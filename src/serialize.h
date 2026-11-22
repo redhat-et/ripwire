@@ -973,8 +973,8 @@ inline constexpr std::string_view kForSigsNextOffsetNote =
 // total=>: the relevance floor intersected with kForLensDefaultTopN or --pack-top-n) IS the answer, so this budget is a
 // STAIR-STEP TARGET, not a ceiling: steps A..E above still shrink row TEXT against it (an answer that fit before is
 // byte-identical), but step F — the only step that removes a row — runs against kForRunawayGuardBytes below. The rows served
-// past the target are disclosed on the block (<sigs past_target="K">: the last K rows are the ones F would have dropped
-// here) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
+// past the target are disclosed on the block (<sigs past_target="K">: K shown rows, the K lowest in score order, are the ones F
+// would have dropped here; the reorders give them any r=) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
 // target over the rows alone (forSigsBudgets below); the text above about its frozen sig share describes the
 // legacy hard-ceiling regime it replaced.
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;

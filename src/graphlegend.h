@@ -392,11 +392,13 @@ inline constexpr std::string_view kForBudgetBytesNote =
 inline constexpr std::string_view kForBudgetBytesTargetNote =
     " [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of"
     " the ranked head is removed for it (sigs past_target=)]";
-// forbudget-soft: <sigs past_target="K">, present only on a block whose ranked head passed the default target. The rows are
-// a rank prefix, so "the last K" names them exactly. Not a cut: nothing is missing.
+// forbudget-soft: <sigs past_target="K">, present only on a block whose ranked head passed the default target. It says what
+// it COUNTS, never where the rows sit: they are the shown rows lowest in score order (serialize.h sigsCutRecordPastTargetRanks),
+// and the head round-robin and the docs reorder give them any r=, so "the last K rows" was false on 16 of 74 unbudgeted GA1 DEV
+// answers (lane HN1, owner ruling 191; gate test/forbudgetcountscheck.sh (R)). Not a cut: nothing is missing.
 inline constexpr std::string_view kForPastTargetNote =
-    " [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head;"
-    " none is cut]";
+    " [sigs past_target=K: K of the shown rows, the K lowest in score order whatever their r=, are past the budget_bytes"
+    " target, served because they are rows of the ranked head; none is cut]";
 // forbudget-soft: an EXPLICIT token budget on a task lens is a SOFT target (owner decision 2026-10-14) — the full dialect's
 // reading of budget_tokens= (the compact one rides its est_tokens clause). Says what it does NOT promise: a byte bound.
 inline constexpr std::string_view kForSoftBudgetNote =

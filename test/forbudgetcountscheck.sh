@@ -29,6 +29,10 @@
 #        a FAIL, never a quiet pass.
 #   (N)  NEGATIVE CONTROLS: the checker must FAIL mutated answers — the pre-HN1 value put back where it was false, U with
 #        files_first= removed, a partial answer with past_target= +1, an all-shed answer with the files_first reading put back.
+#   (R)  the past_target reading states no POSITION the rows contradict (owner ruling 191): on every answer whose shown past rows
+#        are NOT its last K rows by r= (the round-robin lifts them; the docs reorder pushes doc rows below them), the reading must
+#        not place them ("last"/"first"/"top"/"bottom"/"final"/"leading"/"trailing" K). Premise: the sweep holds such an answer; (N)
+#        puts the pre-ruling reading ("the last K rows are past ...") back into one and the checker must FAIL it.
 #   (W)  every answer is well formed (xmllint) and deterministic (run twice, byte-identical).
 #
 # FLOOR, named: a "doc row" is read by its p= extension (.md .markdown .rst .adoc .org .mdx — the Lang::Markdown rows of
@@ -113,6 +117,9 @@ T, budgets = sys.argv[1], sys.argv[2:]
 DOC_EXTS = (".md", ".markdown", ".rst", ".adoc", ".org", ".mdx")
 ATTR = {"past": "past_target", "ff": "files_first"}
 READING = {"past": "[sigs past_target=K:", "ff": "[files_first=N:"}
+POSITIONAL = re.compile(r"\b(last|first|top|bottom|final|leading|trailing)\s+(K|N|\d+)\b", re.I)
+OLD_PAST_READING = ("[sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head;"
+                    " none is cut]")
 fails = 0
 def say(ok, msg):
     global fails
@@ -170,10 +177,18 @@ def check(doc, U, sets):
         out[k] = (printed, true)
         if printed != true: bad.append("%s=%s but %d of its rows are shown (of %d rows)" % (ATTR[k], printed or "absent", true, len(rows)))
         if (READING[k] in doc) != (printed > 0): bad.append("%s reading %s, attribute %s" % (ATTR[k], "present" if READING[k] in doc else "absent", printed or "absent"))
+    # (R): where the shown past rows are not the last K rows by r=, a reading that places them there is false
+    pastShown = sorted(int(r) for r in shown & sets["past"])
+    lastK = sorted(int(a.get("r")) for a in rows)[len(rows) - len(pastShown):] if pastShown else []
+    out["contradicted"] = bool(pastShown) and pastShown != lastK
+    clause = re.search(r"\[sigs past_target=K:[^\]]*\]", doc)
+    if out["contradicted"] and clause and POSITIONAL.search(clause.group(0)):
+        bad.append("(R) the past_target reading places its rows (%r) but they are r=%s, not the last %d" % (POSITIONAL.search(clause.group(0)).group(0), pastShown, len(pastShown)))
     return bad, out, len(rows)
 
 cover = {k: {"formula_false": 0, "none_kept": 0, "partial": 0} for k in ("past", "ff")}
-ctl = {"formula": None, "partial_past": None, "none_ff": None}
+ctl = {"formula": None, "partial_past": None, "none_ff": None, "contradicted": None}
+contradicted = 0
 for fix in ("fa", "fb", "fc"):
     try:
         U, sets, nU = oracle(fix)
@@ -189,6 +204,9 @@ for fix in ("fa", "fb", "fc"):
         for x in bad: say(False, "(P/F) %s.%s: %s" % (fix, b, x))
         if not bad:
             say(True, "(P/F) %s.%s: %d rows, past_target=%s, files_first=%s" % (fix, b, n, out["past"][0] or "absent", out["ff"][0] or "absent"))
+        if out.get("contradicted"):
+            contradicted += 1
+            ctl["contradicted"] = ctl["contradicted"] or (doc, U, sets, "%s.%s" % (fix, b))
         cut = nU - n
         for k in ("past", "ff"):
             u, true = len(sets[k]), out[k][1]
@@ -206,6 +224,7 @@ for k in ("past", "ff"):
     for what, n in cover[k].items():
         say(n > 0, "(C) %s: %d answer(s) in the sweep where %s" % (ATTR[k], n, {"formula_false": "the pre-HN1 formula is false", "none_kept": "none of its rows is kept",
                                                                              "partial": "some but not all of its rows are kept"}[what]))
+say(contradicted > 0, "(R) premise: %d answer(s) in the sweep whose shown past_target rows are not their last rows by r=" % contradicted)
 print("(N) negative controls: the checker must FAIL each mutated answer")
 def sigs_tag(doc): return re.search(r"<sigs\b[^>]*>", re.sub(r"<!--.*?-->", "", doc, flags=re.S)).group(0)
 def set_attr(doc, name, val):
@@ -226,6 +245,13 @@ else:
     expect_fail("%s with past_target=%d (one more than shown)" % (at, true + 1), set_attr(doc, "past_target", true + 1), U, sets)
     doc, U, sets, at = ctl["none_ff"]
     expect_fail("%s with the files_first reading put back" % at, doc.replace("-->", " [files_first=N: x] -->", 1), U, sets)
+if ctl["contradicted"] is None:
+    say(False, "(N) premise: no answer whose past rows contradict a positional reading")
+else:
+    doc, U, sets, at = ctl["contradicted"]
+    mut = re.sub(r"\[sigs past_target=K:[^\]]*\]", lambda m: OLD_PAST_READING, doc, count=1)
+    say(mut != doc, "(N) premise: %s carries a past_target reading to replace" % at)
+    expect_fail("%s with the pre-ruling positional reading put back" % at, mut, U, sets)
 sys.exit(1 if fails else 0)
 PY
 [ $? -eq 0 ] || fail=1
