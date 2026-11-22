@@ -1302,6 +1302,20 @@ struct ShellNarrowChain
     std::pair<std::uint32_t, std::uint32_t> last{ 0, 0 };
 };
 
+// A write waiting for its command to END, which is where it takes effect (FileHarvest::Read::effLine/col): `X=v`
+// at command position is dropped if a command word follows (`X=v cmd` reaches only cmd), and every write — a
+// keyword's too — commits at the separator, the line end or the `)` that closes its command, so a right-hand
+// side that spans lines (`X='a` + `'${X:?}`) still reads the caller's X. function: the function a `local` binds
+// to. isImplicit: the REPLY / MAPFILE a `read` / `mapfile` writes when it names no variable, withdrawn when it does.
+// isGlobal: a `declare -g` write, which sets the global even inside a function that made the name local.
+struct ShellPending
+{
+    FileHarvest::Read write;
+    std::uint32_t     function = UINT32_MAX;   // ShellScan::kNoFunction
+    bool              isImplicit = false;
+    bool              isGlobal = false;
+};
+
 // The scanner's state across lines: quoting and command context nest (`"$( cmd "$X" )"`), and both `'…'` and `"…"`
 // may span lines, so this is per FILE, like forEachCodeByte's block-comment flag.
 struct ShellScan
@@ -1310,19 +1324,8 @@ struct ShellScan
     enum class Kw : std::uint8_t { None, Decl, Export, Read, MapFile, ForName, GetOpts, PrintfV, Case, Shopt };
     static constexpr std::uint32_t kNoFunction = UINT32_MAX;
 
-    // A write waiting for its command to END, which is where it takes effect (FileHarvest::Read::effLine/col): `X=v`
-    // at command position is dropped if a command word follows (`X=v cmd` reaches only cmd), and every write — a
-    // keyword's too — commits at the separator, the line end or the `)` that closes its command, so a right-hand
-    // side that spans lines (`X='a` + `'${X:?}`) still reads the caller's X. function: the function a `local` binds
-    // to. isImplicit: the REPLY / MAPFILE a `read` / `mapfile` writes when it names no variable, withdrawn when it does.
-    // isGlobal: a `declare -g` write, which sets the global even inside a function that made the name local.
-    struct Pending
-    {
-        FileHarvest::Read write;
-        std::uint32_t     function = kNoFunction;
-        bool              isImplicit = false;
-        bool              isGlobal = false;
-    };
+    using Pending = ShellPending;
+    static_assert( kNoFunction == UINT32_MAX, "ShellPending::function defaults to kNoFunction, spelled UINT32_MAX there" );
 
     struct Frame
     {
@@ -2981,6 +2984,21 @@ inline FlagsResult::OversizeFiles crawlOversize( const IngestResult& ing )
     return oversize;
 }
 
+// A file readWhole refused: its gates are missing, counted in unreadable= (it could not be opened or read to its end)
+// or in oversize= (it grew past kMaxFlagFileBytes).
+inline void discloseUnread( ReadWholeFail why, FlagsResult::UnreadableFiles& unreadable, FlagsResult::OversizeFiles& oversize )
+{
+    if( why == ReadWholeFail::TooLarge )
+    {
+        DISCLOSE( oversize, FlagsResult::OversizeFiles::DisclosureWhy::FlagsReadCap,
+                  "flags: a file grew past kMaxFlagFileBytes — its gates are missing (oversize=)" );
+        oversize.noteLimit( kMaxFlagFileBytes );
+        return;
+    }
+    DISCLOSE( unreadable, FlagsResult::UnreadableFiles::DisclosureWhy::OpenOrReadFailed,
+              "flags: a file could not be opened or read to its end — its gates are missing (unreadable=)" );
+}
+
 // Harvest every file, then resolve: gate identities first (so a read site can be attributed only to a name
 // that is actually a declared gate), then regions and reads, then alias chains.
 // `keepUnreadGates` (default false = the `--flags` contract, byte-identical): normally a DECLARED name with
@@ -3003,17 +3021,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
         const std::optional<std::string> bytes = readWhole( full, &why );
         if( !bytes )
         {
-            if( why == ReadWholeFail::Unreadable )
-            {
-                DISCLOSE( unreadable, FlagsResult::UnreadableFiles::DisclosureWhy::OpenOrReadFailed,
-                          "flags: a file could not be opened or read to its end — its gates are missing (unreadable=)" );
-            }
-            else
-            {
-                DISCLOSE( oversize, FlagsResult::OversizeFiles::DisclosureWhy::FlagsReadCap,
-                          "flags: a file grew past kMaxFlagFileBytes — its gates are missing (oversize=)" );
-                oversize.noteLimit( kMaxFlagFileBytes );
-            }
+            discloseUnread( why, unreadable, oversize );
             return;
         }
         std::string rel( relForHash( full, root ) );
@@ -3270,6 +3278,37 @@ inline std::string flagsNextInvocation( const FlagsResult& res, std::size_t maxS
     return widestCut == 0 ? std::string() : flags + std::string( extra ) + " --limit=" + std::to_string( widestCut );
 }
 
+// The legend for the root's counts of files whose gates are missing (unreadable=, oversize=): present only when one is.
+inline void writeMissingFilesLegend( std::FILE* out, const FlagsResult& res )
+{
+    if( res.unreadable.files != 0 )
+    {
+        rw::emitRaw( out, "<!-- unreadable=N on the root: files this scan could not open or read to their end. Their gates "
+                           "are missing, so gates=, dark_gates= and every count beside them are floors for this run. -->" );
+    }
+    if( res.oversize.files != 0 )
+    {
+        rw::emitTo( out, "<!-- oversize=N on the root: files this scan did not read because they are too big — over the crawl's "
+                         "size ceiling (max-file-size, default 4 MB; skipped lists each one) or over this scan's own {} MB read cap. "
+                         "Their gates are missing, so gates=, dark_gates= and every count beside them are floors for this run; "
+                         "files= does not count them. oversize_limit=B: the smallest of those ceilings that dropped one, in bytes. -->",
+                    kMaxFlagFileBytes >> 20 );
+    }
+}
+
+// The root's scan-cut attributes, each absent when zero: generated_skipped=, nesting_cut=, unreadable=, oversize= with
+// oversize_limit=.
+inline std::string flagsScanCutAttrs( const FlagsResult& res )
+{
+    const auto count = []( std::string_view name, std::uint64_t n )
+    {
+        return n == 0 ? std::string() : " " + std::string( name ) + "=\"" + std::to_string( n ) + "\"";
+    };
+    return count( "generated_skipped", res.generatedSkipped ) + count( "nesting_cut", res.nestingCut )
+         + count( "unreadable", res.unreadable.files ) + count( "oversize", res.oversize.files )
+         + ( res.oversize.files == 0 ? std::string() : " oversize_limit=\"" + std::to_string( res.oversize.limitBytes ) + "\"" );
+}
+
 inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxSites, int pageOffset = 0 )
 {
     std::vector<char> esc;
@@ -3286,19 +3325,7 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
                        "verb's own harvest scan (source + CMakeLists files it read looking for gates) — a wider crawl than the "
                        "map's indexed corpus, so it will not equal the map's files= -->" );
     writeShellLegend( out, res );
-    if( res.unreadable.files != 0 )
-    {
-        rw::emitRaw( out, "<!-- unreadable=N on the root: files this scan could not open or read to their end. Their gates "
-                           "are missing, so gates=, dark_gates= and every count beside them are floors for this run. -->" );
-    }
-    if( res.oversize.files != 0 )
-    {
-        rw::emitTo( out, "<!-- oversize=N on the root: files this scan did not read because they are too big — over the crawl's "
-                         "size ceiling (max-file-size, default 4 MB; skipped lists each one) or over this scan's own {} MB read cap. "
-                         "Their gates are missing, so gates=, dark_gates= and every count beside them are floors for this run; "
-                         "files= does not count them. oversize_limit=B: the smallest of those ceilings that dropped one, in bytes. -->",
-                    kMaxFlagFileBytes >> 20 );
-    }
+    writeMissingFilesLegend( out, res );
     // C1 F-07: the site listing's own vocabulary, DEFINED where the reader meets it (legendcoveragecheck's
     // rule). Emitted unconditionally because it describes a listing every run carries, unlike the attributes
     // themselves, which appear only on a gate that was actually cut.
@@ -3329,13 +3356,7 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
                                                            : " escaped_root=\"" + std::to_string( res.escapedRoot ) + "\"";
     // Absent when false: a repo whose CMake sub-walk always succeeds keeps a byte-identical report.
     const std::string fgCmakeFailedAttr = res.cmakeScanFailed ? " cmake_scan_failed=\"1\"" : std::string();
-    const std::string fgGeneratedAttr = ( res.generatedSkipped == 0 ? std::string()
-                                                                    : " generated_skipped=\"" + std::to_string( res.generatedSkipped ) + "\"" )
-                                      + ( res.nestingCut == 0 ? std::string() : " nesting_cut=\"" + std::to_string( res.nestingCut ) + "\"" )
-                                      + ( res.unreadable.files == 0 ? std::string() : " unreadable=\"" + std::to_string( res.unreadable.files ) + "\"" )
-                                      + ( res.oversize.files == 0 ? std::string()
-                                                                  : " oversize=\"" + std::to_string( res.oversize.files ) + "\" oversize_limit=\""
-                                                                        + std::to_string( res.oversize.limitBytes ) + "\"" );
+    const std::string fgGeneratedAttr = flagsScanCutAttrs( res );
     rw::emitTo( out, "<flags gates=\"{}\" dark_gates=\"{}\" compile=\"{}\" cmake=\"{}\" env=\"{}\" files=\"{}\"{}{}{}{}{}>",
                   res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned,
                   fgGeneratedAttr.c_str(), fgEscapedAttr.c_str(), fgCmakeFailedAttr.c_str(), fgFilterAttr.c_str(), flagsNext.c_str() );
