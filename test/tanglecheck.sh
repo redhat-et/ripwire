@@ -73,11 +73,11 @@ Q="$TMP/qd.xml"
 "$BIN" "$R" --quality-delta --json --no-cache >"$TMP/qd.json" 2>/dev/null; rcj=$?
 M="$( "$BIN" "$R" --metrics --no-cache 2>/dev/null )"; rcm=$?
 mkdir -p "$TMP/head" && "${G[@]}" -C "$R" archive HEAD | tar -x -C "$TMP/head"
-MH="$( "$BIN" "$TMP/head" --metrics --no-cache 2>/dev/null )"
+MH="$( "$BIN" "$TMP/head" --metrics --no-cache 2>/dev/null )"; rcmh=$?
 rc="$( cat "$Q.rc" )"
 case "$rc" in 0|2) ;; *) no "quality-delta exit status $rc (stderr: $( head -c 300 "$Q.err" ))";; esac
 if [ "$rc2" != "$rc" ] || [ "$rcj" != "$rc" ]; then no "quality-delta exit status differs between runs: $rc, again $rc2, --json $rcj"; fi
-if [ "$rcm" != 0 ]; then no "--metrics exit status $rcm"; fi
+if [ "$rcm" != 0 ] || [ "$rcmh" != 0 ]; then no "--metrics exit status $rcm (working tree), $rcmh (HEAD)"; fi
 
 # tangle row for a symbol (sym= ends in ::NAME or is NAME), or empty
 trow(){ grep -oE "<r kind=\"tangle\" sym=\"[^\"]*$1\"[^>]*>" "$Q" | head -1; }

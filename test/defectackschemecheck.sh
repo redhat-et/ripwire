@@ -46,7 +46,8 @@ ack(){ ( cd "$1" && "$BIN" . --quality-delta --no-cache --ack-only=format-arity 
 run(){ ( cd "$1" && "$BIN" . --quality-delta --no-cache >"$2" 2>/dev/null ); }
 
 # (p) the binary's own key for this row
-fixture "$TMP/cur"; ack "$TMP/cur" "current ack"
+fixture "$TMP/cur"; ack "$TMP/cur" "current ack"; arc=$?
+[ "$arc" = 0 ] || no "(p) --quality-ack on the fresh row exited $arc, want 0"
 CUR="$( ackkey "$TMP/cur" )"
 if [ -n "$CUR" ] && [ "$CUR" != "$LEGACY_KEY" ]; then ok "(p) the row's current key $CUR differs from its two-bit key $LEGACY_KEY"
 else no "(p) want one current key different from $LEGACY_KEY; got '${CUR:-none}' — the fixture no longer exercises a moved site"; fi
@@ -66,7 +67,7 @@ if [ "$rc" = 0 ] && [ "$a" = 1 ] && [ -z "$k" ]; then ok "(c) the current-key ac
 else no "(c) want rc=0 acked=1 and no acks_rekeyed_by_scheme=; got rc=$rc acked=${a:-?} acks_rekeyed_by_scheme=${k:-absent}"; fi
 
 # (h) re-ack heals the legacy row forward
-ack "$TMP/leg" "re-ack"
+ack "$TMP/leg" "re-ack"   # status: exits 1 by design (the row is already acked through the alias: nothing new to accept); (h) judges the ledger it re-serialised
 HK="$( ackkey "$TMP/leg" )"; reason="$( grep -cE '^ack defect-shape .* legacy ack$' "$TMP/leg/$LEDGER" )"
 run "$TMP/leg" "$TMP/heal.xml"; rc=$?; k="$( attr acks_rekeyed_by_scheme "$TMP/heal.xml" )"
 if [ "$HK" = "$CUR" ] && [ "$reason" = 1 ] && [ "$rc" = 0 ] && [ -z "$k" ]; then ok "(h) --quality-ack re-filed the row at $HK with its reason; the next run needs no alias"
@@ -74,7 +75,7 @@ else no "(h) want the ledger at $CUR with the legacy reason and a later run with
 
 # (r) optional: re-derive the recorded key with a two-bit binary
 if [ -n "${RIPWIRE_LEGACY_BIN:-}" ]; then
-    fixture "$TMP/rec"; ( cd "$TMP/rec" && "$RIPWIRE_LEGACY_BIN" . --quality-delta --no-cache --ack-only=format-arity --quality-ack="legacy ack" >/dev/null 2>&1 )
+    fixture "$TMP/rec"; ( cd "$TMP/rec" && "$RIPWIRE_LEGACY_BIN" . --quality-delta --no-cache --ack-only=format-arity --quality-ack="legacy ack" >/dev/null 2>&1 )   # status: (r) judges the key the legacy binary wrote, not its exit
     RK="$( ackkey "$TMP/rec" )"
     if [ "$RK" = "$LEGACY_KEY" ]; then ok "(r) $RIPWIRE_LEGACY_BIN writes the recorded two-bit key $RK"; else no "(r) $RIPWIRE_LEGACY_BIN wrote '${RK:-none}', the recorded key is $LEGACY_KEY"; fi
 fi
