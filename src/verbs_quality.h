@@ -2676,10 +2676,16 @@ bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r,
         return true;
     }
     const bool gates = rw::quality::rowGates( r ) && inScope;
+    // "gating" is RESERVED: the exact token answers only "would this row exit 2", never a substring of a symbol such as
+    // gatingHelper (CR721 — a substring hit acked a never-gating row, or refused the command on an out-of-scope one).
     const auto patternSelects = [ & ]( std::string_view pat )
     {
+        if( pat == "gating" )
+        {
+            return gates;
+        }
         return !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos
-                                 || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) || ( pat == "gating" && gates ) );
+                                 || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) );
     };
     for( std::string_view rest = ackOnly; !rest.empty(); )
     {
@@ -3303,15 +3309,16 @@ struct QdStaleFold
 };
 
 // The identity-tree verdict's precondition: a working-tree answer whose floor is this tree's own snapshot
-// (head_basis="identity") with no scope, foreign or accepted ack, config warning, absorbed debt, new public surface or
-// unreadable sidecar line to disclose — so the root line alone loses nothing.
+// (head_basis="identity") with no scope, foreign or accepted ack, config warning, absorbed debt, new public surface,
+// unreadable sidecar line or shell scan the nesting budget cut (shell_cut=, CR721) to disclose — so the root line alone
+// loses nothing.
 bool qdNothingElseToDisclose( const QdReport& rep )
 {
     const QdComparison& c     = rep.c;
     const DeltaBasis&   basis = c.basis;
     return !c.refPair && basis.headBasis != nullptr && std::string_view( basis.headBasis ) == "identity"
         && !c.scope.active() && c.part.foreignAcks.empty() && c.part.ackedCount == 0 && rep.configDiag.total() == 0 && rep.baselineAbsorbed == 0
-        && basis.apiNewSurface == 0 && basis.baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0;
+        && basis.apiNewSurface == 0 && basis.baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0 && basis.extras.shellCut == 0;
 }
 
 // The stale fold this answer could ship (whether it PAYS is emitQualityDeltaXml's to measure), or nullopt when it has a

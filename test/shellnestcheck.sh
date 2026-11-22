@@ -15,6 +15,7 @@
 #   (n1) UNDER THE BUDGET: a function ending in a case with no *) arm (unhandled-arm), 40 subshells deep: the unhandled-arm row is still found
 #        and there is no shell_cut= (the budget cut nothing real). Red on a build with a budget under 40.
 #   (n2) SHALLOW: the same file at depth 1: no shell_cut= (premise for n1: the row exists without nesting too).
+#   (f)  FOLD: the subshell script committed with one stale ack: the identity-tree verdict fold keeps shell_cut="1".
 # Usage: test/shellnestcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -75,6 +76,21 @@ for n in 40 1; do
     if [ -n "$row" ] && [ -z "$c" ]; then ok "($label) case $n deep: the unhandled-arm row is found, no shell_cut=: $row"
     else no "($label) case $n deep: want an unhandled-arm row in deep_check.sh and no shell_cut=; got row='${row:-none}' shell_cut='${c:-none}'"; fi
 done
+
+# (f) CR721 FOLD: the deep script COMMITTED (tree = HEAD, head_basis="identity") plus one stale ack: the verdict-only fold
+#     (the root line alone) must still carry shell_cut="1" — it is a disclosure, so the fold must not win. --show-stale is the
+#     premise (the unfolded root has it). RED before CR721 (train GE3 cbed31d4c): the folded root had no shell_cut=.
+R="$TMP/r-fold"; mkdir -p "$R/test"; "${G[@]}" -C "$R" init -q; echo 'echo hi' >"$R/test/a.sh"; gen subshell 5000 "$R/test/deep_check.sh"
+printf '# ripwire quality acks v1\nack complexity 0123456789abcdef 5 a target long gone\n' >"$R/.ripwire_quality_acks"
+"${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm a
+"$BIN" "$R" --quality-delta --no-cache --show-stale >"$TMP/fold-full.xml" 2>/dev/null
+"$BIN" "$R" --quality-delta --no-cache >"$TMP/fold.xml" 2>/dev/null; frc=$?
+full="$( grep -oE '<quality-delta [^>]*' "$TMP/fold-full.xml" )"; root="$( grep -oE '<quality-delta [^>]*' "$TMP/fold.xml" )"
+if printf '%s' "$full" | grep -q 'head_basis="identity"' && printf '%s' "$full" | grep -q 'stale="1"' && [ "$( cutof "$TMP/fold-full.xml" )" = 1 ]; then
+    ok "(f) premise: identity tree, one stale ack, --show-stale root has shell_cut=\"1\""
+else no "(f) premise: want head_basis=identity, stale=1 and shell_cut=1 under --show-stale; got: $full"; fi
+if [ "$frc" = 0 ] && [ "$( cutof "$TMP/fold.xml" )" = 1 ]; then ok "(f) the default (folded) answer keeps shell_cut=\"1\""
+else no "(f) the default answer dropped shell_cut= (rc=$frc): $root"; fi
 
 [ "$fail" = 0 ] && echo "shellnestcheck: PASS" || echo "shellnestcheck: FAIL"
 exit "$fail"
