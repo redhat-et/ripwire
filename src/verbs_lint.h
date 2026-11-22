@@ -7,7 +7,6 @@
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
 #include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
 #include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
-#include "infra/sortutil.h"   // sortUnique — the user rules a tally can print (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
@@ -2064,21 +2063,20 @@ inline std::size_t lintRowBytes( const rw::IngestResult& ing, const EnclosingSym
          + ( e ? e->name.size() : 0 ) + 40;
 }
 
-// The tally rows a --lint answer can print: every built-in rule, plus each user rule that found something (a user finding
-// carries sev=). A user rule that found nothing also prints a row and is not counted here; the row estimate's margin (+40
+// The tally rows a --lint answer can print: every built-in rule and the atoms and cache packs' rules (they join allRuleNames
+// when their pass runs, not in builtInLintRuleNames), plus each user rule that found something (a user finding carries sev=). A user rule that found nothing also prints a row and is not counted here; the row estimate's margin (+40
 // markup per finding, ~10 B over) covers a handful of them.
 inline std::size_t lintTallyRowsBound( const std::vector<LintOut>& outs )
 {
-    std::vector<std::string_view> userRules;
+    std::vector<std::string_view> userRules;   // a handful of user rules at most: a linear membership test is the cheap one
     for( const LintOut& o : outs )
     {
-        if( !o.sev.empty() )
+        if( !o.sev.empty() && std::ranges::find( userRules, std::string_view( o.rule ) ) == userRules.end() )
         {
-            userRules.push_back( o.rule );
+            userRules.emplace_back( o.rule );
         }
     }
-    rw::sortutil::sortUnique( userRules, rw::sortutil::svLess );
-    return builtInLintRuleNames().size() + userRules.size();
+    return builtInLintRuleNames().size() + std::size( rw::atoms::kAtomRuleNames ) + std::size( rw::cachelint::kCacheRuleNames ) + userRules.size();
 }
 
 // The <f> rows a --lint answer prints: the --limit page when the caller sized one, else the sorted run from --offset (0 on a
