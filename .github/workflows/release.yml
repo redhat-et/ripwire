@@ -135,8 +135,8 @@ jobs:
         run: cmake --build build -j --target ripwire
 
       # PGO for the shipped binary (the macOS leg only): scripts/pgobuild.sh is the same one-command
-      # instrument -> train -> merge -> optimize flow a dev runs, trained on this checkout (the
-      # script's own mixed workload). The Linux legs deliberately STAY LTO-only: their manylinux
+      # instrument -> train -> merge -> optimize flow a dev runs, trained on this checkout plus the synthetic
+      # corpus scripts/pgocorpus.py writes at build time, merged weighted (the script's own mixed workload). The Linux legs deliberately STAY LTO-only: their manylinux
       # gcc-toolset is load-bearing for the RHEL static-libstdc++ compat model, and CMake's PGO arm
       # refuses GCC (its -fprofile-* is the incompatible .gcda flavour) — moving Linux to clang is a
       # separate toolchain decision, not a rider on this step. Package/smoke read build/ripwire on

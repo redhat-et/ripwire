@@ -241,18 +241,35 @@ else
     echo "  SKIP  gitignore coverage (not a git checkout)"
 fi
 
-# ── (4) the PGO TRAINING WORKLOAD — scripts/pgobuild.sh's train_workload ───────────
+# ── (4) the PGO TRAINING WORKLOAD — scripts/pgobuild.sh's train_workload + scripts/pgocorpus.py ───────────
 # A profile only covers what the training runs execute, and every way that coverage shrinks is silent: a
-# renamed symbol or a mistyped flag makes one run exit 2 and train nothing, and a benchmark corpus slipped
+# renamed symbol or a mistyped flag makes one run exit 2 and train nothing, a generator that drifts changes what the shipped
+# binary was trained on between two builds of one commit, and a benchmark corpus slipped
 # into the list makes every published PGO number train-on-test. Each gets a behavioural check, not a grep
 # of the script's text, and each check has an arm that proves it can fail.
 PGOSH="$ROOT/scripts/pgobuild.sh"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+GENPY="$ROOT/scripts/pgocorpus.py"
+python3 "$GENPY" "$TMP/syn1" >/dev/null && python3 "$GENPY" "$TMP/syn2" >/dev/null && python3 "$GENPY" "$TMP/syn3" --seed 7 >/dev/null \
+    || no "scripts/pgocorpus.py exited non-zero"
+diff -r "$TMP/syn1" "$TMP/syn2" >/dev/null \
+    && ok "pgocorpus: the same arguments write the same bytes twice (a drifting corpus trains a different binary per build)" \
+    || no "pgocorpus: two runs with the same seed differ — the training corpus is not deterministic"
+diff -r "$TMP/syn1" "$TMP/syn3" >/dev/null \
+    && no "pgocorpus: --seed 7 wrote the same bytes as the default seed — the identity check above cannot fail" \
+    || ok "pgocorpus: a different seed writes different bytes (the identity check is not vacuous)"
+synFiles=$( find "$TMP/syn1" -type f | wc -l | tr -d ' ' )
+implNs=$( grep -l '^class Impl : public Base$' "$TMP"/syn1/cpp/mod*/Base.h 2>&1 | wc -l | tr -d ' ' )
+flatImpl=$( grep -l '^struct Impl : Base$' "$TMP"/syn1/cpp/flat/*.cpp 2>&1 | wc -l | tr -d ' ' )
+polyLangs=$( ls "$TMP/syn1/poly" | wc -l | tr -d ' ' )
+[ "$synFiles" -ge 150 ] && [ "$implNs" -ge 16 ] && [ "$flatImpl" -ge 16 ] && [ "$polyLangs" -ge 12 ] \
+    && ok "pgocorpus carries the namesake shapes ($synFiles files; Impl : Base in $implNs namespaces + $flatImpl global files; $polyLangs language slices)" \
+    || no "pgocorpus lost a shape: files=$synFiles namespaced-Impl=$implNs flat-Impl=$flatImpl languages=$polyLangs"
 
 # No benchmark repo is named in the training workload. The list is the measured corpora (docs/EVALS.md's
 # head-to-head and perf rungs); the planted arm proves the matcher fires.
 BENCH='envoy|vscode|cpython|nushell|terraform|koa|llvm-project|django|angular|cockroach|pydantic|restic|tmux|htop|libzmq|eslint|fastify|kysely|nunjucks|starlette|textual|sinatra|axum|gson|Newtonsoft'
-benchHits=$( grep -n -E -w "$BENCH" "$PGOSH" 2>&1 )
+benchHits=$( grep -n -E -w "$BENCH" "$PGOSH" "$GENPY" 2>&1 )
 [ -z "$benchHits" ] \
     && ok "no benchmark corpus is named in the PGO training files" \
     || { no "a benchmark corpus is named in the PGO training files (train-on-test):"; printf '%s\n' "$benchHits" | sed -n '1,5p'; }
@@ -267,35 +284,53 @@ if [ ! -x "$BIN" ]; then
     no "no ripwire at $BIN — the training-workload arms need a built binary (set RIPWIRE_BIN)"
 else
     SHIM="$TMP/shim/ripwire"; mkdir -p "$TMP/shim"
-    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nfor a in "$@"; do [ "$a" = "$PGO_SHIM_FAIL" ] && exit 3; done\nexec "%s" "$@"\n' "$TMP/runs.log" "$BIN" >"$SHIM"
+    # The shim logs each run's flags (runs.log) and the profile GROUP its counters would go to (groups.log), from
+    # the LLVM_PROFILE_FILE the script sets — --check-training sets it exactly as the instrumented build does.
+    printf '#!/usr/bin/env bash\ncase "${LLVM_PROFILE_FILE:-}" in */core/*) g=core ;; */coverage/*) g=coverage ;; *) g=none ;; esac\nprintf "%%s\\n" "$*" >>"%s"\nprintf "%%s|%%s\\n" "$g" "$*" >>"%s"\nfor a in "$@"; do [ "$a" = "$PGO_SHIM_FAIL" ] && exit 3; done\nexec "%s" "$@"\n' "$TMP/runs.log" "$TMP/groups.log" "$BIN" >"$SHIM"
     chmod +x "$SHIM"
     PGO_SHIM_FAIL="" bash "$PGOSH" --check-training "$SHIM" >"$TMP/train.out" 2>&1; trainRc=$?
     [ "$trainRc" -eq 0 ] \
         && ok "every training run exits 0 with the current binary ($( grep -o '[0-9]* runs, [0-9]* failed, [0-9]* s' "$TMP/train.out" ))" \
         || { no "the training workload has failing runs (rc=$trainRc) — each trains nothing:"; grep 'training run exited' "$TMP/train.out" | sed -n '1,8p'; }
-    # verbs_missing LOG: the listed verbs LOG lacks on this checkout (empty = all present).
+    # verbs_missing LOG: the listed verbs LOG lacks on either corpus (empty = all present).
     verbs_missing(){
-        local log="$1" missing="" verb n
-        for verb in '--no-cache' '--for=' '--pack-task=' '--callers=' '--impact='; do
-            grep -E "^$ROOT " "$log" | grep -q -F -- "$verb" || missing="$missing [$verb]"
+        local log="$1" missing="" corpus verb n
+        for corpus in "^$ROOT " "^[^ ]*/synthetic "; do
+            for verb in '--no-cache' '--page-bytes=' '--for=' '--pack-task=' '--lint' '--clones' '--expand=' '--grep=' '--callers=' '--impact='; do
+                grep -E "$corpus" "$log" | grep -q -F -- "$verb" || missing="$missing [${corpus//[\^ ]/} $verb]"
+            done
+            n=$( grep -E "$corpus" "$log" | grep -c -F -- '--for=' )
+            [ "$n" -ge 3 ] || missing="$missing [${corpus//[\^ ]/} --for x$n, want 3 shapes]"
+            n=$( grep -c -E -- "${corpus}--cache=[^ ]*\$" "$log" )
+            [ "$n" -ge 2 ] || missing="$missing [${corpus//[\^ ]/} cold+warm map x$n]"
         done
-        n=$( grep -c -E -- "^$ROOT --cache=[^ ]*\$" "$log" )
-        [ "$n" -ge 2 ] || missing="$missing [cold+warm map x$n]"
         printf '%s' "$missing"
     }
     missing=$( verbs_missing "$TMP/runs.log" )
     [ -z "$missing" ] \
-        && ok "the training workload runs every listed verb ($( wc -l <"$TMP/runs.log" | tr -d ' ' ) runs)" \
+        && ok "the training workload runs every listed verb on both corpora (this checkout + the synthetic tree; $( wc -l <"$TMP/runs.log" | tr -d ' ' ) runs)" \
         || no "the training workload skipped:$missing"
-    grep -v -F -- '--pack-task=' "$TMP/runs.log" >"$TMP/runs.planted.log"
+    grep -v -E '/synthetic .*--clones' "$TMP/runs.log" >"$TMP/runs.planted.log"
     [ -n "$( verbs_missing "$TMP/runs.planted.log" )" ] \
-        && ok "the verb-coverage check fires on a log with the --pack-task run removed (it is not vacuous)" \
-        || no "the verb-coverage check passed a log missing the --pack-task run — it proves nothing"
-    : >"$TMP/runs.log"
-    PGO_SHIM_FAIL="--impact=buildGraph" bash "$PGOSH" --check-training "$SHIM" >"$TMP/trainfail.out" 2>&1; failRc=$?
-    [ "$failRc" -ne 0 ] && grep -q 'training run exited 3: .*--impact=buildGraph' "$TMP/trainfail.out" \
+        && ok "the verb-coverage check fires on a log with the synthetic --clones run removed (it is not vacuous)" \
+        || no "the verb-coverage check passed a log missing the synthetic --clones run — it proves nothing"
+    # The CORE group is the original nine runs and nothing else: it carries the merge weight, so a coverage verb
+    # that leaks into it is exactly the dilution the weighting exists to prevent.
+    coreRuns=$( grep -c '^core|' "$TMP/groups.log" )
+    coreLeak=$( grep '^core|' "$TMP/groups.log" | grep -c -E -- '--lint|--clones|--page-bytes|--expand|--grep|/synthetic' )
+    unGrouped=$( grep -c '^none|' "$TMP/groups.log" )
+    covSyn=$( grep '^coverage|' "$TMP/groups.log" | grep -c '/synthetic ' )
+    [ "$coreRuns" -eq 9 ] && [ "$coreLeak" -eq 0 ] && [ "$unGrouped" -eq 0 ] && [ "$covSyn" -ge 10 ] \
+        && ok "profile groups: core = the 9 original runs only, every other run in coverage (incl. $covSyn on the synthetic tree)" \
+        || no "profile groups wrong: core=$coreRuns (want 9) core-leaks=$coreLeak ungrouped=$unGrouped synthetic-in-coverage=$covSyn"
+    sed 's/^coverage|\(.*--lint\)/core|\1/' "$TMP/groups.log" | grep '^core|' | grep -c -E -- '--lint' | grep -q '^[1-9]' \
+        && ok "the core-leak count sees a --lint run relabelled core (the group check is not vacuous)" \
+        || no "a --lint run relabelled core was not counted as a leak — the group check proves nothing"
+    : >"$TMP/runs.log"; : >"$TMP/groups.log"
+    PGO_SHIM_FAIL="--clones" bash "$PGOSH" --check-training "$SHIM" >"$TMP/trainfail.out" 2>&1; failRc=$?
+    [ "$failRc" -ne 0 ] && grep -q 'training run exited 3: .*--clones' "$TMP/trainfail.out" \
         && ok "a training run that fails FAILS the workload and is named (a profile with a hole is not shipped quietly)" \
-        || { no "a failing --impact training run did not fail the workload (rc=$failRc)"; sed -n '1,4p' "$TMP/trainfail.out"; }
+        || { no "a failing --clones training run did not fail the workload (rc=$failRc)"; sed -n '1,4p' "$TMP/trainfail.out"; }
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }
