@@ -32,7 +32,8 @@
 // WHERE IT RUNS. Last, on the bytes about to be written by the answer-first CLI path (verbs_for.h runForLens / fittedAnswerFirst):
 // after the permutation, SIGX, the key body, the early stop, the budget fit and PAGING — so every stage before it reads rows as
 // elements exactly as it did, a page holds the same rows it held, and each page is encoded on its own (a continuation page's first
-// sigs row keeps its r=). Not on --legend=first's straight-through write, --json, or the MCP twin. RIPWIRE_NO_ROWLINES (any value)
+// sigs row keeps its r=). Not on --legend=first's straight-through write or --json. MCP `for` runs it last on its bundle (lane MR1,
+// mcpverbs.h forTaskText; `rows` is its --rows=). RIPWIRE_NO_ROWLINES (any value)
 // turns both off — the A/B handle, the RIPWIRE_NO_SIGX precedent — and --rows=lines|elements decides over it (rowLinesOn below).
 #pragma once
 
@@ -388,18 +389,37 @@ struct Applied
     bool rankSeq = false, rowLines = false;
 };
 
+// What a section's COMMENT child does to the line form (lane MR1). The CLI answer-first path lifts its <sigs> notes into the
+// document legend (foranswerfirst.h kSigsAttributeNotes) before this runs, and a section that still holds a comment keeps its
+// elements there (Keep: the CLI's bytes, unchanged). MCP `for` is legend-first and keeps its demote:/decl-twin:/one-side: notes
+// inside <sigs>, so there a comment child is served as a VERBATIM line (AsLines): a line starting with '<' is read back as
+// itself (parseLine, test/rowlines.py parse_line), so the decode is still the element form byte for byte.
+enum class SectionComments
+{
+    Keep,
+    AsLines,
+};
+
+// Whether a read section may take the line form at all: element children only, or comment children too where AsLines lets them.
+[[nodiscard]] inline bool linableSection( const std::optional<Section>& sec, SectionComments comments ) noexcept
+{
+    return sec && ( sec->elementsOnly || comments == SectionComments::AsLines );
+}
+
 // One top-level <sigs>/<tail> block re-emitted into `out` (verbatim when neither form applies to it).
-inline void encodeSection( std::string_view doc, const answerfirst::Block& b, std::string& out, Applied& applied )
+inline void encodeSection( std::string_view doc, const answerfirst::Block& b, std::string& out, Applied& applied,
+                           SectionComments comments = SectionComments::Keep )
 {
     std::optional<Section> sec = readSection( doc, b );
     const bool rankSeq = sec && b.name == "sigs" && sec->open.find( " rseq=\"" ) == std::string_view::npos && elideSequentialRanks( sec->rows );
+    const bool linable = linableSection( sec, comments );
     std::string body;
-    for( std::size_t i = 0; sec && sec->elementsOnly && i < sec->rows.size(); ++i )
+    for( std::size_t i = 0; linable && i < sec->rows.size(); ++i )
     {
         body.append( i > 0 ? "\n" : "" ).append( lineOf( sec->rows[ i ] ) );
     }
     // a verbatim row holding a newline would split into two lines, and "]]>" would end the CDATA: such a section keeps its elements
-    const bool rowLines = sec && sec->elementsOnly && body.find( "]]>" ) == std::string::npos
+    const bool rowLines = linable && body.find( "]]>" ) == std::string::npos
                        && std::ranges::count( body, '\n' ) == std::ranges::ssize( sec->rows ) - 1;
     if( !rankSeq && !rowLines )
     {
@@ -451,8 +471,9 @@ inline void encodeSection( std::string_view doc, const answerfirst::Block& b, st
 }
 
 // Rewrite `doc` (the bytes of a finished answer-first --for answer or of one page of it) in place. Returns whether it changed.
-// `rows`: --rows= as typed (Config::rowsSpec; empty = not typed), read by rowLinesOn.
-inline bool encodeRows( std::string& doc, std::string_view rows = {} )
+// `rows`: --rows= as typed (Config::rowsSpec; empty = not typed), read by rowLinesOn. `comments`: SectionComments above (MCP `for`
+// passes AsLines; the CLI the default).
+inline bool encodeRows( std::string& doc, std::string_view rows = {}, SectionComments comments = SectionComments::Keep )
 {
     const std::string_view                     view = doc;
     // an answer-first document OPENS with its root; anything else (a legend-first answer, JSON, a refusal) is served as it is
@@ -466,7 +487,7 @@ inline bool encodeRows( std::string& doc, std::string_view rows = {} )
     {
         if( b.comment || ( b.name != "sigs" && b.name != "tail" ) ) { continue; }
         out.append( view.substr( copied, b.begin - copied ) );
-        encodeSection( view, b, out, applied );
+        encodeSection( view, b, out, applied, comments );
         copied = b.end;
     }
     const Applied clauses = clausesFor( view.substr( 0, rb->openEnd ), applied );
@@ -476,6 +497,36 @@ inline bool encodeRows( std::string& doc, std::string_view rows = {} )
     out.append( view.substr( rb->closeAt ) );
     doc.swap( out );
     return true;
+}
+
+// THE ROWS A READER OF ATTRIBUTES SEES (lane MR1): `doc` with each top-level line-form <sigs>/<tail> CDATA put back as the rows its
+// lines stand for (parseLine). Ranks RANKSEQ elided stay elided and the clauses stay: this is the view a scan for which ATTRIBUTES
+// an answer's rows carry reads (legenddict.h reduceHead's term readings — rows inside a CDATA are text to it, so without this view a
+// line-form answer's <d cx=…> rows read as absent and their readings are re-sent on every ref answer). Not a decoder: rowlines.py is.
+[[nodiscard]] inline std::string rowsAsElements( std::string_view doc )
+{
+    const std::optional<answerfirst::RootBody> rb = doc.starts_with( "<ctx" ) ? answerfirst::rootBody( doc ) : std::nullopt;
+    std::string out;
+    std::size_t copied = 0;
+    for( const answerfirst::Block& b : rb ? answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) : std::vector<answerfirst::Block>{} )
+    {
+        const std::size_t open  = doc.find( '>', b.begin ) + 1;
+        const std::size_t close = doc.rfind( "</", b.end - 1 );
+        const std::string_view body = close > open ? doc.substr( open, close - open ) : std::string_view();
+        if( b.comment || ( b.name != "sigs" && b.name != "tail" ) || !body.starts_with( "<![CDATA[" ) || body.find( "]]>" ) != body.size() - 3 )
+        {
+            continue;
+        }
+        out.append( doc.substr( copied, open - copied ) );
+        for( std::string_view lines = body.substr( 9, body.size() - 12 ); !lines.empty(); )
+        {
+            const std::size_t nl = std::min( lines.find( '\n' ), lines.size() );
+            out.append( parseLine( lines.substr( 0, nl ) ) );
+            lines.remove_prefix( std::min( nl + 1, lines.size() ) );
+        }
+        copied = close;
+    }
+    return out.append( doc.substr( copied ) );
 }
 
 }   // namespace rw::rowlines

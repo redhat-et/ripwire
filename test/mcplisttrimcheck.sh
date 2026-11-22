@@ -111,7 +111,9 @@ check( all( t.get( "description", "" ).strip() for t in tools ), "(1) every tool
 # sentences unchanged. Ceiling = measured + 30 B, the same margin.
 # RT2 batch parity (2026-11-19): +35 B — the batch item schema gains no_verb_route (the batch `for` item routes like the live
 # verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
-CEILING = 40095
+# MR1 (2026-11-21, owner ruling 168): +73 B over the 40,073 B base 36a95d732 — `for` gains the `rows` string (the CLI --rows= twin):
+# schemas 20,391 -> 20,464 B, descriptions unchanged; measured 40,146 B. Ceiling = measured + 30 B (mcpmanifestcheck's figure).
+CEILING = 40176
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 print( "  INFO  manifest %d B (ensure_ascii metric), wire line %d B, descriptions %d B"
        % ( manifest, len( first.encode( "utf-8" ) ), sum( len( t[ "description" ].encode( "utf-8" ) ) for t in tools ) ) )

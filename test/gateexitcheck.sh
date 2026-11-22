@@ -345,6 +345,7 @@ FAILFAST = {
     "fortailfoldcheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary, a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
     "fortailwidecheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary (11 FAIL), a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
     "forroutepagecheck.sh":     ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against RL1's parent binary a0c020bb6 (5 arms red) and against /usr/bin/true (every answer empty), it exits 1 both times (2026-11-21)", 1 ),
+    "mcpforrowscheck.sh":       ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against the base binary 36a95d732 (25 arms red) it exits 1 (MR1, 2026-11-21)", 1 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────

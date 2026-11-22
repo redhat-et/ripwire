@@ -1511,6 +1511,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // default (no restore) instead of refusing the way the CLI's own `--sections=` (empty value)
             // refuses. Caught by independent review before this ever shipped.
             const bool sectionsIsPresent = mcpdetail::findRawValue( args, "sections" ).isPresent;
+            // MR1 (owner ruling 168): `for`'s row form, the CLI --rows= twin (forrowsform.h): "lines" or "elements" decide over
+            // RIPWIRE_NO_ROWLINES; absent leaves it to the variable. Present-but-empty refuses, as `sections` does (F9/F11).
+            const std::string rowsArg       = strArg( "rows" );
+            const bool        rowsIsPresent = mcpdetail::findRawValue( args, "rows" ).isPresent;
             const std::string files   = strArg( "files" );    // N11: schema-typed STRING (comma-separated paths), never an array
             const std::string diff    = strArg( "diff" );     // H5: same class as `files` — an array here answered about the wrong tree
             const std::string newBody = strArg( "new_body" ); // replace_symbol_body
@@ -2049,6 +2053,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "legend", legendArg ) );
                 pathsUsageError = true;
             }
+            // MR1: `rows` is a CLOSED set (lines, elements) — the CLI's cli.h validateRows, the same refusal `legend` speaks above
+            if( !pathsUsageError && rowsIsPresent && rowsArg != rw::rowlines::kRowsLines && rowsArg != rw::rowlines::kRowsElements )
+            {
+                resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "rows", rowsArg ) );
+                pathsUsageError = true;
+            }
             // L2 (round-1 lever B1): `sections` is a CLOSED, comma-separated, order-insensitive set (lego
             // and/or compose, each named at most once) — the same rule `legend` states just above, and for
             // the same reason: a typo must not silently be read as "restore nothing". `sections:""` refuses
@@ -2415,7 +2425,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // --token-budget beside --limit — the page has no byte ceiling to shape against.
                     // RT2 MCP parity: the CLI's routed answer on the call shapes the CLI routes (mcpRoutedFor)
                     const std::optional<std::string> routed = mcpRoutedFor( { .path = path, .task = task, .sections = sections, .args = args, .noRoute = noRoute,
-                                                                              .noVerbRoute = noVerbRoute, .budgetPresent = budgetArg.isPresent }, redactPtr );
+                                                                              .noVerbRoute = noVerbRoute, .budgetPresent = budgetArg.isPresent, .rows = rowsArg }, redactPtr );
                     resp = routed ? textResult( *routed ) : pagedResult( [ & ]( McpPageArgs pg )
                     {
                         // PAGING-POC follow-up (issue #294): budget + window no longer refuses —
@@ -2423,7 +2433,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         // own document); the budgetless FILE PAGE still answers a windowless-budget call.
                         const std::optional<std::string> answer = forTaskText( path, task, redactPtr,
                                                                                 budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0, noRoute, pg,
-                                                                                sections );   // L2: "" (default) = stub; the validated closed set otherwise
+                                                                                sections,     // L2: "" (default) = stub; the validated closed set otherwise
+                                                                                rowsArg );    // MR1: the row form ("" = RIPWIRE_NO_ROWLINES decides)
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the for answer buffer lost bytes — no answer served" );

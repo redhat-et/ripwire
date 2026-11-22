@@ -27,6 +27,7 @@
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
+#include "forrowlines.h"   // MR1: rowlines::encodeRows — the CLI --for's row form, on the MCP `for` bundle
 #include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
@@ -2688,10 +2689,11 @@ std::optional<std::string> mcpForVerbContinue( const IngestResult& ing, const Gr
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
-                                const std::string& sections = std::string() )   // L2 (round-1 lever B1): the CLI --sections=
+                                const std::string& sections = std::string(),   // L2 (round-1 lever B1): the CLI --sections=
                                                         // twin — "" (the default) collapses <lego>/<compose> to a counted
                                                         // stub; "lego", "compose" or "lego,compose" opts back into the
                                                         // pre-stub render (mcp.h validates the closed set before this call)
+                                std::string_view rows = {} )   // MR1: the CLI --rows= twin ("" = RIPWIRE_NO_ROWLINES decides)
 {
     const std::size_t forBudgetBytes = budgetTokens > 0 ? budgetBytesForTokens( budgetTokens )
                                                         : kForPayloadBudgetBytes;
@@ -3224,6 +3226,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
             insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
+            rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );   // MR1: last, as on the CLI (below)
             return out;
         }
         std::string verb;
@@ -3251,6 +3254,14 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
+    // MR1 (owner ruling 168): ROWLINES + RANKSEQ (forrowlines.h), the CLI --for's row form — LAST, on the finished bundle, so every
+    // stage above (the cut, the price, the blocks spliced before </ctx>) read rows as elements exactly as before; est_tokens= stays
+    // the element form's price (an upper bound), and the two clauses go last before </ctx>. The legend session (legenddict.h) holds
+    // both clauses as dictionary entries, so a ref answer drops one this process already served (dropServedBodyComments). Not on
+    // the file page or the candidate page above (they return earlier), as the CLI's file page is not. This legend-first bundle keeps
+    // its demote:/decl-twin:/one-side: notes inside <sigs>; they ride the CDATA as verbatim lines (AsLines), so a ref answer keeps
+    // a served note there instead of dropping it. Gate: test/mcpforrowscheck.sh.
+    rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );
     return out;
 }
 
@@ -3267,6 +3278,7 @@ struct McpForRouteAsk
     bool               noRoute       = false;
     bool               noVerbRoute   = false;
     bool               budgetPresent = false;
+    std::string_view   rows          = {};   // MR1: the row form of a carried page (forTaskText's `rows`)
 };
 inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
 {
@@ -3283,7 +3295,7 @@ inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactC
     {
         return mcpForVerbContinue( ix.ing, ix.g, a.path, a.task, int( offset.value ) );
     }
-    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
+    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections, a.rows ); } );
 }
 
 // `lego` verb: the TARGETED interface→impls "Lego" view for ONE named interface/base — its signature,
