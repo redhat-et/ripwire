@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-22, IN9 (the 0.7.0 train integration/070-cut-1121 merged with origin/main b576a95e3, which carries #715): RE-PINNED
+#   ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 340/337 -> 342 (rich 343): ONE
+#   number above BOTH sides' bumps (the train's 340, rich 341; main's 337, rich 338). kCacheVersion 54 and kQSnapCacheScheme 38
+#   unchanged. Both sides' entries are kept below, the train's first, then main's. Neither side's hash (448c91aa07…d311066,
+#   a57b75c512…5350ee08a9) can be right once kParserVer moves to 342. Hash a606e48d5b…2f4e02ec.
 # 2026-11-22, lane m1b-tracked-dirs (on the train 0e32486b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
 #   kIngestParserVerMirror 338 -> 340 (PLACEHOLDER, rich 341): the crawl admits a build/ dist/ out/ target/ directory git tracks
 #   files under, and every materialized-tree ingest (computeHeadSnapshot among them) goes through ingest.h ingestTrackedTree so
@@ -64,6 +69,11 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
 #   315, its own entries below), so a cache a lane binary wrote under a placeholder is refused. kCacheVersion and
 #   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not (hash 52505b79f1…2dd4dcbf).
+# 2026-11-21, lane land-715 (#715 by @himanchalkaushale, #548 arm 1: Clojure calls whose list head carries metadata; stacked on
+#   train 1118a 4b1f4516e): RE-PINNED with UPDATE_GOLDEN=1 (hash a57b75c512…5350ee08a9). Watched text: kParserVer 335 -> 337
+#   (rich file tag 338; the PR's 311/312 renumbered above the train's 335/336): queries/clojure/tags.scm accepts a meta_lit before a
+#   list head and src/ingest_clojure.h clojureListHead skips it. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54
+#   and kQSnapCacheScheme 38 stay: no record changes shape and no watched quality.h function moved.
 # 2026-11-21, train 1118a (import-proved-splits, qual-ns-call-bind, cr705-edges, #711 ts paths alias; rebased onto main 5df5a26be,
 #   #714 = train ge2): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash ffa77d0632…ae8d5cc3). kParserVer 335
 #   (rich 336) is the train's number for qual-ns-call-bind, above main's 333/334; the other members change no extraction.

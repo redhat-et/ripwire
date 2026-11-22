@@ -393,7 +393,11 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 340;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+                                                      // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
+                                                      //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
+                                                      //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.
+                                                      // --- history: the 0.7.0 train carried 340 ---
                                                       // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER: the train renumbers; above 338 and its rich
                                                       //   339; rich file tag 341): the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED — a build/ dist/ out/ target/
                                                       //   directory git tracks files under is crawled (ingest_crawl.h TrackedBuildDirs), so a v338 blob has no
@@ -406,6 +410,11 @@ constexpr std::uint32_t kParserVer    = 340;          // bump on any grammar/.sc
                                                       // 336 = 2026-11-21 (IN8, ruling 135: train 1118a — #717, the rebase of #716 — folded into the 0.7.0 train). ONE number above
                                                       //   BOTH sides' bumps past their merge base 5df5a26be (333): the train's 334 and train 1118a's 335. Rich file tag 337.
                                                       //   kCacheVersion stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers, not of 336.
+                                                      // --- history: main b576a95e3 carried 337 ---
+                                                      // 337 = 2026-11-21 (#548 arm 1, @himanchalkaushale, PR #715, landed as lane land-715; was 311 on the PR, above train
+                                                      //   1118a's 335/336): a Clojure call whose list head carries metadata (`^{:doc "tagged"} (square 4)`, `^String (square 5)`)
+                                                      //   is captured, and the C++ head filter (ingest_clojure.h clojureListHead) skips meta_lit before reading the head.
+                                                      //   Rich file tag 338. kCacheVersion unchanged.
                                                       // --- history: train 1118a (4b1f4516e) carried 335 ---
                                                       // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
                                                       //   using-declarations and namespace aliases are recorded while the call-result family is off
