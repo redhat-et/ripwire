@@ -94,7 +94,9 @@ PY
 
 [ -f "$CORPUS/memofix.py" ] || { echo "fixture generation failed (python3 missing?)"; exit 2; }
 
-"$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache >"$TMP/memo.xml" 2>"$TMP/memo.err"
+# CL1 (src/outputceiling.h): a bare --expand budgets bodies under the output ceiling (16 KB), which would cut arm 5's 20 KB line
+# before its trailing run; this gate checks REDACTION, so it reads the body at the historic budget, passed explicitly.
+"$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache --pack-budget-bytes=65536 >"$TMP/memo.xml" 2>"$TMP/memo.err"
 rc=$?
 if [ $rc -eq 0 ]; then ok "--expand on the memo fixture exits 0"; else no "--expand on the memo fixture failed (rc=$rc)"; fi
 
@@ -139,7 +141,7 @@ redacted "$J" "arm5: trailing run on a 20 KB GATED line redacts"
 if grep -qF "$K" "$TMP/eof.xml"; then no "arm6: run at end-of-input (no trailing newline) was NOT redacted"; else ok "arm6: run at end-of-input redacts"; fi
 
 # ── 7) determinism ──────────────────────────────────────────────────────────────────────────────────
-"$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache >"$TMP/memo2.xml" 2>"$TMP/memo2.err"
+"$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache --pack-budget-bytes=65536 >"$TMP/memo2.xml" 2>"$TMP/memo2.err"
 if cmp -s "$TMP/memo.xml" "$TMP/memo2.xml"; then ok "stdout byte-identical run to run"; else no "stdout differs run to run"; fi
 if cmp -s "$TMP/memo.err" "$TMP/memo2.err"; then ok "stderr byte-identical run to run"; else no "stderr differs run to run"; fi
 
