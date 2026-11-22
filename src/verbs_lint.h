@@ -6,6 +6,7 @@
 #include <cstdio>      // stdout / stderr — the two streams the shims below name
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
 #include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
+#include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
@@ -2034,40 +2035,82 @@ bool lintRuleSelected( const rw::lintcatalog::LintSelection& sel, std::string_vi
 // caller who already knew to page past a cap sees no change.
 inline constexpr std::size_t kLintDefaultPayloadBytes = 100000;
 
-// The <f> rows a --lint answer prints: the --limit/--offset page when the caller pages, else the sorted
-// PREFIX that fits kLintDefaultPayloadBytes.
-rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs )
+// CL1 (outputceiling.h): the DEFAULT page's row budget, so the WHOLE answer — legend, root, one <rule> tally row per rule and
+// the <f> rows — stays under kOutputCeilingChars. MEASURED on base 36a95d732 (GA1 DEV, one tree per repo): 9 of 11 default
+// --lint answers printed over 30,000 characters (max 83,162), past the agent harness's inline limit.
+// The reserve covers what is not a finding: the legend (579 B compact on Newtonsoft.Json; the full one ~3.7 KB), the root,
+// and kLintTallyRowBytes per possible tally row (85 B on average there). lintFindingsWindow keeps kLintDefaultPayloadBytes as the
+// upper bound. A page always holds at least one row, so a reserve past the ceiling still advances.
+inline constexpr std::size_t kLintNonRowReserveBytes = 4000;
+inline constexpr std::size_t kLintTallyRowBytes      = 90;
+inline std::size_t lintPagePayloadBytes( std::size_t tallyRows ) noexcept
 {
-    const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
-    if( paging )
+    const std::size_t reserve = kLintNonRowReserveBytes + kLintTallyRowBytes * tallyRows;
+    return rw::kOutputCeilingChars > reserve ? rw::kOutputCeilingChars - reserve : 0;
+}
+
+// One <f> row's printed bytes, from above: the escaped text exactly (emitEscapedText grows & < > to 5/4/4 bytes), the
+// rule, severity, path and enclosing name, plus a flat 40 for the tag markup and line number (26 B + the line's digits).
+inline std::size_t lintRowBytes( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const LintOut& m )
+{
+    std::size_t text = m.text.size();
+    for( char ch : m.text )
+    {
+        text += ch == '&' ? 4 : ( ch == '<' || ch == '>' ) ? 3 : 0;
+    }
+    const rw::Symbol* e = enclosing( m.fileId, m.startByte );
+    return text + m.rule.size() + m.sev.size() + rw::rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative
+         + ( e ? e->name.size() : 0 ) + 40;
+}
+
+// The <f> rows a --lint answer prints: the --limit page when the caller sized one, else the sorted run from --offset (0 on a
+// bare call) that fits `payloadBytes`. CL1: --offset alone is a CONTINUATION of the default page, so it is byte-budgeted
+// too — before, `--lint --offset=K` printed every row from K on, so the page after a capped default answer was larger
+// than the answer it continued. Rows keep their final sorted order, so pages chain without a gap or a repeat.
+rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs,
+                                   std::size_t payloadBytes )
+{
+    if( cfg.pageLimit > 0 )
     {
         return rw::pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset );
     }
-    // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
-    // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
-    // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
-    // the same budget than a corpus of short rows does. text= dominates real row size and is summed
-    // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
-    // which are all short in practice — an estimate, not a second full render (that would mean
-    // rendering the very tail this exists to avoid paying for), and one that can only ever be
-    // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
-    // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
-    std::size_t bytesUsed        = 0;
-    std::size_t lintDefaultShown = 0;
-    for( const LintOut& m : outs )
+    // Byte-budget the default run. The stopping rule is bytes because a corpus with long text= rows (E6's vendored-bundle
+    // case: 2,037,645 B / 6,169 findings) needs far FEWER rows to reach the same budget than a corpus of short rows does.
+    const std::size_t begin            = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, outs.size() );
+    const std::size_t budget           = std::min( payloadBytes, kLintDefaultPayloadBytes );   // the historic cap stays the upper bound
+    std::size_t       bytesUsed        = 0;
+    std::size_t       lintDefaultShown = 0;
+    for( std::size_t i = begin; i < outs.size(); ++i )
     {
-        const rw::Symbol* e        = enclosing( m.fileId, m.startByte );
-        const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
-                                    + rw::rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative, so the cap charges that
-                                    + ( e ? e->name.size() : 0 ) + 80;
-        if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
+        const std::size_t rowBytes = lintRowBytes( ing, enclosing, outs[i] );
+        if( lintDefaultShown > 0 && bytesUsed + rowBytes > budget )
         {
-            break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
+            break;   // the page already kept at least one row — stop BEFORE the overflow row
         }
         bytesUsed += rowBytes;
         ++lintDefaultShown;
     }
-    return rw::PageWindow{ 0, lintDefaultShown };
+    return rw::PageWindow{ begin, begin + lintDefaultShown };
+}
+
+// CL1: the next page of a capped --lint answer, as one pasteable call — the run's own rule-shaping flags, then --offset=K
+// (and --limit=N when the caller sized the page). "" when nothing is left. A user selection is kept AS TYPED, so the next
+// page windows the same findings.
+inline std::string lintPageNext( const rw::Config& cfg, std::size_t windowEnd, std::size_t total )
+{
+    if( windowEnd >= total )
+    {
+        return {};
+    }
+    std::string inv = cfg.lint ? "--lint" : "";
+    const auto  add = [ & ]( const std::string& flag ) { inv += inv.empty() ? flag : " " + flag; };
+    if( !cfg.lintRulesDir.empty() ) { add( rw::nextFlag( "--lint-rules=", cfg.lintRulesDir ) ); }
+    if( !cfg.lintSelect.empty() )   { add( rw::nextFlag( "--lint-select=", cfg.lintSelect ) ); }
+    if( !cfg.lintIgnore.empty() )   { add( rw::nextFlag( "--lint-ignore=", cfg.lintIgnore ) ); }
+    if( cfg.lintMaxPerRule > 0 )    { add( "--lint-max-per-rule=" + std::to_string( cfg.lintMaxPerRule ) ); }
+    if( cfg.namingLocals )          { add( "--naming-locals" ); }
+    if( !cfg.withProfile.empty() )  { add( rw::nextFlag( "--with-profile=", cfg.withProfile ) ); }
+    return rw::pagedNext( inv, cfg.pageLimit, windowEnd );
 }
 
 // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
@@ -2289,7 +2332,7 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
     run.outs = dedupeLintFindings( view.enclosing, std::move( run.outs ) );
 
-    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
+    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs, lintPagePayloadBytes( run.allRuleNames.size() + run.userRules.size() ) );
     const std::size_t shownCount = lintPage.end - lintPage.begin;
     const LintFloors  floors     = lintFloorsOf( cfg, run.saturatedRules, lintSel, lintMaxPerRule );
 
@@ -2335,12 +2378,12 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
     // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
     char lintPageBuf[ kPageDisclosureCap ];
-    lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}>", run.outs.size(),
+    lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}{}>", run.outs.size(),
                 pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, run.outs.size(), lintPage.end,
                                cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
                                /*collectionCapped=*/ floors.anyRuleCapped ),   // H8: a floored rule floors findings=
                 floors.anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( floors.findingsNext, "findings_next" ) : std::string(),
-                heat.second, lintRootExtra, view.rootAttr );
+                heat.second, lintRootExtra, view.rootAttr, rw::nextAttrXml( lintPageNext( cfg, lintPage.end, run.outs.size() ) ) );
     emitLintRuleTally( cfg, view, run, lintSel, lintPage, lintApplicability.corpusLangs );
     emitLintFindingRows( view, run.outs, lintPage, heat.first );
     lintPrintOut( "</lint>" );
