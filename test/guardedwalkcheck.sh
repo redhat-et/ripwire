@@ -12,8 +12,8 @@
 #
 # The probe that follows each level asks, per definition a level hits, whether a class the walk means owns it
 # (IdentityNarrower::ownedBy). For a member defined out of line in a file with no class of its scope's name, that reads
-# every class of the name (plausibleClasses: a visibility test per class) — again on every call. It is memoised per
-# (definition, class) (OWNED-MEMO).
+# every class of the name (plausibleClasses: a visibility test per class) — again on every call, for every class the walk
+# means. The answer depends on the file and the name only, so it is kept per (file, name) (OWNED-MEMO).
 #
 # Class identity's step (3) (a virtual call on a type whose ancestry declares the callee and defines it nowhere: the
 # callee's definitions in the real subclasses) re-read, for every (receiver class, callee), two facts no callee changes:
@@ -22,7 +22,7 @@
 # and per subclass, level by level (INHERITED-LEVELS-MEMO).
 #
 # GW(K, M): K files, each defining `struct RootK`, `struct Base : RootK`, `struct Impl : Base` whose one method repeats
-# M times the bare calls `b0()` .. `b(K-1)()` and `r()`, and `struct Peer : Base` calling `bK()` and `r()` once; K more files define `void Base::bK() { }` out of line, and one
+# M times the bare calls `b0()` .. `b(K-1)()` and `r()`, and `struct Peer : Base` calling `bK()` and `r()` once; one more file defines every `void Base::bK() { }` out of line, and one
 # more a namesake `struct Base` no Impl derives from (so the walk's `Base` is narrowed to the K the Impls name, and the
 # probe asks ownedBy). Every Impl's bare calls walk Impl's guarded bases; `Base` names K+1 classes and `Impl` K, so one
 # walk's meantBase pairs K x (K+1) classes.
@@ -36,8 +36,9 @@
 #       `Impl` and `Peer`), cones=2 (the two caller classes whose cones the ladder proof and the bare-call test read: kept
 #       per class, CONE-MEMO — the one-entry keep it replaced re-expanded a cone at every Impl/Peer switch, 24 times),
 #       meant=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the same
-#       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=12 (one
-#       per out-of-line definition). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
+#       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=1 (the
+#       one file all 12 out-of-line definitions sit in, against the one name `Base`: OWNED-MEMO keeps plausibleClasses per
+#       (file, name); kept per (definition, class) it was 12). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
 # meantBase's pairing (drawnAndStandingBases) asked, for every class of the deriving name, whether the map drew an edge
 # from EVERY class of the base's name to it — |deriving| x |base| binary searches. `Impl` is a name hundreds of llvm classes
 # share, and chaUp merges all their bases under it, so a base one Impl names (`Visitor`, itself defined many times) is
@@ -92,7 +93,7 @@ gen(){
             printf '    }\n};\n'
             printf 'struct Peer : Base\n{\n    void go%d() { b%d(); r(); }\n};\n' "$f" "$f"   # a second caller class, after each Impl
         } >"$dir/f$f.cpp"
-        printf 'void Base::b%d() { }\n' "$f" >"$dir/impl$f.cpp"   # out of line, in a file with no Base: owner unknown
+        printf 'void Base::b%d() { }\n' "$f" >>"$dir/impl.cpp"   # out of line, all in one file with no Base: owner unknown
     done
     printf 'struct Base { void z(); };\n' >"$dir/other.cpp"         # a namesake no Impl derives from: the walk's Base is narrowed
 }
@@ -173,8 +174,8 @@ if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [
 else
     no "(A) no guarded walk reached (rc=$rc2/$rc8, M=2 '${c2:-<no line>}', M=8 '${c8:-<no line>}')"
 fi
-if grep -q "files=$(( 2 * K + 1 )) " "$TMP/GW8.xml" && { ! command -v xmllint >/dev/null || xmllint --noout "$TMP/GW8.xml" 2>/dev/null; }; then
-    ok "(A) the GW map is well-formed and indexes all $(( 2 * K + 1 )) fixture files"
+if grep -q "files=$(( K + 2 )) " "$TMP/GW8.xml" && { ! command -v xmllint >/dev/null || xmllint --noout "$TMP/GW8.xml" 2>/dev/null; }; then
+    ok "(A) the GW map is well-formed and indexes all $(( K + 2 )) fixture files"
 else
     no "(A) the GW map is empty or malformed ($( head -c 200 "$TMP/GW8.xml" ))"
 fi
@@ -211,7 +212,7 @@ if [ "$line8" = "$want" ]; then
 else
     no "(C) GW counter: want '$want', got '${line8:-<no guarded_walk line>}'"
 fi
-want='[mem] owned_by asks=1164 reads=12'
+want='[mem] owned_by asks=1164 reads=1'
 if [ "$oline8" = "$want" ]; then
     ok "(C) GW counter is exact: $oline8"
 else

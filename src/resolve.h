@@ -7394,24 +7394,20 @@ struct IdentityNarrower
     mutable HashMap<std::string, ankerl::unordered_dense::set<std::string_view>> ancestorMemo;
     mutable const ChaUpNames*                             ancestorMemoOf = nullptr;
     mutable HashMap<std::uint64_t, bool>                  visibleMemo;
-    //   ownedMemo:    (definition, class) -> ownedBy's out-of-line answer (lane PF2, OWNED-MEMO): that answer reads every class
-    //                 of the name (plausibleClasses, a visibility test per class), and the guarded walk's probe asks it again
-    //                 for every call that reaches the same definition — hundreds of same-named classes x every call on
-    //                 llvm-project. Keyed with the same-named list it was read against; a different list recomputes.
-    struct OwnedAnswer
+    //   ownedMemo:    (a name's class list, a file) -> plausibleClasses' answer, for ownedBy's out-of-line branch (lane PF2,
+    //                 OWNED-MEMO): that answer reads every class of the name (a visibility test per class), and the guarded
+    //                 walk's probe asked it for every (definition, class) pair it met on every call — 43.6M asks over 14.0M
+    //                 distinct pairs on llvm-project/clang. It depends only on the list and the definition's file, so it is
+    //                 kept per (file, the list's first class — a class is in one name's list only); the list's address is
+    //                 kept with it, and a different list recomputes. `all`: every class of the name (no copy kept).
+    struct PlausibleAnswer
     {
-        const rw::SmallVec<NodeId, 2>* sameNamed = nullptr;
-        bool                           owns      = false;
+        const rw::SmallVec<NodeId, 2>* named = nullptr;
+        bool                           all   = false;
+        std::vector<NodeId>            some;   // ascending, as the list is
     };
-    mutable HashMap<std::uint64_t, OwnedAnswer>           ownedMemo;
-    mutable std::size_t                                   ownedAsks = 0, ownedReads = 0;   // RIPWIRE_STATS `[mem] owned_by`: out-of-line asks, and the ones read
-    //                 A definition is asked about once per class a walk means (all of one name), and every such read is the
-    //                 same plausibleClasses( sameNamed, its file ): `plausible` still holds it when nothing has rewritten it
-    //                 since (plausibleRun counts every plausibleClasses), so the next class of the name reads it as it stands.
-    mutable std::uint64_t                                 plausibleRun = 0;
-    mutable std::uint64_t                                 ownedPlausibleRun = 0;
-    mutable const rw::SmallVec<NodeId, 2>*                ownedPlausibleNamed = nullptr;
-    mutable std::uint32_t                                 ownedPlausibleFile = 0;
+    mutable HashMap<std::uint64_t, PlausibleAnswer>       ownedMemo;
+    mutable std::size_t                                   ownedAsks = 0, ownedReads = 0;   // RIPWIRE_STATS `[mem] owned_by`: out-of-line asks, and the answers read
 
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
@@ -7778,7 +7774,6 @@ struct IdentityNarrower
     // sharing a namespace with it, else all — a preference that orders namesakes, never one that removes the last candidate
     void plausibleClasses( std::span<const NodeId> named, std::uint32_t fromFile, const ClassIdentity& ids ) const
     {
-        ++plausibleRun;
         plausible.clear();
         for( NodeId c : named )
         {
@@ -7840,27 +7835,26 @@ struct IdentityNarrower
     }
 
     // ownedBy for a definition no class span holds (defined out of line in a file with no class of its scope's name): is
-    // `cls` among the classes of that name the definition's file most plausibly means? Memoised per (definition, class).
-    bool ownedOutOfLine( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>& sameNamedList, const ClassIdentity& ids ) const
+    // `cls` among the classes of that name the definition's file most plausibly means? Memoised per (file, name) (ownedMemo).
+    bool ownedOutOfLine( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>& sameNamed, const ClassIdentity& ids ) const
     {
-        const rw::SmallVec<NodeId, 2>* const sameNamed = &sameNamedList;
         ++ownedAsks;
-        const auto [ memo, inserted ] = ownedMemo.try_emplace( hashutil::packPair( def, cls ) );
-        if( !inserted && memo->second.sameNamed == sameNamed )
+        if( sameNamed.size() == 0 )
         {
-            return memo->second.owns;
+            return false;   // plausibleClasses of no classes is none
         }
-        ++ownedReads;
         const std::uint32_t defFile = fileOf( def, ids );
-        if( ownedPlausibleRun != plausibleRun || ownedPlausibleNamed != sameNamed || ownedPlausibleFile != defFile )
+        const auto [ memo, inserted ] = ownedMemo.try_emplace( hashutil::packPair( defFile, sameNamed.front() ) );
+        PlausibleAnswer& answer = memo->second;
+        if( inserted || answer.named != &sameNamed )
         {
-            plausibleClasses( std::span<const NodeId>( sameNamed->data(), sameNamed->size() ), defFile, ids );   // defined out of line in another file
-            ownedPlausibleRun   = plausibleRun;
-            ownedPlausibleNamed = sameNamed;
-            ownedPlausibleFile  = defFile;
+            ++ownedReads;
+            plausibleClasses( std::span<const NodeId>( sameNamed.data(), sameNamed.size() ), defFile, ids );   // defined out of line in another file
+            answer.named = &sameNamed;
+            answer.all   = plausible.size() == sameNamed.size();
+            answer.some.assign( answer.all ? plausible.end() : plausible.begin(), plausible.end() );
         }
-        memo->second = { sameNamed, std::ranges::find( plausible, cls ) != plausible.end() };
-        return memo->second.owns;
+        return answer.all ? std::binary_search( sameNamed.begin(), sameNamed.end(), cls ) : std::binary_search( answer.some.begin(), answer.some.end(), cls );
     }
 
     // a fresh visited generation over the symbol ids (the stamp vector is sized once, never cleared)
