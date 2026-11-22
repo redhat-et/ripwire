@@ -150,7 +150,7 @@ if grep -q 'store/cache_store.js' "$TMP/pack_off.xml"; then echo "  note  B7 con
 echo "=== X: determinism ==="
 cli "$BIN" "$R" --no-cache --for="$Q_GO" > "$TMP/x1.xml"
 cli "$BIN" "$R" --no-cache --for="$Q_GO" > "$TMP/x2.xml"
-[ -s "$TMP/x1.xml" ] && cmp -s "$TMP/x1.xml" "$TMP/x2.xml" && ok "X1 two default --for runs are byte-identical" || no "X1 nondeterministic or empty --for answer"
+if [ -s "$TMP/x1.xml" ] && cmp -s "$TMP/x1.xml" "$TMP/x2.xml"; then ok "X1 two default --for runs are byte-identical"; else no "X1 nondeterministic or empty --for answer"; fi
 
 if [ "$FAIL" -ne 0 ]; then echo "forbasenamedefaultcheck: FAIL"; exit 1; fi
 echo "forbasenamedefaultcheck: PASS"

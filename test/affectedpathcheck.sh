@@ -45,7 +45,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -84,7 +84,7 @@ MIX="$( cat "$TMP/out.txt" )"
 # ── B: every unusable item disclosed, with its reason ──────────────────────────────────────────────────
 WANT_U='<unused item="ChangeLog" reason="not_indexed"/>
 <unused item="src/obsolete_widget.cpp" reason="not_found"/>'
-[ "$( attr unused "$MIX" )" = "2" ] && ok "B root carries unused=\"2\"" || no "B root unused='$( attr unused "$MIX" )' (want 2)"
+if [ "$( attr unused "$MIX" )" = "2" ]; then ok "B root carries unused=\"2\""; else no "B root unused='$( attr unused "$MIX" )' (want 2)"; fi
 [ "$( urows "$MIX" )" = "$WANT_U" ] && ok "B one <unused> row per item, list order, reasons not_indexed / not_found" \
                                    || no "B unused rows wrong: [$( urows "$MIX" | tr '\n' ' ' )]"
 NEAR="$( run --affected=src/core.cpp,src/cor.cpp )"
@@ -145,7 +145,7 @@ case "$MA" in ERROR*'none of the 2 items in the list resolved'*) ok "F MCP all-u
 [ "$( run --affected=src/core.cpp,ChangeLog,src/obsolete_widget.cpp )" = "$MIX" ] && ok "G mixed answer byte-identical run to run" \
                                                                        || no "G mixed answer non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$MIX" | xmllint --noout - 2>/dev/null && ok "G mixed answer is well-formed XML" || no "G mixed answer is not well-formed"
+    if printf '%s' "$MIX" | xmllint --noout - 2>/dev/null; then ok "G mixed answer is well-formed XML"; else no "G mixed answer is not well-formed"; fi
 else
     printf '  SKIP  G xml well-formed (no xmllint)\n'
 fi
@@ -175,7 +175,7 @@ TMRC="$( tgrc --test-gate=src/core.cpp,ChangeLog,src/obsolete_widget.cpp )"; TMI
     || no "T1 mixed test-gate answer wrong: unused='$( tattr unused "$TMIX" )' rows=[$( urows "$TMIX" | tr '\n' ' ' )]"
 LRC="$( tgrc --test-gate=src/lonely.cpp )"
 TYRC="$( tgrc --test-gate=src/lonely.cpp,src/lonly.cpp )"; TTYPO="$( cat "$TMP/out.txt" )"
-[ "$LRC" = 0 ] && ok "T2 control: --test-gate=src/lonely.cpp alone is green (exit 0)" || no "T2 control: lonely.cpp alone exit $LRC (want 0) — the fixture is broken"
+if [ "$LRC" = 0 ]; then ok "T2 control: --test-gate=src/lonely.cpp alone is green (exit 0)"; else no "T2 control: lonely.cpp alone exit $LRC (want 0) — the fixture is broken"; fi
 [ "$TYRC" != 0 ] && [ "$TYRC" = 6 ] && printf '%s' "$TTYPO" | grep -qF '<unused item="src/lonly.cpp" reason="not_found" near="src/lonely.cpp"/>' \
     && ok "T2 a typo beside green items: exit 6 (never 0) WITH an answer naming the typo" \
     || no "T2 typo beside green items: exit $TYRC (want 6), unused=[$( urows "$TTYPO" )]"
