@@ -278,6 +278,7 @@ Discloses: `capped`, `reads_capped`, `writes_capped`
 | --- | --- | --- | --- |
 | `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEnvNameLen` | `128` | BOUNDARY | longest plausible environment-variable name |
+| `kMaxFlagFileBytes` | `67108864` | INDEXING | 64 MiB read cap; a file past it counts in oversize= (#699) |
 | `kMaxShellNesting` | `32` | INDEXING | — |
 | `kMaxSitesShown` | `8` | OUTPUT | <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail |
 

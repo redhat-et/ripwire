@@ -63,7 +63,10 @@ namespace rw
 namespace darkflags
 {
 
-constexpr std::size_t kMaxFlagFileBytes = 4u << 20;   // 4 MB — past this a "source" file is generated data
+// 64 MiB — past this a "source" file is generated data. A runaway guard, not a filter: GitHub warns at 50 MB and refuses
+// 100 MB, and the crawl's own default ceiling (--max-file-size, 4 MB) drops a file long before this one does. A file
+// either ceiling drops is counted in oversize= on the root (#699), so the counts beside it read as floors.
+constexpr std::size_t kMaxFlagFileBytes = 67108864;   // 64 MiB read cap; a file past it counts in oversize= (#699)
 constexpr std::size_t kMaxSitesShown    = 8;          // <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail
 constexpr std::size_t kMaxEnvNameLen    = 128;        // longest plausible environment-variable name
 
@@ -1287,6 +1290,7 @@ struct ShellFunctionWrite
     std::size_t   write = 0;                 // fh.writes index
     std::uint32_t function = 0;              // the innermost function body it sits in
     bool          isLocal = false;           // it IS the `local` / in-function `declare` that binds the name
+    bool          isGlobal = false;          // `declare -g`: it sets the global even while a `local` binds the name (#701)
 };
 
 // The scan-time narrowing chain over fh.writes (shellNarrowFrom): next[k] == k while write k has not been narrowed,
@@ -1311,11 +1315,13 @@ struct ShellScan
     // keyword's too — commits at the separator, the line end or the `)` that closes its command, so a right-hand
     // side that spans lines (`X='a` + `'${X:?}`) still reads the caller's X. function: the function a `local` binds
     // to. isImplicit: the REPLY / MAPFILE a `read` / `mapfile` writes when it names no variable, withdrawn when it does.
+    // isGlobal: a `declare -g` write, which sets the global even inside a function that made the name local.
     struct Pending
     {
         FileHarvest::Read write;
         std::uint32_t     function = kNoFunction;
         bool              isImplicit = false;
+        bool              isGlobal = false;
     };
 
     struct Frame
@@ -1335,6 +1341,7 @@ struct ShellScan
         Kw            kw = Kw::None;
         bool          isDeclLocal = false;   // local, or declare/typeset inside a function: the write ends with it
         bool          isDeclKeep = false;    // a bare NAME keeps its inherited value (readonly, -x, -g, top-level declare)
+        bool          isDeclGlobal = false;  // declare -g / typeset -g: the write is the global's, whatever the function made local
         char          optArg = 0;            // the option letter whose argument the next word is (read -p, mapfile -d, …)
         std::uint8_t  wordsLeft = 0;         // getopts: optstring to skip before the name
         std::vector<Pending>     pending;    // this command's writes, until it ends
@@ -1450,7 +1457,7 @@ inline void shellDeclOption( ShellScan::Frame& f, std::string_view opt )
             f.kw = ShellScan::Kw::None;
             return;
         }
-        if( c == 'g' ) { f.isDeclLocal = false; }
+        if( c == 'g' ) { f.isDeclLocal = false;  f.isDeclGlobal = true; }
         if( c == 'g' || c == 'x' ) { f.isDeclKeep = true; }
     }
 }
@@ -1600,6 +1607,7 @@ inline void shellCommandWord( std::string_view line, std::size_t at, const Shell
         f.kw          = kw->kw;
         f.wordsLeft   = kw->wordsLeft;
         f.isDeclLocal = isScopable && ( w.word == "local" || isInFunction );
+        f.isDeclGlobal = false;
         f.isDeclKeep  = kw->kw == ShellScan::Kw::Decl && !f.isDeclLocal;   // readonly X / top-level declare X keep X
         if( kw->kw == ShellScan::Kw::Read || kw->kw == ShellScan::Kw::MapFile || w.word == "select" )
         {
@@ -1616,6 +1624,7 @@ inline void shellKeywordWrite( std::size_t at, const ShellWord& w, ShellScan::Kw
     const bool          isLocal = kwBefore == ShellScan::Kw::Decl && f.isDeclLocal && st.function() != ShellScan::kNoFunction;
     std::erase_if( f.pending, []( const ShellScan::Pending& p ) { return p.isImplicit; } );
     shellHoldWrite( f, w.name, lineNo, at, isLocal ? st.function() : ShellScan::kNoFunction );
+    f.pending.back().isGlobal = kwBefore == ShellScan::Kw::Decl && f.isDeclGlobal;
     if( kwBefore == ShellScan::Kw::GetOpts )
     {
         shellHoldWrite( f, "OPTARG", lineNo, at, ShellScan::kNoFunction );
@@ -1890,7 +1899,7 @@ inline void shellCommitPending( ShellScan& st, ShellScan::Frame& f, FileHarvest&
         }
         if( enclosing != ShellScan::kNoFunction )
         {
-            st.functionWrites.push_back( ShellFunctionWrite{ fh.writes.size(), enclosing, p.function != ShellScan::kNoFunction } );
+            st.functionWrites.push_back( ShellFunctionWrite{ fh.writes.size(), enclosing, p.function != ShellScan::kNoFunction, p.isGlobal } );
         }
         fh.writes.push_back( std::move( p.write ) );
     }
@@ -2325,10 +2334,39 @@ inline std::vector<FileHarvest::Read> shellShadowingWrites( const FileHarvest& f
     return shadowing;
 }
 
+// One (function, name) group of shellCloseScopes, in effect order: [from, to) of `inFunction`. A `local` binds the name
+// from where it takes effect to where its own shell ends — the function's `}`, or sooner when it ran in a child shell
+// inside the function (`( local X )`, `$( local X )`, `local X | cat`), whose end the scan already narrowed it to (#700).
+// A later write in effect inside a binding sets the local, so it ends at the function's `}` too; a write past every
+// binding, or a `declare -g` (#701), sets the global and keeps the scope it has.
+inline void shellNarrowBoundWrites( const std::vector<ShellFunctionWrite>& inFunction, std::size_t from, std::size_t to,
+                                    std::pair<std::uint32_t, std::uint32_t> functionEnd, FileHarvest& fh )
+{
+    using Pos = std::pair<std::uint32_t, std::uint32_t>;
+    Pos bindEnd{ 0, 0 };   // the furthest end of a local binding met so far (exclusive)
+    for( std::size_t k = from; k < to; ++k )
+    {
+        FileHarvest::Read& w = fh.writes[ inFunction[k].write ];
+        if( inFunction[k].isGlobal )
+        {
+            continue;
+        }
+        if( inFunction[k].isLocal )
+        {
+            bindEnd = std::max( bindEnd, std::min( Pos{ w.scopeLine, w.scopeCol }, functionEnd ) );
+        }
+        if( Pos{ w.effLine, w.col } < bindEnd )
+        {
+            shellNarrowScope( w, functionEnd.first, functionEnd.second );
+        }
+    }
+}
+
 // Each function-local write stops shadowing at its function's `}` (a function the file never closes runs to the end),
 // or sooner when a subshell inside the function already ended it. A LATER write in that function to a name it made
 // local (`local X; X=v`, `read X`, `: ${X:=d}`) sets the local too, so it ends there as well; before the `local`, a
-// write is still the script's. The function's writes are grouped by (function, name) in effect order: one sort.
+// write is still the script's, and so is one after a `local` that ran in a child shell or one made by `declare -g`
+// (shellNarrowBoundWrites). The function's writes are grouped by (function, name) in effect order: one sort.
 inline void shellCloseScopes( const ShellScan& shell, FileHarvest& fh )
 {
     std::vector<ShellFunctionWrite> inFunction = shell.functionWrites;
@@ -2338,19 +2376,17 @@ inline void shellCloseScopes( const ShellScan& shell, FileHarvest& fh )
         const FileHarvest::Read& y = fh.writes[ b.write ];
         return std::tie( a.function, x.name, x.effLine, x.col, a.write ) < std::tie( b.function, y.name, y.effLine, y.col, b.write );
     } );
-    for( std::size_t k = 0; k < inFunction.size(); )
+    for( std::size_t from = 0; from < inFunction.size(); )
     {
-        const std::uint32_t function = inFunction[k].function;
-        const std::string&  name     = fh.writes[ inFunction[k].write ].name;
-        bool                isLocal  = false;
-        for( ; k < inFunction.size() && inFunction[k].function == function && fh.writes[ inFunction[k].write ].name == name; ++k )
+        const std::uint32_t function = inFunction[ from ].function;
+        const std::string&  name     = fh.writes[ inFunction[ from ].write ].name;
+        std::size_t         to       = from;
+        while( to < inFunction.size() && inFunction[ to ].function == function && fh.writes[ inFunction[ to ].write ].name == name )
         {
-            isLocal = isLocal || inFunction[k].isLocal;
-            if( isLocal )
-            {
-                shellNarrowScope( fh.writes[ inFunction[k].write ], shell.functionEnds[ function ].first, shell.functionEnds[ function ].second );
-            }
+            ++to;
         }
+        shellNarrowBoundWrites( inFunction, from, to, shell.functionEnds[ function ], fh );
+        from = to;
     }
     for( const auto& [ writeIndex, function ] : shell.scopedWrites )
     {
@@ -2749,6 +2785,19 @@ struct FlagsResult
         void disclose( DisclosureWhy ) noexcept { ++files; }
     };
     UnreadableFiles   unreadable;
+    // The DISCLOSE sink for a file whose gates are missing because it is too big (#699): the crawl dropped it over its
+    // size ceiling (IngestResult::skippedOversize, a file this scan would have read), or readWhole refused it past
+    // kMaxFlagFileBytes (ReadWholeFail::TooLarge). Every count on the root is then a floor. limitBytes: the smallest
+    // ceiling that dropped one. Absent from the XML when zero.
+    struct OversizeFiles
+    {
+        enum class DisclosureWhy : std::uint8_t { CrawlCeiling, FlagsReadCap };
+        std::uint64_t files      = 0;
+        std::uint64_t limitBytes = 0;
+        void disclose( DisclosureWhy ) noexcept { ++files; }
+        void noteLimit( std::uint64_t bytes ) noexcept { limitBytes = limitBytes == 0 ? bytes : std::min( limitBytes, bytes ); }
+    };
+    OversizeFiles     oversize;
 };
 
 // Fold one harvested definition into the gate table, applying the cmake-beats-compile override rule.
@@ -2915,6 +2964,23 @@ inline void finishGate( Gate& g )
                && std::any_of( g.reads.begin(), g.reads.end(), []( const Site& r ) { return r.sh.form != ShellForm::None; } );
 }
 
+// The files the crawl dropped over a size ceiling (--max-file-size, or the .json lane's own) that this scan would have
+// read — every one that is not prose (harvestFile reads no prose file): their gates are missing too (#699).
+inline FlagsResult::OversizeFiles crawlOversize( const IngestResult& ing )
+{
+    FlagsResult::OversizeFiles oversize;
+    for( const SkippedOversize& s : ing.skippedOversize )
+    {
+        if( !lineSyntaxFor( s.path ).isProse )
+        {
+            DISCLOSE( oversize, FlagsResult::OversizeFiles::DisclosureWhy::CrawlCeiling,
+                      "flags: the crawl dropped a file over its size ceiling — its gates are missing (oversize=)" );
+            oversize.noteLimit( s.limitBytes );
+        }
+    }
+    return oversize;
+}
+
 // Harvest every file, then resolve: gate identities first (so a read site can be attributed only to a name
 // that is actually a declared gate), then regions and reads, then alias chains.
 // `keepUnreadGates` (default false = the `--flags` contract, byte-identical): normally a DECLARED name with
@@ -2929,6 +2995,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     std::uint64_t          generatedSkipped = 0;
     std::uint64_t          nestingCut = 0;
     FlagsResult::UnreadableFiles unreadable;
+    FlagsResult::OversizeFiles   oversize = crawlOversize( ing );
 
     const auto scan = [ & ]( const std::string& full, bool isCMake )
     {
@@ -2940,6 +3007,12 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
             {
                 DISCLOSE( unreadable, FlagsResult::UnreadableFiles::DisclosureWhy::OpenOrReadFailed,
                           "flags: a file could not be opened or read to its end — its gates are missing (unreadable=)" );
+            }
+            else
+            {
+                DISCLOSE( oversize, FlagsResult::OversizeFiles::DisclosureWhy::FlagsReadCap,
+                          "flags: a file grew past kMaxFlagFileBytes — its gates are missing (oversize=)" );
+                oversize.noteLimit( kMaxFlagFileBytes );
             }
             return;
         }
@@ -2992,6 +3065,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     res.generatedSkipped = generatedSkipped;
     res.nestingCut       = nestingCut;
     res.unreadable       = unreadable;
+    res.oversize         = oversize;
     std::size_t filterNameHits = 0;
     for( auto& [ name, g ] : gates )
     {
@@ -3217,6 +3291,14 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
         rw::emitRaw( out, "<!-- unreadable=N on the root: files this scan could not open or read to their end. Their gates "
                            "are missing, so gates=, dark_gates= and every count beside them are floors for this run. -->" );
     }
+    if( res.oversize.files != 0 )
+    {
+        rw::emitTo( out, "<!-- oversize=N on the root: files this scan did not read because they are too big — over the crawl's "
+                         "size ceiling (max-file-size, default 4 MB; skipped lists each one) or over this scan's own {} MB read cap. "
+                         "Their gates are missing, so gates=, dark_gates= and every count beside them are floors for this run; "
+                         "files= does not count them. oversize_limit=B: the smallest of those ceilings that dropped one, in bytes. -->",
+                    kMaxFlagFileBytes >> 20 );
+    }
     // C1 F-07: the site listing's own vocabulary, DEFINED where the reader meets it (legendcoveragecheck's
     // rule). Emitted unconditionally because it describes a listing every run carries, unlike the attributes
     // themselves, which appear only on a gate that was actually cut.
@@ -3250,7 +3332,10 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     const std::string fgGeneratedAttr = ( res.generatedSkipped == 0 ? std::string()
                                                                     : " generated_skipped=\"" + std::to_string( res.generatedSkipped ) + "\"" )
                                       + ( res.nestingCut == 0 ? std::string() : " nesting_cut=\"" + std::to_string( res.nestingCut ) + "\"" )
-                                      + ( res.unreadable.files == 0 ? std::string() : " unreadable=\"" + std::to_string( res.unreadable.files ) + "\"" );
+                                      + ( res.unreadable.files == 0 ? std::string() : " unreadable=\"" + std::to_string( res.unreadable.files ) + "\"" )
+                                      + ( res.oversize.files == 0 ? std::string()
+                                                                  : " oversize=\"" + std::to_string( res.oversize.files ) + "\" oversize_limit=\""
+                                                                        + std::to_string( res.oversize.limitBytes ) + "\"" );
     rw::emitTo( out, "<flags gates=\"{}\" dark_gates=\"{}\" compile=\"{}\" cmake=\"{}\" env=\"{}\" files=\"{}\"{}{}{}{}{}>",
                   res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned,
                   fgGeneratedAttr.c_str(), fgEscapedAttr.c_str(), fgCmakeFailedAttr.c_str(), fgFilterAttr.c_str(), flagsNext.c_str() );
@@ -3336,6 +3421,10 @@ inline void writeFlagsJson( std::FILE* out, const FlagsResult& res, std::size_t 
     if( res.generatedSkipped != 0 ) { doc += ",\"generated_skipped\":" + std::to_string( res.generatedSkipped ); }
     if( res.nestingCut != 0 )       { doc += ",\"nesting_cut\":" + std::to_string( res.nestingCut ); }
     if( res.unreadable.files != 0 ) { doc += ",\"unreadable\":" + std::to_string( res.unreadable.files ); }
+    if( res.oversize.files != 0 )
+    {
+        doc += ",\"oversize\":" + std::to_string( res.oversize.files ) + ",\"oversize_limit\":" + std::to_string( res.oversize.limitBytes );
+    }
     if( res.escapedRoot != 0 )      { doc += ",\"escaped_root\":" + std::to_string( res.escapedRoot ); }
     if( res.cmakeScanFailed )       { doc += ",\"cmake_scan_failed\":true"; }
     if( !res.filter.empty() )       { doc += ",\"filter\":" + q( res.filter ); }
