@@ -1,7 +1,7 @@
 ### Changed — the cross-branch verbs answer in repositories with more than 512 local branches
 
 `--whereis`, `--stray-content` (with `--plan` and `--abi`), `--eval-stray` and the MCP `whereis` and `stray_content` tools used
-to refuse when a repository had more than 512 local branches, which a long-lived clone with many lane branches does. They now
+to refuse when a repository had more than 512 local branches, which a long-lived clone with many work branches does. They now
 read the newest 512 branches by committer date and print `refs_omitted=K` on the answer's root for the K older ones they did not
 read. `--whereis` drops `complete="1"` whenever refs were left out, and `--eval-stray` reads every labelled branch first, so a
 labelled branch is scored, not left out, as long as the labels fit the 512-branch window; past 512 labels, `labels_omitted=K`

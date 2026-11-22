@@ -1,4 +1,4 @@
-### Fixed — ONE-SIDE-REACH no longer wraps an unsigned hop count, so the ASan build answers two-endpoint `--for` tasks
+### Fixed — the one-side reach walk of `--for` no longer wraps an unsigned hop count, so the ASan build answers two-endpoint `--for` tasks
 
 `addShortestPathNodes` (src/foronesidereach.h) tested `toSink[v] + 1 == toSink[u]`, and a callee the other side's walk never reached carries the hop count `UINT32_MAX`, so the sum wrapped to 0. The plain and Release builds answered correctly (a wrapped 0 never equals a hop count above 0, so no row was kept or demoted wrongly), but the ASan build (`-fsanitize=integer -fno-sanitize-recover=all`) aborted on the overflow: any `--for` task naming two endpoints where a node on the path walk calls something the walk does not reach — the two-sink shape of `test/foronesidecheck.sh` (a2), (c), (g), (h), (t), (x) and `test/foranswerfirstcheck.sh` (R0) on this repository — came back empty under ASan. The test now compares on `u`'s side (`toSink[v] == toSink[u] - 1`, `toSink[u] > 0` by the loop's own condition), which cannot wrap. Output of the plain build is byte-identical.
 

@@ -8,4 +8,4 @@ A task written as a sentence lost the subject blocks that the same symbols get i
 
 Everything is additive: the answer before the new block is byte-identical. `test/sentencesubjectcheck.sh` pins each form, its negatives (no cue, two functions, the callee sense, a negated cue, the words with no code) and the re-ask.
 
-Found by the Fable residual-rows and precision pass (2026-11-12), which measured the dropped blocks on 29 in-sample rows (SENTENCE-SUBJECT-BLOCKS and RE-ASK cards).
+Found by a pre-release review of residual misses and precision (2026-11-12), which measured the dropped blocks on 29 in-sample rows.

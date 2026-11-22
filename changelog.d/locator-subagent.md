@@ -1,4 +1,4 @@
-### Added — the `ripwire-locator` Claude Code subagent, and a main-thread sentence that routes code lookups to it (lane LC1)
+### Added — the `ripwire-locator` Claude Code subagent, and a main-thread sentence that routes code lookups to it
 
 In Claude Code every tool result stays in the main conversation and is sent again with each later request, so a
 `--for` answer read in the main thread is paid for on every request after it. A subagent runs in its own context and
