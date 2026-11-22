@@ -1337,7 +1337,8 @@ inline std::vector<char> judgeTermMargins( const LexTfTable& table, const LexCor
     return termKept;
 }
 
-// The corpus statistics BM25 scores against, tallied in ONE pass over the final tf rows in ascending doc id.
+// The corpus statistics BM25 scores against, tallied in ONE pass over the final tf rows in ascending doc id, and the
+// (k1, b) it scores with (A4: resolveBm25Params, the ONE definition the impact bound reads too).
 // avgdl accumulates in the historical doc order (integer sums: exact in any order anyway). dfreq[u] = COUNTED units
 // containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it); dfOut[u] = statsOut units carrying
 // it (all 0 with no statsOut). A counted unit scores with (countedCount, dfreq, avgdlCounted); a statsOut unit against
@@ -1350,6 +1351,7 @@ struct LexBm25Stats
     std::vector<std::uint32_t> candidateIds;   // ascending: every unit with any tf > 0
     double                     avgdlCounted = 0;
     double                     avgdlRanked  = 0;
+    Bm25Params                 params       = kBm25Default;
 };
 
 inline LexBm25Stats tallyBm25Stats( const LexTfTable& table, const LexCorpusRoles& roles )
@@ -1384,6 +1386,7 @@ inline LexBm25Stats tallyBm25Stats( const LexTfTable& table, const LexCorpusRole
     }
     st.avgdlCounted /= double( roles.countedCount ? roles.countedCount : 1 );
     st.avgdlRanked /= double( roles.rankedCount ? roles.rankedCount : 1 );
+    st.params = resolveBm25Params();
     return st;
 }
 
@@ -1413,7 +1416,7 @@ class LexTopKPruner
 {
 public:
     LexTopKPruner( std::size_t pruneTopK, const std::vector<char>* alwaysExact, const LexBm25Stats& st, const LexCorpusRoles& roles,
-                   const DedupedQueryTerms& dedup, const std::vector<char>& termKept, const Bm25Params& bm25Params )
+                   const DedupedQueryTerms& dedup, const std::vector<char>& termKept )
         : topK_( std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr ? pruneTopK : 0 ), alwaysExact_( alwaysExact )
     {
         if( topK_ == 0 )
@@ -1443,7 +1446,7 @@ public:
             const double idfIn  = n > 0 ? std::log( ( double( roles.countedCount ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
             const double idfAll = st.dfOut[u] > 0 ? std::log( ( double( roles.rankedCount ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
             const double idf    = std::max( idfIn, idfAll );
-            const double cap1   = bm25ImpactBound( idf, double( st.tfMaxOf[u] ), bm25Params );   // A4: shared bound, same (k1,b)
+            const double cap1   = bm25ImpactBound( idf, double( st.tfMaxOf[u] ), st.params );   // A4: shared bound, same (k1,b)
             capOcc_[u]          = cap1 * double( occCount[u] );
         }
     }
@@ -1505,14 +1508,14 @@ private:
 //   - a pruned unit provably cannot enter the top-K the caller consumes (LexTopKPruner).
 // So the exhaustive mode needs no loop of its own: it is this loop with a pruner that never skips.
 inline std::vector<float> scoreLexCandidates( const IngestResult& ing, const LexTfTable& table, const LexBm25Stats& st, const LexCorpusRoles& roles,
-                                              const DedupedQueryTerms& dedup, const std::vector<char>& termKept, const Bm25Params& bm25Params,
-                                              LexTopKPruner& pruner, const std::vector<float>* symbolScoreMul )
+                                              const DedupedQueryTerms& dedup, const std::vector<char>& termKept, LexTopKPruner& pruner,
+                                              const std::vector<float>* symbolScoreMul )
 {
     DASSERT( symbolScoreMul == nullptr || std::ranges::all_of( *symbolScoreMul, []( float mul ) { return mul > 0.f && mul <= 1.f; } ),
              "a tier multiplier outside (0,1] would score a non-candidate unit other than +0.0f and break the MaxScore bound" );
     const std::vector<std::size_t>& uniqueIndexOfQtok = dedup.uniqueIndexOfQtok;
     const std::vector<int>&         dl                = table.dl;
-    const double                    k1 = bm25Params.k1, b = bm25Params.b;
+    const double                    k1 = st.params.k1, b = st.params.b;
     std::vector<float>              score( dl.size(), 0.f );
     for( const std::uint32_t i : st.candidateIds )
     {
@@ -1613,10 +1616,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     const std::vector<char> termKept = judgeTermMargins( table, roles, nameDf, marginBits, dedup.uniqueToks );
 
     // score: corpus statistics, then every candidate the MaxScore pruner (armed only on request) does not rule out
-    const LexBm25Stats stats      = tallyBm25Stats( table, roles );
-    const Bm25Params   bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
-    LexTopKPruner      pruner( pruneTopK, alwaysExact, stats, roles, dedup, termKept, bm25Params );
-    return scoreLexCandidates( ing, table, stats, roles, dedup, termKept, bm25Params, pruner, symbolScoreMul );
+    const LexBm25Stats stats = tallyBm25Stats( table, roles );
+    LexTopKPruner      pruner( pruneTopK, alwaysExact, stats, roles, dedup, termKept );
+    return scoreLexCandidates( ing, table, stats, roles, dedup, termKept, pruner, symbolScoreMul );
 }
 
 // the un-tiered contract every pre-§P4 caller keeps (evals, exemplar, --recall): same arity as always,
