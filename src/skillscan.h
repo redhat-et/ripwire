@@ -49,6 +49,7 @@
 
 #include "infra/Diagnostics.h"
 #include "regexguard.h"        // every pattern here is compiled and matched through the one regex boundary
+#include "infra/sortutil.h"    // rw::sortutil::svLess — string_view order without libstdc++ _S_compare wrap
 #include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier byte class, which is \b's word class here
 #include "infra/stackthreads.h"   // rw::runOnStackThreads — the scan runs on a thread whose stack its subject bound is computed for
 
@@ -1065,7 +1066,7 @@ struct ShellBindings
     // from a command, a variable or a read, or a site at or after the use.
     const ShellBindingSite* resolve( std::string_view name, int line, std::size_t col ) const noexcept
     {
-        const auto byName = []( const ShellBindingSite& s, std::string_view n ) noexcept { return std::string_view( s.name ) < n; };
+        const auto byName = []( const ShellBindingSite& s, std::string_view n ) noexcept { return rw::sortutil::svLess( s.name, n ); };
         const auto first  = std::lower_bound( sites.begin(), sites.end(), name, byName );
         if( first == sites.end() || first->name != name || ( first + 1 != sites.end() && ( first + 1 )->name == name ) )
         {

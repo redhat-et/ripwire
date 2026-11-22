@@ -1581,6 +1581,8 @@ Discloses: `capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kFlowMaxDestinations` | `16` | — | — |
+| `kFlowMaxExpandedBytes` | `4096` | — | — |
 | `kSkillExcerptMaxBytes` | `120` | — | — |
 | `kSkillScanFindingCap` | `200` | INDEXING | generous for one file or a small dir; caps a pathological --scan-skills sweep |
 
