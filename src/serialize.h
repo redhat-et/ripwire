@@ -3584,19 +3584,19 @@ inline std::string mapOpeningLegend( bool withProv )
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
 }
 
-// Whether any symbol of the corpus satisfies `pred` — the presence test behind every corpus-kind legend clause.
-template <class Pred>
-inline bool corpusHasSymbol( const IngestResult& ing, const Pred& pred )
-{
-    return std::any_of( ing.symbols.begin(), ing.symbols.end(), pred );
-}
-
 // MODULE-SCOPE OWNERS (issue #60): the t="modscope" kind's reading, ONLY when the corpus actually has one — a corpus with no
 // file-scope call keeps every byte of this legend, which is what kept test/printf_parity.manifest's --pack-signatures and
 // --around hashes and every est_tokens ceiling where they were.
-inline std::string moduleScopeLegend( const IngestResult& ing )
+inline std::string_view moduleScopeLegend( const IngestResult& ing ) noexcept
 {
-    return corpusHasSymbol( ing, []( const Symbol& sym ) { return sym.kind == SymKind::ModuleScope; } ) ? std::string( kModScopeMapLegend ) : std::string();
+    for( const Symbol& sym : ing.symbols )
+    {
+        if( sym.kind == SymKind::ModuleScope )
+        {
+            return kModScopeMapLegend;
+        }
+    }
+    return {};
 }
 
 // lane L6: a <c via="impl"> edge's reading, over the rows WRITTEN (fix round 1, N1): only when a kept row or an inventory entry
@@ -3622,11 +3622,11 @@ inline std::string typeKindLegend( const IngestResult& ing )
 {
     const auto namedTypeKind = []( const Symbol& sym ) { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; };
     std::string clauses;
-    if( corpusHasSymbol( ing, [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         clauses += kNamedTypeMapLegend;
     }
-    if( corpusHasSymbol( ing, [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         clauses += kCppAliasMapLegend;
     }
