@@ -48,10 +48,12 @@
 #   pairs=1200 (4 expansions x 300: Impl's and Peer's 12 classes are each drawn to all 13 `Base`s, so the two sides are
 #   equal there) and BE(8)'s pairs=32 are pinned; walking every class of the name examined 144 in BE(8).
 #
-# SW(4, M): Shape declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
+# SW(4, M): Shape (deriving from Root) declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
 #   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
 #   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
-#   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again).
+#   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again). Its `[mem] plausible reads=`
+#   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
+#   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
 #   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8) and BE(8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
@@ -104,7 +106,7 @@ gensw(){
     local dir="$1" k="$2" m="$3" c i
     mkdir -p "$dir"
     {
-        printf 'struct Shape\n{\n'
+        printf 'struct Root { };\nstruct Shape : Root\n{\n'
         for i in $( seq 0 $(( m - 1 )) ); do printf '    virtual void f%d() = 0;\n' "$i"; done
         printf '};\nstruct Painter\n{\n'
         for i in $( seq 0 $(( m - 1 )) ); do printf '    void f%d() { }\n' "$i"; done
@@ -144,8 +146,8 @@ stats(){
     CALLS="$( printf '%s' "$LINE" | sed -n 's/.* calls=\([0-9]*\).*/\1/p' )"
     WALKS="$( printf '%s' "$LINE" | sed -n 's/.* walks=\([0-9]*\).*/\1/p' )"
     MEANT="$( printf '%s' "$LINE" | sed -n 's/.* meant=\([0-9]*\).*/\1/p' )"
-    OLINE="$( grep -F '[mem] owned_by ' "$TMP/$name.err" )"
-    ASKS="$( printf '%s' "$OLINE" | sed -n 's/.* asks=\([0-9]*\).*/\1/p' )"
+    OLINE="$( grep -F '[mem] plausible ' "$TMP/$name.err" )"
+    ASKS="$( printf '%s' "$OLINE" | sed -n 's/.* owned_asks=\([0-9]*\).*/\1/p' )"
     READS="$( printf '%s' "$OLINE" | sed -n 's/.* reads=\([0-9]*\).*/\1/p' )"
     BLINE="$( grep -F '[mem] base_edges ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
@@ -165,8 +167,8 @@ stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$RE
 stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
 
 stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
-stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC
-stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE"
+stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
+stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE"
 
 # ── (A) REACHED ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [ "$c8" -gt "$c2" ]; then
@@ -205,6 +207,12 @@ else
     no "(B) step (3) re-reads per callee: M=2 clause_reads=${sr2:-?} levels=${sl2:-?}, M=8 clause_reads=${sr8:-?} levels=${sl8:-?}"
 fi
 
+if [ -n "$sp2" ] && [ "$sp2" -gt 0 ] && [ "$sp2" = "$sp8" ]; then
+    ok "(B) step (3)'s walks read each (file, name) plausible set once: reads=$sp8 at both M"
+else
+    no "(B) step (3)'s plausible reads grow with the callee count, or are never reached: M=2 reads=${sp2:-?}, M=8 reads=${sp8:-?}"
+fi
+
 # ── (C) EXACT ──────────────────────────────────────────────────────────────────────────────────────────────────
 want='[mem] guarded_walk calls=1272 walks=2 cones=2 meant=52'
 if [ "$line8" = "$want" ]; then
@@ -212,7 +220,7 @@ if [ "$line8" = "$want" ]; then
 else
     no "(C) GW counter: want '$want', got '${line8:-<no guarded_walk line>}'"
 fi
-want='[mem] owned_by asks=1164 reads=1'
+want='[mem] plausible owned_asks=1164 reads=1'
 if [ "$oline8" = "$want" ]; then
     ok "(C) GW counter is exact: $oline8"
 else

@@ -7394,20 +7394,21 @@ struct IdentityNarrower
     mutable HashMap<std::string, ankerl::unordered_dense::set<std::string_view>> ancestorMemo;
     mutable const ChaUpNames*                             ancestorMemoOf = nullptr;
     mutable HashMap<std::uint64_t, bool>                  visibleMemo;
-    //   ownedMemo:    (a name's class list, a file) -> plausibleClasses' answer, for ownedBy's out-of-line branch (lane PF2,
-    //                 OWNED-MEMO): that answer reads every class of the name (a visibility test per class), and the guarded
-    //                 walk's probe asked it for every (definition, class) pair it met on every call — 43.6M asks over 14.0M
-    //                 distinct pairs on llvm-project/clang. It depends only on the list and the definition's file, so it is
-    //                 kept per (file, the list's first class — a class is in one name's list only); the list's address is
-    //                 kept with it, and a different list recomputes. `all`: every class of the name (no copy kept).
+    //   plausibleMemo: (a name's class list, a file) -> plausibleClasses' answer (lane PF2, PLAUSIBLE-MEMO). That answer reads
+    //                 every class of the name (a visibility test per class), and class identity asked it again and again for
+    //                 facts no callee changes: ownedBy's out-of-line branch (43.6M asks over 14.0M distinct (definition, class)
+    //                 pairs on llvm-project/clang), the ancestor and subclass walks' base levels (the whole of a cold
+    //                 llvm-project profile once the guarded walk was kept). It depends only on the list and the file, so it is
+    //                 kept per (file, the list's first class — a class is in one name's list only); the list's address is kept
+    //                 with it and a different list recomputes. `all`: every class of the name (no copy kept).
     struct PlausibleAnswer
     {
         const rw::SmallVec<NodeId, 2>* named = nullptr;
         bool                           all   = false;
         std::vector<NodeId>            some;   // ascending, as the list is
     };
-    mutable HashMap<std::uint64_t, PlausibleAnswer>       ownedMemo;
-    mutable std::size_t                                   ownedAsks = 0, ownedReads = 0;   // RIPWIRE_STATS `[mem] owned_by`: out-of-line asks, and the answers read
+    mutable HashMap<std::uint64_t, PlausibleAnswer>       plausibleMemo;
+    mutable std::size_t                                   ownedAsks = 0, plausibleReads = 0;   // RIPWIRE_STATS `[mem] plausible`: ownedBy's out-of-line asks; plausibleOfName answers read
 
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
@@ -7835,26 +7836,33 @@ struct IdentityNarrower
     }
 
     // ownedBy for a definition no class span holds (defined out of line in a file with no class of its scope's name): is
-    // `cls` among the classes of that name the definition's file most plausibly means? Memoised per (file, name) (ownedMemo).
+    // `cls` among the classes of that name the definition's file most plausibly means? Kept per (file, name) (plausibleMemo).
     bool ownedOutOfLine( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>& sameNamed, const ClassIdentity& ids ) const
     {
         ++ownedAsks;
-        if( sameNamed.size() == 0 )
+        const std::span<const NodeId> plausibleHere = plausibleOfName( sameNamed, fileOf( def, ids ), ids );   // defined out of line in another file
+        return std::binary_search( plausibleHere.begin(), plausibleHere.end(), cls );
+    }
+
+    // plausibleClasses( named, fromFile ) for a name's class list (ClassIdentity::classesByName), kept (plausibleMemo): ascending,
+    // valid until the next call
+    std::span<const NodeId> plausibleOfName( const rw::SmallVec<NodeId, 2>& named, std::uint32_t fromFile, const ClassIdentity& ids ) const
+    {
+        if( named.size() == 0 )
         {
-            return false;   // plausibleClasses of no classes is none
+            return {};   // plausibleClasses of no classes is none
         }
-        const std::uint32_t defFile = fileOf( def, ids );
-        const auto [ memo, inserted ] = ownedMemo.try_emplace( hashutil::packPair( defFile, sameNamed.front() ) );
+        const auto [ memo, inserted ] = plausibleMemo.try_emplace( hashutil::packPair( fromFile, named.front() ) );
         PlausibleAnswer& answer = memo->second;
-        if( inserted || answer.named != &sameNamed )
+        if( inserted || answer.named != &named )
         {
-            ++ownedReads;
-            plausibleClasses( std::span<const NodeId>( sameNamed.data(), sameNamed.size() ), defFile, ids );   // defined out of line in another file
-            answer.named = &sameNamed;
-            answer.all   = plausible.size() == sameNamed.size();
+            ++plausibleReads;
+            plausibleClasses( std::span<const NodeId>( named.data(), named.size() ), fromFile, ids );
+            answer.named = &named;
+            answer.all   = plausible.size() == named.size();
             answer.some.assign( answer.all ? plausible.end() : plausible.begin(), plausible.end() );
         }
-        return answer.all ? std::binary_search( sameNamed.begin(), sameNamed.end(), cls ) : std::binary_search( answer.some.begin(), answer.some.end(), cls );
+        return answer.all ? std::span<const NodeId>( named.data(), named.size() ) : std::span<const NodeId>( answer.some );
     }
 
     // a fresh visited generation over the symbol ids (the stamp vector is sized once, never cleared)
@@ -7961,8 +7969,7 @@ struct IdentityNarrower
             {
                 continue;
             }
-            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
-            for( NodeId b : plausible )
+            for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
                 if( markSeen( b ) ) { classNext.push_back( b ); }
             }
@@ -8010,8 +8017,8 @@ struct IdentityNarrower
         if( inserted )
         {
             ++clauseReads;
-            plausibleClasses( std::span<const NodeId>( named.data(), named.size() ), fileOf( d, ids ), ids );
-            memo->second = std::ranges::find( plausible, c ) != plausible.end();
+            const std::span<const NodeId> plausibleHere = plausibleOfName( named, fileOf( d, ids ), ids );
+            memo->second = std::binary_search( plausibleHere.begin(), plausibleHere.end(), c );
         }
         return memo->second;
     }
@@ -8069,8 +8076,7 @@ struct IdentityNarrower
             {
                 continue;
             }
-            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
-            for( NodeId b : plausible )
+            for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
                 if( std::ranges::find( visited, b ) == visited.end() )
                 {
