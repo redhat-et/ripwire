@@ -8171,6 +8171,13 @@ struct Narrower
     mutable std::string                   coneOf;      // guardedConeOwns: the class whose guarded base closure is kept
     mutable std::vector<std::string_view> coneNames;   // its names (views into chaUp's stored strings and coneOf)
     mutable std::vector<MeantClasses>     coneMeant;
+    // RIPWIRE_STATS `[mem] guarded_walk` (test/guardedwalkcheck.sh): guardedBaseWalk calls, the full level expansions they
+    // ran, and meantBase evaluations — deterministic counts, never output
+    struct GuardedWalkStats
+    {
+        std::size_t calls = 0, walks = 0, meant = 0;
+    };
+    mutable GuardedWalkStats guardedWalkStats;
 
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, FlatRecvType>&            vt,
@@ -8794,6 +8801,7 @@ struct Narrower
     // empty id list is the by-name reading: one class of that name with nothing to judge it by, or no definition to judge from.
     std::optional<MeantClasses> meantBase( std::size_t parent, const std::string& base ) const
     {
+        ++guardedWalkStats.meant;
         const ClassIdentity& ids       = baseGuard->ids;
         const auto           named     = ids.classesByName.find( base );
         guardKey.assign( fieldWalk[ parent ] );
@@ -9080,9 +9088,77 @@ struct Narrower
                             [ & ]( const MeantClasses& meant ) { return declaresBodiless( fieldWalk[ at++ ], meant, callee ); } );
     }
 
+    // GUARDED-WALK-MEMO (lane PF2, 2026-11-21; test/guardedwalkcheck.sh). One level's expansion asks meantBase of every base
+    // name, and meantBase pairs every class of the deriving NAME with every class of the base NAME (drawnAndStandingBases),
+    // so where a name repeats across files a level costs (classes of the name)^2 — and guardedBaseWalk re-expanded the walk
+    // on every call: calls x K^2. A cold llvm-project map sat in that loop on one core for 10+ minutes. The levels are a
+    // function of the root name alone (chaUp, the implementors map and class identity are fixed once baseGuard is set; the
+    // probe never writes fieldWalk or walkMeant, and an expansion only writes the level it builds), so each root's levels are
+    // KEPT as they are first expanded: a call replays the kept levels into the same scratch and expands — and keeps — only a
+    // level no earlier call reached. fieldWalk / walkMeant therefore hold exactly what the per-call expansion left at every
+    // probe, so every answer is unchanged byte for byte, and no level is expanded twice. Only a walk over baseGuard->chaUp is
+    // kept; a walk over any other table expands per call, as before.
+    struct GuardedWalk
+    {
+        std::vector<std::string_view> names{ std::string_view{} };   // the kept levels' fieldWalk (views into chaUp's strings; [0], the root, is each call's own)
+        std::vector<MeantClasses>     meant{ MeantClasses{} };       // walkMeant, parallel
+        std::vector<std::uint32_t>    levelEnds{ 1 };                // fieldWalk.size() before the first expansion and after each kept one
+    };
+    mutable HashMap<std::string, GuardedWalk> guardedWalks;              // root name -> its kept levels
+    mutable const BaseWalkGuard*              guardedWalksFor = nullptr;   // the guard the kept levels were expanded under
+    mutable std::string                       guardedWalkKey;
+
+    // the kept levels of `typeName`'s walk over chaUp — nullptr for a table other than baseGuard->chaUp, whose walk is expanded
+    // per call (counted as a walk each time)
+    GuardedWalk* keptWalkFor( std::string_view typeName, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( &chaUp != &baseGuard->chaUp )
+        {
+            ++guardedWalkStats.walks;
+            return nullptr;
+        }
+        return &guardedWalkOf( typeName );
+    }
+    GuardedWalk& guardedWalkOf( std::string_view typeName ) const
+    {
+        if( guardedWalksFor != baseGuard )
+        {
+            guardedWalks.clear();
+            guardedWalksFor = baseGuard;
+        }
+        guardedWalkKey.assign( typeName );
+        const auto [ it, inserted ] = guardedWalks.try_emplace( guardedWalkKey );
+        guardedWalkStats.walks += inserted ? 1 : 0;
+        return it->second;   // nothing inserts into guardedWalks until the caller is done with it
+    }
+
+    // the `level`-th expansion of a walk whose scratch holds levels 0..level-1 (fieldWalk[ lvlBegin, lvlEnd ) is the last):
+    // replayed from `walk` when a call reached it before, else expanded here and kept (no `walk`: expanded, not kept)
+    void guardedLevel( GuardedWalk* walk, std::size_t level, std::size_t lvlBegin, std::size_t lvlEnd,
+                       const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( walk != nullptr && level < walk->levelEnds.size() )
+        {
+            const std::size_t to = walk->levelEnds[ level ];
+            fieldWalk.insert( fieldWalk.end(), walk->names.begin() + std::ptrdiff_t( lvlEnd ), walk->names.begin() + std::ptrdiff_t( to ) );
+            walkMeant.insert( walkMeant.end(), walk->meant.begin() + std::ptrdiff_t( lvlEnd ), walk->meant.begin() + std::ptrdiff_t( to ) );
+            return;
+        }
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/3: guarded base walk, a level no call reached before (GUARDED-WALK-MEMO)" );
+        expandGuardedLevel( lvlBegin, lvlEnd, chaUp );
+        if( walk != nullptr )
+        {
+            walk->names.insert( walk->names.end(), fieldWalk.begin() + std::ptrdiff_t( lvlEnd ), fieldWalk.end() );
+            walk->meant.insert( walk->meant.end(), walkMeant.begin() + std::ptrdiff_t( lvlEnd ), walkMeant.end() );
+            walk->levelEnds.push_back( std::uint32_t( fieldWalk.size() ) );
+        }
+    }
+
     const rw::SmallVec<NodeId, 2>* guardedBaseWalk( std::string_view typeName, const Reference& r, const HashMap<std::string, std::vector<std::string>>& chaUp,
                                                     bool skipSelf, bool unionOnMulti ) const
     {
+        ++guardedWalkStats.calls;
+        GuardedWalk* const memo = keptWalkFor( typeName, chaUp );
         fieldWalk.clear();
         fieldWalk.push_back( typeName );
         walkMeant.assign( 1, MeantClasses{} );
@@ -9090,11 +9166,11 @@ struct Narrower
         {
             return nullptr;   // the type itself declares the callee with no body: lookup ends here, and no base's body is the call's
         }
-        std::size_t lvlBegin = 0;
+        std::size_t lvlBegin = 0, level = 0;
         while( lvlBegin < fieldWalk.size() )
         {
             const std::size_t lvlEnd = fieldWalk.size();
-            expandGuardedLevel( lvlBegin, lvlEnd, chaUp );
+            guardedLevel( memo, ++level, lvlBegin, lvlEnd, chaUp );
             const GuardedProbe probe = probeGuardedLevel( lvlEnd, r.calleeName );
             if( probe.unbound )
             {

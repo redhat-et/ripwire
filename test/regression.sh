@@ -642,6 +642,7 @@ for _g in \
     grepscancheck \
     grepseamcheck \
     greptiercheck \
+    guardedwalkcheck \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
