@@ -50,13 +50,19 @@
 #   156; Base->RootK x 12: 12 x 12) and BE(8)'s pairs=16 are pinned (MEANT-MEMO computes each pairing once); walking every
 #   class of the name, and per expansion, examined 1,200 in GW and 144 in BE(8).
 #
+# The argument-type overload pick (argtypepick.h) reads each candidate's namespace chain with the brace lexer, and
+# EditCheckBraceLexer::chainAt lexes the WHOLE file per call: signatures x file size, the hottest frame of
+# llvm-project/clang's resolve loop once the walks were kept. SCOPE-INDEX lexes a file once and answers every offset.
+# AT(N): one file, class S with N overload pairs fK( T ) / fK( U ) and run( T x ) calling each: asks = 2N + 1 signatures
+# (run's own and both overloads of each fK), passes=1 (re-lexed per ask: passes = asks).
+#
 # SW(4, M): Shape (deriving from Root) declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
 #   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
 #   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
 #   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again). Its `[mem] plausible reads=`
 #   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
 #   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8) and BE(8) are
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8) and AT(8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -140,6 +146,20 @@ genbe(){
     printf 'struct Impl : Visitor\n{\n    void walk() { v(); }\n};\n' >"$dir/w.cpp"
 }
 
+# genat DIR N — the argument-type overload pick (see header): one file, a class S with N overload pairs fK( T ) / fK( U ) and a
+# method run( T x ) calling each once
+genat(){
+    local dir="$1" n="$2" k
+    mkdir -p "$dir"
+    {
+        printf 'namespace ns\n{\nstruct T { };\nstruct U { };\nstruct S\n{\n'
+        for k in $( seq 0 $(( n - 1 )) ); do printf '    void f%d( T a ) { }\n    void f%d( U a ) { }\n' "$k" "$k"; done
+        printf '    void run( T x )\n    {\n'
+        for k in $( seq 0 $(( n - 1 )) ); do printf '        f%d( x );\n' "$k"; done
+        printf '    }\n};\n}\n'
+    } >"$dir/s.cpp"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -152,6 +172,7 @@ stats(){
     ASKS="$( printf '%s' "$OLINE" | sed -n 's/.* owned_asks=\([0-9]*\).*/\1/p' )"
     READS="$( printf '%s' "$OLINE" | sed -n 's/.* reads=\([0-9]*\).*/\1/p' )"
     BLINE="$( grep -F '[mem] base_edges ' "$TMP/$name.err" )"
+    ALINE="$( grep -F '[mem] arg_type_chain ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
@@ -162,6 +183,8 @@ GW2="$TMP/gw2"; gen "$GW2" "$K" 2
 GW8="$TMP/gw8"; gen "$GW8" "$K" 8
 
 BE8="$TMP/be8"; genbe "$BE8" 8
+AT2="$TMP/at2"; genat "$AT2" 2
+AT8="$TMP/at8"; genat "$AT8" 8
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
@@ -169,6 +192,8 @@ stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$RE
 stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
 
 stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
+stats AT2 "$AT2"; atline2="$ALINE"
+stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
 stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE"
 
@@ -241,6 +266,12 @@ if [ "$berc" = 0 ] && [ "$beline8" = "$want" ]; then
 else
     no "(C) BE counter: want '$want', got '${beline8:-<no base_edges line>}' (rc=$berc)"
 fi
+want='[mem] arg_type_chain asks=17 passes=1'
+if [ "$atrc" = 0 ] && [ "$atline8" = "$want" ] && [ "$atline2" = '[mem] arg_type_chain asks=5 passes=1' ]; then
+    ok "(B)(C) AT: one lexer pass per file however many signatures ask: $atline2 at N=2, $atline8 at N=8"
+else
+    no "(B)(C) AT counter: want 'asks=5 passes=1' at N=2 and '$want' at N=8, got '${atline2:-<none>}' / '${atline8:-<none>}' (rc=$atrc)"
+fi
 want='[mem] subclass_walk clause_asks=64 clause_reads=8 levels=4'
 if [ "$sline8" = "$want" ]; then
     ok "(C) SW counter is exact: $sline8"
@@ -250,7 +281,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
