@@ -41,4 +41,4 @@ the line on, off, or armed far above the need. `--mcp` and `--lsp` do not arm it
 process and a server must survive a refused request; a build whose `operator new` is not replaced (a sanitizer
 or `RIPWIRE_ALLOC_COUNT` build) cannot arm it and says so when asked explicitly. What this line still cannot
 see — `malloc` called directly by tree-sitter, `mmap`, and small allocations between readings — stays covered
-by the guard's existing `memory_peak=` disclosure. Gate: `test/memceilingcheck.sh`.
+by the guard's existing `memory_peak=` disclosure. macOS uses the existing allocator hook; Linux, Windows and macOS with `RIPWIRE_LARGE_ALLOC=OFF` get `src/memceiling_new.cpp`, first proven by CI. Measured on llvm-project with the pre-fix resolver: `RIPWIRE_MEM_BUDGET_MB=9000` refused with rc 5 at a 5,689 MiB footprint before a 3,520 MiB request, inside the class-identity step that held the runaway, where the OS had killed the run before. Commits `fbd3b192d`, `ec810904f`. Gate: `test/memceilingcheck.sh`.

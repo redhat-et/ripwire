@@ -1,6 +1,6 @@
 ### Fixed — a `--for` budget only trims the answer; it no longer switches it to a different answer
 
-`--for --token-budget=N` used to choose a different answer as soon as any budget was given, even one far larger than the answer. In the 0.7.0 comparison rehearsal, all 21 questions whose unbudgeted answer was under 16,000 tokens came back smaller and different at `--token-budget=16000`. On koa-02 the answer went from 24,446 B to 10,834 B, although the full answer cost only 5,494 tokens. In the other direction, `--detail=3 --max-tokens=16000` returned 1.14× the unbudgeted size.
+`--for --token-budget=N` used to choose a different answer as soon as any budget was given, even one far larger than the answer. In a pre-release comparison run, all 21 questions whose unbudgeted answer was under 16,000 tokens came back smaller and different at `--token-budget=16000`. On koa-02 the answer went from 24,446 B to 10,834 B, although the full answer cost only 5,494 tokens. In the other direction, `--detail=3 --max-tokens=16000` returned 1.14× the unbudgeted size.
 
 The answer is now chosen as if no budget were given, and the budget is applied afterwards as a ceiling:
 

@@ -1,6 +1,6 @@
 ### Changed — a default `--lint` page shows the most important findings first, and `--page-bytes=0` is the whole answer on every paged verb
 
-A default `--lint` answer is a page of findings under the 24,000-character output ceiling, so the order decides what an agent sees first. It used to be file path order: on GA1 DEV's eslint tree (571 findings, 99 on page 1) the page opened with a `do-while` in `Makefile.js` and then ten rows from a vendored ponyfill under `docs/src/assets/js/`. Findings now sort most important first:
+A default `--lint` answer is a page of findings under the 24,000-character output ceiling, so the order decides what an agent sees first. It used to be file path order: on the eslint tree of the development question set (571 findings, 99 on page 1) the page opened with a `do-while` in `Makefile.js` and then ten rows from a vendored ponyfill under `docs/src/assets/js/`. Findings now sort most important first:
 
 1. files nobody in the repository authors go last — a tool, vendored or generated path, a minified file (`--skipped`'s `minified-suspect`), or a bundle (the same bytes-per-line evidence the ranking lenses already demote by);
 2. then rule severity from the lint catalog, `error` before `warn` before `info` (a user rule's own `sev=`);

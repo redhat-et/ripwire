@@ -24,7 +24,7 @@ This is **not** "single-digit": it is 11 on the registered population and 17 on 
 
 Refusals: an empty value (unchanged); **any value that is no tier of this binary, even beside a valid one** — the message names the value, the tiers the rest of the list did name, and `ripwire --legend-dict=core` with its real size, where it used to prescribe the whole dictionary; `--mcp`/`--listen`/`--lsp`; `--legend=full`. A valid pack passed on another schema's answer is honoured, never refused.
 
-An answer served inline under the handshake now says so on stderr, and which of the two reasons applies: `not-applicable` (the dictionary does not reduce that legend — every `--for` answer, 65 of 65) or `inline-kept` (the reduced answer would not be shorter). Stdout is unchanged in both.
+An answer served inline under the handshake now says so on stderr, and which of the two reasons applies: `not-applicable` (the dictionary does not reduce that legend — every `--for` answer, 65 of 65) or `inline-kept` (the reduced answer would not be shorter). Stdout is unchanged in both. The same `not-applicable` line now also goes to stderr for `--situ`, `--recall`, `--report`, `--mermaid`, `--html`, `--plan-lanes`, `--sarif` and the evaluation surfaces (`ripwire: --legend-have=: not-applicable — <surface> answers with no XML legend the legend dictionary reduces, so it is served whole; nothing was saved`), which said nothing before; a stale value is still refused first (commit `35b71f385`; `test/legendhavecheck.sh`).
 
 Also new: `--legend-dict=tiers` (every tier: name, `have=`, entries, bytes, census) and `--legend-dict=index` (every entry by what it defines). The MCP stdio session is unchanged and carries no `have=`.
 

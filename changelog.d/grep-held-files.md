@@ -1,3 +1,0 @@
-### Fixed — `--grep` names the files whose every hit its tier held back
-
-`--grep`'s default tier serves code and holds comment and string hits back, counted in `suppressed_comment=` / `suppressed_string=`. A file whose every hit was held back had no row, so the answer never named it: the count said hits were held back, not where. The root now adds `held_files=` (how many such files), `held=` (the first five paths, in the answer's file order) and `held_next=` (the same search with `--grep-in=any`, which serves every tier); the MCP `grep` twin carries `held_files` / `held` / `held_next`. Present only when some file was wholly held back; every other answer is byte-identical. Lane BX2 (BS1's fix 6, second half); `test/grepdegradedcheck.sh` [P3]–[P7].

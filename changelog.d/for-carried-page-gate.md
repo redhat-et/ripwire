@@ -1,7 +1,7 @@
 ### Added — a gate for bounding the carried `--for` page, and the reason it is not yet bounded
 
 A routed answer carries a `--for` page, and that page is where a first call goes over a client's character
-limit: 8 of 69 release first calls cross, against 1 of 234 elsewhere, and all 8 of them carry a page. When an
+limit: on the measured question sets, 8 of 69 first calls on one set cross, against 1 of 234 on the others, and all 8 of them carry a page. When an
 answer crosses, the client replaces it with a small envelope whose preview lands inside the legend, so the
 agent receives no answer rows at all and the answer's own completeness attributes go with them.
 

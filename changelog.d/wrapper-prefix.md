@@ -15,4 +15,4 @@ A body element (`--expand`, the `--for` body fold and auto bodies, `--pack-task`
 
 The edit verbs splice the span `--expand` prints, so they move with it. `--replace-symbol-body` replaces the wrapper too (a body replaced with the text it was served leaves the file byte-identical). **`--insert-before-symbol` on a decorated definition used to put the payload between the decorators and the function**, which silently re-attached them to the inserted code; it now lands above them.
 
-On the 89 GA1 DEV questions (page 1 of the default `--for`), 9 of the 114 served bodies carry a wrapper, all of them TypeScript `export`; the body rung goes from 18 to 21 with no cell lost, at +63 bytes over the 89 answers. Gate: `test/wrapperprefixcheck.sh`.
+On 89 development questions from 11 open-source repositories (page 1 of the default `--for`), 9 of the 114 served bodies carry a wrapper, all of them TypeScript `export`; the body rung goes from 18 to 21 with no cell lost, at +63 bytes over the 89 answers. Gate: `test/wrapperprefixcheck.sh`.

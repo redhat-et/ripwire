@@ -1,6 +1,6 @@
 ### Fixed — a Rust macro's matcher words are no longer read as calls at its invocation
 
-The re-read of a Rust macro invocation's arguments (RUST-MACRO-ARGS) parsed `wrap!( matcher_fn( 3 ), drop )` as a tuple and
+The re-read of a Rust macro invocation's arguments parsed `wrap!( matcher_fn( 3 ), drop )` as a tuple and
 reported `matcher_fn` as a call, so `--callers=matcher_fn` listed the invoking function, although the word is a literal token
 of `wrap`'s `macro_rules!` matcher (`( matcher_fn ( $x:expr ), $f:ident ) => …`) and nothing calls it. When the invoked macro is
 a `macro_rules!` the same file defines, a bare call whose name one of its matchers spells as a literal word before a `( … )`

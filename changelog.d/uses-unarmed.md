@@ -9,6 +9,6 @@ Four answers made a claim the index could not back:
 
 `test/usesunarmedcheck.sh` pins all four on the CLI and on MCP. Its positive controls are an armed C++ class, a Python class, and C, C++ and Python fields with real captures; these keep answering with no disclosure. Each negative arm counts its premise and fails on zero.
 
-Found by the Fable ideas verify pass (USES-UNARMED-DISCLOSE), the Fable answer audit (USES-FIELD-EXTERNAL) and the Opus audit verify (TMUX-STRUCT-WINDOW).
+Found by pre-release reviews and answer audits.
 
 The new `unindexed_roles=` compact legend term adds one entry to the session legend dictionary, which now reads `dictv=f7d122c82741a996 entries=1107` (docs/COMMANDS.md and the showcase capture are re-recorded).

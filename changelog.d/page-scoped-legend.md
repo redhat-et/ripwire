@@ -15,5 +15,4 @@ stays on page 1 when page 1 carries one of its elements or attributes, and also 
 attribute a page carries (the hops clause's `n=` is the only `n=` an element-form `<d n=>` meets; with the default row-line form the
 row-line clause spells it, so the hops clause can move). The MCP `for` answer is not paged by this path and is unchanged.
 
-MEASURED on the 89 GA1 DEV questions (default argv, page 1 and every followed page): see the lane readout for the figures.
 Gate: `test/pagelegendcheck.sh` (the rule per page on two page sizes, in both row forms, with mutation controls).

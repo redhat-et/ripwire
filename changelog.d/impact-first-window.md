@@ -14,7 +14,7 @@ Both changes only reorder rows. No row is dropped or added. Every count stays th
 slices of one order. CLI XML, `--json`, `--format=columnar` and the MCP `impact` twin all print the same order. The full
 legend and `--help` state the new order. `test/impactfirstwindowcheck.sh` is the gate.
 
-Measured on the spent dev sets (T5d, T5e, held-out, T5c), with the shared grader:
+Measured on four spent development question sets, one of them held out, with the shared grader:
 - **Routed** `--for` → `--impact`, 20 cells: complete on window 1 stays 18 of 20, with 0 flips either way.
 - **`--impact` asked directly** on the 62 blast-radius and change-risk cells: complete on window 1 stays 50 of 62, with 0 flips.
 - **Gold groups that only the symbol and importer rows satisfy:** 60 → 62 routed and 181 → 189 direct, and no cell lost any.

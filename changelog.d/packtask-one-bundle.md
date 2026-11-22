@@ -23,7 +23,7 @@ Completion is counted in files and the tail is the section that names files. Its
 before the cascade spends and handed back on top of whatever the sections above leave, so the tail still
 grows into their slack but can no longer be starved by it. Over 596 tasks on four sets, that moves the
 bundles that name every file the question needs from 329 to 420; LocBench alone goes from 219 to 224 of
-303. The budget did not change: PT1's finding was that this is a shape problem, and raising the budget
+303. The budget did not change: the finding above was that this is a shape problem, and raising the budget
 would have been the wrong fix.
 
 **`<bodies capped=>` now admits a body it cut.** The attribute read only "fewer bodies served than handed
@@ -45,5 +45,5 @@ bound runs.
 
 Gates: `test/packtailsharecheck.sh` (the tail's share is a floor: a 1,200-char task at the default budget still serves it, its bytes reach the floor the share implies, the share is read out of `src/packtask.h` so the gate and the cascade cannot drift apart, the row count is monotone in the budget, and a `--partition` slice reserves nothing — with an arm that asserts a pre-fix binary IS red on the same fixture), `test/packlocatecheck.sh` (the head's r=13..40 rows and the tail's files are named; the first 40
 rows equal `--for`'s; the tail cut carries `capped="1"` and `next=`; the answer stays under the declared
-ceiling) and `test/packkeybodycheck.sh` (exactly one body, KB1's choice, every dropped candidate a
+ceiling) and `test/packkeybodycheck.sh` (exactly one body, the key-body choice, every dropped candidate a
 pointer, the ledger's counts agree).

@@ -1,0 +1,13 @@
+### Changed — highlights of this release
+
+The changes a user is most likely to notice; each has its own entry below with the method and what it does NOT mean.
+
+<!-- README tables: speed, memory, question answering — filled at measurement -->
+
+- **Large trees finish.** On llvm-project a map used to grow until the OS killed it (one process reached 149.7 GB); the name-keyed walks now enter each name once and the cold map peaks at about 3.0 GB. A C++ base-class walk that kept a cold llvm-project map in a single-core loop for more than ten minutes now expands each root once, and the external-veto import tables went from about 2.7 s to 0.6 s there. Every answer is unchanged byte for byte.
+- **A memory ceiling, on by default.** The memory guard's limit (65 % of RAM or the cgroup limit, or `--max-memory`) is now also read at `operator new`, so a runaway allocation inside one step is refused with exit 5 instead of being killed by the OS. A run under the limit is byte-identical.
+- **Answers fit Claude Code's inline limit.** Bare `--lint`, `--expand` and the flagless map are held to a 24,000-character ceiling and continue with one pasteable `next=` call; on the 11 development repositories the largest map went 52,858 → 23,629 characters and the largest `--lint` 83,162 → 19,589, with no answer over 30,000. A routed `--for` answer is held to its page too, CLI and MCP.
+- **`--for` answers the question it is asked.** A question that names a symbol in backticks and asks who calls it, where it is used or what breaks is answered by `--callers`, `--uses` or `--impact`, says so in a `<route>` element, and continues itself with `--offset`. Page 1 also carries the body of the named symbol.
+- **An act line.** A `--for` answer names the ranges to read next in one element, `<act read="path:l-e,…"/>`, to be read in one turn of parallel ranged Reads. Batching those reads is a model estimate of a 7.6 % cut in tokens to the first edit, not yet measured in a live session.
+- **Fewer repeated legend bytes.** With `skills/install.sh --hook`, the legend-seen hook (it rewrites ripwire commands, and says so before installing) cuts about 19 % of total answer bytes from a session's second call on; `--for` rows are served as text lines, page 1 a median 7.6 % smaller (one model spent more output tokens reading them; see that entry).
+- **A locator subagent for Claude Code.** `skills/install.sh` installs `ripwire-locator` for Claude Code, which runs `--for` in its own context and returns at most 12 lines of edit ranges, so the main conversation does not carry the whole answer. No token saving has been measured yet.
