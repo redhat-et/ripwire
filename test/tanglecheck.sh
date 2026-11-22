@@ -193,7 +193,7 @@ if cmp -s "$Q" "$Q.2"; then ok "(d) two runs byte-identical"; else no "(d) two r
 P="$TMP/pin"; mkdir -p "$P/src"; "${G[@]}" -C "$P" init -q
 g1(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import tanglefixtures as t; open(sys.argv[2], "w").write("#include <vector>\n" + t.overbar("grow1", int(sys.argv[3]), mult=17))' "$ROOT/test/lib" "$P/src/grow1.cpp" "$1"; }
 g1 40; "${G[@]}" -C "$P" add -A && "${G[@]}" -C "$P" commit -qm v1; g1 42
-pr="$( "$BIN" "$P" --quality-delta --no-cache 2>/dev/null | grep -oE '<r kind="tangle"[^>]*sym="grow1"[^>]*gating="1"[^>]*' )"
+pr="$( "$BIN" "$P" --quality-delta --no-cache 2>/dev/null | grep -oE '<r kind="tangle"[^>]*sym="grow1"[^>]*gating="1"[^>]*' )"   # status: the delta exits 2 on this gating row; an empty $pr FAILs the (p1) premise below
 pw="$( attr "$pr" was )"; pn="$( attr "$pr" now )"
 "$BIN" "$P" --quality-baseline --no-cache >/dev/null 2>"$TMP/pin.err"; prc=$?
 first="$( tr '\n' ' ' <"$TMP/pin.err" | grep -oE 'First: [^)]*\)' )"
