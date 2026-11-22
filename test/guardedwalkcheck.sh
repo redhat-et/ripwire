@@ -37,7 +37,7 @@
 #       per class, CONE-MEMO — the one-entry keep it replaced re-expanded a cone at every Impl/Peer switch, 24 times),
 #       meant_asks=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the
 #       same two levels under kConeNameCap) — of which meant=14 are computed: MEANT-MEMO keeps meantBase per (parent name,
-#       parent's reading, base), and the four expansions meet Impl->Base, Peer->Base and Base->RootK x 12 only; asks=1164 (one per bK() call: the first class it asks about owns it), reads=1 (the
+#       parent's reading, base), and the four expansions meet Impl->Base, Peer->Base and Base->RootK x 12 only; asks=24 (one per Impl-root bK() callee and Peer-root bK, the answers kept — GUARDED-ANSWER-MEMO; per call it was 1164: the first class it asks about owns it), reads=1 (the
 #       one file all 12 out-of-line definitions sit in, against the one name `Base`: OWNED-MEMO keeps plausibleClasses per
 #       (file, name); kept per (definition, class) it was 12). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
 # meantBase's pairing (drawnAndStandingBases) asked, for every class of the deriving name, whether the map drew an edge
@@ -84,6 +84,11 @@
 #   calling helper() M times; and a.js, where wrap() and wrap2() nest `function helper()`, wrap() and deep() (in wrap2) call
 #   it — a local HOLDS those three calls, so they still walk — and use() calls the top-level helper() twice.
 #   `[mem] reach_by_name asks=M+5 kept=M+2`: 7/4 at M=2, 13/10 at M=8 (the per-call walk keeps none: kept=0).
+# Each call still replayed its root's kept levels and probed them (ownedBy per definition per meant class) though the answer
+# reads only the kept levels, the callee and two flags. GUARDED-ANSWER-MEMO (lane PF3) keeps it per (root, callee, flags) with
+# the scratch the walk left (fieldWalk / walkMeant to the level it stopped at, walkUnion), restored on a replay.
+# `[mem] guarded_answer asks=C kept=K`: GW(12, M) has 26 (root, callee) pairs (Impl and Peer x b0..b11, r), so asks - kept = 26
+# at M=2 (336/310) and M=8 (1272/1246), and the probe's owned_asks fall to 24 at both M (1164 at M=8 per call).
 # Step (3) and the inherited-body walk ask canonByName for "Class::callee" (and "Scope::Class::callee") at every class they
 # visit — every real subclass, for every (class, callee) — building the key text and hashing it into the whole definitions
 # table each time. CANON-SPLIT (lane PF3) splits the table's keys once at their last "::" into (scope, name) ids, keeps a
@@ -264,6 +269,7 @@ stats(){
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
     MLINE="$( grep -F '[mem] recv_method ' "$TMP/$name.err" )"
+    GALINE="$( grep -F '[mem] guarded_answer ' "$TMP/$name.err" )"
     NLINE="$( grep -F '[mem] reach_by_name ' "$TMP/$name.err" )"
     CSLINE="$( grep -F '[mem] canon_split ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
@@ -287,8 +293,8 @@ NS4="$TMP/ns4"; genns "$NS4" 4
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
-stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS"
-stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
+stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS" galine2="$GALINE"
+stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE" galine8="$GALINE"
 
 stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
 stats RC2 "$RC2"; rcline2="$RLINE"
@@ -328,10 +334,17 @@ else
     no "(B) the walk's cost grows with the call count: M=2 walks=${w2:-?} meant=${m2:-?}, M=8 walks=${w8:-?} meant=${m8:-?}"
 fi
 
-if [ -n "$a2" ] && [ -n "$r2" ] && [ "$a8" -gt "$a2" ] && [ "$r2" -gt 0 ] && [ "$r2" = "$r8" ]; then
-    ok "(B) an out-of-line owner is read once per (definition, class): reads=$r8 at both M, asks $a2 -> $a8"
+# GUARDED-ANSWER-MEMO (lane PF3) keeps each (root, callee) answer, so the probe — and its ownedBy asks — runs once per pair:
+# asks no longer grow with M (they did, 1164 at M=8, before it; the arm then read "asks grow, reads stay")
+if [ -n "$a2" ] && [ -n "$r2" ] && [ "$a2" -gt 0 ] && [ "$a2" = "$a8" ] && [ "$r2" -gt 0 ] && [ "$r2" = "$r8" ]; then
+    ok "(B) an out-of-line owner is read once per (file, name), and asked once per (root, callee): reads=$r8 asks=$a8 at both M"
 else
-    no "(B) out-of-line owner reads grow with the call count, or are never reached: M=2 asks=${a2:-?} reads=${r2:-?}, M=8 asks=${a8:-?} reads=${r8:-?}"
+    no "(B) out-of-line owner asks or reads grow with the call count, or are never reached: M=2 asks=${a2:-?} reads=${r2:-?}, M=8 asks=${a8:-?} reads=${r8:-?}"
+fi
+if [ "$galine2" = '[mem] guarded_answer asks=336 kept=310' ] && [ "$galine8" = '[mem] guarded_answer asks=1272 kept=1246' ]; then
+    ok "(B)(C) GW: the guarded walk answers each (root, callee) once, every later call replays it (26 walked at both M): $galine2 / $galine8"
+else
+    no "(B)(C) GW guarded_answer: want 'asks=336 kept=310' at M=2 and 'asks=1272 kept=1246' at M=8, got '${galine2:-<none>}' / '${galine8:-<none>}'"
 fi
 
 if [ -n "$sr2" ] && [ "$sr2" -gt 0 ] && [ "$sr2" = "$sr8" ] && [ -n "$sl2" ] && [ "$sl2" -gt 0 ] && [ "$sl2" = "$sl8" ]; then
@@ -353,7 +366,7 @@ if [ "$line8" = "$want" ]; then
 else
     no "(C) GW counter: want '$want', got '${line8:-<no guarded_walk line>}'"
 fi
-want='[mem] plausible owned_asks=1164 reads=1'
+want='[mem] plausible owned_asks=24 reads=1'
 if [ "$oline8" = "$want" ]; then
     ok "(C) GW counter is exact: $oline8"
 else

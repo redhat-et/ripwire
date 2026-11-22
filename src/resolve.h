@@ -8461,6 +8461,7 @@ struct Narrower
     struct GuardedWalkStats
     {
         std::size_t calls = 0, walks = 0, cones = 0, meant = 0;
+        std::size_t answered = 0;   // GUARDED-ANSWER-MEMO: calls replayed from a kept answer (RIPWIRE_STATS `[mem] guarded_answer`)
     };
     mutable GuardedWalkStats guardedWalkStats;
 
@@ -9512,12 +9513,32 @@ struct Narrower
     // level no earlier call reached. fieldWalk / walkMeant therefore hold exactly what the per-call expansion left at every
     // probe, so every answer is unchanged byte for byte, and no level is expanded twice. Only a walk over baseGuard->chaUp is
     // kept; a walk over any other table expands per call, as before.
+    //
+    // GUARDED-ANSWER-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh GW). With the levels kept, each call still replayed
+    // them and probed every level it reached (probeGuardedLevel: every definition of the callee on a level against every
+    // class the walk means there, ownedBy) and the bodiless-declaration tests — per CALL, while the answer reads only the
+    // root's kept levels (fixed), the callee and the two flags: 746,173 calls over 32,084 roots on llvm-project, ~7% of its
+    // resolve loop at 8f06b3398. So the answer is kept on the root's walk per ( callee, skipSelf, unionOnMulti ): what it
+    // returned (nullptr, a canonByName list, or the level union) and the scratch it left — fieldWalk / walkMeant up to the
+    // level it stopped at (the kept levels themselves) and walkUnion as the last probe left it — which a replay restores, so
+    // a caller sees exactly what the walk would have left.
+    struct GuardedAnswer
+    {
+        enum class Kind : std::uint8_t { Null, Defs, Union };
+        Kind                           kind    = Kind::Null;
+        const rw::SmallVec<NodeId, 2>* defs    = nullptr;   // Kind::Defs: canonByName's list
+        std::uint32_t                  walkEnd = 1;         // fieldWalk.size() at the return
+        bool                           probed  = false;     // a probe ran (walkUnion is its result); false: walkUnion untouched
+        rw::SmallVec<NodeId, 2>        unionLeft;           // walkUnion as the last probe left it
+    };
     struct GuardedWalk
     {
         std::vector<std::string_view> names{ std::string_view{} };   // the kept levels' fieldWalk (views into chaUp's strings; [0], the root, is each call's own)
         std::vector<MeantClasses>     meant{ MeantClasses{} };       // walkMeant, parallel
         std::vector<std::uint32_t>    levelEnds{ 1 };                // fieldWalk.size() before the first expansion and after each kept one
+        HashMap<std::string, GuardedAnswer> answers;                 // GUARDED-ANSWER-MEMO: "<s><u>callee" -> the call's answer
     };
+    mutable std::string guardedAnswerKey;
     mutable HashMap<std::string, GuardedWalk> guardedWalks;              // root name -> its kept levels
     mutable const BaseWalkGuard*              guardedWalksFor = nullptr;   // the guard the kept levels were expanded under
     mutable std::string                       guardedWalkKey;
@@ -9573,10 +9594,58 @@ struct Narrower
     {
         ++guardedWalkStats.calls;
         GuardedWalk* const memo = keptWalkFor( typeName, chaUp );
+        if( memo == nullptr )
+        {
+            return guardedBaseWalked( typeName, r.calleeName, chaUp, skipSelf, unionOnMulti, nullptr );
+        }
+        guardedAnswerKey.assign( 1, skipSelf ? 's' : '-' ).append( 1, unionOnMulti ? 'u' : '-' ).append( r.calleeName );
+        if( const auto kept = memo->answers.find( guardedAnswerKey ); kept != memo->answers.end() )
+        {
+            ++guardedWalkStats.answered;
+            return replayGuardedAnswer( kept->second, *memo, typeName );
+        }
+        const rw::SmallVec<NodeId, 2>* found = guardedBaseWalked( typeName, r.calleeName, chaUp, skipSelf, unionOnMulti, memo );
+        GuardedAnswer answer;
+        answer.kind    = found == nullptr ? GuardedAnswer::Kind::Null : found == &walkUnion ? GuardedAnswer::Kind::Union : GuardedAnswer::Kind::Defs;
+        answer.defs    = answer.kind == GuardedAnswer::Kind::Defs ? found : nullptr;
+        answer.walkEnd = std::uint32_t( fieldWalk.size() );
+        answer.probed  = guardedProbed;
+        if( guardedProbed )
+        {
+            answer.unionLeft = walkUnion;
+        }
+        memo->answers.emplace( guardedAnswerKey, std::move( answer ) );
+        return found;
+    }
+    // a kept answer's return and the scratch the walk left: fieldWalk / walkMeant through the level it stopped at, walkUnion
+    const rw::SmallVec<NodeId, 2>* replayGuardedAnswer( const GuardedAnswer& answer, const GuardedWalk& memo, std::string_view typeName ) const
+    {
+        ENSURES( answer.walkEnd <= memo.names.size() && answer.walkEnd <= memo.meant.size(), "a kept answer stops inside its root's kept levels" );
+        fieldWalk.assign( memo.names.begin(), memo.names.begin() + std::ptrdiff_t( answer.walkEnd ) );
+        fieldWalk[ 0 ] = typeName;
+        walkMeant.assign( memo.meant.begin(), memo.meant.begin() + std::ptrdiff_t( answer.walkEnd ) );
+        if( answer.probed )
+        {
+            walkUnion = answer.unionLeft;
+        }
+        switch( answer.kind )
+        {
+            case GuardedAnswer::Kind::Defs:  return answer.defs;
+            case GuardedAnswer::Kind::Union: return &walkUnion;
+            case GuardedAnswer::Kind::Null:  break;
+        }
+        return nullptr;
+    }
+    mutable bool guardedProbed = false;   // guardedBaseWalked: did a level probe run (and so set walkUnion)
+    // the guarded walk itself (unkept answer); `memo`: the root's kept levels, or null (a walk over another table)
+    const rw::SmallVec<NodeId, 2>* guardedBaseWalked( std::string_view typeName, std::string_view callee, const HashMap<std::string, std::vector<std::string>>& chaUp,
+                                                      bool skipSelf, bool unionOnMulti, GuardedWalk* const memo ) const
+    {
+        guardedProbed = false;
         fieldWalk.clear();
         fieldWalk.push_back( typeName );
         walkMeant.assign( 1, MeantClasses{} );
-        if( !skipSelf && declaresBodiless( 0, r.calleeName ) )
+        if( !skipSelf && declaresBodiless( 0, callee ) )
         {
             return nullptr;   // the type itself declares the callee with no body: lookup ends here, and no base's body is the call's
         }
@@ -9585,7 +9654,8 @@ struct Narrower
         {
             const std::size_t lvlEnd = fieldWalk.size();
             guardedLevel( memo, ++level, lvlBegin, lvlEnd, chaUp );
-            const GuardedProbe probe = probeGuardedLevel( lvlEnd, r.calleeName );
+            const GuardedProbe probe = probeGuardedLevel( lvlEnd, callee );
+            guardedProbed            = true;
             if( probe.unbound )
             {
                 return nullptr;   // the base that defines it is one of two same-named classes and nothing says which
@@ -9594,7 +9664,7 @@ struct Narrower
             {
                 return unionOnMulti ? &walkUnion : nullptr;
             }
-            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, r.calleeName ) )
+            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, callee ) )
             {
                 return probe.found;   // the hit — or nullptr: a base declares it with no body (a pure virtual), and the nearest declaration wins
             }
