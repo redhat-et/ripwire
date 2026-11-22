@@ -97,6 +97,7 @@ kMaxPlanScout	OUTPUT
 kMaxProbeCommits	INDEXING
 kMaxQualifierHops	INDEXING
 kMaxQueryNesting	BOUNDARY
+kMaxReadWholeBytes	INDEXING
 kMaxRefs	INDEXING
 kMaxRenameProbeFiles	INDEXING
 kMaxSample	INDEXING

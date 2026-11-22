@@ -67,6 +67,9 @@ namespace darkflags
 // 100 MB, and the crawl's own default ceiling (--max-file-size, 4 MB) drops a file long before this one does. A file
 // either ceiling drops is counted in oversize= on the root (#699), so the counts beside it read as floors.
 constexpr std::size_t kMaxFlagFileBytes = 67108864;   // 64 MiB read cap; a file past it counts in oversize= (#699)
+// Every OTHER readWhole caller (--doc-drift, subject anchors, lint, layout, field uses, ...) keeps the 4 MiB read cap its
+// legend names ("unreadable or over 4 MiB"): #699 raised the --flags cap only, so computeFlags passes kMaxFlagFileBytes.
+constexpr std::size_t kMaxReadWholeBytes = 4194304;   // 4 MiB read cap for every verb but --flags; a file past it is disclosed unread
 constexpr std::size_t kMaxSitesShown    = 8;          // <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail
 constexpr std::size_t kMaxEnvNameLen    = 128;        // longest plausible environment-variable name
 
@@ -2581,14 +2584,16 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
 
 // ── tree walk + resolution ───────────────────────────────────────────────────────────────────────────────
 
-// Why readWhole returned nothing: the file could not be opened or read to its end, or it grew past kMaxFlagFileBytes.
+// Why readWhole returned nothing: the file could not be opened or read to its end, or it grew past its read cap.
 enum class ReadWholeFail : std::uint8_t { None, Unreadable, TooLarge };
 
-// The whole file, or nullopt when it cannot be opened, cannot be read to its end, or grows past kMaxFlagFileBytes
-// (`why`, when given, says which). A read error part-way through is a failure, never a shorter file: fread's short
-// count alone cannot tell an error from the end, so the stream's error flag decides (#641 merge review — the prefix
-// used to be harvested as if it were the whole file). An empty file is an engaged empty string.
-inline std::optional<std::string> readWhole( const std::string& path, ReadWholeFail* why = nullptr )
+// The whole file, or nullopt when it cannot be opened, cannot be read to its end, or grows past maxBytes
+// (kMaxReadWholeBytes unless the caller names its own cap; `why`, when given, says which). A read error part-way
+// through is a failure, never a shorter file: fread's short count alone cannot tell an error from the end, so the
+// stream's error flag decides (#641 merge review — the prefix used to be harvested as if it were the whole file).
+// An empty file is an engaged empty string.
+inline std::optional<std::string> readWhole( const std::string& path, ReadWholeFail* why = nullptr,
+                                             std::size_t maxBytes = kMaxReadWholeBytes )
 {
     const auto fail = [ & ]( ReadWholeFail reason ) -> std::optional<std::string>
     {
@@ -2609,7 +2614,7 @@ inline std::optional<std::string> readWhole( const std::string& path, ReadWholeF
     {
         n = std::fread( buf, 1, sizeof( buf ), fp );
         out.append( buf, n );
-        isTooLarge = out.size() > kMaxFlagFileBytes;
+        isTooLarge = out.size() > maxBytes;
     }
     const bool isReadError = std::ferror( fp ) != 0;
     std::fclose( fp );
@@ -3020,7 +3025,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     const auto scan = [ & ]( const std::string& full, bool isCMake )
     {
         ReadWholeFail                    why   = ReadWholeFail::None;
-        const std::optional<std::string> bytes = readWhole( full, &why );
+        const std::optional<std::string> bytes = readWhole( full, &why, kMaxFlagFileBytes );
         if( !bytes )
         {
             discloseUnread( why, unreadable, oversize );
