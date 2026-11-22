@@ -16,14 +16,14 @@
 #   (F)  THE A/B HANDLE: on a WHOLE answer (--page-bytes=0, or one page) RIPWIRE_NO_ACTLINE=1 is the answer minus exactly three things
 #        — the element, the clause, and the est_tokens= rise — and est_tokens= rose by the added bytes at 2.5 B/token as a difference
 #        of two round-to-nearest prices: floor..ceil of bytes/2.5 (the document is never under-read by more than the half token
-#        rounding allows; on the CLI the rise is bounded above too); with BASE_BIN= given, the knob-off answer is BASE_BIN's default answer byte for byte. (A paged page 1 is checked
+#        rounding allows, nor over-read past it), on the CLI and on MCP `for` alike; with BASE_BIN= given, the knob-off answer is BASE_BIN's default answer byte for byte. (A paged page 1 is checked
 #        by (A)-(E) only: the line is a block of the row stream, so it can move a page's cut by its own bytes.)
 #   (G)  THE CONTRACTS IT KEEPS (BR1b): an explicit --token-budget the answer fits returns the unbudgeted answer byte for byte, line
 #        included (TOKEN-BUDGET-MONOTONE); --legend=first carries the same read= with its clause in the leading legend and is a byte
 #        permutation of the answer-first whole answer; the fold-off twin (RIPWIRE_NO_BODY_FOLD=1) carries the same read=; page 2
 #        carries no line when page 1 holds all of <sigs>; --json is byte-identical with and without the knob
-#   (M)  MCP PARITY: MCP `for` follows the same rule on its own bundle (oracle against its knob-off twin), carries the line on >= 2
-#        tasks, and not under budget_tokens; its clause joins the bundle's LEADING legend run (MCP `for` is legend-first)
+#   (M)  MCP PARITY: MCP `for` follows the same rule on its own bundle (oracle against its knob-off twin) — (F)'s est_tokens= rise
+#        two-sided as on the CLI — carries the line on >= 2 tasks, and not under budget_tokens; its clause joins the bundle's LEADING legend run (MCP `for` is legend-first)
 #   (S)  --legend-seen=FILE holding the clause's dictionary line: the act line stays and the clause is left out (a dictionary entry)
 #   (V)  --version discloses act=on, and act=off under RIPWIRE_NO_ACTLINE=1
 #   (H)  determinism (two runs byte-identical), xmllint clean, no newline outside CDATA (G4), on every answer
@@ -169,7 +169,7 @@ def placed(don, s):
         and kids[i - 3][0] == b"sigs"
 
 
-def check(on, off, label, exact=True):
+def check(on, off, label):
     """the (A)-(F) verdicts on one (answer, knob-off twin) pair: a list of (ok, msg)"""
     out = []
     don, doff = decode(on), decode(off)
@@ -213,14 +213,13 @@ def check(on, off, label, exact=True):
         # bytes b = the added bytes plus the attribute's own digit growth, at 2.5 B/token, it is floor(b/2.5) or ceil(b/2.5) — never
         # always the ceiling. The old bound (rise*2.5 >= added) demanded the ceiling and failed a correct price whenever the old
         # price's fraction fell low (MEASURED on 565645db5: 4 of 10 GA1 DEV whole answers, and src.whole on an integration tree).
-        # Integer arithmetic: floor = 2b//5, ceil = -(-2b//5). `exact` (every CLI arm) also bounds it from above, which the old bound
-        # never did; MCP `for` re-prices without the render's ledger (foractline.h repriceAdded's known gap) and is bounded below only,
-        # its excess printed.
+        # Integer arithmetic: floor = 2b//5, ceil = -(-2b//5). Bounded from above too, which the old bound never did, on every arm:
+        # BR1D made MCP `for` two-sided as well — it had re-priced without a ledger and charged the blocks spliced after its price
+        # along with the line (MEASURED on c58dec374: mcp.pagerank rose 490 for 264 B, ceiling 106).
         b = added + len(e_on.group(1)) - len(e_off.group(1))
         lo, hi = 2 * b // 5, -(-2 * b // 5)
-        ok = lo <= rise and (rise <= hi or not exact) and (added > 0) == (rise > 0)
-        out.append((ok, "(F) %s: est_tokens= rose %d for %d B priced, the round-to-nearest difference is %d..%d%s" % (
-            label, rise, b, lo, hi, "" if exact else " (lower bound only: %+d over the ceiling)" % (rise - hi))))
+        ok = lo <= rise <= hi and (added > 0) == (rise > 0)
+        out.append((ok, "(F) %s: est_tokens= rose %d for %d B priced, the round-to-nearest difference is %d..%d" % (label, rise, b, lo, hi)))
     out.append((strip == doff, "(F) %s: knob off == the answer minus the element, the clause and the est_tokens= rise" % label))
     return out, want, why
 
@@ -287,7 +286,7 @@ mres = 0
 for label, root, task in (("mcp.pagerank", SRC, "rank symbols by pagerank and serialize the map"), ("mcp.routing", SRC, "edit routing ranged read wrap hook brief"),
                           ("mcp.md", MD, "frobnicate the widget cache guide")):
     on, off = mcp(root, {"task": task}), mcp(root, {"task": task}, off=True)
-    res, want, why = check(on, off, label, exact=False)
+    res, want, why = check(on, off, label)
     mres +=want is not None and act_of(decode(on)) != []
     for okay, msg in res: say(okay, "(M) " + msg)
     say(wellformed(on), "(H) %s: xmllint clean, no newline outside CDATA" % label)
