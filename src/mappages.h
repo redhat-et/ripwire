@@ -11,7 +11,8 @@
 // share a page, which on a big tree is <inv> — that child's rows (<ls>), the container's open tag re-sent around the part each
 // page holds. A comment travels with the element after it. A unit larger than the page is served whole on a page of its own
 // rather than split mid-element. Page 1 keeps the header comments (the legend) in front of the root; a continuation page re-sends
-// none of them, only the root and one comment defining the page attributes.
+// none of them, only the root and one comment defining the page attributes — and then the compact legend layer, which runs after
+// the cut, writes each page the legend of the attributes it carries, so every page reserves room for one.
 //
 // THE DISCLOSURE, on the root: page="K" pages="N" withheld_bytes="W" (the whole map's bytes this page does not carry) has_more="0|1", next= the
 // call that serves page K+1 (--page-bytes=P:K+1 plus the crawl-scope flags, so it maps the same corpus), and est_tokens=
@@ -274,7 +275,10 @@ inline PageResult pageMap( std::string& doc, std::size_t pageBytes, std::size_t 
     const std::size_t rootOpen  = d.rootOpenEnd - d.rootOpenBegin;
     const std::size_t fixedRest = kMapPageLegend.size() + rootOpen + kAttrReserve + 4;
     const std::size_t legendCredit = doc.size() > deliveredBytes ? std::min( doc.size() - deliveredBytes, d.rootOpenBegin ) : 0;
-    const auto        ranges    = detail::pageRanges( d, pageBytes, d.rootOpenBegin - legendCredit + fixedRest, fixedRest );
+    // The compact layer writes a legend for the attributes EACH page carries, continuation pages included (MEASURED: 1,559 B on
+    // nushell's page 2 of 3), so every page reserves the delivered legend of the whole map, which defines a superset.
+    const std::size_t deliveredLegend = d.rootOpenBegin - legendCredit;
+    const auto        ranges    = detail::pageRanges( d, pageBytes, deliveredLegend + fixedRest, deliveredLegend + fixedRest );
     if( page == 0 || page > ranges.size() ) { return { Outcome::PastLast, ranges.size() }; }
     if( ranges.size() == 1 ) { return { Outcome::Whole, 1 }; }
 

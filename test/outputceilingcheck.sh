@@ -211,6 +211,24 @@ mut = joined.replace("<ls ", "<!-- -->", 1) if "<ls " in joined else joined[:-10
 say(mut != map_content(whole_map), "(M6) [M] mutation: the rebuild check FAILS when one row is dropped")
 rc, again, _ = run(BIN, WIDE, [])
 say(again == mpages[0], "(M7) [C] determinism: the first map page is byte-identical across two runs")
+# (M10) every page counts the legend the compact layer writes it AFTER the cut — continuation pages included. At 24,000 B the
+# fixture's pages have slack; at 6,000 B a page filled to the size went over by that legend (6,155 B, found on WP4 nushell's
+# page 2 at 25,412 B before the fix).
+small_pages, args = [], ["--page-bytes=6000"]
+for _ in range(40):
+    rc, out, _ = run(BIN, WIDE, args)
+    small_pages.append(out)
+    nxt = root_attr(out, "r", "page_next") or (root_attr(out, "r", "next") if root_attr(out, "r", "has_more") == "1" else None)
+    if rc != 0 or not nxt:
+        break
+    args = shlex.split(nxt)
+sj = "".join(map_content(p) for p in small_pages)
+for tag in set(re.findall(r"<\w+\b[^>]*>", sj)):
+    if sj.count(tag) > whole_content.count(tag):
+        sj = sj.replace("</%s>%s" % (re.match(r"<(\w+)", tag).group(1), tag), "")
+say(len(small_pages) > 3 and all(len(p.encode()) <= 6000 for p in small_pages) and sj == whole_content,
+    "(M10) [P] at --page-bytes=6000 every page, its compact legend included, is <= 6,000 B (%d pages, max %d) and they rebuild the map"
+    % (len(small_pages), max(len(p.encode()) for p in small_pages)))
 rc, _, err = run(BIN, WIDE, ["--page-bytes=24000:99"])
 say(rc != 0 and "page" in err, "(M8) [C] a page past the last refuses (exit %d)" % rc)
 rc, _, err = run(BIN, BIG, ["--hotspots", "--page-bytes=24000"])
