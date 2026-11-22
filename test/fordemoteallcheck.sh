@@ -63,7 +63,14 @@ python3 - "$TMP/t/src" <<'PY' || { echo "fixture generator failed"; exit 2; }
 import os, sys
 d = sys.argv[1]; os.makedirs( d )
 w = lambda p, s: open( os.path.join( d, p ), "w" ).write( s )
-w( "cfg.h", "struct WidgetConfigHdr {\n  int parse_widget_config(int x);\n  int check_widget_config(int x);\n};\n" )
+# (d) re-pinned (LP1, rule 4): the prototypes carry a short doc comment. Undocumented, they scored on their names alone and sat
+# at r9/r10 by length normalisation — once --for scores the file basename (lexical.h kForBasenameFieldW) the extra basename tokens
+# moved them to r13/r14, past rank 10, where SIBLING-DEMOTE (same-file WidgetConfigHdr above) claims them first and no decl-twin
+# pointer is left. With this comment they rank inside the top 10 with the field on AND off, and every arm holds on both binaries.
+# Measured and NOT taken: the definitions' own wording ("Parse the widget config value.") lifts the prototype to r1, where the
+# MCP budget_tokens=1300 answer keeps it a row while the CLI --token-budget=1300 answer points it (xb, on the pre-LP1 binary
+# too) — a CLI/MCP decl-twin disagreement at the head row, reported by LP1 and not pinned here.
+w( "cfg.h", "struct WidgetConfigHdr {\n  // Widget config field parser.\n  int parse_widget_config(int x);\n  // Widget config field checker.\n  int check_widget_config(int x);\n};\n" )
 s = '''#include "cfg.h"
 // Parse the widget config value.
 int WidgetConfigHdr::parse_widget_config(int x) {

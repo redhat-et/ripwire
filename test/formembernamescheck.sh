@@ -56,10 +56,12 @@ export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_MEMBER_NAMES RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP
-# The fixtures' owners sit in files whose BASENAMES carry the question's words (compiler.js, scheduler.py, …), so with the code
-# lens's default basename field (lexical.h kForBasenameFieldW, LP1) every member ranks as a row and the mem= arms go vacuous
-# (A1/A4/C1/C2/E1/G1/L1 report "every member is shown as a row"). This gate pins mem= mechanics, not ranking: field off.
-export RIPWIRE_BASENAME_W=0
+# LP1 re-pin (rule 4): three fixture files were renamed so their BASENAMES carry none of their question's words — compiler.js ->
+# tpl_emit.js ("template compiler"), ledger.py -> acct.py ("ledger book ... entries"), book.rs / driver.rs -> model.rs / ops.rs
+# ("book driver"). The arms need owners whose members are NOT shown as rows; that held only while a file's name was no ranking
+# signal. Once --for scores the basename (lexical.h kForBasenameFieldW) every member of compiler.js / ledger.py / book.rs scored
+# on it and ranked as a row, and A1/A4/C1/C2/E1/G1/L1 went vacuous ("every member is shown as a row"). The gate runs the
+# DEFAULT ranking (no RIPWIRE_BASENAME_W pin); the member-name rules and every assertion are unchanged.
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "formembernamescheck: BIN=$BIN"
@@ -234,11 +236,11 @@ run cap_non  "$FIX/cap"  RIPWIRE_NO_MEMBER_NAMES=1 -- --for="$Q_CAP"
 run cap_off2 "$FIX/cap"  RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP"
 
 echo "=== A: exactly the direct members ==="
-arm "A1 JS TemplateCompiler"  exact "$TMP/js_off.xml"  TemplateCompiler src/compiler.js constructor compileBlock compileSuper emitLine flushOutput
+arm "A1 JS TemplateCompiler"  exact "$TMP/js_off.xml"  TemplateCompiler src/tpl_emit.js constructor compileBlock compileSuper emitLine flushOutput
 arm "A2 Python JobScheduler"  exact "$TMP/py_off.xml"  JobScheduler sched/scheduler.py __init__ submit assign drain
 arm "A3 C++ DependencyScan"   exact "$TMP/cpp_off.xml" DependencyScan scan/depscan.h@8 RecomputeDirty RecomputeOutputDirty LoadDepfile Reset Width
-arm "A4 Rust BookDriver (impl in driver.rs)" exact "$TMP/rs_off.xml" BookDriver src/book.rs load execute_build build_dir_for source_dir theme_dir
-arm "A4 Rust trait Renderer"  exact "$TMP/rs_off.xml"  Renderer src/book.rs supports
+arm "A4 Rust BookDriver (impl in ops.rs)" exact "$TMP/rs_off.xml" BookDriver src/model.rs load execute_build build_dir_for source_dir theme_dir
+arm "A4 Rust trait Renderer"  exact "$TMP/rs_off.xml"  Renderer src/model.rs supports
 
 echo "=== B: a nested closure is not a member ==="
 arm "B1 blockVisitor/wrap_job never listed (JS)" never "$TMP/js_off.xml" blockVisitor wrap_job helperClosure
@@ -270,7 +272,7 @@ fpair(){   # TAG ROOT ARGS... : head == RIPWIRE_NO_MEMBER_NAMES=1, and no mem=
     if grep -q ' mem="' "$TMP/f_$tag.xml"; then no "F1 $tag carries mem="; else ok "F1 $tag identical, no mem= ($( wc -c <"$TMP/f_$tag.xml" | tr -d ' ' ) B)"; fi
 }
 fpair name-exact "$FIX/js"  --for=TemplateCompiler
-fpair expand     "$FIX/js"  --expand=src/compiler.js:TemplateCompiler
+fpair expand     "$FIX/js"  --expand=src/tpl_emit.js:TemplateCompiler
 fpair map        "$FIX/cap"
 fpair filepage   "$FIX/cap" --for="$Q_CAP" --limit=40
 fpair json       "$FIX/cap" --for="$Q_CAP" --json

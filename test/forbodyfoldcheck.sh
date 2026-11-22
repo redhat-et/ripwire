@@ -37,7 +37,8 @@
 #          <fold>, <slice> and <skip> elements the answer carries
 #   F1 [P] the router question: a <fold> holds SmartRouter's whole body (router.match.bind(router), UnsupportedPathError)
 #   F2 [P] the respond question: respond's body served, the 7.5 KB renderResponseBodyPage SKIPPED with bytes= > 4000 and
-#          next=--expand=lib/render.js:6:renderResponseBodyPage, and Application (r3) still served after the skip;
+#          next=--expand=lib/render.js:6:renderResponseBodyPage, and a body ranked below it still served after the skip (LP1: read off
+#          the answer; it was Application by rank order before the basename field);
 #          the skip's next= pasted (shlex) serves that body whole
 #   F3 [P] C3: on the respond answer <sigs next=> equals the first skip's next=; on a src/ answer whose fold-off <sigs> carried
 #          next=, the fold answer carries it as sigs_next= byte for byte and the legend reads [sigs sigs_next=: …]
@@ -161,7 +162,16 @@ elif cmd == "skip_then_serve":  # FILE SKIPNAME LATERNAME
     s = sk[0]
     if int(s.get("bytes", "0")) <= 4000: fail(f"skip bytes={s.get('bytes')} not over the budget")
     if s.get("next") != f"--expand={s['p']}:{s['l']}:{s['n']}": fail(f"skip next= {s.get('next')!r}")
-    if args[2] not in [b[0].get("n") for b in bodies(x)]: fail(f"{args[2]} not served after the skip")
+    if args[2] == "@later":   # LP1 re-pin: ANY body whose <d> row ranks below the skipped row's (read off the answer)
+        rk = {}
+        for m in re.finditer(r'<d ([^>]*)>', t):
+            a2 = attrs(m.group(1))
+            if "r" in a2: rk.setdefault((a2.get("p"), a2.get("l")), int(a2["r"]))
+        sr = rk.get((s.get("p"), s.get("l")))
+        later = [b[0] for b in bodies(x) if sr is not None and rk.get((b[0].get("p"), b[0].get("l")), 0) > sr]
+        if sr is None: fail(f"the skipped row {s.get('n')} has no ranked <d> row to order against")
+        if not later: fail(f"no body ranked below the skipped {s.get('n')} (r{sr}) is served: {[b[0].get('n') for b in bodies(x)]}")
+    elif args[2] not in [b[0].get("n") for b in bodies(x)]: fail(f"{args[2]} not served after the skip")
     print(s["next"])
 elif cmd == "c3_skip":           # FILE : sigs next= == the first skip's next=
     t = load(args[0]); a, x, _ = fold(t); sk = skips(x)
@@ -349,8 +359,13 @@ for q in router resp respf slice ctor; do
     if r=$( chk cover "$TMP/$q" ); then ok "(L1) $q: the legend defines b t= n= p= l= and every fold/slice/skip attribute"; else no "(L1) $q: $r"; fi
 done
 # F2
-if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage Application ); then
-    ok "(F2) renderResponseBodyPage skipped with bytes>4000 and its --expand next=; Application still served after it"
+# F2 re-pinned (LP1, rule 4): the property is "the fold keeps walking past a skip" — a body ranked BELOW the skipped one is still
+# served. It named Application, which held only while Application was the next body in rank order; once --for scores the file
+# basename (lexical.h kForBasenameFieldW) App.constructor (src/app.ts) is r3 and the fold serves it after the skip instead. The
+# later body is now read off the answer (@later: any served body whose <d> rank is past the skipped row's), so the arm still
+# fails when the walk stops at the skip.
+if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage @later ); then
+    ok "(F2) renderResponseBodyPage skipped with bytes>4000 and its --expand next=; a body ranked below it still served"
     if r2=$( chk has_body "$TMP/resp" respond "res.end(body)" "body.pipe(res)" ); then ok "(F2b) respond's whole body served"; else no "(F2b) $r2"; fi
     eval "set -- $r"
     "$BIN" "$FIX" --no-cache "$@" >"$TMP/skipnext" 2>/dev/null

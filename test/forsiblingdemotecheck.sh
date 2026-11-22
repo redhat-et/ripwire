@@ -104,15 +104,6 @@ def widget_config_variant_{i:02d}(x):
 '''
 s += '''
 
-class WidgetVault:
-    """A widget vault."""
-    def alpha(self):
-        return 1
-
-    def beta(self):
-        return 2
-
-
 def widget_shelf_row(self, first_index=0, last_index=10, include_hidden=False):
     """Widget shelf row: the first row of the shelf, kept for the display table and its tests."""
     return 1
@@ -135,11 +126,24 @@ class WidgetConfigSink:
         return data
 '''
 open( os.path.join( d, "widget.py" ), "w" ).write( s )
+# K1's type lives in other.py (LP1 re-pin): --for scores the file basename (lexical.h kForBasenameFieldW), so EVERY symbol of
+# widget.py scores on "widget"; WidgetVault's members alpha/beta then ranked as rows (r34/r35) and mem= — which never lists a
+# name already shown — went empty, leaving K1 nothing to keep. Its members score 0 here (no question word, none in the basename),
+# so they stay unshown and the vault's row carries mem=; widget_config_other_01 is the higher same-file row the rule needs.
 open( os.path.join( d, "other.py" ), "w" ).write( "".join( f'''
 def widget_config_other_{i:02d}(x):
     """Other widget config helper {i}."""
     return x
-''' for i in range( 1, 6 ) ) )
+''' for i in range( 1, 6 ) ) + '''
+
+class WidgetVault:
+    """A widget vault."""
+    def alpha(self):
+        return 1
+
+    def beta(self):
+        return 2
+''' )
 open( os.path.join( d, "lone.py" ), "w" ).write( '\ndef widget_lone(x):\n    """Lone."""\n    return x\n' )
 PY
 
@@ -226,7 +230,20 @@ arm(){ # arm ID want(row|ptr) NAME WHAT
 }
 arm a2 ptr widget_config_variant_04 "a plain same-file sibling at position 11"
 arm a2 ptr widget_config_other_03 "a deep row of the second file"
-arm p row widget_config_variant_03 "answer position 10, <d> rank 10, is never demoted"
+# (p) re-pinned (LP1, rule 4): the row at answer position 10 is READ off the demote-off answer (it was widget_config_variant_03 only
+# by ranking accident; with the basename field it is variant_02), and must be a plain same-file sibling with a higher widget.py row,
+# i.e. a row the rule WOULD demote one position lower — the premise that keeps the arm able to fail.
+POS10="$( python3 - "$TMP/off.xml" <<'PY'
+import re, sys
+t = re.sub( r"<!--.*?-->", "", open( sys.argv[1] ).read(), flags = re.S ); s = t[t.find( "<sigs" ):t.find( "</sigs>" )]
+rows = re.findall( r'<d [^>]*?\bn="([^"]*)"[^>]*?\bp="([^"]*)"', s ) or [ ( m[1], m[0] ) for m in re.findall( r'<d [^>]*?\bp="([^"]*)"[^>]*?\bn="([^"]*)"', s ) ]
+print( rows[9][0] if len( rows ) >= 10 and rows[9][1] == "widget.py" and re.fullmatch( r"widget_config_variant_\d+", rows[9][0] ) else "" )
+PY
+)"
+if [ -n "$POS10" ]; then arm p row "$POS10" "answer position 10 (read off the off answer), never demoted"
+else no "(p) premise: the off answer's position-10 row is not a plain widget.py sibling (the arm would be vacuous)"; fi
+grep -q '<d [^>]*n="WidgetVault"[^>]*mem="' "$TMP/off.xml" || grep -q '<d [^>]*mem="[^"]*"[^>]*n="WidgetVault"' "$TMP/off.xml" \
+    || no "(k1) premise: WidgetVault carries no mem= in the demote-off answer (K1 would have nothing to keep)"
 arm r ptr widget_config_variant_08 "a same-file decoy at <d> rank 15"
 arm k1 row WidgetVault "it carries mem="
 arm k2 row WidgetConfigSink.widget_config_flush "a <c> callee under the head's <h> row"
