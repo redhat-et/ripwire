@@ -183,87 +183,83 @@ Every install route (prebuilt, from source, per-agent skills, hooks, the MCP ser
 way in, and its convenience has a cost the shell pipe does not carry: its verb schemas sit in your
 agent's context every session, whether or not it calls them.
 
-### How ripwire compares — the 0.7.0 table
+### How ripwire compares
 
-<!-- =====================================================================================================
-     TODO(0.7.0) — EVERY CELL OF THE TABLE BELOW IS DELIBERATELY UNFILLED.
-     The 0.7.0 comparison run is being collected on another machine. The COLUMN DESIGN is settled and is
-     what this slot exists to hold; the CELLS are not, and nothing may be written into one here.
+Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings. `…` = not yet
+measured.
 
-     DO NOT fill a cell from docs/EVALS.md, from the round-4 table under "Against other tools" further
-     down this page, or from any earlier round. Those are a different instrument on a different question
-     set, and carrying one forward would publish a figure that no 0.7.0 run produced.
+#### Speed
 
-     FILL ORDER (cheapest first; columns 1, 5, 6 and 7 need no seal and no gold):
-       1. column 1 did-it-finish, column 5 must-install, column 6 discloses-a-cut, column 7 deterministic
-          -- mechanical, and ripwire's own cells in 2 and 5 are readable off this repository alone.
-       2. column 2 what-it-reads, as a scope statement from each tool's own documentation and code.
-       3. columns 3 and 4, only after the three method fixes: measure PEAK over the whole PROCESS TREE
-          (`time -l` reports the parent only and under-reads a tool with workers or a daemon), state the
-          unit (the 2,048 MB ceiling clears by 1.93x decimal to 2.03x MiB -- a 2.8 % margin against a
-          4.9 % unit ambiguity), and tear down between arms (34.2 GB of leftover peer indexes once made
-          a ripwire cold index read 2.18x slower).
-       4. column 8, quoted for the DEFAULT posture -- the opt-in dictionary saving is not what an agent
-          receives today.
-       5. column 9 last, and only behind the PREREG seal: the seal and the contamination time-join must
-          arrive BEFORE indexing, with per-question AND per-verb gold, frozen peer invocations, and a
-          grader whose fixtures prove it scores a flat-repo layout.
+| Seconds, wall clock | ripwire | codegraph | cbm | graphify | graft | crg |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cold index, envoy | **2.3** | … | … | … | … | … |
+| Cold index, vscode | **5.2** | 178 | 62 | 260 | 55 | 192 |
+| Cold index, llvm-project (limit 1 h) | **28** | … | … | … | … | … |
+| Warm query, slowest of 6 repositories | **0.24** | … | … | … | … | … |
+| Warm queries over 1 second, of 6 repositories | **0** | 2 | 1 | 5 | 3 | 0 |
 
-     PUBLICATION GATE, per cell: matched n printed in the cell, or no ratio at all; recall before
-     precision, with the cap that produced the precision beside it; no warm cell without an explicit
-     re-warm, and warm never carries a verdict; never a minimum-is-best column on its own (pair every
-     byte column with a completeness column at equal n); nothing from a peer's marketing -- measure it,
-     or leave the cell blank and say we did not measure it; and every cut a peer discloses earns that
-     peer a column-6 credit exactly as ours does.
+<sub>Cold = index from nothing, the wait before the first answer; warm = a later call. ripwire: median of 5 runs on a
+quiet machine. Peers: n=1, measured 2026-11-14 unless noted.</sub>
 
-     Never write "spyware", "exfiltrates" or "steals" in column 2. Write what a tool reads and where
-     that is documented.
+#### Memory
 
-     The peer rows are the tools the 0.7.0 plan documents name, and are provisional until the run fixes
-     the set. No version strings here: the 0.7.0 versions are not known yet, and the round-4 versions
-     belong to round 4.
-     ===================================================================================================== -->
+| Peak memory, MB | ripwire | codegraph | cbm | graphify | graft | crg |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Indexing envoy | **673** | 5,439 | 2,024 | 3,434 | 3,558 | 2,119 |
+| Indexing cpython | **800** | 7,198 | 1,783 | 3,254 | 2,846 | 1,889 |
+| Indexing vscode | **1,094** | 11,815 | 4,592 | 4,070 | 5,555 | 3,193 |
+| Indexing llvm-project (limit 36 GB) | **5,217** | … | … | … | … | … |
+| 4 agents at once, envoy · answered | **2,751 · 4 of 4** | … | … | … | … | … |
+| 8 agents at once, envoy · answered | **5,497 · 8 of 8** | … | … | … | … | … |
+| Index on disk, vscode | **290** | 2,176 | 1,664 | 613 | not measured | 5,872 |
 
-> **TODO(0.7.0) — the cells below are unfilled on purpose.** The 0.7.0 measurements are still being collected.
-> **`—` means *not yet measured*** — never zero, never "not applicable", and never a figure carried over from an
-> earlier round. The box (cores, RAM), the timeout allowed, the attempts per cell and each repository's pinned sha
-> are published beside the table when the run lands, because an out-of-memory result at 16 GB is a different claim
-> from one at 128 GB.
+<sub>Peak resident memory over the whole process tree; MB = 2²⁰ bytes. "Agents at once" = N fresh starts together, each
+building its own index; combined peak and how many answered. llvm-project: the larger of the cold index and a warm
+query; ripwire indexes 80,576 of the 180,650 files git tracks. codegraph sizes itself to the
+machine, so its figure is what it took with 48 GB available. The limits are our harness's, not the tools'.</sub>
 
-| | 1 Did it finish | 2 What it reads | 3 Cold wall clock | 4 Cold peak memory | 5 Must install | 6 Discloses a cut | 7 Deterministic | 8 Bytes per answered question | 9 Answers complete / partial / wrong |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **ripwire** | — | — | — | — | — | — | — | — | — |
-| graft / Trail-Code | — | — | — | — | — | — | — | — | — |
-| graphify | — | — | — | — | — | — | — | — | — |
-| codegraph | — | — | — | — | — | — | — | — | — |
-| cbm | — | — | — | — | — | — | — | — | — |
-| *(peer set provisional — TODO(0.7.0))* | — | — | — | — | — | — | — | — | — |
+#### Answers
 
-**What each column is, and what it is measured in.** The order is deliberate: lead with what cannot be argued
-with, and finish with the contested cell, because a table whose first column is contested reads as a contested
-table.
+| One call per task · 213 held-out tasks | ripwire | codegraph | cbm | graphify | graft | crg |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Complete | **126** | 68 | 66 | 55 | 34 | 53 |
+| Partial | **83** | 98 | 117 | 123 | 137 | 114 |
+| Missed | **4** | 47 | 30 | 35 | 42 | 46 |
+| Failed calls | **0** | 0 | 0 | 0 | 0 | 0 |
+| Says when the answer was cut | **209** | 197 | 207 | 163 | 0 | 193 |
+| Gives the next call to continue, of those cut | **209 of 209** | 0 of 197 | 206 of 207 | 163 of 163 | — | 0 of 193 |
+| Over Claude Code's 30,000-character inline limit | **0** | 0 | 0 | 0 | 0 | 0 |
 
-1. **Did it finish** — `complete` / `OOM` / `timeout` / `refused`, per repository, each tool in *its own
-   documented best configuration*. A tool that cannot index the repository the reader actually works in is
-   disqualified by its own behaviour. A peer running out of memory on defaults it tells you not to use is our
-   error, not its disqualifier.
-2. **What it reads** — `repo only` / `+ global config` / `+ the developer's history and credentials`. A scope
-   statement read off each tool's own documentation and code, not a measurement, and the row a reader forwards to
-   their security team.
-3. **Cold wall clock** — seconds, per repository, one measured process at a time. Wall clock is the headline:
-   most machines have cores and full utilisation is the goal.
-4. **Cold peak memory** — MB, one lifecycle peak, cold, over the whole process tree. Warm prints with no verdict.
-5. **What you must install** — runtime dependencies, a daemon, a database, a container: paid on every agent
-   machine and every CI leg, and taken from each tool's own install documentation.
-6. **Does it disclose a cut** — asked a question whose answer exceeds the tool's cap, does the output say so. A
-   correctness column wearing a format column's clothes: a tool that truncates silently hands the agent a wrong
-   answer and the agent cannot tell.
-7. **Determinism** — two runs, `diff`, byte-identical or not. A tool whose output varies run to run cannot be
-   diffed, cached, or used in CI.
-8. **Bytes per answered question** — tokens at matched n, and never published without column 9 beside it at the
-   same n: "fewest bytes" rewards not answering.
-9. **Answers complete / partial / wrong** — counts under both a strict and a lenient bound. The one cell that
-   needs the pre-registration seal, and the reason it is last.
+**What the tasks are.** Each task is a real commit from an open-source project. The question is that commit's message,
+and the tool answers from the code as it was *before* the commit. The right answer is what the commit actually changed:
+every file it edited and every function it modified. 135 of the 213 touch two or more files, half of those three or
+more, and 97 of those 135 name none of the functions they change.
+
+**Where they come from.** 37 repositories in 11 languages, none used while building or tuning any tool compared here:
+Python (httpx, attrs, marshmallow, jinja) · JavaScript (prettier, Chart.js, undici, express) · TypeScript (excalidraw,
+vitest, redux-toolkit, mobx) · Shell (sdkman-cli, LinuxGSM, bats-core, shellspec) · Rust (clap, starship, zellij) ·
+Go (lazygit, hugo, urfave/cli) · Java (jsoup, commons-io, junit5) · C++ (aria2, CLI11, googletest) ·
+C (libuv, zstd, nginx) · C# (FluentValidation, NLog, CsvHelper) · Ruby (puma, liquid, rubocop).
+
+**What the questions look like** (from a separate development set built the same way, so the 213 stay unpublished):
+
+- *Go, one file:* "prettify error message for catch-all conflict with existing path segment" (gin)
+- *C++, two files:* "Add `SliderWithCallback` component. Add SliderOption::on_change. Useful to observe a change to the value." (FTXUI)
+- *Rust, three files:* "Refactor: `merge_exit_codes` now takes an `impl IntoIterator<Item = ExitCode>`. This way, callers don't need to collect into a slice / vec." (fd)
+- *Python, three files:* "Allow customization of help option right from its decorator. Removes `click.decorators.HelpOption` class." (click)
+
+<sub>**Complete** = names every file the change touched and locates every function it changed; **partial** = some of
+them; **missed** = none, or the call failed. One call per task, each tool's documented free-text entry, default
+settings; graft ran without its `init` step. The same grader scored all six tools, its rules fixed before any tool ran on
+these tasks; one task (of 214) was excluded beforehand because the grader could not score one tool's answer format on
+it. "Says when cut" and "gives the next call" are read from each answer's own text under definitions written before any
+count was taken; a pointer to run another tool without arguments does not count as a next call.</sub>
+
+<sub>**Setup outside the repository** (from each tool's own documentation, not measured): ripwire reads and writes
+nothing outside the repository. graphify reads the API keys in the environment to pick an LLM backend and writes
+`~/.claude/CLAUDE.md`; graft's `init` reads your past coding-agent transcripts and, with `gh` signed in, your last 50
+merged PR reviews (graft ran here without `init`), and it edited the tracked `.gitignore` (observed); codegraph writes
+agent configuration for 9 agents, cbm for 45 agent surfaces; crg writes its own `.gitignore`.</sub>
 
 ### The goal: one question, one complete answer.
 
