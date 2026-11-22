@@ -2895,10 +2895,42 @@ struct ExternalVetoTables
     HashMap<std::string, char>          pythonMultiFileClasses;   // IMPORT-PROVED-SPLITS: pythonMultiFileClassNames, built once per run
 };
 
+// FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
+// stdlib and third-party ones above all), so its answers are memoized per module spelling — per root on a multi-root run,
+// where the answer depends on the importer's root. PY-SUFFIX-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh PS): the
+// module-form file of `import X [as y]` (pythonModuleFormFile, for recordImportBindFile and its def-scoped twin) asks it too —
+// unmemoized it scanned every path once per such import (`import os` in each of llvm-project's Python files: ~1 s of the
+// external-veto tables), so it reads this memo as well.
+struct PythonSuffixMemo
+{
+    const std::vector<std::uint32_t>*   fileRoot = nullptr;
+    HashMap<std::string, std::uint32_t> answers;
+    std::string                         key;
+    std::size_t                         asks = 0, scans = 0;   // RIPWIRE_STATS `[mem] py_suffix asks= scans=` (FE-A's tables only)
+    std::uint32_t resolve( std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex, std::uint32_t importer )
+    {
+        const bool scoped = fileRoot != nullptr && importer < fileRoot->size();
+        key.assign( module );
+        if( scoped )
+        {
+            key.push_back( '\x1f' );
+            Narrower::appendUint( key, ( *fileRoot )[ importer ] );
+        }
+        ++asks;
+        const auto [ it, fresh ] = answers.try_emplace( key, kNoFile );
+        if( fresh )
+        {
+            ++scans;
+            it->second = resolvePythonModuleSuffix( module, fileIndex, fileRoot, importer );
+        }
+        return it->second;
+    }
+};
+
 // the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
 // none or when the record cannot say which (ind4b fix 5, E3) — recordImportBindFile's and PY-LOCAL-BIND's scoped twin's shared reading
 inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                           const std::vector<std::uint32_t>* fileRoot )
+                                           PythonSuffixMemo& memo )
 {
     EXPECTS( !b.typeName.empty(), "typeName.front() below needs a spec: both callers (recordImportBindFile, recordScopedImportBindFile) take bindings buildPythonImportVetoes already filtered for an empty typeName" );
     // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
@@ -2909,7 +2941,7 @@ inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resol
     }
     if( resolved == kNoFile && b.typeName.front() != '.' )
     {
-        return resolvePythonModuleSuffix( b.typeName, fileIndex, fileRoot, b.fileId );   // absolute spec only, root-scoped to b.fileId's own root
+        return memo.resolve( b.typeName, fileIndex, b.fileId );   // absolute spec only, root-scoped to b.fileId's own root (memo.fileRoot)
     }
     return resolved;
 }
@@ -2926,8 +2958,7 @@ inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resol
 // to a same-named file in a WHOLLY UNRELATED root with no import path connecting them).
 inline void recordImportBindFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
                                   const HashMap<std::string, char>& pythonModuleRebind, std::string& key,
-                                  HashMap<std::string, std::uint32_t>& importBindFile,
-                                  const std::vector<std::uint32_t>* fileRoot = nullptr )
+                                  HashMap<std::string, std::uint32_t>& importBindFile, PythonSuffixMemo& memo )
 {
     // Both are the SAME filter buildExternalVetoTables' own loop already applies before calling this (kind
     // != Import, an empty var or an empty typeName all `continue` there) — restated here because `.front()`
@@ -2943,7 +2974,7 @@ inline void recordImportBindFile( const Binding& b, std::uint32_t resolved, cons
     {
         return;   // issue #287 round 2: something else in this file rebinds `b.var` at module scope — never trust the alias
     }
-    const std::uint32_t moduleFile = pythonModuleFormFile( b, resolved, fileIndex, fileRoot );
+    const std::uint32_t moduleFile = pythonModuleFormFile( b, resolved, fileIndex, memo );
     // issue #287 round 3 (review rv-p6.md HIGH): try_emplace runs even when THIS import is unresolved
     // (moduleFile==kNoFile) — an import whose target is outside the indexed tree (stdlib/third-party/
     // unknown) is STILL a rebinding of `b.var`, not an absence of one. Skipping the emplace here (the
@@ -3188,32 +3219,6 @@ struct PythonImportVetoes
     std::vector<std::vector<std::uint32_t>> importFiles;
     PythonScopeFacts                        scopes;
     HashMap<std::string, char>              multiFileClasses;   // pythonMultiFileClassNames (ExternalVetoTables::pythonMultiFileClasses)
-};
-
-// FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
-// stdlib and third-party ones above all), so its answers are memoized per module spelling — per root on a multi-root run,
-// where the answer depends on the importer's root.
-struct PythonSuffixMemo
-{
-    const std::vector<std::uint32_t>*   fileRoot = nullptr;
-    HashMap<std::string, std::uint32_t> answers;
-    std::string                         key;
-    std::uint32_t resolve( std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex, std::uint32_t importer )
-    {
-        const bool scoped = fileRoot != nullptr && importer < fileRoot->size();
-        key.assign( module );
-        if( scoped )
-        {
-            key.push_back( '\x1f' );
-            Narrower::appendUint( key, ( *fileRoot )[ importer ] );
-        }
-        const auto [ it, fresh ] = answers.try_emplace( key, kNoFile );
-        if( fresh )
-        {
-            it->second = resolvePythonModuleSuffix( module, fileIndex, fileRoot, importer );
-        }
-        return it->second;
-    }
 };
 
 // FE-A: record the module FILE a `from m import x [as y]` binding names (ExternalVetoTables::memberImportFile) — Step-A's
@@ -3597,14 +3602,14 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
 
 // PY-LOCAL-BIND: a def-scoped `import X [as y]` into ExternalVetoTables::scopedImportBindFile, keyed "<scope>#y" — the module file
 // recordImportBindFile would read; two that disagree in one def record kNoFile. A from-import is recordSubmoduleBind's.
-inline void recordScopedImportBindFile( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out )
+inline void recordScopedImportBindFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out, PythonSuffixMemo& memo )
 {
     if( b.importedName != "module" )
     {
         return;
     }
-    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, memo );
     const auto [ it, inserted ] = out.try_emplace( fileNameKey( key, scope, b.var ), file );
     if( !inserted && it->second != file )
     {
@@ -3642,11 +3647,11 @@ inline void recordPythonImportFiles( const IngestResult& ing, const Binding& b, 
     const NodeId scope = pythonImportScope( ing, b );
     if( scope == kNoNode )
     {
-        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, memo );   // memo.fileRoot is ing's (buildPythonImportVetoes)
     }
     else
     {
-        recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
+        recordScopedImportBindFile( b, resolved, fileIndex, scope, key, t.scopedImportBindFile, memo );
         t.scopedImportNames.try_emplace( fileNameKey( key, b.fileId, b.var ), '\0' );
     }
     recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
@@ -3689,6 +3694,10 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     t.multiFileClasses   = pythonMultiFileClassNames( ing );
     addPythonMultiFileImportNames( ing, t.multiFileClasses, callees );
     t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] py_suffix asks={} scans={}\n", memo.asks, memo.scans );
+    }
     return t;
 }
 

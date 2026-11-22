@@ -96,7 +96,12 @@
 # class visits answered by ids (a callee with a ':' keeps the text lookup; with the ids compiled out keyed=0). SW(4, 8)
 # pins asks=keyed=128 (every callee is a plain name); NS(4) — the same shape inside namespace ns, so every class visit also asks
 # the "ns::Class::callee" key — pins asks=keyed=32 and joins the (D) arm.
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8), RN(4, 8) and NS(4) are
+# The external-veto tables resolve an absolute Python import Step-A cannot place by a suffix match over EVERY indexed path
+# (resolvePythonModuleSuffix). FE-A's own asks were memoized per module spelling (PythonSuffixMemo), but the module-form file
+# of `import X [as y]` (pythonModuleFormFile) scanned per import. PY-SUFFIX-MEMO (lane PF3) routes it through the same memo.
+# PS(K): K Python files, each `import os` (outside the tree) and `import util` (pkg/util.py, a suffix hit): `[mem] py_suffix
+# asks=4K scans=2` (one scan per module spelling; 2 + 2K with the form-file asks unmemoized).
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8), RN(4, 8), NS(4) and PS(16) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -252,6 +257,17 @@ genns(){
     printf '#include "shape.h"\nnamespace ns\n{\nvoid use( Shape* s )\n{\n    s->f0();\n    s->f1();\n}\n}\n' >"$dir/use.cpp"
 }
 
+# genps DIR K — the Python suffix scan (see header)
+genps(){
+    local dir="$1" k="$2" f
+    mkdir -p "$dir/pkg"
+    : >"$dir/pkg/__init__.py"
+    printf 'def helper():\n    return 1\n' >"$dir/pkg/util.py"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'import os\nimport util\n\ndef f%d():\n    return util.helper() + len(os.sep)\n' "$f" >"$dir/m$f.py"
+    done
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -272,6 +288,7 @@ stats(){
     GALINE="$( grep -F '[mem] guarded_answer ' "$TMP/$name.err" )"
     NLINE="$( grep -F '[mem] reach_by_name ' "$TMP/$name.err" )"
     CSLINE="$( grep -F '[mem] canon_split ' "$TMP/$name.err" )"
+    PSLINE="$( grep -F '[mem] py_suffix ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -290,6 +307,8 @@ RM8="$TMP/rm8"; genrm "$RM8" 4 8
 RN2="$TMP/rn2"; genrn "$RN2" 4 2
 RN8="$TMP/rn8"; genrn "$RN8" 4 8
 NS4="$TMP/ns4"; genns "$NS4" 4
+PS4="$TMP/ps4"; genps "$PS4" 4
+PS16="$TMP/ps16"; genps "$PS16" 16
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
@@ -306,6 +325,8 @@ stats RM8 "$RM8"; rmline8="$MLINE" rmrc=$RC
 stats RN2 "$RN2"; rnline2="$NLINE"
 stats RN8 "$RN8"; rnline8="$NLINE" rnrc=$RC
 stats NS4 "$NS4"; nsline="$CSLINE" nsrc=$RC
+stats PS4 "$PS4"; psline4="$PSLINE"
+stats PS16 "$PS16"; psline16="$PSLINE" psrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
 stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE" swcs8="$CSLINE"
 
@@ -421,6 +442,12 @@ if [ "$nsrc" = 0 ] && [ "$nsline" = "$want" ]; then
 else
     no "(C) NS canon_split counter: want '$want', got '${nsline:-<no canon_split line>}' (rc=$nsrc)"
 fi
+want='[mem] py_suffix asks=64 scans=2'
+if [ "$psrc" = 0 ] && [ "$psline16" = "$want" ] && [ "$psline4" = '[mem] py_suffix asks=16 scans=2' ]; then
+    ok "(B)(C) PS: one suffix scan per module spelling however many imports ask: $psline4 at K=4, $psline16 at K=16"
+else
+    no "(B)(C) PS counter: want 'asks=16 scans=2' at K=4 and '$want' at K=16, got '${psline4:-<none>}' / '${psline16:-<none>}' (rc=$psrc)"
+fi
 want='[mem] inherited asks=16 walks=8'
 if [ "$iline8" = "$want" ]; then
     ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
@@ -436,7 +463,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8" "NS:$NS4"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8" "NS:$NS4" "PS:$PS16"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
