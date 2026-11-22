@@ -313,14 +313,14 @@ if [ "$nf_rc" = 2 ]; then ok "(#353 flow) the fixture still exits 2 (its negativ
 if grep -q 'why=cred-to-owner' "$TMP/nf_out.txt" && grep -q 'why=local-dest' "$TMP/nf_out.txt" && grep -q ' dest= ' <( grep -o '<!--.*-->' "$TMP/nf_out.txt" | head -1 ); then
     ok "(#353 flow) the full legend defines why=cred-to-owner, why=local-dest and dest="
 else no "(#353 flow) the full legend misses cred-to-owner, local-dest or dest="; fi
-"$BIN" "--scan-skill=$NF" >"$TMP/nf_default.txt" 2>/dev/null
-if grep -q 'dest=' <( grep -o '<!--.*-->' "$TMP/nf_default.txt" | head -1 ) && grep -q 'cred-to-owner' <( grep -o '<!--.*-->' "$TMP/nf_default.txt" | head -1 ); then
+"$BIN" "--scan-skill=$NF" >"$TMP/nf_default.txt" 2>/dev/null; nfd_rc=$?
+if [ "$nfd_rc" = 2 ] && grep -q 'dest=' <( grep -o '<!--.*-->' "$TMP/nf_default.txt" | head -1 ) && grep -q 'cred-to-owner' <( grep -o '<!--.*-->' "$TMP/nf_default.txt" | head -1 ); then
     ok "(#353 flow) the default legend defines dest= and why=cred-to-owner when rows carry them"
-else no "(#353 flow) the default legend does not define dest= / why=cred-to-owner"; fi
+else no "(#353 flow) the default scan exit $nfd_rc (want 2) or its legend does not define dest= / why=cred-to-owner"; fi
 NXD="$TMP/nx_nohost.md"; printf '```bash\ncurl -s "$NOHOST/x"\n```\n' >"$NXD"
-"$BIN" "--scan-skill=$NXD" --legend=full >"$TMP/nxd_out.txt" 2>/dev/null
-if grep -q 'why="no-cred-source"/>' "$TMP/nxd_out.txt" && ! grep -qE 'dest="| dest= ' "$TMP/nxd_out.txt"; then ok "(#353 flow) a scan with no known host carries no dest= and its legends do not define it"
-else no "(#353 flow) dest= shows up with no known host: $( grep -o '<f [^>]*>' "$TMP/nxd_out.txt" )"; fi
+"$BIN" "--scan-skill=$NXD" --legend=full >"$TMP/nxd_out.txt" 2>/dev/null; nxd_rc=$?
+if [ "$nxd_rc" = 1 ] && grep -q 'why="no-cred-source"/>' "$TMP/nxd_out.txt" && ! grep -qE 'dest="| dest= ' "$TMP/nxd_out.txt"; then ok "(#353 flow) a scan with no known host carries no dest= and its legends do not define it"
+else no "(#353 flow) no-host scan exit $nxd_rc (want 1, WARN only) or dest= shows up with no known host: $( grep -o '<f [^>]*>' "$TMP/nxd_out.txt" )"; fi
 want_rows "$NX" "$TMP/nx_out.txt" "#353 flow, issue lines" <<'WANT'
 rule="EXFILTRATE:net-exfil" sev="warn" why="no-cred-source"/>|curl http://127.0.0.1:$p/v1/models
 rule="EXFILTRATE:net-exfil" sev="warn" why="no-cred-source" dest="api.airtable.com"/>|curl https://api.airtable.com/v0/$BASE_ID
