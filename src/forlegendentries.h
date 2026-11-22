@@ -175,6 +175,8 @@ const std::string_view kForDocList[] =
     commentBody( rw::sigx::kSigxLegend ),
     commentBody( rw::kForHopValueRefsUnreadClause ),
     commentBody( rw::keybody::kKeyBodyLegend ),
+    // foractline.h (BR1, ruling 178) — the act line's clause; appended, so no existing entry id moves
+    commentBody( rw::actline::kActClause ),
 };
 
 }   // namespace — forlegendentries.h section of main.cpp

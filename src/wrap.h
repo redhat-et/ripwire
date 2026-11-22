@@ -152,7 +152,7 @@ struct AgentTarget
 // blurb spells to it). One line, no newline: it rides on a blurb line, and hooks/ripwire-nudge.sh --agent-brief appends the same bytes to a
 // spawn prompt (test/subagentroutecheck.sh (M) holds the two byte-equal).
 inline constexpr std::string_view kSubagentBriefBlock =
-    "ripwire is on PATH — before reading source, `ripwire <dir> --for=\"<task>\"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; "
+    "ripwire is on PATH — before reading source, `ripwire <dir> --for=\"<task>\"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; "
     "before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.";
 // What introduces the block on the blurb line. "that reads source": a lane that only edits prose or counts stored results has
 // nothing to orient on, and a block it cannot follow teaches it to skip the next one.
@@ -333,11 +333,11 @@ inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view a
 // what was not delivered, and always for a file outside the working directory. Every other agent keeps the verbs.
 inline constexpr std::string_view kEditLinesSkipRead[ 2 ] = {
     "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
-    "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand.",
+    "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand. Read listed ranges in ONE turn (parallel, ranged; a page's `<act read=>` lists its top ones); search only for what ripwire marks missing.",
 };
 inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
     "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — inside your working directory, use your native Edit on it directly.",
-    "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
+    "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. Read every listed range in ONE turn (parallel Read calls; a page's `<act read=>` lists its top ones); don't re-search what ripwire listed, search only for what it marks missing. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
 };
 
 // The parallel-agents line of the blurb, named because wrapPrintBlurb appends AgentTarget::subagentBrief to exactly this line (a

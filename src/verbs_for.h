@@ -10,6 +10,7 @@
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
 #include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
+#include "foractline.h"     // BR1: the act line — the page's top undelivered ranges, read in one turn
 #include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
@@ -5907,6 +5908,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
                 forBodyPointers( d, *early );
+                (void)rw::actline::insertActLine( *early );   // BR1 (foractline.h): before ROWLINES, so its clauses stay last
                 (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
@@ -5916,6 +5918,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                 return 1;
             }
             forBodyPointers( d, doc );
+            (void)rw::actline::insertActLine( doc );   // BR1 (foractline.h): on the page served, after the body pointers, before ROWLINES
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;

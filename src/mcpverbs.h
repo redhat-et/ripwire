@@ -28,6 +28,7 @@
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "forrowlines.h"   // MR1: rowlines::encodeRows — the CLI --for's row form, on the MCP `for` bundle
+#include "foractline.h"    // BR1: actline::insertActLine — the CLI --for's act line, on the MCP `for` bundle
 #include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
@@ -3274,6 +3275,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // the file page or the candidate page above (they return earlier), as the CLI's file page is not. This legend-first bundle keeps
     // its demote:/decl-twin:/one-side: notes inside <sigs>; they ride the CDATA as verbatim lines (AsLines), so a ref answer keeps
     // a served note there instead of dropping it. Gate: test/mcpforrowscheck.sh.
+    // BR1 (foractline.h): the act line, as on the CLI — before ROWLINES, so its clauses stay last. Not on the budget_tokens return
+    // above: there the budget decided the bytes, as the CLI's budget-fit path does. Gate: test/actlinecheck.sh (M).
+    (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head );   // legend-first: the clause joins the leading legend
     rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );
     return out;
 }
