@@ -2313,7 +2313,7 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
         if( verdict.firstRow.empty() )
         {
             verdict.firstRow = r.kind + " " + quality::displaySym( r.sym, cfg.rootPath )
-                             + " (was=" + std::to_string( r.was ) + " now=" + std::to_string( r.now ) + ")";
+                             + " (was=" + quality::rowValueText( r, r.was ) + " now=" + quality::rowValueText( r, r.now ) + ")";   // CR721: tangle in display units
         }
     }
     return verdict;
@@ -3155,11 +3155,13 @@ QdRowModel qdRowModel( const rw::quality::Regression& r, bool gatingAllowed, std
 
 // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified selector, so
 // a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment. Only the sym-carrying shapes ask:
-// a Members row (duplication) names a SET and has no single body to open. Nor does a FILE-anchored defect-shape row
-// (top-level code: sym= is the path, and --expand=FILE:FILE matches no symbol). Empty when the row offers no body.
+// a Members row (duplication) names a SET and has no single body to open; nor does new-clone-of-reused-helper, whose sym= is
+// the same member list (CR721: its "last :: segment" was "a | b", and p= belongs to the first member). Nor does a
+// FILE-anchored defect-shape row (top-level code: sym= is the path, and --expand=FILE:FILE matches no symbol). Empty when
+// the row offers no body.
 std::string qdExpandNextAttr( const rw::quality::Regression& r, const QdRowModel& m )
 {
-    if( !m.gating || r.path.empty() || ( r.kind == "defect-shape" && r.sym == r.path ) )
+    if( !m.gating || r.path.empty() || r.kind == "new-clone-of-reused-helper" || ( r.kind == "defect-shape" && r.sym == r.path ) )
     {
         return std::string();
     }

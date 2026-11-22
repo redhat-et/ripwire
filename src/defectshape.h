@@ -4078,8 +4078,14 @@ inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std:
     {
         return {};
     }
-    const rw::shstatus::Tree     tree = parseShellScan( src, cut );
-    const rw::shstatus::Analysis an   = rw::shstatus::analyze( tree, src );
+    const rw::shstatus::Tree tree = parseShellScan( src, cut );
+    if( tree.cut )
+    {
+        // CR721: a guard PAST the cut (a presence test after the absence assertion it protects) is invisible to the prefix,
+        // so the prefix alone would call that assertion vacuous. A cut tree is not judged; shell_cut= already says so.
+        return {};
+    }
+    const rw::shstatus::Analysis an = rw::shstatus::analyze( tree, src );
     const va::Script             script( src, tree, an );
     return script.sites();
 }
