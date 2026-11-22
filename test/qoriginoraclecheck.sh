@@ -202,5 +202,14 @@ PE="$( cd "$P" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 printf '%s' "$PE" | grep -q 'kind="new-clone-of-reused-helper"' \
     && ok "a new clone of a PREEXISTING reused helper is still reported (the kind is narrowed, not emptied)" \
     || { no "the reuse-decline kind no longer fires on its own headline case"; printf '%s' "$PE" | tr '<' '\n' | grep '^r kind='; }
+# (e2) CR721: that row's sym= is a member LIST and p= is the first member's, so it hands no --expand next= (a single-body
+#      selector would be "FILE:a | b", which resolves nothing). Premise: the row is there and gates. RED before CR721
+#      (main b576a95e3 and train GE3 cbed31d4c): next="--expand='copy.cpp:… | …'".
+crow="$( printf '%s' "$PE" | grep -oE '<r kind="new-clone-of-reused-helper"[^>]*' | head -1 )"
+case "$crow" in
+    *'gating="1"'*next=*) no "(e2) the gating clone-group row offers a single-body next=: $crow" ;;
+    *'gating="1"'*)       ok "(e2) the gating clone-group row carries no next=: $crow" ;;
+    *)                    no "(e2) PREMISE: want a gating new-clone-of-reused-helper row, got '${crow:-none}'" ;;
+esac
 
 [ "$fail" -eq 0 ] && echo "qoriginoraclecheck: ALL PASS" || { echo "qoriginoraclecheck: SOME CHECKS FAILED"; exit 1; }

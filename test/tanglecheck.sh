@@ -8,6 +8,7 @@
 #        names the nesting, fix= an extraction with its lines, locals= the flag.
 #   (b1) CROSSING: crossing was 100 flat lines (score 0) and now has tangled's body: a preexisting row (no origin=) with gating="1".
 #   (b2) TEST CODE: harnessmain, new under test/ with tangled's body: a row with sev="minor" and no gating= (premise: the row exists).
+#   (p1) PIN UNITS: the dirty-tree --quality-baseline refusal names a tangle row as "was=10.5 now=10.9", like the delta row.
 #   (b3) EXIT: the answer exits 2 and the root's gating= counts at least t1 + b1; the stderr line names a tangled new function.
 #   (n1) LONG SEQUENTIAL, (n2) LONG ORCHESTRATOR, (n3) FLAT DISPATCHER, (n4) SHORT NESTED HELPER: no tangle row. Each counts its
 #        premise in --metrics first (the function is there, and n3/n4 really reach depth 4+) and FAILS on a zero premise.
@@ -185,6 +186,20 @@ if [ "${jt% *}" = "$tangles" ] && [ "${jt#* }" -ge 2 ]; then ok "(j) --json: ${j
 else no "(j) --json: '$jt' (tangle rows, improved) vs XML $tangles rows"; fi
 # (d)
 if cmp -s "$Q" "$Q.2"; then ok "(d) two runs byte-identical"; else no "(d) two runs differ"; fi
+
+# (p1) CR721 PIN UNITS: --quality-baseline on a dirty tree whose one gating row is a tangle (grow1 over the bar, growing) refuses
+#      and names that row in the SAME display units as the --quality-delta row (was="10.5" now="10.9"), not raw tenths.
+#      RED before CR721 (train GE3 cbed31d4c): "First: tangle grow1 (was=105 now=109)".
+P="$TMP/pin"; mkdir -p "$P/src"; "${G[@]}" -C "$P" init -q
+g1(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import tanglefixtures as t; open(sys.argv[2], "w").write("#include <vector>\n" + t.overbar("grow1", int(sys.argv[3]), mult=17))' "$ROOT/test/lib" "$P/src/grow1.cpp" "$1"; }
+g1 40; "${G[@]}" -C "$P" add -A && "${G[@]}" -C "$P" commit -qm v1; g1 42
+pr="$( "$BIN" "$P" --quality-delta --no-cache 2>/dev/null | grep -oE '<r kind="tangle"[^>]*sym="grow1"[^>]*gating="1"[^>]*' )"
+pw="$( attr "$pr" was )"; pn="$( attr "$pr" now )"
+"$BIN" "$P" --quality-baseline --no-cache >/dev/null 2>"$TMP/pin.err"; prc=$?
+first="$( tr '\n' ' ' <"$TMP/pin.err" | grep -oE 'First: [^)]*\)' )"
+if [ -z "$pr" ] || [ "${pw#*.}" = "$pw" ]; then no "(p1) PREMISE: want a gating tangle row on grow1 with a decimal was=, got '${pr:-none}'"
+elif [ "$prc" = 1 ] && [ "$first" = "First: tangle grow1 (was=$pw now=$pn)" ]; then ok "(p1) the pin refusal names the tangle row in display units: $first"
+else no "(p1) want rc 1 and 'First: tangle grow1 (was=$pw now=$pn)', got rc=$prc '$first'"; fi
 
 [ "$fail" = 0 ] && echo "tanglecheck: PASS" || echo "tanglecheck: FAIL"
 exit "$fail"
