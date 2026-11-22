@@ -629,7 +629,9 @@ inline std::string objectMemberLocal( const std::string& text, std::size_t from,
             const std::size_t b = e.find_first_not_of( " \t\r\n" );
             e = b == std::string_view::npos ? std::string_view() : e.substr( b, e.find_last_not_of( " \t\r\n" ) - b + 1 );
             const std::size_t colon = e.find( ':' );
-            const std::string_view key = colon == std::string_view::npos ? e : e.substr( 0, e.find_last_not_of( " \t", colon - 1 ) + 1 );
+            // colon == 0 keeps the whole entry as the key (what `colon - 1` wrapping to npos used to give); past 0, e[0] is a
+            // non-blank before the colon, so the search cannot come back npos
+            const std::string_view key = colon == std::string_view::npos || colon == 0 ? e : e.substr( 0, e.find_last_not_of( " \t", colon - 1 ) + 1 );
             if( key == m )
             {
                 std::string_view v = colon == std::string_view::npos ? e : e.substr( colon + 1 );

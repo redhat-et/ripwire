@@ -1695,12 +1695,12 @@ struct TouchUnits
 inline std::string_view memberStem( const IngestResult& ing, const ExemplarMember& mem )
 {
     const std::string_view rel = rootRelPath( ing, mem.fileId );
-    std::string_view stem = rel.substr( rel.rfind( '/' ) + 1 );
+    std::string_view stem = rw::namesplit::afterLast( rel, "/" );
     stem = stem.substr( 0, stem.find( '.' ) );
     if( stem == "index" || stem == "mod" || stem == "__init__" )
     {
         const std::string_view dir = includerDir( rel );
-        stem = dir.substr( dir.rfind( '/' ) + 1 );
+        stem = rw::namesplit::afterLast( dir, "/" );
     }
     return stem;
 }

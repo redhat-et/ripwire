@@ -1668,7 +1668,7 @@ inline bool flattenRustUseTree( std::string_view tree, const std::string& prefix
     const auto trim = []( std::string_view s )
     {
         s.remove_prefix( std::min( s.find_first_not_of( " \t\r\n" ), s.size() ) );
-        s.remove_suffix( s.size() - std::min( s.size(), s.find_last_not_of( " \t\r\n" ) + 1 ) );
+        s = namesplit::trimTrailing( s, " \t\r\n" );
         return s;
     };
     const auto join = [ & ]( std::string_view tail )
@@ -6217,7 +6217,7 @@ inline bool bodylessIsNoContract( std::string_view text, std::uint32_t from ) no
     const std::size_t prev = from == 0 ? std::string_view::npos : text.find_last_of( ";{}", from - 1 );
     const std::size_t head = prev == std::string_view::npos ? 0 : prev + 1;
     std::string_view  decl = text.substr( head, end - head );
-    decl                   = decl.substr( 0, decl.find_last_not_of( " \t\r\n" ) + 1 );   // npos + 1 = 0: all blank
+    decl                   = namesplit::trimTrailing( decl, " \t\r\n" );
     const auto word = []( std::string_view in, std::string_view w ) noexcept
     {
         for( std::size_t at = in.find( w ); at != std::string_view::npos; at = in.find( w, at + 1 ) )
@@ -6234,7 +6234,7 @@ inline bool bodylessIsNoContract( std::string_view text, std::uint32_t from ) no
         if( decl.ends_with( tail ) && word( decl, tail ) )
         {
             std::string_view rest = decl.substr( 0, decl.size() - tail.size() );
-            rest                  = rest.substr( 0, rest.find_last_not_of( " \t\r\n" ) + 1 );
+            rest                  = namesplit::trimTrailing( rest, " \t\r\n" );
             if( rest.ends_with( '=' ) )
             {
                 return true;
