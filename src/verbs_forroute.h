@@ -669,6 +669,7 @@ inline RouteRender renderCarriedPage( const MainDispatch& d, std::size_t bytes )
     rw::Config pc    = d.cfg;
     pc.pageBytesSpec = spec;
     pc.forPageBytes  = bytes;
+    pc.bodiesSpec    = rw::bodyptr::kBodiesInline;   // NB1: a routed answer keeps its bodies (forbodyptr.h) — RL1 fits this page with them in
     const MainDispatch pd = routeDispatch( d, pc );
     return renderRouteCaptured( [ & ] { return runForLens( pd ).value_or( 1 ); } );
 }

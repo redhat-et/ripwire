@@ -58,7 +58,8 @@ pick ONE symbol, then `--expand=path:name`** (paste the row's own path and name 
 unique serves every definition, still without the map). That is the flow, and it is cheaper than the bodies were: half the bytes
 of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
 `--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both
-shapes; `--detail=N` picks the body count explicitly.
+shapes; `--detail=N` picks the body count explicitly. `--bodies=pointer` (off by default) names each body page 1 would carry
+as a `<skip p= n= l= e=>` row instead: Read lines `l`..`e` of that file, then Edit.
 **Composing a selector out of a row** (the map's rows and `--for`'s alike): a scoped row carries `sc=`, its
 enclosing scope, instead of repeating its whole id — the canonical id is `p::sc::n`, assembled from the
 row's own `p=` (or the `<f p=>` it sits under), `sc=` and `n=` (a `--for` line row spells them `path:L-E name sc=scope`). Every selector (`--expand`, `--callers`,
