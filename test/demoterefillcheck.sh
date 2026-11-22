@@ -9,6 +9,10 @@
 #        ships within what the rows were allotted.
 #   (k)  K4: rows 11..12 stay whole once row 13 shows (it is their task-named seed). The refill that admits row 13 frees nothing,
 #        so it does not ship: the walk renders back to the base budget (12 rows), and the block ships within its allotment.
+#   (c)  cascade (LP1, RED on the 3-pass walk: it stops at 17 rows with more=1): every row from 11 on is demotable, so each refill's
+#        rows free bytes that buy more rows. The walk runs to its fixed point — one further refill would add no row (more=0) — and
+#        ships within its allotment. Measured on the product first: mcpforparitycheck (5) at budget_tokens 1600/2000 under-filled by
+#        one rank on a ranking that demotes 6-10 rows (the bytes the third pass freed bought nothing).
 #
 # Usage: bash test/demoterefillcheck.sh
 set -u
@@ -31,8 +35,8 @@ OUT="$( "$TMP/t" )"; rc=$?
 printf '%s\n' "$OUT" | sed 's/^/  /'
 [ "$rc" -eq 0 ] || no "the driver exited $rc"
 field(){ printf '%s\n' "$OUT" | grep "^$1:" | grep -oE "$2=[0-9]+" | cut -d= -f2; }
-for sc in refill k4; do
-    for f in rows ships allotted; do
+for sc in refill k4 cascade; do
+    for f in rows ships allotted more; do
         [ -n "$( field "$sc" "$f" )" ] || no "($sc) no $f= in the driver's output"
     done
 done
@@ -42,6 +46,10 @@ if [ "${rr:-0}" -gt 12 ] && [ "${rs:-1}" -le "${ra:-0}" ]; then ok "(r) the free
 else no "(r) refill: rows=${rr:-?} ships=${rs:-?} allotted=${ra:-?} (want rows > 12, ships <= allotted)"; fi
 if [ "${kr:-0}" -eq 12 ] && [ "${ks:-1}" -le "${ka:-0}" ]; then ok "(k) K4: the refill that frees nothing does not ship: back to $kr rows, $ks B <= $ka B allotted"
 else no "(k) K4: rows=${kr:-?} ships=${ks:-?} allotted=${ka:-?} (want rows = 12, ships <= allotted)"; fi
+
+cr="$( field cascade rows )"; cs="$( field cascade ships )"; ca="$( field cascade allotted )"; cm="$( field cascade more )"
+if [ "${cm:-1}" -eq 0 ] && [ "${cr:-0}" -gt 17 ] && [ "${cs:-1}" -le "${ca:-0}" ]; then ok "(c) cascade: the walk reaches its fixed point: $cr rows, one more refill adds none, $cs B <= $ca B allotted"
+else no "(c) cascade: rows=${cr:-?} more=${cm:-?} ships=${cs:-?} allotted=${ca:-?} (want more = 0, rows > 17, ships <= allotted)"; fi
 
 if [ "$fail" -eq 0 ]; then echo "PASS demoterefillcheck"; exit 0; fi
 echo "FAIL demoterefillcheck"; exit 1
