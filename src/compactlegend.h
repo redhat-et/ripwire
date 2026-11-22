@@ -1091,7 +1091,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // CR712-SHSTATUS-DEPTH (src/quality.h ratchetAttrsXml): present when not 0
     { "shell_cut", "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; deeper code not judged", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, a ceiling= row or a tangle row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, ceiling=, tangle", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped: self-registering test/bench macros or Rust #[test]; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
