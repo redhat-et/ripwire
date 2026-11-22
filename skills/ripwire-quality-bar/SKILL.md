@@ -3,8 +3,8 @@ name: ripwire-quality-bar
 description: >
   Code QUALITY of what YOU just wrote, before commit/'done' or a cleanup: --quality-delta
   lists what got WORSE in 13 kinds; exit 2 if old code did (new-symbol rows never gate,
-  except defect-shape format-arity, a new function at the ceiling and a tangled new one); the fix each shape calls for.
-  Merge safety → change-check. Even a single-line leaf fix runs it.
+  except defect-shape format-arity, new functions at the ceiling or tangled); the fix each shape calls for.
+  Merge safety → change-check. Even a one-line fix runs it.
 allowed-tools: Bash, Read
 ---
 
