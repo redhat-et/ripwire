@@ -39,6 +39,9 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 est(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | head -1 | grep -oE '[0-9]+'; }
 
+# CL1 (src/outputceiling.h): a bare --expand now budgets its bodies under the output ceiling (16 KB, refit to fit), which cuts
+# buildGraph's body. This gate prices the BODY term of est_tokens, so every --expand probe below passes the historic budget
+# explicitly (--pack-budget-bytes=65536) to keep a body large enough to price; the ceiling has its own gate (outputceilingcheck).
 # ── #1: map-alone est_tokens (baseline) is present and positive ───────────────────────────────────────
 MAP_EST="$( est src )"
 { [ -n "$MAP_EST" ] && [ "$MAP_EST" -gt 0 ] 2>/dev/null; } \
@@ -46,7 +49,7 @@ MAP_EST="$( est src )"
     || no "map-alone est_tokens missing / non-positive (got '$MAP_EST')"
 
 # ── #2: --expand=buildGraph (a large fn) reports MORE than the map alone — the body is now counted ─────
-EXP_EST="$( est src --expand=buildGraph --top-k=200 )"
+EXP_EST="$( est src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 )"
 { [ -n "$EXP_EST" ] && [ "$EXP_EST" -gt "$MAP_EST" ] 2>/dev/null; } \
     && ok "--expand=buildGraph est_tokens ($EXP_EST) > map-alone ($MAP_EST) — the body is counted (bug fixed)" \
     || no "--expand=buildGraph est_tokens ($EXP_EST) not > map-alone ($MAP_EST) — body still uncounted (BUG)"
@@ -58,16 +61,16 @@ EXP_EST="$( est src --expand=buildGraph --top-k=200 )"
 #    B/tok (MEASURED: 59.5KB → 19.3K real tokens = 3.08; 2.85 is a conservative floor). |est - truth| must
 #    be <= 15% of truth. Integer math on the byte path.
 #    RE-CALIBRATED 2026-09-13 (PR #215, sc= on the map rows): the proxy is 3.40, from the SAME instrument the
-#    2.85 came from — real o200k counts of this exact probe (`src --expand=buildGraph --top-k=200`) on the two
+#    2.85 came from — real o200k counts of this exact probe (`src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536`) on the two
 #    binaries either side of the change: 94,702 B / 25,908 real tokens = 3.66 B/tok before, 90,338 B / 24,593
 #    = 3.67 after. The estimate tracks the real count on both (est/real 1.103 before, 1.090 after — the leaner
 #    row made it BETTER), and the 2.85 floor no longer tracks the bytes: it read the new output as 31,697 tokens
 #    against 24,593 real, and put the estimate 15.4% "under" a truth that was 29% too high. 3.40 keeps the same
 #    conservative posture 2.85 had against its own 3.08 (about 7% under the measured rate); the 15% band is
 #    unchanged. When tiktoken is installed the real path runs and this constant is not consulted. ────────────
-FULL_BYTES="$( "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null | wc -c | tr -d ' ' )"
+FULL_BYTES="$( "$BIN" src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 --no-cache 2>/dev/null | wc -c | tr -d ' ' )"
 if python3 -c 'import tiktoken' >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null >"$TMP/exp3.xml"
+    "$BIN" src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 --no-cache 2>/dev/null >"$TMP/exp3.xml"
     TRUTH="$( python3 -c 'import sys,tiktoken; print(len(tiktoken.get_encoding("o200k_base").encode(open(sys.argv[1],encoding="utf-8",errors="replace").read())))' "$TMP/exp3.xml" )"
     LABEL="real o200k"
 else
@@ -87,14 +90,14 @@ LIM=$(( TRUTH * 15 / 100 ))
     || no "map-alone ($MAP_EST) not materially short of full truth ($TRUTH) — the bug may not be exercised by this corpus"
 
 # ── #5: determinism — the reported est_tokens is byte-identical run-to-run ─────────────────────────────
-D1="$( est src --expand=buildGraph --top-k=200 )"; D2="$( est src --expand=buildGraph --top-k=200 )"
+D1="$( est src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 )"; D2="$( est src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 )"
 { [ -n "$D1" ] && [ "$D1" = "$D2" ]; } \
     && ok "--expand est_tokens deterministic across re-runs ($D1)" \
     || no "--expand est_tokens NON-deterministic ($D1 vs $D2)"
 
 # ── #6: full --expand output is well-formed XML ────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
+    "$BIN" src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
         && ok "xml well-formed under --expand" || no "xml malformed under --expand"
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
@@ -104,7 +107,7 @@ fi
 #    A budget just under the expand est but ABOVE the map-alone est must FAIL (exit 3) — the whole point of
 #    the fix: pre-fix this budget passed while the real payload blew past it. ─────────────────────────────
 MID=$(( (MAP_EST + EXP_EST) / 2 ))
-"$BIN" src --expand=buildGraph --top-k=200 --token-budget=$MID --no-cache >/dev/null 2>"$TMP/tb.err"
+"$BIN" src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 --token-budget=$MID --no-cache >/dev/null 2>"$TMP/tb.err"
 rc=$?
 { [ "$rc" -eq 3 ] && grep -qE "est_tokens=$EXP_EST > budget=$MID\$" "$TMP/tb.err"; } \
     && ok "--token-budget=$MID (between map-alone and full) on --expand: exit 3, gate uses the full est ($EXP_EST)" \
@@ -118,7 +121,7 @@ BARE1="$( est src )"; BARE2="$( est src )"
 
 # ── #9: (optional) tiktoken accuracy report — informational, never gates (tiktoken isn't a build dep) ───
 if python3 -c 'import tiktoken' >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null >"$TMP/exp.xml"
+    "$BIN" src --expand=buildGraph --top-k=200 --pack-budget-bytes=65536 --no-cache 2>/dev/null >"$TMP/exp.xml"
     python3 - "$TMP/exp.xml" "$EXP_EST" <<'PY'
 import sys, re, tiktoken
 out=open(sys.argv[1],encoding='utf-8',errors='replace').read()

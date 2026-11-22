@@ -864,6 +864,7 @@ for _g in \
     osswitchcheck \
     oswin32logiccheck \
     outlinecheck \
+    outputceilingcheck \
     overbudgetcommentcheck \
     ownerhopcheck \
     ownerscheck \

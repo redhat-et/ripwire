@@ -4647,9 +4647,9 @@ $ ./build/ripwire . --quality-delta --legend=full
 
 ### `--page-bytes=N[:K]`
 
-**Answers:** (with --for) the page size of the answer-first --for answer: 12000 by default, 0 = the whole answer in one call.
+**Answers:** (with --for, or the bare map) the page size of the answer-first --for answer: 12000 by default, 0 = the whole answer in one call.
 
-The answer is rendered whole and cut at row boundaries into pages of about N bytes; the root says page= pages= withheld_bytes= and next=, which is this flag with :K, the next page. Page 1 keeps the whole legend after its rows; a later page re-sends none and ends <about legend="ref" have="page1"/>. Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page. ROWS AS LINES: the answer-first answer serves the rows of <sigs> and <tail> as text lines in one CDATA per section, defined by its own legend: 'P:L-E N k=v.. | SIG' is a <d> row (path, first-last line, name, its other attributes, signature), 'P SYMS' a <t> row, and a line starting with < is the row verbatim; a sigs row whose rank is the previous row's + 1 spells no r= (<sigs rseq="1">). Lossless, applied to each page after it is cut (the page size and est_tokens= count the element form, an upper bound). RIPWIRE_NO_ROWLINES=1 serves the elements (the A/B handle); --legend=first, --json and MCP for are not in this form.
+The answer is rendered whole and cut at row boundaries into pages of about N bytes; the root says page= pages= withheld_bytes= and next=, which is this flag with :K, the next page. Page 1 keeps the whole legend after its rows; a later page re-sends none and ends <about legend="ref" have="page1"/>. Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page. ROWS AS LINES: the answer-first answer serves the rows of <sigs> and <tail> as text lines in one CDATA per section, defined by its own legend: 'P:L-E N k=v.. | SIG' is a <d> row (path, first-last line, name, its other attributes, signature), 'P SYMS' a <t> row, and a line starting with < is the row verbatim; a sigs row whose rank is the previous row's + 1 spells no r= (<sigs rseq="1">). Lossless, applied to each page after it is cut (the page size and est_tokens= count the element form, an upper bound). RIPWIRE_NO_ROWLINES=1 serves the elements (the A/B handle); --legend=first, --json and MCP for are not in this form. --page-bytes=0 on an answer over the 24,000-character OUTPUT CEILING (the agent harness's ~30,000-character inline limit less a fifth) prints one stderr line naming its size first. THE BARE MAP pages the same way: over the ceiling it is cut between its file groups and inventory rows into 24,000 B pages (page= pages= withheld_bytes= has_more= next=|page_next=); --page-bytes=N sets that size, :K a page, 0 the whole map. Beside a report verb, refused.
 
 **Try it**
 
@@ -4677,6 +4677,8 @@ $ ./build/ripwire . --for="rankGraphTeleport" --page-bytes=4000:2
 **Caveats (stated by the binary):**
 
 - --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.
+- --page-bytes=0 on an answer over the 24,000-character OUTPUT CEILING (the agent harness's ~30,000-character inline limit less a fifth) prints one stderr line naming its size first.
+- Beside a report verb, refused.
 
 ### `--rows=lines|elements`
 

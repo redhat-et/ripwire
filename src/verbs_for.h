@@ -3,6 +3,7 @@
 #error "verbs_for.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "outputceiling.h"   // CL1: kOutputCeilingChars — the --page-bytes=0 size line
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
@@ -5853,6 +5854,21 @@ inline bool serveForPage( const rw::Config& cfg, std::string& doc )
     return exists;
 }
 
+// CL1 (outputceiling.h): --page-bytes=0 is the caller's explicit request for the WHOLE answer, so the answer is printed whole and
+// byte-identical — but when it is over kOutputCeilingChars ONE stderr line says so, BEFORE the answer, so it lands inside the 2 KB
+// preview an agent harness shows when it persists a large result to a file. Why a line and not a cut: the size override is the
+// caller's choice (a cut would make --page-bytes=0 mean something other than "whole"); why a line and not silence: an agent that
+// copied --page-bytes=0 from a pattern gets a preview and a path, and without the line it cannot tell why. MEASURED on GA1 DEV
+// (base 36a95d732, one tree per repo): 5 of 11 whole answers were over 24,000 characters, 2 over 30,000 (max 43,403).
+inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answerBytes )
+{
+    if( !cfg.pageBytesSpec.empty() && cfg.forPageBytes == 0 && answerBytes > rw::kOutputCeilingChars )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes=0: this whole answer is {} B, over the {} B output ceiling (an agent harness may show "
+                            "only a preview of it); drop --page-bytes=0 to receive it in pages\n", answerBytes, rw::kOutputCeilingChars );
+    }
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     if( d.cfg.forTask.empty() )
@@ -5917,6 +5933,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             forBodyPointers( d, doc );
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
+            noteWholeAnswerOverCeiling( d.cfg, doc.size() );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
         }

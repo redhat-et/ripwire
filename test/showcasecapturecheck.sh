@@ -238,7 +238,9 @@ def measure(n):
     # L1 (2026-09-19): the CLI default legend is compact, and its legend spells row shapes (<d r=N>, <b t= n= p= l=>)
     # inside its comment, which the element regexes below would count; the caption was measured in the full legend.
     sig_xml  = run(["--pack-signatures", "--pack-top-n=%d" % n, "--top-k=0", "--legend=full"])
-    body_xml = run(["--expand=" + ",".join(sels), "--top-k=0", "--legend=full"])
+    # CL1: a bare --expand now budgets its bodies under the output ceiling (src/outputceiling.h); the reference here is the
+    # bodies at the historic default budget, passed explicitly, so the recount measures what the caption measured
+    body_xml = run(["--expand=" + ",".join(sels), "--top-k=0", "--legend=full", "--pack-budget-bytes=65536"])
     d_elems = re.findall(r"<d [^>]*>.*?</d>|<d [^>]*/>", sig_xml,  re.S)
     b_elems = re.findall(r"<b .*?</b>|<b [^>]*/>",       body_xml, re.S)
     # root-neutralised: strip the corpus-root prefix from every element before counting BYTES (not chars --
