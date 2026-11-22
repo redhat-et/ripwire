@@ -208,7 +208,10 @@ if [ -z "$(comm -13 "$WORK/for.seen" "$WORK/red.seen")" ] || [ ! -s "$WORK/red.s
 else bad "(S11b) the reduced answer yields hashes the plain one did not: $(comm -13 "$WORK/for.seen" "$WORK/red.seen" | head -3 | tr '\n' ' ')"; fi
 
 # ── (S12) a BLOCK-LOCAL legend (`<!-- ripwire for lit …`, carried with its section) is left out WHERE IT STANDS ──────
-LQ="the --page-bytes flag"
+# Re-pinned 2026-11-22 (lane CL1b): "the --page-bytes flag"'s <lit> grew past page 1 on this tree (it is deferred now, so the
+# plain answer carries no lit legend and the arm went vacuous-red). The probe needs a lit section ON page 1; see
+# foranswerfirstcheck.sh (G6/G7) for the measurement and the shared choice.
+LQ="the --sections flag"
 run --for="$LQ" >"$WORK/lit.plain"
 "$BIN" --legend-dict=seen <"$WORK/lit.plain" >"$WORK/lit.held"
 run --for="$LQ" --legend-seen="$WORK/lit.held" >"$WORK/lit.red"
