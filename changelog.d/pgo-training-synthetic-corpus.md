@@ -6,3 +6,9 @@ trained, and a training run that exits non-zero on this checkout fails the build
 hole in it. `scripts/pgobuild.sh --check-training BIN` runs the same list without building; `optremarkscheck` uses it
 to prove every listed verb runs and exits 0, and that no benchmark corpus is named. Output bytes are unchanged: PGO
 changes speed, never an answer.
+
+The training also runs ONE cold map of a small synthetic tree that `scripts/pgocorpus.py` writes at build time (seeded,
+deterministic, standard library only): namespaces sharing the class names `Base`/`Impl`/`A`/`B`, deep namesake
+inheritance, overloads and call-result chains, plus one slice of each other language family, so the class-identity
+paths an llvm-sized run spends its time in are not profiled as cold. `optremarkscheck` asserts the generator writes the
+same bytes twice.
