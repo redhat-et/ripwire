@@ -11,7 +11,11 @@
 #      RIPWIRE_TEST_LARGEALLOC=off. Same binary, same run load, so the ratio is the machine-free number. It goes red if
 #      someone raises the threshold, unlinks the file, or swaps the allocator back.
 #   B  the two runs' answers are byte-identical.
-#   M  --max-memory still reads the routed pages: a limit under the routed peak stops the run (exit 5 or a partial answer).
+#   M  --max-memory still reads the routed pages. The limit is sized from the reading the guard ALWAYS takes, the one right
+#      after the ingest (main.cpp's hard line), so the stop depends neither on the 5 s cadence nor on what --deps builds
+#      after the ingest (#690). It FAILS when that reading is missing, does not hold the routed reference array, or the limit
+#      it sized is not below it. Then: exit 5, nothing on stdout, and the guard's own line naming the limit, with the allocator
+#      line off (M) and on (Mc).
 #   D  the band M never enters: a limit at 70 % of the routed peak. The guard reads the footprint between phases, and the
 #      blocks the route returned are gone from that reading, so the run finishes over its cap. It must SAY so (owner
 #      2026-11-01: disclosed, not enforced): the stderr line with the peak, the cap and what the cap is for, and
@@ -103,10 +107,11 @@ for f in range(files):
 P
 git -C "$1" init -q . 2>/dev/null
 }
-# Sized so the M arm's limit (half the routed peak) sits above its 256 MB floor. 2000 files x 400 calls peaked at 458 MB
-# routed on main 74456897f, so half of it was under the floor and the floor was the limit; MEM-REF-SHRINK step 2 (#608) cut
-# the reference rows to 80 B and the same tree peaked at 278 MB, where a 256 MB limit sits above every between-phase
-# reading and M could not stop it. 880 calls per file peaks at 569 MB routed with that lane (macOS M2, 9 s).
+# Sized so each worker's reference array passes 256 KiB many times over and the after-ingest footprint (arm M) sits well
+# over the guard's 64 MB floor: 2000 files x 880 calls read ~230-245 MB after the ingest and peak near 480 MB routed on an
+# M2 (main b576a95e3, 6-7 s). Until #690 arm M took half the routed peak, floored at 256 MB, and that stopped only when a
+# reading landed over it: the 5 s cadence during the parse on a slow machine, or the graph build's hard line, which --deps
+# no longer reaches (#648). On a fast machine the run ends inside the cadence and every reading sat under 256 MB.
 FX="$TMP/fx"
 genfx "$FX" 2000 880
 
@@ -145,15 +150,56 @@ else
     no "B: the route changed the answer"
 fi
 
-# ---- M: the guard's reading includes routed pages. Half the routed peak cannot fit. ----
-lim=$(( on / 2 ))
-[ "$lim" -lt 256 ] && lim=256
-rc=0
-( cd "$FX" && HOME="$TMP" "$BIN" "$FX" --no-cache --deps --max-memory="${lim}M" >"$TMP/m.out" 2>"$TMP/m.err" ) || rc=$?
-if [ "$rc" -eq 5 ] || grep -q 'memory_stop' "$TMP/m.out" "$TMP/m.err"; then
-    ok "M: --max-memory=${lim}M against a ${on} MB run stops (exit $rc)"
+# ---- M: the guard's reading includes routed pages (#690, thanks @jflowers). One unlimited run with RIPWIRE_STATS reads the
+#      footprint the guard reads right after the ingest: `[mem] phase=model` is marked as ingest() returns, and main.cpp's
+#      hard line reads the same footprint next, on every run whatever its speed. The limit goes a quarter under it, so that
+#      reading alone must stop the run: a slow machine may stop sooner, at the cadence's soft line (half the limit), which
+#      is a stop too. The allocator line (memceiling.h) is off for these two runs: it would stop the run on its own reading
+#      before the hard line is asked, and it is memceilingcheck's to test. Mc then runs the same limit with it on, as
+#      every user does. ----
+MLINE="$TMP/m.line"
+( cd "$FX" && HOME="$TMP" RIPWIRE_STATS=1 RIPWIRE_MEM_BUDGET_MB=0 "$BIN" "$FX" --no-cache --deps >"$TMP/m0.out" 2>"$TMP/m0.err" ); mrc0=$?
+nread="$( grep -c '^\[mem\] phase=model cur_mib=[0-9]' "$TMP/m0.err" )"
+read_mb="$( sed -n 's/^\[mem\] phase=model cur_mib=\([0-9]*\)\.[0-9].*/\1/p' "$TMP/m0.err" | tail -1 )"
+refs_mb="$( sed -n 's/^\[mem\] family references .* cap_mib=\([0-9]*\)\.[0-9].*/\1/p' "$TMP/m0.err" | tail -1 )"
+lim=$(( ${read_mb:-0} * 3 / 4 ))
+echo "  M: after-ingest reading ${read_mb:-none} MB (readings seen: $nread, rc $mrc0), routed reference array ${refs_mb:-none} MB; limit ${lim}M"
+mpremise=0
+if [ "$mrc0" != 0 ] || [ "${nread:-0}" -lt 1 ] || [ -z "$read_mb" ]; then
+    no "M: no after-ingest reading to size the limit from (rc $mrc0, $nread [mem] phase=model lines): the arm cannot test the stop"
+elif [ -z "$refs_mb" ] || [ "$refs_mb" -lt 64 ] || [ "$read_mb" -lt "$refs_mb" ]; then
+    no "M: the after-ingest reading ${read_mb} MB does not hold the routed reference array (${refs_mb:-none} MB): the footprint misses routed pages, or the fixture no longer builds the array"
+elif [ "$lim" -ge "$read_mb" ] || [ "$lim" -lt 64 ]; then
+    no "M: the limit ${lim}M is not below the ${read_mb} MB reading or is under the guard's 64 MB floor: the arm would pass without a stop"
 else
-    no "M: --max-memory=${lim}M against a ${on} MB run did not stop (exit $rc): the guard does not see routed pages"
+    ok "M: limit ${lim}M sized from the ${read_mb} MB after-ingest reading, which holds the ${refs_mb} MB routed reference array"
+    mpremise=1
+fi
+# mstop <tag> <env...>: one capped run, rc 5, nothing on stdout, and its first ripwire: line is a stop naming this limit
+mstop(){
+    local tag="$1"; shift
+    local rc=0
+    ( cd "$FX" && env "$@" HOME="$TMP" "$BIN" "$FX" --no-cache --deps --max-memory="${lim}M" >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) || rc=$?
+    grep -m1 '^ripwire: ' "$TMP/$tag.err" >"$MLINE"
+    local how=""
+    if grep -Eq "^ripwire: memory limit reached during the ingest \(limit ${lim}M, from --max-memory\); stopped cleanly without an answer" "$MLINE"; then
+        how="the hard line after the ingest"
+    elif grep -Eq "^ripwire: memory limit reached during the (--deps closure|include-closure fold) \(limit ${lim}M, from --max-memory\); stopped cleanly without an answer" "$MLINE"; then
+        how="the --deps closure's hard line"   # read after the ingest too, on every run: a stop, though the ingest's line should come first
+    elif grep -Eq "^ripwire: the memory guard stopped the (crawl|parse) (at the (crawl|parse) line \(.*the ${lim}M limit\)|under critical system memory pressure)" "$MLINE"; then
+        how="a cadence reading during the ingest"
+    elif grep -Eq "^ripwire: refused by the memory ceiling \(--max-memory=${lim}M\)" "$MLINE"; then
+        how="the allocator line"
+    fi
+    if [ "$rc" = 5 ] && [ ! -s "$TMP/$tag.out" ] && [ -n "$how" ]; then
+        ok "$tag: --max-memory=${lim}M under the ${read_mb} MB after-ingest reading stops (exit 5) at $how"
+    else
+        no "$tag: --max-memory=${lim}M under the ${read_mb} MB after-ingest reading did not stop as the guard says it does (exit $rc, stdout $( wc -c <"$TMP/$tag.out" | tr -d ' ' ) B): $( head -c 300 "$MLINE" )"
+    fi
+}
+if [ "$mpremise" = 1 ]; then
+    mstop M RIPWIRE_MEM_BUDGET_MB=0
+    mstop Mc X=1
 fi
 
 # ---- D: the band between the at-line reading and the peak. The tree must peak well over the 80 MB floor below in under
