@@ -24,7 +24,8 @@
 //              that would have terminated the search; formaxtokenscheck (E): the body ceiling moves no row)
 //              The doc rows the docs reorder moved hold the worst r= of U's shown set, so rows:N cuts them first: <sigs
 //              docs_after_code=> is recounted over the rows kept (absent at 0, its reading with it) — lane DA1, gate
-//              test/fordocsaftercodecheck.sh; the walk still prices U's count, so the rows kept are the ones kept before it
+//              test/fordocsaftercodecheck.sh; past_target= and files_first= likewise (lane HN1, test/forbudgetcountscheck.sh).
+//              The walk prices each state as it prints, recounts included
 // answer(B) = U with the SHORTEST prefix of that sequence removed whose est_tokens (plus the held blocks' price) is <= B; the whole sequence when none
 // is (the root then prices more than it names; a --max-tokens ceiling also says over_ceiling="1"). Three consequences the
 // gate (test/budgetmonotonecheck.sh) holds: B >= est(U) + its held blocks' price returns U byte for byte (a budget that fits cuts nothing, so it
@@ -806,36 +807,10 @@ private:
         return bytes;
     }
     std::size_t priceOf( const ShedState& st, bool over ) const { return estOf( st, disclosureBytes( st, over ) ); }
-    // lanes DA1, HN1: the bytes the recounts take off a state (each attribute's value or the attribute, and its reading). The WALK
-    // prices them back in at the count the fitter printed before the recounts existed — docs_after_code= U's, past_target= U's less
-    // the rows cut, files_first= U's clamped to the rows kept — so the shed chooses exactly the rows it chose then (selection is not
-    // these lanes' to move); render() prices the document it prints, so est_tokens= stays that document's price. Negative when the
-    // recount ADDS bytes (past_target= kept where `K - rowCut` dropped it while past rows were still shown): walkCharge.
-    std::ptrdiff_t recountBytes( const ShedState& st ) const
-    {
-        if( st.rowCut == 0 )
-        {
-            return 0;
-        }
-        std::ptrdiff_t bytes = 0;
-        for( std::size_t k = 0; k < kRecountKinds; ++k )
-        {
-            const std::size_t u    = recount_[k].u;
-            const std::size_t keep = sigRows_ - st.rowCut;
-            const std::size_t was  = k == kPastTarget ? ( u > st.rowCut ? u - st.rowCut : 0 ) : k == kFilesFirst ? std::min( u, keep ) : u;
-            bytes += recountAttrBytes( k, was ) - recountAttrBytes( k, keptOf( st, k ) ) + ( clauseErased( st, k ) ? std::ptrdiff_t( recount_[k].clauseLen ) : 0 );
-        }
-        return bytes;
-    }
-    static std::ptrdiff_t recountAttrBytes( std::size_t k, std::size_t n )
-    {
-        return n == 0 ? 0 : std::ssize( kRecountAttr[k] ) + std::ssize( std::string_view( " =\"\"" ) ) + std::ssize( std::to_string( n ) );
-    }
-    // what the walk charges a state over its printed disclosure: the bytes the recounts took off it, never fewer than none — the
-    // walk never prices a state below the document it prints, so a state it stops on still prints est_tokens= within the target
-    // (fornotesbudgetcheck (ST): a past_target= the old formula dropped came back, +6 tokens over a 1890 target at 6 rows)
-    std::ptrdiff_t walkCharge( const ShedState& st ) const { return std::max<std::ptrdiff_t>( recountBytes( st ), 0 ); }
-    std::size_t walkPriceOf( const ShedState& st ) const { return estOf( st, disclosureBytes( st, false ) + walkCharge( st ) ); }
+    // the price the walk cuts against: the document the state prints, its recounted docs_after_code= / past_target= / files_first=
+    // and their readings included (lane HN1's selection step: the walk had charged the larger of that and the price at the counts
+    // the fitter printed before the recounts, so an answer whose recount removed bytes kept the rows it kept before them)
+    std::size_t walkPriceOf( const ShedState& st ) const { return priceOf( st, false ); }
     // the price the token target cuts rows against: the ceiling's own disclosure (max_tokens= and its clause, beside a target) is
     // not the target's to pay, so a ceiling never moves a ranked row (formaxtokenscheck (E): the same rows with or without it)
     std::size_t rowsPriceOf( const ShedState& st ) const
@@ -844,7 +819,7 @@ private:
         const std::size_t ceiling = !both ? 0
                                   : std::string_view( " max_tokens=\"\"" ).size() + std::to_string( ask_.ceilingTokens ).size()
                                         + ( legendEnd_ != std::string_view::npos ? kForBudgetCeilingBesideTarget.size() : 0 );
-        return estOf( st, disclosureBytes( st, false ) + walkCharge( st ) - std::ptrdiff_t( ceiling ) );
+        return estOf( st, disclosureBytes( st, false ) - std::ptrdiff_t( ceiling ) );
     }
 
     std::vector<Swap> swapsFor( const ShedState& st ) const
