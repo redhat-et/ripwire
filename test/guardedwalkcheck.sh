@@ -56,13 +56,19 @@
 # AT(N): one file, class S with N overload pairs fK( T ) / fK( U ) and run( T x ) calling each: asks = 2N + 1 signatures
 # (run's own and both overloads of each fK), passes=1 (re-lexed per ask: passes = asks).
 #
+# The ladder's by-name cone test (ReceiverEvidence::inCone: is a candidate's owner the caller's class or a base?) walked the
+# caller class's bases once per CANDIDATE of every call, deduplicating every push by a linear scan of the whole frontier.
+# RECV-CONE-MEMO keeps each type's first kWalkCap classes and stops pushing past them (nothing there is ever read).
+# RC(16, M): 16 files with RootK / Base : RootK / Impl : Base, Impl's method calling r() M times — every call has 16
+# candidates, each asking about Impl's cone: asks = 16 x M x 16 (512, 2048), builds=1 at both (re-walked per ask: builds = asks).
+#
 # SW(4, M): Shape (deriving from Root) declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
 #   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
 #   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
 #   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again). Its `[mem] plausible reads=`
 #   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
 #   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8) and AT(8) are
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8) and RC(16, 8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -160,6 +166,20 @@ genat(){
     } >"$dir/s.cpp"
 }
 
+# genrc DIR K M — the ladder's by-name cone (see header): K files, each `struct RootK { void r(); }`, `struct Base : RootK` and
+# `struct Impl : Base` whose method calls r() M times (K candidates per call, each asked "is RootK in Impl's cone?")
+genrc(){
+    local dir="$1" k="$2" m="$3" f i
+    mkdir -p "$dir"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        {
+            printf 'struct Root%d { void r(); };\nstruct Base : Root%d { };\nstruct Impl : Base\n{\n    void run%d()\n    {\n' "$f" "$f" "$f"
+            for i in $( seq 1 "$m" ); do printf '        r();\n'; done
+            printf '    }\n};\n'
+        } >"$dir/f$f.cpp"
+    done
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -173,6 +193,7 @@ stats(){
     READS="$( printf '%s' "$OLINE" | sed -n 's/.* reads=\([0-9]*\).*/\1/p' )"
     BLINE="$( grep -F '[mem] base_edges ' "$TMP/$name.err" )"
     ALINE="$( grep -F '[mem] arg_type_chain ' "$TMP/$name.err" )"
+    RLINE="$( grep -F '[mem] recv_cone ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
@@ -183,6 +204,8 @@ GW2="$TMP/gw2"; gen "$GW2" "$K" 2
 GW8="$TMP/gw8"; gen "$GW8" "$K" 8
 
 BE8="$TMP/be8"; genbe "$BE8" 8
+RC2="$TMP/rc2"; genrc "$RC2" 16 2
+RC8="$TMP/rc8"; genrc "$RC8" 16 8
 AT2="$TMP/at2"; genat "$AT2" 2
 AT8="$TMP/at8"; genat "$AT8" 8
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
@@ -192,6 +215,8 @@ stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$RE
 stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
 
 stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
+stats RC2 "$RC2"; rcline2="$RLINE"
+stats RC8 "$RC8"; rcline8="$RLINE" rcrc=$RC
 stats AT2 "$AT2"; atline2="$ALINE"
 stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
@@ -272,6 +297,12 @@ if [ "$atrc" = 0 ] && [ "$atline8" = "$want" ] && [ "$atline2" = '[mem] arg_type
 else
     no "(B)(C) AT counter: want 'asks=5 passes=1' at N=2 and '$want' at N=8, got '${atline2:-<none>}' / '${atline8:-<none>}' (rc=$atrc)"
 fi
+want='[mem] recv_cone asks=2048 builds=1'
+if [ "$rcrc" = 0 ] && [ "$rcline8" = "$want" ] && [ "$rcline2" = '[mem] recv_cone asks=512 builds=1' ]; then
+    ok "(B)(C) RC: one cone walk per type however many candidates ask: $rcline2 at M=2, $rcline8 at M=8"
+else
+    no "(B)(C) RC counter: want 'asks=512 builds=1' at M=2 and '$want' at M=8, got '${rcline2:-<none>}' / '${rcline8:-<none>}' (rc=$rcrc)"
+fi
 want='[mem] subclass_walk clause_asks=64 clause_reads=8 levels=4'
 if [ "$sline8" = "$want" ]; then
     ok "(C) SW counter is exact: $sline8"
@@ -281,7 +312,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then

@@ -2573,6 +2573,9 @@ struct ReceiverEvidence
     std::vector<std::vector<NodeId>>                      classesByFile;   // fileId → class-like symbols sorted by start
     mutable std::string                                   key;
     mutable std::vector<std::string_view>                 frontier;
+    mutable HashMap<std::string, std::vector<std::string_view>> conesAbove;   // inCone: type -> coneAbove (RECV-CONE-MEMO)
+    mutable std::string                                   coneKey;
+    mutable std::size_t                                   coneAsks = 0, coneBuilds = 0;   // RIPWIRE_STATS `[mem] recv_cone`
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
     const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
@@ -2728,6 +2731,7 @@ struct ReceiverEvidence
     }
     void addBase( const std::string& owner, std::string_view base )
     {
+        conesAbove.clear();   // a kept cone may hold this owner's bases, or views into the list about to change
         std::vector<std::string>& e = embeds[ owner ];
         if( std::find( e.begin(), e.end(), base ) == e.end() )
         {
@@ -3668,27 +3672,49 @@ struct ReceiverEvidence
             for( const std::string& b : it->second ) { fn( std::string_view( b ) ); }
         }
     }
-    // is `ancestor` the class `type` or one of its (transitive) bases
+    // is `ancestor` the class `type` or one of its (transitive) bases — among the first kWalkCap classes of the breadth-first
+    // walk (each class once). RECV-CONE-MEMO (lane PF2, 2026-11-21): the ladder asks this once per CANDIDATE of every call
+    // (graph.h ladderProves), and the walk pushed every base of every class it expanded, deduplicated by a linear scan of the
+    // whole frontier — past kWalkCap too, though nothing past it is ever compared. With chaUp merging every base of a shared
+    // name, that was the whole of a cold llvm-project resolve loop (10,374 of 11,536 samples) once the narrowing walks were
+    // kept. A class at index >= kWalkCap is never read, and only blocks a later push that would also land past it, so the walk
+    // now stops pushing there; and the first kWalkCap classes are kept per type (addBase, which can change a type's bases,
+    // drops them).
     bool inCone( std::string_view type, std::string_view ancestor ) const
     {
         if( type.empty() || ancestor.empty() )
         {
             return false;
         }
+        ++coneAsks;
+        if( type == ancestor )
+        {
+            return true;
+        }
+        const std::vector<std::string_view>& above = coneAbove( type );
+        return std::find( above.begin(), above.end(), ancestor ) != above.end();
+    }
+    // the classes the walk from `type` reaches within its first kWalkCap, `type` itself left out (kept per type)
+    const std::vector<std::string_view>& coneAbove( std::string_view type ) const
+    {
+        coneKey.assign( type );
+        const auto [ kept, inserted ] = conesAbove.try_emplace( coneKey );
+        if( !inserted )
+        {
+            return kept->second;
+        }
+        ++coneBuilds;
         frontier.clear();
         frontier.push_back( type );
         for( std::size_t i = 0; i < frontier.size() && i < kWalkCap; ++i )
         {
-            if( frontier[ i ] == ancestor )
-            {
-                return true;
-            }
             forEachBase( frontier[ i ], [ & ]( std::string_view b )
             {
-                if( std::find( frontier.begin(), frontier.end(), b ) == frontier.end() ) { frontier.push_back( b ); }
+                if( frontier.size() < kWalkCap && std::find( frontier.begin(), frontier.end(), b ) == frontier.end() ) { frontier.push_back( b ); }
             } );
         }
-        return false;
+        kept->second.assign( frontier.begin() + 1, frontier.end() );   // views into chaUp / embeds, which addBase guards
+        return kept->second;
     }
     // visit `type`'s level (depth 0), then its base levels shallowest first, each class once: `visit( level, depth )`
     // returns true to stop. Returns whether a visit stopped the walk.
