@@ -7919,7 +7919,45 @@ struct IdentityNarrower
     // step (2): from the receiver class up the REAL inheritance level by level; the shallowest level whose classes define the
     // callee answers into hits (several defining classes at one level: their union, an honest split — unless two of them are
     // namesakes, then `ambiguous`). `declaredAlong` reports a bodiless declaration of the callee on any class visited.
+    // INHERITED-MEMO (lane PF2, 2026-11-21): the answer — hits, the result, whether a bodiless declaration was met, and the
+    // ambiguity verdict a defining level gave — depends on the receiver class and the callee NAME only (every table it reads
+    // is fixed for the loop), and the walk ran again for every call: after RECV-CONE-MEMO it was 6,342 of 10,110 samples of
+    // a cold llvm-project resolve loop. Kept per (class, callee); a replay leaves `hits` as the walk left it.
+    struct InheritedAnswer
+    {
+        rw::SmallVec<NodeId, 2> hits;
+        bool                    result   = false;
+        bool                    declared = false;
+        bool                    ambiguous = false;
+    };
+    mutable HashMap<std::string, InheritedAnswer> inheritedMemo;
+    mutable std::string                           inheritedKey;
+    mutable std::size_t                           inheritedAsks = 0, inheritedWalks = 0;   // RIPWIRE_STATS `[mem] inherited`
     bool inheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
+    {
+        ++inheritedAsks;
+        inheritedKey.assign( std::to_string( receiverClass ) ).push_back( '#' );
+        inheritedKey.append( r.calleeName );
+        auto [ kept, inserted ] = inheritedMemo.try_emplace( inheritedKey );
+        if( inserted )
+        {
+            ++inheritedWalks;
+            InheritedAnswer answer;
+            answer.result = walkInheritedDefinitions( r, receiverClass, ids, answer.declared, answer.ambiguous );
+            answer.hits   = hits;
+            kept          = inheritedMemo.find( inheritedKey );   // the walk inserts into no memo of this one, but re-find rather than trust it
+            kept->second  = std::move( answer );
+        }
+        const InheritedAnswer& answer = kept->second;
+        hits          = answer.hits;
+        declaredAlong = answer.declared || declaredAlong;
+        if( !answer.hits.empty() )
+        {
+            ambiguous = answer.ambiguous;   // the walk sets it only where a level's hits answer
+        }
+        return answer.result;
+    }
+    bool walkInheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
     {
         nextSeenGeneration( ids );
         markSeen( receiverClass );

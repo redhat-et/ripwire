@@ -63,9 +63,11 @@
 # candidates, each asking about Impl's cone: asks = 16 x M x 16 (512, 2048), builds=1 at both (re-walked per ask: builds = asks).
 #
 # SW(4, M): Shape (deriving from Root) declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
-#   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
+#   through Painter; use( Shape* s ) and use2( Shape* s ) call each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
 #   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
-#   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again). Its `[mem] plausible reads=`
+#   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again). Two callers (use, use2) ask
+#   every (Shape, fK): step (2)'s ancestor walk (inheritedDefinitions) runs once per pair — `[mem] inherited asks=16
+#   walks=8` (INHERITED-MEMO; walked per ask: walks=16). Its `[mem] plausible reads=`
 #   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
 #   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
 #   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8) and RC(16, 8) are
@@ -133,11 +135,13 @@ gensw(){
             printf '};\nstruct Square%d : Shape, Painter { };\n' "$c"
         } >"$dir/c$c.cpp"
     done
-    {
-        printf '#include "shape.h"\nvoid use( Shape* s )\n{\n'
-        for i in $( seq 0 $(( m - 1 )) ); do printf '    s->f%d();\n' "$i"; done
-        printf '}\n'
-    } >"$dir/use.cpp"
+    for c in use use2; do   # two callers make every (Shape, fK) question twice
+        {
+            printf '#include "shape.h"\nvoid %s( Shape* s )\n{\n' "$c"
+            for i in $( seq 0 $(( m - 1 )) ); do printf '    s->f%d();\n' "$i"; done
+            printf '}\n'
+        } >"$dir/$c.cpp"
+    done
 }
 
 # genbe DIR N — base-edge fan-in (see header): N files with `struct BaseK` and `struct Impl : BaseK`, N files with a
@@ -195,6 +199,7 @@ stats(){
     ALINE="$( grep -F '[mem] arg_type_chain ' "$TMP/$name.err" )"
     RLINE="$( grep -F '[mem] recv_cone ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
+    ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -220,7 +225,7 @@ stats RC8 "$RC8"; rcline8="$RLINE" rcrc=$RC
 stats AT2 "$AT2"; atline2="$ALINE"
 stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
-stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE"
+stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE"
 
 # ── (A) REACHED ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [ "$c8" -gt "$c2" ]; then
@@ -302,6 +307,12 @@ if [ "$rcrc" = 0 ] && [ "$rcline8" = "$want" ] && [ "$rcline2" = '[mem] recv_con
     ok "(B)(C) RC: one cone walk per type however many candidates ask: $rcline2 at M=2, $rcline8 at M=8"
 else
     no "(B)(C) RC counter: want 'asks=512 builds=1' at M=2 and '$want' at M=8, got '${rcline2:-<none>}' / '${rcline8:-<none>}' (rc=$rcrc)"
+fi
+want='[mem] inherited asks=16 walks=8'
+if [ "$iline8" = "$want" ]; then
+    ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
+else
+    no "(C) SW inherited counter: want '$want', got '${iline8:-<no inherited line>}'"
 fi
 want='[mem] subclass_walk clause_asks=64 clause_reads=8 levels=4'
 if [ "$sline8" = "$want" ]; then

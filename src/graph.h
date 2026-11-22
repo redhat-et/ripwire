@@ -14447,6 +14447,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] base_edges pairs={}\n", narrower.baseEdgePairs );
         rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
+        rw::emitTo( stderr, "[mem] inherited asks={} walks={}\n", narrower.identity.inheritedAsks, narrower.identity.inheritedWalks );
         rw::emitTo( stderr, "[mem] subclass_walk clause_asks={} clause_reads={} levels={}\n", narrower.identity.clauseAsks, narrower.identity.clauseReads,
                     narrower.identity.levelsQueued );
     }
