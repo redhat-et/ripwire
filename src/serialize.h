@@ -3325,12 +3325,11 @@ inline void dropUnmappedRows( const IngestResult& ing, std::vector<NodeId>& orde
 // order, the file groups and the honesty gauges — so the two dialects cannot drift on them; each dialect then writes the
 // same groups in its own spelling. Every step below is decided once and handed on as a const value.
 
-// C1-b: the row count the map WOULD print. It depends on topK and the printable rows alone — never on the ranking — so under
-// in=DIR's stub it is still the honest would_show=.
-inline std::size_t mapKeepCount( const IngestResult& ing, int topK ) noexcept
+// C1-b: the row count the map WOULD print. It depends on topK and the printable rows alone (`mapSymbols`, mapSymbolCount: the
+// rows dropUnmappedRows leaves) — never on the ranking — so under in=DIR's stub it is still the honest would_show=.
+inline std::size_t mapKeepCount( std::size_t mapSymbols, int topK ) noexcept
 {
-    const std::size_t mapS = mapSymbolCount( ing );   // the rows the map can print (dropUnmappedRows)
-    return std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapS, mapS );
+    return std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapSymbols, mapSymbols );
 }
 
 // The rank order the map's rows are drawn from: (rank desc, id asc) — the id tie-break makes the top-K deterministic — less
@@ -3348,16 +3347,11 @@ struct RankedMapRows
     }
 };
 
-// C1-b: under in=DIR's stub (`stubbed`) the map prints no symbol row, so every step that exists only to ORDER rows nobody
-// prints is skipped — the radix sort over every symbol among them — and the order is empty.
-inline RankedMapRows rankMapRows( const IngestResult& ing, const std::vector<float>& rank, const MapAnnotations& ann, std::size_t keep,
-                                  bool stubbed )
+// Not run under in=DIR's stub (planMap): the stub prints no symbol row, so the radix sort over every symbol would order rows
+// nobody prints, and the stub's order stays empty.
+inline RankedMapRows rankMapRows( const IngestResult& ing, const std::vector<float>& rank, const MapAnnotations& ann, std::size_t keep )
 {
     RankedMapRows ranked;
-    if( stubbed )
-    {
-        return ranked;
-    }
     ranked.order.resize( ing.symbols.size() );
     for( NodeId i = 0; i < ranked.order.size(); ++i )
     {
@@ -3393,20 +3387,30 @@ enum class MapEmitOrder : std::uint8_t
 // T3 note: the decision keys off the MAP's own estimate, NOT the payload — the fill-order heuristic reasons about the map that
 // gets reordered; the appended <bodies>/<sigs>/<src> blocks are emitted after and cannot be reordered, so they must not shift
 // the map's primacy/recency decision.
-inline MapEmitOrder decideMapEmitOrder( bool stable, bool mostImportantLast, bool autoOrder, std::size_t mapEstTokens ) noexcept
+// The caller's order flags, as asked; decideMapEmitOrder turns them into the one MapEmitOrder everything downstream reads.
+struct MapOrderRequest
 {
-    if( stable )
+    bool stable            = false;   // --stable
+    bool mostImportantLast = false;   // --most-important-last
+    bool autoOrder         = false;   // T3: the caller opted into the fill-aware flip
+};
+
+inline MapEmitOrder decideMapEmitOrder( const MapOrderRequest& asked, std::size_t mapEstTokens ) noexcept
+{
+    if( asked.stable )
     {
         return MapEmitOrder::Stable;
     }
-    if( mostImportantLast )
+    if( asked.mostImportantLast )
     {
         return MapEmitOrder::ImportantLast;
     }
-    return ( autoOrder && mapEstTokens > kFillOrderThreshold ) ? MapEmitOrder::ImportantLastAuto : MapEmitOrder::ImportantFirst;
+    return ( asked.autoOrder && mapEstTokens > kFillOrderThreshold ) ? MapEmitOrder::ImportantLastAuto : MapEmitOrder::ImportantFirst;
 }
 
-// What each emit order means downstream, as data: its order= spelling and whether the rank order is REVERSED (important-last).
+// What each emit order means downstream, as data: its order= spelling, whether the rank order is REVERSED (important-last),
+// and whether the map is --stable's byte-stable PREFIX — path/id order, no k= on a row, lens= in place of est_tokens= on <r>,
+// and the volatile stats moved to a trailing comment. Every one of those choices reads this trait, never the --stable flag.
 // order= marker: T3's auto-flip must be OBSERVABLE, not a silent behaviour change — "important-last(auto:fill)" is distinct
 // from the explicit "important-last" so a reader (or a diff) can tell the ordering was the fill-aware heuristic, not a
 // requested flag.
@@ -3414,17 +3418,20 @@ struct MapEmitOrderTraits
 {
     const char* orderAttr;
     bool        importantLast;
-};
-inline constexpr MapEmitOrderTraits kMapEmitOrderTraits[] = {
-    { "important-first", false },             // ImportantFirst
-    { "stable", false },                      // Stable
-    { "important-last", true },               // ImportantLast
-    { "important-last(auto:fill)", true },    // ImportantLastAuto
+    bool        stablePrefix;
 };
 
-inline const MapEmitOrderTraits& traitsOf( MapEmitOrder emitOrder ) noexcept
+// A switch with no default: -Werror=switch makes a new MapEmitOrder a compile error until it has its traits here.
+inline MapEmitOrderTraits emitOrderTraits( MapEmitOrder emitOrder ) noexcept
 {
-    return kMapEmitOrderTraits[ std::size_t( emitOrder ) ];
+    switch( emitOrder )
+    {
+        case MapEmitOrder::ImportantFirst:    return { .orderAttr = "important-first", .importantLast = false, .stablePrefix = false };
+        case MapEmitOrder::Stable:            return { .orderAttr = "stable", .importantLast = false, .stablePrefix = true };
+        case MapEmitOrder::ImportantLast:     return { .orderAttr = "important-last", .importantLast = true, .stablePrefix = false };
+        case MapEmitOrder::ImportantLastAuto: return { .orderAttr = "important-last(auto:fill)", .importantLast = true, .stablePrefix = false };
+    }
+    UNREACHABLE( "a MapEmitOrder outside its four enumerators" );
 }
 
 // Puts the rank-ordered file groups in the emit order: --stable sorts files by path and rows by symbol id (== file+line
@@ -3432,7 +3439,8 @@ inline const MapEmitOrderTraits& traitsOf( MapEmitOrder emitOrder ) noexcept
 inline void putMapGroupsInEmitOrder( const IngestResult& ing, MapEmitOrder emitOrder, std::vector<std::vector<NodeId>>& buckets,
                                      std::vector<std::uint32_t>& fileOrder )
 {
-    if( emitOrder == MapEmitOrder::Stable )
+    const MapEmitOrderTraits traits = emitOrderTraits( emitOrder );
+    if( traits.stablePrefix )
     {
         std::sort( fileOrder.begin(), fileOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[ a ] < ing.files[ b ]; } );
         for( std::vector<NodeId>& b : buckets )
@@ -3440,7 +3448,7 @@ inline void putMapGroupsInEmitOrder( const IngestResult& ing, MapEmitOrder emitO
             std::sort( b.begin(), b.end() );
         }
     }
-    else if( traitsOf( emitOrder ).importantLast )
+    else if( traits.importantLast )
     {
         std::reverse( fileOrder.begin(), fileOrder.end() );
         for( std::vector<NodeId>& b : buckets )
@@ -3452,7 +3460,8 @@ inline void putMapGroupsInEmitOrder( const IngestResult& ing, MapEmitOrder emitO
 
 // The printed rows grouped by file. Files are ordered by their best (first-seen) rank, and two row sets are decided over that
 // rank-ordered grouping BEFORE it is put in the emit order: MAP-STEM's one reserved stem-namesake row per shown file (added
-// to the buckets, after the kept rows) and the D7 inventory over the files the kept rows did NOT reach. Empty under the stub.
+// to the buckets, after the kept rows) and the D7 inventory over the files the kept rows did NOT reach. Not run under the stub
+// (planMap), whose groups stay empty: no files-sized bucket allocation, no fill loop.
 struct MapFileGroups
 {
     std::vector<std::vector<NodeId>> buckets;     // per file id: its printed rows, in emit order
@@ -3462,15 +3471,10 @@ struct MapFileGroups
 };
 
 template <class PathRel>
-inline MapFileGroups groupMapRowsByFile( const IngestResult& ing, const MapAnnotations& ann, std::span<const NodeId> kept, bool stubbed,
-                                         MapEmitOrder emitOrder, const std::vector<std::uint32_t>& outOff,
-                                         const std::vector<NodeId>& outTargets, const PathRel& pathRel )
+inline MapFileGroups groupMapRowsByFile( const IngestResult& ing, const MapAnnotations& ann, std::span<const NodeId> kept, MapEmitOrder emitOrder,
+                                         const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets, const PathRel& pathRel )
 {
     MapFileGroups groups;
-    if( stubbed )
-    {
-        return groups;   // C1-b: no files-sized bucket allocation, no fill loop
-    }
     groups.buckets.resize( ing.files.size() );
     std::vector<char> shownFile( ing.files.size(), 0 );   // exactly the printed <f> groups
     for( const NodeId id : kept )
@@ -3546,6 +3550,63 @@ inline MapHonestyGauges countMapHonestyGauges( const IngestResult& ing, const Ma
                              .nestRefusedFiles    = ing.crawlSkips.nestRefusedFiles };
 }
 
+// Whether in=DIR's stub (MapAnnotations::stubSymbols) replaces the symbol rows. The XML map honours it; the JSON map has no
+// stub spelling and always prints its rows. Named once, at the planMap call, so neither dialect re-reads the flag.
+enum class MapStubPolicy : std::uint8_t
+{
+    HonourAnnotation,
+    AlwaysPrintRows,
+};
+
+// WHAT a map prints, decided once for both dialects (planMap): the row cap, the rank order, the byte model, the emit order,
+// the file groups, the honesty gauges and the shown= count. Each dialect then only spells the plan.
+struct MapPlan
+{
+    bool             stubbed     = false;   // C1-b: in=DIR's stub prints no symbol row (MapStubPolicy)
+    std::size_t      symbolCount = 0;       // symbols=: the symbols the map ranks (mapSymbolCount), counted once per map
+    std::size_t      keep        = 0;       // the top-K cut; under the stub, the would_show= it would have printed
+    RankedMapRows    ranked;                // empty under the stub
+    TokenEstimate    mapEst;                // the byte MODEL: the T3 order oracle and the bytes/token rate (§H7)
+    MapEmitOrder     emitOrder   = MapEmitOrder::ImportantFirst;
+    MapFileGroups    groups;                // empty under the stub
+    MapHonestyGauges gauges;
+    std::size_t      shown       = 0;       // shown=: the kept rows plus the stem rows; 0 under the stub
+
+    // the rows inside the top-K cut (none under the stub)
+    std::span<const NodeId> kept() const noexcept { return ranked.kept( keep ); }
+};
+
+template <class PathRel>
+inline MapPlan planMap( const IngestResult& ing, const std::vector<float>& rank, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                        const MapAnnotations& ann, int topK, const MapOrderRequest& asked, const MapResolverCounters& counters, MapStubPolicy stubPolicy,
+                        const PathRel& pathRel )
+{
+    MapPlan plan;
+    plan.stubbed     = stubPolicy == MapStubPolicy::HonourAnnotation && ann.stubSymbols;
+    plan.symbolCount = mapSymbolCount( ing );
+    plan.keep        = mapKeepCount( plan.symbolCount, topK );
+    if( !plan.stubbed )
+    {
+        plan.ranked = rankMapRows( ing, rank, ann, plan.keep );
+    }
+    // T1/§H7: the byte MODEL. It decides the T3 emit order (which has to be decided before any byte exists — see §H7 at
+    // estimateTokens) and supplies the language-weighted bytes/token RATE, the half of it that is actually measured. It no
+    // longer REPORTS the size: each dialect measures est_tokens from its emitted bytes, because a model of the symbol set cannot
+    // see --metrics decoration or an appended payload. C1-b: under the stub the estimate is taken over no rows.
+    plan.mapEst    = estimateTokens( ing, plan.ranked.order, plan.kept().size(), outOff, outTargets );
+    plan.emitOrder = decideMapEmitOrder( asked, plan.mapEst.tokens );
+    ASSUME( emitOrderTraits( plan.emitOrder ).stablePrefix == asked.stable, "decideMapEmitOrder returns Stable exactly when --stable was asked" );
+    if( !plan.stubbed )
+    {
+        plan.groups = groupMapRowsByFile( ing, ann, plan.kept(), plan.emitOrder, outOff, outTargets, pathRel );
+    }
+    plan.gauges = countMapHonestyGauges( ing, counters );
+    plan.shown  = plan.stubbed ? 0 : plan.keep + plan.groups.stemPick.rows.size();
+    ASSUME( !plan.stubbed || ( plan.kept().empty() && plan.groups.fileOrder.empty() && plan.groups.inventory.entries.empty() ),
+            "the stub ranks and groups no row, so no kept-row legend clause and no <f> group can fire under it" );
+    return plan;
+}
+
 // The per-symbol facts a map row may print, gathered once from the emitter's parameters. Read-only; a nullptr source means
 // that attribute is never printed.
 struct MapRowSources
@@ -3558,8 +3619,8 @@ struct MapRowSources
     const std::vector<std::uint32_t>* ambOut;
     const std::vector<std::uint32_t>* locPinOut;
     const SparseLabels*               bind;
-    bool                              stable;    // --stable: no k= (PageRank is globally volatile)
-    bool                              metrics;   // --metrics: the descriptive Q-compute attributes
+    MapEmitOrder                      emitOrder;   // k= is absent on --stable's byte-stable prefix (emitOrderTraits().stablePrefix)
+    bool                              metrics;     // --metrics: the descriptive Q-compute attributes
     const std::vector<std::uint32_t>* fanIn;
     const std::vector<std::uint32_t>* cbo;
     const std::vector<std::uint8_t>*  tested;
@@ -3825,20 +3886,35 @@ inline std::size_t scipPinnedEdgeCount( const std::vector<std::uint8_t>* outProv
     return outProv ? std::size_t( std::count( outProv->begin(), outProv->end(), std::uint8_t( 1 ) ) ) : 0;
 }
 
-// The header gauges after the parse-honesty run: what the run covered and what it left out. Each is absent unless its fact
-// holds, so a default run over a tree with nothing to disclose stays byte-identical. Composed once per map.
-inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<std::uint8_t>* outProv, const MapAnnotations& ann )
+// What the run covered and what it left out, as the counts both dialects' headers state. Every one is ABSENT at 0 in both
+// spellings, so a default run over a tree with nothing to disclose stays byte-identical; each count's presence rule is decided
+// here, once, and the renderers only test > 0.
+struct MapCoverageFacts
+{
+    std::size_t scipPinnedEdges = 0;   // precise=: the out-edges a SCIP overlay pinned (scipPinnedEdgeCount)
+    std::size_t multiRootCount  = 0;   // roots=: the workspace's roots — 0 on a single root (A13: only N≥2 is stated)
+    std::size_t skippedOversize = 0;   // skipped_oversize=: files the crawl dropped for a per-file size ceiling (§P0.5d)
+};
+
+inline MapCoverageFacts mapCoverageFacts( const IngestResult& ing, const std::vector<std::uint8_t>* outProv ) noexcept
+{
+    return MapCoverageFacts{ .scipPinnedEdges = scipPinnedEdgeCount( outProv ),
+                             .multiRootCount  = ing.rootLabels.size() >= 2 ? ing.rootLabels.size() : 0,
+                             .skippedOversize = ing.skippedOversize.size() };
+}
+
+// The XML header's coverage attributes after the parse-honesty gauges, composed once per map.
+inline std::string renderMapCoverageAttrs( const IngestResult& ing, const MapCoverageFacts& c, const MapAnnotations& ann )
 {
     std::string attrs;
-    if( const std::size_t precise = scipPinnedEdgeCount( outProv ); precise > 0 )
+    if( c.scipPinnedEdges > 0 )
     {
-        attrs += " precise=" + std::to_string( precise );   // only when a SCIP overlay pinned something
+        attrs += " precise=" + std::to_string( c.scipPinnedEdges );   // only when a SCIP overlay pinned something
     }
-    // Multi-root workspace (A13): `roots=N` joins the header gauges and a `<root label= p=/>` prologue opens <r> — ONLY when
-    // N≥2 (single-root output byte-unchanged).
-    if( ing.rootLabels.size() >= 2 )
+    // Multi-root workspace (A13): `roots=N` joins the header gauges and a `<root label= p=/>` prologue opens <r>.
+    if( c.multiRootCount > 0 )
     {
-        attrs += " roots=" + std::to_string( ing.rootLabels.size() );
+        attrs += " roots=" + std::to_string( c.multiRootCount );
     }
     // D6: --map-diff's teleport-seed file count, ONLY when the caller passes changedCount (nullptr for every non-map-diff
     // caller ⇒ zero token cost, byte-identical golden map). A clean tree reports "changed=0" so the caller can see the
@@ -3851,9 +3927,9 @@ inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<
     // §P0.5d: how many otherwise-indexable files the crawl dropped for exceeding a per-file size ceiling — --max-file-size, or
     // (§B13.1) the .json lane's fixed 256 KB config ceiling that --max-file-size does not raise. `--max-file-size=8K` dropped
     // ~296 of ~759 files on this repo and files= reported the survivors as if they WERE the corpus.
-    if( !ing.skippedOversize.empty() )
+    if( c.skippedOversize > 0 )
     {
-        attrs += " skipped_oversize=" + std::to_string( ing.skippedOversize.size() );
+        attrs += " skipped_oversize=" + std::to_string( c.skippedOversize );
     }
     attrs += buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     attrs += buildUnindexedAttr( ing.crawlSkips );    // §L1: the LANGUAGES this build could not read at all
@@ -3862,6 +3938,13 @@ inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<
     // M1 — the UNTRACKED files left out of a build/ the crawl entered because git tracks files under it (model.h
     // CrawlSkips::untrackedBuild): absent at zero; defined in the --skipped legend (kUntrackedBuildLegend) and the compact legend.
     attrs += presentCountAttr( "untracked_build", ing.crawlSkips.untrackedBuildFiles );
+    return attrs;
+}
+
+// The XML header's budget attributes, right after the coverage ones: --max-tokens' asked count and the byte ceiling it became.
+inline std::string mapFitAttrs( const MapAnnotations& ann )
+{
+    std::string attrs;
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that was shaped by them,
     // so the ~10% the headroom leaves unused is a disclosed fact rather than a silent one. §F5: over_ceiling=1 rides the same
     // attr — a cap that can be overshot is not a cap, so where the map's fixed floor cannot fit inside fit_bytes the map states
@@ -3887,13 +3970,10 @@ inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<
 // unterminated comment). Composed on std::string, the margin question disappears.
 struct MapStatsFacts
 {
-    std::size_t             files;
-    std::size_t             symbols;      // the symbols the map ranks
-    std::size_t             edges;
-    std::size_t             shown;        // C1-b: 0 under the stub, which prints no row
-    const MapHonestyGauges& gauges;
-    std::string_view        coverageAttrs;
-    const char*             orderAttr;
+    const MapPlan&   plan;            // symbols=, shown=, the honesty gauges and order=
+    std::size_t      files;
+    std::size_t      edges;
+    std::string_view coverageAttrs;   // renderMapCoverageAttrs + mapFitAttrs
 };
 
 inline std::string renderMapStats( const MapStatsFacts& f, std::size_t estTokens, bool estModelled )
@@ -3905,28 +3985,29 @@ inline std::string renderMapStats( const MapStatsFacts& f, std::size_t estTokens
             out += key;  out += std::to_string( value );
         }
     };
+    const MapHonestyGauges& g = f.plan.gauges;
     std::string stats = "<!-- files=";
     stats += std::to_string( f.files );
-    stats += " symbols=";    stats += std::to_string( f.symbols );
+    stats += " symbols=";    stats += std::to_string( f.plan.symbolCount );
     stats += " edges=";      stats += std::to_string( f.edges );
-    stats += " shown=";      stats += std::to_string( f.shown );
+    stats += " shown=";      stats += std::to_string( f.plan.shown );
     stats += " est_tokens="; stats += std::to_string( estTokens );
     if( estModelled )
     {
         stats += " est_measured=0";   // the number beside it is the model (MapEstimate); absent ⇒ measured
     }
-    stats += " ambiguous=";  stats += std::to_string( f.gauges.ambiguous );
-    stats += " unresolved="; stats += std::to_string( f.gauges.unresolved );
-    gauge( stats, " locality_pinned=", f.gauges.localityPinned );
-    gauge( stats, " external=", f.gauges.external );                 // Phase 5
-    gauge( stats, " declined=", f.gauges.declined );                 // tier-3 declines, after external= so no adjacency moves
+    stats += " ambiguous=";  stats += std::to_string( g.ambiguous );
+    stats += " unresolved="; stats += std::to_string( g.unresolved );
+    gauge( stats, " locality_pinned=", g.localityPinned );
+    gauge( stats, " external=", g.external );                 // Phase 5
+    gauge( stats, " declined=", g.declined );                 // tier-3 declines, after external= so no adjacency moves
     // The parse-honesty gauges follow the call-resolution family (ambiguous= .. declined=), in this order, so declined= stays
     // adjacent to external= and the resolver's gauges read as one contiguous run.
-    gauge( stats, " extent_suspect_syms=", f.gauges.extentSuspectSyms );
-    gauge( stats, " macro_blanked_files=", f.gauges.macroBlankedFiles );
-    gauge( stats, " nest_refused=", f.gauges.nestRefusedFiles );     // #157: last of the parse-honesty gauges
+    gauge( stats, " extent_suspect_syms=", g.extentSuspectSyms );
+    gauge( stats, " macro_blanked_files=", g.macroBlankedFiles );
+    gauge( stats, " nest_refused=", g.nestRefusedFiles );     // #157: last of the parse-honesty gauges
     stats += f.coverageAttrs;
-    stats += " order=";      stats += f.orderAttr;
+    stats += " order=";      stats += emitOrderTraits( f.plan.emitOrder ).orderAttr;
     stats += " -->";
     return stats;
 }
@@ -3963,14 +4044,13 @@ struct MapRootFacts
 {
     const MapAnnotations& ann;
     std::string_view      rootArg;
-    bool                  stable;
-    const DataSectionsCut& dataSecCut;
-    std::size_t           stemCut;
+    const MapPlan&        plan;   // the byte-stable prefix (emit order), data_sections_cut= and stem_cut=
 };
 
 inline std::string renderMapRootTag( const MapRootFacts& r, std::size_t estTokens, bool estModelled, std::vector<char>& esc )
 {
-    const MapAnnotations& ann = r.ann;
+    const MapAnnotations& ann          = r.ann;
+    const bool            stablePrefix = emitOrderTraits( r.plan.emitOrder ).stablePrefix;
     // r26-stamp Task A: ` at="..."` ONLY when the caller passed a non-empty stamp (--map-diff); every other caller passes
     // nullptr, so the hot default-map path pays a pointer compare, not a git call. at= stays FIRST — the `<r at="<sha>` byte
     // sequence gitstampcheck.sh pins is unchanged.
@@ -3989,8 +4069,8 @@ inline std::string renderMapRootTag( const MapRootFacts& r, std::size_t estToken
     // budget-aware caller most needs was unreachable from the comment alone. The SAME `estTokens` value (one estimator).
     // --stable omits it on the precedent of the k= rank attribute: --stable buys a byte-stable PREFIX, the root element is
     // that prefix, and est_tokens is globally volatile.
-    if( !r.stable ) { char estAttr[ 40 ];  rw::formatTo( estAttr, sizeof( estAttr ), " est_tokens=\"{}\"", estTokens );  h += estAttr; }
-    if( !r.stable && estModelled ) { h += " est_measured=\"0\""; }   // beside the number it qualifies (MapEstimate)
+    if( !stablePrefix ) { char estAttr[ 40 ];  rw::formatTo( estAttr, sizeof( estAttr ), " est_tokens=\"{}\"", estTokens );  h += estAttr; }
+    if( !stablePrefix && estModelled ) { h += " est_measured=\"0\""; }   // beside the number it qualifies (MapEstimate)
     // W2-F: LAST on the root, after est_tokens — the same placement rule counts_floor= follows, so no existing
     // attribute-ADJACENCY assertion in test/ can break on it. NOT suppressed under --stable: the iteration count is a property
     // of the CORPUS and the ranker, not of the run's size, and a byte-stable prefix that hides "this ranking is unfinished"
@@ -4000,20 +4080,20 @@ inline std::string renderMapRootTag( const MapRootFacts& r, std::size_t estToken
     // `analyze` call gets) saw rows with no rank attribute and nothing saying the score exists elsewhere. lens= names what is
     // missing, so "absent" reads as "not served here", never as "not computed". Gate: test/mcpattrparitycheck.sh, whose lens=
     // arm also fails on a stale name.
-    if( r.stable ) { h += " lens=\"k,est_tokens\""; }
+    if( stablePrefix ) { h += " lens=\"k,est_tokens\""; }
     // L3 follow-up (CodeRabbit 4053600616): TRULY last, past every pre-existing attribute — same placement rule as lens= just
     // above, so no attribute-adjacency assertion in test/ can break on it.
     if( ann.notesDegraded ) { h += notes::kNotesDegradedAttr; }
     h += renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp=/churn= walk could not be read
     // The code-first pick's swaps, last of all (the same placement rule as the two above): absent when nothing was swapped.
-    if( r.dataSecCut.cut > 0 )
+    if( const DataSectionsCut& cut = r.plan.ranked.dataSecCut; cut.cut > 0 )
     {
-        h += " data_sections_cut=\"";  h += std::to_string( r.dataSecCut.cut );  h += "\"";
-        h += nextAttrXml( dataSectionsNext( r.dataSecCut ) );
+        h += " data_sections_cut=\"";  h += std::to_string( cut.cut );  h += "\"";
+        h += nextAttrXml( dataSectionsNext( cut ) );
     }
-    if( r.stemCut > 0 )
+    if( const std::size_t stemCut = r.plan.groups.stemPick.cut; stemCut > 0 )
     {
-        h += " stem_cut=\"";  h += std::to_string( r.stemCut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
+        h += " stem_cut=\"";  h += std::to_string( stemCut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
     }
     h += ">";   // K51: history_unread='s definition rides the leading legend (HISTORY-UNREAD-LEGEND), not behind this tag
     return h;
@@ -4025,7 +4105,7 @@ inline std::string renderMapRootTag( const MapRootFacts& r, std::size_t estToken
 // the disclosed locality pin (Phase 4). The cursor is the OUT POINTER, never a would-have-written length: lpin= is written AT
 // the offset the first write ended, so a count an implementation computed rather than wrote would place it inside the
 // half-written amb= attribute. Same defect class as BoundedAttrRun below.
-inline std::string rowGuessAttrs( const MapRowSources& src, NodeId id )
+inline std::string rowResolverGuessAttrs( const MapRowSources& src, NodeId id )
 {
     char        ambs[ 48 ];  ambs[ 0 ] = '\0';
     char*       ap = ambs;
@@ -4043,12 +4123,12 @@ inline std::string rowGuessAttrs( const MapRowSources& src, NodeId id )
     return ambs;
 }
 
-// PageRank k= is GLOBALLY volatile (any edit perturbs every rank) → omitted in --stable mode so the prefix stays byte-identical
-// for unedited files (provider KV-cache hits). Default keeps k=.
+// PageRank k= is GLOBALLY volatile (any edit perturbs every rank) → omitted on --stable's byte-stable prefix so the prefix stays
+// byte-identical for unedited files (provider KV-cache hits). Default keeps k=.
 inline std::string rowRankAttr( const MapRowSources& src, NodeId id )
 {
     char kbuf[ 24 ];  kbuf[ 0 ] = '\0';
-    if( !src.stable )
+    if( !emitOrderTraits( src.emitOrder ).stablePrefix )
     {
         rw::formatTo( kbuf, sizeof( kbuf ), " k=\"{:.4f}\"", double( src.rank[ id ] ) );
     }
@@ -4162,27 +4242,24 @@ inline void appendQMetricAttrs( BoundedAttrRun& run, const Symbol& s, NodeId id,
     }
 }
 
-// The row's descriptive attributes as ONE run after its identity attributes: under --metrics with fan-in, in=/out=/cx=/ccx=,
-// role="hub" at fan-in ≥ 8 and the Q-compute run first; then amb=/lpin= and k=. Composed in one fixed buffer, as always, so a
-// run past its width truncates at the byte it always did.
-inline std::string rowDescriptiveAttrs( const Symbol& s, NodeId id, const MapRowSources& src )
+// The row's --metrics run (only with fan-in): in=/out=/cx=/ccx=, role="hub" at fan-in ≥ 8, then the Q-compute run.
+// EQUIVALENCE (GE-SERIALIZE round 2): this run, amb=/lpin= and k= used to share one attr[352] buffer, so a run past its width
+// would have truncated across all three. None ever did: the widest is 26 B of literal + 4 × 10 digits + 11 B role + the
+// BoundedAttrRun's 191 + amb=/lpin=' 35 + k=' 23 = 326 B < 351 (test/fixedbufsweep.sh's attr row), so writing the three as
+// separate writes is byte-identical — and this buffer alone now has 83 B of headroom.
+inline std::string rowMetricsAttrs( const Symbol& s, NodeId id, const MapRowSources& src )
 {
+    if( !src.metrics || !src.fanIn )
+    {
+        return {};
+    }
+    BoundedAttrRun qmetrics;
+    appendQMetricAttrs( qmetrics, s, id, src );
+    const std::uint32_t in        = ( id < src.fanIn->size() ) ? ( *src.fanIn )[ id ] : 0u;
     const std::uint32_t outDegree = src.outOff[ id + 1 ] - src.outOff[ id ];
-    const std::string   guesses   = rowGuessAttrs( src, id );
-    const std::string   rankAttr  = rowRankAttr( src, id );
     char                attr[ 352 ];
-    if( src.metrics && src.fanIn )
-    {
-        BoundedAttrRun qmetrics;
-        appendQMetricAttrs( qmetrics, s, id, src );
-        const std::uint32_t in = ( id < src.fanIn->size() ) ? ( *src.fanIn )[ id ] : 0u;
-        rw::formatTo( attr, sizeof( attr ), " in=\"{}\" out=\"{}\" cx=\"{}\" ccx=\"{}\"{}{}{}{}",
-                      in, outDegree, s.cx, s.ccx, ( in >= 8 ? " role=\"hub\"" : "" ), qmetrics.c_str(), guesses, rankAttr );
-    }
-    else
-    {
-        rw::formatTo( attr, sizeof( attr ), "{}{}", guesses, rankAttr );
-    }
+    rw::formatTo( attr, sizeof( attr ), " in=\"{}\" out=\"{}\" cx=\"{}\" ccx=\"{}\"{}{}",
+                  in, outDegree, s.cx, s.ccx, ( in >= 8 ? " role=\"hub\"" : "" ), qmetrics.c_str() );
     return attr;
 }
 
@@ -4227,7 +4304,9 @@ inline void writeMapSymbolRow( XmlWriter& w, const IngestResult& ing, const Over
     {
         w.write( " bind=\"" );  w.write( escapeXml( label, esc ) );  w.write( "\"" );
     }
-    w.write( rowDescriptiveAttrs( s, id, src ) );
+    w.write( rowMetricsAttrs( s, id, src ) );          // --metrics: in=/out=/cx=/ccx=/role= and the Q-compute run
+    w.write( rowResolverGuessAttrs( src, id ) );       // amb= / lpin=, each absent at 0
+    w.write( rowRankAttr( src, id ) );                 // k=, absent on --stable's byte-stable prefix
     // EXTENT HONESTY (kExtentSuspectRowLegend): the containment checks this row's extent/scope/kind failed. After k= so every
     // pre-existing adjacency holds; absent when every check held (clean corpora unchanged).
     if( s.extentSuspect != 0 )
@@ -4296,17 +4375,19 @@ inline void writeSymbolMapStub( XmlWriter& w, std::size_t keep, std::string_view
 // <r>'s children, as ONE renderer serialize()'s measured path and its degrade path both call: the multi-root prologue, F3's
 // recent files (rank_by=churn-decay's file-level answer, before the symbol map), the stub or the <f> groups, and the D7
 // inventory tier. The inventory rides the LOW-importance end of the document — after the rows, or before them when the map
-// is emitted important-last, so the top-ranked rows keep the end position that order promises.
+// is emitted important-last, so the top-ranked rows keep the end position that order promises. That placement is the XML
+// document's own: <r>'s children are a sequence a reader meets in order, while the JSON map's "inv" is a key of one object,
+// where a position carries nothing — so it stays here rather than in MapPlan (moving it would also move JSON bytes).
 template <class PathRel>
-inline void writeMapChildren( XmlWriter& w, const IngestResult& ing, const MapAnnotations& ann, std::size_t keep, const MapFileGroups& groups,
-                              MapEmitOrder emitOrder, const MapRowSources& src, const PathRel& pathRel, std::vector<char>& esc,
-                              std::vector<std::uint32_t>& scratch )
+inline void writeMapChildren( XmlWriter& w, const IngestResult& ing, const MapAnnotations& ann, const MapPlan& plan, const MapRowSources& src,
+                              const PathRel& pathRel, std::vector<char>& esc, std::vector<std::uint32_t>& scratch )
 {
+    const MapFileGroups& groups = plan.groups;
     writeRootLabelRows( w, ing, esc );   // A13: the multi-root prologue
     writeRecentRows( w, ann, pathRel, esc );
-    if( ann.stubSymbols )
+    if( plan.stubbed )
     {
-        writeSymbolMapStub( w, keep, ann.stubNext );
+        writeSymbolMapStub( w, plan.keep, ann.stubNext );
     }
     const auto writeInventory = [ & ]()
     {
@@ -4315,7 +4396,7 @@ inline void writeMapChildren( XmlWriter& w, const IngestResult& ing, const MapAn
             writeMapInventoryXml( w, ing, groups.inventory, pathRel, src.outOff, src.outTargets, src.outProv, src.outNameOnly, esc, scratch );
         }
     };
-    const bool inventoryFirst = traitsOf( emitOrder ).importantLast;   // --stable's path order wins, as it does for the rows
+    const bool inventoryFirst = emitOrderTraits( plan.emitOrder ).importantLast;   // --stable's path order wins, as it does for the rows
     if( inventoryFirst )
     {
         writeInventory();
@@ -4443,41 +4524,29 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
     };
 
-    // ── WHICH rows, in WHICH order ──────────────────────────────────────────────────────────────────────────────────
-    const bool                    stubbed = ann.stubSymbols;   // C1-b: in=DIR's stub prints no symbol row
-    const std::size_t             keep    = mapKeepCount( ing, topK );
-    const RankedMapRows           ranked  = rankMapRows( ing, rank, ann, keep, stubbed );
-    const std::span<const NodeId> kept    = ranked.kept( keep );
-    // T1/§H7: the byte MODEL. It decides the T3 emit order (which has to be decided before any byte exists — see §H7 at
-    // estimateTokens) and supplies the language-weighted bytes/token RATE, the half of it that is actually measured. It no
-    // longer REPORTS the size: est_tokens is computed from the document's emitted bytes in PHASE 2 below, because a model of
-    // the symbol set cannot see --metrics decoration or an appended payload. C1-b: under the stub the estimate is taken over
-    // no rows, since the document contains none.
-    const TokenEstimate       mapEst    = estimateTokens( ing, ranked.order, kept.size(), outOff, outTargets );
-    const MapEmitOrder        emitOrder = decideMapEmitOrder( stable, mostImportantLast, autoOrder, mapEst.tokens );
-    const MapFileGroups       groups    = groupMapRowsByFile( ing, ann, kept, stubbed, emitOrder, outOff, outTargets, pathRel );
-    const MapHonestyGauges    gauges    = countMapHonestyGauges( ing, MapResolverCounters{ .ambOut = ambOut, .unresolvedOut = unresolvedOut, .locPinOut = locPinOut,
-                                                                                         .declinedOut = declinedOut, .externalCalls = externalCalls,
-                                                                                         .gateDeclinedCalls = gateDeclinedCalls,
-                                                                                         .stdMemberDeclined = stdMemberDeclinedCalls,
-                                                                                         .inertDeclinedCalls = inertDeclinedCalls } );
-    ASSUME( !stubbed || ( kept.empty() && groups.fileOrder.empty() && groups.inventory.entries.empty() ),
-            "the stub ranks and groups no row, so no kept-row legend clause and no <f> group can fire under it" );
+    // ── WHICH rows, in WHICH order: the plan both dialects share; the XML map honours in=DIR's stub ─────────────────────
+    const MapPlan plan = planMap( ing, rank, outOff, outTargets, ann, topK,
+                                  MapOrderRequest{ .stable = stable, .mostImportantLast = mostImportantLast, .autoOrder = autoOrder },
+                                  MapResolverCounters{ .ambOut = ambOut, .unresolvedOut = unresolvedOut, .locPinOut = locPinOut,
+                                                       .declinedOut = declinedOut, .externalCalls = externalCalls,
+                                                       .gateDeclinedCalls = gateDeclinedCalls, .stdMemberDeclined = stdMemberDeclinedCalls,
+                                                       .inertDeclinedCalls = inertDeclinedCalls },
+                                  MapStubPolicy::HonourAnnotation, pathRel );
     std::vector<char> esc;
 
     // ── the legend, clause group by clause group, in the order the reader meets them ──────────────────────────────
     std::string legend = mapOpeningLegend( outProv != nullptr );
     legend += moduleScopeLegend( ing );
-    legend += keptImplEdgeLegend( outOff, outProv, kept, groups.inventory.entries );
+    legend += keptImplEdgeLegend( outOff, outProv, plan.kept(), plan.groups.inventory.entries );
     legend += typeKindLegend( ing );
-    legend += gaugeLegend( gauges, kParseHonestyClauses );
+    legend += gaugeLegend( plan.gauges, kParseHonestyClauses );
     legend += runAnnotationLegend( ing, ann, rootArg, metrics );
-    legend += rowSelectionLegend( ranked.dataSecCut, groups );
+    legend += rowSelectionLegend( plan.ranked.dataSecCut, plan.groups );
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty for a lexical or
     // HITS ordering, and the prose half only on the map whose iteration stopped short.
     legend += renderDisclosure( ann.prDisclosure, DiscloseAs::LegendComment );
-    legend += gaugeLegend( gauges, kDeclineClauses );
-    legend += keptNameEdgeLegend( outOff, outNameOnly, kept, ann.viaLegendStripped );
+    legend += gaugeLegend( plan.gauges, kDeclineClauses );
+    legend += keptNameEdgeLegend( outOff, outNameOnly, plan.kept(), ann.viaLegendStripped );
     // K51: history_unread='s definition, the LAST leading clause, so it stands right before the <r> root it marks and inside the
     // leading block every reader (and legendcoveragecheck's full rows) meets first; absent unless the amp=/churn= walk was unread.
     legend += renderHistoryUnread( DiscloseAs::LegendComment );
@@ -4488,12 +4557,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // the identical reason. Pure functions of estTokens, the values decided above and the estimate sink's state.
     // --stable: the volatile counts move to a TRAILING comment (out of the cacheable prefix) — unless the caller asked for the
     // first-screen placement (§B6 M10, the MCP analyze verb). Exactly one of the two builders emits the stats.
-    const bool          statsTrail    = stable && !statsFirstScreen;
-    const std::string   coverageAttrs = mapCoverageAttrs( ing, outProv, ann );
-    const MapStatsFacts statsFacts{ .files = ing.files.size(), .symbols = mapSymbolCount( ing ), .edges = outTargets.size(),
-                                    .shown = stubbed ? std::size_t( 0 ) : keep + groups.stemPick.rows.size(),
-                                    .gauges = gauges, .coverageAttrs = coverageAttrs, .orderAttr = traitsOf( emitOrder ).orderAttr };
-    const MapRootFacts  rootFacts{ .ann = ann, .rootArg = rootArg, .stable = stable, .dataSecCut = ranked.dataSecCut, .stemCut = groups.stemPick.cut };
+    const bool          statsTrail    = emitOrderTraits( plan.emitOrder ).stablePrefix && !statsFirstScreen;
+    const std::string   coverageAttrs = renderMapCoverageAttrs( ing, mapCoverageFacts( ing, outProv ), ann ) + mapFitAttrs( ann );
+    const MapStatsFacts statsFacts{ .plan = plan, .files = ing.files.size(), .edges = outTargets.size(), .coverageAttrs = coverageAttrs };
+    const MapRootFacts  rootFacts{ .ann = ann, .rootArg = rootArg, .plan = plan };
     MapEstimate         estimate{ ann.payloadUncharged };   // the est_tokens measurement's DISCLOSE sink — read by the builders
     const auto buildHead = [ & ]( std::size_t estTokens ) -> std::string
     {
@@ -4520,18 +4587,18 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // measure, decide, then write (the order --recall's emitRecallBudgeted and the --for lens's pre-rendered sigs block
     // already impose on themselves).
     const MapRowSources rowSources{ .rank = rank, .outOff = outOff, .outTargets = outTargets, .outProv = outProv, .outNameOnly = outNameOnly,
-                                    .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .stable = stable, .metrics = metrics,
+                                    .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .emitOrder = plan.emitOrder, .metrics = metrics,
                                     .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp };
     std::vector<std::uint32_t> hedgedScratch;   // FE-B: writeMapCalleeRows' reused buffer
     const auto writeChildren = [ & ]( XmlWriter& w )
     {
-        writeMapChildren( w, ing, ann, keep, groups, emitOrder, rowSources, pathRel, esc, hedgedScratch );
+        writeMapChildren( w, ing, ann, plan, rowSources, pathRel, esc, hedgedScratch );
     };
     // DEGRADE, one path for both failures (a buffer that did not open, or one that opened and then lost a write — by then the
     // children were already spent into it, so they are rendered again): the head goes out FIRST carrying the MODELLED estimate
     // (the pre-§H7 number, so no worse than the old behaviour and never a fabricated one), the children stream straight to
     // `out` behind it, then the trailing summary. The whole map, uncharged.
-    const std::size_t modelledTokens = mapEst.tokens + extraPayloadTokens;
+    const std::size_t modelledTokens = plan.mapEst.tokens + extraPayloadTokens;
     const auto emitModelled = [ & ]()
     {
         XmlWriter direct( out );
@@ -4571,7 +4638,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         return;
     }
     const std::string_view childrenStr = children.bytes;   // owned by childStream, alive to the end of this function
-    const SettledHeadTail  settled     = settleEstTokens( modelledTokens, childrenStr.size(), mapEst.bytesPerToken(), extraPayloadTokens, buildHead, buildTail );
+    const SettledHeadTail  settled     = settleEstTokens( modelledTokens, childrenStr.size(), plan.mapEst.bytesPerToken(), extraPayloadTokens, buildHead, buildTail );
     if( outEstTokens )
     {
         *outEstTokens = settled.estTokens; // --token-budget reads THIS value — never a second counter
@@ -11710,35 +11777,24 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
 }
 
 // The default map's JSON header — the gauge block plus the two prologues that ride on it, in one place so
-// "which gauge, in which order, on which condition" is stated once rather than smeared through the emitter.
-// The XML sibling states the same set through its `stats` snprintf + the <root> prologue in serialize().
+// "which gauge, in which order, on which condition" is stated once rather than smeared through the emitter. Its counts are the
+// plan's and the coverage facts' — the same values the XML header spells (renderMapStats, renderMapCoverageAttrs,
+// renderMapRootTag), never a second count.
 struct JsonMapHeader
 {
-    const IngestResult&              ing;
-    std::size_t                      symbolCount;
-    std::size_t                      edgeCount;
-    std::size_t                      shownCount;
-    std::size_t                      estTokens;
-    std::size_t                      ambiguousCount;
-    std::size_t                      unresolvedCount;
-    const char*                      orderAttr;
-    const std::vector<std::uint8_t>* outProv;      // nullptr ⇒ no precise= (nothing was measured)
-    const MapAnnotations*            ann;          // §B1.2: how THIS map was produced — the same at/rank_by/window
-                                                   // stamp the XML `<r>` element carries. nullptr ⇒ no stamp emitted.
-    std::string_view                 rootArg;      // R-E: the JSON twin of the XML `<r root="…">` — empty for
-                                                    // multi-root (its own roots_count/roots table below already
-                                                    // names every root) or a caller that never passes one.
-    std::size_t                      localityPinnedCount = 0;   // Phase 4: Σ lpin — "locality_pinned":N, absent when 0
-    std::size_t                      externalCount = 0;         // Phase 5: the veto's refusals — "external":N, absent when 0
-    std::size_t                      declinedCount = 0;         // tier 3's declines — "declined":N, absent when 0
-    std::size_t                      extentSuspectCount = 0;    // extent honesty: "extent_suspect_syms":N, absent when 0
-    std::size_t                      macroBlankedCount  = 0;    // member-macro re-parse: "macro_blanked_files":N, absent when 0
-    std::size_t                      nestRefusedCount   = 0;    // #157: "nest_refused":N, the JSON twin of the XML nest_refused=, absent when 0
-    bool                             isEstModelled      = false;   // MapEstimate: "est_measured":false, absent when measured
-    DataSectionsCut                  dataSectionsCut    = {};      // the code-first pick's swaps: "data_sections_cut":N + "next", absent at N=0
-    std::size_t                      stemCut            = 0;       // MAP-STEM: "stem_cut":N, the XML stem_cut=, absent at N=0
-    std::string_view                 memoryPeakJson     = {};      // buildMemoryPeakAttr( ing, true ), read ONCE per serializeJson call (the
-                                                                   // peak reading only rises and the seam counts calls); kept last, the struct is filled positionally
+    const IngestResult&     ing;
+    const MapPlan&          plan;            // symbols, shown, the honesty gauges, order, data_sections_cut, stem_cut
+    const MapCoverageFacts& coverage;        // precise, skipped_oversize, roots_count
+    std::size_t             edgeCount;
+    std::size_t             estTokens;
+    bool                    isEstModelled;   // MapEstimate: "est_measured":false, absent when measured
+    const MapAnnotations&   ann;             // §B1.2: how THIS map was produced — the same at/rank_by/window stamp the XML `<r>`
+                                             // element carries
+    std::string_view        rootArg;         // R-E: the JSON twin of the XML `<r root="…">` — empty for multi-root (its own
+                                             // roots_count/roots table below already names every root) or a caller that never
+                                             // passes one.
+    std::string_view        memoryPeakJson;  // buildMemoryPeakAttr( ing, true ), read ONCE per serializeJson call (the peak
+                                             // reading only rises and the seam counts calls)
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -11748,13 +11804,8 @@ struct JsonMapHeader
 // Same absent-unless-produced rule as the XML: a default map passes no annotations ⇒ zero bytes, byte-
 // identical output. `changed` (--map-diff) has no arm here on purpose — see the coverage note above
 // serializeJson: jsonUnsupportedVerb refuses --map-diff before this emitter is ever reached.
-inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotations* ann )
+inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotations& ann )
 {
-    if( !ann )
-    {
-        return;
-    }
-
     // §B12.6 (CA4): `at`'s ABSENCE had two meanings inside one dialect. Five JSON emitters (quality-delta,
     // test-gate, cochange, plan-lanes, the MCP quality_delta twin) write `"at":null` when the root has no
     // HEAD to anchor to — "we tried, there is nothing" — while this one OMITTED the key in the same state,
@@ -11767,32 +11818,32 @@ inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotat
     // no churn ranking) emits no key, which is also what the XML does, so the 1:1 attr/key correspondence
     // holds in every state. The windowless rank_by= stamps (authority/hub/rrf) attempt no anchor and are
     // deliberately outside the predicate, exactly as they are on the XML side.
-    const bool didAttemptAtStamp = ( ann->changedCount != nullptr ) || ( ann->churnWindow != nullptr );
+    const bool didAttemptAtStamp = ( ann.changedCount != nullptr ) || ( ann.churnWindow != nullptr );
     if( didAttemptAtStamp )
     {
         w.write( ",\"at\":" );
-        if( ann->atStamp != nullptr && !ann->atStamp->empty() )
+        if( ann.atStamp != nullptr && !ann.atStamp->empty() )
         {
-            writeJsonStr( w, *ann->atStamp, esc );
+            writeJsonStr( w, *ann.atStamp, esc );
         }
         else
         {
             w.write( "null" );
         }
     }
-    if( ann->churnWindow != nullptr )
+    if( ann.churnWindow != nullptr )
     {
         w.write( ",\"rank_by\":" );                            // P0-4: which churn ranker — "churn" or "churn-decay"
-        writeJsonStr( w, ann->churnRankLabel, esc );
+        writeJsonStr( w, ann.churnRankLabel, esc );
         w.write( ",\"window\":" );
-        writeJsonStr( w, *ann->churnWindow, esc );
+        writeJsonStr( w, *ann.churnWindow, esc );
     }
     // §B2.1: authority/hub/rrf carry no window, so they stamp rank_by alone — the JSON half of the XML arm
     // above, symmetric with it, so the two dialects still cannot disagree about how a map was produced.
-    else if( ann->rankByLabel != nullptr )
+    else if( ann.rankByLabel != nullptr )
     {
         w.write( ",\"rank_by\":" );
-        writeJsonStr( w, std::string_view( ann->rankByLabel ), esc );
+        writeJsonStr( w, std::string_view( ann.rankByLabel ), esc );
     }
 
     // §C4 — the --max-tokens fit, in the dialect that was missing it. `--max-tokens=N --json` shaped the map and
@@ -11809,13 +11860,13 @@ inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotat
     // without naming the dialect it was measured against would replace one silence with a false implication.
     // The XML needs no such key because the XML is the measured dialect. Fixing the SEARCH to measure the
     // emitted dialect is a main.cpp change and is recorded as a residual, not smuggled in here.
-    if( ann->maxTokensFit != nullptr )
+    if( ann.maxTokensFit != nullptr )
     {
         char fit[ 160 ];
         rw::formatTo( fit, sizeof( fit ), ",\"max_tokens\":{},\"fit_bytes\":{},\"fit_measured_in\":\"xml\"{}{}",
-                       ann->maxTokensFit->askedTokens, ann->maxTokensFit->ceilingBytes,
-                       ann->maxTokensFit->isOverCeiling || ann->maxTokensFit->isUnmeasured ? ",\"over_ceiling\":true" : "",
-                       ann->maxTokensFit->isUnmeasured ? ",\"fit_unmeasured\":true" : "" );
+                       ann.maxTokensFit->askedTokens, ann.maxTokensFit->ceilingBytes,
+                       ann.maxTokensFit->isOverCeiling || ann.maxTokensFit->isUnmeasured ? ",\"over_ceiling\":true" : "",
+                       ann.maxTokensFit->isUnmeasured ? ",\"fit_unmeasured\":true" : "" );
         w.write( fit );
     }
 }
@@ -11861,55 +11912,56 @@ inline void writeJsonUnindexed( JsonWriter& w, std::string& esc, const CrawlSkip
 
 inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHeader& h )
 {
+    const MapHonestyGauges& g = h.plan.gauges;
     char hdr[ 256 ];   // the gauge line has 7 size_t fields — wider than the per-symbol scratch
     rw::formatTo( hdr, sizeof( hdr ), "{{\"files\":{},\"symbols\":{},\"edges\":{},\"shown\":{},\"est_tokens\":{},\"ambiguous\":{},\"unresolved\":{},",
-                   h.ing.files.size(), h.symbolCount, h.edgeCount, h.shownCount, h.estTokens, h.ambiguousCount, h.unresolvedCount );
+                   h.ing.files.size(), h.plan.symbolCount, h.edgeCount, h.plan.shown, h.estTokens, g.ambiguous, g.unresolved );
     w.write( hdr );
     if( h.isEstModelled )
     {
         w.write( "\"est_measured\":false," );   // the XML est_measured="0" twin: est_tokens above is the model
     }
     // Phase 4: the S6-C locality-pin gauge — same absent-when-zero rule as the XML `locality_pinned=`.
-    if( h.localityPinnedCount > 0 )
+    if( g.localityPinned > 0 )
     {
-        rw::formatTo( hdr, sizeof( hdr ), "\"locality_pinned\":{},", h.localityPinnedCount );
+        rw::formatTo( hdr, sizeof( hdr ), "\"locality_pinned\":{},", g.localityPinned );
         w.write( hdr );
     }
     // Phase 5: the external-name veto gauge — the JSON twin of the XML `external=`, same absent-when-zero rule.
-    if( h.externalCount > 0 )
+    if( g.external > 0 )
     {
-        rw::formatTo( hdr, sizeof( hdr ), "\"external\":{},", h.externalCount );
+        rw::formatTo( hdr, sizeof( hdr ), "\"external\":{},", g.external );
         w.write( hdr );
     }
     // tier 3's declines — the JSON twin of the XML `declined=`, same absent-when-zero rule.
-    if( h.declinedCount > 0 )
+    if( g.declined > 0 )
     {
-        rw::formatTo( hdr, sizeof( hdr ), "\"declined\":{},", h.declinedCount );
+        rw::formatTo( hdr, sizeof( hdr ), "\"declined\":{},", g.declined );
         w.write( hdr );
     }
     // extent honesty: the JSON twin of the XML header's extent_suspect_syms=, same absent-when-zero rule and the
     // XML header's order (after the call-resolution family, declined included).
-    if( h.extentSuspectCount > 0 )
+    if( g.extentSuspectSyms > 0 )
     {
-        w.write( "\"extent_suspect_syms\":" + std::to_string( h.extentSuspectCount ) + "," );   // composed, not a fixed buffer
+        w.write( "\"extent_suspect_syms\":" + std::to_string( g.extentSuspectSyms ) + "," );   // composed, not a fixed buffer
     }
     // member-macro re-parse: the JSON twin of the XML header's macro_blanked_files=, same absent-when-zero rule.
-    if( h.macroBlankedCount > 0 )
+    if( g.macroBlankedFiles > 0 )
     {
-        w.write( "\"macro_blanked_files\":" + std::to_string( h.macroBlankedCount ) + "," );
+        w.write( "\"macro_blanked_files\":" + std::to_string( g.macroBlankedFiles ) + "," );
     }
     // #157: the JSON twin of the XML header's nest_refused=, same absent-when-zero rule.
-    if( h.nestRefusedCount > 0 )
+    if( g.nestRefusedFiles > 0 )
     {
-        w.write( "\"nest_refused\":" + std::to_string( h.nestRefusedCount ) + "," );
+        w.write( "\"nest_refused\":" + std::to_string( g.nestRefusedFiles ) + "," );
     }
 
     // §P0.5d, JSON lane: the size-ceiling disclosure must reach --json consumers too — the XML header
     // gained skipped_oversize= and a JSON reader (MCP clients most of all) must not be the one audience
     // still shown the survivors as if they were the corpus. Same absent-when-zero rule as the XML side.
-    if( !h.ing.skippedOversize.empty() )
+    if( h.coverage.skippedOversize > 0 )
     {
-        rw::formatTo( hdr, sizeof( hdr ), "\"skipped_oversize\":{},", h.ing.skippedOversize.size() );
+        rw::formatTo( hdr, sizeof( hdr ), "\"skipped_oversize\":{},", h.coverage.skippedOversize );
         w.write( hdr );
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
@@ -11930,25 +11982,16 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     }
 
     writeJsonUnindexed( w, esc, h.ing.crawlSkips );   // §L1, JSON lane — see its own header
-    // §A4d: `precise=N` — how many out-edges the SCIP overlay actually pinned. C1 drift fix, the JSON half of
-    // the XML fix above and by the same argument: this counted every NONZERO provenance value, so an FFI
-    // binding (2) and now a k-way split arm (3) were both reported as SCIP-precise. Emitted only when the
-    // count is non-zero (absent ⇒ nothing was pinned, never a fabricated 0 nor a borrowed one).
-    if( h.outProv )
+    // §A4d: `precise=N` — how many out-edges the SCIP overlay actually pinned: the ONE count both dialects state
+    // (scipPinnedEdgeCount, whose C1 drift note says why it names value 1 alone). Absent at 0 — nothing was pinned, never a
+    // fabricated 0 nor a borrowed one.
+    if( h.coverage.scipPinnedEdges > 0 )
     {
-        std::size_t preciseTotal = 0;
-        for( std::uint8_t v : *h.outProv )
-        {
-            preciseTotal += ( v == 1u ? 1u : 0u );
-        }
-        if( preciseTotal > 0 )
-        {
-            rw::formatTo( hdr, sizeof( hdr ), "\"precise\":{},", preciseTotal );
-            w.write( hdr );
-        }
+        rw::formatTo( hdr, sizeof( hdr ), "\"precise\":{},", h.coverage.scipPinnedEdges );
+        w.write( hdr );
     }
     w.write( "\"order\":" );
-    writeJsonStr( w, h.orderAttr, esc );
+    writeJsonStr( w, emitOrderTraits( h.plan.emitOrder ).orderAttr, esc );
 
     // R-E (2026-08-17 harvest): the JSON twin of the XML `<r root="…">` — same condition (single-root only,
     // multi-root's own roots_count/roots table below already names every root), right after order= like the
@@ -11965,29 +12008,29 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     // headers carry the SAME KEYSET for the same run, so this is not an XML-side courtesy — a JSON consumer
     // (every MCP client) reading a truncated ranking with no key to tell it so is the exact defect the XML
     // side just closed. Same slot, same absent-means-converged rule.
-    w.write( renderDisclosure( h.ann->prDisclosure, DiscloseAs::JsonKeys ) );
+    w.write( renderDisclosure( h.ann.prDisclosure, DiscloseAs::JsonKeys ) );
     w.write( renderHistoryUnread( DiscloseAs::JsonKeys ) );   // K51: the JSON twin of the root's history_unread= (absent unless the amp= walk was unread)
 
     // The JSON twin of the XML root's data_sections_cut= / next= (codeFirstKeep): same keys, same absent-at-zero rule.
-    if( h.dataSectionsCut.cut > 0 )
+    if( const DataSectionsCut& cut = h.plan.ranked.dataSecCut; cut.cut > 0 )
     {
-        w.write( ",\"data_sections_cut\":" + std::to_string( h.dataSectionsCut.cut ) + ",\"next\":" );   // composed, not a fixed buffer
-        writeJsonStr( w, dataSectionsNext( h.dataSectionsCut ), esc );
+        w.write( ",\"data_sections_cut\":" + std::to_string( cut.cut ) + ",\"next\":" );   // composed, not a fixed buffer
+        writeJsonStr( w, dataSectionsNext( cut ), esc );
     }
-    if( h.stemCut > 0 )
+    if( const std::size_t stemCut = h.plan.groups.stemPick.cut; stemCut > 0 )
     {
-        w.write( ",\"stem_cut\":" + std::to_string( h.stemCut ) );   // the JSON twin of the XML root's stem_cut=
+        w.write( ",\"stem_cut\":" + std::to_string( stemCut ) );   // the JSON twin of the XML root's stem_cut=
     }
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
     // Without it every `"p"` in the payload is an unresolvable root-relative fragment.
-    if( h.ing.rootLabels.size() < 2 )
+    if( h.coverage.multiRootCount == 0 )
     {
         return;
     }
 
-    rw::formatTo( hdr, sizeof( hdr ), ",\"roots_count\":{},\"roots\":[", h.ing.rootLabels.size() );
+    rw::formatTo( hdr, sizeof( hdr ), ",\"roots_count\":{},\"roots\":[", h.coverage.multiRootCount );
     w.write( hdr );
     for( std::size_t r = 0; r < h.ing.rootLabels.size(); ++r )
     {
@@ -12107,7 +12150,7 @@ inline void writeJsonMapRow( JsonWriter& w, const IngestResult& ing, const Overl
     {
         w.write( ",\"extent_suspect\":" );  writeJsonStr( w, extent::extentSuspectReasons( s.extentSuspect ), esc );
     }
-    if( !src.stable )
+    if( !emitOrderTraits( src.emitOrder ).stablePrefix )
     {
         rw::formatTo( num, sizeof( num ), ",\"k\":{:.4f}", double( src.rank[ id ] ) );  w.write( num );
     }
@@ -12143,8 +12186,8 @@ inline void writeJsonMapFileGroup( JsonWriter& w, const IngestResult& ing, std::
     w.write( "]}" );
 }
 
-// The default-map JSON sibling of serialize(). It shares serialize()'s decisions about WHAT the map prints — mapKeepCount,
-// rankMapRows, decideMapEmitOrder, groupMapRowsByFile, countMapHonestyGauges — and writes the same groups in its own
+// The default-map JSON sibling of serialize(). It shares serialize()'s decisions about WHAT the map prints — one MapPlan
+// (planMap) and the same MapCoverageFacts — and writes the same groups in its own
 // spelling, so a defect fixed in one dialect's selection cannot survive in the other's. Scope: the common single-root
 // invocation (metrics, fan-in, ambiguity, cbo/tested/lcom4/amp Q-metrics, stable/most-important-last/auto-order, bind labels,
 // est_tokens, per-edge provenance, the multi-root prologue, and — §B1.2 — the at/rank_by/window PROVENANCE STAMP a
@@ -12194,18 +12237,16 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
     };
 
-    // ── WHICH rows, in WHICH order: serialize()'s steps. This dialect has no in=DIR stub; it always prints its rows. ──────────
-    const std::size_t             keep   = mapKeepCount( ing, topK );
-    const RankedMapRows           ranked = rankMapRows( ing, rank, ann, keep, /*stubbed=*/false );
-    const std::span<const NodeId> kept   = ranked.kept( keep );
-    // T1/§H7: SAME byte-model the XML sibling uses, in the same two roles — the fill-order oracle and the rate source. The
-    // REPORTED est_tokens is measured from the emitted bytes in PHASE 2 below, exactly as in serialize(): this emitter had the
-    // identical --metrics under-report (MEASURED: 1780 B reported as est_tokens=507, 3.51 B/tok).
-    const TokenEstimate    mapEst    = estimateTokens( ing, ranked.order, kept.size(), outOff, outTargets );
-    const MapEmitOrder     emitOrder = decideMapEmitOrder( stable, mostImportantLast, autoOrder, mapEst.tokens );
-    const MapFileGroups    groups    = groupMapRowsByFile( ing, ann, kept, /*stubbed=*/false, emitOrder, outOff, outTargets, pathRel );
-    const MapHonestyGauges gauges    = countMapHonestyGauges( ing, MapResolverCounters{ .ambOut = ambOut, .unresolvedOut = unresolvedOut, .locPinOut = locPinOut,
-                                                                                      .declinedOut = declinedOut, .externalCalls = externalCalls } );
+    // ── WHICH rows, in WHICH order: serialize()'s plan. This dialect has no in=DIR stub spelling; it always prints its rows. ────
+    // The byte model in the plan plays the same two roles as in serialize() — the fill-order oracle and the rate source; the
+    // REPORTED est_tokens is measured from the emitted bytes in PHASE 2 below (this emitter had the identical --metrics
+    // under-report: MEASURED 1780 B reported as est_tokens=507, 3.51 B/tok).
+    const MapPlan plan = planMap( ing, rank, outOff, outTargets, ann, topK,
+                                  MapOrderRequest{ .stable = stable, .mostImportantLast = mostImportantLast, .autoOrder = autoOrder },
+                                  MapResolverCounters{ .ambOut = ambOut, .unresolvedOut = unresolvedOut, .locPinOut = locPinOut,
+                                                       .declinedOut = declinedOut, .externalCalls = externalCalls },
+                                  MapStubPolicy::AlwaysPrintRows, pathRel );
+    const MapCoverageFacts coverage = mapCoverageFacts( ing, outProv );
 
     // ── PHASE 1: render the "r" array into a buffer (§H7 — see serialize()'s PHASE 1 for the full reasoning: measure, decide,
     // then write). DEGRADE: an open_memstream failure emits the header FIRST with the MODELLED estimate (the pre-§H7 number,
@@ -12226,45 +12267,43 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
         JsonWriter hw( dst );
-        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, mapSymbolCount( ing ), outTargets.size(), keep + groups.stemPick.rows.size(), estTokens, gauges.ambiguous,
-                                                    gauges.unresolved, traitsOf( emitOrder ).orderAttr, outProv, &ann, rootArg, gauges.localityPinned, gauges.external,
-                                                    gauges.declined, gauges.extentSuspectSyms, gauges.macroBlankedFiles, gauges.nestRefusedFiles,
-                                                    estimate.isModelled, ranked.dataSecCut, groups.stemPick.cut, memoryPeakJson } );
+        writeJsonMapHeader( hw, esc, JsonMapHeader{ .ing = ing, .plan = plan, .coverage = coverage, .edgeCount = outTargets.size(), .estTokens = estTokens,
+                                                    .isEstModelled = estimate.isModelled, .ann = ann, .rootArg = rootArg, .memoryPeakJson = memoryPeakJson } );
         hw.write( ",\"r\":[" );
     };
 
     // The "r" array, as ONE renderer both paths call — serialize()'s writeChildren, for the same reason: a buffer that opened and
     // then lost a write has already spent the rows, so the fallback must be able to write them again.
     const MapRowSources rowSources{ .rank = rank, .outOff = outOff, .outTargets = outTargets, .outProv = outProv, .outNameOnly = outNameOnly,
-                                    .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .stable = stable, .metrics = metrics,
+                                    .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .emitOrder = plan.emitOrder, .metrics = metrics,
                                     .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp };
     const auto writeRows = [ & ]( JsonWriter& w )
     {
-        for( std::size_t i = 0; i < groups.fileOrder.size(); ++i )
+        for( std::size_t i = 0; i < plan.groups.fileOrder.size(); ++i )
         {
             if( i > 0 )
             {
                 w.write( "," );
             }
-            writeJsonMapFileGroup( w, ing, groups.fileOrder[ i ], groups, rowSources, pathRel, esc );
+            writeJsonMapFileGroup( w, ing, plan.groups.fileOrder[ i ], plan.groups, rowSources, pathRel, esc );
         }
         w.write( "]" );
-        if( groups.inventory.active )
+        if( plan.groups.inventory.active )   // after "r", always: a key of one object (see writeMapChildren on the XML placement)
         {
-            writeMapInventoryJson( w, ing, groups.inventory, pathRel, outOff, outTargets, outProv, outNameOnly, esc );
+            writeMapInventoryJson( w, ing, plan.groups.inventory, pathRel, outOff, outTargets, outProv, outNameOnly, esc );
         }
         w.write( "}" );
     };
     // DEGRADE, one path for both failures: the header FIRST with the MODELLED estimate, the array streamed behind it.
     const auto emitModelled = [ & ]()
     {
-        emitHeader( out, mapEst.tokens );
+        emitHeader( out, plan.mapEst.tokens );
         JsonWriter direct( out );
         writeRows( direct );
         direct.flush();
         if( outEstTokens )
         {
-            *outEstTokens = mapEst.tokens;
+            *outEstTokens = plan.mapEst.tokens;
         }
     };
     if( !rowsMem )
@@ -12303,7 +12342,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         rw::MemoryStream probe;
         if( std::FILE* const pm = openChargeStream( probe ) )
         {
-            emitHeader( pm, mapEst.tokens );
+            emitHeader( pm, plan.mapEst.tokens );
             if( const rw::MemoryStreamBytes header = probe.finish(); header.isWhole )
             {
                 headerBytes = header.bytes.size();
@@ -12322,7 +12361,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     }
 
     const std::size_t estTokens = tokensForEmittedBytes( headerBytes + kEstTokensFieldReserve + rowsStr.size(),
-                                                         mapEst.bytesPerToken() );
+                                                         plan.mapEst.bytesPerToken() );
     if( outEstTokens )
     {
         *outEstTokens = estTokens;
