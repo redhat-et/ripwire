@@ -1702,11 +1702,14 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
 
-    std::vector<char> changed;
+    std::vector<char>       changed;
+    std::vector<UnusedItem> unused;   // AF5: `files` items that resolved to nothing — the "unused" array, absent when none
     bool isCleanTree = false;
     if( !diffOrEmpty.empty() )
     {
-        changed = changedMaskFromList( ing, diffOrEmpty );
+        ChangedList list = changedMaskFromListChecked( ing, diffOrEmpty );
+        unused           = changedListUnused( ing, root, list );
+        changed          = std::move( list.mask );
     }
     else
     {
@@ -1775,6 +1778,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     {
         out += ",\"hunk_evidence\":false";
     }
+    out += unusedItemsJsonField( unused, []( std::string_view v ) { return mcpdetail::jsonEscape( std::string( v ) ); } );   // AF5: as --situ's block
     out += ",\"changed_files\":[";
     {
         bool first = true;

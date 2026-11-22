@@ -24,11 +24,20 @@
 #      the mixed list instead of erroring.
 #   G  determinism (two runs byte-identical) and well-formedness (xmllint) of the mixed answer.
 #   H  multi-root: the on-disk reason is read under every root.
+#   T  --test-gate=F1,F2 (owner ruling 2026-11-21, "answer, never pass"): a mixed list answers — the same <t>
+#      rows as the usable items alone, the same <unused> rows — and NEVER exits 0: exit 6 (partial, the
+#      --quality-delta meaning) when nothing gates, exit 4 when an obligation does. T2 is the arm the ruling
+#      names: every usable item is green (exit 0 alone), one typo in the list, and the exit is nonzero WITH an
+#      answer on stdout. --json carries the same items. Nothing usable stays the plain refusal (exit 1).
+#   S  --situ=F1,F2 and MCP situational_awareness{files}: the same disclosure (an `unused:` block / an
+#      "unused" JSON array), the rest of the report identical to the usable items alone, exit 0 (not a gate);
+#      nothing usable stays the refusal.
 #   M  mutation controls: the comparisons above are fed a deliberately wrong document and must FAIL, so a
 #      green run cannot come from a comparator that accepts anything.
 #
-# RED-FIRST: on 36a95d732 arms A, B, C, F fail (the mixed list exits 1 with an empty stdout; MCP returns a
-# -32602 error); D's single-item text, E, M pass on both binaries.
+# RED-FIRST: on 36a95d732 arms A, B, C, F, H, T1/T2/T4/T5-present, S1/S3 fail (the mixed list exits 1 with an
+# empty stdout; MCP returns a -32602 error); D's single-item text, E, the clean-list and refusal controls and M pass
+# on both binaries (they pin that nothing else moved).
 #
 # Usage:  bash test/affectedpathcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/affectedpathcheck.sh
 set -u
@@ -49,6 +58,7 @@ printf 'int leaf() { return 1; }\nint mid()  { return leaf(); }\n' > "$R/src/cor
 printf 'void test_mid()  { mid();  }\n'                            > "$R/test/test_mid.cpp"
 printf 'void test_leaf() { leaf(); }\n'                            > "$R/test/test_leaf.cpp"
 printf '2026-11-21  a changelog entry\n'                           > "$R/ChangeLog"   # on disk, never indexed
+printf 'int lonely_fn() { return 0; }\n'                           > "$R/src/lonely.cpp"  # no caller, no test: --test-gate exit 0 alone
 
 run(){ perl -e 'alarm 20; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 runec(){ perl -e 'alarm 20; exec @ARGV' "$BIN" "$R" "$@" --no-cache >"$TMP/out.txt" 2>"$TMP/err.txt"; }
@@ -150,6 +160,74 @@ MR="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$R" "$R2" --affected=src/core.cpp,
     && ok "H multi-root: a non-indexed file in the SECOND root reads not_indexed, as in the first" \
     || no "H multi-root reasons wrong: [$( urows "$MR" | tr '\n' ' ' )]"
 
+# ── T: --test-gate — answer, never pass ───────────────────────────────────────────────────────────────
+tgrc(){ perl -e 'alarm 20; exec @ARGV' "$BIN" "$R" "$@" --no-cache >"$TMP/out.txt" 2>"$TMP/err.txt"; echo $?; }
+tbody(){ body "$1" | grep -oE '<test-gate [^>]*'; }
+tattr(){ tbody "$2" | grep -oE " $1=\"[^\"]*\"" | head -1 | sed 's/.*="//; s/"$//'; }
+ttrows(){ body "$1" | grep -oE '<(t|g|u) [^>]*>' | LC_ALL=C sort; }
+TCRC="$( tgrc --test-gate=src/core.cpp )"; TCLEAN="$( cat "$TMP/out.txt" )"
+TMRC="$( tgrc --test-gate=src/core.cpp,ChangeLog,src/obsolete_widget.cpp )"; TMIX="$( cat "$TMP/out.txt" )"
+[ "$TCRC" = 4 ] && [ "$TMRC" = 4 ] && ok "T1 a mixed list whose usable item gates still exits 4 (the obligation's own code; control alone: $TCRC)" \
+                                  || no "T1 mixed list with an obligation: exit $TMRC (control $TCRC; want 4/4): $( head -c 200 "$TMP/err.txt" )"
+[ -n "$( ttrows "$TCLEAN" )" ] && [ "$( ttrows "$TMIX" )" = "$( ttrows "$TCLEAN" )" ] && [ "$( urows "$TMIX" )" = "$WANT_U" ] \
+    && [ "$( tattr unused "$TMIX" )" = 2 ] \
+    && ok "T1 the mixed answer: same <t>/<u> rows as the usable item alone, unused=\"2\", the same <unused> rows" \
+    || no "T1 mixed test-gate answer wrong: unused='$( tattr unused "$TMIX" )' rows=[$( urows "$TMIX" | tr '\n' ' ' )]"
+LRC="$( tgrc --test-gate=src/lonely.cpp )"
+TYRC="$( tgrc --test-gate=src/lonely.cpp,src/lonly.cpp )"; TTYPO="$( cat "$TMP/out.txt" )"
+[ "$LRC" = 0 ] && ok "T2 control: --test-gate=src/lonely.cpp alone is green (exit 0)" || no "T2 control: lonely.cpp alone exit $LRC (want 0) — the fixture is broken"
+[ "$TYRC" != 0 ] && [ "$TYRC" = 6 ] && printf '%s' "$TTYPO" | grep -qF '<unused item="src/lonly.cpp" reason="not_found" near="src/lonely.cpp"/>' \
+    && ok "T2 a typo beside green items: exit 6 (never 0) WITH an answer naming the typo" \
+    || no "T2 typo beside green items: exit $TYRC (want 6), unused=[$( urows "$TTYPO" )]"
+TARC="$( tgrc --test-gate=ChangeLog,src/obsolete_widget.cpp )"
+[ "$TARC" = 1 ] && [ ! -s "$TMP/out.txt" ] && grep -qF "none of the 2 items in the list resolved" "$TMP/err.txt" \
+    && ok "T3 nothing usable: the plain refusal (exit 1, empty stdout, says none resolved)" \
+    || no "T3 all-unusable test-gate: exit $TARC, stdout $( wc -c < "$TMP/out.txt" ) B: $( head -c 200 "$TMP/err.txt" )"
+TJRC="$( tgrc --test-gate=src/lonely.cpp,ChangeLog --json )"
+[ "$TJRC" = 6 ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); u=d.get("unused"); sys.exit(0 if u==[{"item":"ChangeLog","reason":"not_indexed"}] else 1)' "$TMP/out.txt" 2>/dev/null \
+    && ok "T4 --json: exit 6 and \"unused\":[{\"item\":\"ChangeLog\",\"reason\":\"not_indexed\"}]" \
+    || no "T4 --json mixed: exit $TJRC, body $( head -c 200 "$TMP/out.txt" )"
+printf '%s' "$TMIX" | sed 's/-->.*//' | grep -qF 'unused=N' && ! printf '%s' "$TCLEAN" | grep -qE 'unused=N| unused="|<unused ' \
+    && ok "T5 the test-gate legend defines unused= exactly when the root carries it" \
+    || no "T5 test-gate unused= legend missing on the mixed answer, or present on the clean one"
+
+# ── S: --situ and MCP situational_awareness ────────────────────────────────────────────────────────────
+SCRC="$( tgrc --situ=src/core.cpp )"; SCLEAN="$( cat "$TMP/out.txt" )"
+SMRC="$( tgrc --situ=src/core.cpp,ChangeLog,src/obsolete_widget.cpp )"; SMIX="$( cat "$TMP/out.txt" )"
+srest(){ printf '%s\n' "$1" | grep -vE '^unused: |^  unused item=' | sed 's|src/core.cpp,ChangeLog,src/obsolete_widget.cpp|src/core.cpp|g'; }
+sblock(){ printf '%s\n' "$1" | grep -E '^  unused item='; }
+[ "$SCRC" = 0 ] && [ "$SMRC" = 0 ] && ok "S1 --situ mixed list exits 0 (not a gate), as the usable item alone" \
+                                  || no "S1 --situ mixed exit $SMRC (control $SCRC; want 0/0): $( head -c 200 "$TMP/err.txt" )"
+[ "$( sblock "$SMIX" )" = '  unused item=ChangeLog reason=not_indexed
+  unused item=src/obsolete_widget.cpp reason=not_found' ] && printf '%s' "$SMIX" | grep -qE '^unused: 2 ' \
+    && ok "S1 --situ names both unused items with their reasons under an 'unused: 2' line" \
+    || no "S1 --situ unused block wrong: [$( printf '%s\n' "$SMIX" | grep -E '^unused|^  unused' | tr '\n' '|' )]"
+[ "$( srest "$SMIX" )" = "$( srest "$SCLEAN" )" ] && ok "S1 the rest of the --situ report is identical to the usable item alone" \
+    || no "S1 --situ report differs beyond the unused block: $( diff <( srest "$SCLEAN" ) <( srest "$SMIX" ) | head -5 | tr '\n' '|' )"
+printf '%s' "$SCLEAN" | grep -qE '^unused: |^  unused item=' && no "S1 a clean --situ list prints an unused block" \
+                                                            || ok "S1 a clean --situ list prints no unused block"
+SARC="$( tgrc --situ=ChangeLog,src/obsolete_widget.cpp )"
+[ "$SARC" = 1 ] && [ ! -s "$TMP/out.txt" ] && grep -qF "none of the 2 items in the list resolved" "$TMP/err.txt" \
+    && ok "S2 --situ nothing usable: the plain refusal (exit 1, says none resolved)" \
+    || no "S2 all-unusable --situ: exit $SARC: $( head -c 200 "$TMP/err.txt" )"
+smcp(){ printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"situational_awareness","arguments":{"path":"'"$R"'","files":"'"$1"'"}}}' \
+    | perl -e 'alarm 30; exec @ARGV' "$BIN" "$R" --mcp --no-cache 2>/dev/null | tail -1 | mtext; }
+SJM="$( smcp 'src/core.cpp,ChangeLog,src/obsolete_widget.cpp' )"; SJC="$( smcp 'src/core.cpp' )"
+sjq(){ python3 -c 'import json,sys
+t=sys.stdin.read()
+if t.startswith("ERROR"): print(t[:200]); sys.exit(0)
+d=json.loads(t); k=sys.argv[1]; print(json.dumps(d.get(k), sort_keys=True))' "$1"; }
+[ "$( printf '%s' "$SJM" | sjq unused )" = '[{"item": "ChangeLog", "reason": "not_indexed"}, {"item": "src/obsolete_widget.cpp", "reason": "not_found"}]' ] \
+    && [ "$( printf '%s' "$SJM" | sjq changed_files )" = "$( printf '%s' "$SJC" | sjq changed_files )" ] \
+    && [ "$( printf '%s' "$SJC" | sjq unused )" = null ] \
+    && ok "S3 MCP situational_awareness: mixed list answers with an \"unused\" array; changed_files as the usable item alone; clean list has no key" \
+    || no "S3 MCP situational_awareness mixed: unused=$( printf '%s' "$SJM" | sjq unused | head -c 200 ) changed=$( printf '%s' "$SJM" | sjq changed_files | head -c 120 )"
+case "$( smcp 'ChangeLog,src/obsolete_widget.cpp' )" in ERROR*'none of the 2 items in the list resolved'*) ok "S4 MCP situational_awareness nothing usable: still an error naming the cause" ;;
+     *) no "S4 MCP situational_awareness all-unusable did not refuse with the none-resolved clause" ;; esac
+
 # ── M: mutation controls — each comparator must reject a wrong document ────────────────────────────────
 MUT1="$( printf '%s' "$MIX" | sed 's|<unused item="src/obsolete_widget.cpp" reason="not_found"/>||' )"
 [ "$( urows "$MUT1" )" = "$WANT_U" ] && no "M the unused-row comparator accepted a document missing one row" \
@@ -160,6 +238,14 @@ MUT2="$( printf '%s' "$MIX" | sed 's|</affected>|<test p="test/test_fake.cpp"/><
 MUT3="$( printf '%s' "$MIX" | sed 's| unused="2"||' )"
 [ "$( attr unused "$MUT3" )" = "2" ] && no "M the attr reader found unused= in a document without it" \
                                      || ok "M the attr reader rejects a document with unused= removed"
+
+MUT4="$( printf '%s\n' "$SCLEAN" | sed '$a\
+an extra line the usable-only report does not have' )"
+[ "$( srest "$MUT4" )" = "$( srest "$SCLEAN" )" ] && no "M the --situ rest comparator accepted an extra line" \
+                                                 || ok "M the --situ rest comparator rejects an extra line"
+MUT5="$( printf '%s' "$TTYPO" | sed 's|<unused item="src/lonly.cpp"[^>]*/>||' )"
+printf '%s' "$MUT5" | grep -qF '<unused item="src/lonly.cpp"' && no "M the T2 row check found a row that was removed" \
+                                                             || ok "M the T2 row check rejects a document without the typo row"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

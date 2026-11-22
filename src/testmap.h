@@ -43,6 +43,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -2395,13 +2396,20 @@ inline std::string classNewGroupXml( const IngestResult& ing, std::span<const Cl
     return out + "</g>";
 }
 
-// ── AF5 (lane SW0 plan item 3c, 2026-11-21) — the list items an --affected answer could not use ─────────
-// resolveAffectedSeeds answers for every usable item and keeps the rest (AffectedSeeds::unusedItems); these
-// three name them. The REASON is read off the disk, never guessed: a file by that path under the root that
-// the index does not hold is `not_indexed` (non-source, excluded, ignored, vendored, generated or oversize —
-// --skipped says which), and anything else is `not_found` — no indexed path, no indexed symbol, no file (a
-// deleted or renamed file, or a typo; the two cannot be told apart without history, so near= names the
-// closest indexed path and the reader decides). Gate: test/affectedpathcheck.sh.
+// ── AF5 (lane SW0 plan item 3c, 2026-11-21) — the FILE-LIST items an answer could not use ────────────────
+// --affected, --situ and --test-gate (and their MCP twins) answer for every usable item of a list and keep the
+// rest; these name them, ONE vocabulary for every surface. The REASON is read off the disk, never guessed: a
+// file by that path under a root that the index does not hold is `not_indexed` (non-source, excluded, ignored,
+// vendored, generated or oversize — --skipped says which), and anything else is `not_found` — no indexed path,
+// no indexed symbol, no file (a deleted or renamed file, or a typo; the two cannot be told apart without
+// history, so near= names the closest indexed path and the reader decides). Gate: test/affectedpathcheck.sh.
+struct UnusedItem
+{
+    std::string item;              // as typed
+    const char* reason = nullptr;  // "not_indexed" | "not_found"
+    std::string near;              // root-relative closest indexed path (not_found only), "" when none
+};
+
 // Multi-root: every surviving root is asked (ing.rootPaths, empty on a single root), so a file in the second
 // root is not called not_found because the first root lacks it.
 inline const char* affectedUnusedReason( const IngestResult& ing, const std::string& root, std::string_view item )
@@ -2417,6 +2425,27 @@ inline const char* affectedUnusedReason( const IngestResult& ing, const std::str
     return onDisk ? "not_indexed" : "not_found";
 }
 
+inline std::vector<UnusedItem> classifyUnusedItems( const IngestResult& ing, const std::string& root, std::span<const std::string> items,
+                                                    std::string_view rootPrefix )
+{
+    std::vector<UnusedItem> out;
+    out.reserve( items.size() );
+    for( const std::string& item : items )
+    {
+        UnusedItem u{ item, affectedUnusedReason( ing, root, item ), {} };
+        if( std::string_view( u.reason ) == "not_found" )   // a path near-miss is a suggestion; for not_indexed the path is already right
+        {
+            const std::string_view best = nearestIndexedFile( ing, stripLineLocator( item ) );
+            if( !best.empty() )
+            {
+                u.near.assign( sarif::rootRelativeUri( best, rootPrefix ) );
+            }
+        }
+        out.push_back( std::move( u ) );
+    }
+    return out;
+}
+
 // The refusal's own clause for a list with NO usable item: the first item's sentence names one of them, so a
 // longer list says plainly that the rest failed too. Empty for a one-item list (its refusal text is unchanged).
 inline std::string affectedNoneResolvedClause( std::size_t itemCount )
@@ -2425,32 +2454,50 @@ inline std::string affectedNoneResolvedClause( std::size_t itemCount )
                          : std::format( " — none of the {} items in the list resolved, so there is no answer to give", itemCount );
 }
 
+// The two reasons, defined once for every surface's legend (each verb leads with what its own counts cover).
+inline constexpr std::string_view kUnusedReasonsLegend =
+    "reason=\"not_indexed\": a file by that path exists under the root but is not indexed (non-source, excluded, ignored, vendored or "
+    "oversize; --skipped says which), so the graph holds nothing to reach from it. reason=\"not_found\": no indexed path, no indexed "
+    "symbol and no file match it (deleted, renamed or misspelled); near= names the closest indexed path when one exists. ";
 inline constexpr std::string_view kAffectedUnusedLegend =
     "unused=N: list items this answer could not use, each an <unused item= reason=> row in list order; tests=/reached=/seeds= answer for "
-    "the other items only. reason=\"not_indexed\": a file by that path exists under the root but is not indexed (non-source, excluded, "
-    "ignored, vendored or oversize; --skipped says which), so the graph holds nothing to reach from it. reason=\"not_found\": no indexed "
-    "path, no indexed symbol and no file match it (deleted, renamed or misspelled); near= names the closest indexed path when one exists. ";
+    "the other items only. ";
 
 template<class EscapeFn>
-inline std::string affectedUnusedRowsXml( const IngestResult& ing, const std::string& root, const AffectedSeeds& sel,
-                                          std::string_view rootPrefix, EscapeFn ex )
+inline std::string unusedItemRowsXml( std::span<const UnusedItem> unused, EscapeFn ex )
 {
     std::string rows;
-    for( const std::string& item : sel.unusedItems )
+    for( const UnusedItem& u : unused )
     {
-        const char* const reason = affectedUnusedReason( ing, root, item );
-        std::string       near;
-        if( std::string_view( reason ) == "not_found" )   // a path near-miss is a suggestion; for not_indexed the path is already right
+        rows += "<unused item=\"" + ex( u.item ) + "\" reason=\"" + u.reason + "\"";
+        if( !u.near.empty() )
         {
-            const std::string_view best = nearestIndexedFile( ing, stripLineLocator( item ) );
-            if( !best.empty() )
-            {
-                near = " near=\"" + ex( sarif::rootRelativeUri( best, rootPrefix ) ) + "\"";
-            }
+            rows += " near=\"" + ex( u.near ) + "\"";
         }
-        rows += "<unused item=\"" + ex( item ) + "\" reason=\"" + reason + "\"" + near + "/>";
+        rows += "/>";
     }
     return rows;
+}
+
+// The JSON twin: `,"unused":[{"item":…,"reason":…[,"near":…]}]`, or "" when every item resolved (absent key).
+template<class JsonEscapeFn>
+inline std::string unusedItemsJsonField( std::span<const UnusedItem> unused, JsonEscapeFn jesc )
+{
+    if( unused.empty() )
+    {
+        return {};
+    }
+    std::string out = ",\"unused\":[";
+    for( std::size_t i = 0; i < unused.size(); ++i )
+    {
+        out += ( i ? ",{\"item\":\"" : "{\"item\":\"" ) + jesc( unused[i].item ) + "\",\"reason\":\"" + unused[i].reason + "\"";
+        if( !unused[i].near.empty() )
+        {
+            out += ",\"near\":\"" + jesc( unused[i].near ) + "\"";
+        }
+        out += "}";
+    }
+    return out + "]";
 }
 
 struct AffectedReportResult
@@ -2519,7 +2566,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
     const std::string    afRunFirst = runFirstField( answer.rows, answer.rows.size(), /*json=*/false );   // hono-20: the run-first head
     // IX-5 (hono-20): the class-new backstop, rendered apart from the proven rows above and counted in none of the root's counts
     const std::string    afClassNew = classNewGroupXml( ing, classNewTestRows( ing, g, sel, answer ), afRootPrefix, ex );
-    const std::string    afUnused   = affectedUnusedRowsXml( ing, root, sel, afRootPrefix, ex );   // AF5: empty when every item resolved
+    const std::string    afUnused   = unusedItemRowsXml( classifyUnusedItems( ing, root, sel.unusedItems, afRootPrefix ), ex );   // AF5: empty when every item resolved
     // seeded_by= is the honesty half of the file-first rule: the two readings answer DIFFERENT questions
     // over the same argument string and return different counts, so which one fired is a fact about the
     // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
@@ -2543,7 +2590,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
                  // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.
                  runFirstLegend( !afRunFirst.empty() ),
                  afClassNew.empty() ? std::string_view() : kClassNewLegend,
-                 afUnused.empty() ? std::string_view() : kAffectedUnusedLegend,
+                 afUnused.empty() ? std::string() : ( std::string( kAffectedUnusedLegend ) + std::string( kUnusedReasonsLegend ) ),
                  unprovenDefsVerbLegend( UnprovenDefsVerb::Affected, sel.unprovenDefs > 0 ).c_str(),
                  graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( singleRoot ) );
     rw::emitTo( out, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\"{}{} script_gates_unmodelled=\"{}\""

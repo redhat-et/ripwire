@@ -1129,6 +1129,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners in the corpus, a path count; not call-graph modelled", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "run_first", "run_first=N: the first N t rows have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_registered", "script_gates_registered=N: shell gates test/regression.sh registers as suite members", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
+    // AF5 (situ.h kTestGateUnusedLegend): present only when a --test-gate=FILES item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest; exit never 0 (4 if gating, else 6)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_mapped", "script_gates_mapped=N: registered gates with exact dependency evidence (literal paths or RIPWIRE_TEST_DEPS)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_unresolved_dynamic", "script_gates_unresolved_dynamic=N: registered gates with no mappable deps; they may cover the change unlisted", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "evidence", "t evidence=script_literal|manifest_declared: why a shell gate joins tests=, its text names the changed path or its RIPWIRE_TEST_DEPS does", true, "t", MapHeaderRead::No, {}, "test-gate" },
