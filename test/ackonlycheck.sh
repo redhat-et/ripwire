@@ -115,5 +115,23 @@ rc=$?
 if [ $rc -eq 0 ]; then ok "--ack-only=gating clears the gate (exit 0)"; else no "--ack-only=gating left exit $rc"; fi
 if grep -q 'gating="0"' "$TMP/all.xml"; then ok "…and the header agrees (gating=\"0\")"; else no "…but the header still counts gating findings"; fi
 
+# 5) CR721: "gating" is a RESERVED token, not a substring. A new symbol named gatingHelper carries never-gating
+#    new-symbol rows (params, dead-code); --ack-only=gating must ack only the one gating contract-change, never those
+#    rows because "gating" occurs in their sym=. RED before CR721 (train GE3 cbed31d4c): "acknowledged 3 of 3".
+R5="$TMP/repo5"; mkdir -p "$R5"; cd "$R5"; git init -q .; git config user.email t@t; git config user.name t
+printf '#pragma once\ninline int alpha( int a ) { return a; }\n' > lib.h
+git add lib.h; git commit -qm base; "$BIN" . --quality-baseline >/dev/null 2>&1
+printf '#pragma once\ninline int alpha( int a, int b ) { return a + b; }\ninline int gatingHelper( int a, int b, int c ) { return a + b + c; }\n' > lib.h
+"$BIN" . --quality-delta >"$TMP/g5.xml" 2>/dev/null
+n5="$( grep -oE '<r [^>]*sym="gatingHelper"[^>]*' "$TMP/g5.xml" | wc -l | tr -d ' ' )"
+if [ "${n5:-0}" -ge 1 ] && ! grep -oE '<r [^>]*sym="gatingHelper"[^>]*' "$TMP/g5.xml" | grep -q 'gating="1"'; then
+    ok "(5) premise: $n5 never-gating row(s) on gatingHelper"
+else no "(5) premise: want >=1 non-gating gatingHelper row, got $n5: $( grep -oE '<r [^>]*' "$TMP/g5.xml" | tr '\n' ' ' )"; fi
+"$BIN" . --quality-delta --ack-only=gating --quality-ack="the gating one" >/dev/null 2>"$TMP/g5.err"
+a5="$( grep -c '^ack ' .ripwire_quality_acks 2>/dev/null )"
+if grep -q 'acknowledged 1 of ' "$TMP/g5.err" && [ "${a5:-0}" = 1 ] && grep -q '^ack api-surface .*facet=contract-change' .ripwire_quality_acks; then
+    ok "(5) --ack-only=gating acks only the gating row, not gatingHelper's: $( head -1 "$TMP/g5.err" )"
+else no "(5) --ack-only=gating swept in gatingHelper by substring: $( head -1 "$TMP/g5.err" ); ack lines: ${a5:-0}"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
