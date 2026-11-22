@@ -4459,7 +4459,7 @@ $ ./build/ripwire . --skipped
 
 **Answers:** scan a single skill file before installing (any file, not just .md) EXFILTRATE:net-exfil (a network verb plus a $VAR or base64 on one fenced line) needs a destination: a verb named but not run, as in command -v curl, does not fire.
 
-It is CRITICAL only when a credential-shaped source is on that line: a credential-named var, an Authorization: header with a var, an env dump or a key file. Otherwise it is WARN and the row says why="no-cred-source". A sensitive file read fed into an upload (cat /etc/passwd | curl ... @-, curl -d @.env ...) is CRITICAL with or without a var: why="sensitive-read-upload".
+It is CRITICAL only when a credential-shaped source is on that line: a credential-named var, an Authorization: header with a var, an env dump or a key file. Otherwise it is WARN and the row says why="no-cred-source". A sensitive file read fed into an upload (cat /etc/passwd | curl ... @-, curl -d @.env ...) is CRITICAL with or without a var: why="sensitive-read-upload". A credential var sent only to localhost, 127/8, ::1, a private-LAN or link-local host is WARN why="local-dest"; one sent only to the service its name names (CLOUDFLARE/CF, GITHUB/GH, AIRTABLE, to that name's .com) is WARN why="cred-to-owner". A host held in a $VAR counts when the file assigns it exactly once, to a literal, before the line; dest= names the hosts proved.
 
 **Try it**
 
