@@ -53,6 +53,7 @@
 #include "foractlineswitch.h" // actLineOn — the switch (cli.h's --version reads the same header)
 #include "forbudgetfit.h"     // ForAnswerLedger — the render's priced ledger the line re-prices through and keeps current
 #include "foranswerfirst.h"   // rootBody / topLevelBlocks — the one CDATA-safe scanner of a --for answer's blocks
+#include "forpages.h"         // detail::rootPriceSpan — the one reader of where a document's price sits (pricePage's)
 #include "forrowlines.h"      // readSection — the one strict row reader
 #include "serialize.h"        // attrOf — the one reader of a printed tag's attribute value
 
@@ -138,24 +139,18 @@ namespace detail
 // judge): markup at kBytesPerTokenDefault, the <bodies> section at its own rate, the attribute's own digits by the fixpoint. Whatever
 // the old price held beyond its markup is kept as it was (the bodies, or a block the whole answer prices outside), so only the added
 // bytes move it — never the ceil-at-the-densest-rate over-read a later "est_tokens= equals the delivered price" arm would catch.
+// The span is pricePage's own reader (forpages.h rootPriceSpan), so the two cannot disagree about where the price and the bodies are.
+// KNOWN GAP (lane BR1C, MEASURED on MCP `for`): when the old price held LESS than its markup (blocks spliced after the price), the
+// clamp below sets the rest to 0 and the line's reprice charges those blocks too — actlinecheck (M) prints the excess.
 inline void repriceAdded( std::string& doc, std::size_t added )
 {
-    constexpr std::string_view kKey    = " est_tokens=\"";
-    const std::size_t          openEnd = doc.find( '>' );
-    const std::size_t          at      = doc.find( kKey );
-    if( at == std::string::npos || at > openEnd ) { return; }
-    const std::size_t close = doc.find( '"', at + kKey.size() );
-    const std::size_t old   = rootEstTokens( doc );
-    if( close == std::string::npos || close > openEnd || old == 0 ) { return; }
-    const std::size_t attrLen    = close + 1 - at;
-    const std::size_t bodiesAt   = doc.find( "<bodies" );
-    const std::size_t bodiesEnd  = bodiesAt == std::string::npos ? std::string::npos : doc.find( "</bodies>", bodiesAt );
-    const std::size_t bodyBytes  = bodiesEnd == std::string::npos ? 0 : bodiesEnd + std::string_view( "</bodies>" ).size() - bodiesAt;
-    const std::size_t markupNow  = doc.size() - bodyBytes - attrLen;   // the attribute itself excluded: the fixpoint adds it back
-    const std::size_t markupWas  = markupNow - added;
-    const std::size_t pricedWas  = rw::tokensForEmittedBytes( markupWas + attrLen, rw::kBytesPerTokenDefault );
+    const std::optional<forpages::detail::RootPriceSpan> s   = forpages::detail::rootPriceSpan( doc );
+    const std::size_t                                    old = rootEstTokens( doc );
+    if( !s || old == 0 ) { return; }
+    const std::size_t markupNow  = doc.size() - s->bodyBytes - s->attrLen;   // the attribute itself excluded: the fixpoint adds it back
+    const std::size_t pricedWas  = rw::tokensForEmittedBytes( markupNow - added + s->attrLen, rw::kBytesPerTokenDefault );
     const std::size_t restTokens = old > pricedWas ? old - pricedWas : 0;
-    doc.replace( at, attrLen, rw::pricedRootAttrTokens( markupNow, rw::kBytesPerTokenDefault, restTokens, nullptr ) );
+    doc.replace( s->at, s->attrLen, rw::pricedRootAttrTokens( markupNow, rw::kBytesPerTokenDefault, restTokens, nullptr ) );
 }
 }   // namespace detail
 

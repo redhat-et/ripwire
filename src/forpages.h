@@ -203,6 +203,28 @@ struct PageAt
            " <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the"
            " whole answer in one call -->";
 }
+// What a document's price is read from: where the root's est_tokens= attribute sits (the space before it through its closing
+// quote) and the bytes of its <bodies> section (priced at kBytesPerTokenBody; the rest is markup). nullopt: the <ctx> root's open
+// tag carries no est_tokens=. The ONE reader of both, for pricePage and for the act line's repriceAdded (foractline.h; lane BR1C:
+// that reprice had grown a 314-token copy of this reader).
+struct RootPriceSpan
+{
+    std::size_t at = 0, attrLen = 0, bodyBytes = 0;
+};
+[[nodiscard]] inline std::optional<RootPriceSpan> rootPriceSpan( std::string_view doc ) noexcept
+{
+    constexpr std::string_view kKey = " est_tokens=\"";
+    const std::size_t rootEnd = doc.find( '>', doc.find( "<ctx" ) );
+    const std::size_t at      = doc.find( kKey );
+    if( at == std::string_view::npos || at > rootEnd ) { return std::nullopt; }
+    const std::size_t close = doc.find( '"', at + kKey.size() );
+    if( close == std::string_view::npos || close > rootEnd ) { return std::nullopt; }
+    const std::size_t bodiesAt  = doc.find( "<bodies" );
+    const std::size_t bodiesEnd = bodiesAt == std::string_view::npos ? std::string_view::npos : doc.find( "</bodies>", bodiesAt );
+    const std::size_t bodyBytes = bodiesEnd == std::string_view::npos ? 0 : bodiesEnd + std::string_view( "</bodies>" ).size() - bodiesAt;
+    return RootPriceSpan{ at, close + 1 - at, bodyBytes };
+}
+
 // est_tokens= PRICES THE PAGE AS DELIVERED, in the emitter's own two rates: markup at kBytesPerTokenDefault, the <bodies>
 // section at kBytesPerTokenBody, the attribute's own digits inside the markup it prices (pricedRootAttrTokens' fixpoint).
 // Scaling the whole answer's number by the bytes kept was tried first and UNDER-read: formaxtokenscheck (B) priced a
@@ -211,19 +233,11 @@ struct PageAt
 // <graph_verb> …) is priced here: a page never claims to be cheaper than it is.
 inline void pricePage( std::string& page )
 {
-    constexpr std::string_view kKey = " est_tokens=\"";
-    const std::size_t rootEnd = page.find( '>', page.find( "<ctx" ) );
-    const std::size_t at      = page.find( kKey );
-    if( at == std::string::npos || at > rootEnd ) { return; }
-    const std::size_t close = page.find( '"', at + kKey.size() );
-    if( close == std::string::npos || close > rootEnd ) { return; }
-    page.erase( at, close + 1 - at );   // priced afresh below, its own bytes included by the fixpoint
-    const std::size_t bodiesAt  = page.find( "<bodies" );
-    const std::size_t bodiesEnd = bodiesAt == std::string::npos ? std::string::npos : page.find( "</bodies>", bodiesAt );
-    const std::size_t bodyBytes = bodiesEnd == std::string::npos ? 0 : bodiesEnd + std::string_view( "</bodies>" ).size() - bodiesAt;
-    const std::string attr = pricedRootAttrTokens( page.size() - bodyBytes, kBytesPerTokenDefault,
-                                                   bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0, nullptr );
-    page.insert( at, attr );
+    const std::optional<RootPriceSpan> s = rootPriceSpan( page );
+    if( !s ) { return; }
+    // priced afresh, the attribute's own bytes included by the fixpoint
+    page.replace( s->at, s->attrLen, pricedRootAttrTokens( page.size() - s->attrLen - s->bodyBytes, kBytesPerTokenDefault,
+                                                           s->bodyBytes > 0 ? tokensForEmittedBytes( s->bodyBytes, kBytesPerTokenBody ) : 0, nullptr ) );
 }
 } // namespace detail
 
