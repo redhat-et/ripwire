@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# trackedbuilddircheck.sh — a build/ dist/ out/ target/ directory that git TRACKS files under is SOURCE, and is crawled;
-# the same names untracked stay pruned (lane M1B, from LP1's ga-bat-06 loss).
+# trackedbuilddircheck.sh — a build/ directory that git TRACKS files under is SOURCE, and its TRACKED files are crawled;
+# the same name untracked stays pruned (lane M1B, from LP1's ga-bat-06 loss).
 #
 # WHY. kCrawlSkipDirs prunes those four names on a guess that they hold generated output. bat's build/ holds its Cargo
 # build script — committed source — and the name prune removed it from every answer while a peer indexed it (LP1
 # MEASURED: with build/ renamed, all 5 gold functions of the task reach page 1). git can falsify the guess, so the crawl
 # asks it (ingest_crawl.h TrackedBuildDirs), once per root and only when a non-ignored build-output name is met.
+# ONLY build/: round 1 also lifted dist/ out/ target/, and on GA3 DEV the only trees affected were axios's tracked dist/
+# BUNDLES (28-36 of ~135 page-1 rows, one body lost); none of the house's bundle/minified/vendored verdicts flags them.
 #
 # THE ARMS, and what each would catch:
-#   1. default map: tracked build/, nested tracked web/dist/, and tracked sub/build/ are INDEXED (RED on the pre-change
-#      binary); untracked out/ (NOT gitignored), ignored target/, tracked vendor/ and an ignored file INSIDE the tracked
-#      build/ stay OUT — the fix must not turn the prune off by name.
-#   2. --skipped still rows out/ target/ vendor/ as pruned-dir, and no longer rows build/ web/dist sub/build.
+#   1. default map: tracked build/ and tracked sub/build/ are INDEXED (RED on the pre-change binary); untracked out/,
+#      ignored target/, tracked vendor/, TRACKED web/dist/ (dist/ is not falsifiable), an untracked lib/build/, an
+#      ignored file INSIDE the tracked build/ and an untracked-NOT-ignored file inside it (build/scratch.c: inside a
+#      crawled build/ only what git tracks is indexed) all stay OUT.
+#   2. --skipped rows out/ target/ vendor/ web/dist lib/build as pruned-dir, no longer rows build/ sub/build, and rows
+#      build/scratch.c as why="untracked-build" under untracked_build="1"; the map header carries untracked_build=1.
 #   3. CONTROL for every "stays out" arm: the same tree with the four dirs RENAMED indexes every symbol, so an absent
 #      symbol in arm 1 is the prune's doing and not a grep that cannot see it (a prohibition is vacuous by default).
-#   4. a NON-GIT copy and --no-ignore keep the name prune (the pre-change corpus each already promised; the tracked
-#      probe is bound to the ignore answer so the warm snapshot's index watch covers it).
+#   4. a NON-GIT copy keeps the name prune (nothing vouches). --no-ignore crawls the TRACKED build/ too, with every file
+#      in it (scratch.c and the ignored x.gen.c — the flag stops filtering), and no untracked_build= drop; untracked
+#      out/ and lib/build/ stay pruned (built-in policy, which --no-ignore never lifted).
 #   5. a SUBDIRECTORY root sees its own tracked sub/build/ (the probe's pathspec and paths are root-relative).
 #   6. --quality-delta: a regression inside the tracked build/ GATES as preexisting-worse. Against a HEAD snapshot that
 #      still pruned build/ it would read as new-symbol (never gating) — the materialized-tree scope (CrawlTreeAllTracked).
@@ -24,6 +29,8 @@
 #   8. MCP: a server that warmed its index sees a NEW file added under the tracked build/ (mcpindex.h collectDirMtimes
 #      watches a name-pruned dir that holds an indexed file).
 #   9. determinism: two cold runs are byte-identical, and cold == warm through the cache.
+#  10. the warm snapshot under --no-ignore, in a LINKED worktree (its .git is a file, so an index write moves no
+#      watched directory): a replayed crawl must be refused once `git add` makes an untracked build/ tracked.
 #
 #   RIPWIRE_BIN=build/ripwire bash test/trackedbuilddircheck.sh
 # Takes $1 = BIN (the house convention), else $RIPWIRE_BIN, else ./build/ripwire.
@@ -48,7 +55,7 @@ mkdir -p "$XDG_CACHE_HOME" "$TMPDIR"
 cfn(){ printf 'int %s( int a ) { return a + %s; }\n' "$1" "$2" >"$3"; }
 mkrepo(){
     local d="$1"
-    mkdir -p "$d/src" "$d/build" "$d/web/dist" "$d/out" "$d/target/debug" "$d/vendor" "$d/sub/build"
+    mkdir -p "$d/src" "$d/build" "$d/web/dist" "$d/out" "$d/target/debug" "$d/vendor" "$d/sub/build" "$d/lib/build"
     printf 'target/\n*.gen.c\n' >"$d/.gitignore"
     cfn rwTbMainFn          1 "$d/src/main.c"
     cfn rwTbBuildFn         2 "$d/build/tool.c"
@@ -60,6 +67,8 @@ mkrepo(){
     cfn rwTbVendorFn        8 "$d/vendor/lib.c"          # TRACKED, but vendor/ is not a build-output name
     cfn rwTbSubBuildFn      9 "$d/sub/build/s.c"
     cfn rwTbSubFn          10 "$d/sub/x.c"
+    cfn rwTbScratchFn      12 "$d/build/scratch.c"       # untracked, NOT ignored, inside the TRACKED build/
+    cfn rwTbLibBuildFn     13 "$d/lib/build/later.c"     # untracked dir named build/, NOT ignored
     (
         cd "$d" || exit 1
         git init -q . >/dev/null 2>&1
@@ -72,8 +81,8 @@ mkrepo(){
 }
 R="$TMP/repo"
 mkrepo "$R"
-IN="rwTbMainFn rwTbBuildFn rwTbBuildSteadyFn rwTbDistFn rwTbSubBuildFn rwTbSubFn"
-OUT="rwTbOutFn rwTbTargetFn rwTbVendorFn rwTbBuildIgnoredFn"
+IN="rwTbMainFn rwTbBuildFn rwTbBuildSteadyFn rwTbSubBuildFn rwTbSubFn"
+OUT="rwTbOutFn rwTbTargetFn rwTbVendorFn rwTbBuildIgnoredFn rwTbDistFn rwTbScratchFn rwTbLibBuildFn"
 run(){ "$BIN" "$@" --top-k=400 --no-cache 2>>"$TMP/err"; }
 syms(){ grep -oE 'rwTb[A-Za-z]+' "$1" | sort -u | tr '\n' ' '; }
 
@@ -84,30 +93,39 @@ for s in $OUT; do grep -q "\b$s\b" "$TMP/def" && no "1: $s is indexed — the pr
 
 # ── 2. --skipped
 "$BIN" "$R" --skipped --no-cache >"$TMP/sk" 2>>"$TMP/err"
-for d in out target vendor; do
+for d in out target vendor web/dist lib/build; do
     grep -q "<f p=\"$d\" why=\"pruned-dir\"" "$TMP/sk" && ok "2: --skipped rows $d/ as pruned-dir" || no "2: --skipped lost the pruned-dir row for $d/"
 done
-for d in build web/dist sub/build; do
+grep -q '<f p="build/scratch.c" why="untracked-build"' "$TMP/sk" && grep -q 'untracked_build="1"' "$TMP/sk" \
+    && ok "2: --skipped rows build/scratch.c as untracked-build, untracked_build=\"1\"" \
+    || no "2: --skipped does not disclose the untracked file inside the tracked build/: $( grep -oE '<skipped [^>]*>' "$TMP/sk" | cut -c1-300 )"
+grep -q 'untracked_build=1' "$TMP/def" && ok "2: the map header discloses untracked_build=1" \
+    || no "2: the map header does not disclose the untracked build/ file: $( grep -oE '<!-- files=[^>]{0,200}' "$TMP/def" | head -1 )"
+for d in build sub/build; do
     grep -q "<f p=\"$d\" why=\"pruned-dir\"" "$TMP/sk" && no "2: --skipped still rows the tracked $d/ as pruned" || ok "2: --skipped no longer rows the tracked $d/"
 done
 
 # ── 3. CONTROL: renamed dirs index every symbol, so arm 1's absences are the prune's
 cp -R "$R" "$TMP/ctl"; rm -rf "$TMP/ctl/.git"
-for d in build out target vendor sub/build; do mv "$TMP/ctl/$d" "$TMP/ctl/${d}_x"; done
+for d in build out target vendor sub/build lib/build; do mv "$TMP/ctl/$d" "$TMP/ctl/${d}_x"; done
 mv "$TMP/ctl/web/dist" "$TMP/ctl/web/dist_x"
 run "$TMP/ctl" >"$TMP/ctlmap"
 miss=""; for s in $IN $OUT; do grep -q "\b$s\b" "$TMP/ctlmap" || miss="$miss $s"; done
 [ -z "$miss" ] && ok "3: control — every fixture symbol is visible when nothing is name-pruned" || no "3: control cannot see:$miss"
 
-# ── 4. non-git and --no-ignore keep the name prune
+# ── 4. non-git keeps the name prune; --no-ignore crawls the tracked build/ whole
 cp -R "$R" "$TMP/nogit"; rm -rf "$TMP/nogit/.git"
 run "$TMP/nogit" >"$TMP/ng"
 grep -q '\brwTbBuildFn\b' "$TMP/ng" && no "4: a non-git root crawled build/ (no git, nothing vouches)" || ok "4: non-git root keeps the build/ prune"
 grep -q '\brwTbMainFn\b' "$TMP/ng" && ok "4: non-git root still indexes src/" || no "4: non-git root lost src/ (instrument broken)"
 run "$R" --no-ignore >"$TMP/noig"
-if ! grep -q '\brwTbMainFn\b' "$TMP/noig"; then no "4: --no-ignore map lost src/ (instrument broken)"
-elif grep -q '\brwTbBuildFn\b' "$TMP/noig"; then no "4: --no-ignore crawled build/ (it promises the pre-change corpus)"
-else ok "4: --no-ignore keeps the build/ prune (src/ still indexed)"; fi
+for s in rwTbMainFn rwTbBuildFn rwTbScratchFn rwTbBuildIgnoredFn rwTbSubBuildFn; do
+    grep -q "\b$s\b" "$TMP/noig" && ok "4: --no-ignore indexes $s" || no "4: --no-ignore misses $s (indexed: $( syms "$TMP/noig" ))"
+done
+for s in rwTbOutFn rwTbLibBuildFn rwTbDistFn rwTbVendorFn rwTbTargetFn; do
+    grep -q "\b$s\b" "$TMP/noig" && no "4: --no-ignore indexed $s (an untracked or non-falsifiable dir)" || ok "4: --no-ignore keeps out $s"
+done
+grep -q 'untracked_build=' "$TMP/noig" && no "4: --no-ignore disclosed an untracked_build= drop (it filters nothing)" || ok "4: --no-ignore drops no untracked build/ file"
 
 # ── 5. a subdirectory root
 run "$R/sub" >"$TMP/subm"
@@ -179,6 +197,24 @@ run "$R" >"$TMP/d1"; run "$R" >"$TMP/d2"
 grep -q '\brwTbBuildFn\b' "$TMP/d1" && cmp -s "$TMP/d1" "$TMP/d2" && ok "9: two cold runs are byte-identical" || no "9: two cold runs differ"
 "$BIN" "$R" --top-k=400 >"$TMP/w1" 2>>"$TMP/err"; "$BIN" "$R" --top-k=400 >"$TMP/w2" 2>>"$TMP/err"
 cmp -s "$TMP/w1" "$TMP/w2" && cmp -s "$TMP/w1" "$TMP/d1" && ok "9: cold == warm through the cache" || no "9: the cached runs differ from the cold run"
+
+# ── 10. warm snapshot under --no-ignore: an index-only change must refuse the replayed crawl
+V="$TMP/wtsrc"; mkrepo "$V"
+git -C "$V" worktree add -q --detach "$TMP/wt" main >/dev/null 2>&1
+[ -f "$TMP/wt/.git" ] && [ -f "$TMP/wt/build/tool.c" ] || no "10: could not create the linked worktree (instrument broken)"
+mkdir -p "$TMP/wt/lib/build"; cfn rwTbLaterFn 14 "$TMP/wt/lib/build/later2.c"   # an untracked lib/build/ in the linked worktree
+wrun(){ RIPWIRE_SNAPSHOT_STATS=1 "$BIN" "$TMP/wt" --no-ignore --top-k=400 --cache="$TMP/wt.bin" >"$1" 2>"$1.err"; }
+sleep 3                                                   # leave the 2 s racy window, so the next run may record the tree
+wrun "$TMP/w10a"; sleep 3; wrun "$TMP/w10b"
+if grep -q 'tree=replayed' "$TMP/w10b.err" && ! grep -q '\brwTbLaterFn\b' "$TMP/w10b"; then
+    ok "10: --no-ignore replays the crawl, untracked lib/build/ pruned (vacuity guard)"
+else
+    no "10: VACUOUS or wrong — no replay, or lib/build/ indexed while untracked: $( grep snapshot-stats "$TMP/w10b.err" )"
+fi
+git -C "$TMP/wt" add lib/build/later2.c >/dev/null 2>&1
+wrun "$TMP/w10c"
+grep -q '\brwTbLaterFn\b' "$TMP/w10c" && ok "10: after git add, the newly tracked lib/build/ is indexed (the index change refused the replay)" \
+    || no "10: STALE — the warm snapshot replayed past an index change under --no-ignore: $( grep snapshot-stats "$TMP/w10c.err" )"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; fi

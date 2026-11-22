@@ -267,13 +267,18 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
     return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
 }
 
-// M1 (tracked build-output dirs): the four kCrawlSkipDirs names that GUESS a directory is build output from its name
-// alone. A guess git can falsify: bat's `build/` holds the Cargo build script's real source (tracked), and the name prune
-// removed it from every answer while a peer indexed it. So a directory with one of these names that git TRACKS files
-// under is crawled (ingest_crawl.h TrackedBuildDirs); untracked, it stays pruned — generated output is what the prune is
-// for. Deliberately NOT here: vendor/, third_party/, node_modules/ (tracked vendored code is the noise those names exist
-// to drop, tracked or not), and captures/ (this repository tracks docs/captures/ and prunes it on purpose).
-inline constexpr std::string_view kTrackedBuildOutputDirs[] = { "build", "dist", "out", "target" };
+// M1 (tracked build dirs): the kCrawlSkipDirs names whose "this is build output" guess git can FALSIFY. bat's `build/`
+// holds the Cargo build script's real source (tracked), and the name prune removed it from every answer while a peer
+// indexed it. So a directory with one of these names that git TRACKS files under is crawled — its tracked files only
+// (ingest_crawl.h CrawlNamePrune) — and untracked it stays pruned: generated output is what the prune is for.
+// ONLY build/, measured: round 1 also lifted dist/ out/ target/, and on GA3 DEV (n=99) the only trees that moved were
+// axios's, whose TRACKED dist/ holds rollup bundles (dist/axios.js, dist/esm/axios.js, dist/node/axios.cjs,
+// dist/browser/axios.cjs) that took 28-36 of ~135 page-1 rows and cost one body. None of the house's shipped-code verdicts
+// flags them (26-34 bytes/line, far under kVendoredBundleLineBytes; normal whitespace, so not minified-suspect; no
+// vendoring segment), so tracking is not evidence of source there. out/ and target/ never occurred tracked in GA1 or GA3.
+// Deliberately NOT here either: vendor/, third_party/, node_modules/ (tracked vendored code is the noise those names exist
+// to drop) and captures/ (this repository tracks docs/captures/ and prunes it on purpose).
+inline constexpr std::string_view kTrackedBuildOutputDirs[] = { "build" };
 
 inline bool isTrackedBuildOutputName( std::string_view dirName ) noexcept
 {

@@ -1713,30 +1713,33 @@ GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreM
     return set;
 }
 
-// ── M1: TRACKED BUILD-OUTPUT DIRECTORIES ARE SOURCE ───────────────────────────────────────────────────────
+// ── M1: TRACKED BUILD DIRECTORIES ARE SOURCE ─────────────────────────────────────────────────────────────
 //
-// kCrawlSkipDirs prunes build/ dist/ out/ target/ by NAME, a guess that they hold generated output. git can falsify it:
-// a directory under one of those names whose files git TRACKS is committed source (bat's build/ is its Cargo build
-// script; LP1 measured all 5 gold functions of one DEV task under it, missed by the name prune, on page 1 once it was
-// renamed). So the walk crawls such a directory when git tracks files under it, and keeps pruning it otherwise.
+// kCrawlSkipDirs prunes build/ by NAME, a guess that it holds generated output. git can falsify it: a build/ whose files
+// git TRACKS is committed source (bat's build/ is its Cargo build script; LP1 measured all 5 gold functions of one DEV
+// task under it, missed by the name prune, on page 1 once it was renamed). So the walk enters such a directory when git
+// tracks files under it and keeps pruning it otherwise — and inside it indexes ONLY the files git tracks: the guess was
+// falsified for those, not for whatever a build left beside them (CrawlSkips::untrackedBuild counts the rest).
+// kTrackedBuildOutputDirs (ingest.h) says why build/ alone, with the GA3 numbers.
 //
-// ONE git child per root, never one per directory, and only when it can matter: the walk meets a directory with one of
-// the four names that git's ignore answer did not already collapse whole (an ignored directory holds nothing tracked —
-// `--directory` never collapses a directory with a tracked path in it). This repository's own build/ is ignored, so it
-// never asks. The answer is every tracked path under any such directory (`:(glob)**/NAME/**`, relative to the root as
-// the walk's own paths are), folded to the directories it proves: each ancestor of a tracked path named by
-// kTrackedBuildOutputDirs. Nested ones too: a tracked `web/dist/a.js` admits `web/dist`.
+// ONE git child per root, never one per directory, and only when it can matter: the walk meets a build/ that git's ignore
+// answer did not already collapse whole (an ignored directory holds nothing tracked — `--directory` never collapses a
+// directory with a tracked path in it), so this repository's own ignored build/ never asks. The answer is every tracked
+// path under any build/ (`:(glob)**/build/**`, relative to the root as the walk's own paths are): kept as the file list
+// the untracked test reads, and folded to the directories it proves (nested ones too: tracked `a/build/x.rs` admits
+// `a/build`).
 //
-// Bound to the ignore answer on purpose (asked only when git answered it): that is what makes the walk's dependence on
-// the INDEX visible to the warm snapshot, which watches the index's signature exactly when the ignore probe ran
-// (warmsnap.h GitInputs). So a non-git root, --no-ignore and a git that could not answer all keep the name prune, which
-// is also the pre-change corpus each of those already promised. A materialized commit tree is the one case decided
-// without git (ingest.h CrawlTreeAllTracked).
+// The INDEX becomes an input of the walk, so the probe tells the warm snapshot (TreeCapture::gitIndexRead), which then
+// watches the index's signature — under --no-ignore too, where no ignore probe ran to make it watch. Under --no-ignore a
+// tracked build/ is entered the same way and every file in it is indexed (the flag stops filtering; it never lifted the
+// built-in denylist, so an UNTRACKED build/ stays pruned there as before). A non-git root and a git that cannot answer
+// keep the name prune. A materialized commit tree is decided without git (ingest.h CrawlTreeAllTracked).
 struct TrackedBuildDirs
 {
     bool                     asked     = false;   // the probe has run for this walk (its answer, good or bad, stands)
-    bool                     available = false;   // git answered; `dirs` is authoritative
+    bool                     available = false;   // git answered; `dirs` and `files` are authoritative
     std::vector<std::string> dirs;                // root-relative, NO trailing '/', sorted, unique
+    std::vector<std::string> files;               // the tracked files under them, root-relative, sorted
     enum class DisclosureWhy : std::uint8_t
     {
         GitNotRunnable,
@@ -1749,11 +1752,10 @@ struct TrackedBuildDirs
     }
 };
 
-// The -z listing → the directories it proves tracked. Each entry is one tracked file; every '/'-terminated prefix whose
-// LAST component is one of the four names is a directory the walk will crawl.
-inline std::vector<std::string> trackedBuildDirsOf( std::string_view listing )
+// The -z listing → its files, and the directories they prove tracked: every '/'-terminated prefix whose LAST component is
+// a kTrackedBuildOutputDirs name.
+inline void readTrackedListing( std::string_view listing, TrackedBuildDirs& out )
 {
-    std::vector<std::string> dirs;
     for( std::size_t i = 0; i < listing.size(); )
     {
         const std::size_t nul = std::min( listing.find( '\0', i ), listing.size() );
@@ -1763,18 +1765,22 @@ inline std::vector<std::string> trackedBuildDirsOf( std::string_view listing )
         {
             if( isTrackedBuildOutputName( ent.substr( from, slash - from ) ) )
             {
-                dirs.emplace_back( ent.substr( 0, slash ) );
+                out.dirs.emplace_back( ent.substr( 0, slash ) );
             }
         }
+        if( !ent.empty() )
+        {
+            out.files.emplace_back( ent );
+        }
     }
-    std::sort( dirs.begin(), dirs.end() );
-    dirs.erase( std::unique( dirs.begin(), dirs.end() ), dirs.end() );
-    return dirs;
+    std::sort( out.dirs.begin(), out.dirs.end() );
+    out.dirs.erase( std::unique( out.dirs.begin(), out.dirs.end() ), out.dirs.end() );
+    std::sort( out.files.begin(), out.files.end() );
 }
 
 inline TrackedBuildDirs collectTrackedBuildDirs( const char* rootDir )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest: crawl (git tracked-build-dir probe, one per root, only when a build-output name is met)" );
+    PROFILE_SCOPE_DESCRIBE( "ingest: crawl (git tracked-build-dir probe, one per root, only when a build/ is met)" );
     TrackedBuildDirs out;
     out.asked = true;
     std::string args = "-z --";
@@ -1788,17 +1794,17 @@ inline TrackedBuildDirs collectTrackedBuildDirs( const char* rootDir )
         case GitIgnoreProbeRaw::State::NotGit:        // not produced by runGitLsFiles; the name prune stands
         case GitIgnoreProbeRaw::State::NotRunnable:
         {
-            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the tracked-build-dir probe — build-output names stay pruned" );
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the tracked-build-dir probe — build/ stays pruned" );
             return out;
         }
         case GitIgnoreProbeRaw::State::Failed:
         {
-            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeFailed, "ingest: the tracked-build-dir probe exited non-zero — build-output names stay pruned" );
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeFailed, "ingest: the tracked-build-dir probe exited non-zero — build/ stays pruned" );
             return out;
         }
         case GitIgnoreProbeRaw::State::OverCeiling:
         {
-            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeOverCeiling, "ingest: the tracked-build-dir probe exceeded its byte ceiling — build-output names stay pruned" );
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeOverCeiling, "ingest: the tracked-build-dir probe exceeded its byte ceiling — build/ stays pruned" );
             return out;
         }
         case GitIgnoreProbeRaw::State::Answered:
@@ -1806,24 +1812,51 @@ inline TrackedBuildDirs collectTrackedBuildDirs( const char* rootDir )
             break;
         }
     }
-    out.dirs      = trackedBuildDirsOf( raw.bytes );
+    readTrackedListing( raw.bytes, out );
     out.available = true;
     return out;
 }
 
-// The walk's one question about a directory NAME, with M1's exception folded in: is `name` pruned by the built-in
-// denylist? A build-output name git tracks files under is not (TrackedBuildDirs' header). `rel` is the walk's LAZY
-// root-relative spelling, stringified only for one of the four names; the probe runs at most once per walk.
+// The walk's two M1 questions. prunes(): is directory `name` pruned by the built-in denylist? A build/ git tracks files
+// under is not (TrackedBuildDirs' header). untracked(): is this file inside such a directory without being tracked itself
+// (default mode only; --no-ignore and a commit tree index everything they enter)? `rel` is the walk's LAZY root-relative
+// spelling, stringified only for a build/ directory, or for a file once a tracked build/ has been entered at all.
+// How the walk runs, as CrawlNamePrune reads it: a materialized commit tree (every file tracked), whether git's ignore rules
+// are honoured (false under --no-ignore), and the warm snapshot's capture, told when the probe reads the index
+// (TreeCapture::gitIndexRead; null records nothing).
+struct CrawlNameMode
+{
+    bool                   allTracked       = false;
+    bool                   respectGitignore = true;
+    warmsnap::TreeCapture* seen             = nullptr;
+};
+
 class CrawlNamePrune
 {
 public:
-    CrawlNamePrune( const char* rootDir, const GitIgnoreSet& ignoreSet, bool allTracked ) noexcept
-        : rootDir_( rootDir ), ignoreSet_( ignoreSet ), allTracked_( allTracked ) {}
+    CrawlNamePrune( const char* rootDir, const GitIgnoreSet& ignoreSet, CrawlNameMode mode ) noexcept
+        : rootDir_( rootDir ), ignoreSet_( ignoreSet ), respectGitignore_( mode.respectGitignore ), allTracked_( mode.allTracked ), seen_( mode.seen ) {}
 
     template< typename RelFn >
     bool prunes( std::string_view name, RelFn&& rel )
     {
         return isSkippedCrawlDir( name ) && !( isTrackedBuildOutputName( name ) && tracked( rel() ) );
+    }
+
+    template< typename RelFn >
+    bool untracked( RelFn&& rel ) const
+    {
+        if( !respectGitignore_ || allTracked_ || !probe_.available || probe_.dirs.empty() )
+        {
+            return false;
+        }
+        const std::string_view r = rel();
+        bool inside = false;
+        for( std::size_t slash = r.find( '/' ); slash != std::string_view::npos && !inside; slash = r.find( '/', slash + 1 ) )
+        {
+            inside = pathInIgnoreSet( probe_.dirs, r.substr( 0, slash ) );
+        }
+        return inside && !pathInIgnoreSet( probe_.files, r );
     }
 
 private:
@@ -1833,22 +1866,60 @@ private:
         {
             return true;   // a materialized commit tree: every file is tracked (ingest.h CrawlTreeAllTracked)
         }
-        if( !ignoreSet_.available || pathInIgnoreSet( ignoreSet_.dirs, rel ) )
+        const bool gitAnswers = respectGitignore_ ? ignoreSet_.available && !pathInIgnoreSet( ignoreSet_.dirs, rel ) : underGit();
+        if( !gitAnswers )
         {
-            return false;  // git did not answer (the name prune stands), or ignored this directory whole (nothing tracked)
+            return false;  // no git (the name prune stands), or git ignored this directory whole (nothing under it is tracked)
         }
         if( !probe_.asked )
         {
             probe_ = collectTrackedBuildDirs( rootDir_ );
+            if( seen_ != nullptr )
+            {
+                seen_->gitIndexRead();
+            }
         }
         return probe_.available && pathInIgnoreSet( probe_.dirs, rel );
     }
 
-    const char*         rootDir_;
-    const GitIgnoreSet& ignoreSet_;
-    bool                allTracked_;
-    TrackedBuildDirs    probe_;
+    bool underGit()   // --no-ignore ran no ignore probe, so the root's git-ness is asked here, once, without a git child
+    {
+        if( underGit_ == 0 )
+        {
+            underGit_ = underGitRoot( rootDir_ ) ? 1 : 2;
+        }
+        return underGit_ == 1;
+    }
+
+    const char*            rootDir_;
+    const GitIgnoreSet&    ignoreSet_;
+    bool                   respectGitignore_;
+    bool                   allTracked_;
+    warmsnap::TreeCapture* seen_;
+    TrackedBuildDirs       probe_;
+    std::uint8_t           underGit_ = 0;   // 0 not asked, 1 yes, 2 no
 };
+
+// The drops git's answers decide, tested AFTER the extension and the --exclude match (pathInIgnoreSet's header has why): a
+// file git's ignore rules cover (§N6-C), then (M1) an untracked file inside a build/ the walk entered only because git
+// tracks files under it — so untrackedBuild, like ignored, counts only what would OTHERWISE HAVE BEEN INDEXED. True when
+// the file was dropped and recorded.
+template< typename PathFn, typename IgnoredFn, typename RelFn >
+bool recordGitDrop( CrawlSkips& skips, const CrawlNamePrune& namePrune, const std::string& ext, const fs::directory_entry& entry,
+                    PathFn&& fullPath, IgnoredFn&& ignored, RelFn&& rel )
+{
+    if( ignored() )
+    {
+        recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, entry );
+        return true;
+    }
+    if( namePrune.untracked( rel ) )
+    {
+        recordCrawlDrop( skips.untrackedBuild, skips.untrackedBuildFiles, fullPath(), ext, entry );
+        return true;
+    }
+    return false;
+}
 
 // §L1/§N6-C — WHY the walk stopped at this directory, recorded. Contents are UNKNOWN past here whichever
 // rule stopped us, but WHICH rule is itself the disclosure, so the three classes carry three counters
@@ -1903,6 +1974,7 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     std::sort( skips.prunedDirRows.begin(), skips.prunedDirRows.end(), byPath );   // #478 gap 3, same contract
     std::sort( skips.prunedPackageRows.begin(), skips.prunedPackageRows.end(), byPath );
     std::sort( skips.escaped.begin(), skips.escaped.end(), byPath );               // §SEC1, same contract
+    std::sort( skips.untrackedBuild.begin(), skips.untrackedBuild.end(), byPath ); // M1, same contract
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
     {
@@ -2139,7 +2211,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
     SphinxTxtRoots     sphinxTxtRoots( os::program_path( root ) );
     seen.root( os::program_path( root ) );
-    CrawlNamePrune     namePrune( rootDir, ignoreSet, tlCrawlTreeAllTracked );   // M1; the scope is read on the calling thread
+    CrawlNamePrune     namePrune( rootDir, ignoreSet, { tlCrawlTreeAllTracked, respectGitignore, &seen } );   // M1; the scope is read on this thread
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -2286,10 +2358,10 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 continue;
             }
 
-            // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering.
-            if( ignored() )
+            // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering; M1's
+            // untracked-in-build/ class right after it (recordGitDrop).
+            if( recordGitDrop( skips, namePrune, ext, *it, fullPath, ignored, [ & ] { return relForHash( fullPath(), rootDir ); } ) )
             {
-                recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, *it );
                 continue;
             }
 

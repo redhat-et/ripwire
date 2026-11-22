@@ -78,7 +78,8 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 4;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 5;                        // bump on ANY layout change in the three sections
+                                                                    // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
                                                                     // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
                                                                     // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
                                                                     // 2: the MODEL section dropped its stored stat signature of the blob — the
@@ -294,8 +295,12 @@ struct TreeCapture
     std::vector<std::string> ignoredDirs;    // the directories pruned ONLY because git's answer listed them
     bool                     on     = false; // false: nobody is recording, and every call below is one test and a return
     bool                     usable = true;  // false: the walk hit something a replay cannot stand for (a memory stop, an unreadable level)
+    bool                     readGitIndex = false;   // M1: the walk asked git what it tracks, so the INDEX is one of its inputs
 
     void unreplayable() noexcept { usable = false; }
+    // M1: the tracked-build-dir probe ran (ingest_crawl.h CrawlNamePrune). Under --no-ignore no ignore probe ran, so without
+    // this recordTree would leave the index unwatched and replay a crawl a `git add` had changed.
+    void gitIndexRead() noexcept { readGitIndex = true; }
     // the root itself, through any link that names it
     void root( const std::string& path )
     {
@@ -343,9 +348,9 @@ inline void writeCrawlSkips( Out& o, const CrawlSkips& s )
 {
     writeSkipRows( o, s.excluded );  writeSkipRows( o, s.unsupported );  writeSkipRows( o, s.prunedDirRows );  writeSkipRows( o, s.prunedPackageRows );
     writeSkipRows( o, s.ignored );   writeSkipRows( o, s.ignoredDirRows ); writeSkipRows( o, s.nestRefused );  writeSkipRows( o, s.extractPartial );
-    writeSkipRows( o, s.escaped );
+    writeSkipRows( o, s.escaped );   writeSkipRows( o, s.untrackedBuild );
     for( const std::uint64_t n : { s.excludedFiles, s.unsupportedFiles, s.excludedDirs, s.prunedDirs, s.prunedPackages, s.ignoredFiles, s.ignoredDirs,
-                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles } )
+                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles, s.untrackedBuildFiles } )
     {
         o.u64( n );
     }
@@ -356,9 +361,9 @@ inline void readCrawlSkips( In& in, CrawlSkips& s )
 {
     readSkipRows( in, s.excluded );  readSkipRows( in, s.unsupported );  readSkipRows( in, s.prunedDirRows );  readSkipRows( in, s.prunedPackageRows );
     readSkipRows( in, s.ignored );   readSkipRows( in, s.ignoredDirRows ); readSkipRows( in, s.nestRefused );  readSkipRows( in, s.extractPartial );
-    readSkipRows( in, s.escaped );
+    readSkipRows( in, s.escaped );   readSkipRows( in, s.untrackedBuild );
     for( std::uint64_t* n : { &s.excludedFiles, &s.unsupportedFiles, &s.excludedDirs, &s.prunedDirs, &s.prunedPackages, &s.ignoredFiles, &s.ignoredDirs,
-                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles } )
+                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles, &s.untrackedBuildFiles } )
     {
         *n = in.u64();
     }
@@ -819,7 +824,7 @@ inline void recordTree( Session& s, const IngestResult& crawl, const std::string
     {
         return;   // the racy rule: some signature is too young to tell a later same-granule change from no change
     }
-    const GitInputs git = respectGitignore ? collectGitInputs( rootReal ) : GitInputs{};
+    const GitInputs git = respectGitignore || s.capture.readGitIndex ? collectGitInputs( rootReal ) : GitInputs{};   // M1: see gitIndexRead
     if( !git.usable || ( !git.indexPath.empty() && ( git.indexSig.mtimeNs >= racyFrom || git.indexSig.ctimeNs >= racyFrom ) ) )
     {
         return;
