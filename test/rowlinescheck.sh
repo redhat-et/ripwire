@@ -10,7 +10,10 @@
 #   (L1)  lossless: decode(answer) == twin, byte for byte — the whole answer (--page-bytes=0), the default page 1, page 2, a budget
 #         the answer fits, a budget that sheds, --signatures-only, and pages 1 and 2 at 3000 B (page 2 re-opens <sigs>)
 #   (L1n) MUTATION NEGATIVE CONTROL: the same comparison FAILS when one byte is dropped from a line, and when the r= a continuation
-#         page's first row must keep is elided (the decoder then numbers the rows from 1)
+#         page's first row must keep is elided (the decoder then numbers the rows from 1). The continuation page is page 2 at 2500 B,
+#         whose <sigs> opens on a DEFINITION line under both rankings (basename field on and RIPWIRE_BASENAME_W=0); at 3000 B the
+#         basename field (M2) made page 2 open on a VERBATIM row, the line-form regex found no target and the control went
+#         vacuous. It still fails closed: no definition line carrying r= first in a continuation page's <sigs> is a FAIL.
 #   (L2)  legend: each of the two clauses is present exactly once where its form is used, last before </ctx>, and absent from the twin;
 #         a continuation page carries neither (it re-sends no legend), and page 1 carries the clause of every section it names as
 #         continued= or deferred=, so the pages after it are defined
@@ -63,6 +66,7 @@ pair sheds  --token-budget=4000
 pair sigonly --signatures-only
 pair small1 --page-bytes=3000
 pair small2 --page-bytes=3000:2
+pair small3 --page-bytes=2500:2
 rw --page-bytes=0 >"$WORK/whole.on2"
 for arm in "--legend=first" "--json"; do
     tag="$( printf '%s' "$arm" | tr -c 'a-z0-9' '_' )"
@@ -121,7 +125,7 @@ for d in $( ls -d test/*fix | sort | awk 'NR % 6 == 1' ); do
     RIPWIRE_NO_ROWLINES=1 "$BIN" "$d" --no-cache --for="main run init parse handle get set name value" --page-bytes=0 >"$WORK/t$n.off" 2>/dev/null
 done
 echo "$n" >"$WORK/trees.n"
-for f in whole page1 page2 fits sheds sigonly small1 small2 fx; do
+for f in whole page1 page2 fits sheds sigonly small1 small2 small3 fx; do
     if xmllint --noout "$WORK/$f.on" 2>/dev/null; then ok "(L5) $f: well formed"; else no "(L5) $f: xmllint rejects the answer"; fi
 done
 if cmp -s "$WORK/whole.on" "$WORK/whole.on2"; then ok "(L6) two runs byte-identical"; else no "(L6) two runs differ"; fi
@@ -134,7 +138,7 @@ def rd(n): return open(os.path.join(W, n), "rb").read()
 def say(ok, msg):
     global bad
     print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
-ANSWERS = ("whole", "page1", "page2", "fits", "sheds", "sigonly", "small1", "small2")
+ANSWERS = ("whole", "page1", "page2", "fits", "sheds", "sigonly", "small1", "small2", "small3")
 on = {n: rd(n + ".on") for n in ANSWERS + ("fx",)}; off = {n: rd(n + ".off") for n in ANSWERS + ("fx",)}
 def sections(b): return {name: b[e:c] for name, s, e, c in R.top_sections(b)}
 def is_lines(body): return body.startswith(b"<![CDATA[") and body.endswith(b"]]>") and body.find(b"]]>") == len(body) - 3 and b"<![CDATA[" not in body[9:]
@@ -162,12 +166,14 @@ def differs(mutant):
 w = on["whole"]; m = re.search(rb"\n[^<\n]", w[w.index(b"<sigs"):w.index(b"</sigs>")])
 i = w.index(b"<sigs") + m.start() + 1 if m else -1      # the first byte of the first definition/pointer line of <sigs>
 say(i > 0 and differs(w[:i] + w[i + 1:]), "(L1n) [mutation negative control] one byte dropped from a line: the decode no longer equals the twin")
-s2 = on["small2"]; m = re.search(rb"(<sigs[^>]*><!\[CDATA\[[^<\n][^\n]*?)[ \t]r=\d+(?= \| |\n|\]\]>)", s2)
+s2 = on["small3"]; m = re.search(rb"(<sigs[^>]*><!\[CDATA\[[^<\n][^\n]*?)[ \t]r=\d+(?= \| |\n|\]\]>)", s2)
+m = m if m and re.search(rb' page="(?!1")\d+"', s2[:s2.index(b">")]) else None      # the target must sit on a continuation page
 def differs2(mutant):
-    try: return R.decode(mutant) != off["small2"]
+    try: return R.decode(mutant) != off["small3"]
     except Exception: return True
 say(m is not None and differs2(s2[:m.start(0)] + m.group(1) + s2[m.end(0):]),
-    "(L1n) [mutation negative control] the r= a continuation page's first row must keep, elided: the decode no longer equals the twin")
+    "(L1n) [mutation negative control] the r= a continuation page's first row must keep (2500 B pages, page 2, %s), elided: the decode no longer equals the twin"
+    % (m.group(0)[m.group(0).rfind(b"r="):].decode() if m else "NO definition line with r= opens <sigs>"))
 
 # (L2) the legend clauses
 for n in ANSWERS:

@@ -426,6 +426,13 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # RE-ANCHORED BY HAND 2026-11-18 (lane s1-small, DEF-READING-TRIM, by design; gate test/verbdefrowscheck.sh (11)), callers.xml and
 # impact.xml only: the old kSoleDefLegend sentence replaced by the shortened one (graphlegend.h), string for string, nothing else
 # (checked mechanically against a fresh --legend=full run, at= masked). 4197 -> 4144 B and 4903 -> 4850 B. Five others unchanged.
+# RE-ANCHORED 2026-11-21 (lane rp1-repin-m2, owner ruling 171 "re-pin and investigate"), for.xml only: M2 made --for score a
+# symbol's file BASENAME by default (weight 2), and "geometry" is the basename of geometry.h/geometry.cpp, so the probe's ranking
+# moved: perimeter r2 (was diagonal), geometry.h's Point and perimeter prototype join the rows (kept 9 of 40, was 7), the prototype
+# carries same_as=, docs_after_code= and the wider files_first= ride, coverage= drops (the answer is no longer thin), and the hop
+# and fold follow the new order. Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=0 prints the previous pin byte for
+# byte (at= masked), so every changed byte is the ranking's. The pin is the DEFAULT ranking's, never the W=0 one. 5780 -> 5980 B.
+# The six other pins are unchanged (none of them ranks).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -834,13 +841,19 @@ ripwire.merge-scout/v1            570   558
 ripwire.whereis/v1               1050  1037
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
-ripwire.pack-task/v1             990   974
+ripwire.pack-task/v1            1070  1054
 ripwire.pack-top-n/v1            830   813
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            510   508
 ripwire.for/v1                   1100  1099
 ripwire.defs/v1                   490   472
 '
+# RE-PINNED 2026-11-21 (lane rp1-repin-m2, owner ruling 171): ripwire.pack-task/v1 990 -> 1070. M2 (the --for basename field, on by
+#   default) lifts geometry.h's struct Point to r=1 of --pack-task=geometry, and that row carries sc=, so the present-only sc= reading
+#   ("sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it.", 96 B) rides again: measured
+#   1254 B raw, 1054 B net of the two registered riding clauses (key-body-pointer-rows 90 + file-tail-rows 110, which explain their
+#   own bytes), against 958 net with RIPWIRE_BASENAME_W=0 -- +96 B, exactly that reading. The rule above on the NET figure (the
+#   registry explains the rest; applying it to the raw 1254 would hand those 200 B a second time): 1054 -> 1060, + 10 = 1070.
 # PINNED 2026-10-27 (lane/defs-lookup): ripwire.defs/v1 on this gate's --defs=zzqq9 probe. First pin 340 on 316 B, measured BEFORE
 # the not-found readings existed; RE-PINNED 2026-10-28 to 490 on 472 B = the verb's purpose line (~290 B) plus the shared not-found
 # answer's found=/of=/near= readings (compactlegendcheck UG required them). Present-only: none of the defs row readings ride here.
@@ -881,13 +894,19 @@ fi
 # (U-twin-fold) FIX1 B2 (rule 4: a re-pin keeps a twin for the old path): the 820 -> 1100 re-pin of ripwire.for/v1 above paid for
 # ONE reading, the fold's compact clause; with the fold off (RIPWIRE_NO_BODY_FOLD=1, so neither the fold nor its clause rides) the
 # same --for=geometry probe's compact prose legend still fits the OLD 820 B pin, measured by the same `leg prose` operand.
+# RE-PINNED 2026-11-21 (lane rp1-repin-m2, owner ruling 171): 820 -> 840. M2 (the --for basename field, on by default) turned this
+# probe from a THIN answer (kept 2 of 40) into a fuller one (kept 8 of 40: "geometry" is geometry.h/geometry.cpp's basename), so
+# its present-only readings changed: coverage= left (no longer thin), sc=, d same_as=, d e= and the doc-mentions note joined.
+# Measured 903 B raw, 825 B net of the registered riding tail clauses (tail-code-first 61 + tail-sym-skip 17), against 897 raw /
+# 819 net with RIPWIRE_BASENAME_W=0 (1 B under the old 820). The table's rule on the NET figure: 825 -> 830, + 10 = 840. The twin's
+# purpose is unchanged: the fold-off legend is held to a pin that excludes the fold clause (the (U) arm's ripwire.for/v1 pin holds it).
 ( cd "$REPO" && RIPWIRE_NO_BODY_FOLD=1 "$BIN" . --for=geometry --legend=compact >"$TMP/uf.c" 2>/dev/null </dev/null \
   && RIPWIRE_NO_BODY_FOLD=1 "$BIN" . --for=geometry --legend=full >"$TMP/uf.full" 2>/dev/null </dev/null ); rcUf=$?
 ufRest="$( leg prose "$TMP/uf.c" "$TMP/uf.full" )"
 if [ "$rcUf" -ne 0 ] || grep -q '<fold ' "$TMP/uf.c"; then
     no "(U-twin-fold) the fold-off --for=geometry probe exited $rcUf or still carries a <fold>"
 else
-    lt_gate "(U-twin-fold) --for=geometry compact prose with the fold off (the pre-fold pin)" ripwire.for/v1 "$ufRest" 820 "$( leg bytes "$TMP/uf.c" )" "$LT_GUARD_COMPACT" "$TMP/uf.c"
+    lt_gate "(U-twin-fold) --for=geometry compact prose with the fold off (the pre-fold pin)" ripwire.for/v1 "$ufRest" 840 "$( leg bytes "$TMP/uf.c" )" "$LT_GUARD_COMPACT" "$TMP/uf.c"
 fi
 # (U-twin-callers) the pre-2026-10-09 ripwire.callers/v1 pin, kept the same way: the 330 -> 450 re-pin paid for ONE
 # reading, the caller row's sites_at=. The --callers=distance compact answer with exactly that reading cut out still fits
@@ -3174,7 +3193,10 @@ esac
 fx4bad=""
 for tb in 900 1200 1500 2000; do
     d="$( "$BIN" "$ROOT/src" --no-cache --pack-task="rank symbols by pagerank" --token-budget=$tb 2>/dev/null )"
-    root="$( printf '%s' "$d" | grep -oE '<ctx [^>]*>' | head -1 )"; led="$( printf '%s' "$d" | grep -oE '<!-- ledger: [^>]*-->' | head -1 )"
+    # the ledger comment ends at its first "-->", not its first ">": a header note it carries may spell one (docs_dropped=: "r>24";
+    # RP1 2026-11-21 — M2's ranking put such a note into the tb=2000 ledger and the old [^>]* match read it as "no kept ledger")
+    root="$( printf '%s' "$d" | grep -oE '<ctx [^>]*>' | head -1 )"
+    led="$( printf '%s' "$d" | python3 -c 'import re, sys; m = re.search( r"<!-- ledger: .*?-->", sys.stdin.read(), re.S ); sys.stdout.write( m.group( 0 ) if m else "" )' )"
     [ -n "$led" ] || { fx4bad="$fx4bad [tb=$tb: no kept ledger]"; continue; }
     ro=0; lo=0
     case "$root" in *'over_ceiling="1"'*) ro=1 ;; esac
