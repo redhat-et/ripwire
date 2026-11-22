@@ -993,7 +993,7 @@ inline constexpr char kHelpHead[] =
         "                               ranked head (<sigs total=>: the relevance floor within the top 40, or --pack-top-n) is\n"
         "                               the answer and every row of it ships. A ~7.5KB payload TARGET shortens row text toward\n"
         "                               it (tail signatures and doc excerpts first; <sigs shown=S total=T capped=\"1\"> with S=T\n"
-        "                               marks a shrink); rows served past it carry past_target=\"K\" (the last K rows). Only a\n"
+        "                               marks a shrink); past_target=\"K\" counts the rows served past it. Only a\n"
         "                               runaway guard (30KB, a bug signal) cuts rows: over_ceiling=\"1\" and <sigs next=> serving\n"
         "                               them all (S printed of the T rows handed to the trim). The r=1 (top-ranked)\n"
         // §B7.5 (CA4): this said <sigs payload="capped"> — the STRING ENUM the §P8 vocabulary migration

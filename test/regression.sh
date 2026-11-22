@@ -561,6 +561,7 @@ for _g in \
     forblowupcheck \
     forbodyfoldcheck \
     forbodyslotcheck \
+    forbudgetcountscheck \
     forbudgetmonotoncheck \
     forcalibfactscheck \
     forcallerhopcheck \

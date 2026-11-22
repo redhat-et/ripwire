@@ -5442,6 +5442,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( mode.ledger != nullptr )
         {
             mode.ledger->docsAfterCodeRanks = forSigsCut.docsAfterCodeRanks;   // lane DA1: a rows:N shed recounts docs_after_code= by them
+            mode.ledger->pastTargetRanks    = forSigsCut.pastTargetRanks;      // lane HN1: and past_target= / files_first= by these
+            mode.ledger->filesFirstRanks    = forSigsCut.filesFirstRanks;
         }
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms

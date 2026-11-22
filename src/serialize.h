@@ -973,8 +973,8 @@ inline constexpr std::string_view kForSigsNextOffsetNote =
 // total=>: the relevance floor intersected with kForLensDefaultTopN or --pack-top-n) IS the answer, so this budget is a
 // STAIR-STEP TARGET, not a ceiling: steps A..E above still shrink row TEXT against it (an answer that fit before is
 // byte-identical), but step F — the only step that removes a row — runs against kForRunawayGuardBytes below. The rows served
-// past the target are disclosed on the block (<sigs past_target="K">: the last K rows are the ones F would have dropped
-// here) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
+// past the target are disclosed on the block (<sigs past_target="K">: K shown rows, the K lowest in score order, are the ones F
+// would have dropped here; the reorders give them any r=) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
 // target over the rows alone (forSigsBudgets below); the text above about its frozen sig share describes the
 // legacy hard-ceiling regime it replaced.
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;
@@ -5446,9 +5446,12 @@ inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fil
 
 // The rendered rows' reorder, after the ladder (the shown set is final): returns how many shown rows changed rank (0 ⇒ the
 // head already named distinct files — byte-identical). Runs BEFORE reorderDocsAfterCode, which then moves any doc row below
-// the code rows and keeps the code rows' round-robin order.
+// the code rows and keeps the code rows' round-robin order. `movedGlobalRanks` (optional, OUT): the globalRank of each row
+// whose rank changed, ascending — the rows files_first= counts, by a key the docs reorder does not renumber
+// (sigsCutRecordFilesFirstRanks turns them into the r= they are finally shown with; lane HN1).
 template< class EntryT, class FileOf, class NameOf, class MayOpen, class Rehead >
-inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen, Rehead&& rehead )
+inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen, Rehead&& rehead,
+                                          std::vector<std::uint32_t>* movedGlobalRanks = nullptr )
 {
     std::vector<std::size_t> live;
     for( std::size_t i = 0; i < entries.size(); ++i )
@@ -5464,10 +5467,22 @@ inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&&
     std::size_t              moved = 0;
     std::vector<std::size_t> newOrder;
     newOrder.reserve( pos.size() );
+    if( movedGlobalRanks != nullptr )
+    {
+        movedGlobalRanks->clear();
+    }
     for( std::size_t k = 0; k < pos.size(); ++k )
     {
         moved += pos[k] != k ? 1u : 0u;
         newOrder.push_back( live[ pos[k] ] );
+        if( movedGlobalRanks != nullptr && pos[k] != k )
+        {
+            movedGlobalRanks->push_back( entries[ live[ pos[k] ] ].globalRank );
+        }
+    }
+    if( movedGlobalRanks != nullptr )
+    {
+        std::sort( movedGlobalRanks->begin(), movedGlobalRanks->end() );
     }
     if( moved > 0 )
     {
@@ -5822,6 +5837,8 @@ struct SigsCutReport
     std::vector<std::uint32_t> docsAfterCodeRanks;   // OUT: the r= those moved doc rows are shown with, ascending (the --for budget
                                                      //   fitter recounts docs_after_code= over the rows it keeps: forbudgetfit.h)
     std::size_t filesFirst    = 0;     // reorderHeadRoundRobin's moved count: files_first= (0 ⇒ absent)
+    std::vector<std::uint32_t> filesFirstRanks;   // OUT: the r= those moved rows are shown with after BOTH reorders, ascending (the
+                                                  //   --for budget fitter recounts files_first= over the rows it keeps: lane HN1)
     std::string next;                  // knob-honesty-068: the cut's continuation (sigsCutNextInvocation), set only on a capped
                                        //   block whose caller asked for a PASTEABLE one; the tag's next= / the JSON "sigs_next"
     std::size_t nextBudgetTokens = 0;  // …or, on a surface with no pasteable argv (MCP), the budget_tokens a re-call needs:
@@ -6004,6 +6021,23 @@ inline void sigsCutRecordPastTargetRanks( SigsCutReport& cut, const std::vector<
     }
     std::sort( cut.pastTargetRanks.begin(), cut.pastTargetRanks.end() );
     ENSURES( cut.pastTargetRanks.size() == cut.pastTarget, "sigsCutRecordPastTargetRanks: a past_target row is not a shown row" );
+}
+
+// files_first=: which shown rows the head round-robin moved, by the r= they are FINALLY shown with. reorderHeadRoundRobin names
+// them by globalRank (`movedGlobal`, ascending), because the docs reorder renumbers the shown rows after it; read after both.
+template< class EntryT >
+inline void sigsCutRecordFilesFirstRanks( SigsCutReport& cut, const std::vector<EntryT>& entries, const std::vector<std::uint32_t>& movedGlobal )
+{
+    cut.filesFirstRanks.clear();
+    for( const EntryT& e : entries )
+    {
+        if( !e.dropped && std::binary_search( movedGlobal.begin(), movedGlobal.end(), e.globalRank ) )
+        {
+            cut.filesFirstRanks.push_back( e.displayRank );
+        }
+    }
+    std::sort( cut.filesFirstRanks.begin(), cut.filesFirstRanks.end() );
+    ENSURES( cut.filesFirstRanks.size() == cut.filesFirst, "sigsCutRecordFilesFirstRanks: a files_first row is not a shown row" );
 }
 
 // What the finished block shows, from its rows after the gate and the ladder: shown rows, and the shown rows whose doc
@@ -6687,12 +6721,13 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
                                                        spelling.elideZeroMetrics, &sigOwners }, esc, rootArg ); };
         const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
+        std::vector<std::uint32_t> filesFirstGlobal;   // the round-robin's moved rows by globalRank (sigsCutRecordFilesFirstRanks)
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
             const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const SigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml );
+                                                    [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml, &filesFirstGlobal );
         }
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
@@ -6701,6 +6736,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
         sigsCutRecordPastTargetRanks( cut, entries );   // forbudget-soft: after the docs reorder renumbered them
+        sigsCutRecordFilesFirstRanks( cut, entries, filesFirstGlobal );   // lane HN1: likewise
         sigsCutAttachContinuation( cut, cutNext, cutNextInv, cutNextTokens );   // nothing unless capped and asked for
         if( cutOut )
         {
@@ -12587,11 +12623,13 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         const auto reheadJson = [ & ]( JsonSigEntry& e, std::uint32_t newRank )
         { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); };
         const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
+        std::vector<std::uint32_t> filesFirstGlobal;   // the round-robin's moved rows by globalRank (sigsCutRecordFilesFirstRanks)
         if( lens.headRoundRobin )
         {
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const JsonSigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const JsonSigEntry& e ) { return !lens.docsAfterCode || !isDocRow( e ); }, reheadJson );
+                                                    [ & ]( const JsonSigEntry& e ) { return !lens.docsAfterCode || !isDocRow( e ); }, reheadJson,
+                                                    &filesFirstGlobal );
         }
         if( lens.docsAfterCode )
         {
@@ -12600,6 +12638,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
         sigsCutRecordPastTargetRanks( cut, entries );   // forbudget-soft: after the docs reorder renumbered them
+        sigsCutRecordFilesFirstRanks( cut, entries, filesFirstGlobal );   // lane HN1: likewise
         sigsCutAttachContinuation( cut, cutNext, cutNextInv, cutNextTokens );   // knob-honesty-068: nothing unless capped and asked for
         if( cutOut )
         {

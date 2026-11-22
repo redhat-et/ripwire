@@ -273,7 +273,7 @@ for q in "${REPO_Q[@]}"; do
     now=$(( now - ex ))   # body-fold: the band reads the answer before its fold additions
     marker="$( printf '%s' "$out" | grep -o '<sigs[^>]*>' | head -1 )"
     # forbudget-soft (stop when complete; PROCESS rule 5's stair-step target): rows served past the 7.5 KB target are disclosed
-    # (<sigs past_target="K">: the last K rows) and are what the answer needs, so the band applies to the answer WITHOUT them —
+    # (<sigs past_target="K">: K rows, the lowest in score order) and are what the answer needs, so the band applies to the answer WITHOUT them —
     # every byte over 4% must be a disclosed past-target row, or a <hops> row past the old 1,000 B allowance (decision D-3:
     # the default serves every hop row), or — forbudget-soft round C, FOLD C (owner decision 2026-10-14) — a tail PAGE row
     # (`<t p= sym=/>`: page 0 of the --for file page now rides the answer), never anything else
