@@ -5727,6 +5727,20 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
 inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
 {
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
+    // BR1b (foractline.h): the act line goes into an answer the budget fits WHOLE, still raw (before the permutation, as on the default
+    // path), and only while it still fits with the line — so a budget the answer fits returns the unbudgeted answer, line included,
+    // byte for byte (TOKEN-BUDGET-MONOTONE), and the line never takes a row's room (forrankordercheck (11), forbodyslotcheck E1). Not on
+    // a shed answer: a budget that had to cut content spends nothing on the line, and its price stays the fitter's own, exact one (the
+    // render's ledger describes the unfitted answer, so it could not re-price a shed one exactly: formaxtokenscheck (A/C/D)). On a whole
+    // fit that ledger still describes this answer: a copy of it re-prices the line and follows it, so SIGX below charges it too.
+    const std::size_t   budgetLimit = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
+                                                                                    : std::max( ask.targetTokens, ask.ceilingTokens );
+    const bool          wholeFit    = fit.verdict == rw::ForBudgetFitResult::Verdict::Whole;
+    rw::ForAnswerLedger ledger      = u.ledger;
+    if( wholeFit )
+    {
+        (void)rw::actline::insertActLine( out, budgetLimit, &ledger );
+    }
     // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
     // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
     // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
@@ -5751,10 +5765,9 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
     {
         (void)rw::answerfirst::answerFirst( out, forAnswerFirstAsk( d.cfg, out ) );
         // SIGX (TL1 M1, forsigx.h): a budget that fitted the answer whole returns the unbudgeted (compacted) answer when that still fits
-        if( fit.verdict == rw::ForBudgetFitResult::Verdict::Whole && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+        if( wholeFit && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
         {
-            (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
-                                                                                                 : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
+            (void)rw::sigx::compactSigsWithin( out, budgetLimit, &ledger );
         }
         (void)rw::rowlines::encodeRows( out, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
     }
@@ -5871,6 +5884,33 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
     }
 }
 
+// BR1b (foractline.h): the --legend=first XML answer carries the same act line as the answer-first one, its clause in the leading
+// legend, so the two postures stay byte permutations of each other (forpagescheck P6). It needs the finished answer, so this posture
+// is rendered into a buffer here; nullopt: not this posture, or no buffer to render into, or a capture that failed (the caller then
+// renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
+// print twice).
+inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.legendAnswerFirst || !rw::actline::actLineOn() || cfg.json || cfg.columnar || cfg.candidates )
+    {
+        return std::nullopt;
+    }
+    ForPostureRender r = renderForPostureCaptured( d );
+    if( !r.stdoutCaptured || !r.out || r.out->failed )
+    {
+        return std::nullopt;
+    }
+    replayForPostureNotices( r );
+    std::string doc = r.out->bytes;
+    if( capturedWhole( r.out ) )
+    {
+        (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+    }
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return r.rc;
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     if( d.cfg.forTask.empty() )
@@ -5909,6 +5949,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( r.stdoutCaptured && capturedWhole( r.out ) )
         {
             std::string doc = r.out->bytes;
+            (void)rw::actline::insertActLine( doc, 0, &r.ledger );   // BR1 (foractline.h): into the raw render, as every path does — first
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
@@ -5925,7 +5966,6 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
                 forBodyPointers( d, *early );
-                (void)rw::actline::insertActLine( *early );   // BR1 (foractline.h): before ROWLINES, so its clauses stay last
                 (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
@@ -5935,7 +5975,6 @@ std::optional<int> runForLens( const MainDispatch& d )
                 return 1;
             }
             forBodyPointers( d, doc );
-            (void)rw::actline::insertActLine( doc );   // BR1 (foractline.h): on the page served, after the body pointers, before ROWLINES
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             noteWholeAnswerOverCeiling( d.cfg, doc.size() );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
@@ -5955,6 +5994,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         rw::answerfirst::AnswerFirstFallback afSink;
         DISCLOSE( afSink, rw::answerfirst::AnswerFirstFallback::DisclosureWhy::NoWholeCapture,
                   "runForLens: no whole capture for the default answer — serving it unpermuted" );
+    }
+    if( std::optional<int> rc = runForLensLegendFirstAct( d ) )
+    {
+        return rc;
     }
     return runForLensPosture( d, nullptr );
 }
