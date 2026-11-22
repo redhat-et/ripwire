@@ -56,8 +56,11 @@ namespace rw
 
 // The C/C++ full chain of one definition (enclosing namespaces and classes, then its written qualifier), read off the
 // comment-blanked source; nullopt when the reader cannot prove it (graph.h resolveAllByWrittenSpelling's contract). Moved
-// here verbatim from graph.h (lane overload-split) so the argument-type pick below reads the same chain.
-inline std::optional<std::vector<std::string>> cppFullChainOf( const Symbol& s, std::string_view file )
+// here verbatim from graph.h (lane overload-split) so the argument-type pick below reads the same chain. `enclosing( at )`
+// answers the brace lexer's two questions at the name's offset: the enclosing chain (chainAt) and whether a `using
+// namespace` came before it (usingDirectiveBefore).
+template <class Enclosing>
+inline std::optional<std::vector<std::string>> cppFullChainVia( const Symbol& s, std::string_view file, Enclosing&& enclosing )
 {
     const std::uint32_t end = std::min<std::uint32_t>( isDefinitionNotDeclaration( s ) ? s.sigEndByte : s.endByte, std::uint32_t( file.size() ) );
     if( end <= s.sigStartByte )
@@ -71,9 +74,8 @@ inline std::optional<std::vector<std::string>> cppFullChainOf( const Symbol& s, 
     }
     const std::size_t                              nameInFile = s.sigStartByte + nameAt;
     const std::optional<EditCheckWrittenQualifier> written    = editCheckWrittenQualifier( file, nameInFile );
-    EditCheckBraceLexer                            lexer( file );
-    std::optional<std::vector<std::string>>        chain      = lexer.chainAt( nameInFile );
-    if( !written || !chain || ( !written->names.empty() && !written->absolute && lexer.usingDirectiveBefore() ) )
+    auto [ chain, usingBefore ]                               = enclosing( nameInFile );
+    if( !written || !chain || ( !written->names.empty() && !written->absolute && usingBefore ) )
     {
         return std::nullopt;
     }
@@ -83,6 +85,16 @@ inline std::optional<std::vector<std::string>> cppFullChainOf( const Symbol& s, 
     }
     chain->insert( chain->end(), written->names.begin(), written->names.end() );
     return chain;
+}
+// one lexer pass over the file per call
+inline std::optional<std::vector<std::string>> cppFullChainOf( const Symbol& s, std::string_view file )
+{
+    return cppFullChainVia( s, file, [ & ]( std::size_t at )
+    {
+        EditCheckBraceLexer lexer( file );
+        std::optional<std::vector<std::string>> chain = lexer.chainAt( at );
+        return std::pair{ std::move( chain ), lexer.usingDirectiveBefore() };
+    } );
 }
 
 // One written type, reduced to what overload resolution compares for an lvalue argument: the type without its top-level
@@ -418,7 +430,11 @@ private:
         }
         sig.quals      = editCheckMemberQualifiers( file, s.sigStartByte + raw.closeAt + 1 );
         sig.isTemplate = templateHeadBefore( file, s.sigStartByte ) || text.substr( 0, nameAt ).find( "template" ) != std::string_view::npos;
-        sig.namespaces = cppFullChainOf( s, file );
+        sig.namespaces = cppFullChainVia( s, file, [ & ]( std::size_t at )
+        {
+            const EditCheckScopeIndex& scopes = scopeIndexOf( s.fileId, file );
+            return std::pair{ scopes.chainAt( at ), scopes.usingDirectiveBefore( at ) };
+        } );
         while( sig.namespaces && !sig.namespaces->empty() && classNames().contains( sig.namespaces->back() ) )
         {
             sig.namespaces->pop_back();   // the class labels: lookup inside them is the nested-type guard's (provable)
@@ -502,6 +518,19 @@ private:
         if( !tablesBuilt ) { buildTypeTables(); }
         return classes;
     }
+    // fileId -> the one-pass chain index of its text (SCOPE-INDEX, cppscopechain.h): every candidate of a file reads its chain
+    // there instead of lexing the whole file again. RIPWIRE_STATS `[mem] arg_type_chain asks= passes=`.
+    const EditCheckScopeIndex& scopeIndexOf( std::uint32_t fileId, std::string_view file )
+    {
+        ++chainAsks;
+        const auto [ it, inserted ] = scopeIndexes.try_emplace( fileId );
+        if( inserted )
+        {
+            ++chainPasses;
+            it->second = EditCheckBraceLexer( file ).scopeIndex();
+        }
+        return it->second;
+    }
     const HashSet<std::string>& nestedTypeNames()
     {
         if( !tablesBuilt ) { buildTypeTables(); }
@@ -522,6 +551,9 @@ private:
     HashSet<std::string>                classes;
     HashSet<std::string>                nested;
     bool                                tablesBuilt = false;
+    HashMap<std::uint32_t, EditCheckScopeIndex> scopeIndexes;
+public:
+    std::size_t                         chainAsks = 0, chainPasses = 0;
 };
 
 }   // namespace rw

@@ -7380,8 +7380,28 @@ struct IdentityNarrower
     mutable std::vector<NodeId>                           classWalk;       // nameable classes, then a walk frontier
     mutable std::vector<NodeId>                           classNext;
     mutable std::vector<NodeId>                           plausible;       // plausibleClasses' answer
-    mutable std::vector<std::uint32_t>                    seenStamp;       // generation-stamped visited set, one u32 per symbol
-    mutable std::uint32_t                                 seenGeneration = 0;
+    // a generation-stamped set over the symbol ids: next() empties it in O(1) (the stamp vector is sized once, never cleared)
+    struct StampSet
+    {
+        std::vector<std::uint32_t> stamp;
+        std::uint32_t              generation = 0;
+        void next( std::size_t ids )
+        {
+            if( stamp.size() != ids || generation == 0xFFFFFFFFu )
+            {
+                stamp.assign( ids, 0u );
+                generation = 0;
+            }
+            ++generation;
+        }
+        bool insert( NodeId id ) noexcept   // true when `id` was not in the set
+        {
+            const bool fresh = stamp[ id ] != generation;
+            stamp[ id ]      = generation;
+            return fresh;
+        }
+    };
+    mutable StampSet                                      seen;            // the class walks' visited set (markSeen)
     mutable HashMap<std::string, rw::SmallVec<NodeId, 2>> subclassMemo;    // step 3 per (receiver class, callee)
     mutable const Reference*                              claimRef       = nullptr;
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
@@ -7394,6 +7414,21 @@ struct IdentityNarrower
     mutable HashMap<std::string, ankerl::unordered_dense::set<std::string_view>> ancestorMemo;
     mutable const ChaUpNames*                             ancestorMemoOf = nullptr;
     mutable HashMap<std::uint64_t, bool>                  visibleMemo;
+    //   plausibleMemo: (a name's class list, a file) -> plausibleClasses' answer (lane PF2, PLAUSIBLE-MEMO). That answer reads
+    //                 every class of the name (a visibility test per class), and class identity asked it again and again for
+    //                 facts no callee changes: ownedBy's out-of-line branch (43.6M asks over 14.0M distinct (definition, class)
+    //                 pairs on llvm-project/clang), the ancestor and subclass walks' base levels (the whole of a cold
+    //                 llvm-project profile once the guarded walk was kept). It depends only on the list and the file, so it is
+    //                 kept per (file, the list's first class — a class is in one name's list only); the list's address is kept
+    //                 with it and a different list recomputes. `all`: every class of the name (no copy kept).
+    struct PlausibleAnswer
+    {
+        const rw::SmallVec<NodeId, 2>* named = nullptr;
+        bool                           all   = false;
+        std::vector<NodeId>            some;   // ascending, as the list is
+    };
+    mutable HashMap<std::uint64_t, PlausibleAnswer>       plausibleMemo;
+    mutable std::size_t                                   ownedAsks = 0, plausibleReads = 0;   // RIPWIRE_STATS `[mem] plausible`: ownedBy's out-of-line asks; plausibleOfName answers read
 
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
@@ -7817,26 +7852,48 @@ struct IdentityNarrower
         {
             return false;
         }
-        plausibleClasses( std::span<const NodeId>( sameNamed->data(), sameNamed->size() ), fileOf( def, ids ), ids );   // defined out of line in another file
-        return std::ranges::find( plausible, cls ) != plausible.end();
+        return ownedOutOfLine( def, cls, *sameNamed, ids );
+    }
+
+    // ownedBy for a definition no class span holds (defined out of line in a file with no class of its scope's name): is
+    // `cls` among the classes of that name the definition's file most plausibly means? Kept per (file, name) (plausibleMemo).
+    bool ownedOutOfLine( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>& sameNamed, const ClassIdentity& ids ) const
+    {
+        ++ownedAsks;
+        const std::span<const NodeId> plausibleHere = plausibleOfName( sameNamed, fileOf( def, ids ), ids );   // defined out of line in another file
+        return std::binary_search( plausibleHere.begin(), plausibleHere.end(), cls );
+    }
+
+    // plausibleClasses( named, fromFile ) for a name's class list (ClassIdentity::classesByName), kept (plausibleMemo): ascending,
+    // valid until the next call
+    std::span<const NodeId> plausibleOfName( const rw::SmallVec<NodeId, 2>& named, std::uint32_t fromFile, const ClassIdentity& ids ) const
+    {
+        if( named.size() == 0 )
+        {
+            return {};   // plausibleClasses of no classes is none
+        }
+        const auto [ memo, inserted ] = plausibleMemo.try_emplace( hashutil::packPair( fromFile, named.front() ) );
+        PlausibleAnswer& answer = memo->second;
+        if( inserted || answer.named != &named )
+        {
+            ++plausibleReads;
+            plausibleClasses( std::span<const NodeId>( named.data(), named.size() ), fromFile, ids );
+            answer.named = &named;
+            answer.all   = plausible.size() == named.size();
+            answer.some.assign( answer.all ? plausible.end() : plausible.begin(), plausible.end() );
+        }
+        return answer.all ? std::span<const NodeId>( named.data(), named.size() ) : std::span<const NodeId>( answer.some );
     }
 
     // a fresh visited generation over the symbol ids (the stamp vector is sized once, never cleared)
     void nextSeenGeneration( const ClassIdentity& ids ) const
     {
-        if( seenStamp.size() != ids.symbols->size() || seenGeneration == 0xFFFFFFFFu )
-        {
-            seenStamp.assign( ids.symbols->size(), 0u );
-            seenGeneration = 0;
-        }
-        ++seenGeneration;
+        seen.next( ids.symbols->size() );
     }
 
     bool markSeen( NodeId id ) const noexcept
     {
-        const bool fresh = seenStamp[ id ] != seenGeneration;
-        seenStamp[ id ] = seenGeneration;
-        return fresh;
+        return seen.insert( id );
     }
 
     // two KNOWN, distinct owning classes that share a name among the definitions — a union of namesakes, not one type's answer
@@ -7862,7 +7919,45 @@ struct IdentityNarrower
     // step (2): from the receiver class up the REAL inheritance level by level; the shallowest level whose classes define the
     // callee answers into hits (several defining classes at one level: their union, an honest split — unless two of them are
     // namesakes, then `ambiguous`). `declaredAlong` reports a bodiless declaration of the callee on any class visited.
+    // INHERITED-MEMO (lane PF2, 2026-11-21): the answer — hits, the result, whether a bodiless declaration was met, and the
+    // ambiguity verdict a defining level gave — depends on the receiver class and the callee NAME only (every table it reads
+    // is fixed for the loop), and the walk ran again for every call: after RECV-CONE-MEMO it was 6,342 of 10,110 samples of
+    // a cold llvm-project resolve loop. Kept per (class, callee); a replay leaves `hits` as the walk left it.
+    struct InheritedAnswer
+    {
+        rw::SmallVec<NodeId, 2> hits;
+        bool                    result   = false;
+        bool                    declared = false;
+        bool                    ambiguous = false;
+    };
+    mutable HashMap<std::string, InheritedAnswer> inheritedMemo;
+    mutable std::string                           inheritedKey;
+    mutable std::size_t                           inheritedAsks = 0, inheritedWalks = 0;   // RIPWIRE_STATS `[mem] inherited`
     bool inheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
+    {
+        ++inheritedAsks;
+        inheritedKey.assign( std::to_string( receiverClass ) ).push_back( '#' );
+        inheritedKey.append( r.calleeName );
+        auto [ kept, inserted ] = inheritedMemo.try_emplace( inheritedKey );
+        if( inserted )
+        {
+            ++inheritedWalks;
+            InheritedAnswer answer;
+            answer.result = walkInheritedDefinitions( r, receiverClass, ids, answer.declared, answer.ambiguous );
+            answer.hits   = hits;
+            kept          = inheritedMemo.find( inheritedKey );   // the walk inserts into no memo of this one, but re-find rather than trust it
+            kept->second  = std::move( answer );
+        }
+        const InheritedAnswer& answer = kept->second;
+        hits          = answer.hits;
+        declaredAlong = answer.declared || declaredAlong;
+        if( !answer.hits.empty() )
+        {
+            ambiguous = answer.ambiguous;   // the walk sets it only where a level's hits answer
+        }
+        return answer.result;
+    }
+    bool walkInheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
     {
         nextSeenGeneration( ids );
         markSeen( receiverClass );
@@ -7925,8 +8020,7 @@ struct IdentityNarrower
             {
                 continue;
             }
-            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
-            for( NodeId b : plausible )
+            for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
                 if( markSeen( b ) ) { classNext.push_back( b ); }
             }
@@ -7961,6 +8055,25 @@ struct IdentityNarrower
         return !hits.empty();
     }
 
+    // does `d`'s base clause, read from d's own file, plausibly mean `c` among the classes of c's name (`named`)? Memoised per
+    // (d, c) (SUBCLASS-CLAUSE-MEMO, lane PF2): the answer is the callee's business not at all, and step (3) asked it again
+    // for every (receiver class, callee) — a visibility test per class of the name each time, the hotspot on
+    // llvm-project/clang after INHERITED-LEVELS-MEMO.
+    mutable HashMap<std::uint64_t, bool> clauseMeansMemo;
+    mutable std::size_t                  clauseAsks = 0, clauseReads = 0, levelsQueued = 0;   // RIPWIRE_STATS `[mem] subclass_walk`
+    bool clauseMeans( NodeId d, NodeId c, const rw::SmallVec<NodeId, 2>& named, const ClassIdentity& ids ) const
+    {
+        ++clauseAsks;
+        const auto [ memo, inserted ] = clauseMeansMemo.try_emplace( hashutil::packPair( d, c ), false );
+        if( inserted )
+        {
+            ++clauseReads;
+            const std::span<const NodeId> plausibleHere = plausibleOfName( named, fileOf( d, ids ), ids );
+            memo->second = std::binary_search( plausibleHere.begin(), plausibleHere.end(), c );
+        }
+        return memo->second;
+    }
+
     // the real subclasses of `c` whose base clause, read from their own file, plausibly means `c`: their definitions of the
     // callee appended, each queued once
     void visitSubclassesOf( const Reference& r, NodeId c, const ClassIdentity& ids ) const
@@ -7974,8 +8087,7 @@ struct IdentityNarrower
         }
         for( NodeId d : down->second )
         {
-            plausibleClasses( std::span<const NodeId>( named->second.data(), named->second.size() ), fileOf( d, ids ), ids );
-            if( std::ranges::find( plausible, c ) == plausible.end() || !markSeen( d ) )
+            if( !clauseMeans( d, c, named->second, ids ) || !markSeen( d ) )
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
@@ -8015,10 +8127,9 @@ struct IdentityNarrower
             {
                 continue;
             }
-            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
-            for( NodeId b : plausible )
+            for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
-                if( std::ranges::find( visited, b ) == visited.end() )
+                if( visitSet.insert( b ) )   // not in `visited` (stampVisited put it in the set; a push puts it here)
                 {
                     visited.push_back( b );
                     next.push_back( b );
@@ -8027,30 +8138,88 @@ struct IdentityNarrower
         }
     }
 
+    // `visited` as a generation-stamped set over the symbol ids, for queueUnvisitedBases' membership test (lane PF2,
+    // VISITED-STAMP): a linear find over a list that holds every plausible namesake of every base reached was the hottest
+    // frame of llvm-project/clang's resolve loop once the levels were kept (2,551 of ~4,200 resolve samples, wmemchr)
+    mutable StampSet visitSet;
+    void stampVisited( const std::vector<NodeId>& visited, const ClassIdentity& ids ) const
+    {
+        visitSet.next( ids.symbols->size() );
+        for( NodeId v : visited )
+        {
+            visitSet.insert( v );
+        }
+    }
+
     // CPP-PTR-ALIAS (C2): a real subclass `d` of the receiver class that defines no body of the callee runs the one it INHERITS
     // through another base — `class ConnectionSocketImpl : public SocketImpl, public virtual ConnectionSocket` runs
     // SocketImpl::isOpen on a ConnectionSocket receiver whose contract Socket declares. The shallowest ancestor level of `d`
     // whose classes own a definition answers (several at one level: their union, the split lists them all); a level of
     // declarations alone walks on. Bounded like the ancestor walk; its own visited list, so the subclass walk's state is kept.
+    // INHERITED-LEVELS-MEMO (lane PF2, 2026-11-21): the levels are the callee's business only in which one answers — the
+    // classes on each level are read from base clauses and files alone (queueUnvisitedBases: plausibleClasses per base name,
+    // a visibility test per class of it). On llvm-project/clang the walk re-read them for every (receiver class, callee),
+    // and it was the hotspot after CONE-MEMO. So each subclass's levels are kept as first reached — level k+1 queued from
+    // level k with the same `visited` list, in the same order — and a later callee reads the kept levels.
+    struct InheritedLevels
+    {
+        std::vector<NodeId>        classes;          // the levels, flattened
+        std::vector<std::uint32_t> ends{ 1 };        // classes.size() after each level; level 0 is { d }
+        std::vector<NodeId>        visited;          // queueUnvisitedBases' visited list after the last kept level was queued
+    };
+    mutable HashMap<NodeId, InheritedLevels> inheritedLevels;
+    mutable std::vector<NodeId>              inheritedNext;
+
+    // `d`'s level `depth` of the inherited-body walk (empty past the last), keeping it when no earlier walk reached it
+    std::span<const NodeId> inheritedLevel( NodeId d, std::size_t depth, const ClassIdentity& ids ) const
+    {
+        const auto [ it, inserted ] = inheritedLevels.try_emplace( d );
+        InheritedLevels& lv = it->second;
+        if( inserted )
+        {
+            lv.classes.assign( 1, d );
+            lv.visited.assign( 1, d );
+        }
+        while( lv.ends.size() <= depth && lv.ends.back() > ( lv.ends.size() >= 2 ? lv.ends[ lv.ends.size() - 2 ] : 0u ) )
+        {
+            const std::size_t from = lv.ends.size() >= 2 ? lv.ends[ lv.ends.size() - 2 ] : 0u;
+            const std::size_t to   = lv.ends.back();
+            ++levelsQueued;
+            stampVisited( lv.visited, ids );
+            inheritedNext.clear();
+            for( std::size_t at = from; at < to; ++at )
+            {
+                queueUnvisitedBases( lv.classes[ at ], ids, lv.visited, inheritedNext );
+            }
+            lv.classes.insert( lv.classes.end(), inheritedNext.begin(), inheritedNext.end() );
+            lv.ends.push_back( std::uint32_t( lv.classes.size() ) );
+        }
+        if( depth >= lv.ends.size() )
+        {
+            return {};
+        }
+        const std::size_t from = depth == 0 ? 0u : lv.ends[ depth - 1 ];
+        return std::span<const NodeId>( lv.classes.data() + from, lv.ends[ depth ] - from );
+    }
+
     void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids ) const
     {
-        std::vector<NodeId> level{ d };
-        std::vector<NodeId> next;
-        std::vector<NodeId> visited{ d };
-        for( int depth = 0; depth < 16 && !level.empty(); ++depth )
+        for( std::size_t depth = 0; depth < 16; ++depth )
         {
+            const std::span<const NodeId> level = inheritedLevel( d, depth, ids );
+            if( level.empty() )
+            {
+                return;
+            }
             bool found = false;
-            next.clear();
             for( NodeId c : level )
             {
                 found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
-                queueUnvisitedBases( c, ids, visited, next );
             }
             if( found )
             {
                 return;
             }
-            level.swap( next );
         }
     }
 };
@@ -8171,6 +8340,14 @@ struct Narrower
     mutable std::string                   coneOf;      // guardedConeOwns: the class whose guarded base closure is kept
     mutable std::vector<std::string_view> coneNames;   // its names (views into chaUp's stored strings and coneOf)
     mutable std::vector<MeantClasses>     coneMeant;
+    // RIPWIRE_STATS `[mem] guarded_walk` (test/guardedwalkcheck.sh): guardedBaseWalk calls, the walks it began (roots kept,
+    // plus walks over another table), the cone closures expanded (keepGuardedCone), and meantBase evaluations — deterministic
+    // counts, never output
+    struct GuardedWalkStats
+    {
+        std::size_t calls = 0, walks = 0, cones = 0, meant = 0;
+    };
+    mutable GuardedWalkStats guardedWalkStats;
 
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, FlatRecvType>&            vt,
@@ -8622,22 +8799,6 @@ struct Narrower
         return trimWs( scope.substr( 0, std::min( scope.size(), scope.find( '<' ) ) ) );
     }
 
-    // how the inherit edge base → derived was bound; nullopt when the implementors map draws no such edge
-    std::optional<std::uint8_t> baseEdgeBound( NodeId base, NodeId derived ) const
-    {
-        if( base >= baseGuard->implementors.size() || base >= baseGuard->bound.size() )
-        {
-            return std::nullopt;
-        }
-        const std::vector<NodeId>& kids = baseGuard->implementors[ base ];
-        const auto                 pos  = std::lower_bound( kids.begin(), kids.end(), derived );
-        if( pos == kids.end() || *pos != derived )
-        {
-            return std::nullopt;
-        }
-        return baseGuard->bound[ base ][ std::size_t( pos - kids.begin() ) ];
-    }
-
     // (1) of meantBase: the ONE class of drawnBases the base clause of `d` names by its scope, as C++ reads the clause; kNoNode
     // when the scope evidence names none or several. A class symbol's own scope is its name, so a class's place is read from
     // class identity: the class it is nested in (byte spans), else the namespaces its FILE shows it defines things in
@@ -8700,23 +8861,101 @@ struct Narrower
         } );
     }
 
+    // BASE-EDGES-BY-DERIVED (lane PF2, 2026-11-21): the implementors map read backwards — derived class -> every (base, how it
+    // was bound) edge drawn to it, ascending by base id (CSR, built once per guard). drawnAndStandingBases asked
+    // whether the edge b -> d was drawn (a binary search in implementors[ b ]) for EVERY class b of the base's name: K x K binary searches per base name where a name repeats K
+    // times (hundreds in llvm-project), the first-expansion cost left once the walks were kept. A derived class has a
+    // handful of base edges; the classes of the name it is drawn to are those edges whose base is of that name.
+    mutable std::vector<std::uint32_t> basesOfStart;   // derived id -> its first edge in basesOfEdge; size implementors + 1
+    mutable std::vector<std::pair<NodeId, std::uint8_t>> basesOfEdge;
+    mutable const BaseWalkGuard*       basesOfFor = nullptr;
+    mutable std::size_t                baseEdgePairs = 0;   // RIPWIRE_STATS `[mem] base_edges pairs=`: (derived, base) edges examined
+    std::span<const std::pair<NodeId, std::uint8_t>> baseEdgesOf( NodeId d ) const
+    {
+        if( basesOfFor != baseGuard )
+        {
+            buildBaseEdgesByDerived();
+        }
+        if( std::size_t( d ) + 1 >= basesOfStart.size() )
+        {
+            return {};
+        }
+        return std::span<const std::pair<NodeId, std::uint8_t>>( basesOfEdge.data() + basesOfStart[ d ], basesOfStart[ d + 1 ] - basesOfStart[ d ] );
+    }
+    void buildBaseEdgesByDerived() const
+    {
+        basesOfFor = baseGuard;
+        const std::vector<std::vector<NodeId>>&       kids  = baseGuard->implementors;
+        const std::vector<std::vector<std::uint8_t>>& bound = baseGuard->bound;
+        const std::size_t edgesOf = std::min( kids.size(), bound.size() );   // baseEdgeBound reads an edge only where both hold it
+        std::size_t       ids     = kids.size();
+        for( std::size_t b = 0; b < edgesOf; ++b )
+        {
+            for( NodeId d : kids[ b ] )
+            {
+                ids = std::max( ids, std::size_t( d ) + 1 );
+            }
+        }
+        basesOfStart.assign( ids + 1, 0u );
+        for( std::size_t b = 0; b < edgesOf; ++b )
+        {
+            for( NodeId d : kids[ b ] )
+            {
+                ++basesOfStart[ std::size_t( d ) + 1 ];
+            }
+        }
+        for( std::size_t at = 1; at < basesOfStart.size(); ++at )
+        {
+            basesOfStart[ at ] += basesOfStart[ at - 1 ];
+        }
+        basesOfEdge.assign( basesOfStart.back(), {} );
+        std::vector<std::uint32_t> fill( basesOfStart.begin(), basesOfStart.end() - 1 );
+        for( std::size_t b = 0; b < edgesOf; ++b )   // ascending b, so each derived class's edges land ascending by base
+        {
+            for( std::size_t at = 0; at < kids[ b ].size(); ++at )
+            {
+                basesOfEdge[ fill[ kids[ b ][ at ] ]++ ] = { NodeId( b ), bound[ b ][ at ] };
+            }
+        }
+    }
+
     // (2) of meantBase: the classes of this name the map draws d's clause to (drawnBases), and which of them it did not rule
-    // out as the name collision (standingBases; BaseBound::Other)
+    // out as the name collision (standingBases; BaseBound::Other). Both ascending, as baseClasses is (class identity lists a
+    // name's classes in id order).
+    // The shorter side is walked: d's own base edges (each looked up among the classes of the name), else the classes of the
+    // name (each edge to d looked up in that class's implementors) — a class drawn to hundreds of namesakes of one base meets
+    // a name with few classes the second way.
     void drawnAndStandingBases( NodeId d, std::span<const NodeId> baseClasses ) const
     {
         standingBases.clear();
         drawnBases.clear();
-        for( NodeId b : baseClasses )
+        const std::span<const std::pair<NodeId, std::uint8_t>> edges = baseEdgesOf( d );
+        const auto keep = [ & ]( NodeId b, std::uint8_t how )
         {
-            const std::optional<std::uint8_t> how = baseEdgeBound( b, d );
-            if( !how.has_value() )
-            {
-                continue;
-            }
             drawnBases.push_back( b );
-            if( *how != kBaseBoundOther )
+            if( how != kBaseBoundOther )
             {
                 standingBases.push_back( b );
+            }
+        };
+        baseEdgePairs += std::min( edges.size(), baseClasses.size() );
+        if( edges.size() <= baseClasses.size() )
+        {
+            for( const auto& [ b, how ] : edges )
+            {
+                if( std::binary_search( baseClasses.begin(), baseClasses.end(), b ) )
+                {
+                    keep( b, how );
+                }
+            }
+            return;
+        }
+        for( NodeId b : baseClasses )
+        {
+            const auto at = std::lower_bound( edges.begin(), edges.end(), b, []( const std::pair<NodeId, std::uint8_t>& e, NodeId id ) { return e.first < id; } );
+            if( at != edges.end() && at->first == b )
+            {
+                keep( b, at->second );
             }
         }
     }
@@ -8794,6 +9033,7 @@ struct Narrower
     // empty id list is the by-name reading: one class of that name with nothing to judge it by, or no definition to judge from.
     std::optional<MeantClasses> meantBase( std::size_t parent, const std::string& base ) const
     {
+        ++guardedWalkStats.meant;
         const ClassIdentity& ids       = baseGuard->ids;
         const auto           named     = ids.classesByName.find( base );
         guardKey.assign( fieldWalk[ parent ] );
@@ -8831,6 +9071,39 @@ struct Narrower
         {
             meant.ids.clear();   // every class of the name is some deriving class's own base: the name says the same
         }
+        return meant;
+    }
+
+    // MEANT-MEMO (lane PF2, 2026-11-21): meantBase reads only the parent's NAME, the parent's reading (walkMeant: its ids and
+    // unbound flag) and the base name — every other input is fixed once baseGuard is set — so its answer is kept under exactly
+    // that key. Walks from different roots meet the same parents (every class deriving from a shared base reaches its
+    // bases), and each meantBase pairs every class of the parent's name with the base's (the cone expansions' cost on
+    // llvm-project/clang). `meantAsks` counts the asks; guardedWalkStats.meant the answers computed.
+    mutable HashMap<std::string, std::optional<MeantClasses>> meantMemo;
+    mutable const BaseWalkGuard*                              meantMemoFor = nullptr;
+    mutable std::string                                       meantKey;
+    mutable std::size_t                                       meantAsks = 0;
+    std::optional<MeantClasses> meantBaseKept( std::size_t parent, const std::string& base ) const
+    {
+        ++meantAsks;
+        if( meantMemoFor != baseGuard )
+        {
+            meantMemo.clear();
+            meantMemoFor = baseGuard;
+        }
+        const MeantClasses& reading = walkMeant[ parent ];
+        meantKey.assign( fieldWalk[ parent ] ).push_back( '\0' );
+        meantKey.append( base ).push_back( reading.unbound ? '1' : '0' );
+        for( NodeId id : reading.ids )
+        {
+            meantKey.append( reinterpret_cast<const char*>( &id ), sizeof( id ) );
+        }
+        if( const auto hit = meantMemo.find( meantKey ); hit != meantMemo.end() )
+        {
+            return hit->second;
+        }
+        std::optional<MeantClasses> meant = meantBase( parent, base );
+        meantMemo.emplace( meantKey, meant );   // meantBase rewrote guardKey, never meantKey
         return meant;
     }
 
@@ -8892,7 +9165,7 @@ struct Narrower
             const auto uit = chaUp.find( guardKey );
             for( const std::string& base : ( uit == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( uit->second ) ) )
             {
-                std::optional<MeantClasses> meant = meantBase( i, base );
+                std::optional<MeantClasses> meant = meantBaseKept( i, base );
                 if( !meant.has_value() )
                 {
                     continue;
@@ -8971,12 +9244,47 @@ struct Narrower
     // The whole guarded closure of one class is kept for the next call (calls arrive caller by caller); kConeNameCap is
     // ReceiverEvidence::kWalkCap, the cone's own bound. A closure the cap cut, or a name it never reached, proves nothing.
     static constexpr std::size_t kConeNameCap = 64;
+    // CONE-MEMO (lane PF2, 2026-11-21): calls arrive caller by caller, but a bare call asks its caller's class cone
+    // (bareCallReachesFree) and the ladder proof the candidate's caller's — on llvm-project/clang the kept closure switched
+    // class often enough that re-expanding it (meantBase's class x class pairing, up to kConeNameCap names) was the next
+    // hotspot after GUARDED-WALK-MEMO. Every closure is kept per class name (the same fixed inputs as guardedWalks), and a
+    // switch copies the kept one into coneNames / coneMeant, which hold exactly what the expansion left.
+    struct KeptCone
+    {
+        std::vector<std::string_view> names;   // [0], the class itself, is coneOf on every switch
+        std::vector<MeantClasses>     meant;
+    };
+    mutable HashMap<std::string, KeptCone> keptCones;
+    mutable const BaseWalkGuard*           keptConesFor = nullptr;
+
     void keepGuardedCone( std::string_view cls, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
     {
         if( coneOf == cls && !coneNames.empty() )
         {
             return;
         }
+        if( keptConesFor != baseGuard )
+        {
+            keptCones.clear();
+            keptConesFor = baseGuard;
+        }
+        coneOf.assign( cls );
+        const auto [ kept, inserted ] = keptCones.try_emplace( coneOf );
+        if( !inserted )
+        {
+            coneNames.assign( kept->second.names.begin(), kept->second.names.end() );
+            coneNames.front() = coneOf;
+            coneMeant = kept->second.meant;
+            return;
+        }
+        expandGuardedCone( cls, chaUp );
+        kept->second.names.assign( coneNames.begin(), coneNames.end() );
+        kept->second.names.front() = std::string_view{};
+        kept->second.meant = coneMeant;
+    }
+    void expandGuardedCone( std::string_view cls, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        ++guardedWalkStats.cones;
         fieldWalk.clear();
         fieldWalk.push_back( cls );
         walkMeant.assign( 1, MeantClasses{} );
@@ -8986,7 +9294,6 @@ struct Narrower
             expandGuardedLevel( lvlBegin, lvlEnd, chaUp, kConeNameCap );
             lvlBegin = lvlEnd;
         }
-        coneOf.assign( cls );
         coneNames.assign( fieldWalk.begin(), fieldWalk.end() );
         coneNames.front() = coneOf;   // the root's view was the caller's: keep the kept copy's
         coneMeant = walkMeant;
@@ -9080,9 +9387,77 @@ struct Narrower
                             [ & ]( const MeantClasses& meant ) { return declaresBodiless( fieldWalk[ at++ ], meant, callee ); } );
     }
 
+    // GUARDED-WALK-MEMO (lane PF2, 2026-11-21; test/guardedwalkcheck.sh). One level's expansion asks meantBase of every base
+    // name, and meantBase pairs every class of the deriving NAME with every class of the base NAME (drawnAndStandingBases),
+    // so where a name repeats across files a level costs (classes of the name)^2 — and guardedBaseWalk re-expanded the walk
+    // on every call: calls x K^2. A cold llvm-project map sat in that loop on one core for 10+ minutes. The levels are a
+    // function of the root name alone (chaUp, the implementors map and class identity are fixed once baseGuard is set; the
+    // probe never writes fieldWalk or walkMeant, and an expansion only writes the level it builds), so each root's levels are
+    // KEPT as they are first expanded: a call replays the kept levels into the same scratch and expands — and keeps — only a
+    // level no earlier call reached. fieldWalk / walkMeant therefore hold exactly what the per-call expansion left at every
+    // probe, so every answer is unchanged byte for byte, and no level is expanded twice. Only a walk over baseGuard->chaUp is
+    // kept; a walk over any other table expands per call, as before.
+    struct GuardedWalk
+    {
+        std::vector<std::string_view> names{ std::string_view{} };   // the kept levels' fieldWalk (views into chaUp's strings; [0], the root, is each call's own)
+        std::vector<MeantClasses>     meant{ MeantClasses{} };       // walkMeant, parallel
+        std::vector<std::uint32_t>    levelEnds{ 1 };                // fieldWalk.size() before the first expansion and after each kept one
+    };
+    mutable HashMap<std::string, GuardedWalk> guardedWalks;              // root name -> its kept levels
+    mutable const BaseWalkGuard*              guardedWalksFor = nullptr;   // the guard the kept levels were expanded under
+    mutable std::string                       guardedWalkKey;
+
+    // the kept levels of `typeName`'s walk over chaUp — nullptr for a table other than baseGuard->chaUp, whose walk is expanded
+    // per call (counted as a walk each time)
+    GuardedWalk* keptWalkFor( std::string_view typeName, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( &chaUp != &baseGuard->chaUp )
+        {
+            ++guardedWalkStats.walks;
+            return nullptr;
+        }
+        return &guardedWalkOf( typeName );
+    }
+    GuardedWalk& guardedWalkOf( std::string_view typeName ) const
+    {
+        if( guardedWalksFor != baseGuard )
+        {
+            guardedWalks.clear();
+            guardedWalksFor = baseGuard;
+        }
+        guardedWalkKey.assign( typeName );
+        const auto [ it, inserted ] = guardedWalks.try_emplace( guardedWalkKey );
+        guardedWalkStats.walks += inserted ? 1 : 0;
+        return it->second;   // nothing inserts into guardedWalks until the caller is done with it
+    }
+
+    // the `level`-th expansion of a walk whose scratch holds levels 0..level-1 (fieldWalk[ lvlBegin, lvlEnd ) is the last):
+    // replayed from `walk` when a call reached it before, else expanded here and kept (no `walk`: expanded, not kept)
+    void guardedLevel( GuardedWalk* walk, std::size_t level, std::size_t lvlBegin, std::size_t lvlEnd,
+                       const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( walk != nullptr && level < walk->levelEnds.size() )
+        {
+            const std::size_t to = walk->levelEnds[ level ];
+            fieldWalk.insert( fieldWalk.end(), walk->names.begin() + std::ptrdiff_t( lvlEnd ), walk->names.begin() + std::ptrdiff_t( to ) );
+            walkMeant.insert( walkMeant.end(), walk->meant.begin() + std::ptrdiff_t( lvlEnd ), walk->meant.begin() + std::ptrdiff_t( to ) );
+            return;
+        }
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/3: guarded base walk, a level no call reached before (GUARDED-WALK-MEMO)" );
+        expandGuardedLevel( lvlBegin, lvlEnd, chaUp );
+        if( walk != nullptr )
+        {
+            walk->names.insert( walk->names.end(), fieldWalk.begin() + std::ptrdiff_t( lvlEnd ), fieldWalk.end() );
+            walk->meant.insert( walk->meant.end(), walkMeant.begin() + std::ptrdiff_t( lvlEnd ), walkMeant.end() );
+            walk->levelEnds.push_back( std::uint32_t( fieldWalk.size() ) );
+        }
+    }
+
     const rw::SmallVec<NodeId, 2>* guardedBaseWalk( std::string_view typeName, const Reference& r, const HashMap<std::string, std::vector<std::string>>& chaUp,
                                                     bool skipSelf, bool unionOnMulti ) const
     {
+        ++guardedWalkStats.calls;
+        GuardedWalk* const memo = keptWalkFor( typeName, chaUp );
         fieldWalk.clear();
         fieldWalk.push_back( typeName );
         walkMeant.assign( 1, MeantClasses{} );
@@ -9090,11 +9465,11 @@ struct Narrower
         {
             return nullptr;   // the type itself declares the callee with no body: lookup ends here, and no base's body is the call's
         }
-        std::size_t lvlBegin = 0;
+        std::size_t lvlBegin = 0, level = 0;
         while( lvlBegin < fieldWalk.size() )
         {
             const std::size_t lvlEnd = fieldWalk.size();
-            expandGuardedLevel( lvlBegin, lvlEnd, chaUp );
+            guardedLevel( memo, ++level, lvlBegin, lvlEnd, chaUp );
             const GuardedProbe probe = probeGuardedLevel( lvlEnd, r.calleeName );
             if( probe.unbound )
             {
