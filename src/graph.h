@@ -14443,6 +14443,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] arrow_walk calls={} visits={}\n", aliasWalk.arrowCalls, aliasWalk.arrowVisits );
         const Narrower::GuardedWalkStats& gw = narrower.guardedWalkStats;
         rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} meant={}\n", gw.calls, gw.walks, gw.meant );
+        rw::emitTo( stderr, "[mem] owned_by asks={} reads={}\n", narrower.identity.ownedAsks, narrower.identity.ownedReads );
     }
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the
