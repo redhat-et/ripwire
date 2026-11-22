@@ -81,6 +81,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 # 2026-11-19, lane qual-ns-call-bind (stacked on lane/import-proved-splits 4787d1ed0): RE-PINNED with UPDATE_GOLDEN=1. kParserVer
 #   335 PLACEHOLDER (C++ using-declarations + namespace aliases recorded, ingest_binds.h kCppCallScopeFacts; mirrored in quality.h);
 #   the train renumbers and re-pins. kCacheVersion and kQSnapCacheScheme unchanged.
+# 2026-11-21, lane QD-LESSONS-2a (on main 8861b0d4d): RE-PINNED with UPDATE_GOLDEN=1 (hash 269831ba67…15a52a). defectSitesOf moved:
+#   it takes an optional shell-cut counter (CR712-SHSTATUS-DEPTH) and each site record also carries its two-bit value
+#   (legacySite, CR712-ACK-KEY-MASK), which computeSnapshot does not store. The blob shape is unchanged; the Bash scanners
+#   now stop at the one nesting budget (64) instead of crashing (subshell/group/if) or cutting $( ) at 40, which changes
+#   the site set only for a script nested that deep, and the producer identity keeps this build's blobs apart, so
+#   kQSnapCacheScheme stays 38 (the cr-qd-kinds-068 fix-round-1 precedent below).
 # 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
 #   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the
