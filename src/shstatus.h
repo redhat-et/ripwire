@@ -502,11 +502,6 @@ inline std::size_t pastBacktick( std::string_view s, std::size_t i ) noexcept
 std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb );
 inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBudget& nb )   // s[i] is the opening quote
 {
-    const NestLevel level( nb );
-    if( level.over() )
-    {
-        return s.size();   // past the budget: the rest is one unscanned word (Tree::cut says so)
-    }
     ++i;
     while( i < s.size() )
     {
@@ -534,12 +529,14 @@ inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBud
     }
     return i;
 }
+// The one budget guard of the skip trio: skipQuote and skipBrace recurse only through skipParen, so each nesting level of
+// "$( … "$( … )" … )" or ${ … "$( … )" … } costs one level here.
 inline std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '('
 {
     const NestLevel level( nb );
     if( level.over() )
     {
-        return s.size();
+        return s.size();   // past the budget: the rest is one unscanned word (Tree::cut says so)
     }
     int depth = 0;
     while( i < s.size() )
@@ -579,11 +576,6 @@ inline std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb 
 }
 inline std::size_t skipBrace( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '{' of a ${...}
 {
-    const NestLevel level( nb );
-    if( level.over() )
-    {
-        return s.size();
-    }
     int depth = 0;
     while( i < s.size() )
     {
