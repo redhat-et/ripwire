@@ -27,7 +27,7 @@
 // verb resolves that symbol — as typed, else its last segment (P1's spelling fallback). Anything else is the --for answer,
 // byte for byte; so is --no-verb-route, the opt-out the route's own next= spells. A spelled --page-bytes never routes, which
 // is what keeps every page's next= (`--for='…' --page-bytes=N:K`) a page of the --for answer.
-// MCP `for` is UNCHANGED (AF1 left MCP unpaged, and the fallback contract here is "the first page + next="); an MCP client
+// MCP `for` routes by the same rule (RT2, below; held to the page by MR1 in MCP's limit/offset contract); an MCP client
 // already holds find_referencing_symbols / uses / impact as tools of their own.
 // RT2 (results/RT2_ROUTE_1118, frozen in its PREREG.md): rule E2/R2 (forroute.h: a where-used kind → --uses; a plain word
 // or a `name!` / `name()` span the verb resolves), and W2 (partialwarn.h rt2Evidence): a TEXT GAP — files that name the symbol
@@ -61,7 +61,8 @@
 // page size pre-registered beside 12,000 (forpages.h) and the knee of BL1's sweep on GA1 DEV: page 1 names every gold file on 74 /
 // 81 / 82 / 84 of 89 at 4,000 / 6,000 / 8,000 / 12,000 B. WHY NOT "do not route when it does not fit": every warned answer in a
 // repository of any size carries a page near P, so that rule switches the route off exactly where RT1/RT2 measured it gaining.
-// An answer that already fitted is byte-identical. MCP `for` is unchanged (AF1 left it unpaged). Gate: test/forroutepagecheck.sh.
+// An answer that already fitted is byte-identical. Gate: test/forroutepagecheck.sh. MCP `for` gets the same seam in MCP's paging
+// contract (lane MR1, mcpForVerbRoute below; test/mcpforroutepagecheck.sh).
 
 namespace
 {
@@ -517,20 +518,6 @@ inline void appendCarriedPage( std::string& doc, std::string_view page, bool key
     }
 }
 
-// The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
-// children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
-inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
-{
-    while( !page.empty() && page.back() == '\n' )
-    {
-        page.remove_suffix( 1 );
-    }
-    bool        keyMoved = false;
-    std::string doc      = assembleRoutedHead( d, ra, !page.empty(), keyMoved );
-    appendCarriedPage( doc, page, keyMoved );
-    return doc;
-}
-
 // RL1: the next row limit to try for a document that counts `c` against `room`: the limit scaled by the share of the row bytes
 // that fit, and always at least one row fewer. 0: nothing smaller is left to try.
 inline int routedNextLimit( const RoutedCount& c, std::size_t room, int limit )
@@ -607,7 +594,7 @@ inline std::optional<std::string> routedContinuation( const MainDispatch& d, int
         return doc;
     };
     std::string doc = assemble( verbOut );
-    // RL1: a continuation window is held to the page too (CLI only: forPagingApplies; MCP `for` is unpaged). A window that cannot be
+    // RL1: a continuation window is held to the page too (forPagingApplies: the CLI's and MCP's dispatch alike). A window that cannot be
     // cut to fit is served as the verb windows it — it is the only call that reaches these rows.
     if( forPagingApplies( d.cfg ) )
     {
@@ -766,9 +753,9 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
 }   // namespace — verbs_forroute.h section of main.cpp
 
 // RT2 MCP PARITY (coordinator 2026-11-19): MCP `for` routes by the SAME frozen rule. The server's warm index answers through
-// the CLI's own route (routeQuestion / assembleRouted above) on a dispatch built the way a bare CLI --for run builds its own —
+// the CLI's own route (routeQuestion / assembleRoutedHead above) on a dispatch built the way a bare CLI --for run builds its own —
 // fan-in from the in-edge CSR and computeQMetrics, nothing git-mined — so a routed MCP payload carries the CLI routed answer's
-// rows. The carried page is `page()`: MCP's own `for` answer (MCP serves `for` unpaged). Declared in mcpverbs.h.
+// rows. The carried page is MCP's own `for` answer, or its file page cut to the page (MR1, mcpForVerbRoute). Declared in mcpverbs.h.
 // Gate: test/mcpforroutecheck.sh.
 namespace rw
 {
@@ -798,8 +785,67 @@ std::optional<std::string> withMcpRouteDispatch( const IngestResult& ing, const 
     return use( d );
 }
 
+// MR1 (owner ruling 168): the file page's FIRST row limit when MCP's whole bundle does not fit what the verb left of the page. An
+// upper start, not a cut: mcpFittedFilePage scales it down by the bytes the render measured (routedNextLimit), and at the ~60 B a
+// file row takes at least, 200 rows are more than a 12,000 B page holds — so the page is filled, never capped by this number.
+inline constexpr int kMcpCarriedFilePageFirstLimit = 200;
+
+// MR1: MCP's FILE PAGE (`for` limit=L offset=0) fitted to `room` counted bytes, as fitRoutedVerb fits the verb: re-rendered at the
+// limit the measured bytes allow. Its root says has_more="1" next_offset=K, and `for` limit=L offset=K continues it — MCP's paging
+// contract, where the CLI's carried page says --page-bytes=S:2. nullopt: not even one row fits, or the page did not render.
+inline std::optional<std::string> mcpFittedFilePage( const McpRoutedPages& pages, std::size_t room )
+{
+    int limit = kMcpCarriedFilePageFirstLimit;
+    for( int tries = 0; tries < kRoutedFitTries && limit > 0; ++tries )
+    {
+        std::optional<std::string> fp = pages.files( limit );
+        const bool                 ok = fp && !fp->empty() && rw::findCompactRoot( *fp ).tag == "files";
+        const RoutedCount          c  = ok ? routedCount( *fp ) : RoutedCount{};
+        if( ok && c.stream <= room )
+        {
+            pages.settle( true );
+            return fp;
+        }
+        pages.settle( false );
+        limit = ok ? routedNextLimit( c, room, limit ) : 0;
+    }
+    return std::nullopt;
+}
+
+// MR1: the page a warned routed MCP answer carries, RL1's carryRoutedPage in MCP's contract: the head is windowed first to leave the
+// page its reserve (its continuation is `for` offset=K, RT3-F1's mcpForVerbContinue); MCP's whole `for` bundle is carried when it
+// fits what is left — so an answer that fitted is assembled exactly as before — else its file page cut to fit. The outer nullopt:
+// the head cannot leave the page its reserve, or not one file row fits — the caller does not route. An inner nullopt: the bundle
+// did not render, and the route carries no page (as before MR1).
+inline std::optional<std::optional<std::string>> mcpCarryRoutedPage( const MainDispatch& d, RoutedAnswer& ra, RoutedHead& h, const McpRoutedPages& pages )
+{
+    const std::size_t          pageBytes = d.cfg.forPageBytes;
+    std::optional<std::string> whole     = pages.whole();
+    const bool                 rendered  = whole && !whole->empty();
+    const std::size_t          need      = rendered ? routedCount( *whole ).stream : 0;
+    if( !fitRoutedHead( d, ra, h, pageBytes - carriedPageReserve( d, h.doc, need ) ) )
+    {
+        pages.settle( false );
+        return std::nullopt;
+    }
+    const std::size_t left = pageBytes - std::min( pageBytes, routedCount( h.doc ).stream );
+    if( !rendered || need <= left )
+    {
+        pages.settle( rendered );
+        return std::optional<std::string>( rendered ? std::move( whole ) : std::nullopt );
+    }
+    pages.settle( false );
+    std::optional<std::string> fp = left > 0 ? mcpFittedFilePage( pages, left ) : std::nullopt;
+    return fp ? std::optional<std::optional<std::string>>( std::move( fp ) ) : std::nullopt;
+}
+
+// MR1: A ROUTED MCP ANSWER IS HELD TO THE PAGE — RL1's seam (the header) on the MCP twin. Unchanged from RT2 where the answer already
+// fitted: the verb's own answer, and MCP's whole `for` bundle when a warned route carries one. Otherwise the verb's rows are windowed
+// (has_more="1" next_offset=K: `for` offset=K) and a carried bundle that does not fit what they leave becomes MCP's file page of the
+// same ranking cut to fit (has_more="1" next_offset=K: `for` limit=L offset=K). An answer that cannot be held is not routed: MCP's
+// `for` answer, as for any unrouted question. Gate: test/mcpforroutepagecheck.sh.
 std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
-                                            const std::function<std::optional<std::string>()>& page )
+                                            const McpRoutedPages& pages )
 {
     return withMcpRouteDispatch( ing, g, root, task, 0, [ & ]( const MainDispatch& d ) -> std::optional<std::string>
     {
@@ -808,12 +854,26 @@ std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph
         {
             return std::nullopt;
         }
-        std::optional<std::string> carried;
-        if( ra->wantPage )
+        RoutedHead h;
+        h.doc = assembleRoutedHead( d, *ra, ra->wantPage, h.keyMoved );
+        if( !ra->wantPage )
         {
-            carried = page();
+            return fitRoutedHead( d, *ra, h, d.cfg.forPageBytes ) ? std::optional<std::string>( std::move( h.doc ) ) : std::nullopt;
         }
-        return assembleRouted( d, *ra, carried ? std::string_view( *carried ) : std::string_view{} );
+        const std::optional<std::optional<std::string>> page = mcpCarryRoutedPage( d, *ra, h, pages );
+        if( !page )
+        {
+            return std::nullopt;
+        }
+        if( *page )
+        {
+            appendCarriedPage( h.doc, **page, h.keyMoved );
+        }
+        else if( const std::size_t at = h.doc.find( " page1=\"1\"" ); at != std::string::npos && at < h.doc.find( "/>", h.doc.find( "<route " ) ) )
+        {
+            h.doc.erase( at, std::string_view( " page1=\"1\"" ).size() );   // the bundle did not render: the route claims no page
+        }
+        return std::move( h.doc );
     } );
 }
 

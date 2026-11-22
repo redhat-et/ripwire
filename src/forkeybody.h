@@ -23,9 +23,9 @@
 // that a body the page already carried was not repeated — see the note on the removal of the `served` argument below.
 //
 // WHERE IT GOES.
-//   * a ROUTED answer (verbs_forroute.h assembleRouted — the CLI's and MCP `for`'s, so both surfaces carry it): the root's child
+//   * a ROUTED answer (verbs_forroute.h assembleRoutedHead — the CLI's and MCP `for`'s, so both surfaces carry it): the root's child
 //     right after the verb's own rows and the fold, before a carried --for page. The CLI's routed answer is held to the page (RL1,
-//     verbs_forroute.h; the key-body group is not counted against it, as on an unrouted --for page); MCP `for`'s is not paged.
+//     verbs_forroute.h; the key-body group is not counted against it, as on an unrouted --for page); so is MCP `for`'s (MR1).
 //   * the unrouted answer-first --for answer (verbs_for.h runForLens, after the permutation and SIGX, before ES and paging): directly
 //     after the FIRST top-level row block (the leading <callers by="subject"> when T-B leads it, else whatever answer-first put first),
 //     glued behind its own legend comment. Only when that block ends inside the default page (answerfirst::kAnswerPageBytesDefault):

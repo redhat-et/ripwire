@@ -2678,10 +2678,19 @@ inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::stri
 }
 
 // RT2 MCP parity: a `for` task that names its symbol and asks a call-graph question, answered by the CLI's routed answer
-// (verbs_forroute.h defines it, later in this translation unit); `page` serves the ranked answer a warned route carries.
+// (verbs_forroute.h defines it, later in this translation unit); `pages` serve the ranked answer a warned route carries.
 // nullopt: not routed — serve forTaskText.
+// MR1: the two forms a carried page takes, so a routed answer is held to the page in MCP's own paging contract (verbs_forroute.h):
+// `whole` is MCP's `for` bundle, unpaged; `files( L )` is its FILE PAGE at limit=L, offset 0 (has_more= next_offset=; `for` limit=L
+// offset=K continues it). Each render's redaction tally is taken back unless that render is the one carried (`keep`).
+struct McpRoutedPages
+{
+    std::function<std::optional<std::string>()>      whole;
+    std::function<std::optional<std::string>( int )> files;
+    std::function<void( bool keep )>                 settle;   // after a render: keep its redactions, or take them back
+};
 std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
-                                            const std::function<std::optional<std::string>()>& page );
+                                            const McpRoutedPages& pages );
 // RT3-F1: offset=K on a `for` call that routes — the routed verb's window at K (the CLI's `--for=Q --offset=K`), never a carried
 // page. nullopt: not routed — serve forTaskText's file page.
 std::optional<std::string> mcpForVerbContinue( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task, int offset );
@@ -3295,7 +3304,19 @@ inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactC
     {
         return mcpForVerbContinue( ix.ing, ix.g, a.path, a.task, int( offset.value ) );
     }
-    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections, a.rows ); } );
+    // MR1: each carried-page render counts its redactions from the tally as it stood before it; only the render carried keeps them
+    const std::optional<RedactCounts> before = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
+    const McpRoutedPages pages{
+        .whole  = [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections, a.rows ); },
+        .files  = [ & ]( int limit ) { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{ limit, 0 }, a.sections ); },
+        .settle = [ & ]( bool keep )
+        {
+            if( !keep && before )
+            {
+                *redactPtr = *before;
+            }
+        } };
+    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, pages );
 }
 
 // `lego` verb: the TARGETED interface→impls "Lego" view for ONE named interface/base — its signature,
