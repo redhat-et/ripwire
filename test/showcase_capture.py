@@ -481,7 +481,7 @@ add(S3, f"{BIN} . --outline=rankGraphTeleport --top-k=0", "Control-flow skeleton
 add(S3, f"{BIN} . --outline=rankGraphTeleport:1-10 --top-k=0", "CHANGED: a line range on --outline is now STRIPPED with a stderr note (it used to refuse).")
 add(S3, f"{BIN} . --expand=rankGraphTeleport --top-k=0", "Full body + inline callee signatures.")
 add(S3, f"{BIN} . --expand=rankGraphTeleport:1-12 --top-k=0", "Body SLICE: lines 1..12 of the symbol's own body, with lines=\"lo-hi/total\" marking it partial.")
-add(S3, f"{BIN} . --expand=compressBody --top-k=0 --compress", "Comments stripped + blank runs collapsed — compressBody is the function that implements --compress itself, chosen because it is comment-heavy enough to show a real reduction (the previously captioned symbol had no comments or blank runs, so before/after were byte-identical under a caption promising a difference).")
+add(S3, f"{BIN} . --expand=collapseBlankLineRuns --top-k=0 --compress", "Comments stripped + blank runs collapsed — collapseBlankLineRuns is --compress's own second step (compressBody is now the one-line stripCommentsKeepLiterals-then-collapse pipeline, with nothing left to strip), chosen because it is comment-heavy enough to show a real reduction (a symbol with no comments or blank runs reads byte-identical, or a few bytes larger for the compress attribute, under a caption promising a difference).")
 add(S3, f"{BIN} . --expand=readAckRecords --top-k=0 --no-redact", "--no-redact: emit bodies verbatim (credential redaction is on by default).")
 add(S3, f"{BIN} . --pack-top-n=3 --top-k=0", "Pack the top-3 ranked symbols' full bodies (deprecated verb; see stderr).")
 
