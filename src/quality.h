@@ -9775,6 +9775,29 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
 }
 
+// One (anchor, facet) row's key under the two-bit site values and under the current ones, from that anchor's sites;
+// {0, 0} when it has no site of the facet the two-bit scheme knew (a file record carries no legacySite, so it never counts).
+inline std::pair<std::uint64_t, std::uint64_t> defectRowKeysBothSchemes( std::span<const DefectSiteAt> anchorSites, defectshape::Facet f )
+{
+    std::vector<std::uint64_t> now, old;
+    for( const DefectSiteAt& d : anchorSites )
+    {
+        if( d.legacySite != 0 && defectFacetOf( d.key.site ) == f )
+        {
+            now.push_back( d.key.site );
+            old.push_back( d.legacySite );
+        }
+    }
+    if( now.empty() )
+    {
+        return { 0, 0 };
+    }
+    std::sort( now.begin(), now.end() );
+    std::sort( old.begin(), old.end() );
+    const std::uint64_t anchor = anchorSites.front().key.anchor;
+    return { defectRowKey( anchor, f, old ), defectRowKey( anchor, f, now ) };
+}
+
 // CR712-ACK-KEY-MASK — the defect-shape half of the SCHEME migration: for every current (anchor, facet) row whose key under the
 // two-bit site values (defectLegacySiteValue) differs from its key now, legacy key -> current key, fed into the same toCurrent
 // map addSchemeAliases fills, so remapAckIdentity re-files a released ack (acks_rekeyed_by_scheme=), computeStaleAcks reads it at
@@ -9787,30 +9810,14 @@ inline void addDefectFacetSchemeAliases( IdentityAliases& al, const gtl::btree_m
     {
         return;
     }
-    const std::vector<DefectSiteAt> sites = defectSitesOf( ing, root, nullptr );   // sorted by (anchor, site)
+    constexpr std::size_t           kTwoBitFacets = 4;   // format-arity, utf8-cut, dedup-first, vacuous-assert
+    const std::vector<DefectSiteAt> sites         = defectSitesOf( ing, root, nullptr );   // sorted by (anchor, site)
     for( auto it = sites.begin(); it != sites.end(); )
     {
         const auto end = std::find_if( it, sites.end(), [ & ]( const DefectSiteAt& d ) { return d.key.anchor != it->key.anchor; } );
-        for( std::size_t f = 0; f < defectshape::kFacetCount; ++f )
+        for( std::size_t f = 0; f < kTwoBitFacets; ++f )
         {
-            std::vector<std::uint64_t> now, old;
-            for( auto d = it; d != end; ++d )
-            {
-                if( d->legacySite != 0 && d->key.site != kDefectFilePresent && d->key.site != kDefectFileUnreadable
-                    && defectFacetOf( d->key.site ) == static_cast<defectshape::Facet>( f ) )
-                {
-                    now.push_back( d->key.site );
-                    old.push_back( d->legacySite );
-                }
-            }
-            if( now.empty() )
-            {
-                continue;
-            }
-            std::sort( now.begin(), now.end() );
-            std::sort( old.begin(), old.end() );
-            const auto          facet  = static_cast<defectshape::Facet>( f );
-            const std::uint64_t oldKey = defectRowKey( it->key.anchor, facet, old ), newKey = defectRowKey( it->key.anchor, facet, now );
+            const auto [ oldKey, newKey ] = defectRowKeysBothSchemes( { it, end }, static_cast<defectshape::Facet>( f ) );
             if( oldKey != newKey && al.toCurrent.emplace( oldKey, newKey ).second )
             {
                 al.schemeKeys.push_back( oldKey );
