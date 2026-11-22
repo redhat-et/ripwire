@@ -465,6 +465,14 @@ Discloses: `capped`, `hosts_capped`
 | `kMaxFlipRows` | `25` | OUTPUT | per emitted list; a DEFAULT --limit=N raises and --detail lifts |
 | `kMaxNearMisses` | `5` | OUTPUT | "did you mean" suggestions on an unknown gate name; --limit=N raises it |
 
+### `src/foractline.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kActRows` | `3` | — | see the header: GA1 DEV page 1, the largest N inside a ~120 B median element |
+
 ### `src/foraliashop.h`
 
 Discloses: `capped`, `depth_capped`

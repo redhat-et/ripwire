@@ -59,7 +59,8 @@ inline constexpr std::string_view kActClause =
     "<!-- act read=: P:L-E of the top 3 sigs d rows by r= whose body is not on this page: Read ALL in ONE turn, parallel ranged "
     "Reads; search only for what no row lists; absent if one lacks e= -->";
 
-static_assert( kActRows == 3, "kActClause says \"top 3\": reword it with kActRows" );
+static_assert( kActRows == 3 && kActClause.find( "top 3 " ) != std::string_view::npos,
+               "the legend clause kActClause states \"top 3\": reword it with kActRows (test/capdisclose.map: legend)" );
 
 namespace detail
 {
