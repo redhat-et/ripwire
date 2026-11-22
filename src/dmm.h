@@ -295,7 +295,7 @@ inline bool ingestCommitTree( const std::string& root, const std::string& sha, c
     // ingest() writes single-writer process-global query caches; the sibling HEAD-tree readers in quality.h
     // serialize on this same mutex, so this one does too rather than inventing a second lock order.
     std::lock_guard<std::mutex> ingestLock( quality::headSnapshotIngestMutex() );
-    out = ingest( tmpRoot.c_str(), excludes, cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
+    out = ingestTrackedTree( tmpRoot.c_str(), excludes, cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
     if( out.symbols.empty() && out.files.empty() )
     {
         // Not a refusal: the caller (computeDmm) still prints available="0" dmm="UNAVAILABLE" reason="…" for

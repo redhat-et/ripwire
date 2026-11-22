@@ -393,7 +393,12 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 338;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 340;          // bump on any grammar/.scm/extraction change
+                                                      // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER: the train renumbers; above 338 and its rich
+                                                      //   339; rich file tag 341): the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED — a build/ dist/ out/ target/
+                                                      //   directory git tracks files under is crawled (ingest_crawl.h TrackedBuildDirs), so a v338 blob has no
+                                                      //   record for those files: ABSENT, not stale, and only the header version can reject it (the 88/91
+                                                      //   precedent). No extraction or record shape changes; kCacheVersion stays 54.
                                                       // 338 = 2026-11-21 (lane fx1-two-reds, above the train's 336 and its rich 337; rich file tag 339): a Rust
                                                       //   macro invocation's re-read (ingest_rustmacroargs.h) drops a bare call its own file's `macro_rules!`
                                                       //   matcher spells as a literal word (`wrap!( matcher_fn( 3 ) )`). kCacheVersion stays 54.

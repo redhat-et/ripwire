@@ -3210,7 +3210,9 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 54;   // MUST equal ingest.cpp's kCacheVersion (gated); 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 338;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 340;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER, rich 341): the crawl admits a git-tracked
+                                                          //   build/ dist/ out/ target/ (ingest_crawl.h TrackedBuildDirs). History below.
                                                           // 338 = 2026-11-21 (lane fx1-two-reds, rich 339): a Rust macro invocation's re-read drops a bare call its own
                                                           //   file's `macro_rules!` matcher spells as a literal word. History below.
                                                           // 336 = 2026-11-21 (IN8, ruling 135): train 1118a folded into the 0.7.0 train — ONE number above the train's 334 and
@@ -5148,7 +5150,12 @@ inline std::string crawlSkipDirPathspecs()
     std::string specs;
     for( const std::string_view dir : kCrawlSkipDirs )
     {
-        specs += " " + shSingleQuote( ":(exclude,glob)**/" + std::string( dir ) + "/**" );
+        // M1: a build-output name in a COMMIT is tracked by construction, and the crawl of a materialized tree indexes it
+        // (ingest.h CrawlTreeAllTracked) — so it must be extracted, or the arm loses exactly what the working tree indexes.
+        if( !isTrackedBuildOutputName( dir ) )
+        {
+            specs += " " + shSingleQuote( ":(exclude,glob)**/" + std::string( dir ) + "/**" );
+        }
     }
     specs += " " + shSingleQuote( ":(exclude,glob)**/cmake-build-?*/**" );   // isSkippedCrawlDir: the prefix plus at least one byte
     specs += " " + shSingleQuote( ":(exclude,glob)**/?*.dSYM/**" );          // isSkippedCrawlDir: a name longer than the suffix
@@ -5473,7 +5480,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     //    parse — byte-identical output either way. The working-tree side's excludes are applied here too
     //    (A4-F5) so both trees see the same file set. (Keys were computed once in step 1.)
     const std::string cachePath  = useCache ? headSnapCachePath( repoHex, exclHex, headSha ) : std::string{};
-    IngestResult headIng = ingest( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
+    IngestResult headIng = ingestTrackedTree( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
 
     // Hygiene: cap each (repo, excludes) family to the 2 newest files (delete older sha's). Done AFTER the
     // ingest so the file we just wrote/used is the newest → always retained. Best-effort; never throws.
@@ -5674,7 +5681,7 @@ inline RefTreeLoad loadRefTree( const std::string& repoRoot, const std::string& 
         // ingest() writes single-writer process-global query caches — serialize on the SAME mutex every other
         // materialized-tree reader in this file uses, rather than introducing a second lock order.
         std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
-        out.ing = ingest( tmpRoot.c_str(), excludes,
+        out.ing = ingestTrackedTree( tmpRoot.c_str(), excludes,
                           cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
     }
     if( out.ing.memoryStop.isSet() )
@@ -5998,7 +6005,7 @@ inline RefTreeLoad loadRefSubset( const std::string& repoRoot, const std::string
     }
     {
         std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
-        out.ing = ingest( tmpRoot.c_str(), excludes, std::string_view {}, maxFileBytes );
+        out.ing = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view {}, maxFileBytes );
     }
     if( out.ing.memoryStop.isSet() )
     {
@@ -6086,7 +6093,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     // the ref tree is immutable for its sha → reuse the qheadsnap INGEST cache family keyed by refSha (the
     // family's keep-2 cap holds exactly the HEAD blob + this ref blob between commits).
     const std::string ingestCachePath = headSnapCachePath( repoHex, exclHex, refSha );
-    IngestResult refIng = ingest( tmpRoot.c_str(), excludes, std::string_view( ingestCachePath ), maxFileBytes );
+    IngestResult refIng = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view( ingestCachePath ), maxFileBytes );
     evictOldHeadSnapCaches( cacheDirLadder(), repoHex, exclHex, ingestCachePath, 2 );
     if( refIng.symbols.empty() && refIng.files.empty() )
     { DISCLOSE( "quality: churn-window ref tree ingested empty — churn evidence unavailable" ); return { {}, false }; }

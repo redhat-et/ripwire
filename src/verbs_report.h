@@ -2159,6 +2159,15 @@ void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
              " cannot be detected this way and are not covered. -->" );
 }
 
+// M1 — the untracked-build clause, written ONLY into a document that carries untracked-build rows (escaped_root='s
+// absent-means-nothing-happened rule), so every other --skipped document stays byte-identical. The class's DEFINITION.
+inline constexpr std::string_view kUntrackedBuildLegend =
+             "<!-- untracked_build= counts files left out of a build/ directory the crawl ENTERED only because git tracks files"
+             " under it: build/ is pruned by name as build output unless git tracks files there, and then only the TRACKED files"
+             " are indexed. Each is one f why=\"untracked-build\" row. Tested after the ignore rules, so a file git already ignores"
+             " is counted as ignored= instead; the accounting invariant adds untracked_build= to its drop classes. --no-ignore"
+             " indexes them. -->";
+
 // The nest-refused clause of the legend, written ONLY into a document that carries nest-refused rows — the same
 // absent-means-nothing-happened rule nest_refused= itself follows — so every other --skipped document stays byte-identical.
 void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
@@ -2542,7 +2551,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                                   || cs.prunedDirRows.size() + cs.prunedPackageRows.size() < cs.prunedDirs              // #478 gap 3
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
-                                  || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
+                                  || cs.escaped.size() < cs.escapedFiles                                                // §SEC1
+                                  || cs.untrackedBuild.size() < cs.untrackedBuildFiles;                                 // M1
     char nestAttr[ 48 ] = "";   // absent when zero, like every attribute that only a rare corpus can make non-zero
     if( cs.nestRefusedFiles > 0 )
     {
@@ -2555,6 +2565,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     {
         rw::formatTo( escAttr, sizeof( escAttr ), " escaped_root=\"{}\"", ( unsigned long long ) cs.escapedFiles );
     }
+    // M1 — the same rule, printed right after it: only a tracked build/ that held an untracked file pays a byte
+    const std::string untrackedAttr = cs.untrackedBuildFiles > 0 ? " untracked_build=\"" + std::to_string( cs.untrackedBuildFiles ) + "\"" : std::string();
     rw::formatTo( hdr, sizeof( hdr ),
                    "<skipped indexed=\"{}\" oversize=\"{}\" excluded=\"{}\" unsupported_ext=\"{}\" excluded_dirs=\"{}\""
                    " pruned_dirs=\"{}\" ignored=\"{}\" ignored_dirs=\"{}\" ignore_mode=\"{}\""
@@ -2568,7 +2580,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    skippedHealthRootAttrs( health ),   // extent_suspect_files= then macro_blanked_files=, each absent at 0
                    health.unmeasured,
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
-                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
+                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string( escAttr ) + untrackedAttr, rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
 }
 
@@ -2619,6 +2631,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
         writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
+        w.write( cs.untrackedBuildFiles != 0 ? kUntrackedBuildLegend : std::string_view() );   // M1 — only beside untracked-build rows
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeExtractPartialLegend( w, cs );                         // only into a document that has extract-partial rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=
@@ -2632,6 +2645,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
+        writeDropRows( w, esc, cs.untrackedBuild, "untracked-build", skRootPrefix );   // M1: untracked files in a tracked build/
         writeDropRows( w, esc, cs.prunedPackageRows, "pruned-package", skRootPrefix );   // #478 gap 3: a real package the denylist took
         writeDropRows( w, esc, cs.prunedDirRows,  "pruned-dir",  skRootPrefix );   // #478 gap 3: every other policy prune
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered

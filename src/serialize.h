@@ -2969,9 +2969,15 @@ inline std::string buildPrunedPackagesBlock( const CrawlSkips& skips, std::strin
 // which is what test/golden.xml and every argvdiff vector ride on. The DEFINITION lives in the --skipped
 // legend and --help, not here, for the reason buildUnindexedAttr's note measured: the map's fixed floor has
 // seven bytes of headroom at the smallest --max-tokens budgets, and no clause of any wording fits.
+// ` key=N`, or nothing at zero: the absent-when-zero header count escaped_root= and untracked_build= share.
+inline std::string presentCountAttr( std::string_view key, std::uint64_t n )
+{
+    return n == 0 ? std::string() : " " + std::string( key ) + "=" + std::to_string( n );
+}
+
 inline std::string buildEscapedRootAttr( const CrawlSkips& skips )
 {
-    return skips.escapedFiles == 0 ? std::string() : " escaped_root=" + std::to_string( skips.escapedFiles );
+    return presentCountAttr( "escaped_root", skips.escapedFiles );
 }
 
 // #350 layer 3 — the memory guard stopped this ingest (MemoryStop): memory_stop= names where it first stopped (crawl:
@@ -3724,6 +3730,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
+    // M1 — the UNTRACKED files left out of a build/ the crawl entered because git tracks files under it (model.h
+    // CrawlSkips::untrackedBuild): on the default map for escaped_root='s reason, absent at zero for the same golden reason;
+    // defined in the --skipped legend (kUntrackedBuildLegend) and the compact legend, never in this header.
+    const std::string untrackedAttr = presentCountAttr( "untracked_build", ing.crawlSkips.untrackedBuildFiles );
     const std::string memoryAttr    = buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
@@ -3801,7 +3811,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stats += " nest_refused=";  stats += std::to_string( ing.crawlSkips.nestRefusedFiles );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += memoryAttr;  stats += unindexedAttr;
-        stats += ignoredAttr;  stats += escapedAttr;  stats += fitAttr;
+        stats += ignoredAttr;  stats += escapedAttr;  stats += untrackedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
@@ -11662,6 +11672,11 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     if( h.ing.crawlSkips.escapedFiles > 0 )
     {
         rw::formatTo( hdr, sizeof( hdr ), "\"escaped_root\":{},", ( unsigned long long ) h.ing.crawlSkips.escapedFiles );
+        w.write( hdr );
+    }
+    if( h.ing.crawlSkips.untrackedBuildFiles > 0 )   // M1, JSON lane: the same drop, by the same argument, absent at zero
+    {
+        rw::formatTo( hdr, sizeof( hdr ), "\"untracked_build\":{},", ( unsigned long long ) h.ing.crawlSkips.untrackedBuildFiles );
         w.write( hdr );
     }
 

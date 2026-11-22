@@ -300,7 +300,9 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     // No excludes: the ONE file here is the one the caller already resolved through the main index, so a
     // --exclude that would drop it can only produce a false "the payload defines nothing".
     std::lock_guard<std::mutex> ingestLk( quality::headSnapshotIngestMutex() );
-    return ingest( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
+    // M1: the one file came out of the main index, which already decided its directory is crawled — a tracked build/
+    // file would otherwise be pruned here by name and read as "the payload defines nothing" (ingest.h ingestTrackedTree).
+    return ingestTrackedTree( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
 // E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
