@@ -2745,10 +2745,10 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
-                                                              0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
+                                                              0, kForBasenameFieldW, {}, &mcpEvidence, mcpStatsOutPtr );
     if( rc.which == LexMode::NameExact )
     {
-        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
+        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, kForBasenameFieldW, {}, &mcpEvidence, mcpStatsOutPtr );
     }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
@@ -5324,7 +5324,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's lift order
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
-                                                                              0, 0, {}, &lr.evidence );
+                                                                              0, kForBasenameFieldW, {}, &lr.evidence );
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
     lr.routeNote = routeNoteOf( rc, shape, noRoute );   // row 6: the route CODE, ONE producer (filter.h)
 

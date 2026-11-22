@@ -173,6 +173,47 @@ else:
 sys.exit( 1 if fails else 0 )
 PY
 
+# (C) is a premise about the SWEEP, and a fixed budget list only meets it while the ranking puts a budget inside the narrow band
+# where some but not all moved docs survive. LP1 (rule 4): once --for scored the file basename (lexical.h kForBasenameFieldW) the
+# shipped-default (U) sweep went from all-shed at 1800 (10 rows) to all-kept at 1900 (17 rows) — no listed budget landed in the
+# band, so (U)(C) and (N) lost their partial answer by ranking accident. `refine` reads the sweep it has, and when it holds no
+# partial answer it BISECTS the token budget between the largest all-shed and the smallest all-kept budget and adds the first
+# partial answer it finds. No such answer at 1-token resolution leaves (C) to FAIL, as before: the search adds an answer, never
+# a pass. The fixed list stays as it was, so every budget the gate measured before is still measured.
+cat >"$TMP/exp.py" <<'PY'
+import sys
+exec( open( sys.argv[ 1 ] ).read() )
+oracle, ref, path = sys.argv[ 2: 5 ]
+txt = open( ref, encoding="utf-8", errors="replace" ).read()
+moved, universe = moved_from_twin( txt ) if oracle == "twin" else moved_from_u( txt )[ :2 ]
+try:
+    exp = check( open( path, encoding="utf-8", errors="replace" ).read(), moved, universe )[ 4 ]
+except ( ValueError, KeyError ):
+    exp = -1
+print( exp, len( moved ) )
+PY
+refine(){   # refine PREFIX ORACLE REF ENV... : prints the path of a partial answer it added (empty when the sweep had one, or none exists)
+    local pre="$1" oracle="$2" ref="$3"; shift 3
+    local b e m lo=0 hi=0 mid have=0
+    for b in $BUDGETS; do
+        [ -s "$TMP/$pre.b$b" ] || continue
+        read -r e m < <( python3 "$TMP/exp.py" "$TMP/dac.py" "$oracle" "$ref" "$TMP/$pre.b$b" )
+        if [ "$e" -gt 0 ] && [ "$e" -lt "$m" ]; then have=1; fi
+        if [ "$e" -eq 0 ]; then lo="$b"; elif [ "$e" -eq "$m" ] && [ "$hi" -eq 0 ] && [ "$b" -gt "$lo" ]; then hi="$b"; fi
+    done
+    [ "$have" -eq 1 ] && return 0
+    [ "$lo" -gt 0 ] && [ "$hi" -gt "$lo" ] || return 0
+    while [ $(( hi - lo )) -gt 1 ]; do
+        mid=$(( ( lo + hi ) / 2 ))
+        run "$TMP/$pre.r$mid" "$@" -- "--for=$Q" "--token-budget=$mid"
+        [ "$( cat "$TMP/$pre.r$mid.rc" )" = 0 ] || return 0
+        read -r e m < <( python3 "$TMP/exp.py" "$TMP/dac.py" "$oracle" "$ref" "$TMP/$pre.r$mid" )
+        if [ "$e" -gt 0 ] && [ "$e" -lt "$m" ]; then printf '%s\n' "$TMP/$pre.r$mid"; return 0; fi
+        if [ "$e" -eq 0 ]; then lo="$mid"; else hi="$mid"; fi
+    done
+    return 0
+}
+
 # (W) every ON answer: well formed (XML) and deterministic
 wcheck(){
     local f="$1" label="$2"
@@ -193,6 +234,8 @@ run "$TMP/x.none" $XENV -- "--for=$Q"; ran_ok "$TMP/x.none" "(X) no budget" && X
 for b in $BUDGETS; do
     run "$TMP/x.b$b" $XENV -- "--for=$Q" "--token-budget=$b"; ran_ok "$TMP/x.b$b" "(X) --token-budget=$b" && XS+=( "$TMP/x.b$b" )
 done
+# shellcheck disable=SC2086
+xr="$( refine x twin "$TMP/x.twin" $XENV )"; [ -n "$xr" ] && XS+=( "$xr" ) && echo "  note  (X) bisected a partial answer: ${xr##*/}"
 python3 "$TMP/arm.py" "$TMP/dac.py" "(X)" twin "$TMP/x.twin" "${XS[@]}" || fail=1
 for f in "${XS[@]}"; do wcheck "$f" "(X) ${f##*/}"; done
 
@@ -202,6 +245,7 @@ run "$TMP/u.none" X=1 -- "--for=$Q"; ran_ok "$TMP/u.none" "(U) no budget" && US+
 for b in $BUDGETS; do
     run "$TMP/u.b$b" X=1 -- "--for=$Q" "--token-budget=$b"; ran_ok "$TMP/u.b$b" "(U) --token-budget=$b" && US+=( "$TMP/u.b$b" )
 done
+ur="$( refine u u "$TMP/u.none" X=1 )"; [ -n "$ur" ] && US+=( "$ur" ) && echo "  note  (U) bisected a partial answer: ${ur##*/}"
 python3 "$TMP/arm.py" "$TMP/dac.py" "(U)" u "$TMP/u.none" "${US[@]}" || fail=1
 for f in "${US[@]}"; do wcheck "$f" "(U) ${f##*/}"; done
 
@@ -252,8 +296,8 @@ def expect_fail( label, doc ):
     else:   print( "  FAIL  (N) %s: the checker passed a false count (vacuous)" % label ); fails += 1
 def sigs_tag( doc ): return re.search( r"<sigs\b[^>]*>", strip_comments( doc ) ).group( 0 )
 picked = { "all": None, "partial": None }
-for b in "700 1200 1700 1800 1900 2000 3000".split():
-    p = os.path.join( T, "u.b" + b )
+# the fixed sweep, then any partial answer `refine` bisected (u.r<N>, LP1)
+for p in [ os.path.join( T, "u.b" + b ) for b in "700 1200 1700 1800 1900 2000 3000".split() ] + sorted( os.path.join( T, f ) for f in os.listdir( T ) if re.fullmatch( r"u\.r\d+", f ) ):
     if not os.path.exists( p ): continue
     d = open( p, encoding="utf-8" ).read()
     _, n, _, _, exp = check( d, moved, universe )

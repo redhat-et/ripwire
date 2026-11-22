@@ -1,5 +1,5 @@
 //! BookDriver's methods, in an impl block of their own file.
-use crate::book::{BookDriver, Renderer};
+use crate::model::{BookDriver, Renderer};
 
 impl BookDriver {
     pub fn load(root: &str) -> BookDriver {

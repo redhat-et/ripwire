@@ -86,7 +86,10 @@ diff -q "$TMP/rf.warm.ab" "$TMP/rf.cold.ab" >/dev/null \
 # Both run the identical BM25 float loop over what must be identical integer dl/tf — so their candidate
 # (rank, score, name) rows must match exactly. This is the direct postings==scan proof; (a) alone would
 # hold even if both sides took the same branch.
-crossrows(){ "$BIN" src --no-cache --no-route "$1=$QSRC" --format=candidates --top-k=50 2>/dev/null \
+# Both sides pin RIPWIRE_BASENAME_W: --for's code lens scores the basename field by default (lexical.h kForBasenameFieldW, LP1)
+# and --query does not, so unpinned the two VERBS would differ by a field, not by a branch. Pinned nonzero, the proof also
+# covers the field's own postings==scan parity.
+crossrows(){ RIPWIRE_BASENAME_W=2 "$BIN" src --no-cache --no-route "$1=$QSRC" --format=candidates --top-k=50 2>/dev/null \
                  | sed 's/></>\n</g' | grep '<cand' | grep -oE 'r="[0-9]+" s="[^"]*" n="[^"]*"'; }
 crossrows --query >"$TMP/cross.scan"
 crossrows --for   >"$TMP/cross.postings"

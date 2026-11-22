@@ -197,14 +197,14 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
+                                                                                  0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -224,7 +224,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );
     }
 
     rw::rowFeaturesLexical( lensRank, tierMul );   // ROW-FEATURE-DUMP: inert unless armed
