@@ -76,7 +76,15 @@
 # RM(K, M): K Python files with RootK / Base(RootK) / Impl(Base), Base defining b and RootK defining r; use() binds x = Impl()
 #   and calls x.r() and x.b() M times each. `[mem] recv_method asks=2M walks=2` (one walk per (Impl, name) question; walked
 #   per ask: walks = asks).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8) and RM(4, 8) are
+# A call to a name some function-local definitions share (reachableByName: a local out of the call's reach yields to the
+# name's other definitions) stamped every local of the name and then filtered the name's whole list — per call, though a
+# call no local holds always gets the same answer: the list minus all its locals. REACH-OUTSIDE-MEMO (lane PF3) keeps that
+# list per name and answers such a call with it, after one search of the name's locals by (file, start).
+# RN(K, M): K Python files each nesting `def helper()` in outerK() (which calls it), h.py defining a top-level helper, and use()
+#   calling helper() M times; and a.js, where wrap() and wrap2() nest `function helper()`, wrap() and deep() (in wrap2) call
+#   it — a local HOLDS those three calls, so they still walk — and use() calls the top-level helper() twice.
+#   `[mem] reach_by_name asks=M+5 kept=M+2`: 7/4 at M=2, 13/10 at M=8 (the per-call walk keeps none: kept=0).
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8) and RN(4, 8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -204,6 +212,22 @@ genrm(){
     } >"$dir/use.py"
 }
 
+# genrn DIR K M — the by-name reach of function-local definitions (see header)
+genrn(){
+    local dir="$1" k="$2" m="$3" f i
+    mkdir -p "$dir"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'def outer%d():\n    def helper():\n        return %d\n    return helper()\n' "$f" "$f" >"$dir/f$f.py"
+    done
+    printf 'def helper():\n    return 9\n' >"$dir/h.py"
+    # and JS, whose calls inside a local's span DO reach the walk (a local holds them): wrap's and deep's helper()
+    printf 'function wrap() {\n  function helper() { return 1; }\n  return helper();\n}\nfunction helper() { return 2; }\nfunction use() { helper(); helper(); }\nfunction wrap2() {\n  function helper() { return 3; }\n  function deep() { return helper(); }\n  return deep();\n}\n' >"$dir/a.js"
+    {
+        printf 'from h import helper\n\ndef use():\n'
+        for i in $( seq 1 "$m" ); do printf '    helper()\n'; done
+    } >"$dir/use.py"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -221,6 +245,7 @@ stats(){
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
     MLINE="$( grep -F '[mem] recv_method ' "$TMP/$name.err" )"
+    NLINE="$( grep -F '[mem] reach_by_name ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -236,6 +261,8 @@ AT2="$TMP/at2"; genat "$AT2" 2
 AT8="$TMP/at8"; genat "$AT8" 8
 RM2="$TMP/rm2"; genrm "$RM2" 4 2
 RM8="$TMP/rm8"; genrm "$RM8" 4 8
+RN2="$TMP/rn2"; genrn "$RN2" 4 2
+RN8="$TMP/rn8"; genrn "$RN8" 4 8
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
@@ -249,6 +276,8 @@ stats AT2 "$AT2"; atline2="$ALINE"
 stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
 stats RM2 "$RM2"; rmline2="$MLINE"
 stats RM8 "$RM8"; rmline8="$MLINE" rmrc=$RC
+stats RN2 "$RN2"; rnline2="$NLINE"
+stats RN8 "$RN8"; rnline8="$NLINE" rnrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
 stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE"
 
@@ -339,6 +368,12 @@ if [ "$rmrc" = 0 ] && [ "$rmline8" = "$want" ] && [ "$rmline2" = '[mem] recv_met
 else
     no "(B)(C) RM counter: want 'asks=4 walks=2 kept=2' at M=2 and '$want' at M=8, got '${rmline2:-<none>}' / '${rmline8:-<none>}' (rc=$rmrc)"
 fi
+want='[mem] reach_by_name asks=13 kept=10'
+if [ "$rnrc" = 0 ] && [ "$rnline8" = "$want" ] && [ "$rnline2" = '[mem] reach_by_name asks=7 kept=4' ]; then
+    ok "(C) RN: every call no local holds is answered from the name's kept list, the three a local holds walk: $rnline2 at M=2, $rnline8 at M=8"
+else
+    no "(C) RN counter: want 'asks=7 kept=4' at M=2 and '$want' at M=8, got '${rnline2:-<none>}' / '${rnline8:-<none>}' (rc=$rnrc)"
+fi
 want='[mem] inherited asks=16 walks=8'
 if [ "$iline8" = "$want" ]; then
     ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
@@ -354,7 +389,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
