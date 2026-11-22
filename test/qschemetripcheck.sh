@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-22, lane m1b-tracked-dirs (on the train 0e32486b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 338 -> 340 (PLACEHOLDER, rich 341): the crawl admits a build/ dist/ out/ target/ directory git tracks
+#   files under, and every materialized-tree ingest (computeHeadSnapshot among them) goes through ingest.h ingestTrackedTree so
+#   the HEAD side crawls the same directories. kCacheVersion 54 and kQSnapCacheScheme unchanged: the extraction key moves, the
+#   snapshot blob shape does not. Hash 448c91aa07…d311066.
 # 2026-11-21, lane fx1-two-reds (on integration/070-1120 64b85a6b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
 #   kIngestParserVerMirror 336 -> 338 (rich 339, above the train's rich 337): a Rust macro invocation's re-read drops a bare call
 #   its own file's macro_rules! matcher spells as a literal word (ingest_rustmacroargs.h). kCacheVersion 54 and kQSnapCacheScheme
