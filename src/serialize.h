@@ -3595,14 +3595,16 @@ inline MapPlan planMap( const IngestResult& ing, const std::vector<float>& rank,
     // see --metrics decoration or an appended payload. C1-b: under the stub the estimate is taken over no rows.
     plan.mapEst    = estimateTokens( ing, plan.ranked.order, plan.kept().size(), outOff, outTargets );
     plan.emitOrder = decideMapEmitOrder( asked, plan.mapEst.tokens );
-    ASSUME( emitOrderTraits( plan.emitOrder ).stablePrefix == asked.stable, "decideMapEmitOrder returns Stable exactly when --stable was asked" );
+    // Stable is the one order whose traits carry stablePrefix (emitOrderTraits), so every downstream --stable choice that reads
+    // the trait reads exactly the flag the caller passed.
+    ASSUME( ( plan.emitOrder == MapEmitOrder::Stable ) == asked.stable, "decideMapEmitOrder returns Stable exactly when --stable was asked" );
     if( !plan.stubbed )
     {
         plan.groups = groupMapRowsByFile( ing, ann, plan.kept(), plan.emitOrder, outOff, outTargets, pathRel );
     }
     plan.gauges = countMapHonestyGauges( ing, counters );
     plan.shown  = plan.stubbed ? 0 : plan.keep + plan.groups.stemPick.rows.size();
-    ASSUME( !plan.stubbed || ( plan.kept().empty() && plan.groups.fileOrder.empty() && plan.groups.inventory.entries.empty() ),
+    ASSUME( !plan.stubbed || ( plan.ranked.order.empty() && plan.groups.fileOrder.empty() && plan.groups.inventory.entries.empty() ),
             "the stub ranks and groups no row, so no kept-row legend clause and no <f> group can fire under it" );
     return plan;
 }
