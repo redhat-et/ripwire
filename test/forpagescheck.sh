@@ -31,10 +31,6 @@ set -u
 # one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
 # reads those rows as elements for another rule, so the line form is off here.
 export RIPWIRE_NO_ROWLINES=1
-# BR1 (the act line, src/foractline.h): page 1 carries <act read=> before its <sigs>, derived from THAT page after the cut (which
-# bodies it delivers), so it is page metadata, not a row of the stream this gate joins; --legend=first has none. test/actlinecheck.sh
-# owns it (page 2 none, whole answer by the same rule). Off here, as the line form is.
-export RIPWIRE_NO_ACTLINE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

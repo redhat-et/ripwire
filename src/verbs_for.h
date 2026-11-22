@@ -5724,6 +5724,11 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
 }
 
 // The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
+// The token ceiling a budget's answer must stay within: the lower of the target and the ceiling when both are set, else the one set.
+inline std::size_t forBudgetLimitTokens( const rw::ForBudgetAsk& ask ) noexcept
+{
+    return ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
+}
 inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
 {
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
@@ -5753,10 +5758,18 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
         // SIGX (TL1 M1, forsigx.h): a budget that fitted the answer whole returns the unbudgeted (compacted) answer when that still fits
         if( fit.verdict == rw::ForBudgetFitResult::Verdict::Whole && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
         {
-            (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
-                                                                                                 : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
+            (void)rw::sigx::compactSigsWithin( out, forBudgetLimitTokens( ask ), &u.ledger );
         }
+        // BR1b (foractline.h): the same act line the unbudgeted answer carries, only while the answer still fits the budget with it —
+        // so a budget the answer fits returns it byte for byte (TOKEN-BUDGET-MONOTONE), and a shed answer never exceeds its budget
+        (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::DocumentEnd, forBudgetLimitTokens( ask ) );
         (void)rw::rowlines::encodeRows( out, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
+    }
+    else
+    {
+        // --legend=first under a budget: the same line, its clause in the leading legend, so the two postures stay byte permutations
+        // of each other (forsoftbudgetcheck STp)
+        (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head, forBudgetLimitTokens( ask ) );
     }
     return out;
 }
@@ -5871,6 +5884,33 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
     }
 }
 
+// BR1b (foractline.h): the --legend=first XML answer carries the same act line as the answer-first one, its clause in the leading
+// legend, so the two postures stay byte permutations of each other (forpagescheck P6). It needs the finished answer, so this posture
+// is rendered into a buffer here; nullopt: not this posture, or no buffer to render into, or a capture that failed (the caller then
+// renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
+// print twice).
+inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.legendAnswerFirst || !rw::actline::actLineOn() || cfg.json || cfg.columnar || cfg.candidates )
+    {
+        return std::nullopt;
+    }
+    ForPostureRender r = renderForPostureCaptured( d );
+    if( !r.stdoutCaptured || !r.out || r.out->failed )
+    {
+        return std::nullopt;
+    }
+    replayForPostureNotices( r );
+    std::string doc = r.out->bytes;
+    if( capturedWhole( r.out ) )
+    {
+        (void)rw::actline::insertActLine( doc, rw::actline::ClausePlace::Head );
+    }
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return r.rc;
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     if( d.cfg.forTask.empty() )
@@ -5922,10 +5962,12 @@ std::optional<int> runForLens( const MainDispatch& d )
                 const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
                 (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, d.redactPtr, &r.ledger );
             }
+            // BR1 (foractline.h): after KB1 (the line goes after the key group) and before ES and paging, so it is a block of the row
+            // stream every page size windows the same way, and the pages joined are the whole answer (forpagescheck P2)
+            (void)rw::actline::insertActLine( doc );
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
                 forBodyPointers( d, *early );
-                (void)rw::actline::insertActLine( *early );   // BR1 (foractline.h): before ROWLINES, so its clauses stay last
                 (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
@@ -5935,7 +5977,6 @@ std::optional<int> runForLens( const MainDispatch& d )
                 return 1;
             }
             forBodyPointers( d, doc );
-            (void)rw::actline::insertActLine( doc );   // BR1 (foractline.h): on the page served, after the body pointers, before ROWLINES
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             noteWholeAnswerOverCeiling( d.cfg, doc.size() );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
@@ -5955,6 +5996,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         rw::answerfirst::AnswerFirstFallback afSink;
         DISCLOSE( afSink, rw::answerfirst::AnswerFirstFallback::DisclosureWhy::NoWholeCapture,
                   "runForLens: no whole capture for the default answer — serving it unpermuted" );
+    }
+    if( std::optional<int> rc = runForLensLegendFirstAct( d ) )
+    {
+        return rc;
     }
     return runForLensPosture( d, nullptr );
 }

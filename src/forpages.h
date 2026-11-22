@@ -127,7 +127,8 @@ inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
 }
 
 // The page boundaries: indices into `cuts` of each page's last cut. Page 1 is measured from byte 0, page k from the
-// previous page's end; every page takes at least one cut. KB1: a page measures its bytes without the key-body group (Cut::free), so the
+// previous page's end; every page takes at least one cut. KB1: a page measures its bytes without the key-body group (Cut::free; BR1b:
+// and without the act line, markActLine), so the
 // page the group starts on (page 1 at the default size, forkeybody.h) ends at the row it ended at without it, the group is never split
 // across pages, and every other page holds the same rows.
 inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes )
@@ -258,6 +259,22 @@ inline void markKeyGroup( Stream& st )
     }
 }
 
+// BR1b (foractline.h): no page counts the act line either — it is the answer's reading instruction, not a row — so a page ends at the
+// row it ended at without it and the line never costs a page a row (MEASURED without this, GA1 DEV n=89 page 1: 76 answers lost 1-2
+// rows, 116 in all). It is one element, so no cut falls inside it.
+inline void markActLine( Stream& st )
+{
+    for( std::size_t k = 0; k < st.streamBlocks; ++k )
+    {
+        const answerfirst::Block& b = st.blocks[ k ];
+        if( !b.comment && b.name == "act" )
+        {
+            for( Cut& cut : st.cuts ) { cut.free += uncountedBefore( cut.at, b.begin, b.end ); }
+            return;
+        }
+    }
+}
+
 // The stream ends where the trailing run of DOCUMENT legend comments begins. A document legend comment anywhere inside the
 // stream means the answer is not answer-first: not a shape this pass pages (nullopt), and the answer is served unchanged.
 [[nodiscard]] inline std::optional<Stream> readStream( std::string_view view )
@@ -277,6 +294,7 @@ inline void markKeyGroup( Stream& st )
     st.cuts = streamCuts( view, st.blocks, st.streamBlocks );
     if( st.cuts.empty() ) { return std::nullopt; }
     markKeyGroup( st );
+    markActLine( st );   // after markKeyGroup, which assigns free= (this adds to it)
     return st;
 }
 

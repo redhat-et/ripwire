@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # actlinecheck.sh — THE ACT LINE (src/foractline.h; lane BR1, owner ruling 178): a `--for` page lists the ranges an agent reads next in
-# one element, <act read="P:L-E,…"/>, right before its <sigs>, when the page's top kActRows (3) sigs <d> rows whose body it does not
-# deliver all carry l= and e=. The ORACLE below re-derives that rule in Python from the RIPWIRE_NO_ACTLINE=1 twin of the same call
+# one element, <act read="P:L-E,…"/>, right after its <sigs> (after the key-body group when that follows <sigs>), when the answer's top
+# kActRows (3) sigs <d> rows by rank all carry l= and e= (BR1b: a function of the ranked rows only — no fold, slot or page cut moves it). The ORACLE below re-derives that rule in Python from the RIPWIRE_NO_ACTLINE=1 twin of the same call
 # (its rows decoded by test/rowlines.py), so the binary is checked against the rule as written, not against itself.
 #
 #   (A)  PRESENT IFF THE CONDITION HOLDS: on every answer, the act line is there exactly when the oracle says the condition holds, and
 #        its read= is the oracle's value byte for byte. Non-vacuous both ways: >= 4 answers carry it, and >= 1 answer is one where the
 #        oracle says no line BECAUSE a candidate lacks e= (the markdown fixture), not because the page has no rows
 #   (B)  EVERY LISTED RANGE IS A ROW OF THE SAME PAGE: each P:L-E equals the p= l= e= of a top-level <sigs> <d> row of the answer itself
-#   (C)  ORDER = RANK: the listed rows' r= ascend, and none is a row whose body the page delivers (a <b> in <fold>/<bodies>)
-#   (D)  BYTE BUDGET: at most 3 entries; the element is exactly <act read="…"/> around them (no other byte); the clause is <= 200 B
+#   (C)  ORDER = RANK: the listed rows' r= ascend
+#   (D)  BYTE BUDGET + PLACE: at most 3 entries; the element is exactly <act read="…"/> around them (no other byte), right after <sigs>
+#        or after the key-body group that directly follows it (forkeybodycheck K3's order); the clause is <= 200 B
 #   (E)  DISCLOSED: the clause is in the answer iff the line is, once, BEFORE the row-line clauses (test/rowlines.py strips those from
 #        the end); act/read= are defined where a reader can obtain them (the answer's legend, and `--legend-dict` holds the clause)
-#   (F)  THE A/B HANDLE: RIPWIRE_NO_ACTLINE=1 is the answer minus exactly three things — the element, the clause, and the est_tokens=
-#        rise — and est_tokens= rose by at least the added bytes at 2.5 B/token (never an under-read); with BASE_BIN= given, the
-#        knob-off answer is BASE_BIN's default answer byte for byte
-#   (G)  WHERE IT IS NOT: page 2, an explicit --token-budget, --json and --legend=first carry no act line; --json/--legend=first are
-#        byte-identical with and without the knob; a whole answer (--page-bytes=0) follows the rule like page 1
+#   (F)  THE A/B HANDLE: on a WHOLE answer (--page-bytes=0, or one page) RIPWIRE_NO_ACTLINE=1 is the answer minus exactly three things
+#        — the element, the clause, and the est_tokens= rise — and est_tokens= rose by at least the added bytes at 2.5 B/token (never an
+#        under-read); with BASE_BIN= given, the knob-off answer is BASE_BIN's default answer byte for byte. (A paged page 1 is checked
+#        by (A)-(E) only: the line is a block of the row stream, so it can move a page's cut by its own bytes.)
+#   (G)  THE CONTRACTS IT KEEPS (BR1b): an explicit --token-budget the answer fits returns the unbudgeted answer byte for byte, line
+#        included (TOKEN-BUDGET-MONOTONE); --legend=first carries the same read= with its clause in the leading legend and is a byte
+#        permutation of the answer-first whole answer; the fold-off twin (RIPWIRE_NO_BODY_FOLD=1) carries the same read=; page 2
+#        carries no line when page 1 holds all of <sigs>; --json is byte-identical with and without the knob
 #   (M)  MCP PARITY: MCP `for` follows the same rule on its own bundle (oracle against its knob-off twin), carries the line on >= 2
 #        tasks, and not under budget_tokens; its clause joins the bundle's LEADING legend run (MCP `for` is legend-first)
 #   (S)  --legend-seen=FILE holding the clause's dictionary line: the act line stays and the clause is left out (a dictionary entry)
@@ -136,9 +140,9 @@ def oracle(off_dec):
     if not off_dec.startswith(b"<ctx"): return None, "no-root"
     m = re.search(rb' page="(\d+)"', off_dec[:off_dec.index(b">")])
     if m and m.group(1) != b"1": return None, "later-page"
-    rows, delivered = page_rows(off_dec)
+    rows, _ = page_rows(off_dec)
     if rows is None: return None, "no-sigs"
-    cand = sorted([r for r in rows if (r.get(b"p"), r.get(b"l")) not in delivered], key=lambda r: r["rank"])[:N]
+    cand = sorted(rows, key=lambda r: r["rank"])[:N]
     if not cand: return None, "no-candidate"
     if not all(r.get(b"e") and r.get(b"l") and r.get(b"p") and b"," not in r[b"p"] for r in cand): return None, "no-e"
     return b",".join(b"%s:%s-%s" % (r[b"p"], r[b"l"], r[b"e"]) for r in cand), "listed"
@@ -150,6 +154,20 @@ def act_of(dec):
     return [(a.get(b"read"), s, e) for n, a, s, e in root_children(dec) if n == b"act"]
 
 
+def pages_of(b):
+    m = re.search(rb' pages="(\d+)"', b[:b.index(b">")]) if b.startswith(b"<ctx") else None
+    return int(m.group(1)) if m else 1
+
+
+def placed(don, s):
+    """the element at byte s follows <sigs> directly, or the key-body group (its comment, then <bodies of=key>) that follows <sigs>"""
+    kids = root_children(don); i = next((k for k, c in enumerate(kids) if c[2] == s), -1)
+    if i < 1: return False
+    if kids[i - 1][0] == b"sigs": return True
+    return i >= 3 and kids[i - 1][0] == b"bodies" and kids[i - 2][0] is None and don[kids[i - 2][2]:].startswith(b"<!-- bodies of=key:") \
+        and kids[i - 3][0] == b"sigs"
+
+
 def check(on, off, label):
     """the (A)-(F) verdicts on one (answer, knob-off twin) pair: a list of (ok, msg)"""
     out = []
@@ -159,7 +177,7 @@ def check(on, off, label):
     got = acts[0][0] if len(acts) == 1 else None
     out.append((len(acts) <= 1 and got == want, "(A) %s: line %s, oracle %s (%s)" % (label, got, want, why)))
     if got is not None:
-        rows, delivered = page_rows(don)
+        rows, _ = page_rows(don)
         ents = got.split(b",")
         lookup = {(r[b"p"], r[b"l"], r.get(b"e")): r for r in rows or []}
         hits = []
@@ -168,16 +186,16 @@ def check(on, off, label):
             hits.append(lookup.get((p, l, e)))
         out.append((all(hits), "(B) %s: every listed range is a sigs <d> row's p:l-e on the same page" % label))
         ranks = [h["rank"] for h in hits if h]
-        out.append((ranks == sorted(set(ranks)) and all((h[b"p"], h[b"l"]) not in delivered for h in hits if h), "(C) %s: ranks %s ascend, none delivered" % (label, ranks)))
+        out.append((ranks == sorted(set(ranks)), "(C) %s: ranks %s ascend" % (label, ranks)))
         s, e = acts[0][1], acts[0][2]
-        nxt = [k for k in root_children(don) if k[2] == e]
-        out.append((len(ents) <= N and don[s:e] == b'<act read="' + got + b'"/>' and bool(nxt) and nxt[0][0] == b"sigs",
-                    "(D) %s: %d entries, the element is the bare <act read=\"...\"/>, %d B, right before <sigs>" % (label, len(ents), e - s)))
+        out.append((len(ents) <= N and don[s:e] == b'<act read="' + got + b'"/>' and placed(don, s),
+                    "(D) %s: %d entries, the element is the bare <act read=\"...\"/>, %d B, right after <sigs> (or its key group)" % (label, len(ents), e - s)))
     tail = on[:on.rindex(b"</ctx>")]
     n_cl = tail.count(CLAUSE_LEAD)
     first_row_clause = min([tail.find(c) for c in ROW_CLAUSES if tail.find(c) >= 0] or [len(tail)])
     out.append((n_cl == (1 if got is not None else 0) and (n_cl == 0 or tail.find(CLAUSE_LEAD) < first_row_clause),
                 "(E) %s: the clause %d time(s), before the row-line clauses" % (label, n_cl)))
+    if pages_of(don) > 1: return out, want, why   # (F) is a whole-answer arm: on a paged page 1 the line moves the cut by its bytes
     # (F) on minus element, clause and est_tokens rise == the twin
     strip = don
     if acts: strip = strip[:acts[0][1]] + strip[acts[0][2]:]
@@ -224,13 +242,30 @@ if BASE:
         argv = [root, "--no-cache", "--for=" + task] + extra
         say(run(argv, off=True) == run(argv, binary=BASE), "(F) %s: RIPWIRE_NO_ACTLINE=1 == BASE_BIN's default answer, byte for byte" % label)
 
-# (G) where it is not
+# (G) the contracts it keeps
 TASK = "rank symbols by pagerank and serialize the map"
+whole = ans["src.whole"][0]; wact = act_of(decode(whole))
 p2 = run([SRC, "--no-cache", "--for=" + TASK, "--page-bytes=12000:2"])
-say(p2.startswith(b"<ctx") and b' page="2"' in p2[:p2.index(b">")] and not act_of(decode(p2)) and CLAUSE_LEAD not in p2, "(G) page 2 carries no act line and no clause")
-bud = run([SRC, "--no-cache", "--for=" + TASK, "--token-budget=4000"])
-say(bud.startswith(b"<ctx") and not act_of(decode(bud)) and CLAUSE_LEAD not in bud, "(G) an explicit --token-budget answer carries no act line")
-for flag in ("--json", "--legend=first"):
+p1 = run([SRC, "--no-cache", "--for=" + TASK])
+say(p2.startswith(b"<ctx") and b' page="2"' in p2[:p2.index(b">")] and b'continued="sigs"' not in p1[:p1.index(b">")] and act_of(decode(p1))
+    and not act_of(decode(p2)), "(G) page 1 holds all of <sigs> and the line; page 2 carries none")
+for lab, root, task in (("fixture", os.path.join(REPO, "test", "fixture"), "geometry distance"),):   # one page: the budget's whole answer IS page 1
+    unb = run([root, "--no-cache", "--for=" + task]); bud = run([root, "--no-cache", "--for=" + task, "--token-budget=100000"])
+    say(len(unb) > 0 and bud == unb and b"<act " in unb, "(G) %s: --token-budget=100000 (fits) returns the unbudgeted answer byte for byte, act line included" % lab)
+lf = run([SRC, "--no-cache", "--for=" + TASK, "--legend=first"])   # never paged (--page-bytes is refused with it)
+lfa = act_of(decode(lf)) if lf.startswith(b"<ctx") else []
+lhead = re.match(rb"<ctx[^>]*>((?:<!--(?:(?!-->).)*-->)+)", lf, re.S)
+say(bool(wact) and bool(lfa) and lfa[0][0] == wact[0][0] and lhead is not None and CLAUSE_LEAD in lhead.group(1),
+    "(G) --legend=first carries the same read= as the answer-first whole answer, its clause in the leading legend")
+nosx = dict(RIPWIRE_NO_SIGX="1", RIPWIRE_NO_TAIL_SAMEDIR="1", RIPWIRE_NO_ROWLINES="1")
+def runenv(argv, **env):
+    e = dict(os.environ); e.pop("RIPWIRE_NO_ACTLINE", None); e.update(env)
+    return subprocess.run([BIN] + argv, capture_output=True, env=e, stdin=subprocess.DEVNULL).stdout
+a1 = runenv([SRC, "--no-cache", "--for=" + TASK, "--page-bytes=0"], **nosx); a2 = runenv([SRC, "--no-cache", "--for=" + TASK, "--legend=first"], **nosx)
+say(len(a1) > 0 and a1 != a2 and sorted(a1) == sorted(a2), "(G) --legend=first is a byte permutation of the answer-first whole answer (no SIGX/TAIL_SAMEDIR/ROWLINES), line and clause included")
+nf = runenv([SRC, "--no-cache", "--for=" + TASK, "--page-bytes=0"], RIPWIRE_NO_BODY_FOLD="1")
+say(bool(wact) and act_of(decode(nf)) and act_of(decode(nf))[0][0] == wact[0][0], "(G) the fold-off twin carries the same read= (the line reads the ranked rows only)")
+for flag in ("--json",):
     a, b = run([SRC, "--no-cache", "--for=" + TASK, flag]), run([SRC, "--no-cache", "--for=" + TASK, flag], off=True)
     say(len(a) > 0 and a == b and b"<act " not in a, "(G) %s: byte-identical with and without RIPWIRE_NO_ACTLINE, no act line" % flag)
 
@@ -248,7 +283,9 @@ for label, root, task in (("mcp.pagerank", SRC, "rank symbols by pagerank and se
         say(head is not None and CLAUSE_LEAD in head.group(1), "(M) %s: the clause sits in the legend-first bundle's LEADING legend run (where its reader looks)" % label)
 say(mres >= 2, "(M) MCP `for` carries the line on %d tasks (need >= 2)" % mres)
 mb = mcp(SRC, {"task": TASK, "budget_tokens": 3000})
-say(mb.startswith(b"<ctx") and not act_of(decode(mb)) and CLAUSE_LEAD not in mb, "(M) MCP `for` under budget_tokens carries no act line")
+mest = re.search(rb' est_tokens="(\d+)"', mb[:mb.index(b">")]) if mb.startswith(b"<ctx") else None
+say(mb.startswith(b"<ctx") and (not act_of(decode(mb)) or (mest is not None and int(mest.group(1)) <= 3000)),
+    "(M) MCP `for` under budget_tokens=3000 carries the line only while its est_tokens= stays within the budget")
 
 # (E) the dictionary holds the clause; act/read= are defined in the answer's own legend
 d = subprocess.run([BIN, "--legend-dict"], capture_output=True).stdout
@@ -284,7 +321,7 @@ else:
            "dropped clause": on[:on.index(CLAUSE_LEAD)] + on[on.index(b"-->", on.index(CLAUSE_LEAD)) + 3:]}
     md_on, md_off, _ = ans["md.fixture"]
     k = md_on.index(b"<sigs")
-    mut_md = md_on[:k] + b'<act read="pkg/widget.py:8-9"/>' + md_on[k:]
+    mut_md = md_on[:k] + b'<act read="pkg/widget.py:8-9"/>' + md_on[k:]   # placed wrong too; (A) catches it first
     for name, m in mut.items():
         res, _, _ = check(m, off, pick + "/" + name)
         say(m != on and not all(ok for ok, _ in res), "(X) mutation '%s' on %s is caught" % (name, pick))

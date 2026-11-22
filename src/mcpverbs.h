@@ -3240,6 +3240,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
             insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
+            (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head, std::size_t( budgetTokens ) );   // BR1b: as below
             rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );   // MR1: last, as on the CLI (below)
             return out;
         }
@@ -3275,9 +3276,10 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // the file page or the candidate page above (they return earlier), as the CLI's file page is not. This legend-first bundle keeps
     // its demote:/decl-twin:/one-side: notes inside <sigs>; they ride the CDATA as verbatim lines (AsLines), so a ref answer keeps
     // a served note there instead of dropping it. Gate: test/mcpforrowscheck.sh.
-    // BR1 (foractline.h): the act line, as on the CLI — before ROWLINES, so its clauses stay last. Not on the budget_tokens return
-    // above: there the budget decided the bytes, as the CLI's budget-fit path does. Gate: test/actlinecheck.sh (M).
-    (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head );   // legend-first: the clause joins the leading legend
+    // BR1 (foractline.h): the act line, as on the CLI — before ROWLINES, so its clauses stay last; the clause joins the leading
+    // legend (this bundle is legend-first). Under budget_tokens only while the bundle still fits it with the line (BR1b: as the CLI's
+    // budget path). Gate: test/actlinecheck.sh (M).
+    (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head, budgetTokens > 0 ? std::size_t( budgetTokens ) : 0u );
     rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );
     return out;
 }
