@@ -1499,7 +1499,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kMaxSubDepth` | `40` | — | nested $( ) parsed past this depth are left unparsed (an empty list) |
+| `kMaxShellNest` | `64` | — | shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N |
 
 ### `src/siblift.h`
 
