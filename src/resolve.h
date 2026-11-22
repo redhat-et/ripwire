@@ -8734,22 +8734,6 @@ struct Narrower
         return trimWs( scope.substr( 0, std::min( scope.size(), scope.find( '<' ) ) ) );
     }
 
-    // how the inherit edge base → derived was bound; nullopt when the implementors map draws no such edge
-    std::optional<std::uint8_t> baseEdgeBound( NodeId base, NodeId derived ) const
-    {
-        if( base >= baseGuard->implementors.size() || base >= baseGuard->bound.size() )
-        {
-            return std::nullopt;
-        }
-        const std::vector<NodeId>& kids = baseGuard->implementors[ base ];
-        const auto                 pos  = std::lower_bound( kids.begin(), kids.end(), derived );
-        if( pos == kids.end() || *pos != derived )
-        {
-            return std::nullopt;
-        }
-        return baseGuard->bound[ base ][ std::size_t( pos - kids.begin() ) ];
-    }
-
     // (1) of meantBase: the ONE class of drawnBases the base clause of `d` names by its scope, as C++ reads the clause; kNoNode
     // when the scope evidence names none or several. A class symbol's own scope is its name, so a class's place is read from
     // class identity: the class it is nested in (byte spans), else the namespaces its FILE shows it defines things in
@@ -8812,23 +8796,101 @@ struct Narrower
         } );
     }
 
+    // BASE-EDGES-BY-DERIVED (lane PF2, 2026-11-21): the implementors map read backwards — derived class -> every (base, how it
+    // was bound) edge drawn to it, ascending by base id (CSR, built once per guard). drawnAndStandingBases asked
+    // whether the edge b -> d was drawn (a binary search in implementors[ b ]) for EVERY class b of the base's name: K x K binary searches per base name where a name repeats K
+    // times (hundreds in llvm-project), the first-expansion cost left once the walks were kept. A derived class has a
+    // handful of base edges; the classes of the name it is drawn to are those edges whose base is of that name.
+    mutable std::vector<std::uint32_t> basesOfStart;   // derived id -> its first edge in basesOfEdge; size implementors + 1
+    mutable std::vector<std::pair<NodeId, std::uint8_t>> basesOfEdge;
+    mutable const BaseWalkGuard*       basesOfFor = nullptr;
+    mutable std::size_t                baseEdgePairs = 0;   // RIPWIRE_STATS `[mem] base_edges pairs=`: (derived, base) edges examined
+    std::span<const std::pair<NodeId, std::uint8_t>> baseEdgesOf( NodeId d ) const
+    {
+        if( basesOfFor != baseGuard )
+        {
+            buildBaseEdgesByDerived();
+        }
+        if( std::size_t( d ) + 1 >= basesOfStart.size() )
+        {
+            return {};
+        }
+        return std::span<const std::pair<NodeId, std::uint8_t>>( basesOfEdge.data() + basesOfStart[ d ], basesOfStart[ d + 1 ] - basesOfStart[ d ] );
+    }
+    void buildBaseEdgesByDerived() const
+    {
+        basesOfFor = baseGuard;
+        const std::vector<std::vector<NodeId>>&       kids  = baseGuard->implementors;
+        const std::vector<std::vector<std::uint8_t>>& bound = baseGuard->bound;
+        const std::size_t edgesOf = std::min( kids.size(), bound.size() );   // baseEdgeBound reads an edge only where both hold it
+        std::size_t       ids     = kids.size();
+        for( std::size_t b = 0; b < edgesOf; ++b )
+        {
+            for( NodeId d : kids[ b ] )
+            {
+                ids = std::max( ids, std::size_t( d ) + 1 );
+            }
+        }
+        basesOfStart.assign( ids + 1, 0u );
+        for( std::size_t b = 0; b < edgesOf; ++b )
+        {
+            for( NodeId d : kids[ b ] )
+            {
+                ++basesOfStart[ std::size_t( d ) + 1 ];
+            }
+        }
+        for( std::size_t at = 1; at < basesOfStart.size(); ++at )
+        {
+            basesOfStart[ at ] += basesOfStart[ at - 1 ];
+        }
+        basesOfEdge.assign( basesOfStart.back(), {} );
+        std::vector<std::uint32_t> fill( basesOfStart.begin(), basesOfStart.end() - 1 );
+        for( std::size_t b = 0; b < edgesOf; ++b )   // ascending b, so each derived class's edges land ascending by base
+        {
+            for( std::size_t at = 0; at < kids[ b ].size(); ++at )
+            {
+                basesOfEdge[ fill[ kids[ b ][ at ] ]++ ] = { NodeId( b ), bound[ b ][ at ] };
+            }
+        }
+    }
+
     // (2) of meantBase: the classes of this name the map draws d's clause to (drawnBases), and which of them it did not rule
-    // out as the name collision (standingBases; BaseBound::Other)
+    // out as the name collision (standingBases; BaseBound::Other). Both ascending, as baseClasses is (class identity lists a
+    // name's classes in id order).
+    // The shorter side is walked: d's own base edges (each looked up among the classes of the name), else the classes of the
+    // name (each edge to d looked up in that class's implementors) — a class drawn to hundreds of namesakes of one base meets
+    // a name with few classes the second way.
     void drawnAndStandingBases( NodeId d, std::span<const NodeId> baseClasses ) const
     {
         standingBases.clear();
         drawnBases.clear();
-        for( NodeId b : baseClasses )
+        const std::span<const std::pair<NodeId, std::uint8_t>> edges = baseEdgesOf( d );
+        const auto keep = [ & ]( NodeId b, std::uint8_t how )
         {
-            const std::optional<std::uint8_t> how = baseEdgeBound( b, d );
-            if( !how.has_value() )
-            {
-                continue;
-            }
             drawnBases.push_back( b );
-            if( *how != kBaseBoundOther )
+            if( how != kBaseBoundOther )
             {
                 standingBases.push_back( b );
+            }
+        };
+        baseEdgePairs += std::min( edges.size(), baseClasses.size() );
+        if( edges.size() <= baseClasses.size() )
+        {
+            for( const auto& [ b, how ] : edges )
+            {
+                if( std::binary_search( baseClasses.begin(), baseClasses.end(), b ) )
+                {
+                    keep( b, how );
+                }
+            }
+            return;
+        }
+        for( NodeId b : baseClasses )
+        {
+            const auto at = std::lower_bound( edges.begin(), edges.end(), b, []( const std::pair<NodeId, std::uint8_t>& e, NodeId id ) { return e.first < id; } );
+            if( at != edges.end() && at->first == b )
+            {
+                keep( b, at->second );
             }
         }
     }

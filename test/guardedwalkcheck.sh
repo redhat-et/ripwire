@@ -38,11 +38,20 @@
 #       meant=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the same
 #       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=12 (one
 #       per out-of-line definition). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
+# meantBase's pairing (drawnAndStandingBases) asked, for every class of the deriving name, whether the map drew an edge
+# from EVERY class of the base's name to it — |deriving| x |base| binary searches. `Impl` is a name hundreds of llvm classes
+# share, and chaUp merges all their bases under it, so a base one Impl names (`Visitor`, itself defined many times) is
+# paired with every Impl. Now the shorter side is walked: a class's own base edges (BASE-EDGES-BY-DERIVED: the implementors
+# map read backwards) or the classes of the name. `[mem] base_edges pairs=` counts the edges examined.
+# BE(8): 8 files `struct BaseK` + `struct Impl : BaseK`, 8 files `struct Visitor`, one `struct Impl : Visitor`. GW(12, 8)'s
+#   pairs=1200 (4 expansions x 300: Impl's and Peer's 12 classes are each drawn to all 13 `Base`s, so the two sides are
+#   equal there) and BE(8)'s pairs=32 are pinned; walking every class of the name examined 144 in BE(8).
+#
 # SW(4, M): Shape declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
 #   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
 #   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
 #   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8) and SW(4, 8) are
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8) and BE(8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -114,6 +123,18 @@ gensw(){
     } >"$dir/use.cpp"
 }
 
+# genbe DIR N — base-edge fan-in (see header): N files with `struct BaseK` and `struct Impl : BaseK`, N files with a
+# `struct Visitor`, and one more `struct Impl : Visitor`
+genbe(){
+    local dir="$1" n="$2" k
+    mkdir -p "$dir"
+    for k in $( seq 0 $(( n - 1 )) ); do
+        printf 'struct Base%d { void b%d(); };\nstruct Impl : Base%d\n{\n    void run%d() { b%d(); v(); }\n};\n' "$k" "$k" "$k" "$k" "$k" >"$dir/f$k.cpp"
+        printf 'struct Visitor { void v(); };\n' >"$dir/v$k.cpp"
+    done
+    printf 'struct Impl : Visitor\n{\n    void walk() { v(); }\n};\n' >"$dir/w.cpp"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -135,12 +156,14 @@ stats(){
 GW2="$TMP/gw2"; gen "$GW2" "$K" 2
 GW8="$TMP/gw8"; gen "$GW8" "$K" 8
 
+BE8="$TMP/be8"; genbe "$BE8" 8
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
 stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS"
 stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
 
+stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC
 stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE"
 
@@ -195,6 +218,18 @@ else
     no "(C) GW counter: want '$want', got '${oline8:-<no owned_by line>}'"
 fi
 
+want='[mem] base_edges pairs=1200'
+if [ "$bline8" = "$want" ]; then
+    ok "(C) GW counter is exact: $bline8"
+else
+    no "(C) GW counter: want '$want', got '${bline8:-<no base_edges line>}'"
+fi
+want='[mem] base_edges pairs=32'
+if [ "$berc" = 0 ] && [ "$beline8" = "$want" ]; then
+    ok "(C) BE counter is exact: $beline8"
+else
+    no "(C) BE counter: want '$want', got '${beline8:-<no base_edges line>}' (rc=$berc)"
+fi
 want='[mem] subclass_walk clause_asks=64 clause_reads=8 levels=4'
 if [ "$sline8" = "$want" ]; then
     ok "(C) SW counter is exact: $sline8"
@@ -204,7 +239,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
