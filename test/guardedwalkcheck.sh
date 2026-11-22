@@ -84,7 +84,14 @@
 #   calling helper() M times; and a.js, where wrap() and wrap2() nest `function helper()`, wrap() and deep() (in wrap2) call
 #   it — a local HOLDS those three calls, so they still walk — and use() calls the top-level helper() twice.
 #   `[mem] reach_by_name asks=M+5 kept=M+2`: 7/4 at M=2, 13/10 at M=8 (the per-call walk keeps none: kept=0).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8) and RN(4, 8) are
+# Step (3) and the inherited-body walk ask canonByName for "Class::callee" (and "Scope::Class::callee") at every class they
+# visit — every real subclass, for every (class, callee) — building the key text and hashing it into the whole definitions
+# table each time. CANON-SPLIT (lane PF3) splits the table's keys once at their last "::" into (scope, name) ids, keeps a
+# scope id per class symbol and the last callee's id, and probes by the pair. `[mem] canon_split asks=A keyed=K`: K of the A
+# class visits answered by ids (a callee with a ':' keeps the text lookup; with the ids compiled out keyed=0). SW(4, 8)
+# pins asks=keyed=128 (every callee is a plain name); NS(4) — the same shape inside namespace ns, so every class visit also asks
+# the "ns::Class::callee" key — pins asks=keyed=32 and joins the (D) arm.
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8), RN(4, 8) and NS(4) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -228,6 +235,18 @@ genrn(){
     } >"$dir/use.py"
 }
 
+# genns DIR N — CANON-SPLIT's nested key (see header): in namespace ns, Shape (deriving from Root) declares f0, f1 bodiless; N
+# Circles define them in class (scope "ns": the "ns::CircleK::fJ" key too); N Squares inherit Painter's; ns::use( Shape* s ) calls both
+genns(){
+    local dir="$1" n="$2" c
+    mkdir -p "$dir"
+    printf 'namespace ns\n{\nstruct Root { };\nstruct Shape : Root\n{\n    virtual void f0() = 0;\n    virtual void f1() = 0;\n};\nstruct Painter\n{\n    void f0() { }\n    void f1() { }\n};\n}\n' >"$dir/shape.h"
+    for c in $( seq 0 $(( n - 1 )) ); do
+        printf '#include "shape.h"\nnamespace ns\n{\nstruct Circle%d : Shape\n{\n    void f0() override { }\n    void f1() override { }\n};\nstruct Square%d : Shape, Painter { };\n}\n' "$c" "$c" >"$dir/c$c.cpp"
+    done
+    printf '#include "shape.h"\nnamespace ns\n{\nvoid use( Shape* s )\n{\n    s->f0();\n    s->f1();\n}\n}\n' >"$dir/use.cpp"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -246,6 +265,7 @@ stats(){
     ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
     MLINE="$( grep -F '[mem] recv_method ' "$TMP/$name.err" )"
     NLINE="$( grep -F '[mem] reach_by_name ' "$TMP/$name.err" )"
+    CSLINE="$( grep -F '[mem] canon_split ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -263,6 +283,7 @@ RM2="$TMP/rm2"; genrm "$RM2" 4 2
 RM8="$TMP/rm8"; genrm "$RM8" 4 8
 RN2="$TMP/rn2"; genrn "$RN2" 4 2
 RN8="$TMP/rn8"; genrn "$RN8" 4 8
+NS4="$TMP/ns4"; genns "$NS4" 4
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
@@ -278,8 +299,9 @@ stats RM2 "$RM2"; rmline2="$MLINE"
 stats RM8 "$RM8"; rmline8="$MLINE" rmrc=$RC
 stats RN2 "$RN2"; rnline2="$NLINE"
 stats RN8 "$RN8"; rnline8="$NLINE" rnrc=$RC
+stats NS4 "$NS4"; nsline="$CSLINE" nsrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
-stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE"
+stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE" swcs8="$CSLINE"
 
 # ── (A) REACHED ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [ "$c8" -gt "$c2" ]; then
@@ -374,6 +396,18 @@ if [ "$rnrc" = 0 ] && [ "$rnline8" = "$want" ] && [ "$rnline2" = '[mem] reach_by
 else
     no "(C) RN counter: want 'asks=7 kept=4' at M=2 and '$want' at M=8, got '${rnline2:-<none>}' / '${rnline8:-<none>}' (rc=$rnrc)"
 fi
+want='[mem] canon_split asks=128 keyed=128'
+if [ "$swcs8" = "$want" ]; then
+    ok "(C) SW: every class visit of step (3) is answered by CANON-SPLIT's ids: $swcs8"
+else
+    no "(C) SW canon_split counter: want '$want', got '${swcs8:-<no canon_split line>}'"
+fi
+want='[mem] canon_split asks=32 keyed=32'
+if [ "$nsrc" = 0 ] && [ "$nsline" = "$want" ]; then
+    ok "(C) NS: the nested \"Scope::Class::callee\" key is answered by ids too: $nsline"
+else
+    no "(C) NS canon_split counter: want '$want', got '${nsline:-<no canon_split line>}' (rc=$nsrc)"
+fi
 want='[mem] inherited asks=16 walks=8'
 if [ "$iline8" = "$want" ]; then
     ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
@@ -389,7 +423,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8" "NS:$NS4"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then

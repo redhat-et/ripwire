@@ -7815,14 +7815,23 @@ struct IdentityNarrower
     // true when `cls` owns a definition under keyScope, whether or not an earlier step of the walk appended it already
     bool appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
     {
-        const auto it    = canonByName.find( keyScope );
-        const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
+        const auto it = canonByName.find( keyScope );   // the text lookup: visitAncestor's, and a callee CANON-SPLIT cannot key
         if( it == canonByName.end() )
         {
             return false;
         }
+        return appendOwnedOf( &it->second, cls, ids );
+    }
+    // appendOwnedDefinitions for canonByName's entry `defs` (found by its key text or by CANON-SPLIT's ids; null: no entry)
+    bool appendOwnedOf( const rw::SmallVec<NodeId, 2>* defs, NodeId cls, const ClassIdentity& ids ) const
+    {
+        if( defs == nullptr )
+        {
+            return false;
+        }
+        const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
         bool owns = false;
-        for( NodeId d : it->second )
+        for( NodeId d : *defs )
         {
             if( !ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) )
             {
@@ -8106,6 +8115,21 @@ struct IdentityNarrower
     bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids ) const
     {
         const Symbol& c = ( *ids.symbols )[ cls ];
+        ++canonSplit.asks;
+        if( const std::optional<std::uint32_t> callee = canonSplitName( r.calleeName, ids ); callee.has_value() )
+        {
+            ++canonSplit.keyed;
+            if( *callee == CanonSplit::kNone )
+            {
+                return false;   // no key of canonByName ends in "::callee": neither lookup below can hit
+            }
+            bool owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, false, ids ), *callee ), cls, ids );
+            if( !c.scope.empty() )
+            {
+                owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, true, ids ), *callee ), cls, ids ) || owns;
+            }
+            return owns;
+        }
         keyScope.assign( c.name ).append( "::" ).append( r.calleeName );
         bool owns = appendOwnedDefinitions( cls, ids );
         if( !c.scope.empty() )
@@ -8114,6 +8138,97 @@ struct IdentityNarrower
             owns = appendOwnedDefinitions( cls, ids ) || owns;
         }
         return owns;
+    }
+
+    // CANON-SPLIT (lane PF3, 2026-11-21; test/guardedwalkcheck.sh CS). appendClassDefinitions asks canonByName for
+    // "Class::callee" (and "Scope::Class::callee") once per class step (3) and the inherited-body walk visit — every real
+    // subclass of the receiver class, for every (class, callee) — building each key text and hashing it into the whole
+    // definitions table: on llvm-project's cold map the largest frame of the resolve loop at df8a5dfd4 (string building,
+    // memmove and that table's find under appendClassDefinitions). canonByName is fixed for the loop, so its keys are split
+    // once at their LAST "::" into (scope, name) ids: a callee with no ':' in it matches a key exactly when the key splits
+    // into (the class's key text, the callee) — the callee holds no "::" and cannot extend one — so the lookup becomes a
+    // per-symbol scope id (kept), the callee's id (kept for the last callee asked) and one integer-keyed probe. A callee with
+    // a ':' (or none) keeps the text lookup.
+    struct CanonSplit
+    {
+        static constexpr std::uint32_t kUnread = 0xFFFFFFFFu, kNone = 0xFFFFFFFEu;
+        HashMap<std::string_view, std::uint32_t>                  scopeIds;   // a key's text before its last "::" -> id
+        HashMap<std::string_view, std::uint32_t>                  nameIds;    // a key's text after it -> id
+        HashMap<std::uint64_t, const rw::SmallVec<NodeId, 2>*>    byIds;      // packPair( scope id, name id ) -> canonByName's entry
+        std::vector<std::uint32_t>                                ownScope;     // per symbol: the scope id of its name (kUnread / kNone)
+        std::vector<std::uint32_t>                                nestedScope;  // per symbol: the scope id of "scope::name"
+        std::string                                               lastCallee;   // the callee text the last name id was read for
+        std::uint32_t                                             lastCalleeId = kNone;
+        std::string                                               text;         // "scope::name" scratch
+        bool                                                      built = false, lastRead = false;
+        std::size_t                                               asks = 0, keyed = 0;   // RIPWIRE_STATS `[mem] canon_split`
+    };
+    mutable CanonSplit canonSplit;
+    void buildCanonSplit( std::size_t symbolCount ) const
+    {
+        canonSplit.built = true;
+        canonSplit.ownScope.assign( symbolCount, CanonSplit::kUnread );
+        canonSplit.nestedScope.assign( symbolCount, CanonSplit::kUnread );
+        canonSplit.byIds.reserve( canonByName.size() );
+        for( const auto& [ key, defs ] : canonByName )
+        {
+            const std::size_t sep = key.rfind( "::" );
+            if( sep == std::string::npos )
+            {
+                continue;   // no "::": no "Class::callee" lookup can name it
+            }
+            const std::string_view whole( key );
+            const std::uint32_t scope = canonSplit.scopeIds.try_emplace( whole.substr( 0, sep ), std::uint32_t( canonSplit.scopeIds.size() ) ).first->second;
+            const std::uint32_t name  = canonSplit.nameIds.try_emplace( whole.substr( sep + 2 ), std::uint32_t( canonSplit.nameIds.size() ) ).first->second;
+            canonSplit.byIds.emplace( hashutil::packPair( scope, name ), &defs );   // a key splits one way: one entry per pair
+        }
+    }
+    // the callee's name id (kNone: no key ends in it), or nullopt when the text lookup must answer (a ':' in the callee, or none)
+    std::optional<std::uint32_t> canonSplitName( std::string_view callee, const ClassIdentity& ids ) const
+    {
+        if( callee.empty() || callee.find( ':' ) != std::string_view::npos )
+        {
+            return std::nullopt;
+        }
+        if( !canonSplit.built )
+        {
+            buildCanonSplit( ids.symbols->size() );
+        }
+        if( !canonSplit.lastRead || callee != canonSplit.lastCallee )
+        {
+            const auto it              = canonSplit.nameIds.find( callee );
+            canonSplit.lastRead        = true;
+            canonSplit.lastCallee.assign( callee );
+            canonSplit.lastCalleeId    = it == canonSplit.nameIds.end() ? CanonSplit::kNone : it->second;
+        }
+        return canonSplit.lastCalleeId;
+    }
+    // the scope id of class `cls`'s key text — its name, or (nested) "scope::name" — kept per symbol; kNone: no key has it
+    std::uint32_t canonSplitScope( NodeId cls, bool nested, const ClassIdentity& ids ) const
+    {
+        std::uint32_t& kept = ( nested ? canonSplit.nestedScope : canonSplit.ownScope )[ cls ];
+        if( kept == CanonSplit::kUnread )
+        {
+            const Symbol& c = ( *ids.symbols )[ cls ];
+            std::string_view text = c.name;
+            if( nested )
+            {
+                canonSplit.text.assign( c.scope ).append( "::" ).append( c.name );
+                text = canonSplit.text;
+            }
+            const auto it = canonSplit.scopeIds.find( text );
+            kept          = it == canonSplit.scopeIds.end() ? CanonSplit::kNone : it->second;
+        }
+        return kept;
+    }
+    const rw::SmallVec<NodeId, 2>* canonSplitEntry( std::uint32_t scope, std::uint32_t name ) const
+    {
+        if( scope == CanonSplit::kNone )
+        {
+            return nullptr;
+        }
+        const auto it = canonSplit.byIds.find( hashutil::packPair( scope, name ) );
+        return it == canonSplit.byIds.end() ? nullptr : it->second;
     }
 
     // the plausible direct bases of `c` (its base clause read from its own file) not in `visited`, appended to it and to `next`

@@ -14551,6 +14551,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
         rw::emitTo( stderr, "[mem] recv_method asks={} walks={} kept={}\n", recvEv.methodAsks, recvEv.methodWalks, recvEv.methodAnswers.size() );
         rw::emitTo( stderr, "[mem] reach_by_name asks={} kept={}\n", reachOutside.asks, reachOutside.kept );
+        rw::emitTo( stderr, "[mem] canon_split asks={} keyed={}\n", narrower.identity.canonSplit.asks, narrower.identity.canonSplit.keyed );
         rw::emitTo( stderr, "[mem] inherited asks={} walks={}\n", narrower.identity.inheritedAsks, narrower.identity.inheritedWalks );
         rw::emitTo( stderr, "[mem] subclass_walk clause_asks={} clause_reads={} levels={}\n", narrower.identity.clauseAsks, narrower.identity.clauseReads,
                     narrower.identity.levelsQueued );
