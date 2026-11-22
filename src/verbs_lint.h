@@ -2205,6 +2205,7 @@ void emitLintLegends( const rw::Config& cfg, bool findingsFloored, bool nestRefu
                 "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
                 "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
                 "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
+                "next= on the root is that next page as one pasteable call: lint at offset=next_offset, with the rule-shaping flags this run was given. "
                 "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
                 "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
                 "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
