@@ -27,7 +27,7 @@
 # probe asks ownedBy). Every Impl's bare calls walk Impl's guarded bases; `Base` names K+1 classes and `Impl` K, so one
 # walk's meantBase pairs K x (K+1) classes.
 #
-#   (A) REACHED — the RIPWIRE_STATS lines `[mem] guarded_walk calls=C walks=W cones=X meant=N` and `[mem] owned_by asks=A reads=R`
+#   (A) REACHED — the RIPWIRE_STATS lines `[mem] guarded_walk calls=C walks=W cones=X meant_asks=Q meant=N` and `[mem] plausible owned_asks=A reads=R`
 #       are printed and C > 0, so the arms below cannot pass on a walk the fixture never enters.
 #   (B) PER-ROOT — `walks` (roots kept) and `meant` (meantBase evaluations) are the same at M=2 and at M=8 while `calls`
 #       grows: the walk's cost is paid per distinct root name, not per call. Likewise `reads` (out-of-line owner answers
@@ -35,8 +35,9 @@
 #   (C) EXACT — at M=8: calls=1272 (12 Impl bodies x 8 x 13 calls, plus 12 Peer bodies x 2), walks=2 (two root names,
 #       `Impl` and `Peer`), cones=2 (the two caller classes whose cones the ladder proof and the bare-call test read: kept
 #       per class, CONE-MEMO — the one-entry keep it replaced re-expanded a cone at every Impl/Peer switch, 24 times),
-#       meant=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the same
-#       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=1 (the
+#       meant_asks=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the
+#       same two levels under kConeNameCap) — of which meant=14 are computed: MEANT-MEMO keeps meantBase per (parent name,
+#       parent's reading, base), and the four expansions meet Impl->Base, Peer->Base and Base->RootK x 12 only; asks=1164 (one per bK() call: the first class it asks about owns it), reads=1 (the
 #       one file all 12 out-of-line definitions sit in, against the one name `Base`: OWNED-MEMO keeps plausibleClasses per
 #       (file, name); kept per (definition, class) it was 12). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
 # meantBase's pairing (drawnAndStandingBases) asked, for every class of the deriving name, whether the map drew an edge
@@ -45,8 +46,9 @@
 # paired with every Impl. Now the shorter side is walked: a class's own base edges (BASE-EDGES-BY-DERIVED: the implementors
 # map read backwards) or the classes of the name. `[mem] base_edges pairs=` counts the edges examined.
 # BE(8): 8 files `struct BaseK` + `struct Impl : BaseK`, 8 files `struct Visitor`, one `struct Impl : Visitor`. GW(12, 8)'s
-#   pairs=1200 (4 expansions x 300: Impl's and Peer's 12 classes are each drawn to all 13 `Base`s, so the two sides are
-#   equal there) and BE(8)'s pairs=32 are pinned; walking every class of the name examined 144 in BE(8).
+#   pairs=456 (Impl->Base and Peer->Base: 12 classes each drawn to all 13 `Base`s, so the two sides are equal there, 2 x
+#   156; Base->RootK x 12: 12 x 12) and BE(8)'s pairs=16 are pinned (MEANT-MEMO computes each pairing once); walking every
+#   class of the name, and per expansion, examined 1,200 in GW and 144 in BE(8).
 #
 # SW(4, M): Shape (deriving from Root) declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
 #   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
@@ -214,7 +216,7 @@ else
 fi
 
 # ── (C) EXACT ──────────────────────────────────────────────────────────────────────────────────────────────────
-want='[mem] guarded_walk calls=1272 walks=2 cones=2 meant=52'
+want='[mem] guarded_walk calls=1272 walks=2 cones=2 meant_asks=52 meant=14'
 if [ "$line8" = "$want" ]; then
     ok "(C) GW counter is exact: $line8"
 else
@@ -227,13 +229,13 @@ else
     no "(C) GW counter: want '$want', got '${oline8:-<no owned_by line>}'"
 fi
 
-want='[mem] base_edges pairs=1200'
+want='[mem] base_edges pairs=456'
 if [ "$bline8" = "$want" ]; then
     ok "(C) GW counter is exact: $bline8"
 else
     no "(C) GW counter: want '$want', got '${bline8:-<no base_edges line>}'"
 fi
-want='[mem] base_edges pairs=32'
+want='[mem] base_edges pairs=16'
 if [ "$berc" = 0 ] && [ "$beline8" = "$want" ]; then
     ok "(C) BE counter is exact: $beline8"
 else

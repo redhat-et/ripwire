@@ -7380,8 +7380,28 @@ struct IdentityNarrower
     mutable std::vector<NodeId>                           classWalk;       // nameable classes, then a walk frontier
     mutable std::vector<NodeId>                           classNext;
     mutable std::vector<NodeId>                           plausible;       // plausibleClasses' answer
-    mutable std::vector<std::uint32_t>                    seenStamp;       // generation-stamped visited set, one u32 per symbol
-    mutable std::uint32_t                                 seenGeneration = 0;
+    // a generation-stamped set over the symbol ids: next() empties it in O(1) (the stamp vector is sized once, never cleared)
+    struct StampSet
+    {
+        std::vector<std::uint32_t> stamp;
+        std::uint32_t              generation = 0;
+        void next( std::size_t ids )
+        {
+            if( stamp.size() != ids || generation == 0xFFFFFFFFu )
+            {
+                stamp.assign( ids, 0u );
+                generation = 0;
+            }
+            ++generation;
+        }
+        bool insert( NodeId id ) noexcept   // true when `id` was not in the set
+        {
+            const bool fresh = stamp[ id ] != generation;
+            stamp[ id ]      = generation;
+            return fresh;
+        }
+    };
+    mutable StampSet                                      seen;            // the class walks' visited set (markSeen)
     mutable HashMap<std::string, rw::SmallVec<NodeId, 2>> subclassMemo;    // step 3 per (receiver class, callee)
     mutable const Reference*                              claimRef       = nullptr;
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
@@ -7868,19 +7888,12 @@ struct IdentityNarrower
     // a fresh visited generation over the symbol ids (the stamp vector is sized once, never cleared)
     void nextSeenGeneration( const ClassIdentity& ids ) const
     {
-        if( seenStamp.size() != ids.symbols->size() || seenGeneration == 0xFFFFFFFFu )
-        {
-            seenStamp.assign( ids.symbols->size(), 0u );
-            seenGeneration = 0;
-        }
-        ++seenGeneration;
+        seen.next( ids.symbols->size() );
     }
 
     bool markSeen( NodeId id ) const noexcept
     {
-        const bool fresh = seenStamp[ id ] != seenGeneration;
-        seenStamp[ id ] = seenGeneration;
-        return fresh;
+        return seen.insert( id );
     }
 
     // two KNOWN, distinct owning classes that share a name among the definitions — a union of namesakes, not one type's answer
@@ -8078,12 +8091,25 @@ struct IdentityNarrower
             }
             for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
-                if( std::ranges::find( visited, b ) == visited.end() )
+                if( visitSet.insert( b ) )   // not in `visited` (stampVisited put it in the set; a push puts it here)
                 {
                     visited.push_back( b );
                     next.push_back( b );
                 }
             }
+        }
+    }
+
+    // `visited` as a generation-stamped set over the symbol ids, for queueUnvisitedBases' membership test (lane PF2,
+    // VISITED-STAMP): a linear find over a list that holds every plausible namesake of every base reached was the hottest
+    // frame of llvm-project/clang's resolve loop once the levels were kept (2,551 of ~4,200 resolve samples, wmemchr)
+    mutable StampSet visitSet;
+    void stampVisited( const std::vector<NodeId>& visited, const ClassIdentity& ids ) const
+    {
+        visitSet.next( ids.symbols->size() );
+        for( NodeId v : visited )
+        {
+            visitSet.insert( v );
         }
     }
 
@@ -8121,6 +8147,7 @@ struct IdentityNarrower
             const std::size_t from = lv.ends.size() >= 2 ? lv.ends[ lv.ends.size() - 2 ] : 0u;
             const std::size_t to   = lv.ends.back();
             ++levelsQueued;
+            stampVisited( lv.visited, ids );
             inheritedNext.clear();
             for( std::size_t at = from; at < to; ++at )
             {
@@ -9009,6 +9036,39 @@ struct Narrower
         return meant;
     }
 
+    // MEANT-MEMO (lane PF2, 2026-11-21): meantBase reads only the parent's NAME, the parent's reading (walkMeant: its ids and
+    // unbound flag) and the base name — every other input is fixed once baseGuard is set — so its answer is kept under exactly
+    // that key. Walks from different roots meet the same parents (every class deriving from a shared base reaches its
+    // bases), and each meantBase pairs every class of the parent's name with the base's (the cone expansions' cost on
+    // llvm-project/clang). `meantAsks` counts the asks; guardedWalkStats.meant the answers computed.
+    mutable HashMap<std::string, std::optional<MeantClasses>> meantMemo;
+    mutable const BaseWalkGuard*                              meantMemoFor = nullptr;
+    mutable std::string                                       meantKey;
+    mutable std::size_t                                       meantAsks = 0;
+    std::optional<MeantClasses> meantBaseKept( std::size_t parent, const std::string& base ) const
+    {
+        ++meantAsks;
+        if( meantMemoFor != baseGuard )
+        {
+            meantMemo.clear();
+            meantMemoFor = baseGuard;
+        }
+        const MeantClasses& reading = walkMeant[ parent ];
+        meantKey.assign( fieldWalk[ parent ] ).push_back( '\0' );
+        meantKey.append( base ).push_back( reading.unbound ? '1' : '0' );
+        for( NodeId id : reading.ids )
+        {
+            meantKey.append( reinterpret_cast<const char*>( &id ), sizeof( id ) );
+        }
+        if( const auto hit = meantMemo.find( meantKey ); hit != meantMemo.end() )
+        {
+            return hit->second;
+        }
+        std::optional<MeantClasses> meant = meantBase( parent, base );
+        meantMemo.emplace( meantKey, meant );   // meantBase rewrote guardKey, never meantKey
+        return meant;
+    }
+
     // Where the walk already holds the name `base`, for a new reading `meant` of it. A name is visited once BY NAME; as
     // classes, once per class: `Http::ActiveClient : ConnectionPool::ActiveClient` reaches the second class of the name the
     // first entry does not mean, so the classes an earlier entry holds are cut from `meant`. `covered`: nothing new is left
@@ -9067,7 +9127,7 @@ struct Narrower
             const auto uit = chaUp.find( guardKey );
             for( const std::string& base : ( uit == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( uit->second ) ) )
             {
-                std::optional<MeantClasses> meant = meantBase( i, base );
+                std::optional<MeantClasses> meant = meantBaseKept( i, base );
                 if( !meant.has_value() )
                 {
                     continue;

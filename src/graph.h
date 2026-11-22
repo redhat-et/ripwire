@@ -14442,7 +14442,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] alias_walk calls={} pushes={} elements={}\n", aliasWalk.elementCalls, aliasWalk.elementPushes, aliasWalk.elements );
         rw::emitTo( stderr, "[mem] arrow_walk calls={} visits={}\n", aliasWalk.arrowCalls, aliasWalk.arrowVisits );
         const Narrower::GuardedWalkStats& gw = narrower.guardedWalkStats;
-        rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} cones={} meant={}\n", gw.calls, gw.walks, gw.cones, gw.meant );
+        rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} cones={} meant_asks={} meant={}\n", gw.calls, gw.walks, gw.cones, narrower.meantAsks, gw.meant );
         rw::emitTo( stderr, "[mem] plausible owned_asks={} reads={}\n", narrower.identity.ownedAsks, narrower.identity.plausibleReads );
         rw::emitTo( stderr, "[mem] base_edges pairs={}\n", narrower.baseEdgePairs );
         rw::emitTo( stderr, "[mem] subclass_walk clause_asks={} clause_reads={} levels={}\n", narrower.identity.clauseAsks, narrower.identity.clauseReads,
