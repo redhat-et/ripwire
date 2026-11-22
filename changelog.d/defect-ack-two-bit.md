@@ -1,0 +1,3 @@
+### Fixed — format-arity acks written by 0.6.10 and earlier match again
+
+The unchecked-status facet widened the facet bits of a defect-shape site value from two to three, which changed the ack key of every row holding a site whose hash had bit 2 set (about half of all one-site rows; 4 of 8 in a fixture sample): an ack written by 0.6.10 or earlier stopped matching, the row gated again and the ack was listed stale. Such an ack is now re-filed to its current key on read (counted in `acks_rekeyed_by_scheme=`) and written back healed by the next `--quality-ack`. Only rows whose key moved are affected; acks written since are unchanged. New gate `test/defectackschemecheck.sh`, its legacy key recorded from the released 0.6.9 binary.

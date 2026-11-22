@@ -2149,9 +2149,10 @@ fi
 #   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.
 L="surfaces"
 PHRASE='new-symbol rows never gate, except defect-shape format-arity'
-#   QD-ENTRY-CEILING (2026-11-13) adds the second exception, a NEW function at 4x the bar: every statement of the
-#   rule names it too, in the long form (legend, help, MCP, docs) or the compact legend's ceiling= row.
-CEILX='( and a new function at the ceiling| or a ceiling= row)'
+#   QD-ENTRY-CEILING (2026-11-13) adds the second exception, a NEW function at 4x the bar, and TANGLE-GATE-B (2026-11-21)
+#   the third, a new function at tangle 6 or more: every statement of the rule names both, in the long form (legend,
+#   help, MCP, docs) or the compact legend's ceiling= row and tangle row.
+CEILX='(, a new function at the ceiling[^.;]* (and a tangled new (function|one)|and a new one at tangle 6 or more)|, a ceiling= row or a tangle row)'
 phrase_ok(){  # LABEL TEXT — the text states the exception, and every "new-symbol rows never gate" in it carries it
     local all qual flat   # whitespace-normalized first: a sentence may wrap anywhere in a document
     flat="$( printf '%s' "$2" | tr '\n' ' ' | tr -s ' ' )"
