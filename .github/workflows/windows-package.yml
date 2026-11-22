@@ -152,6 +152,8 @@ jobs:
           # the tarballs' payload, file for file (release.yml's Package step says why each part travels)
           cp -R skills/ripwire-* "dist/${asset}/skills/"
           cp skills/install.sh "dist/${asset}/skills/"
+          # the Claude Code locator subagent: skills/install.sh installs skills/agents/ripwire-locator.md beside the skills
+          cp -R skills/agents "dist/${asset}/skills/"
           cp -R hooks "dist/${asset}/hooks"
           if grep -rlI $'\r' "dist/${asset}/skills" "dist/${asset}/hooks"; then
             echo "windows-package: the files above carry CR bytes; skills/install.sh and hooks/*.sh must ship LF" >&2; exit 1

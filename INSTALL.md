@@ -41,6 +41,7 @@ reports x86-64; the installer sends it to a native arm64 shell, where the arm64 
 | `RIPWIRE_INSTALL_YES=1` | Skip the confirmation prompt. |
 | `RIPWIRE_SKIP_CPU_CHECK=1` | Skip the x86-64-v3 CPU check. The binary is still test-run before it is installed. |
 | `RIPWIRE_NO_ACTIVATE=1` | Stage the skills without activating them. |
+| `RIPWIRE_NO_LOCATOR_AGENT=1` | Activate the Claude Code skills without the `ripwire-locator` subagent. |
 
 Then try it in a repository:
 
@@ -85,6 +86,11 @@ you changed it):
 | Hermes (initial support) | `bash ~/.local/share/ripwire/skills/install.sh --hermes` | `${HERMES_HOME:-~/.hermes}/skills` |
 | openclaw (initial support) | `bash ~/.local/share/ripwire/skills/install.sh --openclaw` | `~/.agents/skills` |
 | Anything else | `bash ~/.local/share/ripwire/skills/install.sh <dir>` | `<dir>` |
+
+For Claude Code the installer also puts the `ripwire-locator` subagent in `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/`.
+The main conversation can hand it a code lookup: it runs ripwire in its own context and returns only the file ranges
+to edit, so the full answer does not stay in the main conversation. Pass `--no-locator-agent` (or set
+`RIPWIRE_NO_LOCATOR_AGENT=1`) to leave it out; a file already at that path that the installer did not write is kept.
 
 Hermes and openclaw support is initial. CI checks what the installers write on disk. For Hermes, a contributor
 also ran the installer and the MCP registration against a real Hermes install when support landed

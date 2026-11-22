@@ -304,7 +304,11 @@ fi
 # ...and (lane HK2) the brief block its row appends to the parallel-agents line; test/subagentroutecheck.sh (K) holds that block.
 grep -q ' When you delegate to subagents, paste this into every brief that reads source: ' "$TMP/blurb_claude" \
     || no "claude's blurb lost the subagent brief block (the strip below would then compare nothing)"
-sed -e '/native Edit/{N;d;}' -e 's/ When you delegate to subagents, paste this into every brief that reads source: .*$//' "$TMP/blurb_claude" >"$TMP/blurb_claude_rest"
+# ...and (lane LC1) the locator-route sentence its row appends to the orient line; test/locatoragentcheck.sh (E) holds that one.
+grep -q ' Main thread: for a code lookup, delegate to the `ripwire-locator` subagent' "$TMP/blurb_claude" \
+    || no "claude's blurb lost the locator-route sentence (the strip below would then compare nothing)"
+sed -e '/native Edit/{N;d;}' -e 's/ When you delegate to subagents, paste this into every brief that reads source: .*$//' \
+    -e 's/ Main thread: for a code lookup, delegate to the `ripwire-locator` subagent.*$//' "$TMP/blurb_claude" >"$TMP/blurb_claude_rest"
 sed '/--replace-symbol-body/{N;d;}' "$TMP/blurb_gemini" >"$TMP/blurb_gemini_rest"
 if cmp -s "$TMP/blurb_claude_rest" "$TMP/blurb_gemini_rest"; then
     ok "claude's blurb equals the shared blurb outside the edit-routing lines"

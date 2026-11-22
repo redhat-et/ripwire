@@ -40,7 +40,8 @@ cmake --install build-install --prefix "$prefix" --component ripwire
 # release installer (scripts/install.sh) does — the two documented routes used to leave different setups,
 # and this one left the skills staged with no word about it. RIPWIRE_NO_ACTIVATE=1 stages only; hooks stay
 # behind an explicit flag (they carry a data-capture disclosure). RIPWIRE_ACTIVATE_CODEX=1 keeps its old
-# meaning: Codex skills plus its advisory hooks.
+# meaning: Codex skills plus its advisory hooks. RIPWIRE_NO_LOCATOR_AGENT=1 reaches skills/install.sh through the
+# environment and leaves the Claude Code ripwire-locator subagent out (owner ruling 189).
 skillsInstaller="$prefix/share/ripwire/skills/install.sh"
 if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ] && [ -f "$skillsInstaller" ]; then
     if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
