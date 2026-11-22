@@ -26,6 +26,10 @@
 #   (n8) `e.g.` is prose, never a candidate; (h3) MCP name_test_hops
 #   (h1)(h2) a path hop matched by name alone into a test file says so (name_test_hops=); the same hop into a source file does not
 set -u
+# MR1 (src/mcpverbs.h forTaskText): MCP `for` serves its <sigs>/<tail> rows as text lines in one CDATA too (the CLI's ROWLINES +
+# RANKSEQ, lossless; test/mcpforrowscheck.sh pins it). This gate reads those rows as elements for another rule, so the line form is
+# off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"

@@ -366,6 +366,8 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // `needs` rides every session's tools/list payload and this tool's schema was measured at the
     // mcpmanifestcheck per-session ceiling before this field existed.
     { "sections",      "lego, compose, or both", "sections=\"lego,compose\"" },
+    // MR1 (owner ruling 168): `for`'s row form, the CLI --rows= twin — a CLOSED set. Terse: it rides tools/list.
+    { "rows",          "lines (the default) or elements", "rows=\"elements\"" },
     // ── boolean ──
     // F-R1-07 (2026-09-10 audit): the CLI's own answer to a route MIS-FIRE is to re-run with --no-route,
     // and the MCP surface had no equivalent — an agent that reads route= and disagrees was told WHICH ranker
@@ -1070,7 +1072,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
-    { "for",                      "path paths task budget_tokens no_route no_verb_route limit offset sections" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
+    { "for",                      "path paths task budget_tokens no_route no_verb_route limit offset sections rows" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
     { "lego",                     "path paths type limit offset legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },

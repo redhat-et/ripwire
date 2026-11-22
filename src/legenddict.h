@@ -59,6 +59,7 @@
 #include "fortailterms.h"       // kForFileTailTermsLegend
 #include "infra/Diagnostics.h"
 #include "infra/hashutil.h"
+#include "forrowlines.h"       // MR1: rowsAsElements — the term scan reads a line-form answer's rows
 #include "legendpacks.h"        // kLegendPackRows, kLegendPackCensus: the census's product (bench/legendtier/packs_build.py)
 
 #include <algorithm>
@@ -1177,7 +1178,9 @@ inline std::optional<HeadReduction> reduceHead( std::string_view view, const Ref
         // LS1: the CLI document legend's clauses are entries too, and some (the files_first= and docs_after_code= notes,
         // the demote comment) ride the MCP bundle verbatim — once served they must not reach the session again.
         for( std::size_t k = 0; k < kForDocCount; ++k ) { forOrder.push_back( kForDocBase + k ); }
-        for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, s.root ), view ) ) { forOrder.push_back( kTermBase + t ); }
+        // MR1: the rows a line-form answer serves in CDATA are read as the rows they stand for (forrowlines.h rowsAsElements)
+        const std::string rowsView = rw::rowlines::rowsAsElements( view );
+        for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, s.root ), rowsView ) ) { forOrder.push_back( kTermBase + t ); }
         std::sort( forOrder.begin(), forOrder.end(), []( std::size_t a, std::size_t b )
                    { return entryBody( a ).size() != entryBody( b ).size() ? entryBody( a ).size() > entryBody( b ).size() : a < b; } );
     }
@@ -1266,6 +1269,37 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
 // session would be sent it on every answer, so a body comment that IS one entry, whole, is treated as reduceHead treats
 // a head entry: touched (served once this answer goes out) and dropped where the session already holds it. CDATA is
 // stepped over — ripwire's own source spells these comments as string literals.
+// MR1: the whole-comment entry `inner` is, if any (touched when found); true when the session already holds it.
+inline bool servedBodyEntry( std::string_view inner, const LegendSession& session, std::vector<std::size_t>& touched )
+{
+    for( std::size_t id = kForDocBase; id < kEntryCount; ++id )
+    {
+        if( entryBody( id ) != inner ) { continue; }
+        touched.push_back( id );
+        return session.isServed( id );
+    }
+    return false;
+}
+// MR1: a line-form <sigs>/<tail> CDATA (forrowlines.h: the section's sole child) of MCP `for` carries the section's comment children
+// as VERBATIM lines (SectionComments::AsLines) — the demote: note among them. Such a line that is one entry, whole, is treated as the
+// comment it stands for: touched, and dropped (with its newline) where the session holds it, so the decoded ref answer is the element
+// session's. Any other CDATA is stepped over whole, as before.
+inline void dropServedCommentLines( std::string& out, std::string_view cdata, const LegendSession& session, std::vector<std::size_t>& touched )
+{
+    std::string kept;
+    for( std::string_view lines = cdata.substr( 9, cdata.size() - 12 ); !lines.empty(); )
+    {
+        const std::size_t      nl   = std::min( lines.find( '\n' ), lines.size() );
+        const std::string_view line = lines.substr( 0, nl );
+        lines.remove_prefix( std::min( nl + 1, lines.size() ) );
+        const bool comment = line.size() >= 9 && line.starts_with( "<!-- " ) && line.ends_with( " -->" );
+        if( comment && servedBodyEntry( line.substr( 5, line.size() - 9 ), session, touched ) ) { continue; }
+        kept.append( kept.empty() ? "" : "\n" ).append( line );
+    }
+    // a section of nothing but served notes keeps them: an empty CDATA would decode as one empty row
+    out.append( kept.empty() ? cdata : "<![CDATA[" + kept + "]]>" );
+}
+
 inline void dropServedBodyComments( std::string& body, const LegendSession& session, std::vector<std::size_t>& touched )
 {
     std::string out;
@@ -1279,20 +1313,17 @@ inline void dropServedBodyComments( std::string& body, const LegendSession& sess
         const std::size_t close = cdata ? body.find( "]]>", d + 9 ) : body.find( " -->", c + 5 );
         if( close == std::string::npos ) { break; }
         const std::size_t end = close + ( cdata ? 3 : 4 );
-        if( !cdata )
+        const bool lineForm = cdata && ( body.compare( end, 7, "</sigs>" ) == 0 || body.compare( end, 7, "</tail>" ) == 0 ) && d > 0 && body[ d - 1 ] == '>';
+        if( lineForm )
         {
-            const std::string_view inner = std::string_view( body ).substr( c + 5, close - c - 5 );
-            for( std::size_t id = kForDocBase; id < kEntryCount; ++id )
-            {
-                if( entryBody( id ) != inner ) { continue; }
-                touched.push_back( id );
-                if( session.isServed( id ) )
-                {
-                    out.append( body, copied, c - copied );
-                    copied = end;
-                }
-                break;
-            }
+            out.append( body, copied, d - copied );
+            dropServedCommentLines( out, std::string_view( body ).substr( d, end - d ), session, touched );
+            copied = end;
+        }
+        else if( !cdata && servedBodyEntry( std::string_view( body ).substr( c + 5, close - c - 5 ), session, touched ) )
+        {
+            out.append( body, copied, c - copied );
+            copied = end;
         }
         i = end;
     }

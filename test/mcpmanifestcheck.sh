@@ -357,7 +357,10 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # 2026-11-21 (0.7.0 / main merge, main 8861b0d4d): main's train ge2 made quality_delta count 13 kinds and name the thirteenth.
 #   Carried into P2's trimmed description as "12 kinds" -> "13 kinds" and ", tangle" (+8 B); main's own 47,420 ceiling is NOT
 #   taken — the P2 ratchet stands. Measured 40,065 -> 40,073 B; ceiling = measured + 30 B, the same margin.
-CEILING = 40103
+# MR1 (2026-11-21, owner ruling 168): +73 B, every byte attributed — `for` gains the `rows` string (the CLI --rows= twin: lines, the
+#   default, or elements): measured 40,073 -> 40,146 B, descriptions unchanged at 15,117 B, schemas 20,391 -> 20,464 B, the 33 first
+#   sentences unchanged. Ceiling = measured + 30 B, the same margin.
+CEILING = 40176
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

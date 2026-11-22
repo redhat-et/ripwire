@@ -131,7 +131,9 @@ case "$FOR_TEXT" in
         printf '%s' "$FOR_TEXT" > "$TMP/for_payload.xml"
         # the raw "--> " sequence from the task must NOT survive verbatim inside the emitted comment —
         # it has to be collapsed (the same std::unique '--' → '-' guard exemplar/reqNote already use).
-        if grep -q -- '--> <evil/>' "$TMP/for_payload.xml"; then
+        # MR1: CDATA is not markup — MCP `for` serves its rows as lines in one (unescaped values, a tail next= echoing the task
+        # among them), where '-->' closes nothing; the literal must not survive OUTSIDE CDATA, i.e. where a comment can be closed.
+        if python3 -c 'import re,sys; sys.exit(0 if "--> <evil/>" in re.sub(r"<!\[CDATA\[.*?\]\]>", "", open(sys.argv[1], encoding="utf8", errors="replace").read(), flags=re.S) else 1)' "$TMP/for_payload.xml"; then
             no "A4-F7: the literal '--> <evil/>' from task survived uncollapsed in the response — comment injection possible"
         else
             ok "A4-F7: the '--' run from task was collapsed before landing in the XML comment"
