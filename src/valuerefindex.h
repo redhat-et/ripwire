@@ -1036,8 +1036,7 @@ private:
     }
     static const End* find( const std::vector<End>& ends, std::uint32_t ref ) noexcept
     {
-        const auto it = std::ranges::lower_bound( ends, ref, {}, &End::ref );
-        return it != ends.end() && it->ref == ref ? &*it : nullptr;
+        return rw::sortutil::findSorted( ends, ref, {}, &End::ref );
     }
     // One side's end `ref` against every end of the other side with the same field: same type → typed; a side's type
     // unknown → the name tier; two known, different types → no hit.

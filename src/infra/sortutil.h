@@ -58,6 +58,14 @@ inline void sortUnique( Container& values, Less less = {} )
     values.erase( std::unique( values.begin(), values.end() ), values.end() );
 }
 
+// The element of `sorted` (ascending by `proj` under `less`) whose projection equals `key`, nullptr when none: the
+// lower_bound-then-equality pair, spelled once.
+template< class Range, class Key, class Less = std::ranges::less, class Proj = std::identity >
+inline auto findSorted( Range& sorted, const Key& key, Less less = {}, Proj proj = {} ) -> decltype( &*std::ranges::begin( sorted ) )
+{
+    const auto it = std::ranges::lower_bound( sorted, key, less, proj );
+    return it != std::ranges::end( sorted ) && std::invoke( proj, *it ) == key ? &*it : nullptr;
+}
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {

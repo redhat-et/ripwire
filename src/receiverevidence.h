@@ -290,10 +290,11 @@ struct CallResultTypes
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
     mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate and memo lookup buffer
-    // RIPWIRE_STATS `[mem] rust_glob asks= reads= verdicts=` (test/rustglobscalecheck.sh): graph.h rustOutsideGlobMaySupply's
-    // calls, the import records forEachImport read for them, and the glob verdicts (levelAt + rustPathProvablyOutside) they ran
+    // RIPWIRE_STATS `[mem] rust_glob asks= answers= reads= verdicts=` (test/rustglobscalecheck.sh): graph.h rustOutsideGlobMaySupply's
+    // calls, those it computed (not its last call's answer again), the import records forEachImport read for them, and the glob
+    // verdicts (levelAt + rustPathProvablyOutside) they ran
     mutable std::size_t                                   importReads = 0;
-    mutable std::size_t                                   rustGlobAsks = 0, rustGlobReads = 0, rustGlobVerdicts = 0;
+    mutable std::size_t                                   rustGlobAsks = 0, rustGlobAnswers = 0, rustGlobReads = 0, rustGlobVerdicts = 0;
     // QUAL-NS-CALL-BIND: what the in-tree headers a file includes declare, at file scope, for one name — the header half of
     // cppScopeNamedAt, which depends on (file, name, alias-or-using) only: "<fileId>#<a|u><name>" → the fold of those rows
     struct CppScopeFold
@@ -568,6 +569,7 @@ struct CallResultTypes
         NodeId        sym   = kNoNode;
         bool          wholeFile() const noexcept { return start == 0 && end == 0xFFFFFFFFu && sym == kNoNode; }
         bool          operator==( const Level& ) const = default;
+        auto          operator<=>( const Level& ) const = default;   // (start, end, sym): rustGlobFacts' sorted levels
     };
     // The votes of one level (or tier): each binding of the spelling there names one in-tree class, or kNoNode (outside,
     // unresolved, an alias). ONE class decides; anything else — an outside or unresolved binding, two that disagree — names
@@ -1264,6 +1266,76 @@ struct CallResultTypes
             }
         }
     }
+    // RUST-GLOB-SCALE (test/rustglobscalecheck.sh): what graph.h rustOutsideGlobMaySupply reads of Rust file `f`, taken once per
+    // file — a glob's verdict depends on the file and the glob alone, never on the call that asks. `useNames`: the names the
+    // file's `use` rows bind, sorted by svLess (a name none binds is in force nowhere, so no forEachRustUseAt walk is needed for it).
+    // `levels`: each level a glob `use` is written at (levelAt's Level, sorted), whether a glob there provably leads out of the
+    // tree (rustPathProvablyOutside, its root no package directory of the tree) and whether one does not.
+    struct RustGlobLevel
+    {
+        Level level;
+        bool  outside = false;
+        bool  other   = false;
+    };
+    struct RustGlobFacts
+    {
+        bool                          built = false;
+        std::vector<std::string_view> useNames;
+        std::vector<RustGlobLevel>    levels;
+        const RustGlobLevel* at( const Level& lv ) const { return sortutil::findSorted( levels, lv, {}, &RustGlobLevel::level ); }
+    };
+    const RustGlobFacts& rustGlobFacts( std::uint32_t f ) const
+    {
+        static const RustGlobFacts kNone{ true, {}, {} };
+        if( f >= importsByFile.size() )
+        {
+            return kNone;
+        }
+        if( rustGlobFiles.size() != importsByFile.size() )
+        {
+            rustGlobFiles.resize( importsByFile.size() );
+        }
+        RustGlobFacts& facts = rustGlobFiles[ f ];
+        if( facts.built )
+        {
+            return facts;
+        }
+        facts.built = true;
+        importReads += importsByFile[ f ].size();
+        for( const Binding* b : importsByFile[ f ] )
+        {
+            if( b->kind != LocalBindKind::TypeImport )
+            {
+                continue;
+            }
+            facts.useNames.push_back( b->var.str() );
+            if( b->var.str() != "*" )
+            {
+                continue;
+            }
+            ++rustGlobVerdicts;
+            const Level lv  = levelAt( f, b->startByte );
+            const bool  out = rustPathProvablyOutside( f, b->startByte, b->importedName ) && !rustRootNamesTreePackage( f, b->startByte, b->importedName );
+            auto        it  = std::ranges::find( facts.levels, lv, &RustGlobLevel::level );
+            if( it == facts.levels.end() )
+            {
+                it = facts.levels.insert( it, RustGlobLevel{ lv } );
+            }
+            ( out ? it->outside : it->other ) = true;
+        }
+        std::ranges::sort( facts.levels, {}, &RustGlobLevel::level );
+        sortutil::sortUnique( facts.useNames, sortutil::svLess );
+        return facts;
+    }
+    mutable std::vector<RustGlobFacts> rustGlobFiles;   // fileId → rustGlobFacts, built on the file's first ask
+    struct RustGlobLast   // the last call graph.h rustOutsideGlobMaySupply answered: its answer depends on (file, byte, name) alone
+    {
+        std::uint32_t    fileId = 0xFFFFFFFFu;
+        std::uint32_t    at     = 0;
+        std::string_view name;
+        bool             answer = false;
+    };
+    mutable RustGlobLast rustGlobLast;
     // the `use` rows binding `name` in force at byte `at` of file `f`: those of the innermost level (a fn body, then the
     // module) that holds one — a `use` binds where it is written (fix round 3), never file-wide
     template <class Fn>

@@ -16,6 +16,8 @@
 #   S2  import records read at (n, 2n) are at most 1.25x those at (n, n): doubling the CALLS reads no more `use` rows (a
 #       rescan per call is 2x). The file's own verdicts still read its `use` rows once per glob (rustRootNamesTreePackage and
 #       rustPathProvablyOutside look the glob's head up by name), so reads grow with globs squared, per FILE: printed as INFO.
+#   A1  one call is answered once: with every called name defined in 3 other files the ladder asks per candidate (asks >= 2C,
+#       the premise), and the answers computed (`answers=`, the asks a binary without that field computes all of) are <= C.
 #   E1  the hedge still answers: every generated call is kept by name (`via="name"`) at every size, as before the memo.
 #   D   determinism: two runs at (2n, 2n) are byte-identical.
 #
@@ -50,6 +52,13 @@ gen(){
     } > "$d/app/src/a.rs"
     for (( i = 1; i <= c; i++ )); do printf 'pub fn work_%d() {}\n' "$i"; done > "$d/app/src/b.rs"
 }
+# genmany G C: gen, plus two more files (c.rs, e.rs) defining every called name: three candidates per call
+genmany(){
+    gen "$1" "$2"
+    local d="$TMP/g$1_c$2"
+    printf 'mod a;\nmod b;\nmod c;\nmod e;\n' > "$d/app/src/lib.rs"
+    cp "$d/app/src/b.rs" "$d/app/src/c.rs"; cp "$d/app/src/b.rs" "$d/app/src/e.rs"
+}
 # run DIR TAG: stdout, stderr and rc of one map of $TMP/DIR into $TMP/TAG.{out,err,rc}
 run(){ ( cd "$TMP/$1" || exit 1; RIPWIRE_STATS=1 "$BIN" "$TMP/$1" --no-cache </dev/null >"$TMP/$2.out" 2>"$TMP/$2.err" ); echo $? >"$TMP/$2.rc"; }
 count(){ grep -m1 '^\[mem\] rust_glob ' "$TMP/$1.err" | grep -oE "$2=[0-9]+" | cut -d= -f2; }
@@ -78,6 +87,13 @@ if [ "${r1:-0}" -gt 0 ] && [ $(( ${r2:-0} * 100 )) -le $(( r1 * 125 )) ]; then
     ok "S2 import records read do not grow with the calls: $r1 -> $r2 for 2x the calls"
 else
     no "S2 import records read '${r1:-none}' -> '${r2:-none}' for 2x the calls at the same globs (want <= 1.25x; a rescan per call is 2x)"
+fi
+mkdir -p "$TMP/many"; ( TMP="$TMP/many"; genmany "$N" "$N" ); run "many/g${N}_c${N}" many
+ma="$( count many asks )"; mans="$( count many answers )"; mans="${mans:-$ma}"
+if [ "$( cat "$TMP/many.rc" )" = 0 ] && [ "${ma:-0}" -ge $(( 2 * N )) ] && [ "${mans:-x}" -le "$N" ] 2>/dev/null; then
+    ok "A1 $N calls with 3 candidates each: $ma asks, $mans answered"
+else
+    no "A1 $N calls with 3 candidates each: rc=$( cat "$TMP/many.rc" ) asks='${ma:-none}' (want >= $(( 2 * N ))) answered='${mans:-none}' (want <= $N)"
 fi
 if [ "$e1fail" = 0 ]; then ok "E1 every generated call is kept by name at every size"; fi
 

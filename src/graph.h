@@ -837,32 +837,45 @@ inline bool rustUseLeavesTree( const CallResultTypes& types, const Reference& r 
 inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Reference& r )
 {
     ++types.rustGlobAsks;
-    const std::size_t readsBefore = types.importReads;
-    bool named = false;
-    types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
-    if( named )
+    CallResultTypes::RustGlobLast& last = types.rustGlobLast;   // the ladder asks once per candidate of one call: the answer is the call's
+    if( last.fileId == r.fileId && last.at == r.startByte && last.name == std::string_view( r.calleeName ) )
     {
-        types.rustGlobReads += types.importReads - readsBefore;
-        return false;
+        return last.answer;
     }
-    bool outside = false;
-    bool other   = false;
-    types.forEachRustScopeAt( r.fileId, r.startByte, [ & ]( const CallResultTypes::Level& lv )
+    ++types.rustGlobAnswers;
+    const std::size_t readsBefore = types.importReads;
+    const auto        answer      = [ & ]
     {
-        types.forEachImport( r.fileId, "*", [ & ]( const Binding& b )
+        const CallResultTypes::RustGlobFacts& facts = types.rustGlobFacts( r.fileId );   // RUST-GLOB-SCALE: the file's globs, read once
+        if( facts.levels.empty() )
         {
-            if( b.kind == LocalBindKind::TypeImport && types.levelAt( r.fileId, b.startByte ) == lv )
+            return false;   // no glob `use` in the file: nothing but a named `use` or the tree can supply the name
+        }
+        bool named = false;
+        if( std::ranges::binary_search( facts.useNames, std::string_view( r.calleeName ), sortutil::svLess ) )
+        {
+            types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
+        }
+        if( named )
+        {
+            return false;
+        }
+        bool outside = false;
+        bool other   = false;
+        types.forEachRustScopeAt( r.fileId, r.startByte, [ & ]( const CallResultTypes::Level& lv )
+        {
+            if( const CallResultTypes::RustGlobLevel* g = facts.at( lv ) )
             {
-                ++types.rustGlobVerdicts;
-                const bool out = types.rustPathProvablyOutside( r.fileId, b.startByte, b.importedName )
-                              && !types.rustRootNamesTreePackage( r.fileId, b.startByte, b.importedName );
-                ( out ? outside : other ) = true;
+                outside = outside || g->outside;
+                other   = other || g->other;
             }
+            return other;   // an in-tree glob at an inner level already decides: no outer level is read
         } );
-        return other;   // an in-tree glob at an inner level already decides: no outer level is read
-    } );
+        return outside && !other;
+    }();
     types.rustGlobReads += types.importReads - readsBefore;
-    return outside && !other;
+    last = { r.fileId, r.startByte, r.calleeName, answer };
+    return answer;
 }
 
 // ---- aider-style name-quality prior weights --------------------------------------------------------
@@ -14565,7 +14578,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
         rw::emitTo( stderr, "[mem] recv_method asks={} walks={} kept={}\n", recvEv.methodAsks, recvEv.methodWalks, recvEv.methodAnswers.size() );
-        rw::emitTo( stderr, "[mem] rust_glob asks={} reads={} verdicts={}\n", recvEv.types.rustGlobAsks, recvEv.types.rustGlobReads, recvEv.types.rustGlobVerdicts );
+        rw::emitTo( stderr, "[mem] rust_glob asks={} answers={} reads={} verdicts={}\n", recvEv.types.rustGlobAsks, recvEv.types.rustGlobAnswers, recvEv.types.rustGlobReads, recvEv.types.rustGlobVerdicts );
         rw::emitTo( stderr, "[mem] reach_by_name asks={} kept={}\n", reachOutside.asks, reachOutside.kept );
         rw::emitTo( stderr, "[mem] canon_split asks={} keyed={}\n", narrower.identity.canonSplit.asks, narrower.identity.canonSplit.keyed );
         rw::emitTo( stderr, "[mem] inherited asks={} walks={}\n", narrower.identity.inheritedAsks, narrower.identity.inheritedWalks );
