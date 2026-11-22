@@ -369,6 +369,39 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
     return out;
 }
 
+// PG1: a FILE:LINE:NAME token names ONE definition — the row it was pasted from (p="path:line" plus that row's n=). The shared resolver
+// reads LINE as a locator and drops it (graph.h splitQualifiedSpec), so the token resolved to EVERY same-named definition in that file:
+// following gson's `--expand=toString` unserved_next= chain re-served $Gson$Types.java's three toString bodies at each hop that named
+// one of them, and reached 19 of 33 definitions (CL1 READOUT §18). When exactly one match starts on LINE, the token keeps that one and
+// drops its same-file namesakes; matches in other files (a declaration's widened definitions) stay, and no match on LINE leaves the
+// list as the resolver gave it.
+inline std::vector<rw::NodeId> narrowToSelectorLine( const rw::IngestResult& ing, std::string_view selector, std::vector<rw::NodeId> matches )
+{
+    const std::size_t nameColon = selector.rfind( ':' );
+    if( matches.size() < 2 || nameColon == std::string_view::npos )
+    {
+        return matches;
+    }
+    const std::string_view located   = selector.substr( 0, nameColon );
+    const std::size_t      lineColon = located.rfind( ':' );
+    std::uint32_t          line      = 0;
+    if( lineColon == std::string_view::npos || lineColon + 1 == located.size()
+        || std::from_chars( located.data() + lineColon + 1, located.data() + located.size(), line ).ptr != located.data() + located.size() )
+    {
+        return matches;   // no `:LINE` before the name: a file:name or a canonical id, resolved as it was
+    }
+    const auto startsOnLine = [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].line == line; };
+    const auto at           = std::ranges::find_if( matches, startsOnLine );
+    if( at == matches.end() || std::any_of( at + 1, matches.end(), [ & ]( rw::NodeId id ) { return id != *at && startsOnLine( id ); } ) )
+    {
+        return matches;   // nothing, or two definitions, start on LINE: the line does not pick one
+    }
+    const rw::NodeId    keep = *at;
+    const std::uint32_t file = ing.symbols[keep].fileId;
+    std::erase_if( matches, [ & ]( rw::NodeId id ) { return id != keep && id < ing.symbols.size() && ing.symbols[id].fileId == file; } );
+    return matches;
+}
+
 // S3: how old is a cached clone, in whole days, from the cache DIR's mtime (no network call — the dir's
 // mtime is bumped by the clone itself and untouched by a read-only map, so it approximates "when we last
 // fetched"). Clamped to >= 0 so a clock skew (mtime in the future) never prints a negative age.
@@ -532,6 +565,9 @@ struct MainDispatch
     const GrepScanPhases*                 grepPhases = nullptr;   // §P4.1: prefetched grep scan (nullptr ⇒ compute inline)
     bool                                   valueUses  = false;     // card A1: the captureValueUses this run's ingest actually used, so the
                                                                     //   pre-apply preview re-parses its one spliced file the SAME way
+    int                                    pageRowCap = -1;        // PG1: the row cap the output ceiling chose for a --grep page (0 = every
+                                                                    //   row, --page-bytes=0); -1 = the verb's own default (runGrepServed)
+    std::size_t*                           pageRowsOut = nullptr;  // PG1: where --grep reports the rows its page window held (the longer list)
 };
 
 }   // namespace — part 1: the shared preamble helpers + the verb-dispatch context
@@ -1656,6 +1692,83 @@ inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vect
     return u;
 }
 
+// expand-lean-k64's posture (runDefaultMap's leanEligible): a run whose root may name unserved definitions — no exact-name default,
+// and no caller-chosen map, payload or serialization (--top-k, --signatures, --pack-top-n, --query, --adaptive, --max-tokens, --json).
+inline bool expandLeanPostureOf( const rw::Config& cfg, bool exactNameExpandDefault ) noexcept
+{
+    return !exactNameExpandDefault && !cfg.topKExplicit && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
+        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json;
+}
+
+// PG1: whether expandOffsetCut may cut this page — the default size (not an explicit --pack-budget-bytes, --for, or --page-bytes=0:
+// `sizedByCaller`), the lean posture above, an --expand without --outline, and bodies that rendered.
+inline bool expandCutAllowed( const rw::Config& cfg, bool sizedByCaller, bool leanPosture, bool bodiesRendered ) noexcept
+{
+    return !sizedByCaller && leanPosture && cfg.outline.empty() && bodiesRendered;
+}
+
+// PG1: where a many-definition --expand page is cut so the chain can continue by offset — the index (in request order) of the first
+// requested definition this render did NOT serve, when more than kMaxUnservedSelectors went unserved (fewer: 0, the selector list in
+// unserved_next= names them all and stays the continuation). 0 also when the first definition itself went unserved (no prefix to
+// serve: the selector list is kept, disclosed by unserved_listed=). Every definition before the cut was served by this render.
+inline std::size_t expandOffsetCut( const rw::IngestResult& ing, const std::vector<rw::NodeId>& requested, const rw::EmittedBodies& record, bool mayCut )
+{
+    if( !mayCut )
+    {
+        return 0;   // an explicit size, the whole answer, an outline, a --top-k/--json posture, or no rendered bodies: never cut here
+    }
+    std::vector<rw::NodeId> served;
+    served.reserve( record.kept.size() );
+    for( const rw::EmittedBody& b : record.kept )
+    {
+        served.push_back( b.id );
+    }
+    std::sort( served.begin(), served.end() );
+    const auto  isUnserved = [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].kind != rw::SymKind::ModuleScope && !std::binary_search( served.begin(), served.end(), id ); };
+    const auto  first      = std::ranges::find_if( requested, isUnserved );
+    const auto  unserved   = std::size_t( std::ranges::count_if( requested, isUnserved ) );
+    return unserved > kMaxUnservedSelectors && first != requested.end() ? std::size_t( first - requested.begin() ) : 0;
+}
+
+// PG1: the root's unserved attributes when the page served a prefix (expandOffsetCut): unserved_total= the definitions after it, and
+// unserved_next= the same --expand tokens with --offset=K, K counted over the whole request (the earlier pages' offset included), plus
+// the crawl-scope flags, so the pasted call resolves the same list. That call serves the next prefix, or names its last <= 16 by
+// selector, so the chain serves every definition once.
+inline UnservedDefs unservedByOffset( const rw::IngestResult& ing, const std::vector<rw::NodeId>& rest, const rw::Config& cfg, std::size_t prefixEnd )
+{
+    const std::size_t nextOffset = std::size_t( std::max( cfg.pageOffset, 0 ) ) + prefixEnd;
+    UnservedDefs u;
+    u.unserved  = std::size_t( std::ranges::count_if( rest, [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].kind != rw::SymKind::ModuleScope; } ) );
+    u.requested = u.unserved;
+    std::string tokens;
+    for( const std::string& tok : cfg.expand )
+    {
+        tokens += ( tokens.empty() ? "" : "," ) + tok;
+    }
+    u.attrs = " unserved_total=\"" + std::to_string( u.unserved ) + "\""
+            + rw::nextAttrXml( rw::nextFlag( "--expand=", tokens ) + " --offset=" + std::to_string( nextOffset ) + crawlScopeFlags( cfg ), "unserved_next" );
+    return u;
+}
+
+// PG1: `--expand=… --offset=K` continues a many-definition --expand (the offset form of unserved_next=, unservedByOffset): the first K
+// definitions the tokens resolve to, in resolution order, were served by the pages before this one, so they are dropped from the
+// request. false (after one stderr line) when K is at or past the last definition: there is nothing left to serve.
+inline bool skipExpandOffset( const rw::Config& cfg, std::vector<rw::NodeId>& nodes )
+{
+    if( cfg.expand.empty() || !cfg.forTask.empty() || cfg.pageOffset <= 0 )
+    {
+        return true;
+    }
+    const std::size_t k = std::size_t( cfg.pageOffset );
+    if( k >= nodes.size() )
+    {
+        rw::emitTo( stderr, "ripwire: --offset={} is past the {} definitions --expand names: nothing is left to serve\n", k, nodes.size() );
+        return false;
+    }
+    nodes.erase( nodes.begin(), nodes.begin() + std::ptrdiff_t( k ) );
+    return true;
+}
+
 // ── ONE PRICE FOR BOTH SERVING CANDIDATES (CodeRabbit, PR #215, second round on this comparison) ─────
 // THE DEFECT was not a missing addend, it was two counters. The bundle candidate was priced to the byte
 // (envelope, root attributes, the unproven residue, the map, the rendered <bodies>, the closing tag) by the
@@ -2308,7 +2421,7 @@ int runDefaultMap( const MainDispatch& d )
             // they mean there. On a bare name it is byte-identical to the resolveAllByName it replaces.
             const ExpandToken         et              = parseExpandToken( tok, "--expand" );
             std::size_t               tokUnprovenDefs = 0;
-            const std::vector<NodeId> matches         = resolveAllByNameQualified( ing, et.selector, &tokUnprovenDefs );
+            const std::vector<NodeId> matches         = narrowToSelectorLine( ing, et.selector, resolveAllByNameQualified( ing, et.selector, &tokUnprovenDefs ) );
             ctxUnprovenDefs += tokUnprovenDefs;
             if( matches.empty() )
             {
@@ -2338,6 +2451,10 @@ int runDefaultMap( const MainDispatch& d )
         {
             return 1; // refusal + empty stdout — nothing has been printed yet
         }
+    }
+    if( !skipExpandOffset( cfg, expandNodes ) )
+    {
+        return 1;   // PG1: an --offset past the last definition: refused on stderr, nothing printed
     }
 
     // V1 (routing note ugrep RN2, 2026-08-15): an EXACT-NAME --expand — one token that resolved to exactly
@@ -2382,7 +2499,7 @@ int runDefaultMap( const MainDispatch& d )
             }
 
             std::size_t               nmUnprovenDefs = 0;
-            const std::vector<NodeId> matches        = resolveAllByNameQualified( ing, nm, &nmUnprovenDefs );
+            const std::vector<NodeId> matches        = narrowToSelectorLine( ing, nm, resolveAllByNameQualified( ing, nm, &nmUnprovenDefs ) );   // PG1
             ctxUnprovenDefs += nmUnprovenDefs;   // H1: onto the <ctx> root --expand shares
             if( matches.empty() )
             {
@@ -2460,6 +2577,10 @@ int runDefaultMap( const MainDispatch& d )
     // LT1: --page-bytes=0 is the whole answer — no body budget at all (SIZE_MAX: the unlimited budget packBodies already maps 0 to),
     // and no refit below.
     std::size_t expandBudget = rw::wholeAnswerAsked( cfg ) ? SIZE_MAX : cfg.packBudgetBytes;
+    // expand-lean-k64's posture (leanEligible below): the runs whose root names unserved definitions — and so the only ones PG1 may cut.
+    const bool expandLeanPosture = expandLeanPostureOf( cfg, exactNameExpandDefault );
+    std::size_t         expandPrefixEnd = 0;   // PG1: > 0 when this page serves the request's first expandPrefixEnd definitions only
+    std::vector<NodeId> expandRest;            //   and these are the rest, continued by --offset (expandOffsetCut)
     if( !expandNodes.empty() )
     {
         const auto renderBodies = [ & ]
@@ -2476,6 +2597,17 @@ int runDefaultMap( const MainDispatch& d )
         for( int refit = 0; !fitsCeiling && refit < 6 && bodiesSection.xml.size() > kExpandCeilingBodiesBytes && expandBudget > kExpandCeilingFloorBytes; ++refit )
         {
             expandBudget = std::max( kExpandCeilingFloorBytes, expandBudget * kExpandCeilingBodiesBytes / bodiesSection.xml.size() * 9 / 10 );
+            renderBodies();
+        }
+        // PG1: past kMaxUnservedSelectors, unserved_next='s selector list cannot name every unserved definition (CL1 §18: 14 of gson's
+        // 33 toString bodies were reached by no hop). The page is then re-rendered as the PREFIX of the request that this render
+        // already served whole-walk (the budget walks the request in order, so the same budget serves that prefix exactly), and the
+        // rest is one offset call away — expandOffsetCut below. Only on the default posture: an explicit size is the caller's.
+        expandPrefixEnd = expandOffsetCut( ing, expandNodes, expandRecord, expandCutAllowed( cfg, fitsCeiling, expandLeanPosture, bodiesSection.isRendered ) );
+        if( expandPrefixEnd > 0 )
+        {
+            expandRest.assign( expandNodes.begin() + std::ptrdiff_t( expandPrefixEnd ), expandNodes.end() );
+            expandNodes.resize( expandPrefixEnd );
             renderBodies();
         }
     }
@@ -2499,8 +2631,7 @@ int runDefaultMap( const MainDispatch& d )
     // posture rides a map there).
     std::string ctxLeanAttr = exactNameExpandDefault ? std::string( " topk_default=\"0\"" ) : std::string();
     std::string ctxUnservedAttr;
-    const bool  leanEligible = !exactNameExpandDefault && !cfg.topKExplicit && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
-        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json
+    const bool  leanEligible = expandLeanPosture
         && ( ( !cfg.expand.empty() && cfg.outline.empty() && !expandNodes.empty() && bodiesSection.isRendered )
              || ( cfg.outline.size() == 1 && cfg.expand.empty() && !outlineNodes.empty() && outlineSection.isRendered ) );
     if( leanEligible )
@@ -2517,8 +2648,9 @@ int runDefaultMap( const MainDispatch& d )
                 served.push_back( b.id );
             }
         }
-        const UnservedDefs un = unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
-                                                cfg.expand.empty() ? "--outline" : "--expand", mapRootArg );
+        const UnservedDefs un = expandPrefixEnd > 0 ? unservedByOffset( ing, expandRest, cfg, expandPrefixEnd )
+                                                    : unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
+                                                                      cfg.expand.empty() ? "--outline" : "--expand", mapRootArg );
         if( un.requested > 0 )
         {
             mapTopK      = 0;
@@ -2621,7 +2753,9 @@ int runDefaultMap( const MainDispatch& d )
     const bool expandAllModuleScope = !expandNodes.empty()
         && std::all_of( expandNodes.begin(), expandNodes.end(),
                         [ & ]( rw::NodeId n ) { return n < ing.symbols.size() && ing.symbols[ n ].kind == rw::SymKind::ModuleScope; } );
-    if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered, expandAllModuleScope ) )
+    // PG1: a page cut to a prefix (expandPrefixEnd) stays a bundle: the whole-file form names no unserved definitions, and its files
+    // would also carry same-named definitions past the cut that the offset chain serves later.
+    if( expandPrefixEnd == 0 && expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered, expandAllModuleScope ) )
     {
         // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
         // + the pre-rendered <bodies> + "</ctx>". Rendering-and-measuring beats arithmetic here: the map's
@@ -4862,6 +4996,121 @@ static std::optional<int> runLintServed( const MainDispatch& d )
     return handled ? std::optional<int>( rc ) : std::nullopt;
 }
 
+// The bytes an answer captured from stdout delivers: what the compact dialect will write for it (the legend it adds after the
+// cut included), else the bytes themselves — the size the output ceiling is checked against (the map pager's own pricing).
+static std::size_t deliveredAnswerBytes( const rw::Config& cfg, const std::string& doc )
+{
+    return cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( doc, compactLegendHint( cfg, doc ) ) : doc.size();
+}
+
+// PG1 (outputceiling.h): --clones under the output ceiling, when it is the verb that answers (§B11.4's winner; any other run is
+// runMaintenanceViews' as before). --page-bytes=0: every clone group through serveWholeAnswer. An explicit --limit=N: the caller's
+// page. Otherwise the verb's own page is rendered into a capture and priced as delivered; over the ceiling it is re-rendered with a
+// row budget (cfg.pageRowBytes, verbs_report.h cloneRowsWindow), lowered in proportion until the page fits or holds one row — a clone
+// group is the unit, never cut. A page that fits is byte-identical; the cut one says next="--clones --offset=K".
+static std::optional<int> runMaintenanceViewsServed( const MainDispatch& d )
+{
+    const VerbPrecedence prec = scanReportVerbPrecedence( d.cfg );
+    if( !d.cfg.clones || prec.winner == nullptr || std::strcmp( prec.winner, "--clones" ) != 0 || !d.cfg.forTask.empty() )
+    {
+        return runMaintenanceViews( d );
+    }
+    if( rw::wholeAnswerAsked( d.cfg ) )
+    {
+        return serveWholeAnswer( d.cfg, [ & ] { return emitClonesReport( d.cfg, d.ing ); } );
+    }
+    if( d.cfg.pageLimit > 0 )
+    {
+        return emitClonesReport( d.cfg, d.ing );
+    }
+    rw::Config page = d.cfg;
+    for( int fit = 0;; ++fit )
+    {
+        std::optional<StdoutCaptured> cap;
+        int                           rc = 0;
+        {
+            StdoutCapture out( true );
+            if( !out.active() )
+            {
+                return emitClonesReport( page, d.ing );
+            }
+            rc  = emitClonesReport( page, d.ing );
+            cap = out.finish();
+        }
+        if( !cap || !cap->restored )
+        {
+            return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+        }
+        const std::size_t bytes = deliveredAnswerBytes( page, cap->bytes );
+        const bool        oneRow = cap->bytes.find( "<group " ) == cap->bytes.rfind( "<group " );   // a group is never cut: nothing smaller to try
+        if( rc != 0 || cap->failed || bytes <= rw::kOutputCeilingChars || oneRow || fit == 8 )
+        {
+            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+            return rc;
+        }
+        // the first cut budgets the rows at the ceiling less a tenth; each later one in proportion to how far over the page still was
+        const std::size_t rowsBudget = fit == 0 ? rw::kOutputCeilingChars * 9 / 10 : page.pageRowBytes;
+        page.pageRowBytes = std::max<std::size_t>( 1, fit == 0 ? rowsBudget : rowsBudget * ( rw::kOutputCeilingChars * 19 / 20 ) / bytes );
+    }
+}
+
+
+// PG1 (outputceiling.h): --grep/--regex under the output ceiling. MEASURED on GA1 DEV (CL1 census, base 36a95d732): a default
+// page printed up to 29,224 characters (bat, --grep=bat: 100 in-index rows plus 100 unindexed rows), over the 24,000 ceiling.
+// A default page (no --limit, no --pack-top-n) is rendered into a capture with the verb's own row cap; over the ceiling, the
+// cap is lowered in proportion and the page re-rendered until it fits (both lists obey the one cap, so they shrink together;
+// a one-row page always ends the loop). The cut is the verb's own window — shown=/capped=/has_more=/next_offset= and
+// next="--grep=… --offset=K" — and the next page is fitted the same way, so the chain walks every match once, in the verb's
+// order (source before tests before docs). A page that fits is byte-identical. --page-bytes=0 (cli.h wholeAnswerAsked): every
+// row of both lists, with the one stderr line. A capture that cannot be taken serves the default page straight through.
+static std::optional<int> runGrepServed( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.grep.empty() )
+    {
+        return std::nullopt;
+    }
+    if( rw::wholeAnswerAsked( cfg ) && rw::rowPagedVerbAsked( cfg ) )
+    {
+        MainDispatch whole = d;
+        whole.pageRowCap   = 0;
+        return serveWholeAnswer( cfg, [ & ] { return emitGrepReport( whole ); } );
+    }
+    if( cfg.pageLimit > 0 || cfg.packTopN > 0 )
+    {
+        return runGrep( d );   // the caller sized the page
+    }
+    MainDispatch page = d;
+    std::size_t  rows = 0;
+    page.pageRowsOut  = &rows;
+    for( ;; )
+    {
+        std::optional<StdoutCaptured> cap;
+        int                           rc = 0;
+        {
+            StdoutCapture out( true );
+            if( !out.active() )
+            {
+                return emitGrepReport( page );
+            }
+            rc  = emitGrepReport( page );
+            cap = out.finish();
+        }
+        if( !cap || !cap->restored )
+        {
+            return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+        }
+        const std::size_t bytes = deliveredAnswerBytes( cfg, cap->bytes );
+        if( rc != 0 || cap->failed || bytes <= rw::kOutputCeilingChars || rows <= 1 )
+        {
+            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+            return rc;
+        }
+        // proportional, at 9/10 of the ceiling (the legend and root do not shrink with the rows), and always at least one row fewer
+        page.pageRowCap = int( std::max<std::size_t>( 1, std::min( rows - 1, rows * ( rw::kOutputCeilingChars * 9 / 10 ) / bytes ) ) );
+    }
+}
+
 // CL1 (mappages.h, outputceiling.h): the bare map, served in pages when it is over the output ceiling. The map is rendered whole
 // into a capture and cut there, so a map that fits is byte-identical and every page windows one document. --page-bytes=N sets
 // the page size (0: the whole map, one call); --page-bytes=N:K asks for page K. A capture that cannot be taken serves the map
@@ -5016,10 +5265,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // CL1: cli.h accepts --page-bytes without --for only on a flag set that can be the bare map; a report verb that wins the
     // dispatch would answer instead and the flag would be read by nothing, so that run refuses rather than ignoring it.
     // LT1: --lint is the one report verb it shapes (--page-bytes=0, the whole answer; cli.h wholeOnlyConflict refuses the rest).
-    const bool lintAnswers = verbPrec.winner != nullptr && std::strcmp( verbPrec.winner, "--lint" ) == 0 && rw::lintPagedVerbAsked( cfg );
+    const bool lintAnswers = verbPrec.winner != nullptr && ( ( std::strcmp( verbPrec.winner, "--lint" ) == 0 && rw::lintPagedVerbAsked( cfg ) )
+                                                             || ( ( std::strcmp( verbPrec.winner, "--grep" ) == 0 || std::strcmp( verbPrec.winner, "--clones" ) == 0 )
+                                                                  && rw::rowPagedVerbAsked( cfg ) ) );   // PG1: --grep/--clones take --page-bytes=0 too
     if( !cfg.pageBytesSpec.empty() && cfg.forTask.empty() && verbPrec.winner != nullptr && !lintAnswers )
     {
-        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer, the bare map, --lint or --expand only — {} answers this run\n", verbPrec.winner );
+        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer, the bare map, --lint, --expand, --grep or --clones only — {} answers this run\n", verbPrec.winner );
         return 1;
     }
 
@@ -6311,7 +6562,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runMaintenanceViews( dsp ) )
+    if( std::optional<int> handled = runMaintenanceViewsServed( dsp ) )
     {
         return *handled;
     }
@@ -6516,7 +6767,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runGrep( dsp ) )
+    if( std::optional<int> handled = runGrepServed( dsp ) )
     {
         return *handled;
     }

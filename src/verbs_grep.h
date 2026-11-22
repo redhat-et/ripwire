@@ -1050,7 +1050,8 @@ int emitGrepReport( const MainDispatch& d )
     // whose name holds the literal, then source), and the rest is where the literal is typed; next= pages on. servedString is
     // set only on that posture (search.h GrepStringLift::Ranked: fewer than kGrepLiftCodeFloor program-code hits, unclassified
     // ones included), so main's literal lift on a full count keeps the 100-row default (rv-lean-trio2 item 1).
-    const int                       histCap         = cfg.packTopN > 0 ? cfg.packTopN : tierReport.servedString > 0 ? kGrepLiftRowCap : 100;
+    // PG1: d.pageRowCap is the cap runGrepServed (main.cpp) chose to keep a default page under the output ceiling (0 = every row).
+    const int                       histCap         = d.pageRowCap >= 0 ? d.pageRowCap : cfg.packTopN > 0 ? cfg.packTopN : tierReport.servedString > 0 ? kGrepLiftRowCap : 100;
     const int                       rowCap          = effectiveRowCap( cfg.pageLimit, histCap );
     const GrepAuxCollection&        aux             = phases->aux;
     const std::vector<GrepTerm>&    grepTerms       = phases->terms;
@@ -1326,7 +1327,16 @@ int emitGrepReport( const MainDispatch& d )
     scanShortAttr += pageCarriers.skippedAttrs;   // L4: the reads the memory guard stopped (reads_skipped=, reads_next=), or ""
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
     // P3 (L7) + honest-lex: the one follow-up (grepRootNext above states the order).
-    const std::string grepNext = grepRootNext( cfg, pat, grepPage.end < hitCount || hitsCapped != 0, grepPage.end,
+    // PG1: the unindexed list obeys the SAME window (H4 below), so a page is cut while EITHER list has rows past it — before, the
+    // chain stopped with the in-index list and the unindexed rows past it were reached by no next=. hits_capped= alone continues
+    // only from a page that printed rows: a page past the last row has nothing after it (it used to name itself forever).
+    const PageWindow  auxPage  = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
+    const std::size_t pageEnd  = std::max( grepPage.end, auxPage.end );
+    if( d.pageRowsOut != nullptr )
+    {
+        *d.pageRowsOut = std::max( grepPage.end - grepPage.begin, auxPage.end - auxPage.begin );
+    }
+    const std::string grepNext = grepRootNext( cfg, pat, grepPage.end < hitCount || auxPage.end < aux.hits.size() || ( hitsCapped != 0 && grepPage.end > grepPage.begin ), pageEnd,
                                                [ & ] { return rw::grepCarrierNext( ing, hits, encRows, encCarriers ); },
                                                [ & ] { return hits.empty() ? std::string() : std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ); } );
     rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}{}>",
@@ -1421,7 +1431,6 @@ int emitGrepReport( const MainDispatch& d )
     // H4: the SAME window the indexed list above obeys, applied to this list's own length. Computed here
     // rather than inside the collector for the §A1 reason: nothing derived from --limit/--offset may reach
     // what is COLLECTED, so count= stays a property of the search and only shown= moves with the page.
-    const PageWindow auxPage = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
     emitGrepUnindexed( aux.hits, auxPage, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
