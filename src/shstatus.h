@@ -124,7 +124,7 @@ struct Tree
 // ONE nesting budget for the lexer and the parser (CR712-SHSTATUS-DEPTH): every recursion of either — a quote or $( ) the
 // lexer skips through, a compound command or a substitution the parser descends into — takes a level, so a script nested
 // past kMaxShellNest is cut there (Tree::cut) instead of exhausting the stack (20,000 nested subshells crashed the scan).
-inline constexpr int kMaxShellNest = 64;
+inline constexpr int kMaxShellNest = 64;   // shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N
 struct NestBudget
 {
     int  depth = 0;
