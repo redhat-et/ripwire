@@ -8507,7 +8507,8 @@ inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& 
             while( rest.starts_with( "../" ) && !dir.empty() )
             {
                 dir.pop_back();
-                dir.resize( dir.rfind( '/' ) + 1 );   // npos + 1 == 0: the top level
+                const std::size_t slash = dir.rfind( '/' );
+                dir.resize( slash == std::string::npos ? 0 : slash + 1 );   // no `/` left: the top level
                 rest.remove_prefix( 3 );
             }
             const std::string norm = lexicalNormalize( rest );
@@ -8693,7 +8694,8 @@ inline bool rustFnIsProcMacro( std::string_view source, std::uint32_t start )
     {
         std::string_view inner = line.substr( 2, line.find( ']' ) == std::string_view::npos ? std::string_view::npos : line.find( ']' ) - 2 );
         inner.remove_prefix( std::min( inner.find_first_not_of( " \t" ), inner.size() ) );
-        return inner.substr( 0, std::min( inner.find_last_not_of( " \t" ) + 1, inner.size() ) ) == "proc_macro";
+        const std::size_t last = inner.find_last_not_of( " \t" );   // npos on a blank attribute: never npos + 1
+        return last != std::string_view::npos && inner.substr( 0, last + 1 ) == "proc_macro";
     };
     // The def's start may already include its doc comments and attributes (the Rust extent takes the run): read forward to the item line
     for( std::size_t at = std::min<std::size_t>( start, text.size() ); at < text.size(); )
@@ -8791,7 +8793,8 @@ inline bool rustUseTextNames( std::string_view uses, std::string_view name )
             std::string_view rest = uses.substr( after );
             rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
             std::string_view before = uses.substr( 0, at );
-            before.remove_suffix( before.size() - std::min( before.find_last_not_of( " \t" ) + 1, before.size() ) );
+            const std::size_t last = before.find_last_not_of( " \t" );   // npos when only blanks precede: never npos + 1
+            before                 = last == std::string_view::npos ? std::string_view() : before.substr( 0, last + 1 );
             const bool aliasSlot = before.ends_with( "as" ) && ( before.size() == 2 || !isIdent( before[ before.size() - 3 ] ) );
             if( rest.starts_with( "as" ) && rest.size() > 2 && !isIdent( rest[ 2 ] ) )
             {
