@@ -188,7 +188,10 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
                            r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=|'
                            # TAIL-SYM-TERMS (2026-11-14): the tsym= clause rides only when a SHOWN tail row added a task-word name
-                           r'tsym=|question words such as which, function, file are ignored', re.I )
+                           r'tsym=|question words such as which, function, file are ignored|'
+                           # BR1b (src/foractline.h): the act-line clause rides only with its own <act> element, which a budget
+                           # carries only while the answer still fits with it — present-only by design; its three segments
+                           r'the act line: read=|search only for what no row lists|absent if one lacks e=', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]

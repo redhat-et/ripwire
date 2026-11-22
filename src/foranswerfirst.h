@@ -404,7 +404,7 @@ inline constexpr std::string_view kSubjectCallersOpen = "<callers by=\"subject\"
 }
 
 // The answer as A will emit it: each block's lead comments (ownerOf), its text with the direct-child comments lifted out, its
-// emitted size with those lead comments (`sized`), and the lifted comments in document order.
+// emitted size with those lead comments (`sized`: the bytes a page counts, so 0 for the act line), and the lifted comments in document order.
 struct Layout
 {
     std::vector<std::size_t>      ownerOf;
@@ -424,6 +424,9 @@ struct Layout
     for( std::size_t k = 0; k < blocks.size(); ++k )
     {
         if( l.ownerOf[ k ] != std::string_view::npos ) { l.sized[ l.ownerOf[ k ] ] += blocks[ k ].end - blocks[ k ].begin; }
+        // BR1b (foractline.h): G measures page 1 as paging will cut it, and no page counts the act line (forpages.h markActLine) — so
+        // neither does G. MEASURED without this, GA1 DEV ga-libzmq-11: the line's 114 B tipped the <fold> off page 1 (BODYn 27 -> 26).
+        if( !blocks[ k ].comment && blocks[ k ].name == "act" ) { l.sized[ k ] = 0; }
     }
     return l;
 }

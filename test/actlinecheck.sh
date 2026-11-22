@@ -54,7 +54,7 @@ sys.path.insert(0, os.path.join(REPO, "test"))
 from rowlines import decode
 bad = 0
 N = 3
-CLAUSE_LEAD = b"<!-- act read=: "
+CLAUSE_LEAD = b"<!-- the act line: "
 ROW_CLAUSES = (b"<!-- sigs rseq=1:", b"<!-- sigs/tail rows are lines:")
 
 
@@ -292,7 +292,9 @@ d = subprocess.run([BIN, "--legend-dict"], capture_output=True).stdout
 on = ans["src.pagerank"][0]
 body = on[on.index(CLAUSE_LEAD) + 5:on.index(b"-->", on.index(CLAUSE_LEAD)) - 1] if CLAUSE_LEAD in on else b"<absent>"
 say(body in d and len(body) + 9 <= 200, "(E) the clause (%d B) is a --legend-dict entry and within 200 B" % (len(body) + 9))
-say(CLAUSE_LEAD in on and b"act read=" in on[on.index(CLAUSE_LEAD):], "(E) act read= is defined in the answer's own legend")
+cl = on[on.index(CLAUSE_LEAD):on.index(b"-->", on.index(CLAUSE_LEAD))] if CLAUSE_LEAD in on else b""
+say(b"act line" in cl and re.search(rb"(?<![\w:.-])read=", cl) is not None,
+    "(E) the act line and its read= are defined in the answer's own legend (the house name= form legendcoveragecheck reads)")
 
 # (S) --legend-seen: a caller that holds the clause's dictionary line gets the line without the clause (the element stays)
 plain = run([SRC, "--no-cache", "--for=" + TASK])

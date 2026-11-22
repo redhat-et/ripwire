@@ -1,5 +1,5 @@
 // foractline.h — THE ACT LINE (lane BR1, owner ruling 178, 2026-11-21): a `--for` answer that can name the ranges an agent will read
-// next says so in one element, <act read="P:L-E,…"/>, right after its answer block, so they are read in ONE turn of parallel ranged Reads.
+// next says so in one element, <act read="P:L-E,…"/>, right after its <sigs>, so they are read in ONE turn of parallel ranged Reads.
 //
 // WHY. Lane RX1 (results RX1_LOOKUP_CLASSES_1121 §1, §6, §7) measured agents acting on a --for answer: 58% of their pre-edit retrieval
 // tokens are reads of ranges the answer listed — they trust it — but they issue them ONE PER REQUEST (1.02-1.27 calls per request), and
@@ -22,18 +22,20 @@
 // N = kActRows = 3, chosen from data (results BR1_BATCHED_READ_1121 READOUT §2/§8; GA1 DEV n=89 page 1, MEASURED): 3 is the largest N
 // inside the ~120 B median element the owner's build ruling set. Sharing a repeated path (P:L-E,L-E) saved 0 B at the median.
 //
-// WHERE IT GOES AND WHEN IT RUNS. Right after <sigs>, or after the key-body group when that group follows <sigs> directly (KB1
-// places the group directly after the first row block: forkeybodycheck K3), so every block-order contract that reads the answer
-// block first still reads it first. It is inserted into the WHOLE answer-first document before the early stop and paging, so it
-// is a block of the row stream like any other: paging carries it on the page it falls on, pricePage prices it, and the pages joined
-// are the whole answer. Under an explicit token budget (CLI runForLensFitted, MCP `for` budget_tokens) it is inserted after the
-// fit only when the answer still fits the budget with it (insertActLine's maxEstTokens), so a budget the answer fits returns the
-// unbudgeted answer byte for byte and a shed answer never exceeds its budget for it. Under --legend=first the same line is written
-// with its clause in the leading legend (ClausePlace::Head), so the legend-first answer stays a byte permutation of the
-// answer-first one (forpagescheck P6, forsoftbudgetcheck STp). Not on --json or a routed answer's outer document (no <ctx> root).
+// WHERE IT GOES AND WHEN IT RUNS. Into the RAW render (legend-first), before the answer-first permutation, KB1, the early stop and
+// paging — so every later stage treats it as it treats every block: --legend=first and the answer-first order stay byte permutations
+// of each other; the line sits right after <sigs> and KB1 later puts its key group directly after the first row block (forkeybodycheck
+// K3); paging carries it as a block of the row stream that no page counts (forpages.h markActLine), and G's page-1 model does not count
+// it either (foranswerfirst.h layoutBlocks), so no page cut and no promotion moves for it. Under an explicit token budget it goes into
+// an answer the budget fits WHOLE (still raw), only while it still fits with the line: a budget the answer fits returns the unbudgeted
+// answer, line included, byte for byte (TOKEN-BUDGET-MONOTONE), and a budget that had to shed content spends nothing on it. MCP `for` has
+// no fitter: under budget_tokens the line rides only while est_tokens= stays within it. The clause joins the leading legend run, and the
+// permutation moves it with the rest of the document legend. Its first word is "the", not "act": a comment whose first word names an
+// element is that element's BLOCK-LOCAL legend (foranswerfirstcheck R8), and this one defines the line for the whole answer.
+// Not on --json (no <ctx> root), nor on a routed answer's outer document.
 // One legend clause (kActClause), only when the line is written; a legend-dictionary entry (forlegendentries.h), so a legend="ref"
-// session drops it once served. est_tokens= is re-priced by the added bytes through the house reprice (compactlegend.h
-// repriceEstTokensIn: ceil at the densest rate), so the price stays an upper bound, never an under-read.
+// session drops it once served. est_tokens= is re-priced EXACTLY for the added bytes (detail::repriceAdded: the rule pricePage and
+// formaxtokenscheck's judge price a document by).
 // RIPWIRE_NO_ACTLINE (any value) turns it off — the A/B handle (the RIPWIRE_NO_SIGX / RIPWIRE_NO_ROWLINES precedent): the answer is
 // then byte-identical to one served before this pass existed. --version discloses the posture (act=on|off).
 // Gate: test/actlinecheck.sh.
@@ -48,10 +50,9 @@
 #include <string_view>
 #include <vector>
 
-#include "compactlegend.h"    // repriceEstTokensIn — the house reprice of a root that grew
 #include "foractlineswitch.h" // actLineOn — the switch (cli.h's --version reads the same header)
+#include "forbudgetfit.h"     // ForAnswerLedger — the render's priced ledger the line re-prices through and keeps current
 #include "foranswerfirst.h"   // rootBody / topLevelBlocks — the one CDATA-safe scanner of a --for answer's blocks
-#include "forpages.h"         // kKeyBodyLegendLead — the key-body group the line goes after
 #include "forrowlines.h"      // readSection — the one strict row reader
 #include "serialize.h"        // attrOf — the one reader of a printed tag's attribute value
 
@@ -60,8 +61,8 @@ namespace rw::actline
 
 inline constexpr std::size_t kActRows = 3;   // see the header: GA1 DEV page 1, the largest N inside a ~120 B median element
 inline constexpr std::string_view kActClause =
-    "<!-- act read=: P:L-E of the top 3 sigs d rows by r=: Read ALL in ONE turn, parallel ranged Reads, except a body the answer "
-    "serves; search only for what no row lists; absent if one lacks e= -->";
+    "<!-- the act line: read= P:L-E of the top 3 sigs d rows by r=: Read ALL in ONE turn, parallel ranged Reads, except a served "
+    "body; search only for what no row lists; absent if one lacks e= -->";
 
 static_assert( kActRows == 3 && kActClause.find( "top 3 " ) != std::string_view::npos,
                "the legend clause kActClause states \"top 3\": reword it with kActRows (test/capdisclose.map: legend)" );
@@ -123,27 +124,8 @@ struct Candidate
 }
 }   // namespace detail
 
-// Where the clause goes: where the answer's own legend is. The answer-first document legend is the trailing comment run before </ctx>
-// (DocumentEnd); a legend-first answer (MCP `for`, CLI --legend=first) has its legend in the comment run right after the root's open tag
-// (Head) — its reader takes the legend from there (test/legendcoveragecheck.sh (G) does), so a clause at the end would define nothing.
-enum class ClausePlace
-{
-    DocumentEnd,
-    Head,
-};
-
 namespace detail
 {
-// Where the line goes: right after <sigs>, or after the key-body group (its legend comment, then <bodies of="key">) when that group
-// follows <sigs> directly — KB1 places the group directly after the first row block, and the line must not come between them.
-[[nodiscard]] inline std::size_t lineAtAfter( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::size_t sigsIdx ) noexcept
-{
-    const std::size_t k        = sigsIdx + 1;
-    const bool        keyGroup = k + 1 < blocks.size() && blocks[ k ].comment && doc.substr( blocks[ k ].begin ).starts_with( forpages::detail::kKeyBodyLegendLead )
-                         && !blocks[ k + 1 ].comment && blocks[ k + 1 ].name == "bodies";
-    return keyGroup ? blocks[ k + 1 ].end : blocks[ sigsIdx ].end;
-}
-
 // The root's est_tokens= as a number (0: none, or not a plain integer).
 [[nodiscard]] inline std::size_t rootEstTokens( std::string_view doc ) noexcept
 {
@@ -151,12 +133,39 @@ namespace detail
     std::size_t            n = 0;
     return std::from_chars( v.data(), v.data() + v.size(), n ).ec == std::errc() ? n : 0;
 }
+
+// Re-price the root after `added` markup bytes went in, EXACTLY as the document is priced (forpages.h pricePage, formaxtokenscheck's
+// judge): markup at kBytesPerTokenDefault, the <bodies> section at its own rate, the attribute's own digits by the fixpoint. Whatever
+// the old price held beyond its markup is kept as it was (the bodies, or a block the whole answer prices outside), so only the added
+// bytes move it — never the ceil-at-the-densest-rate over-read a later "est_tokens= equals the delivered price" arm would catch.
+inline void repriceAdded( std::string& doc, std::size_t added )
+{
+    constexpr std::string_view kKey    = " est_tokens=\"";
+    const std::size_t          openEnd = doc.find( '>' );
+    const std::size_t          at      = doc.find( kKey );
+    if( at == std::string::npos || at > openEnd ) { return; }
+    const std::size_t close = doc.find( '"', at + kKey.size() );
+    const std::size_t old   = rootEstTokens( doc );
+    if( close == std::string::npos || close > openEnd || old == 0 ) { return; }
+    const std::size_t attrLen    = close + 1 - at;
+    const std::size_t bodiesAt   = doc.find( "<bodies" );
+    const std::size_t bodiesEnd  = bodiesAt == std::string::npos ? std::string::npos : doc.find( "</bodies>", bodiesAt );
+    const std::size_t bodyBytes  = bodiesEnd == std::string::npos ? 0 : bodiesEnd + std::string_view( "</bodies>" ).size() - bodiesAt;
+    const std::size_t markupNow  = doc.size() - bodyBytes - attrLen;   // the attribute itself excluded: the fixpoint adds it back
+    const std::size_t markupWas  = markupNow - added;
+    const std::size_t pricedWas  = rw::tokensForEmittedBytes( markupWas + attrLen, rw::kBytesPerTokenDefault );
+    const std::size_t restTokens = old > pricedWas ? old - pricedWas : 0;
+    doc.replace( at, attrLen, rw::pricedRootAttrTokens( markupNow, rw::kBytesPerTokenDefault, restTokens, nullptr ) );
+}
 }   // namespace detail
 
-// Write the act line into `doc` (a finished --for answer: the whole answer-first document before paging, a budget's fitted answer, a
-// legend-first answer or the MCP `for` bundle) in place. `maxEstTokens` > 0: write it only if the answer's est_tokens= stays within
-// it (a budget's ceiling: the line never makes an answer exceed the budget it was fitted to). Returns whether it wrote it.
-inline bool insertActLine( std::string& doc, ClausePlace place = ClausePlace::DocumentEnd, std::size_t maxEstTokens = 0 )
+// Write the act line into `doc` — a RAW render of a --for answer (legend-first: its legend is the comment run right after the root's
+// open tag; under a budget, one it fits whole), before the answer-first permutation, KB1 and paging. The clause joins that leading legend
+// run (the permutation then moves it with the rest of the document legend); the line goes right after <sigs> (KB1 later puts its key
+// group directly after the first row block, so between them). `maxEstTokens` > 0 (a CLI budget's limit, MCP budget_tokens): write it
+// only if the answer's est_tokens= stays within it. `ledger`: the render's priced ledger (CLI), re-priced through and kept current. Returns whether
+// it wrote it.
+inline bool insertActLine( std::string& doc, std::size_t maxEstTokens = 0, ForAnswerLedger* ledger = nullptr )
 {
     const std::string_view view = doc;
     const std::optional<answerfirst::RootBody> rb = actLineOn() && view.starts_with( "<ctx" ) ? answerfirst::rootBody( view ) : std::nullopt;
@@ -166,21 +175,29 @@ inline bool insertActLine( std::string& doc, ClausePlace place = ClausePlace::Do
     const std::vector<answerfirst::Block> blocks = answerfirst::topLevelBlocks( view, rb->openEnd + 1, rb->closeAt );
     const std::optional<std::string>      value  = detail::readValue( view, blocks );
     if( !value ) { return false; }
-    const auto        sigs   = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment && b.name == "sigs"; } );
-    const std::size_t lineAt = detail::lineAtAfter( view, blocks, std::size_t( sigs - blocks.begin() ) );
-    // Head: the end of the leading comment run (or, with none, right after the root's open tag) — always before the line
+    const std::size_t lineAt = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment && b.name == "sigs"; } )->end;
+    // the end of the leading comment run (or, with none, right after the root's open tag) — always before the line
     const auto        lead     = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment; } );
-    const std::size_t clauseAt = place == ClausePlace::Head ? ( lead == blocks.begin() ? rb->openEnd + 1 : std::prev( lead )->end ) : rb->closeAt;
+    const std::size_t clauseAt = lead == blocks.begin() ? rb->openEnd + 1 : std::prev( lead )->end;
     std::string       was      = maxEstTokens > 0 ? doc : std::string();
     const std::size_t before   = doc.size();
-    // the later position first, so the earlier one still holds
-    if( clauseAt > lineAt ) { doc.insert( clauseAt, kActClause ); }
-    doc.insert( lineAt, "<act read=\"" + *value + "\"/>" );
-    if( clauseAt <= lineAt ) { doc.insert( clauseAt, kActClause ); }
-    (void)rw::repriceEstTokensIn( doc, 0, doc.find( '>' ), before, doc.size() );
+    doc.insert( lineAt, "<act read=\"" + *value + "\"/>" );   // the later position first, so clauseAt still holds
+    doc.insert( clauseAt, kActClause );
+    const std::size_t added = doc.size() - before;
+    if( ledger != nullptr && ledger->priced )
+    {
+        // the render's own converged ledger (the house reprice, as SIGX and KB1 use it), and the ledger FOLLOWS: every later stage
+        // that re-prices through it (SIGX, KB1, the budget fit) then charges these bytes too
+        repriceRootAfterCut( doc, PricedRootInputs{ ledger->markupBytes, ledger->bodyTokens }, before );
+        ledger->markupBytes += added;
+    }
+    else
+    {
+        detail::repriceAdded( doc, added );
+    }
     if( maxEstTokens > 0 && detail::rootEstTokens( doc ) > maxEstTokens )
     {
-        doc.swap( was );   // over the budget with it: the fitted answer is served as it was fitted
+        doc.swap( was );   // over the budget with it: the answer is served as it was shaped
         return false;
     }
     return true;

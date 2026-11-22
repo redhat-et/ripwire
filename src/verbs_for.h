@@ -5724,14 +5724,23 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
 }
 
 // The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
-// The token ceiling a budget's answer must stay within: the lower of the target and the ceiling when both are set, else the one set.
-inline std::size_t forBudgetLimitTokens( const rw::ForBudgetAsk& ask ) noexcept
-{
-    return ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
-}
 inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
 {
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
+    // BR1b (foractline.h): the act line goes into an answer the budget fits WHOLE, still raw (before the permutation, as on the default
+    // path), and only while it still fits with the line — so a budget the answer fits returns the unbudgeted answer, line included,
+    // byte for byte (TOKEN-BUDGET-MONOTONE), and the line never takes a row's room (forrankordercheck (11), forbodyslotcheck E1). Not on
+    // a shed answer: a budget that had to cut content spends nothing on the line, and its price stays the fitter's own, exact one (the
+    // render's ledger describes the unfitted answer, so it could not re-price a shed one exactly: formaxtokenscheck (A/C/D)). On a whole
+    // fit that ledger still describes this answer: a copy of it re-prices the line and follows it, so SIGX below charges it too.
+    const std::size_t   budgetLimit = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
+                                                                                    : std::max( ask.targetTokens, ask.ceilingTokens );
+    const bool          wholeFit    = fit.verdict == rw::ForBudgetFitResult::Verdict::Whole;
+    rw::ForAnswerLedger ledger      = u.ledger;
+    if( wholeFit )
+    {
+        (void)rw::actline::insertActLine( out, budgetLimit, &ledger );
+    }
     // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
     // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
     // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
@@ -5756,20 +5765,11 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
     {
         (void)rw::answerfirst::answerFirst( out, forAnswerFirstAsk( d.cfg, out ) );
         // SIGX (TL1 M1, forsigx.h): a budget that fitted the answer whole returns the unbudgeted (compacted) answer when that still fits
-        if( fit.verdict == rw::ForBudgetFitResult::Verdict::Whole && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+        if( wholeFit && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
         {
-            (void)rw::sigx::compactSigsWithin( out, forBudgetLimitTokens( ask ), &u.ledger );
+            (void)rw::sigx::compactSigsWithin( out, budgetLimit, &ledger );
         }
-        // BR1b (foractline.h): the same act line the unbudgeted answer carries, only while the answer still fits the budget with it —
-        // so a budget the answer fits returns it byte for byte (TOKEN-BUDGET-MONOTONE), and a shed answer never exceeds its budget
-        (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::DocumentEnd, forBudgetLimitTokens( ask ) );
         (void)rw::rowlines::encodeRows( out, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
-    }
-    else
-    {
-        // --legend=first under a budget: the same line, its clause in the leading legend, so the two postures stay byte permutations
-        // of each other (forsoftbudgetcheck STp)
-        (void)rw::actline::insertActLine( out, rw::actline::ClausePlace::Head, forBudgetLimitTokens( ask ) );
     }
     return out;
 }
@@ -5905,7 +5905,7 @@ inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
     std::string doc = r.out->bytes;
     if( capturedWhole( r.out ) )
     {
-        (void)rw::actline::insertActLine( doc, rw::actline::ClausePlace::Head );
+        (void)rw::actline::insertActLine( doc, 0, &r.ledger );
     }
     std::fwrite( doc.data(), 1, doc.size(), stdout );
     return r.rc;
@@ -5949,6 +5949,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( r.stdoutCaptured && capturedWhole( r.out ) )
         {
             std::string doc = r.out->bytes;
+            (void)rw::actline::insertActLine( doc, 0, &r.ledger );   // BR1 (foractline.h): into the raw render, as every path does — first
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
@@ -5962,9 +5963,6 @@ std::optional<int> runForLens( const MainDispatch& d )
                 const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
                 (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, d.redactPtr, &r.ledger );
             }
-            // BR1 (foractline.h): after KB1 (the line goes after the key group) and before ES and paging, so it is a block of the row
-            // stream every page size windows the same way, and the pages joined are the whole answer (forpagescheck P2)
-            (void)rw::actline::insertActLine( doc );
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
                 forBodyPointers( d, *early );

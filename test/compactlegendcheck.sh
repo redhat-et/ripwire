@@ -433,6 +433,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # and fold follow the new order. Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=0 prints the previous pin byte for
 # byte (at= masked), so every changed byte is the ranking's. The pin is the DEFAULT ranking's, never the W=0 one. 5780 -> 5980 B.
 # The six other pins are unchanged (none of them ranks).
+# RE-ANCHORED BY HAND 2026-11-22 (lane BR1b, the act line, src/foractline.h, by design), for.xml only: --legend=first answers
+# now carry the act line too (so they stay byte permutations of the answer-first answer), so the pin gains exactly three things —
+# <act read="geometry.h:12-12,geometry.cpp:11-19,sub/consumer.cpp:8-11"/> right after </sigs>, the "<!-- the act line: …" clause
+# at the end of the leading legend run, and est_tokens= 2310 -> 2415 (the 264 added bytes, exact). Checked: removing those three
+# from the new output (at= masked) gives the previous pin byte for byte, and RIPWIRE_NO_ACTLINE=1 reproduces the previous pin.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
