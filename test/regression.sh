@@ -1152,6 +1152,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tidyratchetcheck \
     tiebreakcontentcheck \
     tiercallerscheck \
     timsortcheck \

@@ -249,6 +249,13 @@ jobs:
       - name: clang-tidy — gate (scripts/tidycheck.sh, the zero-row subset)
         run: CLANG_TIDY=clang-tidy-"$CLANG_VERSION" bash scripts/tidycheck.sh build-tidy
 
+      # GATING, the ratchet (0.7.1): the high-signal checks that are NOT at zero rows (exception-escape,
+      # unchecked-optional-access, ... — scripts/tidycheck.sh's RATCHET list) fail on any finding that is not already a
+      # row of .clang-tidy-baseline.txt. Baselined rows pass; the row-count half of the ratchet is test/tidyratchetcheck.sh.
+      # Local equivalent: CLANG_TIDY=/opt/homebrew/opt/llvm@22/bin/clang-tidy bash scripts/tidycheck.sh --ratchet
+      - name: clang-tidy — ratchet (scripts/tidycheck.sh --ratchet, no NEW high-signal row)
+        run: CLANG_TIDY=clang-tidy-"$CLANG_VERSION" bash scripts/tidycheck.sh --ratchet build-tidy
+
       # GATING, a second long: the parser behind the nightly advisory diff below (dedupe across TUs, ANSI, the anchor, a
       # compile error is not a finding). It reads no repo state, so it runs on every event and keeps that parser honest
       # between nightlies, when nothing else would exercise it.
@@ -304,6 +311,17 @@ jobs:
             tidy-advisory-issue.md
           if-no-files-found: ignore
           retention-days: 14
+
+      # GATING, nightly half of the ratchet (0.7.1): bugprone-exception-escape is too slow for every event (it is most of
+      # the ~1 h 55 min above), so its NEW rows are gated here, from the advisory report this job already wrote — with the
+      # same diff and the whole RATCHET_NIGHTLY list. Not continue-on-error: a NEW row reddens the nightly, and so does a
+      # crashed or empty advisory run (status != ok is never a pass). The advisory step and its diff above stay advisory.
+      - name: clang-tidy — nightly ratchet over the advisory report (no NEW exception-escape or other high-signal row)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        run: |
+          python3 scripts/tidyadvisory_diff.py --report tidy-advisory.txt --rc tidy-advisory.rc \
+            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" \
+            --scope "$( bash scripts/tidycheck.sh --list | sed -n 's/^ratchet-nightly: //p' )" --gate
 
   # ─── tidy-advisory-report: ONE tracking issue for the advisory clang-tidy's NEW findings (nightly only) ─────
   #

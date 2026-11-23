@@ -291,6 +291,16 @@ Homebrew's keg-only `/opt/homebrew/opt/llvm@22/bin/clang-tidy` — pin that path
 `/opt/homebrew/opt/llvm`, which may be another major — and prints a `SKIP` line (not a pass) when it
 finds neither.
 
+**A second gating step, the ratchet (0.7.1), covers the high-signal checks that are not at zero rows.**
+`scripts/tidycheck.sh --ratchet` runs its `RATCHET` list (unchecked `optional` access, use-after-move, dangling handles,
+suspicious missing comma, signed-char misuse, `string_view::data()` misuse, throwing static initialisation,
+inc/dec in conditions) on every event and fails on any finding that is not already a row of `.clang-tidy-baseline.txt`;
+`bugprone-exception-escape`, too slow for every event, is gated the same way from the nightly advisory report.
+`test/tidyratchetcheck.sh` holds the baseline to the per-check ceilings in `.clang-tidy-ratchet.txt`: more rows fail,
+and so do fewer — a fix lowers its ceiling in the same commit (`python3 scripts/tidyadvisory_diff.py --baseline
+.clang-tidy-baseline.txt --ratchet .clang-tidy-ratchet.txt --ratchet-update`). A row that is kept carries its reason
+in a fourth TAB field (`kept: ...`), which regeneration carries forward.
+
 The compiler holds the same line for the UB class: CMakeLists.txt's compile-time fence block makes
 `return-type`, `uninitialized`, `format`/`format-security`, returning a local's address, on Clang
 `-Wdangling` and constant `array-bounds`, and on GCC 13+ `dangling-reference`, errors on our own targets, per compiler, with the cl.exe
