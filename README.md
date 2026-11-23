@@ -185,38 +185,42 @@ agent's context every session, whether or not it calls them.
 
 ### How ripwire compares
 
-Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings. `…` = not yet
-measured.
+Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22.
 
 #### Speed
 
 | Seconds, wall clock | ripwire | codegraph | cbm | graphify | graft | crg |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Cold index, envoy | **2.3** | … | … | … | … | … |
-| Cold index, vscode | **5.2** | 178 | 62 | 260 | 55 | 192 |
-| Cold index, llvm-project (limit 1 h) | **28** | … | … | … | … | … |
-| Warm query, slowest of 6 repositories | **0.24** | … | … | … | … | … |
-| Warm queries over 1 second, of 6 repositories | **0** | 2 | 1 | 5 | 3 | 0 |
+| Cold index, envoy | **2.3** | 37.6 | 14.6 | 102.8 | 22.8 | 58.6 |
+| Cold index, vscode | **5.1** | 173.9 | 61.1 | 257.5 | 54.6 | 184.5 |
+| Cold index, llvm-project (limit 1 h) | **28** | 509 | 291 | stopped at 1 h | failed | stopped at 1 h |
+| One question once indexed, envoy | 0.71 | 0.87 | 0.65 | 6.0 | 1.8 | **0.26** |
+| One question once indexed, vscode | 1.09 | 2.46 | 0.64 | 10.2 | 4.8 | **0.32** |
 
-<sub>Cold = index from nothing, the wait before the first answer; warm = a later call. ripwire: median of 5 runs on a
-quiet machine. Peers: n=1, measured 2026-11-14 unless noted.</sub>
+<sub>Cold = index from nothing, the wait before the first answer. "One question once indexed" = the same question asked
+of each tool's documented query entry (ripwire `--for`) with its index already built. ripwire: median of 5 runs;
+others: median of 3; all on 2026-11-22 on a quiet machine. llvm-project: one run per tool, each alone, limit 1 hour and
+36 GB; "stopped at 1 h" is our limit, not the tool failing (crg had parsed 16,600 of 77,918 files; graphify had finished
+parsing and was still building). graft failed: its parser aborted on 59,479 of 73,559 files and the process exited with
+an error after 42 s, the same on a second attempt.</sub>
 
 #### Memory
 
 | Peak memory, MB | ripwire | codegraph | cbm | graphify | graft | crg |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Indexing envoy | **673** | 5,439 | 2,024 | 3,434 | 3,558 | 2,119 |
-| Indexing cpython | **800** | 7,198 | 1,783 | 3,254 | 2,846 | 1,889 |
-| Indexing vscode | **1,094** | 11,815 | 4,592 | 4,070 | 5,555 | 3,193 |
-| Indexing llvm-project (limit 36 GB) | **5,217** | … | … | … | … | … |
-| 4 agents at once, envoy · answered | **2,751 · 4 of 4** | … | … | … | … | … |
-| 8 agents at once, envoy · answered | **5,497 · 8 of 8** | … | … | … | … | … |
-| Index on disk, vscode | **290** | 2,176 | 1,664 | 613 | not measured | 5,872 |
+| Indexing envoy | **668** | 5,399 | 2,040 | 3,434 | 3,481 | 2,100 |
+| Indexing vscode | **1,106** | 12,258 | 4,595 | 4,086 | 5,656 | 3,227 |
+| Indexing llvm-project (limit 36 GB) | **5,199** | 16,466 | 19,704 | 9,755 at the stop | 6,074 at the failure | 5,603 at the stop |
+| 4 agents at once, envoy · answered | **2,528 · 4 of 4** | 21,736 · 4 of 4 | 8,239 · 4 of 4 | 13,761 · 4 of 4 | 13,862 · 4 of 4 | 8,290 · 4 of 4 |
+| 8 agents at once, envoy · answered | **5,342 · 8 of 8** | 26,175 · 8 of 8 ‡ | 8,266 · 8 of 8 | 27,510 · 8 of 8 | 23,525 · 8 of 8 | 16,469 · 8 of 8 ‡ |
+| Index on disk, vscode | **276** | 2,075 | 1,664 | 585 | 1,368 | 5,600 |
 
-<sub>Peak resident memory over the whole process tree; MB = 2²⁰ bytes. "Agents at once" = N fresh starts together, each
-building its own index; combined peak and how many answered. llvm-project: the larger of the cold index and a warm
-query; ripwire indexes 80,576 of the 180,650 files git tracks. codegraph sizes itself to the
-machine, so its figure is what it took with 48 GB available. The limits are our harness's, not the tools'.</sub>
+<sub>Peak resident memory over the whole process tree, background daemon included; MB = 2²⁰ bytes. llvm-project: ripwire's
+figure is the larger of its cold index (3,823) and its first question; ripwire indexes 80,576 of the 180,650 files git
+tracks. "Agents at once" = N fresh starts together, each in its own copy of the repository, each indexing and then
+answering one question; combined peak and how many answered; one run per cell. ‡ = the 48 GB machine swapped during the
+run. cbm sends every index through one daemon with at most 4 workers, so its peak stays flat from 4 to 8 agents while its
+time doubles. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available.</sub>
 
 #### Answers
 
