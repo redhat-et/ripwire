@@ -438,6 +438,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # <act read="geometry.h:12-12,geometry.cpp:11-19,sub/consumer.cpp:8-11"/> right after </sigs>, the "<!-- the act line: …" clause
 # at the end of the leading legend run, and est_tokens= 2310 -> 2415 (the 264 added bytes, exact). Checked: removing those three
 # from the new output (at= masked) gives the previous pin byte for byte, and RIPWIRE_NO_ACTLINE=1 reproduces the previous pin.
+# RE-ANCHORED 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW), for.xml only: margin_pct 68 -> 62,
+# files_first 6 -> 3, est_tokens 2415 -> 2460, and the hops serve diagonal (sub/consumer.cpp) beside the first owner (shown 1 -> 2,
+# noedge 5 -> 4). Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=2 prints the previous pin byte for byte (at= masked),
+# so every changed byte is the ranking's. Captured with the arm's own setup (same git fixture, HOME, warm cache). 6242 -> 6354 B.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
