@@ -1769,6 +1769,58 @@ inline bool skipExpandOffset( const rw::Config& cfg, std::vector<rw::NodeId>& no
     return true;
 }
 
+// CL1 + PG1: how an --expand's <bodies> section is fitted to its page. Lifted out of runDefaultMap, whose cognitive complexity the
+// two decisions had pushed past its value on main; the packBodies call and its streams stay there, in the caller's `renderAt`.
+//   budget:    the body budget of the LAST render. It is the charged one, so every later packBodies of the run must reuse it.
+//   prefixEnd: PG1, > 0 when the page serves only the request's first prefixEnd definitions (the request is cut to them);
+//   rest:      the definitions past that cut, continued by --offset (unservedByOffset names them). Empty when prefixEnd is 0.
+struct ExpandBodiesFit
+{
+    std::size_t             budget    = 0;
+    std::size_t             prefixEnd = 0;
+    std::vector<rw::NodeId> rest;
+};
+
+// `renderAt( budget )` re-renders the <bodies> section of `nodes` at that budget, refills `record`, and returns the section. Nothing is
+// rendered when `nodes` is empty. `nodes` is the request the caller's render reads, so a PG1 cut shrinks it in place before the
+// re-render. CL1 (outputceiling.h): packBodies charges only body TEXT against the budget, so 33 short bodies whose <b> tags carry
+// ~1.3 KB of sibs=/inc= each printed 51,406 characters under a 16,000 B budget (GA1 DEV gson, --expand=toString). On a bare --expand
+// the render is re-run at a proportionally smaller budget until the section fits kExpandCeilingBodiesBytes; what no longer fits is
+// named by the root's unserved_next= (or a body's lines=/next=), so nothing is dropped silently. An explicit --pack-budget-bytes is the
+// caller's size and is rendered as asked.
+template< class RenderAt >
+ExpandBodiesFit fitExpandBodies( const rw::IngestResult& ing, const rw::Config& cfg, bool leanPosture, std::vector<rw::NodeId>& nodes,
+                                 const rw::EmittedBodies& record, RenderAt&& renderAt )
+{
+    // LT1: --page-bytes=0 is the whole answer — no body budget at all (SIZE_MAX: the unlimited budget packBodies already maps 0 to),
+    // and no refit below.
+    ExpandBodiesFit fit;
+    fit.budget = rw::wholeAnswerAsked( cfg ) ? SIZE_MAX : cfg.packBudgetBytes;
+    if( nodes.empty() )
+    {
+        return fit;
+    }
+    const rw::ChargedSection* bodies        = &renderAt( fit.budget );
+    const bool                sizedByCaller = cfg.packBudgetExplicit || !cfg.forTask.empty() || rw::wholeAnswerAsked( cfg );
+    for( int refit = 0; !sizedByCaller && refit < 6 && bodies->xml.size() > rw::kExpandCeilingBodiesBytes && fit.budget > rw::kExpandCeilingFloorBytes; ++refit )
+    {
+        fit.budget = std::max( rw::kExpandCeilingFloorBytes, fit.budget * rw::kExpandCeilingBodiesBytes / bodies->xml.size() * 9 / 10 );
+        bodies     = &renderAt( fit.budget );
+    }
+    // PG1: past kMaxUnservedSelectors, unserved_next='s selector list cannot name every unserved definition (CL1 §18: 14 of gson's
+    // 33 toString bodies were reached by no hop). The page is then re-rendered as the PREFIX of the request that this render
+    // already served whole-walk (the budget walks the request in order, so the same budget serves that prefix exactly), and the
+    // rest is one offset call away — expandOffsetCut above. Only on the default posture: an explicit size is the caller's.
+    fit.prefixEnd = expandOffsetCut( ing, nodes, record, expandCutAllowed( cfg, sizedByCaller, leanPosture, bodies->isRendered ) );
+    if( fit.prefixEnd > 0 )
+    {
+        fit.rest.assign( nodes.begin() + std::ptrdiff_t( fit.prefixEnd ), nodes.end() );
+        nodes.resize( fit.prefixEnd );
+        renderAt( fit.budget );
+    }
+    return fit;
+}
+
 // ── ONE PRICE FOR BOTH SERVING CANDIDATES (CodeRabbit, PR #215, second round on this comparison) ─────
 // THE DEFECT was not a missing addend, it was two counters. The bundle candidate was priced to the byte
 // (envelope, root attributes, the unproven residue, the map, the rendered <bodies>, the closing tag) by the
@@ -2562,6 +2614,8 @@ int runDefaultMap( const MainDispatch& d )
             { packSource( f, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); },
             rw::kBytesPerTokenBody );
     }
+    // The --expand line ranges as every packBodies / estimateExpandBodyTokens call below takes them: null when no token named a range.
+    const HashMap<NodeId, LineRange>* expandRangesPtr = expandRanges.empty() ? nullptr : &expandRanges;
     // &calleeOrder (lane/cutfix-bodies): each body's <calls> listing is cut at 16 rows, and with no query in scope it
     // kept the sixteen LOWEST node ids — an arbitrary cut, however honestly disclosed. It is now ordered FEWEST
     // SAME-NAMED DEFINITIONS FIRST (serialize.h calleeNameSpecificity: why that and not the map's PageRank, with the
@@ -2569,48 +2623,24 @@ int runDefaultMap( const MainDispatch& d )
     // charged render and the emitted one cannot differ.
     const std::vector<float> calleeOrder = expandNodes.empty() ? std::vector<float>{} : rw::calleeNameSpecificity( ing );
     EmittedBodies            expandRecord;   // expand-lean-k64: which requested bodies the render above actually emitted
-    // CL1 (outputceiling.h): packBodies charges only body TEXT against the budget, so 33 short bodies whose <b> tags carry
-    // ~1.3 KB of sibs=/inc= each printed 51,406 characters under a 16,000 B budget (GA1 DEV gson, --expand=toString). On a
-    // bare --expand the render is re-run at a proportionally smaller budget until the <bodies> section fits
-    // kExpandCeilingBodiesBytes; what no longer fits is named by the root's unserved_next= (or a body's lines=/next=), so
-    // nothing is dropped silently. An explicit --pack-budget-bytes is the caller's size and is rendered as asked.
-    // LT1: --page-bytes=0 is the whole answer — no body budget at all (SIZE_MAX: the unlimited budget packBodies already maps 0 to),
-    // and no refit below.
-    std::size_t expandBudget = rw::wholeAnswerAsked( cfg ) ? SIZE_MAX : cfg.packBudgetBytes;
     // expand-lean-k64's posture (leanEligible below): the runs whose root names unserved definitions — and so the only ones PG1 may cut.
     const bool expandLeanPosture = expandLeanPostureOf( cfg, exactNameExpandDefault );
-    std::size_t         expandPrefixEnd = 0;   // PG1: > 0 when this page serves the request's first expandPrefixEnd definitions only
-    std::vector<NodeId> expandRest;            //   and these are the rest, continued by --offset (expandOffsetCut)
-    if( !expandNodes.empty() )
+    // CL1 + PG1 (fitExpandBodies): the render below is re-run until the <bodies> section fits its page, and a many-definition request
+    // may be cut to the prefix it served — expandNodes then holds that prefix and expandRest the definitions continued by --offset.
+    const auto renderBodiesAt = [ & ]( std::size_t budget ) -> const rw::ChargedSection&
     {
-        const auto renderBodies = [ & ]
-        {
-            bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
-              packBodies( f, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/&expandRecord,
-                          /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
-            rw::kBytesPerTokenBody );
-        };
-        renderBodies();
-        const bool fitsCeiling = cfg.packBudgetExplicit || !cfg.forTask.empty() || rw::wholeAnswerAsked( cfg );
-        for( int refit = 0; !fitsCeiling && refit < 6 && bodiesSection.xml.size() > kExpandCeilingBodiesBytes && expandBudget > kExpandCeilingFloorBytes; ++refit )
-        {
-            expandBudget = std::max( kExpandCeilingFloorBytes, expandBudget * kExpandCeilingBodiesBytes / bodiesSection.xml.size() * 9 / 10 );
-            renderBodies();
-        }
-        // PG1: past kMaxUnservedSelectors, unserved_next='s selector list cannot name every unserved definition (CL1 §18: 14 of gson's
-        // 33 toString bodies were reached by no hop). The page is then re-rendered as the PREFIX of the request that this render
-        // already served whole-walk (the budget walks the request in order, so the same budget serves that prefix exactly), and the
-        // rest is one offset call away — expandOffsetCut below. Only on the default posture: an explicit size is the caller's.
-        expandPrefixEnd = expandOffsetCut( ing, expandNodes, expandRecord, expandCutAllowed( cfg, fitsCeiling, expandLeanPosture, bodiesSection.isRendered ) );
-        if( expandPrefixEnd > 0 )
-        {
-            expandRest.assign( expandNodes.begin() + std::ptrdiff_t( expandPrefixEnd ), expandNodes.end() );
-            expandNodes.resize( expandPrefixEnd );
-            renderBodies();
-        }
-    }
+        bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
+        { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
+          packBodies( f, ing, expandNodes, budget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+                      expandRangesPtr, d.notesPtr, /*outEmitted=*/&expandRecord,
+                      /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
+        rw::kBytesPerTokenBody );
+        return bodiesSection;
+    };
+    ExpandBodiesFit           expandFit       = fitExpandBodies( ing, cfg, expandLeanPosture, expandNodes, expandRecord, renderBodiesAt );
+    const std::size_t         expandBudget    = expandFit.budget;      // the charged render's budget: the emissions below reuse it
+    const std::size_t         expandPrefixEnd = expandFit.prefixEnd;   // PG1: > 0 when this page serves that prefix of the request only
+    const std::vector<NodeId> expandRest      = std::move( expandFit.rest );
     std::vector<NodeId> outlineShown;   // expand-lean-k64: the outlines the render below emitted
     if( !outlineNodes.empty() )
     {
@@ -2636,17 +2666,12 @@ int runDefaultMap( const MainDispatch& d )
              || ( cfg.outline.size() == 1 && cfg.expand.empty() && !outlineNodes.empty() && outlineSection.isRendered ) );
     if( leanEligible )
     {
-        std::vector<NodeId> served;
-        if( cfg.expand.empty() )
+        // What the render served: an --outline's shown outlines, or an --expand's kept bodies. leanEligible admits one verb only, and
+        // the other's list is then empty (no outline rendered beside an --expand; no body beside an --outline), so both are appended.
+        std::vector<NodeId> served = outlineShown;
+        for( const EmittedBody& b : expandRecord.kept )
         {
-            served = outlineShown;
-        }
-        else
-        {
-            for( const EmittedBody& b : expandRecord.kept )
-            {
-                served.push_back( b.id );
-            }
+            served.push_back( b.id );
         }
         const UnservedDefs un = expandPrefixEnd > 0 ? unservedByOffset( ing, expandRest, cfg, expandPrefixEnd )
                                                     : unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
@@ -2665,7 +2690,7 @@ int runDefaultMap( const MainDispatch& d )
     const std::size_t payloadTokens = sigsSection.tokens + srcSection.tokens + outlineSection.tokens
         + ( ( !expandNodes.empty() && !bodiesSection.isRendered )
                 ? estimateExpandBodyTokens( ing, expandNodes, expandBudget, g.outOff, g.outTargets, cfg.compress,
-                                            expandRanges.empty() ? nullptr : &expandRanges )
+                                            expandRangesPtr )
                 : bodiesSection.tokens )
         + ( ctxUnprovenBytes > 0 ? rw::tokensForEmittedBytes( ctxUnprovenBytes, rw::kBytesPerTokenDefault ) : 0 );   // H1: charged at the markup rate
     // A requested section whose chargeSection degraded (its sink cleared isRendered) streams uncharged, or is priced by the
@@ -2991,7 +3016,7 @@ int runDefaultMap( const MainDispatch& d )
         if( !expandNodes.empty() && noteAppliesToBundle )   // !serveWholeFile is this whole branch's precondition (see the if above)
         {
             emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                                                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+                                                           expandRangesPtr, d.notesPtr, /*outEmitted=*/nullptr,
                                                            /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );
             bodiesEmittedEarly = true;
         }
@@ -3065,7 +3090,7 @@ int runDefaultMap( const MainDispatch& d )
     if( !expandNodes.empty() && !serveWholeFile && !bodiesEmittedEarly )   // #289: already served ahead of the map below
     {
         emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                                                       expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+                                                       expandRangesPtr, d.notesPtr, /*outEmitted=*/nullptr,
                                                        /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }
     if( !outlineNodes.empty() )
