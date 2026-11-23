@@ -356,18 +356,7 @@ def run(a):
         status = "tool-failed"
         extra.append("no exit-status file %s" % a.rc)
     full_base = list(base)
-    globs = scope_globs(a.scope)
-    fglobs = scope_globs(getattr(a, "scope_files", ""))
-
-    def row_in(r):
-        f, c, _ = r.split("\t", 2)
-        return in_scope(c, globs, f, fglobs)
-    if globs:
-        outside = [f for f in findings if not in_scope(f[2], globs, f[0], fglobs)]
-        if outside:
-            extra.append("%d finding(s) outside --scope ignored" % len(outside))
-        findings = [f for f in findings if in_scope(f[2], globs, f[0], fglobs)]
-        base = [r for r in base if row_in(r)]
+    findings, base, row_in = apply_scope(a, findings, base, extra)
     if status == "ok" and not findings and base:
         status = "suspect-empty"
         extra.append("0 findings parsed against %d baseline rows" % len(base))
@@ -385,22 +374,10 @@ def run(a):
         print("tidyadvisory_diff: %d compile error line(s) with no [check] tag: the report may be incomplete" % errs)
     if status == "noinput":
         print("tidyadvisory_diff: no report file: %s" % a.report)
-    if status in ("noinput",):
-        pass
     else:
-        for title, ctr in (("NEW", new), ("GONE", gone)):
-            print("%s (%d)" % (title, sum(ctr.values())))
-            last = None
-            for k in sorted(ctr, key=lambda k: (k.split("\t")[1], k)):
-                f, c, an = k.split("\t", 2)
-                if c != last:
-                    print("  [%s]" % c)
-                    last = c
-                where = ",".join(str(n) for n in sorted(lines_of.get(k, []))[:4])
-                print("    %s%s  %s%s" % (f, (":" + where) if (where and title == "NEW") else "", an[:110],
-                                         "  x%d" % ctr[k] if ctr[k] > 1 else ""))
+        print_listing(new, gone, lines_of)
     if a.normalized_out and status != "noinput":
-        kept = [r for r in full_base if not row_in(r)] if globs else []
+        kept = [r for r in full_base if not row_in(r)] if row_in else []
         write_rows(a.normalized_out, kept + [keyof(f) for f in findings], a.note, reasons)
     if a.issue_body and status == "ok" and nrows:
         with open(a.issue_body, "w", encoding="utf-8") as fh:
@@ -408,14 +385,47 @@ def run(a):
     if a.status_out:
         with open(a.status_out, "w") as fh:
             fh.write("status=%s\nparsed=%d\nbaseline=%d\nnew=%d\ngone=%d\n" % (status, len(findings), len(base), nrows, sum(gone.values())))
-    if a.gate:
-        if status != "ok":
-            print("tidyadvisory_diff: GATE ERROR status=%s — not a pass%s" % (status, (
-                "; if every in-scope row was fixed, regenerate the baseline" if status == "suspect-empty" else "")))
-            return 2
-        print("tidyadvisory_diff: GATE %s — %d NEW row(s) in scope" % ("FAIL" if nrows else "PASS", nrows))
-        return 1 if nrows else 0
-    return 0
+    return gate_verdict(status, nrows) if a.gate else 0
+
+
+def apply_scope(a, findings, base, extra):
+    """--scope / --scope-files: -> (in-scope findings, in-scope baseline rows, the row predicate or None)."""
+    globs = scope_globs(a.scope)
+    if not globs:
+        return findings, base, None
+    fglobs = scope_globs(getattr(a, "scope_files", ""))
+
+    def row_in(r):
+        f, c, _ = r.split("\t", 2)
+        return in_scope(c, globs, f, fglobs)
+    kept = [f for f in findings if in_scope(f[2], globs, f[0], fglobs)]
+    if len(kept) != len(findings):
+        extra.append("%d finding(s) outside --scope ignored" % (len(findings) - len(kept)))
+    return kept, [r for r in base if row_in(r)], row_in
+
+
+def print_listing(new, gone, lines_of):
+    for title, ctr in (("NEW", new), ("GONE", gone)):
+        print("%s (%d)" % (title, sum(ctr.values())))
+        last = None
+        for k in sorted(ctr, key=lambda k: (k.split("\t")[1], k)):
+            f, c, an = k.split("\t", 2)
+            if c != last:
+                print("  [%s]" % c)
+                last = c
+            where = ",".join(str(n) for n in sorted(lines_of.get(k, []))[:4])
+            print("    %s%s  %s%s" % (f, (":" + where) if (where and title == "NEW") else "", an[:110],
+                                     "  x%d" % ctr[k] if ctr[k] > 1 else ""))
+
+
+def gate_verdict(status, nrows):
+    """--gate's exit: 0 pass, 1 a NEW in-scope row, 2 any status but ok (never a pass)."""
+    if status != "ok":
+        print("tidyadvisory_diff: GATE ERROR status=%s — not a pass%s" % (status, (
+            "; if every in-scope row was fixed, regenerate the baseline" if status == "suspect-empty" else "")))
+        return 2
+    print("tidyadvisory_diff: GATE %s — %d NEW row(s) in scope" % ("FAIL" if nrows else "PASS", nrows))
+    return 1 if nrows else 0
 
 
 def selftest():
@@ -450,7 +460,12 @@ def selftest():
     g, e = parse(["clang-tidy: segfault\n", "/x/y.cpp:1:1: error: unknown type name 'Foo'\n"], None)
     check(g == [] and e == 1, "a compile error with no [check] is counted as unattributed, not as a finding")
 
-    # --scope / --gate / --ratchet: each red arm beside its green twin, on throwaway files
+    selftest_modes(check)
+    return 0 if ok else 1
+
+
+def selftest_modes(check):
+    """--scope / --gate / --ratchet / reasons: each red arm beside its green twin, on throwaway files."""
     import io
     import contextlib
     import tempfile
@@ -499,45 +514,43 @@ def selftest():
         check(rc_why == 0 and carried == {"src/a.h\tbugprone-exception-escape\tvoid f()": "kept: bad_alloc only"},
               "a row's kept: reason is not part of its key and survives regeneration (%r)" % carried)
 
-        def ratch(baseline, ceil, update=False):
-            ns = argparse.Namespace(baseline=baseline, ratchet=ceil, ratchet_update=update)
-            with contextlib.redirect_stdout(io.StringIO()):
-                return ratchet(ns)
-        ceil = os.path.join(tmp, "ratchet.txt")
-        check(ratch(base, ceil, update=True) == 0 and read_ratchet(ceil) == {"bugprone-exception-escape": 1, "bugprone-branch-clone": 1},
-              "--ratchet-update writes one ceiling per check")
-        check(ratch(base, ceil) == 0, "ratchet PASSES a baseline that matches its ceilings")
-        grown = put("grown.txt", open(base).read() + "src/b.h\tbugprone-exception-escape\tvoid g()\n")
-        check(ratch(grown, ceil) == 1, "ratchet FAILS a baseline that grew by one row")
-        other = put("other.txt", open(base).read() + "src/b.h\tbugprone-use-after-move\tuse( x );\n")
-        check(ratch(other, ceil) == 1, "ratchet FAILS a row of a check that has no ceiling (ceiling 0)")
-        fewer = put("fewer.txt", "src/a.h\tbugprone-branch-clone\tif( x )\n")
-        check(ratch(fewer, ceil) == 1, "ratchet FAILS a baseline that shrank until the ceiling is lowered (no slack to spend)")
-    return 0 if ok else 1
+        selftest_ratchet(check, put, tmp, base)
 
 
-def main():
+def selftest_ratchet(check, put, tmp, base):
+    import io
+    import contextlib
+    def ratch(baseline, ceil, update=False):
+        ns = argparse.Namespace(baseline=baseline, ratchet=ceil, ratchet_update=update)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return ratchet(ns)
+    ceil = os.path.join(tmp, "ratchet.txt")
+    check(ratch(base, ceil, update=True) == 0 and read_ratchet(ceil) == {"bugprone-exception-escape": 1, "bugprone-branch-clone": 1},
+          "--ratchet-update writes one ceiling per check")
+    check(ratch(base, ceil) == 0, "ratchet PASSES a baseline that matches its ceilings")
+    grown = put("grown.txt", open(base).read() + "src/b.h\tbugprone-exception-escape\tvoid g()\n")
+    check(ratch(grown, ceil) == 1, "ratchet FAILS a baseline that grew by one row")
+    other = put("other.txt", open(base).read() + "src/b.h\tbugprone-use-after-move\tuse( x );\n")
+    check(ratch(other, ceil) == 1, "ratchet FAILS a row of a check that has no ceiling (ceiling 0)")
+    fewer = put("fewer.txt", "src/a.h\tbugprone-branch-clone\tif( x )\n")
+    check(ratch(fewer, ceil) == 1, "ratchet FAILS a baseline that shrank until the ceiling is lowered (no slack to spend)")
+
+
+def parse_args():
     ap = argparse.ArgumentParser(description="diff an advisory clang-tidy report against .clang-tidy-baseline.txt (advisory: exit 0)")
-    ap.add_argument("--report")
-    ap.add_argument("--baseline")
-    ap.add_argument("--rc")
-    ap.add_argument("--root")
-    ap.add_argument("--normalized-out", dest="normalized_out")
-    ap.add_argument("--issue-body", dest="issue_body")
-    ap.add_argument("--status-out", dest="status_out")
-    ap.add_argument("--run-url", dest="run_url", default="")
-    ap.add_argument("--sha", default="")
-    ap.add_argument("--note", default="")
-    ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--scope", default="")
-    ap.add_argument("--scope-files", dest="scope_files", default="")
-    ap.add_argument("--gate", action="store_true")
-    ap.add_argument("--ratchet")
-    ap.add_argument("--ratchet-update", dest="ratchet_update", action="store_true")
-    ap.add_argument("--annotate")
-    a = ap.parse_args()
-    if a.selftest:
-        return selftest()
+    for flag in ("--report", "--baseline", "--rc", "--root", "--ratchet", "--annotate"):
+        ap.add_argument(flag)
+    for flag in ("--normalized-out", "--issue-body", "--status-out"):
+        ap.add_argument(flag, dest=flag[2:].replace("-", "_"))
+    for flag in ("--run-url", "--sha", "--note", "--scope", "--scope-files"):
+        ap.add_argument(flag, dest=flag[2:].replace("-", "_"), default="")
+    for flag in ("--selftest", "--gate", "--ratchet-update"):
+        ap.add_argument(flag, dest=flag[2:].replace("-", "_"), action="store_true")
+    return ap.parse_args()
+
+
+def file_mode(a):
+    """--annotate / --ratchet: the two modes that read only the baseline (and their own file). None: neither asked."""
     if a.annotate:
         if not a.baseline or not os.path.isfile(a.baseline) or not os.path.isfile(a.annotate):
             print("tidyadvisory_diff: --annotate needs an existing --baseline and TSV")
@@ -548,6 +561,16 @@ def main():
             print("tidyadvisory_diff: --ratchet needs an existing --baseline and ratchet file")
             return 2
         return ratchet(a)
+    return None
+
+
+def main():
+    a = parse_args()
+    if a.selftest:
+        return selftest()
+    done = file_mode(a)
+    if done is not None:
+        return done
     try:
         return run(a)
     except Exception as e:      # advisory: a bug here must not red the job, but it must not look like a clean run either
