@@ -14677,8 +14677,8 @@ v0.6.9 on envoy, cockroach and vscode.
 
 **Caveats.** Three warm runs per cell, on a loaded machine; v0.6.9's warm peak varied most between runs, which is why the
 median is quoted. Dev builds, not release builds. One verb (`--deps`); other verbs have other peaks. The per-step
-mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, for main since 0.6.10, in
-`changelog.d/mem-ref-shrink.md` and the other `changelog.d/` fragments.
+mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, since 0.6.10, in
+CHANGELOG.md [0.7.0] ("each indexed reference takes 120 B less memory" and the entries around it).
 
 ## The warm path is graph rebuild, not ranking — graph-section cache, PRE-REGISTERED 2026-11-14 (before any implementation number)
 
