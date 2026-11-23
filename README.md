@@ -141,7 +141,7 @@ claim cannot quietly drift. The row-by-row ledger is
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-**Latest: 0.7.0** — practical for large repositories on small and normal-sized machines: llvm-project indexes cold in 28 s at a 5.1 GB peak on an Apple M5 Pro, and the same runs complete on a 16 GB laptop; complete answers on 126 of 213 held-out tasks, against 68 for the next tool. [Release notes](#release-notes) ·
+**Latest: 0.7.0** — practical for large repositories on small and normal-sized machines: llvm-project (80,576 source files of the 180,650 git tracks) indexes cold in 28 s at a 5.1 GB peak on an Apple M5 Pro, and the same runs complete on a 16 GB laptop; complete answers on 126 of 213 held-out tasks, against 68 for the next tool. [Release notes](#release-notes) ·
 [the presentation](present/ripwire-showcase.pdf) · [the changelog](CHANGELOG.md) — with thanks to the
 contributors named there.
 
