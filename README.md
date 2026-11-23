@@ -211,16 +211,11 @@ an error after 42 s, the same on a second attempt.</sub>
 | Indexing envoy | **668** | 5,399 | 2,040 | 3,434 | 3,481 | 2,100 |
 | Indexing vscode | **1,106** | 12,258 | 4,595 | 4,086 | 5,656 | 3,227 |
 | Indexing llvm-project (limit 36 GB) | **5,199** | 16,466 | 19,704 | 9,755 at the stop | 6,074 at the failure | 5,603 at the stop |
-| 4 agents at once, envoy · answered | **2,528 · 4 of 4** | 21,736 · 4 of 4 | 8,239 · 4 of 4 | 13,761 · 4 of 4 | 13,862 · 4 of 4 | 8,290 · 4 of 4 |
-| 8 agents at once, envoy · answered | **5,342 · 8 of 8** | 26,175 · 8 of 8 ‡ | 8,266 · 8 of 8 | 27,510 · 8 of 8 | 23,525 · 8 of 8 | 16,469 · 8 of 8 ‡ |
 | Index on disk, vscode | **276** | 2,075 | 1,664 | 585 | 1,368 | 5,600 |
 
 <sub>Peak resident memory over the whole process tree, background daemon included; MB = 2²⁰ bytes. llvm-project: ripwire's
 figure is the larger of its cold index (3,823) and its first question; ripwire indexes 80,576 of the 180,650 files git
-tracks. "Agents at once" = N fresh starts together, each in its own copy of the repository, each indexing and then
-answering one question; combined peak and how many answered; one run per cell. ‡ = the 48 GB machine swapped during the
-run. cbm sends every index through one daemon with at most 4 workers, so its peak stays flat from 4 to 8 agents while its
-time doubles. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12,258 MB on vscode (almost all TypeScript), 76,181 files at 16,466 MB on llvm-project (mostly C and C++); its vscode figure repeats within 7% over three runs (12,154 to 12,952 MB).</sub>
+tracks. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12,258 MB on vscode (almost all TypeScript), 76,181 files at 16,466 MB on llvm-project (mostly C and C++); its vscode figure repeats within 7% over three runs (12,154 to 12,952 MB).</sub>
 
 #### Answers
 
