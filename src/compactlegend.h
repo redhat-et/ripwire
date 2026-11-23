@@ -1596,6 +1596,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "similar", "r similar=N: the params list is new or grew and holds N>=3 adjacent same-typed params (C/C++); a swapped call compiles; pass a named struct; never gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands or shrunk member, an unhandled-arm row's values with no outcome (add the arm or a default); fix=: the shape the row calls for, with lines", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines fix=
+    // QD-FIX-LEGEND: a repeated-decision row (complexity, sev=minor) carries fix= with no why=, so the row above never fires for it;
+    // this one steps aside wherever an r row carries why= (that row already defines fix=), so only fix-without-why answers gain bytes.
+    { "fix", "r fix=: the shape the row calls for, with lines; name the decision/loop once: one condition (6+ tokens) or loop body repeats at those lines; report-only", true, "r", MapHeaderRead::No, {}, "quality-delta", "r", "why" },
     { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },

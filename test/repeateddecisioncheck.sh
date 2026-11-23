@@ -18,7 +18,8 @@
 #   (S)  the row's severity and gating are what they are without the facet: every row here is origin="new-symbol"
 #   (C)  PREMISE COUNT — all seven rows found; a missing row FAILS
 #   (L)  a document with the facet defines it (full legend); one without carries no such sentence
-# Red-before: on a binary without the facet, P1 and P2 FAIL. Guard-off (no minimum condition length, no statement test, no
+#   (L2) the DEFAULT legend of a range whose minor complexity row carries fix= and no why= defines fix= (QD-FIX-LEGEND)
+# Red-before: on a binary without the facet, P1 and P2 FAIL; on b576a95e3 (no compact fix= term), L2 FAILS. Guard-off (no minimum condition length, no statement test, no
 # bracket stop, overlapping repeats allowed): N2, N3, N4 and N5 FAIL.
 #
 # Usage:  bash test/repeateddecisioncheck.sh [BIN]
@@ -269,6 +270,26 @@ FULL0="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"; r
 if [ "$rc0" != 0 ] && [ "$rc0" != 2 ]; then no "(L) the no-facet run failed (rc=$rc0)"
 elif ! printf '%s' "$FULL0" | grep -q '<quality-delta '; then no "(L) the no-facet run printed no quality-delta document"
 else case "$FULL0" in *'deciding it once is the cheapest fix'*) no "(L) a document without the facet pays for its sentence";; *) ok "(L) a document without the facet carries no such sentence";; esac; fi
+
+echo "── (L2) default legend on a range: a minor row's fix= with no why= is defined"
+# QD-FIX-LEGEND: the compact dictionary defined fix= only beside why= (a tangle or clone row), so a range whose one printed
+# row is a MINOR complexity row carrying only fix= met an undefined attribute (legendcoveragecheck (G) r@fix on #720/#722).
+G="$TMP/range"; mkdir -p "$G/src"
+( cd "$G" && git init -q . && git config user.email t@t && git config user.name t && git config commit.gpgsign false ) || { echo "git setup failed"; exit 2; }
+cp "$TMP/groups.h" "$G/src/groups.h"
+( cd "$G" && git add -A && git commit -qm base ) || { echo "git setup failed"; exit 2; }
+# one more branch in dropSilent: ccx grows by 1 over a body already over the bar, so its row is sev="minor"
+sed 's/^    if( left >= 2 )$/    if( left > 9 \&\& mode == 0 ) { return 9; }\n    if( left >= 2 )/' "$TMP/groups.h" >"$G/src/groups.h"
+( cd "$G" && git commit -qam grow ) || { echo "git setup failed"; exit 2; }
+RG="$( cd "$G" && "$BIN" "$G" --quality-delta=HEAD~1..HEAD --no-cache 2>/dev/null )"   # status: exits 0 or 2 by design; the document is the verdict
+L2ROW="$( printf '%s' "$RG" | tr '<' '\n' | grep '^r kind="complexity"' | grep 'sym="dropSilent"' | head -1 )"
+L2LEG="$( printf '%s' "$RG" | sed -n '1s/-->.*//p' )"
+case "$L2ROW" in
+    *'sev="minor"'*'fix="name the decision once: '*) case "$L2ROW" in *' why='*) no "(L2) premise: the row carries why= (row: $L2ROW)";;
+        *) case "$L2LEG" in *'fix='*) ok "(L2) the default legend defines fix= for a minor fix-only row";;
+                            *) no "(L2) the default legend leaves fix= undefined (legend: ${L2LEG:0:200}...)";; esac;; esac;;
+    *) no "(L2) premise: no minor dropSilent row with a decision fix= (row: $L2ROW)";;
+esac
 
 echo
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
