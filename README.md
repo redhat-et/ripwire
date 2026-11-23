@@ -191,13 +191,13 @@ row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070
 
 #### Speed
 
-| Seconds, wall clock | ripwire | codegraph | cbm | graphify | graft | crg |
+| Wall clock | ripwire | codegraph | cbm | graphify | graft | crg |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Cold index, envoy | **2.3** | 37.6 | 14.6 | 102.8 | 22.8 | 58.6 |
-| Cold index, vscode | **5.1** | 173.9 | 61.1 | 257.5 | 54.6 | 184.5 |
-| Cold index, llvm-project (limit 1 h) | **28** | 509 | 291 | stopped at 1 h | failed | stopped at 1 h |
-| First answer from nothing, envoy | **3.0** | 38.5 | 15.3 | 108.8 | 24.7 | 58.9 |
-| First answer from nothing, vscode | **6.2** | 176.3 | 61.8 | 267.7 | 59.5 | 184.8 |
+| Cold index, envoy | **2.3 s** | 37.6 s | 14.6 s | 102.8 s | 22.8 s | 58.6 s |
+| Cold index, vscode | **5.1 s** | 173.9 s | 61.1 s | 257.5 s | 54.6 s | 184.5 s |
+| Cold index, llvm-project (limit 1 h) | **28 s** | 509 s | 291 s | stopped at 1 h | failed | stopped at 1 h |
+| First answer from nothing, envoy | **3.0 s** | 38.5 s | 15.3 s | 108.8 s | 24.7 s | 58.9 s |
+| First answer from nothing, vscode | **6.2 s** | 176.3 s | 61.8 s | 267.7 s | 59.5 s | 184.8 s |
 
 <sub>Cold = index from nothing. "First answer from nothing" = the cold index plus one question asked through each tool's documented
 query entry (ripwire `--for`), the sum of the two medians: what an agent waits for at the start of a session. ripwire: median of 5 runs;
@@ -208,16 +208,16 @@ an error after 42 s, the same on a second attempt.</sub>
 
 #### Memory
 
-| Peak memory, MB | ripwire | codegraph | cbm | graphify | graft | crg |
+| Peak memory | ripwire | codegraph | cbm | graphify | graft | crg |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Indexing envoy | **668** | 5,399 | 2,040 | 3,434 | 3,481 | 2,100 |
-| Indexing vscode | **1,106** | 12,258 | 4,595 | 4,086 | 5,656 | 3,227 |
-| Indexing llvm-project (limit 36 GB) | **5,199** | 16,466 ▲ | 19,704 ▲ | 9,755 at the stop | 6,074 at the failure | 5,603 at the stop |
-| Index on disk, vscode | **276** | 2,075 | 1,664 | 585 | 1,368 | 5,600 |
+| Indexing envoy | **0.7 GB** | 5.3 GB | 2.0 GB | 3.4 GB | 3.4 GB | 2.1 GB |
+| Indexing vscode | **1.1 GB** | 12.0 GB | 4.5 GB | 4.0 GB | 5.5 GB | 3.2 GB |
+| Indexing llvm-project (limit 36 GB) | **5.1 GB** | 16.1 GB ▲ | 19.2 GB ▲ | 9.5 GB at the stop | 5.9 GB at the failure | 5.5 GB at the stop |
+| Index on disk, vscode | **0.3 GB** | 2.0 GB | 1.6 GB | 0.6 GB | 1.3 GB | 5.5 GB |
 
-<sub>▲ = more than a 16 GB machine has. Peak resident memory over the whole process tree, background daemon included; MB = 2²⁰ bytes. llvm-project: ripwire's
-figure is the larger of its cold index (3,823) and its first question; ripwire indexes 80,576 of the 180,650 files git
-tracks. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12,258 MB on vscode (almost all TypeScript), 76,181 files at 16,466 MB on llvm-project (mostly C and C++); its vscode figure repeats within 7% over three runs (12,154 to 12,952 MB).</sub>
+<sub>▲ = more than a 16 GB machine has. Peak resident memory over the whole process tree, background daemon included; GB = 2³⁰ bytes. llvm-project: ripwire's
+figure is the larger of its cold index (3.7 GB) and its first question; ripwire indexes 80,576 of the 180,650 files git
+tracks. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12.0 GB on vscode (almost all TypeScript), 76,181 files at 16.1 GB on llvm-project (mostly C and C++); its vscode figure repeats within 7% over three runs (11.9 to 12.6 GB).</sub>
 
 #### Answers
 

@@ -403,7 +403,7 @@ commit, local Release build with profile-guided optimization), codegraph 1.6.2, 
 - "Cold" indexes from nothing. "First answer from nothing" adds one question, asked through each tool's documented query
   entry once its index is built; the README prints the sum of the two medians.
 - Peak memory is the largest sum of resident memory over the tool's whole process tree, sampled 8 times a second, with a
-  background daemon counted once. MB = 2²⁰ bytes.
+  background daemon counted once. GB = 2³⁰ bytes.
 - llvm-project: one run per tool, with limits of 1 hour and 36 GB. A run the limit stops is reported as stopped, never as
   the tool failing.
 
