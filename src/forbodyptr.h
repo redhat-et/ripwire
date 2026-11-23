@@ -253,7 +253,7 @@ inline std::optional<Element> nextElement( std::string_view v, std::size_t from,
         }
         std::optional<rowlines::OpenTag> t    = rowlines::readOpenTag( v.substr( i, end - i ) );
         const Kind                       kind = kindOf( t );
-        if( kind != Kind::Other )
+        if( t && kind != Kind::Other )   // kindOf( nullopt ) is Other; `t &&` states it where the deref is
         {
             const bool        body  = kind == Kind::Body;
             const std::size_t close = body ? bodyElementEnd( v, i + t->size ) : i + t->size;

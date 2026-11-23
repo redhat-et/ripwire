@@ -51,6 +51,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
@@ -437,7 +438,7 @@ inline bool namingEvaluableLang( Lang lang ) noexcept
 //   kNameInfoMinBodyLines gates a name-only signal behind a body big enough for the name's information
 //     content to matter at all — a 3-line `fill` needs no name richer than its body (kept < this bar
 //     well below naming-body-mismatch's era and below the unrelated large-function bar of 80).
-inline const double        kNameInfoLowIdfThreshold = std::log( 2.0 );
+inline constexpr double    kNameInfoLowIdfThreshold = std::numbers::ln2;   // = std::log( 2.0 ), bit for bit (0x3FE62E42FEFA39EF); constexpr, so no static init
 inline constexpr std::uint32_t kNameInfoMinBodyLines = 20;
 
 namespace detail

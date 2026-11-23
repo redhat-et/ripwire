@@ -589,7 +589,7 @@ inline std::optional<std::pair<CMakeCall, std::string_view>> cmakeCallStart( std
     for( const auto& [cmd, kind] : kCMakeCommands )
     {
         const bool named = t.size() > cmd.size() && std::ranges::equal( t.substr( 0, cmd.size() ), cmd, []( char a, char b )
-                                                                       { return lexLowerByte( static_cast<unsigned char>( a ) ) == b; } );
+                                                                       { return lexLowerByte( static_cast<unsigned char>( a ) ) == static_cast<unsigned char>( b ); } );
         const std::string_view paren = named ? trimWs( t.substr( cmd.size() ) ) : std::string_view();
         if( paren.starts_with( '(' ) )
         {

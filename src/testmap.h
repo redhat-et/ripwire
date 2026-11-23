@@ -2179,12 +2179,12 @@ inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx
     for( std::size_t i = 0; i < groups.size(); ++i )
     {
         const std::vector<std::uint32_t>& members = groups[i];
-        if( heads[i] )
+        if( const std::optional<std::string>& head = heads[i]; head )
         {
             const bool        folded = !folds[i].text.empty();
             const std::string body   = folded ? renderFoldedTestRowGroup( rows[ members[0] ].attrs, members.size(), shape, esc, folds[i].text )
                                               : renderTestRowGroup( rows, members, shape, esc );
-            out.push_back( { body + groupRunTail( shape.dialect, *heads[i], esc ), std::uint32_t( members.size() ), folded } );
+            out.push_back( { body + groupRunTail( shape.dialect, *head, esc ), std::uint32_t( members.size() ), folded } );
             continue;
         }
         for( const std::uint32_t k : members )

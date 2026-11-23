@@ -5948,7 +5948,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // SUCCEEDED and handed its bytes back. An earlier version of this branch read `!restored`, the exact
         // inverse, so the permutation never ran and the answer fell through to the write-it-anyway path
         // below — a complete, unpermuted answer and a silently dead feature.
-        if( r.stdoutCaptured && capturedWhole( r.out ) )
+        if( r.stdoutCaptured && r.out && capturedWhole( r.out ) )   // capturedWhole implies r.out; stated where it is read
         {
             std::string doc = r.out->bytes;
             (void)rw::actline::insertActLine( doc, 0, &r.ledger );   // BR1 (foractline.h): into the raw render, as every path does — first

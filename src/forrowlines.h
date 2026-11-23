@@ -183,7 +183,7 @@ inline bool elideSequentialRanks( std::vector<Row>& rows )
     bool        dropped  = false;
     for( Row& r : rows )
     {
-        if( !ranked( r ) ) { continue; }
+        if( !r.tag || !ranked( r ) ) { continue; }   // ranked() implies r.tag; stated where the derefs are
         const std::size_t rank = rankOf( r );
         if( rank == previous + 1 && r.tag->attrs.back().name == "r" )
         {
@@ -411,6 +411,11 @@ inline void encodeSection( std::string_view doc, const answerfirst::Block& b, st
                            SectionComments comments = SectionComments::Keep )
 {
     std::optional<Section> sec = readSection( doc, b );
+    if( !sec )   // no section read: neither form applies (rankSeq and linable both need one), so the block stays verbatim
+    {
+        out.append( doc.substr( b.begin, b.end - b.begin ) );
+        return;
+    }
     const bool rankSeq = sec && b.name == "sigs" && sec->open.find( " rseq=\"" ) == std::string_view::npos && elideSequentialRanks( sec->rows );
     const bool linable = linableSection( sec, comments );
     std::string body;

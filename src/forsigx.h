@@ -127,7 +127,7 @@ struct SplitRow
     const std::optional<DRow>                 d     = dRow( row );
     const std::optional<std::vector<TagAttr>> attrs = d ? tagAttrs( d->tag ) : std::nullopt;
     const RankAttr                            r     = attrs ? rankAttr( d->tag, *attrs ) : RankAttr{};
-    if( r.rank <= kSigxKeepRank ) { return std::nullopt; }
+    if( !d || !attrs || r.rank <= kSigxKeepRank ) { return std::nullopt; }   // without attrs r is RankAttr{}, so this was already the exit
     std::string keep = "<d", move;
     for( const TagAttr& a : *attrs )
     {

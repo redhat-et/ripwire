@@ -3968,19 +3968,22 @@ inline void Script::unreadRcFileSites( std::vector<std::uint32_t>& at ) const
             }
         }
         const std::uint32_t scope = scope_[c];
+        // named rather than invoked inside the || (bugprone-inc-dec-in-conditions read the loop's ++d as part of the
+        // condition); still called only when no call matched, as before
+        const auto runFactBefore = [ & ]
+        {
+            for( std::uint32_t d = 0; d < a_.facts.size(); ++d )
+            {
+                if( a_.facts[d].seen && scope_[d] == scope && node( d ).pos < n.pos && isRun( d ) && a_.facts[d].cons.how.rfind( "rc file", 0 ) == 0 )
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
         const bool afterRun = std::any_of( a_.calls.begin(), a_.calls.end(), [ & ]( const sh::Call& call )
                                            { return call.node != kNone && scope_[call.node] == scope && call.how.rfind( "rc file", 0 ) == 0 && node( call.node ).pos < n.pos; } )
-                           || [ & ]
-                              {
-                                  for( std::uint32_t d = 0; d < a_.facts.size(); ++d )
-                                  {
-                                      if( a_.facts[d].seen && scope_[d] == scope && node( d ).pos < n.pos && isRun( d ) && a_.facts[d].cons.how.rfind( "rc file", 0 ) == 0 )
-                                      {
-                                          return true;
-                                      }
-                                  }
-                                  return false;
-                              }();
+                           || runFactBefore();
         if( target.empty() || !afterRun )
         {
             continue;
