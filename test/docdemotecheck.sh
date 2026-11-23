@@ -104,6 +104,13 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-22 (lane FS2; rule 4): docdemotegolden_for.xml 6053 -> 6326 B (est_tokens "2423" -> "2530"), two intended 0.7.0 train
+# changes, each proven separately. (1) LP1 (4ba1fdec6) kForBasenameFieldW=2: the query word "evictor" now meets src/evictor.py's
+# basename, so evict_one rises to r=1 over PageCache.pin_page (r=2), and confidence/margin_pct/coverage re-read (78 -> 76, 36 -> 33).
+# (2) BR1B (53824ea8a) the act line: <act read="src/evictor.py:4-11,src/pagecache.py:12-14,src/pagecache.py:4-29"/> and its clause.
+# Mechanically: the same call under RIPWIRE_NO_ACTLINE=1 RIPWIRE_BASENAME_W=0 is the previous golden byte for byte; under
+# RIPWIRE_BASENAME_W=0 alone it is the previous golden plus the act element and clause only (est_tokens masked); and the new capture
+# minus the act line is the RIPWIRE_NO_ACTLINE=1 capture. No demotion byte moved; (g) and (h) are unchanged.
 # RE-PIN 2026-11-18 (lane AF4 T-C, pointer kind as ptr=; rule 4): docdemotegolden_for.xml 6040 -> 6053 B (est_tokens "2418" -> "2423")
 # and docdemotegolden_noroute.xml 9550 -> 9563 B ("3387" -> "3392"). The whole diff, read mechanically: est_tokens= and the demote
 # legend's wording "a <t> in sigs is" -> "a <t> in sigs with no ptr= is" (13 B); no row, rank, pointer or comment position moved

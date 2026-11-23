@@ -67,6 +67,11 @@ CONCEPT="how does resolution work"
 #    the pre-routing golden (captured from plain subtoken+body). The DEFAULT run only ADDS a "[routed:
 #    subtoken+body …]" header note, so we compare the --no-route run (identical bytes) to the golden AND
 #    assert the DEFAULT run's ranking body matches by stripping just the header comment. ──────────────────
+# RE-PIN 2026-11-22 (lane FS2; rule 4): golden_for.xml 4345 -> 4599 B, est_tokens "1661" -> "1763". CAUSE: the --for act line
+# (BR1/BR1B, merged into the 0.7.0 train at 53824ea8a "the act line ... rides the raw render"), now on --no-route too:
+# <act read="resolve.cpp:3-7,graph.cpp:11-15,resolve.cpp:10-14"/> after </sigs> and its one full-legend clause. Verified
+# mechanically: the same call under RIPWIRE_NO_ACTLINE=1 (the act line's A/B handle) is the previous golden byte for byte, and
+# deleting the <act> element and its clause from the new capture with est_tokens= masked gives it too. No ranking or route byte moved.
 # RE-PIN 2026-11-18 (train byte-token-070, aeaacdad2 "a callee signature row under a <b> body names the file its line is in";
 # rule 4): golden_for.xml 4301 -> 4345 B, est_tokens "1643" -> "1661". The train changed the output and did not re-pin here:
 # the full legend's calls clause gains " (c p= their file when it is not the body's)" and a callee <c> row whose line is in another

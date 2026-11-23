@@ -208,21 +208,44 @@ a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
 # row or the syms block shows" (+46 B): the hop-off answer is 3384 -> 3405 B on macOS (4109 -> 4130 B with the hop; (4b) holds).
 # (4d) moves 3400 -> 3500 B. The answer embeds the fixture's absolute root=, so the same bytes are ~45 B shorter under Linux /tmp
 # (~3360 B) — why only the macOS legs crossed 3400. (4) and the strip-equality half of (4d) are unchanged.
-a_norm_bytes="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); sys.stdout.write(s)' | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
+# RE-PIN 2026-11-22 (lane FS2; rule 4): the --for act line (BR1/BR1B, foractline.h; on the 0.7.0 train since 53824ea8a) rides this
+# answer — <act read="P:L-E"/> after </sigs> and its own full-legend comment "<!-- the act line: ... -->" — and took (4) to 3161 B,
+# (4b) to 4447 B and (4d)'s twin to 3670 B on macOS (CI's longer /var/folders root: 3192 / 4478 / 3701). The act line is a pointer
+# to the ranges to read, not padding, and the act-free answer is RIPWIRE_NO_ACTLINE=1's, byte for byte. So, by this arm's own
+# precedent: (4) and (4d) normalise the act element and its clause out (ACT_STRIP) and keep their 3000 / 3500 B ceilings measuring
+# exactly what they measured; (4b), the WHOLE answer, moves 4300 -> 4600 B by the measured act cost (+221 B here), still far below
+# the 5307 B padded answer. (4e) proves the strip is live (it removed bytes) and that it removed ONLY the act line.
+ACT_STRIP='import re,sys; s=sys.stdin.read(); s=re.sub(r"<act read=\"[^\"]*\"/>","",s); s=re.sub(r"<!-- the act line:.*?-->","",s,flags=re.S); sys.stdout.write(s)'
+A_OUT_NOACT="$( printf '%s' "$A_OUT" | python3 -c "$ACT_STRIP" )"
+a_norm_bytes="$( printf '%s' "$A_OUT_NOACT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); sys.stdout.write(s)' | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
                  | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>","",s); m=re.search(r"; tail: [^\]]*?budget-trimmed row\)",s); s=s.replace(m.group(0),"x"*391) if m and len(m.group(0))>391 else s; sys.stdout.write(s)' | wc -c | tr -d ' ' )"
 case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
 [ "$a_norm_bytes" -lt 3000 ] && ok "(4) the floored bundle without e= and its clause is $a_norm_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
                              || no "(4) the floored bundle without e= and its clause is $a_norm_bytes B, over the 3000 B ceiling"
-[ "$a_bytes" -lt 4300 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4300 with e=, the tail page rows, the caller hop and their legend clauses)" \
-                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4300 B ceiling"
+[ "$a_bytes" -lt 4600 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4600 with e=, the tail page rows, the caller hop, the act line and their legend clauses)" \
+                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4600 B ceiling"
 A_OFF="$( RIPWIRE_NO_CALLER_HOP=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
+A_OFF_ALL="$( RIPWIRE_NO_CALLER_HOP=1 RIPWIRE_NO_ACTLINE=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
+A_OFF="$( printf '%s' "$A_OFF" | python3 -c "$ACT_STRIP" )"
 a_off_bytes="$( printf '%s' "$A_OFF" | wc -c | tr -d ' ' )"
-a_on_strip="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"
+a_on_strip="$( printf '%s' "$A_OUT_NOACT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"
 a_off_strip="$( printf '%s' "$A_OFF" | sed -E 's/ est_tokens="[0-9]+"//g' )"
 if [ -n "$A_OFF" ] && [ "$a_on_strip" = "$a_off_strip" ] && [ "$a_off_bytes" -lt 3500 ]; then
     ok "(4d) the answer minus the caller hop is the RIPWIRE_NO_CALLER_HOP=1 answer ($a_off_bytes B, < the 3500 B ceiling)"
 else
     no "(4d) the answer minus the caller hop differs from RIPWIRE_NO_CALLER_HOP=1, or that answer is $a_off_bytes B (>= 3500)"
+fi
+# (4e) the act strip is live and exact: on an answer carrying the act line it removed bytes, and what is left is the hop-off,
+# act-off answer once the hop is stripped (so ACT_STRIP cannot hide anything but the act line from (4) and (4d)).
+if printf '%s' "$A_OUT" | grep -q '<act read="'; then
+    if [ "${#A_OUT_NOACT}" -lt "${#A_OUT}" ] \
+       && [ "$( printf '%s' "$A_OFF" | sed -E 's/ est_tokens="[0-9]+"//g' )" = "$( printf '%s' "$A_OFF_ALL" | sed -E 's/ est_tokens="[0-9]+"//g' )" ]; then
+        ok "(4e) the act strip removed the act line only (${#A_OUT} -> ${#A_OUT_NOACT} chars; the hop-off answer minus it is RIPWIRE_NO_ACTLINE=1's)"
+    else
+        no "(4e) the act strip removed nothing, or the hop-off answer minus the act line is not the RIPWIRE_NO_ACTLINE=1 answer"
+    fi
+else
+    ok "(4e) this answer carries no act line (a binary without it, or RIPWIRE_NO_ACTLINE): (4)/(4d) measure the answer as it is"
 fi
 if printf '%s' "$A_OUT" | grep -q ' e="'; then
     [ "$a_norm_bytes" -lt "$a_bytes" ] \
