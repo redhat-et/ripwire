@@ -62,6 +62,7 @@
 Checks: >
   -*,
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
   bugprone-integer-division,
   bugprone-sizeof-expression,
   clang-analyzer-*,
@@ -85,19 +86,16 @@ WarningsAsErrors: ''
 # No automatic fixes. `-fix` on a data-oriented tree rewrites layout decisions that were made on purpose.
 FormatStyle: none
 
-# bugprone-easily-swappable-parameters is set to REVEAL, because the rows are real. Measured 2026-09-10 on e63e2d43
-# with the style job's toolchain and version.h stamped: every one of the 209 rows the upstream defaults report was
-# read and labeled. 208 are role pairs where a swap compiles and silently changes the answer — (root, path),
-# (fileId, line), (topN, budgetBytes), out-parameter pairs — and 1 is noise. So every option that shrinks the table
-# silences real rows. Counted per option: ModelImplicitConversions=false 31, MinimumLength=3 192, ignoring the
-# string_view suffix 54, the name lists a;b;x;y / from;to;lo;hi;start;stop;open;close / second;lo;hi 4 / 9 / 1, and a
-# name-affix threshold of 3 8. None of those is set. The two options below only ADD rows, and every added row is real:
-#   NamePrefixSuffixSilenceDissimilarityThreshold 0 (upstream 1): +3. Names one character apart were silenced as
-#     "similar", which hid archViolates(la, lb), findStringValue(vs, ve) and parseCappedCsvPair(capA, capB).
-#   QualifiersMix true (upstream false): +15. A const T& input beside a T& output, e.g. readFile(path, out): a swap
-#     compiles whenever the caller's input is a mutable lvalue, the common case here. These rows are also debt against
-#     CONTRIBUTING.md §3 "Interfaces" (structured-binding returns over out-params).
-# SuppressParametersUsedTogether stays true: false adds 440 rows, most of them (a, b) / (i, n) noise.
-CheckOptions:
-  bugprone-easily-swappable-parameters.NamePrefixSuffixSilenceDissimilarityThreshold: 0
-  bugprone-easily-swappable-parameters.QualifiersMix: true
+# bugprone-easily-swappable-parameters is OFF (0.7.1, 2026-11-23). It was 612 of the 967 baseline rows (63%), so the
+# report a reader triaged was mostly one class, and that class names a signature SHAPE, not a defect: a row says a swap
+# would compile, never that a call is swapped. Disabled rather than tightened, because no option set leaves "only the
+# risky pairs": the 2026-09-10 labeling on e63e2d43 read all 209 rows the upstream defaults then reported and found 208
+# real role pairs ((root, path), (fileId, line), (topN, budgetBytes), out-parameters), and each option silences by
+# shape, not by risk (MinimumLength=3 alone drops 192 of those, ModelImplicitConversions=false 31, the string_view
+# suffix 54), so the survivors would be no riskier than the rows it hid, and every new signature would still be one
+# more row with the same triage outcome. The design side is covered where it can gate: --quality-delta's params kind
+# reports a function whose parameter count grows against git HEAD, and its report-only similar= facet names the longest
+# run of adjacent same-typed parameters (src/similarargs.h). The options the check carried
+# (NamePrefixSuffixSilenceDissimilarityThreshold 0, QualifiersMix true; both only ADDED rows) are removed with it;
+# re-enabling it starts from upstream defaults and should re-measure first.
+CheckOptions: {}

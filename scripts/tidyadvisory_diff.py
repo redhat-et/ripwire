@@ -24,7 +24,19 @@ MODES (all flags optional except --report)
   --issue-body F       write the markdown body of the tracking issue (written only when there are NEW rows)
   --status-out F       write key=value lines: status, parsed, new, gone, baseline, ...
   --run-url U --sha S --note TEXT   shown in the issue body / the `generated from` header line
-  --selftest           run the built-in checks and exit 0 only if they pass (the one exception to "always 0")
+  --selftest           run the built-in checks and exit 0 only if they pass (an exception to "always 0")
+
+GATING MODES (0.7.1; each is opt-in, and each is the only way this script exits non-zero besides --selftest)
+  --scope GLOBS        the report came from a `--checks='-*,GLOBS'` run: compare it against only the baseline rows whose
+                       check matches GLOBS (comma list, clang-tidy's `*` globs). With --normalized-out the candidate is a
+                       PARTIAL regeneration: every out-of-scope baseline row kept as it is, the in-scope rows replaced.
+  --gate               exit 1 when status=ok and there is a NEW row, exit 2 when status is anything but ok (a crashed run,
+                       a missing input or a suspect-empty report is not a pass). GONE rows never fail: fewer findings is
+                       the direction the ratchet wants. scripts/tidycheck.sh --ratchet runs this on every CI event.
+  --ratchet FILE       compare the baseline's row count per check with FILE's ceilings (.clang-tidy-ratchet.txt): exit 1
+                       when any check has MORE rows than its ceiling (a check absent from FILE has ceiling 0) and also when
+                       it has FEWER — a fixed row lowers the ceiling in the same commit, so the next change cannot spend
+                       the slack. --ratchet-update rewrites FILE from the baseline (and exits 0).
 
 status= is one of: ok | noinput (no report file) | nobaseline (no baseline file) | tool-failed (rc != 0) |
 suspect-empty (0 findings parsed against a non-empty baseline: a crashed or truncated run looks like this, not like a
@@ -32,6 +44,7 @@ clean tree). Only status=ok means NEW/GONE are trustworthy; the workflow acts on
 """
 import argparse
 import collections
+import fnmatch
 import os
 import re
 import sys
@@ -48,7 +61,7 @@ MAX_BODY = 60000          # GitHub's issue body limit is 65536 characters; stay 
 BASELINE_HEADER = """\
 # .clang-tidy-baseline.txt - the advisory clang-tidy findings accepted as of the commit below.
 # One row per finding: file TAB check TAB anchor (the trimmed source line; no line numbers, so unrelated edits do not
-# churn it). Sorted. Every row is either a fix still to come or a triaged false positive / accepted finding; a fixed
+# churn it), then optionally TAB and the one-line reason a row is kept (`kept: ...`; carried across regeneration). Sorted. Every row is either a fix still to come or a triaged false positive / accepted finding; a fixed
 # finding's row is deleted, never kept as a record.
 # The nightly advisory run (ci.yml `style` job, schedule/workflow_dispatch) diffs its report against this file with
 # scripts/tidyadvisory_diff.py and opens or updates ONE tracking issue (label clang-tidy-advisory) listing the NEW rows.
@@ -114,27 +127,34 @@ def keyof(f):
     return "%s\t%s\t%s" % (f[0], f[2], f[3])
 
 
-def read_baseline(path):
+def read_baseline(path, reasons=None):
+    """-> key rows. A row may carry a 4th TAB field, the one-line reason it is kept (`kept: ...`); it is not part of the
+    key (an anchor never holds a TAB: collapse() splits on whitespace) and, when `reasons` is a dict, is collected
+    into it by key so a regeneration can carry it forward."""
     rows = []
     with open(path, encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             ln = ln.rstrip("\n")
             if not ln.strip() or ln.startswith("#"):
                 continue
-            parts = ln.split("\t", 2)
+            parts = ln.split("\t", 3)
             if len(parts) < 2:
                 continue            # not a key row; ignored rather than guessed at
-            rows.append("\t".join((parts + [""])[:3]))
+            key = "\t".join((parts + [""])[:3])
+            rows.append(key)
+            if reasons is not None and len(parts) == 4 and parts[3].strip():
+                reasons.setdefault(key, parts[3].strip())
     return rows
 
 
-def write_rows(path, keys, note):
+def write_rows(path, keys, note, reasons=None):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(BASELINE_HEADER)
         fh.write("# generated from: %s\n" % (note or "an advisory clang-tidy report"))
         fh.write("# rows: %d\n" % len(keys))
         for k in sorted(keys):
-            fh.write(k + "\n")
+            why = (reasons or {}).get(k)
+            fh.write(k + ("\t" + why if why else "") + "\n")
 
 
 def esc(text):
@@ -208,6 +228,62 @@ def issue_body(new_keys, new_lines, gone_keys, base_n, sha, url, nrows):
     return "\n".join(head + body_mid + out + tail) + "\n"
 
 
+def in_scope(check, globs):
+    return any(fnmatch.fnmatchcase(check, g) for g in globs)
+
+
+def scope_globs(text):
+    return [g.strip() for g in (text or "").split(",") if g.strip() and not g.strip().startswith("-")]
+
+
+RATCHET_HEADER = """\
+# .clang-tidy-ratchet.txt - the per-check ceiling on .clang-tidy-baseline.txt's row count. check TAB ceiling, sorted.
+# test/tidyratchetcheck.sh fails when the baseline has MORE rows of a check than its ceiling (a check not listed here
+# has ceiling 0) and when it has FEWER: lower the ceiling in the commit that fixes the row, so the slack cannot be spent.
+# Generated, never hand-edited: python3 scripts/tidyadvisory_diff.py --baseline .clang-tidy-baseline.txt
+#                                   --ratchet .clang-tidy-ratchet.txt --ratchet-update
+"""
+
+
+def read_ratchet(path):
+    ceil = {}
+    with open(path, encoding="utf-8") as fh:
+        for ln in fh:
+            ln = ln.rstrip("\n")
+            if not ln.strip() or ln.startswith("#"):
+                continue
+            c, _, n = ln.partition("\t")
+            ceil[c] = int(n)
+    return ceil
+
+
+def ratchet(a):
+    counts = collections.Counter(r.split("\t", 2)[1] for r in read_baseline(a.baseline))
+    if a.ratchet_update:
+        with open(a.ratchet, "w", encoding="utf-8") as fh:
+            fh.write(RATCHET_HEADER)
+            fh.write("# total: %d\n" % sum(counts.values()))
+            for c in sorted(counts):
+                fh.write("%s\t%d\n" % (c, counts[c]))
+        print("tidyadvisory_diff: ratchet rewritten: %d check(s), %d row(s)" % (len(counts), sum(counts.values())))
+        return 0
+    ceil = read_ratchet(a.ratchet)
+    grew, shrank = [], []
+    for c in sorted(set(counts) | set(ceil)):
+        have, cap = counts.get(c, 0), ceil.get(c, 0)
+        if have > cap:
+            grew.append((c, have, cap))
+        elif have < cap:
+            shrank.append((c, have, cap))
+    print("tidyadvisory_diff: ratchet baseline=%d ceiling=%d grew=%d shrank=%d" % (
+        sum(counts.values()), sum(ceil.values()), len(grew), len(shrank)))
+    for c, have, cap in grew:
+        print("  GREW    %s: %d rows, ceiling %d — a new finding is fixed, not baselined (or argue it in review)" % (c, have, cap))
+    for c, have, cap in shrank:
+        print("  SHRANK  %s: %d rows, ceiling %d — lower the ceiling in this commit (--ratchet-update)" % (c, have, cap))
+    return 1 if (grew or shrank) else 0
+
+
 def run(a):
     status = "ok"
     extra = []
@@ -218,8 +294,9 @@ def run(a):
         with open(a.report, encoding="utf-8", errors="replace") as fh:
             findings, errs = parse(fh.readlines(), a.root)
     base = []
+    reasons = {}
     if a.baseline and os.path.isfile(a.baseline):
-        base = read_baseline(a.baseline)
+        base = read_baseline(a.baseline, reasons)
     elif status == "ok":
         status = "nobaseline"
     rc = None
@@ -234,6 +311,14 @@ def run(a):
     elif a.rc and status == "ok":
         status = "tool-failed"
         extra.append("no exit-status file %s" % a.rc)
+    full_base = list(base)
+    globs = scope_globs(a.scope)
+    if globs:
+        outside = [f for f in findings if not in_scope(f[2], globs)]
+        if outside:
+            extra.append("%d finding(s) outside --scope ignored" % len(outside))
+        findings = [f for f in findings if in_scope(f[2], globs)]
+        base = [r for r in base if in_scope(r.split("\t", 2)[1], globs)]
     if status == "ok" and not findings and base:
         status = "suspect-empty"
         extra.append("0 findings parsed against %d baseline rows" % len(base))
@@ -266,13 +351,21 @@ def run(a):
                 print("    %s%s  %s%s" % (f, (":" + where) if (where and title == "NEW") else "", an[:110],
                                          "  x%d" % ctr[k] if ctr[k] > 1 else ""))
     if a.normalized_out and status != "noinput":
-        write_rows(a.normalized_out, [keyof(f) for f in findings], a.note)
+        kept = [r for r in full_base if not in_scope(r.split("\t", 2)[1], globs)] if globs else []
+        write_rows(a.normalized_out, kept + [keyof(f) for f in findings], a.note, reasons)
     if a.issue_body and status == "ok" and nrows:
         with open(a.issue_body, "w", encoding="utf-8") as fh:
             fh.write(issue_body(list(new), lines_of, list(gone), len(base), a.sha, a.run_url, nrows))
     if a.status_out:
         with open(a.status_out, "w") as fh:
             fh.write("status=%s\nparsed=%d\nbaseline=%d\nnew=%d\ngone=%d\n" % (status, len(findings), len(base), nrows, sum(gone.values())))
+    if a.gate:
+        if status != "ok":
+            print("tidyadvisory_diff: GATE ERROR status=%s — not a pass%s" % (status, (
+                "; if every in-scope row was fixed, regenerate the baseline" if status == "suspect-empty" else "")))
+            return 2
+        print("tidyadvisory_diff: GATE %s — %d NEW row(s) in scope" % ("FAIL" if nrows else "PASS", nrows))
+        return 1 if nrows else 0
     return 0
 
 
@@ -307,6 +400,65 @@ def selftest():
     # the crash twin: unparseable garbage yields nothing, not a finding
     g, e = parse(["clang-tidy: segfault\n", "/x/y.cpp:1:1: error: unknown type name 'Foo'\n"], None)
     check(g == [] and e == 1, "a compile error with no [check] is counted as unattributed, not as a finding")
+
+    # --scope / --gate / --ratchet: each red arm beside its green twin, on throwaway files
+    import io
+    import contextlib
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        def put(name, text):
+            path = os.path.join(tmp, name)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            return path
+        base = put("base.txt", "# header\nsrc/a.h\tbugprone-exception-escape\tvoid f()\nsrc/a.h\tbugprone-branch-clone\tif( x )\n")
+        rc0 = put("rc", "0\n")
+        same = put("same.txt", "/r/src/a.h:3:6: warning: an exception may be thrown [bugprone-exception-escape]\n    3 | void f()\n")
+        new = put("new.txt", "/r/src/a.h:3:6: warning: an exception may be thrown [bugprone-exception-escape]\n    3 | void f()\n"
+                             "/r/src/b.h:9:6: warning: an exception may be thrown [bugprone-exception-escape]\n    9 | void g()\n")
+        empty = put("empty.txt", "")
+
+        def gate(report, scope, rc=rc0, out=None):
+            ns = argparse.Namespace(report=report, baseline=base, rc=rc, root="/r", normalized_out=out, issue_body=None,
+                                    status_out=None, run_url="", sha="", note="", scope=scope, gate=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                return run(ns)
+        check(gate(same, "bugprone-exception-escape") == 0, "gate PASSES a scoped report whose only row is baselined (the branch-clone row is out of scope, not GONE)")
+        check(gate(new, "bugprone-exception-escape") == 1, "gate FAILS a NEW in-scope row (planted src/b.h exception-escape)")
+        check(gate(new, "bugprone-unchecked-optional-access,bugprone-exception-*") == 1, "a glob in --scope matches the planted row's check")
+        check(gate(new, "bugprone-branch-clone") == 2, "gate is an ERROR, not a pass, on an empty scoped report against a non-empty scoped baseline")
+        check(gate(empty, "bugprone-use-after-move") == 0, "gate PASSES an empty report when the scope has no baseline rows (a zero-row check)")
+        check(gate(same, "bugprone-exception-escape", rc=put("rc1", "1\n")) == 2, "gate is an ERROR when clang-tidy's exit status is non-zero")
+        check(gate(os.path.join(tmp, "missing.txt"), "bugprone-exception-escape") == 2, "gate is an ERROR on a missing report")
+        cand = os.path.join(tmp, "cand.txt")
+        gate(new, "bugprone-exception-escape", out=cand)
+        rows = read_baseline(cand)
+        check(len(rows) == 3 and any("branch-clone" in r for r in rows) and any("void g()" in r for r in rows),
+              "a scoped --normalized-out keeps the out-of-scope rows and replaces the in-scope ones (got %d rows)" % len(rows))
+        why = put("why.txt", "src/a.h\tbugprone-exception-escape\tvoid f()\tkept: bad_alloc only\n")
+        ns = argparse.Namespace(report=same, baseline=why, rc=rc0, root="/r", normalized_out=cand, issue_body=None, status_out=None,
+                                run_url="", sha="", note="", scope="", gate=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc_why = run(ns)
+        carried = {}
+        read_baseline(cand, carried)
+        check(rc_why == 0 and carried == {"src/a.h\tbugprone-exception-escape\tvoid f()": "kept: bad_alloc only"},
+              "a row's kept: reason is not part of its key and survives regeneration (%r)" % carried)
+
+        def ratch(baseline, ceil, update=False):
+            ns = argparse.Namespace(baseline=baseline, ratchet=ceil, ratchet_update=update)
+            with contextlib.redirect_stdout(io.StringIO()):
+                return ratchet(ns)
+        ceil = os.path.join(tmp, "ratchet.txt")
+        check(ratch(base, ceil, update=True) == 0 and read_ratchet(ceil) == {"bugprone-exception-escape": 1, "bugprone-branch-clone": 1},
+              "--ratchet-update writes one ceiling per check")
+        check(ratch(base, ceil) == 0, "ratchet PASSES a baseline that matches its ceilings")
+        grown = put("grown.txt", open(base).read() + "src/b.h\tbugprone-exception-escape\tvoid g()\n")
+        check(ratch(grown, ceil) == 1, "ratchet FAILS a baseline that grew by one row")
+        other = put("other.txt", open(base).read() + "src/b.h\tbugprone-use-after-move\tuse( x );\n")
+        check(ratch(other, ceil) == 1, "ratchet FAILS a row of a check that has no ceiling (ceiling 0)")
+        fewer = put("fewer.txt", "src/a.h\tbugprone-branch-clone\tif( x )\n")
+        check(ratch(fewer, ceil) == 1, "ratchet FAILS a baseline that shrank until the ceiling is lowered (no slack to spend)")
     return 0 if ok else 1
 
 
@@ -323,13 +475,24 @@ def main():
     ap.add_argument("--sha", default="")
     ap.add_argument("--note", default="")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--scope", default="")
+    ap.add_argument("--gate", action="store_true")
+    ap.add_argument("--ratchet")
+    ap.add_argument("--ratchet-update", dest="ratchet_update", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.ratchet:
+        if not a.baseline or not os.path.isfile(a.baseline) or (not a.ratchet_update and not os.path.isfile(a.ratchet)):
+            print("tidyadvisory_diff: --ratchet needs an existing --baseline and ratchet file")
+            return 2
+        return ratchet(a)
     try:
         return run(a)
     except Exception as e:      # advisory: a bug here must not red the job, but it must not look like a clean run either
         print("tidyadvisory_diff: ERROR %s: %s" % (type(e).__name__, e))
+        if a.gate:
+            return 2            # gating: a script bug is never a pass
         if a.status_out:
             try:
                 open(a.status_out, "w").write("status=script-error\nparsed=0\nbaseline=0\nnew=0\ngone=0\n")
