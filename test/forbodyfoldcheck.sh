@@ -341,6 +341,10 @@ if r=$( chk slice "$TMP/slice" JobScheduler __init__ drain counter_00 ); then ok
 if r=$( chk whole "$TMP/slice" "$BIN" "$FIXPY" ); then ok "(S2) slice members whole, the fold <= 4000 B, no body twice"; else no "(S2) $r"; fi
 if grep -q '<slice p="scheduler.py" n="JobScheduler" l="1" members="[0-9]*" of="49">' "$TMP/slice"; then ok "(S3) of= counts the class's 49 direct members: hand_off, nested in drain, is not one"; else no "(S3) of= is not 49 (a nested function counted as a member?)"; fi
 # S4 (N4): the constructor by name, not by rank
+# FIXTURE MOVE 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW): ledger.ts -> book.ts. The question's
+# "ledger" was also the class file's basename, which lifts every symbol of the file by the same amount; at weight 1 that put
+# lineOfDay (2.69) a hair over LedgerBook (2.64), so lineOfDay was served as its own body and no slice was cut — the premise moved,
+# not the slice rule. Under book.ts the fold, slice and skip are the pre-basename answer at weights 0, 1 and 2 alike (paths aside).
 if r=$( chk unranked "$TMP/ctor" constructor ) && r=$( chk slice "$TMP/ctor" LedgerBook constructor lineOfDay member00 ); then
     ok "(S4) an unranked constructor with no question word still leads LedgerBook's slice (by name), then lineOfDay; never member00"
 else no "(S4) $r"; fi
