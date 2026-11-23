@@ -1,8 +1,0 @@
-### Changed — `--impact`'s help says what `--limit` sizes, and the declined-tier disclosure of a named call is gated on every surface
-
-The call a windowed `--callers` / `--impact` root names in `all_next=` carries `--limit=<row total>`, and `--limit` sizes the declined call sites as well as the rows. Where an answer holds more declined sites than rows, that call still cuts them. It was reported as a silent cut. It is not one: the answer says `dc_shown=` (the sites printed), `declined_calls=` (the tier's count, a floor) and `dc_next=` (the call that lists them all), in XML, columnar, `--json` and the MCP twins. Re-measured on 32 windowed impact cells of five corpora: 15 named calls cut the tier (102,979 of 179,022 sites listed) and 15 of 15 carry all three.
-
-- No answer changes: 72 of 72 corpus documents are byte-identical to the previous binary.
-- `--impact`'s help said the named call "lists every row". It now reads "every row of total=" and says that `--limit` sizes the declined call sites too, naming `dc_shown=`, `declined_calls=` and `dc_next=`.
-- `test/dctiercutcheck.sh` asserts on six surfaces of each named call (reached from a `--impact` root, a `--callers` root and a `--for` hand-off) that a cut tier is said, that `dc_shown=` is the number of sites printed, and that `dc_next=`, run verbatim, lists every site and the same rows. Three mutations of the real binary turn it red, two of which hide or misstate the cut from the reader.
-- Sizing the declined tier apart from `--limit`, and a pointer that clears both tiers, were both considered and not taken (`docs/EVALS.md`, amendment 10c): the second measured 145,532 B against 77,797 B at the median in amendment 10b.

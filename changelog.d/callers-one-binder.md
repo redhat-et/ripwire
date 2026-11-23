@@ -1,3 +1,0 @@
-### Fixed — MCP `find_referencing_symbols` binds a narrowed callers selector like `--callers`
-
-`--callers=Owner.method`, refused as written over several definitions, answers for its one source definition (the GV-PATH-BIND rule, `narrowed=`). MCP `find_referencing_symbols` and the `callers` batch verb ran their own copy of the row lookup without that step and refused the same spelling with "symbol not found". Both surfaces now call one binder, `callHierarchyRowsNarrowed` in `src/forgraphverb.h`, and the MCP answer carries `"narrowed"` and its `narrowed_note`. A spelling that still fits two source definitions refuses on both surfaces, as before. New arm (d5) in `test/gvassemblycheck.sh`.
