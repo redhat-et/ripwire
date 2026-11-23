@@ -1,5 +1,0 @@
-### Fixed — a Rust call bound by a `use` of an outside crate no longer binds an in-tree namesake
-
-`use crossterm::style::Print; Print( s )` bound, with no hedge, to an in-tree `trait Print` of another workspace crate; `use std::cmp::max; max( a, b )` bound to an in-tree `fn max`. A bare call whose name every `use` in force leads provably out of the tree (std, a registry crate, an in-tree re-export of one) is now counted `external=` and draws no edge. A Rust call site never binds a trait (a call names a function, a tuple struct or a tuple variant). A bare call that only an outside glob (`use crossterm::style::*;`) may supply keeps an in-tree namesake the file's own `use`s do not reach as a `via="name"` row instead of an unhedged one. Measured on nushell: 72 fewer edges, 105 more `external=`; every changed edge sampled was a std, `fancy_regex`, `ndarray`, `polars` or `bracoxide` item.
-
-What it does not change: a `use` that reaches an in-tree item (`use crate::ui::Print`, `use a::Print` of a workspace crate) binds as before, and a file with an in-tree glob beside an outside one answers as before.

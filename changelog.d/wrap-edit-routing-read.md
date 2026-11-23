@@ -1,3 +1,0 @@
-### Changed — the edit-routing line `ripwire wrap claude` writes no longer says a Read is always required before an Edit
-
-Claude Code refuses a native Edit on an unread file only when the file is outside its working directory (measured on stored sessions: 4 refusals in 283 Edits, all outside the session directory; 7 unread in-directory Edits, all accepted). The blurb now says so: a body ripwire delivered is the verbatim text of its lines and is edited directly inside the working directory; a ranged Read is for what was not delivered, and always for a file outside it. Other agents' text is unchanged. This changes no answer byte; its effect on agent behaviour is UNTESTED. Re-run `ripwire wrap claude` to refresh an installed copy.
