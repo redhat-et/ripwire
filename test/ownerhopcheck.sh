@@ -74,7 +74,7 @@
 #   (C/scoped) the first cut owner is a method with a same-named free function in its file (scope: Bus.notify vs
 #        notify): next= is the canonical --callees=app/bus.py::Bus::notify, and pasting it resolves defs="1" (the
 #        FILE:NAME form merges both: premise defs >= 2).
-#   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4000
+#   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4100
 #        (less room than the owner row needs) the owner is first or named by qword_cut + next=;
 #        --token-budget=1200 (ceiling spent, reason="budget"): byte-identical to the A/B handle. (B3) a budget sweep
 #        on broadcast: every owner row it serves is disclosed (capped="1" + next=), an absent one is disclosed
@@ -546,12 +546,17 @@ if ran_ok "$f" "(B1)"; then
     else no "(B1) est_tokens missing or not numeric ('$est')"; fi
 fi
 # (B1b) a ceiling that leaves the owner less than its row: the owner is still first, or its cut is disclosed by name
-f="$TMP/ts.b4.xml"; run ts "$f" "--for=$QTS" --token-budget=4000
+# RE-ANCHOR 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW): 4000 -> 4100. A size-derived threshold,
+# not an owner-hop change: at weight 1 the rows the hops are shed from cost more (est_tokens 3956 with every hop shed, 3825 at
+# weight 0), so 4000 and 4050 now shed all seven hops (shown="0" capped="1" next=, disclosed — B3 holds), and the first budget
+# that funds exactly the owner row (shown="1", gateway, hops:6 shed) is 4100 — the shape weight 0 had at 4000. Measured on this
+# fixture at weights 0/1/2: 4100 serves gateway first at each (shown 2/1/2).
+f="$TMP/ts.b4.xml"; run ts "$f" "--for=$QTS" --token-budget=4100
 if ran_ok "$f" "(B1b)"; then
     HJ "$f" "$TMP/ts.b4.json" "(B1b)"
     got="$( J "('row' if d['rows'] and d['rows'][0]['n']=='gateway' and d['rows'][0].get('qword')=='gateway' else 'cut' if (d['hops'] or {}).get('next')=='--callees=src/middleware/gateway.ts:gateway' and (d['hops'] or {}).get('qword_cut','0')!='0' else '')" <"$TMP/ts.b4.json" )"
-    if [ "$got" = row ] || [ "$got" = cut ] || grep -q 'reason="budget"' "$f"; then ok "(B1b) --token-budget=4000: the owner is first or disclosed ($got)"
-    else no "(B1b) --token-budget=4000: gateway neither the first owner row nor named by qword_cut/next= ($got)"; fi
+    if [ "$got" = row ] || [ "$got" = cut ] || grep -q 'reason="budget"' "$f"; then ok "(B1b) --token-budget=4100: the owner is first or disclosed ($got)"
+    else no "(B1b) --token-budget=4100: gateway neither the first owner row nor named by qword_cut/next= ($got)"; fi
 fi
 # forbudget-soft round C (rule 4): sections are funded from the rows at the soft target's cut (reserve first), so 1200 tokens
 # now leaves the hops a share; re-anchored at 700, the widest budget that still exhausts it (measured: 700 budget, 900 not)
