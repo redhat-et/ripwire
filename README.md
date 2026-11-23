@@ -220,7 +220,7 @@ figure is the larger of its cold index (3,823) and its first question; ripwire i
 tracks. "Agents at once" = N fresh starts together, each in its own copy of the repository, each indexing and then
 answering one question; combined peak and how many answered; one run per cell. ‡ = the 48 GB machine swapped during the
 run. cbm sends every index through one daemon with at most 4 workers, so its peak stays flat from 4 to 8 agents while its
-time doubles. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available.</sub>
+time doubles. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12,258 MB on vscode (almost all TypeScript), 76,181 files at 16,466 MB on llvm-project (mostly C and C++); its vscode figure repeats within 6% over three runs.</sub>
 
 #### Answers
 
