@@ -520,6 +520,7 @@ REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys
 crossref.h	listTreesOfRefs	.at	1	rootTreesOf returns its map only when catFileBatch served every distinct tip (an answer for another object fails the read) and each served tip is assigned its tree, so every ref's tip is a key
+graph.h	rustOutsideGlobMaySupply	.at	1	not std's throwing at: CallResultTypes::RustGlobFacts::at (receiverevidence.h) is a sortutil::findSorted lookup that returns nullptr on a miss, and the caller tests the pointer before reading it
 infra/dynamic_map.hpp	at	.at	1	the non-const at forwards to the const at of the same container; no ripwire caller
 ingest_astquery.h	nearestNodeKindHint	.at	1	the key was just read out of this same map by nearestNameByEditDistance, so it is present
 REGC
