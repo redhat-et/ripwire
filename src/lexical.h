@@ -522,12 +522,15 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
 // names a FILE or a package more often than a function ("lib/theme.githelpers: remove dead code", "restorer: reject …"),
 // and a symbol's own text rarely repeats its file's name. Two peers win GA1 DEV cells on exactly this signal:
 // codebase-memory-mcp indexes each node's file path and qualified name at the SAME BM25 weight as its name, graphify seeds
-// from the file node a query word names. 2 sits under the name field (×3) and over the body (×1). MEASURED on GA1 DEV n=89
+// from the file node a query word names. LP1 shipped 2 (under the name field ×3, over the body ×1). MEASURED on GA1 DEV n=89
 // (in-sample; LP1): w=2 completes 1 more task and takes 0 tasks down at any rung; the FULL-path field (RIPWIRE_PATHTOK_W=1)
 // took 2 tasks down — r3_pathtok's held-out finding again, the reason this is the basename and not the path.
-// NOT YET the LB-3 acceptance verdict pass 1.6 asks for (a never-tuned set: GA3 DEV, held-out LocBench) — an owner call.
+// OWNER RULING (2026-11-23): the default is 1, not LP1's 2. At 2 a file-name match lifts every function of a same-named
+// file by the same amount, so a long function in a large file sinks behind its short siblings under BM25 length
+// normalization (test/ownerhopcheck.sh G/guard: `broadcast` among 105 short handlers of pkg/broadcast.py, rank 2 -> 107;
+// at 1 it stays at 2). Weight 1 keeps the held-out completeness unchanged (126 / 83 / 4 of 213) and fixes that case.
 // RIPWIRE_BASENAME_W still overrides it (0 = the historical ranking). test/forbasenamedefaultcheck.sh pins it.
-inline constexpr int kForBasenameFieldW = 2;
+inline constexpr int kForBasenameFieldW = 1;
 
 // The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
 // without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
