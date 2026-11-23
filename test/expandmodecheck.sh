@@ -88,7 +88,14 @@ fi
 # it now ALSO defaults its own map to top-k=0 — the ranked map that used to ride inside "bundle" mode is
 # gone, and the root discloses the default with topk_default="0" (test/expandtopk0check.sh is the dedicated
 # gate for that mechanism; this arm just keeps M6's bundle-vs-whole-file byte comparison honest under it).
-"$BIN" fix --expand=bigProbe007 --no-cache --legend=full >"$TMP/big.xml" 2>/dev/null
+# CL1 (src/outputceiling.h): big.c is 43.7 KB, over a bare --expand's ceiling budget (16 KB), so by DEFAULT the whole file is not a
+# candidate and reason= says so ("whole-file NB over pack-budget MB" — arm (2c)). The comparison this arm prices is taken at the
+# historic budget, passed explicitly, so both candidates still compete.
+"$BIN" fix --expand=bigProbe007 --no-cache --legend=full --pack-budget-bytes=65536 >"$TMP/big.xml" 2>/dev/null
+"$BIN" fix --expand=bigProbe007 --no-cache --legend=full >"$TMP/bigdefault.xml" 2>/dev/null
+grep -q 'mode="bundle" reason="whole-file [0-9]*B over pack-budget [0-9]*B"' "$TMP/bigdefault.xml" \
+    && ok "(2c) by default a file over the output-ceiling budget is no candidate, and reason= names both sizes" \
+    || no "(2c) the default big-file --expand does not disclose why the whole file was not served"
 grep -q 'mode="bundle"' "$TMP/big.xml" \
     && ok "(2) large-file --expand keeps mode=\"bundle\"" \
     || no "(2) large-file --expand lost the bundle mode"
@@ -153,7 +160,7 @@ fi
 diff -q "$TMP/small.xml" "$TMP/small2.xml" >/dev/null \
     && ok "(det) whole-file mode byte-identical twice" \
     || no "(det) whole-file mode differs across two runs"
-"$BIN" fix --expand=bigProbe007 --no-cache --legend=full >"$TMP/big2.xml" 2>/dev/null
+"$BIN" fix --expand=bigProbe007 --no-cache --legend=full --pack-budget-bytes=65536 >"$TMP/big2.xml" 2>/dev/null
 diff -q "$TMP/big.xml" "$TMP/big2.xml" >/dev/null \
     && ok "(det) bundle mode byte-identical twice" \
     || no "(det) bundle mode differs across two runs"

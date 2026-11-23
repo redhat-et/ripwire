@@ -307,9 +307,14 @@ struct TailPointerSpan
 {
     std::size_t at = 0, end = 0;
     std::string_view p, sym, rank;
+    std::string_view kind;   // AF4 T-C: ptr= on the pointer ("twin" DECL-TWIN, "side" ONE-SIDE-REACH; "" SIBLING-DEMOTE, the common kind)
 };
-// `text` with each span (in text order) rewritten in place as <t p= sym= r=/> (r= only when the row had one), `legend` before the
-// first; "" when `spans` is empty. ONE-SIDE-REACH (foronesidereach.h) and SIBLING-DEMOTE (forsiblingdemote.h) both print through it.
+// `text` with each span (in text order) rewritten in place as <t p= sym= r= ptr=/> (r= only when the row had one, ptr= only when the
+// span names a kind), `legend` before the first; "" when `spans` is empty. ONE-SIDE-REACH (foronesidereach.h), SIBLING-DEMOTE
+// (forsiblingdemote.h) and DECL-TWIN (fordecltwin.h) all print through it.
+// AF4 T-C: the KIND is on the row (ptr=), not read from which legend comment precedes it. Each legend used to label the pointers
+// after it by POSITION, so it could not move: lifted to the trailing legend every <t> read as every kind (AF1's deviation from
+// AF2's spec, results/AF1_ANSWERFIRST_1118/READOUT.md §6). With ptr= the legends define by attribute and may move.
 inline std::string tailPointerText( std::string_view text, std::span<const TailPointerSpan> spans, std::string_view legend )
 {
     std::string out;
@@ -323,6 +328,7 @@ inline std::string tailPointerText( std::string_view text, std::span<const TailP
         out += "\" sym=\"";
         out += s.sym;
         out += s.rank.empty() ? std::string() : "\" r=\"" + std::string( s.rank );
+        out += s.kind.empty() ? std::string() : "\" ptr=\"" + std::string( s.kind );
         out += "\"/>";
         from = s.end;
     }

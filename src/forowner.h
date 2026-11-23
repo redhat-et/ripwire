@@ -389,9 +389,17 @@ inline BodySlotRender renderForBodySlot( const BodySlotInputs& in, ForBodySlotOw
     BodySlotRender                    out;
     const std::optional<RedactCounts> before = in.redact != nullptr ? std::optional<RedactCounts>( *in.redact ) : std::nullopt;
     ChargedSection sec = chargeSection( [ & ]( std::FILE* f )
+        // CB1: the owner slot is the THIRD surface that serves a candidate's definition body, and so the third
+        // and last to take the monotone line cap. The three capped surfaces are exactly the ones whose unit is
+        // "this symbol's definition body": <bodies of="key">, <bodies pick="name|member"> here, and pack-task's.
+        // The route/hops/launch groups keep bodyLineCap=0 -- their unit is a PATH through several definitions,
+        // not one candidate's body, and capping them would move bytes on answers this lane never measured.
+        // Which of the three fires depends on the query, so a rule bound to only one of them would be a rule a
+        // caller cannot predict -- that is why the gate asserts the unit, not the shell.
         { packBodies( f, in.ing, { owner.id }, kForBodySlotMaxBytes, in.outOff, in.outTargets, withAnchorEdge( CalleeEdgeBytes( in.outNameOnly, in.outProv, nullptr ), in.outAnchor ),
                       in.compress, in.redact, /*ranges=*/nullptr, in.notes, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                      /*withFileContext=*/false, in.rootArg, &in.lensRank, CalleeLegendsInHead( in.viaLegendInHead, in.splitLegendInHead ) ); },
+                      /*withFileContext=*/false, in.rootArg, &in.lensRank, CalleeLegendsInHead( in.viaLegendInHead, in.splitLegendInHead ),
+                      /*bodyLineCap=*/kCappedBodyLines ); },
         kBytesPerTokenBody );
     if( !sec.isRendered )
     {

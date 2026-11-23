@@ -124,6 +124,34 @@ inline std::string_view editCheckScopeDefine( std::string_view line ) noexcept
     return ( end != name && opensScope ) ? line.substr( name, end - name ) : std::string_view{};
 }
 
+// What EditCheckBraceLexer( file ).chainAt( offset ) and its usingDirectiveBefore() answer, for EVERY offset of one file,
+// from one pass (lane PF2, SCOPE-INDEX). chainAt lexes the whole file per call (the final balance decides any answer), so a
+// caller asking once per definition paid symbols x file size: the argument-type overload pick read every candidate's chain
+// that way, the hottest frame of llvm-project/clang's resolve loop after the narrowing walks were kept. The chain only
+// changes at a '{' or '}' that pushes or pops labels, so the pass keeps those points and the chain after each; an offset's
+// chain is the one after the last such point before it, exactly the state chainAt snapshots there.
+struct EditCheckScopeIndex
+{
+    bool                                  ok = false;   // the braces balance, close, and no macro opens a scope: chainAt's answers stand
+    std::vector<std::size_t>              changeAt;     // ascending positions of the label-moving '{' / '}'
+    std::vector<std::vector<std::string>> chainAfter;   // parallel: the chain after each
+    std::vector<std::size_t>              usingAt;      // ascending starts of the `namespace` of each `using namespace`
+
+    std::optional<std::vector<std::string>> chainAt( std::size_t offset ) const
+    {
+        if( !ok )
+        {
+            return std::nullopt;
+        }
+        const std::size_t before = std::size_t( std::lower_bound( changeAt.begin(), changeAt.end(), offset ) - changeAt.begin() );
+        return before == 0 ? std::vector<std::string>{} : chainAfter[ before - 1 ];
+    }
+    bool usingDirectiveBefore( std::size_t offset ) const noexcept
+    {
+        return !usingAt.empty() && usingAt.front() < offset;
+    }
+};
+
 // ── the full scope chain ──────────────────────────────────────────────────────────────────────────────────────
 // The ENCLOSING half: a brace lexer over the comment-blanked file. Every '{' pushes the labels that a `namespace A::B`,
 // `namespace` (anonymous), `struct S`, `class S` or `union S` head left pending (an `enum class` and every other block
@@ -189,6 +217,21 @@ public:
         return out;
     }
 
+    // the one pass that answers chainAt / usingDirectiveBefore for every offset (EditCheckScopeIndex above)
+    EditCheckScopeIndex scopeIndex()
+    {
+        EditCheckScopeIndex index;
+        recording   = &index;
+        askedOffset = text.size();
+        for( std::size_t i = 0; i < text.size() && balanced; )
+        {
+            i = step( i );
+        }
+        recording = nullptr;
+        index.ok  = balanced && stack.empty() && !scopeMacro;
+        return index;
+    }
+
     // a `using namespace X;` came before the offset asked about: a QUALIFIED definition there (`int S::f`) may name a
     // member of X, so its written chain is not certain (the caller then reads the chain as unknown)
     bool usingDirectiveBefore() const noexcept { return usingBefore; }
@@ -224,14 +267,21 @@ private:
             return end;
         }
         punctuation( c );
+        if( recording != nullptr && ( c == '{' || c == '}' ) && labelsMoved )
+        {
+            recording->changeAt.push_back( i );
+            recording->chainAfter.push_back( current() );
+        }
         return i + 1;
     }
 
     // a '{' pushes the pending head's labels, a '}' pops; ';', '(' and '=' cancel a pending head
     void punctuation( char c )
     {
+        labelsMoved = false;
         if( c == '{' )
         {
+            labelsMoved = pending.has_value() && !pending->empty();
             stack.push_back( pending.value_or( std::vector<std::string>{} ) );
             stackIsNamespace.push_back( char( pending.has_value() && pendingNamespace ? 1 : 0 ) );
             pending.reset();
@@ -242,6 +292,7 @@ private:
         }
         else if( c == '}' )
         {
+            labelsMoved = !stack.back().empty();
             stack.pop_back();
             stackIsNamespace.pop_back();
         }
@@ -329,6 +380,10 @@ private:
         }
         scopeMacro  = scopeMacro || scopeMacroAt( w, i, end );
         usingBefore = usingBefore || ( lastWord == "using" && w == "namespace" && i < askedOffset );
+        if( recording != nullptr && lastWord == "using" && w == "namespace" )
+        {
+            recording->usingAt.push_back( i );
+        }
         if( ( w == "namespace" && lastWord != "using" ) || ( ( w == "struct" || w == "class" || w == "union" ) && lastWord != "enum" ) )
         {
             pending          = headLabels( end, w == "namespace" );
@@ -411,6 +466,8 @@ private:
     bool                                    stmtStart        = true;
     bool                                    scopeMacro       = false;
     bool                                    usingBefore      = false;
+    bool                                    labelsMoved      = false;     // the last punctuation pushed or popped labels
+    EditCheckScopeIndex*                    recording        = nullptr;   // scopeIndex's pass: where it keeps what it saw
 };
 
 // The WRITTEN half: the qualifier spelled before the declarator's name, read backwards from `nameAt` — `outer::detail::`

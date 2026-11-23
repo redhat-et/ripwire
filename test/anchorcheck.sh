@@ -124,6 +124,11 @@ QUERY="frobnicate widget cache"
 # ranking, body or anchor byte moved (anchor-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
+# RE-PIN 2026-11-22 (lane FS2; rule 4): golden_for.xml 4119 -> 4366 B, est_tokens "1572" -> "1671". CAUSE: the --for act line
+# (BR1/BR1B, merged into the 0.7.0 train at 53824ea8a "the act line ... rides the raw render"), which now rides --no-route too:
+# <act read="frob.cpp:4-8,frob.cpp:18-21,frob.cpp:11-15"/> after </sigs> and its one full-legend clause. Nothing to do with
+# --anchor. Verified mechanically: the same call under RIPWIRE_NO_ACTLINE=1 (the act line's A/B handle) is the previous golden
+# byte for byte, and deleting the <act> element and its clause from the new capture with est_tokens= masked gives it too.
 # RE-PIN 2026-11-18 (train byte-token-070, aeaacdad2 "a callee signature row under a <b> body names the file its line is in";
 # rule 4): golden_for.xml 4061 -> 4119 B, est_tokens "1551" -> "1572". The train changed the output and did not re-pin here:
 # the full legend's calls clause gains " (c p= their file when it is not the body's)" and a callee <c> row whose line is in another

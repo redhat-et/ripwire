@@ -37,6 +37,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) print some ranked rows as <t p= sym= r=/>
 # pointers (--json: {"pointer":…,"sym":…,"r":…} objects) in their place. This gate pins the ORDER of the ranked entries — a row or a
 # pointer at its r= — so it reads the answer as shipped; the rules are pinned in forsiblingdemotecheck / fordecltwincheck.

@@ -29,6 +29,10 @@
 # Usage:  bash test/mentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/mentioncheck.sh
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -191,12 +195,19 @@ printf '%s' "$JSON_HIT" | python3 -c "import json,sys; d=json.load(sys.stdin); a
     || no "L10b: --json mention_anchored key missing or wrong"
 
 # ── (vii) NAMED IDENTIFIER — the symbol the task names verbatim enters the head, below an unanchored #1 ──────
-# core/search.py defines hybrid_search once. eval/bench_top.py's run() calls it twice and repeats the question's
+# LP1 (4ba1fdec6, 0.7.0 train) ranks a file's BASENAME at weight 2 by default, so a question word that is a file's stem now lifts
+# that file's symbols with no mention anchor at all: core/search.py ("search.hybrid_search rank search results") and
+# core/ranking.cpp ("ranking::rescore") put the named symbol in the served head with the anchor OFF, and the module.fn, ns::fn
+# and cap arms below lost their premise (r=2 / r=1 either way). The fixture therefore places each qualifier where the basename
+# field cannot see it: hybrid_search lives in search/legs.py (the `search.` qualifier names its DIRECTORY, one of the three
+# places qualifierPlaces reads) and rescore in core/order_ops.cpp (the `ranking::` qualifier is its C++ namespace, its scope).
+# The arms pass with the basename field at its default and at RIPWIRE_BASENAME_W=0 alike.
+# search/legs.py defines hybrid_search once. eval/bench_top.py's run() calls it twice and repeats the question's
 # prose (the unanchored #1); forty-five eval/bench_NN.py run_NN()s call it once each and outscore it, so without the
 # anchor it sits far past the served head (r=47 on the base binary's candidate list).
 FIXN="$TMP/fixn"
-mkdir -p "$FIXN/core" "$FIXN/eval" "$FIXN/tests"
-cat > "$FIXN/core/search.py" <<'PY'
+mkdir -p "$FIXN/core" "$FIXN/eval" "$FIXN/tests" "$FIXN/search"
+cat > "$FIXN/search/legs.py" <<'PY'
 def hybrid_search(store, query):
     """Blend the keyword and vector legs."""
     return store.lookup(query) + store.nearest(query)
@@ -247,7 +258,7 @@ for f in core/t1.py lib/t2.py web/t3.py; do printf 'def tri_rows_rank(x):\n    "
 # C++: a header prototype and its definition — one named function, one lift
 printf '#pragma once\nint scale_all( int x );\n' > "$FIXN/ext/scale.h"
 printf '#include "scale.h"\nint scale_all( int x ) { return x * 2; }\n' > "$FIXN/ext/scale.cpp"
-cat > "$FIXN/core/ranking.cpp" <<'CPP'
+cat > "$FIXN/core/order_ops.cpp" <<'CPP'
 namespace ranking
 {
 int rescore( int x )
@@ -347,7 +358,9 @@ CAP="$( headOf "does hybrid_search call helper() or ranking::rescore to rank sea
 if printf '%s' "$CAP" | grep -q 'mention_syms_capped="1" mention_syms_total="3"' && printf '%s' "$CAP" | grep -q 'mention_anchored="2"'; then
     ok "vii three named identifiers: two lift, the third is disclosed (mention_syms_capped=\"1\" mention_syms_total=\"3\")"
 else no "vii cap: expected mention_anchored=\"2\" with mention_syms_capped=\"1\" mention_syms_total=\"3\""; fi
-ORD="$( headOf 'does helper() call ranking::rescore before `hybrid_search` to rank search results' )"
+# --no-verb-route: a backticked `hybrid_search` plus "call" is a who-calls question the route answers with --callers (RT1/RT2,
+# verbs_forroute.h); this arm reads the ranked --for answer's mention lifts
+ORD="$( headOf 'does helper() call ranking::rescore before `hybrid_search` to rank search results' --no-verb-route )"
 if [ -n "$( servedRank "$ORD" helper )" ] && [ -n "$( servedRank "$ORD" rescore )" ] && [ -z "$( servedRank "$ORD" hybrid_search )" ]; then
     ok "vii cap order is task-text order: helper and rescore lift, the later backticked hybrid_search is the one refused"
 else no "vii cap order: helper r=$( servedRank "$ORD" helper ) rescore r=$( servedRank "$ORD" rescore ) hybrid_search r=$( servedRank "$ORD" hybrid_search ) (want the last absent)"; fi

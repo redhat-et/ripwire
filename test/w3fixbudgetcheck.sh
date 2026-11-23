@@ -37,14 +37,52 @@
 # legend clause — is ever dropped "(ceiling)" to fit. So the H2 arms no longer assert "fits ceiling x 1.15 <=> discloses
 # over_ceiling"; at every (task length x budget x lens) point they assert what must hold now:
 #   ST    (--for) the rows' charged bytes inside <sigs> fit T, or are only the rank 1..4 floor;
-#   RP    the served rows are a rank prefix of the default answer's rows, growing with the budget;
+#   RP    the served rows are a rank prefix of the default answer's rows, growing with the budget (--pack-task: a growing
+#         prefix in SCORE order, and each answer a disclosed pure reorder of that prefix — see "H2's RED CELL" below);
 #   NX    (--for) every cut element (capped="1") carries next=;
 #   NOLBL no over_ceiling= on the root and no over_ceiling ladder note;
 #   HL    no "(ceiling)" drop and no "task_echo: dropped" in the header; task= verbatim; route= kept when the default has it.
 # The user-text findings (M2/M3 hostile bytes, the M1 charge, the --recall disclosure, determinism) are unchanged:
 # --recall --max-tokens keeps its hard ceiling and its biconditional (arm 5).
+#
+# H2's RED CELL, CLOSED 2026-11-21 (it was acked on integration/070-1120, owner ruling 105). THE CELL: lens --pack-task,
+# task `mid`, budget 3000 against the 1600 step below — `the 9 row(s) served do not extend the 4 served at the budget below`.
+# WHAT WAS SERVED (binary 5000f06af, this gate's corpus; names abbreviated, D = a docs/BUDGET_NOTES.md row):
+#     score order (both reorder handles off)   render shape disclosure D:BUDGET_NOTES D D remaining ceiling headerFloor
+#     --pack-task --token-budget=1600          render shape disclosure D:BUDGET_NOTES          <sigs shown="4" total="9" capped="1">
+#     --pack-task --token-budget=3000          render shape disclosure remaining ceiling headerFloor D D D   <sigs docs_after_code="3">
+# Both answers are exactly what the product documents. The byte ladder picks the shown set in SCORE order — 4 rows at
+# 1600, all 9 at 3000, the first a prefix of the second — and code-above-docs then reorders the SHOWN set (filter.h: "the
+# same rows, only reordered ... the reorder never evicts a doc row"), renumbering r= and saying so in docs_after_code=.
+# At 1600 the one doc row shown is already last, so nothing moves; at 3000 three move below the code. The r= this gate
+# read is the DISPLAY rank, so it compared one answer before the permutation with one after it.
+# WHY IT WENT RED WHEN IT DID: this arm was written (77e225588, 2026-10-14) on the stated premise that "an explicit
+# budget's answer does not [reorder]" — true then, because --pack-task handed the caller's budget to
+# docsAfterCodeFitsCeiling and every budget on this grid is tighter than the default share. 34be00d0f (2026-11-19, "the
+# head's lens rules are the LENS's, not the caller's budget's") deliberately passes 0 there, so an explicit budget's head
+# takes the default's rules; its message lists the gates it re-ran and this one is not among them. The premise is in the
+# gate, so the defect is the gate's: RP for --pack-task was asserted on a rank the product is documented to permute.
+# THE FIX KEEPS THE FACT AND ADDS TWO. Per --pack-task point the gate now also serves the SCORE-ORDER TWIN (the same call
+# under RIPWIRE_NO_DOCS_AFTER_CODE=1 RIPWIRE_NO_HEAD_RR=1, the product's own A/B handles for the two shown-set reorders):
+#   RP   the twin's rows extend the twin's rows at the budget below      — the growing rank prefix, on the rank the ladder cuts by;
+#   T1   the served rows are the twin's rows as a SET, none added or lost — the reorder is pure (new; the legend's own claim);
+#   T2   a served order that differs from the twin's is DISCLOSED on <sigs> (docs_after_code= or files_first=) — new.
+# So display-order prefix is no longer demanded where a disclosed reorder sits between two budgets, and that is the whole
+# relaxation; --for is judged exactly as before (its soft cut is taken after the reorder, so its display order IS a
+# prefix, and stays pinned). A relaxed comparison is proved by MUTATION NEGATIVE CONTROL, and the arm carries four, run
+# on the cell that was red: the rank-4 row swapped for rank 5 (the old symptom, in score order), the head two rows
+# transposed, one row deleted from the served answer (T1), the disclosure attribute stripped (T2) — each must go red.
+# The grid is still 24 points and no point, lens or budget was dropped.
+# NOT DECIDED HERE, reported for the owner: at the same explicit budget --for and --pack-task now fill the rank 1..4 floor
+# differently on a question whose 4th-scored row is a doc (--for cuts after the reorder and serves `remaining`,
+# --pack-task cuts before it and serves the doc heading). Each matches its own written contract; whether they should
+# match each other is a product question, and this gate pins neither answer to it.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -296,9 +334,10 @@ if rows is None or refRows is None:     bad.append( 'no <sigs> block (served %s,
 else:
     if k == 0:                          bad.append( 'no row served — the rank 1..4 floor always ships' )
     if [ r for r, _ in rows ] != list( range( 1, k + 1 ) ): bad.append( 'rows are not the ranks 1..%d: r=%s' % ( k, [ r for r, _ in rows ] ) )
-    # the default answer may move its doc rows below its code rows (docs_after_code=, renumbering r=; an explicit budget's
-    # answer does not, on base as on head), so against a reordered default the rows are judged as a SET there and the rank
-    # PREFIX is judged across budgets by the caller (rows(N) a prefix of rows(N'))
+    # the default answer may move its doc rows below its code rows (docs_after_code=, renumbering r=). A --pack-task
+    # answer under an explicit budget reorders ITS OWN shown set the same way since 34be00d0f — which is a no-op while its
+    # doc rows are already last — so against a reordered default the rows are judged as a SET here, and the rank PREFIX is
+    # judged across budgets by the caller: on the display rows for --for, on the score-order twin for --pack-task (twin.py)
     if refAttrs is not None and 'docs_after_code=' in refAttrs:
         extra = set( x for _, x in rows ) - set( x for _, x in refRows )
         if extra: bad.append( 'rows the default answer does not serve: %s' % sorted( extra )[ :3 ] )
@@ -313,7 +352,50 @@ if lens == 'for' and rows is not None:
 for line in bad: print( '    ' + line )
 sys.exit( 1 if bad else 0 )
 PY_EOF
-SOFT_POINTS=0;  SOFT_BAD=0;  SOFT_BINDS=0
+# twin.py SERVED TWIN — the --pack-task reorder arms. Prints one "trow p:l:n" per TWIN row in its (score) order, then
+# "reordered=0|1", then one line per violation; exit 1 on any. TWIN is the same call with both shown-set reorders off.
+TWIN="$TMP/twin.py"
+cat > "$TWIN" <<'PY_EOF'
+import re, sys
+def rowsOf( path ):
+    t = open( path, 'rb' ).read().decode( 'utf-8', 'replace' )
+    t = re.sub( r'<!\[CDATA\[.*?\]\]>', '', t, flags = re.S )
+    t = re.sub( r'<!--.*?-->', '', t, flags = re.S )
+    m = re.search( r'<sigs\b([^>]*)>(.*?)</sigs>', t, re.S )
+    if not m: return None, None
+    rows = []
+    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', m.group( 2 ), re.S ):
+        a = d.group( 1 ) or d.group( 2 )
+        g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, '?' ] )[ 1 ]
+        rows.append( ( int( g( 'r' ) ) if g( 'r' ).isdigit() else 10**9, g( 'p' ) + ':' + g( 'l' ) + ':' + g( 'n' ) ) )
+    rows.sort()
+    return m.group( 1 ), [ x for _, x in rows ]
+attrs, served = rowsOf( sys.argv[1] )
+tAttrs, twin  = rowsOf( sys.argv[2] )
+bad = []
+if served is None or twin is None:
+    print( 'reordered=0' ); print( '    twin: no <sigs> block (served %s, twin %s)' % ( served is not None, twin is not None ) ); sys.exit( 1 )
+for x in twin: print( 'trow ' + x )
+reordered = served != twin
+print( 'reordered=%d' % reordered )
+# the twin must BE the score order: a reorder disclosure on it means a handle stopped working and the twin proves nothing
+if re.search( r'\b(docs_after_code|files_first)="', tAttrs ): bad.append( 'twin: the reorder-free twin itself discloses a reorder (<sigs%s>) — an A/B handle is not honoured' % tAttrs )
+# T1: the same rows, none added, none lost, none repeated
+if sorted( served ) != sorted( twin ):
+    bad.append( 'T1: the served rows are not the score-order twin\'s rows as a set (%d served, %d twin; only served %s; only twin %s)' % (
+        len( served ), len( twin ), sorted( set( served ) - set( twin ) )[ :2 ], sorted( set( twin ) - set( served ) )[ :2 ] ) )
+# T2: a different order is a DISCLOSED one
+elif reordered and not re.search( r'\b(docs_after_code|files_first)="[1-9]', attrs ):
+    bad.append( 'T2: the rows are served in a different order than their score order and <sigs%s> discloses no reorder' % attrs )
+for line in bad: print( '    ' + line )
+sys.exit( 1 if bad else 0 )
+PY_EOF
+# does the row list in file $2 extend the one in file $1 — at least as long, and $1 is its head, line for line?
+extends(){
+    local n;  n="$( wc -l < "$1" | tr -d ' ' )"
+    [ "$( wc -l < "$2" | tr -d ' ' )" -ge "$n" ] && [ "$( awk -v n="$n" 'NR <= n' "$2" )" = "$( cat "$1" )" ]
+}
+SOFT_POINTS=0;  SOFT_BAD=0;  SOFT_BINDS=0;  SOFT_REORDERED=0;  SOFT_TWINS=0
 for TASKFILE in mid long; do
     T="$( cat "$TMP/task.$TASKFILE" )"
     for V in for pack-task; do
@@ -325,14 +407,30 @@ for TASKFILE in mid long; do
             SOFT_POINTS=$(( SOFT_POINTS + 1 ))
             OUT="$( python3 "$SOFT" "$TMP/c.out" "$TMP/c.def" "$TMP/task.$TASKFILE" "$V" "$TB" )";  RC=$?
             K="$( printf '%s\n' "$OUT" | sed -n 's/^k=//p' | head -1 )"
-            if [ "$RC" != 0 ]; then
-                SOFT_BAD=$(( SOFT_BAD + 1 ))
-                echo "    --$V task=$TASKFILE budget=$B (T=$TB B):";  printf '%s\n' "$OUT" | grep -v '^k=\|^row '
-            elif [ "${K:-0}" -lt "$PREVK" ] || [ "$( printf '%s\n' "$OUT" | sed -n 's/^row //p' | awk -v n="$PREVK" 'NR <= n' )" != "$( cat "$TMP/rows.prev" )" ]; then
-                SOFT_BAD=$(( SOFT_BAD + 1 ))
-                echo "    --$V task=$TASKFILE budget=$B: the $K row(s) served do not extend the $PREVK served at the budget below — RP is not a growing rank prefix"
+            # the rows RP is judged on across budgets: the DISPLAY rows for --for; for --pack-task the SCORE-ORDER twin's
+            # (header, "H2's RED CELL"), with T1/T2 tying the served answer to that twin at this point
+            TRC=0;  TW="";  ORDER="display"
+            if [ "$V" = "pack-task" ]; then
+                RIPWIRE_NO_DOCS_AFTER_CODE=1 RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --no-cache "--$V=$T" --token-budget=$B >"$TMP/c.twin" 2>/dev/null
+                TW="$( python3 "$TWIN" "$TMP/c.out" "$TMP/c.twin" )";  TRC=$?
+                ORDER="score";  SOFT_TWINS=$(( SOFT_TWINS + 1 ))
+                printf '%s\n' "$TW" | sed -n 's/^trow //p' > "$TMP/rows.cur"
+                if printf '%s\n' "$TW" | grep -q '^reordered=1$'; then
+                    SOFT_REORDERED=$(( SOFT_REORDERED + 1 ))
+                    # the negative controls below run on the FIRST reordered point and the step under it
+                    [ -s "$TMP/n.cur" ] || [ ! -s "$TMP/rows.prev" ] || { cp "$TMP/rows.prev" "$TMP/n.prev";  cp "$TMP/rows.cur" "$TMP/n.cur";  cp "$TMP/c.out" "$TMP/n.out";  cp "$TMP/c.twin" "$TMP/n.twin";  NEG_CELL="task=$TASKFILE budget=$B"; }
+                fi
+            else
+                printf '%s\n' "$OUT" | sed -n 's/^row //p' > "$TMP/rows.cur"
             fi
-            printf '%s\n' "$OUT" | sed -n 's/^row //p' > "$TMP/rows.prev"
+            if [ "$RC" != 0 ] || [ "$TRC" != 0 ]; then
+                SOFT_BAD=$(( SOFT_BAD + 1 ))
+                echo "    --$V task=$TASKFILE budget=$B (T=$TB B):";  printf '%s\n' "$OUT" | grep -v '^k=\|^row ';  printf '%s\n' "$TW" | grep '^    '
+            elif [ "${K:-0}" -lt "$PREVK" ] || ! extends "$TMP/rows.prev" "$TMP/rows.cur"; then
+                SOFT_BAD=$(( SOFT_BAD + 1 ))
+                echo "    --$V task=$TASKFILE budget=$B: the $K row(s) served do not extend the $PREVK served at the budget below ($ORDER order) — RP is not a growing rank prefix"
+            fi
+            cp "$TMP/rows.cur" "$TMP/rows.prev"
             # non-vacuity: a point whose est_tokens is past its budget (so NOLBL was tested on a blown target, not assumed)
             EST="$( perl -0pe 's#<!--.*?-->##gs' "$TMP/c.out" | grep -oE '<ctx( [^>]*)?>' | head -1 | grep -oE ' est_tokens="[0-9]+"' | tr -dc '0-9' )"
             [ -n "$EST" ] && [ "$EST" -gt "$B" ] && SOFT_BINDS=$(( SOFT_BINDS + 1 ))
@@ -341,11 +439,58 @@ for TASKFILE in mid long; do
     done
 done
 [ "$SOFT_BAD" = "0" ] \
-    && ok "H2 soft target: ST/RP/NX/NOLBL/HL hold at all $SOFT_POINTS (task length x budget x lens) points" \
+    && ok "H2 soft target: ST/RP/NX/NOLBL/HL hold at all $SOFT_POINTS (task length x budget x lens) points (--pack-task: RP in score order, T1/T2 at each of its $SOFT_TWINS)" \
     || no "H2 soft target: VIOLATED at $SOFT_BAD of $SOFT_POINTS points"
 [ "$SOFT_BINDS" -gt 0 ] \
     && ok "H2 soft target: non-vacuity — $SOFT_BINDS point(s) deliver est_tokens past their budget (NOLBL/HL were judged on blown targets)" \
     || no "H2 soft target: VACUOUS — no point delivers past its budget, so no-label/header-kept was never tested on a blown target"
+# --pack-task's RP is judged on the score-order twin, so the arm owes two proofs that it is not looser than it reads:
+# that some point really IS served reordered (else T1/T2 were never exercised and the twin is the answer itself), and
+# that each comparison still fails when the one fact it reads is broken (a relaxation's proof is a mutation control).
+[ "$SOFT_REORDERED" -gt 0 ] \
+    && ok "H2 --pack-task reorder: non-vacuity — $SOFT_REORDERED of $SOFT_TWINS point(s) are served in an order other than their score order (T1 pure-reorder and T2 disclosed were judged on a real reorder)" \
+    || no "H2 --pack-task reorder: VACUOUS — 0 of $SOFT_TWINS points are served reordered, so T1/T2 judged nothing and the negative controls have no cell to run on"
+if [ -s "$TMP/n.cur" ] && [ -s "$TMP/n.prev" ]; then
+    NP="$( wc -l < "$TMP/n.prev" | tr -d ' ' )"
+    extends "$TMP/n.prev" "$TMP/n.cur" \
+        && ok "H2 (RPn) control premise: on the cell that was red (--pack-task $NEG_CELL) the score-order rows DO extend the $NP below" \
+        || no "H2 (RPn) control premise: the unmutated score-order rows do not extend the step below on --pack-task $NEG_CELL — the controls below prove nothing"
+    # (RPn1) the old symptom, in score order: rank NP's row gone, rank NP+1 in its place
+    awk -v n="$NP" 'NR != n' "$TMP/n.cur" > "$TMP/n.m1"
+    extends "$TMP/n.prev" "$TMP/n.m1" \
+        && no "H2 (RPn1) negative control: with the rank-$NP row replaced by the rank after it the rows still 'extend' the step below — RP cannot go red" \
+        || ok "H2 (RPn1) negative control: RP fails when the rank-$NP row is replaced by the rank after it"
+    # (RPn2) the head two rows transposed
+    awk 'NR == 1 { a = $0; next } NR == 2 { print; print a; next } { print }' "$TMP/n.cur" > "$TMP/n.m2"
+    extends "$TMP/n.prev" "$TMP/n.m2" \
+        && no "H2 (RPn2) negative control: with ranks 1 and 2 transposed the rows still 'extend' the step below — RP cannot go red" \
+        || ok "H2 (RPn2) negative control: RP fails when ranks 1 and 2 are transposed"
+    # (T1n) one row deleted from the SERVED answer's <sigs>
+    python3 - "$TMP/n.out" "$TMP/n.m3" <<'PY_EOF'
+import re, sys
+s = open( sys.argv[1], 'rb' ).read().decode( 'utf-8', 'replace' )
+m = re.search( r'(<sigs\b[^>]*>)(.*?)(</sigs>)(?!.*</sigs>)', s, re.S )
+rows = list( re.finditer( r'<d [^>]*>.*?</d>|<d [^>]*/>', m.group( 2 ), re.S ) )
+cut = rows[ -1 ]
+open( sys.argv[2], 'wb' ).write( ( s[ :m.start( 2 ) + cut.start() ] + s[ m.start( 2 ) + cut.end(): ] ).encode() )
+PY_EOF
+    T1N="$( python3 "$TWIN" "$TMP/n.m3" "$TMP/n.twin" )"
+    printf '%s\n' "$T1N" | grep -q '^    T1:' \
+        && ok "H2 (T1n) negative control: T1 fails when one row is deleted from the served answer" \
+        || no "H2 (T1n) negative control: one row deleted from the served answer and T1 did not fire: $( printf '%s' "$T1N" | grep -v '^trow ' | tr '\n' ' ' )"
+    # (T2n) the reorder disclosure stripped from the SERVED answer's <sigs> tag (the rows stay reordered)
+    perl -0pe 's#(<sigs\b[^>]*?) (?:docs_after_code|files_first)="[0-9]+"#$1#g' "$TMP/n.out" > "$TMP/n.m4"
+    T2N="$( python3 "$TWIN" "$TMP/n.m4" "$TMP/n.twin" )"
+    printf '%s\n' "$T2N" | grep -q '^    T2:' \
+        && ok "H2 (T2n) negative control: T2 fails when the reorder is served without docs_after_code=/files_first=" \
+        || no "H2 (T2n) negative control: the disclosure was stripped from a reordered answer and T2 did not fire: $( printf '%s' "$T2N" | grep -v '^trow ' | tr '\n' ' ' )"
+    # and the unmutated cell passes the same reader — the controls above are red for the mutation, not for the cell
+    python3 "$TWIN" "$TMP/n.out" "$TMP/n.twin" >/dev/null \
+        && ok "H2 (T1/T2) on the unmutated cell: the served answer is a disclosed pure reorder of its score-order twin" \
+        || no "H2 (T1/T2) on the unmutated cell: twin.py rejects the answer the controls were built from"
+else
+    no "H2 (RPn/T1n/T2n) negative controls DID NOT RUN: no --pack-task point is served reordered with a budget step below it, so nothing proves the score-order arms can go red"
+fi
 
 # the case named in the finding, asserted on its own so a regression names itself. forbudget-soft (rule 4) — REPLACES
 # "a 900-char task at --token-budget=600 fits B x 2.36 x 1.15 or discloses over_ceiling": the soft target makes no byte

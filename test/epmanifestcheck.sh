@@ -396,7 +396,8 @@ a = re.sub(r"; ep p= l= group=:.*?groups_total= if cut", "", a, flags=re.S)
 # K-WRONGSYM: <syms> lists the shown files' symbols that NO WORD OF THE ANSWER names (src/forfilesyms.h), and the <ep> block names
 # some (used_in=load_other), so the answer without it lists one row more. Both sides are read less the <syms> block and its legend
 # comment (the rest is the prefix identity); the off side must carry the row the on side lost, or the strip proves nothing.
-syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+# AF1 (2026-11-18): answer-first — the last row block is followed only by the trailing document legend (comments) before </ctx>
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)', re.S)
 sa, sb = syms.search(a), syms.search(b)
 twin = sa is not None and sb is not None and 'n="load_other"' in sb.group(0) and 'n="load_other"' not in sa.group(0)
 a, b = syms.sub('', a), syms.sub('', b)

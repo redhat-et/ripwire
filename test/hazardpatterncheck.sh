@@ -506,6 +506,7 @@ mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional backg
 REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
 largealloc.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits: the replaced operator's own bad_alloc, as the library's would throw
+memceiling_new.cpp	operator new	1	the same operator new seam where largealloc.cpp is not linked (the memory ceiling's portable hook): the replaced operator's own bad_alloc, as the library's would throw
 infra/fileSetStore.h	fromEdges	1	an adjacency past its u32 offset is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
 main.cpp	dispatchMainBody	1	the rethrow after joining the grep prefetch worker, which would std::terminate if unwound joinable; dispatchMain catches it
 mcpindex.h	getIndex	1	the rethrow after releasing the half-built index; mcp.h's request envelope and mcpserver.h's warm-up catch it
@@ -519,6 +520,7 @@ REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys
 crossref.h	listTreesOfRefs	.at	1	rootTreesOf returns its map only when catFileBatch served every distinct tip (an answer for another object fails the read) and each served tip is assigned its tree, so every ref's tip is a key
+graph.h	rustOutsideGlobMaySupply	.at	1	not std's throwing at: CallResultTypes::RustGlobFacts::at (receiverevidence.h) is a sortutil::findSorted lookup that returns nullptr on a miss, and the caller tests the pointer before reading it
 infra/dynamic_map.hpp	at	.at	1	the non-const at forwards to the const at of the same container; no ripwire caller
 ingest_astquery.h	nearestNodeKindHint	.at	1	the key was just read out of this same map by nearestNameByEditDistance, so it is present
 REGC
@@ -526,6 +528,7 @@ cat > "$TMP/reg_d.tsv" <<'REGD'
 REGD
 cat > "$TMP/reg_e.tsv" <<'REGE'
 largealloc.cpp	allocOrNull	malloc	1	the replaced operator new's storage for a block the route does not take, freed by its operator delete
+memceiling_new.cpp	operator new	malloc	1	the replaced operator new's storage (the memory ceiling's portable hook), freed by its operator delete
 alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed by its operator delete (A/B instrument, never shipped)
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
 memceiling_new.cpp	operator new	malloc	1	the replaced operator new's own storage, handed to the caller exactly as the default operator new does and freed by the operator delete beside it in the same file; an RAII owner is impossible at this seam, since returning raw storage IS the contract (the non-Apple twin of largealloc.cpp's allocOrNull row)

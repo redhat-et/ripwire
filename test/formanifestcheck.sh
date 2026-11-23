@@ -328,6 +328,8 @@ printf 'x = 1\n' >"$F/xtra/sub/other.py"
 
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<manifest_rows .*</manifest_rows>' "$1" | head -1; }
+# AF1 (2026-11-18): LITERAL is the last ROW element before </ctx>; the answer-first DOCUMENT legend (comments only) may sit between them
+lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[2],encoding="utf8").read(); sys.exit(0 if re.search(re.escape(sys.argv[1])+r"(?:<!--(?:(?!-->).)*-->)*</ctx>$", s, re.S) else 1)' "$1" "$2"; }
 # has ARM FIXTURE TASK PATTERN... — the block fires and holds every (python regex) pattern, in order
 has(){
     local arm="$1" fx="$2" task="$3"; shift 3
@@ -458,7 +460,7 @@ run acme "--for=add a new broker transport like NATS or MQTT to brokers" --json 
 if [ -s "$TMP/j1.json" ] && ! grep -q 'manifest_rows' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) --json"; fi
 # TOKEN-BUDGET-MONOTONE (main 2026-11-14): a budget holds the block only when the answer plus the block does not fit it; 100 forces the hold
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=100 >"$TMP/b1.xml" || no "(b1) the run exited $?"
-if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b1.xml" && ! grep -q '<r l=' "$TMP/b1.xml"; then ok "(b1) a token budget holds the block"
+if lastrow '<manifest_rows files="2" held="budget"/>' "$TMP/b1.xml" && ! grep -q '<r l=' "$TMP/b1.xml"; then ok "(b1) a token budget holds the block"
 else no "(b1) budget: $( grep -o '<manifest_rows.*' "$TMP/b1.xml" | head -c 300 )"; fi
 # (b2) a budget the answer and the block fit whole: the block comes back byte for byte
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" >"$TMP/b2u.xml" || no "(b2) the run exited $?"
@@ -468,7 +470,7 @@ else no "(b2) budget 4000: $( grep -o '<manifest_rows.*' "$TMP/b2.xml" | head -c
 # (b3) the fit prices <manifest_rows> (forbudgetfit.h kForHeldBlocks): at 1400 the answer alone fits but not with the block, so the
 # re-render holds it; unpriced, the whole answer printed over the budget (red on the merge before manifest_rows joined the list)
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml" || no "(b3) the run exited $?"
-if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
+if lastrow '<manifest_rows files="2" held="budget"/>' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
 else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c 300 )"; fi
 # (b4) CodeRabbit 4609415543: the held price carries the block's own legend (softbudget.py whole_price, the gate's twin of
 # heldBlocksPrice). Red before: heldLegendAt read only `<!-- manifest_rows`, so a budget one token under the whole price
@@ -477,7 +479,7 @@ W="$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[1] ); import softbudg
 case "$W" in ''|*[!0-9]*) no "(b4) no whole price from the unbudgeted answer (got '$W')"; W=1 ;; esac
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$W" >"$TMP/b4w.xml" || no "(b4) the run exited $?"
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$(( W - 1 ))" >"$TMP/b4.xml" || no "(b4) the run exited $?"
-if cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b4.xml" && ! grep -q '<r l=' "$TMP/b4.xml"; then
+if cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && lastrow '<manifest_rows files="2" held="budget"/>' "$TMP/b4.xml" && ! grep -q '<r l=' "$TMP/b4.xml"; then
     ok "(b4) the fit prices the legend: whole at $W, held at $(( W - 1 ))"
 else no "(b4) whole price $W: at W $( cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && echo whole || echo changed ), at W-1 $( grep -o '<manifest_rows[^>]*>' "$TMP/b4.xml" | head -1 )"; fi
 # (rd1)/(rd2) CodeRabbit 4609415549: a defining line is source text, redacted like every served body (redact.h). The release line
@@ -530,14 +532,17 @@ if grep -q '<manifest_rows files="2" held="budget"/>' "$TMP/x3.xml" && ! grep -q
 else no "(x3) MCP budget 100: $( grep -o '<manifest_rows[^>]*>' "$TMP/x3.xml" | head -1 )"; fi
 run ferris "--for=add a new extractor behind its own cargo feature like multipart" --legend=full >"$TMP/l1.xml" || no "(l1) the run exited $?"
 if python3 - "$TMP/a1.xml" "$TMP/l1.xml" <<'PY'
-import sys
+import re, sys
 def legend( path ):
     s = open( path, encoding="utf8" ).read()
     i = s.index( "<!-- ripwire for manifest_rows:" )
     return s[ i: s.index( "-->", i ) ], s[ s.index( "-->", i ): ]
 a, ra = legend( sys.argv[1] ); b, rb = legend( sys.argv[2] )
 if not len( a ) < len( b ): sys.exit( "compact legend %d B is not shorter than full %d B" % ( len( a ), len( b ) ) )
-if ra.split( "<manifest_rows", 1 )[1] != rb.split( "<manifest_rows", 1 )[1]: sys.exit( "the block rows differ between legends" )
+# AF1 (2026-11-18): the default answer is answer-first, so its DOCUMENT legend trails the block (the full posture is legend-first): the
+# rows compared are the element itself, open tag to close, in each answer
+el = lambda r: ( re.search( r'<manifest_rows [^>]*/>|<manifest_rows .*?</manifest_rows>', r, re.S ) or re.search( r'', '' ) ).group( 0 )
+if el( ra ) != el( rb ): sys.exit( "the block rows differ between legends" )
 PY
 then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
 for f in a1 l1 b1 n1 cap1 cap2 g1 k1 s1 e1 e3 cr5 cr6 cr7; do
@@ -548,7 +553,8 @@ M.parseString( s )
 i = s.index( "<!-- ripwire for manifest_rows:" )
 legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
-m = re.search( r'(<manifest_rows .*?(?:/>|</manifest_rows>))</ctx>$', s, re.S )
+# AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
+m = re.search( r'(<manifest_rows .*?(?:/>|</manifest_rows>))(?:<!--(?:(?!-->).)*-->)*</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
 for tag, attrs in re.findall( r'<(manifest_rows|mf|r|feature_touch|touch_list|touch) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):

@@ -183,7 +183,12 @@ rootbodies(){ printf '%s' "$1" | grep -o 'bundle="auto" bodies="[0-9]*"' | head 
 BIG="$( rw --for=widgetAnchorProbe )"
 FIT="$( rw --for=widgetFitProbe )"
 SOLO="$( rw --for=widgetSoloProbe )"
-MID="$( rw --for=widgetMidProbe )"                        # the anchor-resolved allowance's own shape
+# AF1-fix (2026-11-18): the default --for answer is served in 12 KB PAGES (src/forpages.h); the anchor body this arm funds is
+# ~11 KB, so it starts past page 1's cut. (7)..(7b2) are about the ANSWER the allowance funds, so MID reads --page-bytes=0 —
+# the whole answer in one call, row-identical to the joined pages (forpagescheck P2) — and (7p) holds the default PAGE to
+# present-or-disclosed-deferred. (7c): a budget is never paged, so the whole answer a fitting budget returns is MID.
+MID="$( rw --for=widgetMidProbe --page-bytes=0 )"         # the anchor-resolved allowance's own shape
+MIDPAGE="$( rw --for=widgetMidProbe )"                    # the default page
 MIDCAP="$( rw --for=widgetMidProbe --token-budget=6000 )" # …with an explicit ceiling: stays hard
 TWIN="$( rw --for=widgetTwinProbe )"                      # multi-candidate anchor: no raise
 # COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) moved the rank-first BODY
@@ -283,6 +288,10 @@ printf '%s' "$MID" | grep -q 'ZZBYSTANDERPROSE' \
     || ok "(7b2) no bystander prose in the newly-funded bundle"
 # TOKEN-BUDGET-MONOTONE (rule 4): 6000 tokens holds this answer whole, so it IS the unbudgeted answer byte for byte (no
 # budget_tokens= named: nothing was shed) — the anchor's body rides because the posture is the no-budget one
+if printf '%s' "$MIDPAGE" | grep -q '<b t="fn" [^>]*n="widgetMidProbe"><!\[CDATA\['; then ok "(7p) the default page carries the anchor's body"
+elif printf '%s' "$MIDPAGE" | python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",sys.stdin.read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "bodies" in n and " next=" in r else 1)'; then
+    ok "(7p) the default page does not hold the anchor's body and says so: deferred= names <bodies>, next= reaches it"
+else no "(7p) the default page neither carries the anchor's body nor names <bodies> in deferred=/continued= (a silent drop)"; fi
 { printf '%s' "$MIDCAP" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe"><!\[CDATA\[' \
   && [ "$MIDCAP" = "$MID" ]; } \
     && ok "(7c) an explicit --token-budget the answer fits returns it byte for byte: the anchor's body (the answer) still rides" \

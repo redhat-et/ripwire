@@ -2,7 +2,7 @@
 
 **Shrink-only clone pairs (QD-SHRINK-PAIR).** A Type-3 pair's similarity is 2·LCS/(|a|+|b|), so it rises when either
 member loses tokens the other does not share. Handing a body's sort and `erase( unique )` lines to a helper therefore
-made it look more like its neighbour: on lane/sort-unique, `cFamilyMacroNames` fell from 135 to 99 tokens, its shared
+made it look more like its neighbour: on one development branch, `cFamilyMacroNames` fell from 135 to 99 tokens, its shared
 LCS with `jsExportsOf` fell from 84 to 81, and the pair crossed 0.8. It printed as a gating duplication row and a gating
 new-clone-of-reused-helper row about an edit that removed code and copied none.
 

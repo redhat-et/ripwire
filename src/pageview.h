@@ -348,11 +348,10 @@ inline constexpr PageSyntax kJsonPageSyntax
 // `collectionCapped` (H8): true when the verb's OWN collection cap fired (the rule-4 marker it emits beside
 // this block — hits_capped=/findings_capped=). Callers pass it under a /*collectionCapped=*/ annotation so
 // test/collectioncapcheck.sh arm (D) can read, from src/ alone, that every rule-4 emitter feeds it.
-inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
-                                   std::size_t windowEnd, int limit, int offset, bool discloseCap,
-                                   const PageSyntax& syn = kXmlPageSyntax, bool collectionCapped = false ) noexcept
+// The two halves above, written from already-computed values (pageDisclosure and pageDisclosureChained share it).
+inline const char* formatPageDisclosure( char* buf, std::size_t bufCap, const PageDisclosureValues& v, std::size_t rowsShown,
+                                         std::size_t rowTotal, const PageSyntax& syn ) noexcept
 {
-    const PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap, collectionCapped );
     if( !v.active ) { buf[0] = '\0';  return buf; }
 
     const char* isCapped = v.capped ? syn.yes : syn.no;
@@ -377,6 +376,33 @@ inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t ro
         rw::formatTo( buf + written, bufCap - written, "{}", syn.floor );
     }
     return buf;
+}
+
+inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
+                                   std::size_t windowEnd, int limit, int offset, bool discloseCap,
+                                   const PageSyntax& syn = kXmlPageSyntax, bool collectionCapped = false ) noexcept
+{
+    return formatPageDisclosure( buf, bufCap, computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap, collectionCapped ),
+                                 rowsShown, rowTotal, syn );
+}
+
+// PG1 (owner ruling 192): a root whose ONE window also cuts a secondary listing (--grep's <unindexed> list obeys the in-index
+// list's --limit/--offset). shown=/capped=/total= stay the primary list's (the secondary element carries its own capped=); but
+// has_more=/next_offset= describe the WHOLE chain: while the secondary list still has rows past `chainEnd` (the window's end over
+// both lists), the paging half rides with has_more="1" next_offset=chainEnd, so a loop that reads has_more= never stops while
+// next= would still serve rows. `secondaryMore` false: byte-identical to pageDisclosure.
+inline const char* pageDisclosureChained( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal, std::size_t windowEnd,
+                                          int limit, int offset, bool collectionCapped, bool secondaryMore, std::size_t chainEnd ) noexcept
+{
+    PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, true, collectionCapped );
+    if( secondaryMore )
+    {
+        v.active      = true;
+        v.paging      = true;
+        v.hasMore     = 1u;
+        v.nextOrTotal = chainEnd;
+    }
+    return formatPageDisclosure( buf, bufCap, v, rowsShown, rowTotal, kXmlPageSyntax );
 }
 
 // ── LB-G (listing-paging round, 2026-09-10) — the SECONDARY listing's pair, emitted ONLY on a CUT ────────

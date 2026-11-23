@@ -12,7 +12,9 @@
 # (widget_shelf_row; the member row says same_as= it). other.py: five more helpers (its first row high, the rest deep).
 # ARMS
 #   (a)  the demoted answer equals the RIPWIRE_NO_SIBLING_DEMOTE=1 answer with exactly the rows the rule picks (recomputed here from the
-#        off answer; K4's proven-path rows named) rewritten as <t p= sym= r=/> and the legend comment before the first, est_tokens= aside
+#        off answer; K4's proven-path rows named) rewritten as <t p= sym= r=/> (no ptr=: the demote kind), comments compared apart
+#        (the on answer's are the off answer's plus the demote legend once), est_tokens= aside
+#   (pk) AF4 T-C: in the answer-first default the demote legend is lifted after the rows (red on f6288ec32, which kept it in <sigs>)
 #   (a2) a plain deep sibling is a pointer: widget_config_variant_04 (pos 11) and other.py's deep rows
 #   (p)  position: the rows at answer positions <= 10 stay rows (widget_config_variant_03 at pos 10, rank 10)
 #   (r)  rank (PRECISION-LAB 11-10: a demote at rank 6-10 pulls deeper rows into the top 10): an unused-in-file table puts 28 <u> rows
@@ -36,6 +38,14 @@
 #   (x)  MCP `for` (one renderer): (a) on the MCP answer and its RIPWIRE_NO_SIBLING_DEMOTE=1 twin (its <h> rows differ from the CLI's,
 #        so its K2 reads differ: the rule is checked on its own bytes)
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -94,15 +104,6 @@ def widget_config_variant_{i:02d}(x):
 '''
 s += '''
 
-class WidgetVault:
-    """A widget vault."""
-    def alpha(self):
-        return 1
-
-    def beta(self):
-        return 2
-
-
 def widget_shelf_row(self, first_index=0, last_index=10, include_hidden=False):
     """Widget shelf row: the first row of the shelf, kept for the display table and its tests."""
     return 1
@@ -125,11 +126,24 @@ class WidgetConfigSink:
         return data
 '''
 open( os.path.join( d, "widget.py" ), "w" ).write( s )
+# K1's type lives in other.py (LP1 re-pin): --for scores the file basename (lexical.h kForBasenameFieldW), so EVERY symbol of
+# widget.py scores on "widget"; WidgetVault's members alpha/beta then ranked as rows (r34/r35) and mem= — which never lists a
+# name already shown — went empty, leaving K1 nothing to keep. Its members score 0 here (no question word, none in the basename),
+# so they stay unshown and the vault's row carries mem=; widget_config_other_01 is the higher same-file row the rule needs.
 open( os.path.join( d, "other.py" ), "w" ).write( "".join( f'''
 def widget_config_other_{i:02d}(x):
     """Other widget config helper {i}."""
     return x
-''' for i in range( 1, 6 ) ) )
+''' for i in range( 1, 6 ) ) + '''
+
+class WidgetVault:
+    """A widget vault."""
+    def alpha(self):
+        return 1
+
+    def beta(self):
+        return 2
+''' )
 open( os.path.join( d, "lone.py" ), "w" ).write( '\ndef widget_lone(x):\n    """Lone."""\n    return x\n' )
 PY
 
@@ -175,14 +189,18 @@ def rule( t, keep4 ):
     return pick
 off, on, keep4 = open( sys.argv[1] ).read(), open( sys.argv[2] ).read(), set( sys.argv[3].split( "," ) )
 pick = rule( off, keep4 )
-LEG = "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->"
+LEG = "<!-- demote: a <t> in sigs with no ptr= is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->"
+# AF4 T-C: a demote pointer is the kind with NO ptr= (decl-twin / one-side carry theirs); the legend is compared apart from the rows,
+# because where it sits is the order's (legend-first: before the first pointer; answer-first: lifted into the trailing legend)
 exp, at = [], 0
 for k, r in enumerate( pick ):
-    exp += [ off[at:r["s"]], LEG if k == 0 else "", '<t p="%s" sym="%s"%s/>' % ( r["raw"]["p"], r["raw"]["n"], ' r="%s"' % r["raw"]["r"] if "r" in r["raw"] else "" ) ]; at = r["e"]
+    exp += [ off[at:r["s"]], '<t p="%s" sym="%s"%s/>' % ( r["raw"]["p"], r["raw"]["n"], ' r="%s"' % r["raw"]["r"] if "r" in r["raw"] else "" ) ]; at = r["e"]
 exp = "".join( exp ) + off[at:]
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
+nocom = lambda s: re.sub( r"<!--.*?-->", "", est( s ), flags = re.S )
+coms = lambda s: sorted( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", s, flags = re.S ), re.S ) )
 print( "rows " + ",".join( r["a"]["n"] for r in pick ) )
-print( ( "PASS" if est( exp ) == est( on ) else "FAIL" ) + " (a) %d rows" % len( pick ) )
+print( ( "PASS" if nocom( exp ) == nocom( on ) and coms( on ) == sorted( coms( off ) + ( [ LEG ] if pick else [] ) ) else "FAIL" ) + " (a) %d rows" % len( pick ) )
 PY
 # names of the in-sigs pointers, and of the <d> rows, of an answer
 cat >"$TMP/names.py" <<'PY'
@@ -212,7 +230,20 @@ arm(){ # arm ID want(row|ptr) NAME WHAT
 }
 arm a2 ptr widget_config_variant_04 "a plain same-file sibling at position 11"
 arm a2 ptr widget_config_other_03 "a deep row of the second file"
-arm p row widget_config_variant_03 "answer position 10, <d> rank 10, is never demoted"
+# (p) re-pinned (LP1, rule 4): the row at answer position 10 is READ off the demote-off answer (it was widget_config_variant_03 only
+# by ranking accident; with the basename field it is variant_02), and must be a plain same-file sibling with a higher widget.py row,
+# i.e. a row the rule WOULD demote one position lower — the premise that keeps the arm able to fail.
+POS10="$( python3 - "$TMP/off.xml" <<'PY'
+import re, sys
+t = re.sub( r"<!--.*?-->", "", open( sys.argv[1] ).read(), flags = re.S ); s = t[t.find( "<sigs" ):t.find( "</sigs>" )]
+rows = re.findall( r'<d [^>]*?\bn="([^"]*)"[^>]*?\bp="([^"]*)"', s ) or [ ( m[1], m[0] ) for m in re.findall( r'<d [^>]*?\bp="([^"]*)"[^>]*?\bn="([^"]*)"', s ) ]
+print( rows[9][0] if len( rows ) >= 10 and rows[9][1] == "widget.py" and re.fullmatch( r"widget_config_variant_\d+", rows[9][0] ) else "" )
+PY
+)"
+if [ -n "$POS10" ]; then arm p row "$POS10" "answer position 10 (read off the off answer), never demoted"
+else no "(p) premise: the off answer's position-10 row is not a plain widget.py sibling (the arm would be vacuous)"; fi
+grep -q '<d [^>]*n="WidgetVault"[^>]*mem="' "$TMP/off.xml" || grep -q '<d [^>]*mem="[^"]*"[^>]*n="WidgetVault"' "$TMP/off.xml" \
+    || no "(k1) premise: WidgetVault carries no mem= in the demote-off answer (K1 would have nothing to keep)"
 arm r ptr widget_config_variant_08 "a same-file decoy at <d> rank 15"
 arm k1 row WidgetVault "it carries mem="
 arm k2 row WidgetConfigSink.widget_config_flush "a <c> callee under the head's <h> row"
@@ -244,6 +275,16 @@ if [ -n "$eon" ] && [ -n "$eoff" ] && [ "$eon" -lt "$eoff" ]; then ok "(e) est_t
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/on.xml" 2>"$TMP/w.err"; then ok "(w) well formed"; else no "(w) $( head -c 300 "$TMP/w.err" )"; fi
 fi
+# (pk) AF4 T-C: the kind is on the row, so the answer-first default lifts the demote legend out of <sigs> into the trailing legend
+# (RED on f6288ec32, which kept it before the first pointer by position); the legend-first order keeps it there.
+pk="$( python3 - "$TMP/on.xml" <<'PY'
+import re, sys
+t = re.sub( r"<!\[CDATA\[.*?\]\]>", lambda m: " " * len( m.group( 0 ) ), open( sys.argv[1] ).read(), flags = re.S )
+s0, s1 = t.find( "<sigs" ), t.find( "</sigs>" ); at = t.find( "<!-- demote:" ); last = max( t.rfind( "</" + n + ">" ) for n in ( "sigs", "tail", "syms", "hops", "fold", "callers" ) )
+print( "ok" if at > last and not ( s0 < at < s1 ) and re.search( r"<t [^>]*/>", t[s0:s1] ) and not re.search( r'<t [^>]*ptr=', t[s0:s1] ) else "at=%d sigs=%d..%d last=%d" % ( at, s0, s1, last ) )
+PY
+)"
+if [ "$pk" = ok ]; then ok "(pk) answer-first: the demote legend sits after the rows, not in <sigs>; its pointers carry no ptr="; else no "(pk) demote legend placement / pointer kind: $pk"; fi
 nl="$( python3 -c 'import sys; print( open( sys.argv[1] ).read().count( "<!-- demote:" ) )' "$TMP/on.xml" )"
 lc="$( python3 -c 'import sys; t = open( sys.argv[1] ).read(); a = t.find( "<!-- demote:" ) + 4; print( t[a:t.find( "-->", a )] )' "$TMP/on.xml" )"
 if [ "$nl" = 1 ] && [ "${lc#*--}" = "$lc" ]; then ok "(l) one legend comment, no double hyphen inside"; else no "(l) legend comments=$nl"; fi

@@ -2464,6 +2464,12 @@ struct CrawlSkips
     // IN-ROOT link, never the target, for the same reason.
     std::vector<SkippedFile>  escaped;              // capped rows, path-sorted (bytes 0 = not measured)
     std::uint64_t             escapedFiles    = 0;  // EXACT count (rows may be fewer)
+    // M1: inside a build/ directory the crawl entered ONLY because git tracks files under it (ingest_crawl.h CrawlNamePrune),
+    // a file git does NOT track is dropped: the name prune's guess was falsified for the tracked files, not for whatever a
+    // build left beside them. Tested after the ignore class, so it counts only untracked files git's rules did not already
+    // hide, i.e. files that would OTHERWISE HAVE BEEN INDEXED — one of the accounting invariant's drop classes.
+    std::vector<SkippedFile>  untrackedBuild;       // capped rows, path-sorted
+    std::uint64_t             untrackedBuildFiles = 0;  // EXACT count (rows may be fewer)
     // The DISCLOSE sink for a file the crawl refused because its link left the root: the exact count escaped_root= prints.
     enum class DisclosureWhy : std::uint8_t
     {

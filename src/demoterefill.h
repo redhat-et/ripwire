@@ -16,7 +16,13 @@ namespace rw
 // of `baseRowDrop` and the undemoted block the walk started from. A refill whose added rows keep earlier picks whole (K4: a row
 // past the cut that is a seed of theirs) frees too little; it is rendered back to the last accepted budget, the rules run again
 // there, and the walk stops (CodeRabbit 4543056274). Returns the rules' result on the block as it finally is ("" when none moves).
-inline constexpr int kDemoteRefillPasses = 3;
+// LP1 (2026-11-21): a BLOW-UP GUARD, not a convergence limit. The walk already stops at its fixed point — a pass whose render serves
+// no more rows ends it, so every pass that continues adds at least one row, and the rows a --for answer can show are bounded (its
+// 40-row default cap). It was 3, and 3 stopped a cascade early: when the rows a refill buys are themselves demotable, each pass frees
+// bytes for the next, and the third pass's savings bought nothing. MEASURED on src/ (mcpforparitycheck (5)): budget_tokens 1600 and
+// 2000 shipped one rank short once a ranking demoted 6-10 rows; the walk to its fixed point serves that rank. Every pass re-renders
+// the <sigs> rows only. test/demoterefillcheck.sh (c) pins convergence on a model answer (RED at 3: 17 rows, one more refill adds 1).
+inline constexpr int kDemoteRefillPasses = 64;
 template<class Block, class RowsCut, class RowsShown, class RenderAt, class Point>
 inline std::string refillRowsForDemote( std::size_t baseRowDrop, const Block& block, const RowsCut& rowsCut, const RowsShown& rowsShown,
                                         const RenderAt& renderAt, const Point& point )

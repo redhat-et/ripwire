@@ -368,6 +368,8 @@ if [ -d "$extractedDir/skills" ]; then
     # is the product, so a symlink that cannot be written degrades to the manual line, exactly like a
     # release with no bundled skills does.
     #
+    # RIPWIRE_NO_LOCATOR_AGENT=1 reaches skills/install.sh through the environment and leaves the Claude Code
+    # ripwire-locator subagent out of the Claude activation (owner ruling 189); test/locatoragentcheck.sh (I).
     # RIPWIRE_NO_ACTIVATE=1 stages without activating, for image builds and scripted installs that
     # provision agent homes later. test/releaseinstallcheck.sh arms (E1)-(E6) pin all of it.
     activated=0

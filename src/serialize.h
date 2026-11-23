@@ -7,6 +7,7 @@
 #include "infra/os.h"   // rw::os::open_memstream — the est_tokens charge buffers
 #include <format>          // std::format_to_n — the appendf lambdas append through it directly
 #include "model.h"
+#include "declwrap.h"   // declStartByte — a served body starts at its declaration, wrapper prefix included
 #include "memguard.h"   // #350: memguard::limitSpelling — memory_limit= is spelled as the --max-memory value that raises it
 #include "extentsuspect.h"   // extent honesty: extent_suspect= reason spellings (extent::extentSuspectReasons)
 #include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
@@ -306,13 +307,12 @@ inline const char* multiRootTableLegend( bool multiRoot ) noexcept
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 17
+//   CALL-SITES: 16
 //     main.cpp     --for task echo · --exemplar request note · --query route note
 //                  · --run-trace command echo (runTraceLegendComment)                   (4)
 //     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
 //                  · path-from upstream-callers note (PATH-FROM-UPSTREAM)                (1)
 //                  · siblift · expand lift notes (2026-09-10 lift disclosure)             (2)
-//                  · W2-K restated body-omission marker name echo                       (1)
 //     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
 //     tracelocus.h --from-trace src note                                                (1)
 //     serialize.h  the <b>/<o> per-symbol name echo inside a comment: packBodies'        (2)
@@ -725,23 +725,13 @@ inline constexpr std::size_t ceilingAllowanceBytes( std::size_t budgetTokens ) n
     return std::size_t( double( budgetTokens ) * kMinBytesPerToken * kCeilingFirstEntryTolerance );
 }
 
-// THE EXACT CEILING, IN THE UNIT THE ROOT PRINTS. Both task lenses label a root over_ceiling="1" on
-// `est_tokens > budget_tokens`, and est_tokens prices the delivered document at kBytesPerTokenDefault — so the
-// largest document that keeps the root silent is budgetTokens x kBytesPerTokenDefault, NOT the allowance above
-// and NOT budgetTokens x kMinBytesPerToken.
-//
-// WHY THIS EXISTS (2026-09-13, PR #215 review item 1). The ladder's free rungs were priced at kMinBytesPerToken
-// (2.36) while the verdict they exist to avoid is priced at kBytesPerTokenDefault (2.50), a 6% disagreement in
-// the direction that makes the lens trim a document its own root calls conformant. MEASURED on the pre-fix
-// binary: `test/cppqualfix --for="widget ping make box" --token-budget=1200` printed est_tokens="778" with no
-// over_ceiling= — comfortably inside its budget — and had still dropped three legend clauses "(ceiling)"; at
-// --token-budget=1300 the same query kept every clause at est_tokens="1146". A lens must not pay a rung for a
-// ceiling it is not against. The tolerance above is for the residual a lens cannot trim (a first signature is
-// not divisible) and still governs the rungs that COST something — see climbCeilingLadderBy, which takes both.
-inline constexpr std::size_t ceilingBytes( std::size_t budgetTokens ) noexcept
-{
-    return std::size_t( double( budgetTokens ) * kBytesPerTokenDefault );
-}
+// WHY THERE IS NO SECOND CEILING ANY MORE (PB1, 2026-11-19). A `ceilingBytes()` lived here, budgetTokens x
+// kBytesPerTokenDefault (2.50), because the task lenses used to price est_tokens= at 2.50 while converting the
+// budget at 2.36 — so the largest document that kept a root silent was a different number from the one the
+// bundle published. That 6% disagreement is the defect PT1 measured from the other end: a --pack-task answer
+// that had spent 91% of its bytes read est_tokens="3975" against budget_tokens="6000". --pack-task now prices
+// every delivered byte at the rate its budget is converted at, so the ceiling it is judged against and the
+// ceiling it declares are ONE number, the one below, and ceilingBytes had no caller left.
 
 // The conservative hard byte ceiling a token target implies at the DENSEST language rate — a different number
 // from ceilingBytes above, with a different job: --pack-task PUBLISHES it (`budget_ceiling_bytes` in the JSON
@@ -983,8 +973,8 @@ inline constexpr std::string_view kForSigsNextOffsetNote =
 // total=>: the relevance floor intersected with kForLensDefaultTopN or --pack-top-n) IS the answer, so this budget is a
 // STAIR-STEP TARGET, not a ceiling: steps A..E above still shrink row TEXT against it (an answer that fit before is
 // byte-identical), but step F — the only step that removes a row — runs against kForRunawayGuardBytes below. The rows served
-// past the target are disclosed on the block (<sigs past_target="K">: the last K rows are the ones F would have dropped
-// here) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
+// past the target are disclosed on the block (<sigs past_target="K">: K shown rows, the K lowest in score order, are the ones F
+// would have dropped here; the reorders give them any r=) and the budget_bytes= clause calls this number a target on such an answer. An EXPLICIT --token-budget is a SOFT
 // target over the rows alone (forSigsBudgets below); the text above about its frozen sig share describes the
 // legacy hard-ceiling regime it replaced.
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;
@@ -2979,9 +2969,15 @@ inline std::string buildPrunedPackagesBlock( const CrawlSkips& skips, std::strin
 // which is what test/golden.xml and every argvdiff vector ride on. The DEFINITION lives in the --skipped
 // legend and --help, not here, for the reason buildUnindexedAttr's note measured: the map's fixed floor has
 // seven bytes of headroom at the smallest --max-tokens budgets, and no clause of any wording fits.
+// ` key=N`, or nothing at zero: the absent-when-zero header count escaped_root= and untracked_build= share.
+inline std::string presentCountAttr( std::string_view key, std::uint64_t n )
+{
+    return n == 0 ? std::string() : " " + std::string( key ) + "=" + std::to_string( n );
+}
+
 inline std::string buildEscapedRootAttr( const CrawlSkips& skips )
 {
-    return skips.escapedFiles == 0 ? std::string() : " escaped_root=" + std::to_string( skips.escapedFiles );
+    return presentCountAttr( "escaped_root", skips.escapedFiles );
 }
 
 // #350 layer 3 — the memory guard stopped this ingest (MemoryStop): memory_stop= names where it first stopped (crawl:
@@ -3734,6 +3730,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
+    // M1 — the UNTRACKED files left out of a build/ the crawl entered because git tracks files under it (model.h
+    // CrawlSkips::untrackedBuild): on the default map for escaped_root='s reason, absent at zero for the same golden reason;
+    // defined in the --skipped legend (kUntrackedBuildLegend) and the compact legend, never in this header.
+    const std::string untrackedAttr = presentCountAttr( "untracked_build", ing.crawlSkips.untrackedBuildFiles );
     const std::string memoryAttr    = buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
@@ -3811,7 +3811,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stats += " nest_refused=";  stats += std::to_string( ing.crawlSkips.nestRefusedFiles );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += memoryAttr;  stats += unindexedAttr;
-        stats += ignoredAttr;  stats += escapedAttr;  stats += fitAttr;
+        stats += ignoredAttr;  stats += escapedAttr;  stats += untrackedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
@@ -5270,6 +5270,9 @@ inline constexpr bool explicitCeilingTighterThanDefault( std::size_t budgetToken
 // (a disclosure never costs a row), so under a tight explicit ceiling — where the answer promises est_tokens <= the ceiling
 // and every row — neither the reorder nor its note applies: the answer is the one it was before the reorder existed. At or
 // above the default share, or with no explicit ceiling, it applies. Independent of RIPWIRE_FOR_ENDLINES (that switch moves e= only).
+// The CLI XML --for no longer reaches this with its budget: TOKEN-BUDGET-MONOTONE renders the unbudgeted answer (budget 0, so
+// the reorder applies) and sheds it (forbudgetfit.h, which recounts docs_after_code= over the rows it keeps). JSON and MCP `for`
+// still decide here (forsigspancheck (T)).
 inline constexpr bool docsAfterCodeFitsCeiling( std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
     return !explicitCeilingTighterThanDefault( budgetTokens, bodyCeiling );
@@ -5372,8 +5375,11 @@ inline bool isDocsAfterCodeRow( const IngestResult& ing, NodeId id )
     return ing.symbols[ id ].lang == Lang::Markdown;
 }
 
+// `movedRanks` (optional, OUT): the r= each MOVED doc row is shown with after the reorder, ascending — the rows docs_after_code=
+// counts. A later shed of the rendered answer (forbudgetfit.h, rows:N) recounts the attribute over the rows it keeps by these
+// ranks: the shed cuts the worst r= first, and the reorder hands the doc rows the worst r= of the shown set (lane DA1).
 template< class EntryT, class IsDoc, class Rehead >
-inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead )
+inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead, std::vector<std::uint32_t>* movedRanks = nullptr )
 {
     const auto [ live, moved ] = shownDocsAboveCode( entries, isDoc );
     if( moved == 0 )
@@ -5382,7 +5388,18 @@ inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& i
     }
     std::vector<std::size_t> newOrder;
     std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return !isDoc( entries[i] ); } );
+    const std::size_t codeRows = newOrder.size();
     std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return isDoc( entries[i] ); } );
+    if( movedRanks != nullptr )
+    {
+        // the moved rows are the first `moved` doc rows of `live` (shownDocsAboveCode), so they follow the code rows in newOrder,
+        // and the k-th row of newOrder takes the k-th shown r= (applyShownOrder: `live` is in display order)
+        movedRanks->clear();
+        for( std::size_t k = codeRows; k < codeRows + moved; ++k )
+        {
+            movedRanks->push_back( entries[ live[k] ].displayRank );
+        }
+    }
     applyShownOrder( entries, live, newOrder, rehead );
     ENSURES( moved > 0, "a moved count is only returned when the order changed" );
     return moved;
@@ -5439,9 +5456,12 @@ inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fil
 
 // The rendered rows' reorder, after the ladder (the shown set is final): returns how many shown rows changed rank (0 ⇒ the
 // head already named distinct files — byte-identical). Runs BEFORE reorderDocsAfterCode, which then moves any doc row below
-// the code rows and keeps the code rows' round-robin order.
+// the code rows and keeps the code rows' round-robin order. `movedGlobalRanks` (optional, OUT): the globalRank of each row
+// whose rank changed, ascending — the rows files_first= counts, by a key the docs reorder does not renumber
+// (sigsCutRecordFilesFirstRanks turns them into the r= they are finally shown with; lane HN1).
 template< class EntryT, class FileOf, class NameOf, class MayOpen, class Rehead >
-inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen, Rehead&& rehead )
+inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen, Rehead&& rehead,
+                                          std::vector<std::uint32_t>* movedGlobalRanks = nullptr )
 {
     std::vector<std::size_t> live;
     for( std::size_t i = 0; i < entries.size(); ++i )
@@ -5457,10 +5477,22 @@ inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&&
     std::size_t              moved = 0;
     std::vector<std::size_t> newOrder;
     newOrder.reserve( pos.size() );
+    if( movedGlobalRanks != nullptr )
+    {
+        movedGlobalRanks->clear();
+    }
     for( std::size_t k = 0; k < pos.size(); ++k )
     {
         moved += pos[k] != k ? 1u : 0u;
         newOrder.push_back( live[ pos[k] ] );
+        if( movedGlobalRanks != nullptr && pos[k] != k )
+        {
+            movedGlobalRanks->push_back( entries[ live[ pos[k] ] ].globalRank );
+        }
+    }
+    if( movedGlobalRanks != nullptr )
+    {
+        std::sort( movedGlobalRanks->begin(), movedGlobalRanks->end() );
     }
     if( moved > 0 )
     {
@@ -5812,7 +5844,11 @@ struct SigsCutReport
     std::size_t docsDropped = 0;
     bool        isCapped    = false;
     std::size_t docsAfterCode = 0;     // reorderDocsAfterCode's moved count: docs_after_code= (0 ⇒ absent)
+    std::vector<std::uint32_t> docsAfterCodeRanks;   // OUT: the r= those moved doc rows are shown with, ascending (the --for budget
+                                                     //   fitter recounts docs_after_code= over the rows it keeps: forbudgetfit.h)
     std::size_t filesFirst    = 0;     // reorderHeadRoundRobin's moved count: files_first= (0 ⇒ absent)
+    std::vector<std::uint32_t> filesFirstRanks;   // OUT: the r= those moved rows are shown with after BOTH reorders, ascending (the
+                                                  //   --for budget fitter recounts files_first= over the rows it keeps: lane HN1)
     std::string next;                  // knob-honesty-068: the cut's continuation (sigsCutNextInvocation), set only on a capped
                                        //   block whose caller asked for a PASTEABLE one; the tag's next= / the JSON "sigs_next"
     std::size_t nextBudgetTokens = 0;  // …or, on a surface with no pasteable argv (MCP), the budget_tokens a re-call needs:
@@ -5995,6 +6031,23 @@ inline void sigsCutRecordPastTargetRanks( SigsCutReport& cut, const std::vector<
     }
     std::sort( cut.pastTargetRanks.begin(), cut.pastTargetRanks.end() );
     ENSURES( cut.pastTargetRanks.size() == cut.pastTarget, "sigsCutRecordPastTargetRanks: a past_target row is not a shown row" );
+}
+
+// files_first=: which shown rows the head round-robin moved, by the r= they are FINALLY shown with. reorderHeadRoundRobin names
+// them by globalRank (`movedGlobal`, ascending), because the docs reorder renumbers the shown rows after it; read after both.
+template< class EntryT >
+inline void sigsCutRecordFilesFirstRanks( SigsCutReport& cut, const std::vector<EntryT>& entries, const std::vector<std::uint32_t>& movedGlobal )
+{
+    cut.filesFirstRanks.clear();
+    for( const EntryT& e : entries )
+    {
+        if( !e.dropped && std::binary_search( movedGlobal.begin(), movedGlobal.end(), e.globalRank ) )
+        {
+            cut.filesFirstRanks.push_back( e.displayRank );
+        }
+    }
+    std::sort( cut.filesFirstRanks.begin(), cut.filesFirstRanks.end() );
+    ENSURES( cut.filesFirstRanks.size() == cut.filesFirst, "sigsCutRecordFilesFirstRanks: a files_first row is not a shown row" );
 }
 
 // What the finished block shows, from its rows after the gate and the ladder: shown rows, and the shown rows whose doc
@@ -6200,6 +6253,47 @@ inline std::string_view attrOf( std::string_view tag, std::string_view name )
         }
     }
     return {};
+}
+
+
+// WHERE AN ELEMENT'S OPEN TAG STARTS AND ENDS — by structure, never by punctuation: skip leading comment nodes (a legend can
+// carry a tag-like NAME in prose, e.g. `n=<file-scope>`), then take the '>' that closes the element found. Moved here from
+// packtask.h (PB1) so the headers that read it (handoffwindow.h, forgraphverb.h) no longer include the bundle assembler, which
+// now includes forpage.h — a chain that reaches back to them.
+struct SectionOpenTag
+{
+    std::size_t start = std::string::npos;   // offset of the element's '<'
+    std::size_t end   = std::string::npos;   // offset of the '>' that closes THAT tag
+};
+inline SectionOpenTag findSectionOpenTag( std::string_view xml, std::string_view element ) noexcept
+{
+    SectionOpenTag t;
+    std::size_t    i = 0;
+    while( i < xml.size() )
+    {
+        if( xml.compare( i, 4, "<!--" ) == 0 )
+        {
+            const std::size_t close = xml.find( "-->", i );
+            if( close == std::string_view::npos )
+            {
+                return t;   // an unterminated comment: refuse rather than guess where the element begins
+            }
+            i = close + 3;
+            continue;
+        }
+        if( xml.compare( i, element.size(), element ) == 0 )
+        {
+            const std::size_t close = xml.find( '>', i );
+            if( close != std::string_view::npos )
+            {
+                t.start = i;
+                t.end   = close;
+            }
+            return t;
+        }
+        return t;   // something other than a comment or the element we restate — refuse
+    }
+    return t;
 }
 
 
@@ -6637,20 +6731,22 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
                                                        spelling.elideZeroMetrics, &sigOwners }, esc, rootArg ); };
         const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
+        std::vector<std::uint32_t> filesFirstGlobal;   // the round-robin's moved rows by globalRank (sigsCutRecordFilesFirstRanks)
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
             const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const SigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml );
+                                                    [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml, &filesFirstGlobal );
         }
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
-            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadXml );   // lean-answers' zero elision included
+            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadXml, &cut.docsAfterCodeRanks );   // lean-answers' zero elision included
         }
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
         sigsCutRecordPastTargetRanks( cut, entries );   // forbudget-soft: after the docs reorder renumbered them
+        sigsCutRecordFilesFirstRanks( cut, entries, filesFirstGlobal );   // lane HN1: likewise
         sigsCutAttachContinuation( cut, cutNext, cutNextInv, cutNextTokens );   // nothing unless capped and asked for
         if( cutOut )
         {
@@ -6986,6 +7082,13 @@ inline const std::string* extractedTextOfUnit( const IngestResult& ing, const Sy
     }
     const auto doc = ing.docText.find( s.fileId );
     return doc != ing.docText.end() ? &doc->second : nullptr;
+}
+
+// Where the body a verb serves for `s` starts in `src`, the text extractedTextOfUnit chose: the declaration's first byte
+// (declwrap.h) in a file's own bytes, the unit's own start in an extracted doc unit (no grammar parses that text).
+inline std::size_t servedBodyStart( const IngestResult& ing, const Symbol& s, std::string_view src, bool srcIsDocUnit )
+{
+    return srcIsDocUnit ? std::size_t( s.sigStartByte ) : declStartByte( ing, s, src );
 }
 
 inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, int cap,
@@ -8012,6 +8115,60 @@ inline BodyCut cutOversizedBody( std::string& body, std::size_t budgetBytes, std
     return out;
 }
 
+// ── THE MONOTONE BODY LINE CAP (lane CB1, 2026-11-19) ────────────────────────────────────────────────────
+// A body of at most kCappedBodyLines lines rides WHOLE; past that only its first kCappedBodyLines lines ride.
+// `min( span, 120 )` — monotone, no discontinuity. The owner RULED this shape over SR1's "whole <=120, else a
+// 15-line head" on the cliff: that shape saves more (CB1 §3d MEASURED -42.3% of candidate body lines against
+// this one's -21.7%) but an answer whose size jumps 8x on a property the caller cannot see is the wrong trade,
+// and it is worst in the fan-out shape where N subagents each budget alone with nothing to normalise them.
+//
+// WHY A LINE CAP AND NOT THE BYTE CAP THAT ALREADY EXISTS. kHopBodyCapBytes (4,000 B) already cuts large
+// bodies -- but CB1 §4 MEASURED that in LINES that cut is 73 on dense code and 150 on sparse, a 2.1x spread
+// over ten repos decided by nothing but how wide a repo's lines happen to be. Lines are also the denominator
+// every cost model here is written in (SR1 READOUT §2). So the line cap's claim is PREDICTABILITY, not
+// savings, and it is a blow-up guard in the owner's standing sense, not a token knob.
+//
+// WHAT IT CANNOT DO, measured and stated so no reader infers otherwise. On GA1's DEV half (191 gold bodies,
+// 28 of them over 120 lines) a monotone head cap graded EDIT-COVERING reaches 50.0% of capped bodies at zero
+// context and 42.9% at the registered 3-line floor, against 100% for whole bodies by construction -- because
+// the last changed line of a large body sits a median 123 lines in. So this cap cannot GAIN at the body rung;
+// it can only cost there. Its purpose is to make MORE bodies affordable at all, and 6 of those 28 have an
+// edit hull wider than 120 lines, so no 120-line contiguous run can ever cover them.
+inline constexpr std::uint32_t kCappedBodyLines = 120;
+
+// Cut `body` to its first `maxLines` whole lines, in the BodyCut vocabulary cutOversizedBody already speaks.
+// Returns isComplete when the body is at most maxLines lines and nothing was removed -- the caller then emits
+// exactly what it emitted before, which is what keeps every uncapped body byte-identical.
+inline BodyCut capBodyAtLines( std::string& body, std::uint32_t maxLines, std::uint32_t loLine )
+{
+    EXPECTS( maxLines > 0, "a zero line cap would serve nothing; 0 means INERT at the call site, not here" );
+    BodyCut       out;
+    std::size_t   at   = 0;
+    std::uint32_t seen = 0;
+    while( seen < maxLines )
+    {
+        const std::size_t nl = body.find( '\n', at );
+        if( nl == std::string::npos )
+        {
+            out.isComplete = true;      // fewer than maxLines lines, no terminator: nothing to cut
+            return out;
+        }
+        at = nl + 1;
+        ++seen;
+    }
+    // `at` is one past the maxLines'th '\n'. Nothing but an empty last line after it => the body already fits.
+    if( at >= body.size() )
+    {
+        out.isComplete = true;
+        return out;
+    }
+    body.resize( at - 1 );              // drop the trailing '\n' too: the served text ends on its last line
+    out.hiLine    = loLine + maxLines - 1;
+    out.nextStart = out.hiLine + 1;
+    ENSURES( out.nextStart > loLine && !out.isComplete, "a line cap that cut shows whole lines and advances" );
+    return out;
+}
+
 // The --expand call that serves lines [fromLine, toLine] of this definition: the partial-fetch selector
 // P:L:N:A-B (main.cpp parseExpandToken splits the range at the LAST ':', and file:line:name resolves one
 // definition). Unescaped — each dialect escapes its own way.
@@ -8031,9 +8188,11 @@ inline std::string bodyNextCall( std::string_view path, const Symbol& s, std::ui
 }
 
 // the reading of <b truncated="1">, written only into a document that carries it (the kBodylessBodiesLegend rule).
+// CB1: the cause clause. truncated= used to mean one thing because only one thing cut a body; the line cap is a
+// second cause, so the reading names which one fired rather than letting the old wording stand and be false.
 inline constexpr const char* kTruncatedBodyLegend =
-    "<!-- b truncated=\"1\": cut at the byte budget (bodies capped=\"1\"); lines=\"lo-hi/T\": the def lines shown, of T; "
-    "next=: the call serving the rest -->";
+    "<!-- b truncated=\"1\": cut at the byte budget, or at cap_lines=N when that attribute is present (bodies capped=\"1\"); "
+    "lines=\"lo-hi/T\": the def lines shown, of T; next=: the call serving the rest -->";
 // …and of <b over_ceiling="1">, written only into a document that carries it.
 inline constexpr const char* kOverCeilingBodyLegend =
     "<!-- b over_ceiling=\"1\": its first line alone exceeds the byte budget, served whole -->";
@@ -8155,9 +8314,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                             //   on --for/--pack-task/--from-trace, calleeNameSpecificity on
                                                                             //   --expand; nullptr (--around/--exemplar) ⇒ node-id order.
                                                                             //   See CalleeCallsSink::rank.
-                        CalleeLegendsInHead legendsInHead = {} )   // FE-B: the caller's own first-screen legend already defines via="name"
+                        CalleeLegendsInHead legendsInHead = {},   // FE-B: the caller's own first-screen legend already defines via="name"
                                                                     //   (namesOnlyOutAny above), so this section neither repeats nor charges
                                                                     //   it; Q1: likewise prov="split" (splitArmsOutAny)
+                        std::uint32_t bodyLineCap = 0 )   // CB1: the monotone body line cap (kCappedBodyLines). 0 => INERT, and
+                                                           //   every pre-existing caller keeps that default, so their answers are
+                                                           //   byte-identical by construction rather than by inspection. A body at
+                                                           //   or under the cap is emitted exactly as before; only a body PAST it
+                                                           //   changes, and it then carries cap_lines= naming the cause.
 {
     const std::vector<std::uint8_t>& outNameOnly     = outEdges.nameOnly;
     const bool                       viaLegendInHead = legendsInHead.via;
@@ -8296,7 +8460,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // table and dangle any reference held across it — never cache `src` past an insert.
         const std::string* unitText = extractedTextOfUnit( ing, s );
         const std::string& src      = unitText ? *unitText : contentOf( f );
-        const std::size_t  a = s.sigStartByte, b = s.endByte;
+        // WRAPPER PREFIX (declwrap.h): the body starts at the declaration — `export`, a decorator, `template<…>`, an
+        // attribute run — not at the inner node the symbol's span starts at. An extracted doc unit keeps its own start.
+        const std::size_t  a = servedBodyStart( ing, s, src, unitText != nullptr ), b = s.endByte;
         if( src.empty() || a >= b || b > src.size() )
         {
             continue; // graceful: file gone / empty, or an unreadable span — covered by total=/capped=
@@ -8336,7 +8502,38 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         const std::size_t remainingBytes = used < budgetBytes ? budgetBytes - used : 0;
         bool              truncated      = false;
         bool              overCeiling    = false;   // the first whole line alone exceeds the budget (cutOversizedBody)
+        bool              lineCapped     = false;   // CB1: this body was cut by the LINE cap, not by the byte budget
         std::string       nextCall;   // the call that serves what a truncation cut; empty on a whole body
+
+        // CB1 — THE LINE CAP RUNS FIRST, AND IT IS THE REASON A LARGE BODY STOPS BEING DROPPED.
+        // Before this, `--pack-task` was whole-body-or-nothing: a body that did not fit the REMAINING budget
+        // took the omission marker below, because the cut just under it fires only for a body larger than the
+        // WHOLE budget that is also first. CB1 §2 MEASURED the consequence on a fixture — a 202-line, 6,050 B
+        // body dropped entirely while 5,189 B of a 12,744 B budget stood unused. Capping it to 120 lines makes
+        // it ~3,600 B, so it FITS and rides as a head. That is the whole gain, and it is why the cap belongs
+        // ahead of the byte check rather than after it.
+        // The byte budget still has the last word: a capped head that still does not fit is still omitted and
+        // still named in the marker. The cap makes a body affordable; it does not make it mandatory.
+        if( bodyLineCap > 0 )
+        {
+            if( !isSliced )
+            {
+                lineTotal = std::uint32_t( std::count( body.begin(), body.end(), '\n' ) ) + 1;
+                hiLine    = lineTotal;
+            }
+            const std::uint32_t askedHi = hiLine;
+            std::string         probe   = body;   // cap a copy: an uncut body must keep the byte-identical path
+            const BodyCut       capCut  = capBodyAtLines( probe, bodyLineCap, loLine );
+            if( !capCut.isComplete )
+            {
+                body       = std::move( probe );
+                hiLine     = capCut.hiLine;
+                truncated  = true;
+                lineCapped = true;
+                nextCall   = bodyNextCall( pathRel( f ), s, capCut.nextStart, askedHi );
+            }
+        }
+
         if( body.size() > remainingBytes )                     // doesn't fit the remaining budget
         {
             // a single def larger than the WHOLE budget → truncate it (UTF-8 safe) — unless the caller
@@ -8347,12 +8544,15 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                 noteOmittedBody( outEmitted, id );   // §H5: the JSON dialect names the same ones
                 continue;
             }
-            if( !isSliced )
+            // CB1: NOT when the line cap already cut — `body` is then the capped HEAD, so counting its lines
+            // here would report lineTotal as the cap (120) instead of the definition's real length, and askedHi
+            // would stop next= at 120 instead of the def's last line. The line cap recorded both already.
+            if( !isSliced && !lineCapped )
             {
                 lineTotal = std::uint32_t( std::count( body.begin(), body.end(), '\n' ) ) + 1;   // sliceBodyLines' own line count
                 hiLine    = lineTotal;
             }
-            const std::uint32_t askedHi = hiLine;   // the last line the request covered: the whole def, or the slice's end
+            const std::uint32_t askedHi = lineCapped ? lineTotal : hiLine;   // the last line the request covered
             const BodyCut       cut     = cutOversizedBody( body, budgetBytes, loLine );
             overCeiling = cut.overCeiling;
             if( !cut.isComplete )
@@ -8421,6 +8621,16 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         if( overCeiling )
         {
             piece += " over_ceiling=\"1\"";   // this body's first line alone exceeds the budget: served whole, never a fragment
+        }
+        if( lineCapped )
+        {
+            // CB1 -- THE CAUSE, not just the extent. truncated=/lines=/next= already say HOW MUCH was cut, and
+            // src/compactlegend.h registers truncated= as "cut at the byte budget". A line cap is a different
+            // fact, so reusing truncated= alone would make that registered reading FALSE on this row
+            // (non-negotiable 3). cap_lines= names the cap that did it; a byte cut carries no cap_lines=, so
+            // the two causes are distinguishable from the row alone. head_only= was rejected for this: it
+            // belongs to src/abicheck.h on <ref>, where "head" means git HEAD.
+            piece += " cap_lines=\"" + std::to_string( bodyLineCap ) + "\"";
         }
         appendBodyFidelityAttrs( piece, bodyScrubbed, bodyRedacted );
         appendExtentSuspectAttr( piece, s );   // extent honesty: this body's span may be a recovery artifact
@@ -9157,7 +9367,7 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         const Symbol&      s        = ing.symbols[id];
         const std::string* unitText = extractedTextOfUnit( ing, s );   // packBodies' own choice of text
         const std::string& src      = unitText ? *unitText : contentOf( s.fileId );
-        const std::size_t  a = s.sigStartByte, b = s.endByte;
+        const std::size_t  a = servedBodyStart( ing, s, src, unitText != nullptr ), b = s.endByte;   // packBodies' own start
         if( a >= b || b > src.size() )
         {
             continue;
@@ -11037,9 +11247,14 @@ inline std::string jsonStr( std::string_view s )
 //
 // `lazy` (kParserVer 72, fnbody-require lane): parallel to `files` (same index, same size) — 1 ⇒ every
 // edge this importer has into the def set is a TS/JS function-body require/import (graph.h::ImportTier),
-// never a top-level one. Disclosed per row rather than folded into via= (a THIRD via= value would silently
-// widen a reader's existing `via="import"` match into two different claims); see
-// graphlegend.h::kImpactImportTierLegend for the definition a reader meets first.
+// never a top-level one. Disclosed per row; see graphlegend.h::kImpactImportTierLegend for the definition a reader meets first.
+//
+// IMPORT-ROW-SHORT (2026-11-18): the row is `<f p="…"/>`, and `<f p="…" lazy="1"/>` when lazy. It was
+// `<f via="import" p="…" lazy="0|1"/>`: via="import" was a literal of this one emitter, so it could not differ between two rows
+// (the <f> tag under <impact> already says "importer"), and lazy="0" was the default arm of a two-valued flag. Both are put back
+// by a rule that reads one row and nothing else — test/importrowshortcheck.sh rebuilds every row and compares the whole <impact>
+// element with the pre-change binary's. The --json twin below still spells via and lazy on every entry: it is that gate's second
+// reference, and a JSON reader has no tag to read the kind from.
 inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
                                std::span<const std::uint32_t> files, std::string_view rootPrefix, std::span<const char> lazy = {} )
 {
@@ -11049,7 +11264,7 @@ inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
         const std::string_view raw = ing.files[ files[i] ];
         const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
         const bool              isLazy = i < lazy.size() && lazy[i] != 0;
-        rw::emitTo( out, "<f via=\"import\" p=\"{}\" lazy=\"{}\"/>", std::string( escapeXml( rel, esc ) ).c_str(), isLazy ? "1" : "0" );
+        rw::emitTo( out, "<f p=\"{}\"{}/>", std::string( escapeXml( rel, esc ) ).c_str(), isLazy ? " lazy=\"1\"" : "" );
     }
 }
 
@@ -11457,6 +11672,11 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     if( h.ing.crawlSkips.escapedFiles > 0 )
     {
         rw::formatTo( hdr, sizeof( hdr ), "\"escaped_root\":{},", ( unsigned long long ) h.ing.crawlSkips.escapedFiles );
+        w.write( hdr );
+    }
+    if( h.ing.crawlSkips.untrackedBuildFiles > 0 )   // M1, JSON lane: the same drop, by the same argument, absent at zero
+    {
+        rw::formatTo( hdr, sizeof( hdr ), "\"untracked_build\":{},", ( unsigned long long ) h.ing.crawlSkips.untrackedBuildFiles );
         w.write( hdr );
     }
 
@@ -12418,19 +12638,22 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         const auto reheadJson = [ & ]( JsonSigEntry& e, std::uint32_t newRank )
         { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); };
         const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
+        std::vector<std::uint32_t> filesFirstGlobal;   // the round-robin's moved rows by globalRank (sigsCutRecordFilesFirstRanks)
         if( lens.headRoundRobin )
         {
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const JsonSigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const JsonSigEntry& e ) { return !lens.docsAfterCode || !isDocRow( e ); }, reheadJson );
+                                                    [ & ]( const JsonSigEntry& e ) { return !lens.docsAfterCode || !isDocRow( e ); }, reheadJson,
+                                                    &filesFirstGlobal );
         }
         if( lens.docsAfterCode )
         {
-            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadJson );
+            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadJson, &cut.docsAfterCodeRanks );
         }
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
         sigsCutRecordPastTargetRanks( cut, entries );   // forbudget-soft: after the docs reorder renumbered them
+        sigsCutRecordFilesFirstRanks( cut, entries, filesFirstGlobal );   // lane HN1: likewise
         sigsCutAttachContinuation( cut, cutNext, cutNextInv, cutNextTokens );   // knob-honesty-068: nothing unless capped and asked for
         if( cutOut )
         {

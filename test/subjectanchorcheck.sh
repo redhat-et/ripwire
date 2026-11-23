@@ -18,6 +18,10 @@
 #          budgeted or candidates call never flips
 # Usage: bash test/subjectanchorcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/subjectanchorcheck.sh
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -27,7 +31,9 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "subjectanchorcheck: BIN=$BIN"
-ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
+# --page-bytes=12000: the default page SPELLED, so page 1 never ends early (RT2 ES ends a default page 1 right after a
+# proven <callers by="subject"> block, which would read here as "the rest of the answer displaced"; forverbroutecheck owns ES)
+ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null ) </dev/null; }
 route(){ printf '%s' "$1" | python3 -c 'import re,sys; b=sys.stdin.read(); m=re.search(r"route=\"([^\"]*)\"",b); print(m.group(1) if m else "@@NONE")'; }
 has(){ case "$1" in *"$2"*) ok "$3";; *) no "$3 (missing: $2)";; esac; }
 hasnt(){ case "$1" in *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
@@ -171,7 +177,7 @@ nat(){ # $1 root $2 subject $3 caller row $4 label: callers ride, no flip, and t
     has "$A" '<callers by="subject"' "SC $4: callers ride by subject"
     has "$( blk "$A" )" "$3" "SC $4: the caller row"
     hasnt "$( route "$A" )" 'dropped:' "SC $4: the route is not flipped"
-    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" <<'X'
+    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null </dev/null )" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
 m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
@@ -392,7 +398,7 @@ printf 'export function fresh(a: number) { return a; }\n' > "$FX/src/fresh.ts"
 A="$( ask "$FX" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
 has "$R" 'name-exact(SoloThing)' "F6 one function, body fits: the declined route flips to the symbol"
 has "$R" 'dropped:' "F6 flip: dropped words named"
-has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "F6 flip: the body is printed"
+has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "F6 flip: the body is printed"
 has "$( blk "$A" )" 'soloUser' "F6 flip: the callers are printed"
 hasnt "$A" 'body omitted' "F6 flip: no body omitted for budget"
 # F2: the class, not a path list. A namesake under ANY directory makes the name two functions: the map stays.
@@ -572,7 +578,7 @@ WC="$( wfx ctl )"; printf 'export function SoloThing(a: number) { return a + 41;
 for q in "${WQ[@]}"; do
     A="$( ask "$WC" "$q" )"
     has "$( route "$A" )" 'name-exact(SoloThing)' "W control [$q]: flips to the symbol"
-    has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "W control [$q]: the body prints"
+    has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "W control [$q]: the body prints"
     has "$( blk "$A" )" 'soloUser' "W control [$q]: the callers print"
 done
 # MF2: the outcome, not a flag list. Every mode that prints no body, or no callers, keeps the map; the same call in the default mode flips.

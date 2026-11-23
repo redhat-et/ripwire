@@ -393,14 +393,39 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 337;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+                                                      // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
+                                                      //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
+                                                      //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.
+                                                      // --- history: the 0.7.0 train carried 340 ---
+                                                      // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER: the train renumbers; above 338 and its rich
+                                                      //   339; rich file tag 341): the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED — a build/ dist/ out/ target/
+                                                      //   directory git tracks files under is crawled (ingest_crawl.h TrackedBuildDirs), so a v338 blob has no
+                                                      //   record for those files: ABSENT, not stale, and only the header version can reject it (the 88/91
+                                                      //   precedent). No extraction or record shape changes; kCacheVersion stays 54.
+                                                      // 338 = 2026-11-21 (lane fx1-two-reds, above the train's 336 and its rich 337; rich file tag 339): a Rust
+                                                      //   macro invocation's re-read (ingest_rustmacroargs.h) drops a bare call its own file's `macro_rules!`
+                                                      //   matcher spells as a literal word (`wrap!( matcher_fn( 3 ) )`). kCacheVersion stays 54.
+                                                      // --- history: 336 ---
+                                                      // 336 = 2026-11-21 (IN8, ruling 135: train 1118a — #717, the rebase of #716 — folded into the 0.7.0 train). ONE number above
+                                                      //   BOTH sides' bumps past their merge base 5df5a26be (333): the train's 334 and train 1118a's 335. Rich file tag 337.
+                                                      //   kCacheVersion stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers, not of 336.
+                                                      // --- history: main b576a95e3 carried 337 ---
                                                       // 337 = 2026-11-21 (#548 arm 1, @himanchalkaushale, PR #715, landed as lane land-715; was 311 on the PR, above train
                                                       //   1118a's 335/336): a Clojure call whose list head carries metadata (`^{:doc "tagged"} (square 4)`, `^String (square 5)`)
                                                       //   is captured, and the C++ head filter (ingest_clojure.h clojureListHead) skips meta_lit before reading the head.
                                                       //   Rich file tag 338. kCacheVersion unchanged.
+                                                      // --- history: train 1118a (4b1f4516e) carried 335 ---
                                                       // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
                                                       //   using-declarations and namespace aliases are recorded while the call-result family is off
                                                       //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
+                                                      // --- history: the 0.7.0 train after main 8861b0d4d (823276f30) carried 334 ---
+                                                      // 334 = 2026-11-21 (IN8, rulings 129/135: the 0.7.0 train merged with main 8861b0d4d, which carries #709). ONE number
+                                                      //   above BOTH sides' bumps past their merge base ee8d1a50e (331) — main's 333 (train 1117d2) and the 0.7.0 line's 332 (IN3) —
+                                                      //   so neither side's cache can be read by the other's binary. Rich file tag 335. kCacheVersion 54 is main's (qd-tangle); the
+                                                      //   0.7.0 line had stayed at 52 and changes no record shape. Both notes are kept below as HISTORY, main's first; the tags
+                                                      //   they name are the tags of those numbers, not of 334.
+                                                      // --- history: main 8861b0d4d carried 333 ---
                                                       // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
                                                       //   The members' extraction changes (each lane's number was a placeholder):
                                                       //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
@@ -411,6 +436,14 @@ constexpr std::uint32_t kParserVer    = 337;          // bump on any grammar/.sc
                                                       //   (rustUnwrappedCall). kCacheVersion 52 -> 53 (LocalBindKind RecvCall appended).
                                                       //   rust-macro-args (placeholder 315): the calls written inside a Rust macro invocation's arguments are references
                                                       //   (ingest_rustmacroargs.h: the token tree is re-read as one expression and kept only when it parses clean).
+                                                      // --- history: the 0.7.0 line (integration/070-1120, 21d4b66b7) carried 332 ---
+                                                      // 332 = 2026-11-20 (IN3, ruling 92: the 0.7.0 integration of integration/070-candidate
+                                                      //   + lane/r1b-priority with main ee8d1a50e). ONE number above BOTH sides' bumps — main's
+                                                      //   331 (train 1117d1) and the stack's 317 (INT1) — so neither side's cache can be read by
+                                                      //   the other's binary. Rich file tag 333. kCacheVersion unchanged: no record changes shape.
+                                                      //   Both provenance lists are kept below as HISTORY, main's first; the tags they name are
+                                                      //   the tags of those numbers, not of 332.
+                                                      // --- history: main ee8d1a50e carried 331 ---
                                                       // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
                                                       //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
                                                       //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
@@ -426,6 +459,14 @@ constexpr std::uint32_t kParserVer    = 337;          // bump on any grammar/.sc
                                                       //   edge-strays-1118 (placeholder 327): a Rust call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
                                                       //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
                                                       //   Rich file tag 328. kCacheVersion unchanged.
+                                                      // --- history: integration/070-candidate carried 317 ---
+                                                      // 317 = 2026-11-19 (INT1, the 0.7.0 candidate integration/070-candidate: ONE number for lane BX2's two parser members, strictly
+                                                      //   above main d65f60c6d's 313/314 (TRAIN-1117b) and above both BX2 placeholders 313 and 315, so no cache a lane binary wrote
+                                                      //   under a placeholder reads as this tree's). Rich file tag 318. kCacheVersion unchanged.
+                                                      //   - BX2 FIX 5 (its placeholder 313): a Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` /
+                                                      //     `$crate::a::name(` is a Call reference of its macro (ingest_names.h scanTranscriberCalls).
+                                                      //   - BX2 FIX 8 (its placeholder 315): a C-family parameter stored into a struct field (`tp->signalcb = signalcb`) records
+                                                      //     the IX1-V2 slot fact Go and Rust record (ingest_valuerefs.h paramSlotFact).
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as

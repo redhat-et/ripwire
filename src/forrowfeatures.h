@@ -17,6 +17,7 @@
 #include "graph.h" // Graph CSR + per-edge bytes, declined sites, definitionCountOfName
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
+#include "infra/namesplit.h" // afterLast: the directory cut with no npos wrap
 #include "infra/ownedfile.h" // OwnedFile: the dump file closes on every path
 #include "infra/sortutil.h"
 #include "lexical.h" // LexTermEvidence, RouteAnchorDef, routeLower
@@ -321,29 +322,6 @@ inline std::vector<std::uint32_t> lensPositions( const std::vector<float>& rank 
     }
     return pos;
 }
-inline std::vector<std::uint32_t> fileRanks( const IngestResult& ing, const std::vector<float>& rank )
-{
-    std::vector<float> best( ing.files.size(), 0.0f );
-    for( std::size_t i = 0; i < ing.symbols.size() && i < rank.size(); ++i )
-    {
-        if( const std::uint32_t f = ing.symbols[i].fileId; f < best.size() )   // a file id past the table has no rank, and no slot
-        {
-            best[f] = std::max( best[f], rank[i] );
-        }
-    }
-    std::vector<std::uint32_t> files( best.size() );
-    for( std::uint32_t f = 0; f < files.size(); ++f )
-    {
-        files[f] = f;
-    }
-    rw::sortutil::radixSortByScoreDescId( files, best );
-    std::vector<std::uint32_t> out( best.size(), 0 );
-    for( std::size_t k = 0; k < files.size() && best[files[k]] > 0.0f; ++k )
-    {
-        out[files[k]] = std::uint32_t( k + 1 );
-    }
-    return out;
-}
 // The anchors a name-exact route resolved, as nodes: each one's first definition of that name in its file.
 inline std::vector<NodeId> anchorNodes( const IngestResult& ing, const std::vector<RouteAnchorDef>& anchors )
 {
@@ -568,7 +546,7 @@ inline void renderGraph( std::string& out, const Context& c, const std::vector<L
     field( out, s != nullptr ? kProvNames[std::size_t( reachProv( c, lines, k ) )] : std::string_view() );
     const std::string_view headPath = headKnown ? rootRelPath( c.ing, c.ing.symbols[c.head].fileId ) : std::string_view();
     const std::string_view rowPath = s != nullptr ? rootRelPath( c.ing, s->fileId ) : std::string_view();
-    const auto dirOf = []( std::string_view p ) { return p.substr( 0, p.rfind( '/' ) + 1 ); };
+    const auto dirOf = []( std::string_view p ) { return p.substr( 0, p.size() - rw::namesplit::afterLast( p, "/" ).size() ); };
     count( out, headKnown && s->fileId == c.ing.symbols[c.head].fileId ? 1 : 0 );
     count( out, headKnown && dirOf( headPath ) == dirOf( rowPath ) ? 1 : 0 );
     count( out, s != nullptr && s->fileId < c.fileRank.size() ? c.fileRank[s->fileId] : 0 );

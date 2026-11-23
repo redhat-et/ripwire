@@ -68,11 +68,11 @@ BASE_ROWS="$( HOME="$HOME_FAKE" CODEX_HOME="$CODEX_FAKE" AGENTS_HOME="$AGENTS_FA
     | grep -o '<c n="' | wc -l | tr -d ' ' )"
 CODEX_CHECKS="$( printf '%s' "$OUT" | grep -o '<doctor checks="[0-9]*"' | grep -o '[0-9]*' )"
 CODEX_PASSED="$( printf '%s' "$OUT" | grep -o 'passed="[0-9]*"' | head -1 | grep -o '[0-9]*' )"
-[ -n "$BASE_ROWS" ] && [ "$CODEX_CHECKS" = "$(( BASE_ROWS + 4 ))" ] \
+[ -n "$BASE_ROWS" ] && [ "$CODEX_CHECKS" = "$(( BASE_ROWS + 5 ))" ] \
     && [ "$CODEX_PASSED" = "$CODEX_CHECKS" ] \
     && printf '%s' "$OUT" | grep -q 'agent="codex"' \
     && ok "Codex selection adds four checks (base $BASE_ROWS -> $CODEX_CHECKS), all passed, and labels the report" \
-    || no "Codex doctor reported checks=\"$CODEX_CHECKS\" passed=\"$CODEX_PASSED\" against a base of $BASE_ROWS rows (expected checks=passed=$(( BASE_ROWS + 4 )) and agent=\"codex\")"
+    || no "Codex doctor reported checks=\"$CODEX_CHECKS\" passed=\"$CODEX_PASSED\" against a base of $BASE_ROWS rows (expected checks=passed=$(( BASE_ROWS + 5 )) and agent=\"codex\")"
 for row in codex-binary codex-skills codex-hooks codex-mcp; do
     printf '%s' "$OUT" | grep -q "<c n=\"$row\" ok=\"1\"" \
         && ok "healthy row present: $row" || no "healthy row missing/failing: $row"

@@ -23,6 +23,10 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -124,25 +128,31 @@ GIT_DATE="$( cd "$WORK" && git log -1 --format=%cs HEAD )"
 BUN="$TMP/bundle.xml"
 # L1 (2026-09-19): the CLI default legend is compact — it spells <callers ...>/<sigs ...> inside its comment and omits the full
 # legend's per-section truncation prose; the bundle/tiny/lens arms read real sections and that prose, so they ask for the full legend.
-runw --pack-task="parse budget planner decoy" --legend=full > "$BUN"
+# PB1 (2026-11-19): the task NAMES applyBudget in backticks. <callers> is now the KEY BODY's own 1-hop callers
+# (PT1 design D1), so the arms below — which are about run_budget_tests, the fixture's genuine 1-hop caller of
+# applyBudget — have to pin WHICH body is served, or they are asserting a relationship to whichever decoy the
+# ranker happened to head. KB1's rule (forkeybody.h) is the backtick span, so naming it is how a gate says
+# "this body". The decoy words stay: they are what keeps run_budget_tests out of the candidate set itself.
+runw --pack-task="parse budget planner decoy \`applyBudget\`" --legend=full > "$BUN"
 
 # section presence
-for tag in "<sigs" "<bodies " "<callers " "<notes " "<tests "; do
+for tag in "<sigs" "<bodies " "<callers " "<notes " "<tests " "<tail "; do
     if grep -qF -- "$tag" "$BUN"; then ok "section present: ${tag}…"; else no "section missing: ${tag}"; fi
 done
 
-# section ORDER (fixed): ranking < bodies < callers < notes < tests, by first byte offset
+# section ORDER (fixed): ranking < bodies < callers < notes < tests < tail, by first byte offset
 p_sigs="$(   byte_off "$BUN" "<sigs" )"
 p_bodies="$( byte_off "$BUN" "<bodies " )"
 p_callers="$(byte_off "$BUN" "<callers " )"
 p_notes="$(  byte_off "$BUN" "<notes " )"
 p_tests="$(  byte_off "$BUN" "<tests " )"
-if [ -n "$p_sigs" ] && [ -n "$p_bodies" ] && [ -n "$p_callers" ] && [ -n "$p_notes" ] && [ -n "$p_tests" ] \
+p_tail="$(   byte_off "$BUN" "<tail " )"
+if [ -n "$p_sigs" ] && [ -n "$p_bodies" ] && [ -n "$p_callers" ] && [ -n "$p_notes" ] && [ -n "$p_tests" ] && [ -n "$p_tail" ] \
    && [ "$p_sigs" -lt "$p_bodies" ] && [ "$p_bodies" -lt "$p_callers" ] \
-   && [ "$p_callers" -lt "$p_notes" ] && [ "$p_notes" -lt "$p_tests" ]; then
-    ok "sections emitted in the FIXED order ranking < bodies < callers < notes < tests"
+   && [ "$p_callers" -lt "$p_notes" ] && [ "$p_notes" -lt "$p_tests" ] && [ "$p_tests" -lt "$p_tail" ]; then
+    ok "sections emitted in the FIXED order ranking < bodies < callers < notes < tests < tail"
 else
-    no "section order is wrong (sigs=$p_sigs bodies=$p_bodies callers=$p_callers notes=$p_notes tests=$p_tests)"
+    no "section order is wrong (sigs=$p_sigs bodies=$p_bodies callers=$p_callers notes=$p_notes tests=$p_tests tail=$p_tail)"
 fi
 
 # section 3: a 1-hop caller of the top symbols surfaces (run_budget_tests calls applyBudget, an anchor,
@@ -157,7 +167,6 @@ grep -oE '<callers[^>]*>.*</callers>' "$BUN" | grep -qF 'n="run_budget_tests"' \
 FLAT="$( tr '\n' ' ' < "$BUN" )"
 CALLERS_BLOCK="$( printf '%s' "$FLAT" | grep -oE '<callers[^>]*>.*</callers>' )"
 BODIES_BLOCK="$(  printf '%s' "$FLAT" | grep -oE '<bodies [^>]*>.*</bodies>'   )"
-FAR_BLOCK="$(     printf '%s' "$FLAT" | grep -oE '<far[^>]*>.*</far>'          )"
 printf '%s' "$BODIES_BLOCK" | grep -qF 'n="parseBudget"' \
     && ok "R2 d0: parseBudget (an anchor) has a FULL BODY" || no "R2 d0: parseBudget missing from <bodies>"
 
@@ -170,14 +179,15 @@ printf '%s' "$BODIES_BLOCK" | grep -qF 'n="run_budget_tests"' \
     && no "R2 REGRESSION: run_budget_tests (d1) got a FULL BODY too — d1 must stay signature-only" \
     || ok "R2 d1: run_budget_tests never gets a body, even though the budget could afford one"
 
-# d2+ (decoyBudgetSix / unrelatedHelper: no call edge to any anchor): a bare NAME-ONLY row in <far>, nested
-# just inside </sigs> (still section 1, not a 6th top-level section) — no signature, no doc, no body anywhere.
-printf '%s' "$FAR_BLOCK" | grep -qE '<s t="fn" n="unrelatedHelper" p="[^"]*"/>' \
-    && ok "R2 d2+: unrelatedHelper is a bare NAME-ONLY row in <far>" || no "R2 d2+: unrelatedHelper missing/not name-only in <far>"
-printf '%s' "$BODIES_BLOCK"  | grep -qF 'n="unrelatedHelper"' && no "R2 REGRESSION: unrelatedHelper (d2+) got a body"  || ok "R2 d2+: unrelatedHelper has no body"
-printf '%s' "$CALLERS_BLOCK" | grep -qF 'n="unrelatedHelper"' && no "R2 REGRESSION: unrelatedHelper (d2+) got a signature row in <callers>" || ok "R2 d2+: unrelatedHelper has no signature row"
-grep -qF '<far ' "$BUN" && grep -oE '<sigs.*</sigs>' "$BUN" | grep -qF '<far ' \
-    && ok "R2: <far> nests INSIDE <sigs> (section 1), not a 6th top-level section" || no "R2: <far> is not nested inside <sigs>"
+# PB1 (2026-11-19): there is no <far> tier and no distance mask any more. The bundle's ranking IS --for's head,
+# so a symbol with no call edge to the key body is not demoted to a name-only row — it keeps whatever row shape
+# the head's own ladder gives it, which is the point of sharing the head. What survives from this arm is the
+# part that is still a contract: a symbol that is neither the key body nor one of its callers gets NO body and
+# NO caller row, however it is ranked.
+printf '%s' "$BODIES_BLOCK"  | grep -qF 'n="unrelatedHelper"' && no "unrelatedHelper (not the key body) got a body"  || ok "unrelatedHelper is not served a body"
+printf '%s' "$CALLERS_BLOCK" | grep -qF 'n="unrelatedHelper"' && no "unrelatedHelper (not a caller of the key body) got a row in <callers>" || ok "unrelatedHelper has no <callers> row"
+grep -qF '<far ' "$BUN" \
+    && no "the removed <far> tier is back in the bundle" || ok "no <far> tier: the ranking is --for's head, not a distance-masked window"
 
 # section 4: the field note surfaces as a dated CDATA <note> on the top symbol
 grep -oE '<notes[^>]*>.*</notes>' "$BUN" \
@@ -194,7 +204,7 @@ grep -oE '<tests[^>]*>.*</tests>' "$BUN" | grep -qF 'test/test_budget.cpp' \
 if xmllint --noout "$BUN" 2>/dev/null; then ok "fixture bundle is xmllint-clean (G4)"; else no "fixture bundle is not well-formed"; fi
 
 # the header names every truncation (no silent caps): it must carry the per-section report line
-grep -q 'sections in FIXED order ranking > bodies > callers > notes > tests' "$BUN" \
+grep -q 'sections in FIXED order ranking > key body > callers > notes > tests > tail' "$BUN" \
     && grep -qE 'ranking: (full|capped) \| bodies: .* \| callers: .* \| notes: .* \| tests: ' "$BUN" \
     && ok "header carries the per-section truncation report (no silent caps)" || no "header truncation report missing/incomplete"
 
@@ -212,10 +222,13 @@ if { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; }; then ok "bundle is deterministic
 # only tightens the <bodies> assertion, from "absent" to "present with shown=0/capped=1/the true total".
 TINY="$TMP/tiny.xml"
 "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget" --token-budget=50 --legend=full > "$TINY" 2>/dev/null
+# PB1: total= on <bodies> is what qualified to be SERVED — 1 when a bodied key body exists — and the candidates
+# not served are <bn> pointer rows inside the element, so a tiny budget reads shown="0" total="1" capped="1".
+# The assertion this arm exists for is unchanged: the element is PRESENT, not absent, and says it kept nothing.
 if grep -qF '<sigs' "$TINY" \
-   && grep -qE '<bodies shown="0" total="[1-9][0-9]*" capped="1"></bodies>' "$TINY" \
+   && grep -qE '<bodies shown="0" total="1" capped="1"[^>]*>' "$TINY" \
    && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
-   && grep -qE 'bodies: kept 0 of [1-9]' "$TINY"; then
+   && grep -qE 'bodies: kept 0 of 1' "$TINY"; then
     ok "tiny budget: <sigs> survives, <bodies shown=\"0\"> is PRESENT (not absent), other sections omitted"
 else
     no "tiny-budget degradation wrong (expected <sigs> + <bodies shown=\"0\" total=\"N\" capped=\"1\">)"

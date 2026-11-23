@@ -290,6 +290,11 @@ struct CallResultTypes
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
     mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate and memo lookup buffer
+    // RIPWIRE_STATS `[mem] rust_glob asks= answers= reads= verdicts=` (test/rustglobscalecheck.sh): graph.h rustOutsideGlobMaySupply's
+    // calls, those it computed (not its last call's answer again), the import records forEachImport read for them, and the glob
+    // verdicts (levelAt + rustPathProvablyOutside) they ran
+    mutable std::size_t                                   importReads = 0;
+    mutable std::size_t                                   rustGlobAsks = 0, rustGlobAnswers = 0, rustGlobReads = 0, rustGlobVerdicts = 0;
     // QUAL-NS-CALL-BIND: what the in-tree headers a file includes declare, at file scope, for one name — the header half of
     // cppScopeNamedAt, which depends on (file, name, alias-or-using) only: "<fileId>#<a|u><name>" → the fold of those rows
     struct CppScopeFold
@@ -440,6 +445,7 @@ struct CallResultTypes
     {
         if( fileId < importsByFile.size() )
         {
+            importReads += importsByFile[ fileId ].size();
             for( const Binding* b : importsByFile[ fileId ] )
             {
                 if( b->var == var )
@@ -563,6 +569,7 @@ struct CallResultTypes
         NodeId        sym   = kNoNode;
         bool          wholeFile() const noexcept { return start == 0 && end == 0xFFFFFFFFu && sym == kNoNode; }
         bool          operator==( const Level& ) const = default;
+        auto          operator<=>( const Level& ) const = default;   // (start, end, sym): rustGlobFacts' sorted levels
     };
     // The votes of one level (or tier): each binding of the spelling there names one in-tree class, or kNoNode (outside,
     // unresolved, an alias). ONE class decides; anything else — an outside or unresolved binding, two that disagree — names
@@ -1259,6 +1266,76 @@ struct CallResultTypes
             }
         }
     }
+    // RUST-GLOB-SCALE (test/rustglobscalecheck.sh): what graph.h rustOutsideGlobMaySupply reads of Rust file `f`, taken once per
+    // file — a glob's verdict depends on the file and the glob alone, never on the call that asks. `useNames`: the names the
+    // file's `use` rows bind, sorted by svLess (a name none binds is in force nowhere, so no forEachRustUseAt walk is needed for it).
+    // `levels`: each level a glob `use` is written at (levelAt's Level, sorted), whether a glob there provably leads out of the
+    // tree (rustPathProvablyOutside, its root no package directory of the tree) and whether one does not.
+    struct RustGlobLevel
+    {
+        Level level;
+        bool  outside = false;
+        bool  other   = false;
+    };
+    struct RustGlobFacts
+    {
+        bool                          built = false;
+        std::vector<std::string_view> useNames;
+        std::vector<RustGlobLevel>    levels;
+        const RustGlobLevel* at( const Level& lv ) const { return sortutil::findSorted( levels, lv, {}, &RustGlobLevel::level ); }
+    };
+    const RustGlobFacts& rustGlobFacts( std::uint32_t f ) const
+    {
+        static const RustGlobFacts kNone{ true, {}, {} };
+        if( f >= importsByFile.size() )
+        {
+            return kNone;
+        }
+        if( rustGlobFiles.size() != importsByFile.size() )
+        {
+            rustGlobFiles.resize( importsByFile.size() );
+        }
+        RustGlobFacts& facts = rustGlobFiles[ f ];
+        if( facts.built )
+        {
+            return facts;
+        }
+        facts.built = true;
+        importReads += importsByFile[ f ].size();
+        for( const Binding* b : importsByFile[ f ] )
+        {
+            if( b->kind != LocalBindKind::TypeImport )
+            {
+                continue;
+            }
+            facts.useNames.push_back( b->var.str() );
+            if( b->var.str() != "*" )
+            {
+                continue;
+            }
+            ++rustGlobVerdicts;
+            const Level lv  = levelAt( f, b->startByte );
+            const bool  out = rustPathProvablyOutside( f, b->startByte, b->importedName ) && !rustRootNamesTreePackage( f, b->startByte, b->importedName );
+            auto        it  = std::ranges::find( facts.levels, lv, &RustGlobLevel::level );
+            if( it == facts.levels.end() )
+            {
+                it = facts.levels.insert( it, RustGlobLevel{ lv } );
+            }
+            ( out ? it->outside : it->other ) = true;
+        }
+        std::ranges::sort( facts.levels, {}, &RustGlobLevel::level );
+        sortutil::sortUnique( facts.useNames, sortutil::svLess );
+        return facts;
+    }
+    mutable std::vector<RustGlobFacts> rustGlobFiles;   // fileId → rustGlobFacts, built on the file's first ask
+    struct RustGlobLast   // the last call graph.h rustOutsideGlobMaySupply answered: its answer depends on (file, byte, name) alone
+    {
+        std::uint32_t    fileId = 0xFFFFFFFFu;
+        std::uint32_t    at     = 0;
+        std::string_view name;
+        bool             answer = false;
+    };
+    mutable RustGlobLast rustGlobLast;
     // the `use` rows binding `name` in force at byte `at` of file `f`: those of the innermost level (a fn body, then the
     // module) that holds one — a `use` binds where it is written (fix round 3), never file-wide
     template <class Fn>
@@ -2573,6 +2650,18 @@ struct ReceiverEvidence
     std::vector<std::vector<NodeId>>                      classesByFile;   // fileId → class-like symbols sorted by start
     mutable std::string                                   key;
     mutable std::vector<std::string_view>                 frontier;
+    mutable HashMap<std::string, std::vector<std::string_view>> conesAbove;   // inCone: type -> coneAbove (RECV-CONE-MEMO)
+    mutable std::string                                   coneKey;
+    mutable std::size_t                                   coneAsks = 0, coneBuilds = 0;   // RIPWIRE_STATS `[mem] recv_cone`
+    // METHOD-MEMO (lane PF3): methodOf's answer per ( type, name, superOnly, cls ) — the bool and the `found` it leaves
+    struct MethodAnswer
+    {
+        rw::SmallVec<NodeId, 2> found;
+        bool                    hit = false;
+    };
+    mutable HashMap<std::string, MethodAnswer>            methodAnswers;
+    mutable std::string                                   methodKey;
+    mutable std::size_t                                   methodAsks = 0, methodWalks = 0;   // RIPWIRE_STATS `[mem] recv_method`
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
     const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
@@ -2728,6 +2817,7 @@ struct ReceiverEvidence
     }
     void addBase( const std::string& owner, std::string_view base )
     {
+        conesAbove.clear();   // a kept cone may hold this owner's bases, or views into the list about to change
         std::vector<std::string>& e = embeds[ owner ];
         if( std::find( e.begin(), e.end(), base ) == e.end() )
         {
@@ -3668,27 +3758,49 @@ struct ReceiverEvidence
             for( const std::string& b : it->second ) { fn( std::string_view( b ) ); }
         }
     }
-    // is `ancestor` the class `type` or one of its (transitive) bases
+    // is `ancestor` the class `type` or one of its (transitive) bases — among the first kWalkCap classes of the breadth-first
+    // walk (each class once). RECV-CONE-MEMO (lane PF2, 2026-11-21): the ladder asks this once per CANDIDATE of every call
+    // (graph.h ladderProves), and the walk pushed every base of every class it expanded, deduplicated by a linear scan of the
+    // whole frontier — past kWalkCap too, though nothing past it is ever compared. With chaUp merging every base of a shared
+    // name, that was the whole of a cold llvm-project resolve loop (10,374 of 11,536 samples) once the narrowing walks were
+    // kept. A class at index >= kWalkCap is never read, and only blocks a later push that would also land past it, so the walk
+    // now stops pushing there; and the first kWalkCap classes are kept per type (addBase, which can change a type's bases,
+    // drops them).
     bool inCone( std::string_view type, std::string_view ancestor ) const
     {
         if( type.empty() || ancestor.empty() )
         {
             return false;
         }
+        ++coneAsks;
+        if( type == ancestor )
+        {
+            return true;
+        }
+        const std::vector<std::string_view>& above = coneAbove( type );
+        return std::find( above.begin(), above.end(), ancestor ) != above.end();
+    }
+    // the classes the walk from `type` reaches within its first kWalkCap, `type` itself left out (kept per type)
+    const std::vector<std::string_view>& coneAbove( std::string_view type ) const
+    {
+        coneKey.assign( type );
+        const auto [ kept, inserted ] = conesAbove.try_emplace( coneKey );
+        if( !inserted )
+        {
+            return kept->second;
+        }
+        ++coneBuilds;
         frontier.clear();
         frontier.push_back( type );
         for( std::size_t i = 0; i < frontier.size() && i < kWalkCap; ++i )
         {
-            if( frontier[ i ] == ancestor )
-            {
-                return true;
-            }
             forEachBase( frontier[ i ], [ & ]( std::string_view b )
             {
-                if( std::find( frontier.begin(), frontier.end(), b ) == frontier.end() ) { frontier.push_back( b ); }
+                if( frontier.size() < kWalkCap && std::find( frontier.begin(), frontier.end(), b ) == frontier.end() ) { frontier.push_back( b ); }
             } );
         }
-        return false;
+        kept->second.assign( frontier.begin() + 1, frontier.end() );   // views into chaUp / embeds, which addBase guards
+        return kept->second;
     }
     // visit `type`'s level (depth 0), then its base levels shallowest first, each class once: `visit( level, depth )`
     // returns true to stop. Returns whether a visit stopped the walk.
@@ -3720,6 +3832,13 @@ struct ReceiverEvidence
     // `cls` (fix round 1): the ONE definition `type` resolved to — its own level keeps only the members that class owns
     // (memberOwnerRuleOf), and its bases, which are known by NAME only, are walked only when no other in-tree class of its
     // language shares that name.
+    //
+    // METHOD-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh RM). The answer reads only tables build() fills before the
+    // resolve loop (chaUp, embeds, methodsByType, abstractByType, abstractNames, the ownership rule) — so it is a function of
+    // its four arguments, and it is KEPT per ( type, name, superOnly, cls ): a repeated question copies the kept `found` back.
+    // Each ask walked the type's base levels (walkBaseLevels: a linear de-duplication per push) and looked every class of
+    // every level up by "Class::name" — on llvm-project, where chaUp merges every base of a shared class name (`Impl`,
+    // `Base`), the per-call walk was ~9% of the resolve loop at PF2's tip.
     bool methodOf( std::string_view type, std::string_view name, bool superOnly, NodeId cls = kNoNode ) const
     {
         EXPECTS( active, "methodOf reads the tables build() fills" );
@@ -3728,6 +3847,23 @@ struct ReceiverEvidence
         {
             return false;
         }
+        ++methodAsks;
+        methodKey.assign( type ).push_back( '\0' );
+        methodKey.append( name ).push_back( superOnly ? '1' : '0' );
+        methodKey.append( reinterpret_cast<const char*>( &cls ), sizeof( cls ) );
+        if( const auto kept = methodAnswers.find( methodKey ); kept != methodAnswers.end() )
+        {
+            found = kept->second.found;
+            return kept->second.hit;
+        }
+        ++methodWalks;
+        const bool hit = methodOfWalked( type, name, superOnly, cls );
+        methodAnswers.emplace( methodKey, MethodAnswer{ found, hit } );
+        return hit;
+    }
+    // methodOf's walk itself (unkept)
+    bool methodOfWalked( std::string_view type, std::string_view name, bool superOnly, NodeId cls ) const
+    {
         const bool basesByName = cls == kNoNode || types.sameNamedClasses( cls ) == 1;
         bool        redeclared = false;   // a nearer level declared the name WITHOUT a body: the nearest declaration wins, no ancestor body runs
         std::size_t foundDepth = 0;

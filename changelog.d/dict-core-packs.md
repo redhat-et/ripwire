@@ -24,7 +24,7 @@ This is **not** "single-digit": it is 11 on the registered population and 17 on 
 
 Refusals: an empty value (unchanged); **any value that is no tier of this binary, even beside a valid one** — the message names the value, the tiers the rest of the list did name, and `ripwire --legend-dict=core` with its real size, where it used to prescribe the whole dictionary; `--mcp`/`--listen`/`--lsp`; `--legend=full`. A valid pack passed on another schema's answer is honoured, never refused.
 
-An answer served inline under the handshake now says so on stderr, and which of the two reasons applies: `not-applicable` (the dictionary does not reduce that legend — every `--for` answer, 65 of 65) or `inline-kept` (the reduced answer would not be shorter). Stdout is unchanged in both.
+An answer served inline under the handshake now says so on stderr, and which of the two reasons applies: `not-applicable` (the dictionary does not reduce that legend — every `--for` answer, 65 of 65) or `inline-kept` (the reduced answer would not be shorter). Stdout is unchanged in both. The same `not-applicable` line now also goes to stderr for `--situ`, `--recall`, `--report`, `--mermaid`, `--html`, `--plan-lanes`, `--sarif` and the evaluation surfaces (`ripwire: --legend-have=: not-applicable — <surface> answers with no XML legend the legend dictionary reduces, so it is served whole; nothing was saved`), which said nothing before; a stale value is still refused first (commit `35b71f385`; `test/legendhavecheck.sh`).
 
 Also new: `--legend-dict=tiers` (every tier: name, `have=`, entries, bytes, census) and `--legend-dict=index` (every entry by what it defines). The MCP stdio session is unchanged and carries no `have=`.
 
@@ -32,4 +32,4 @@ Guidance: `--help`, the empty-value refusal, `ripwire wrap`'s primer line and th
 
 Gate: `test/legendtiercheck.sh` (BAND K (tiers), docs/EVALS.md amendment 11) — held-or-carried at bar 0 over every cell and holding, tier identity, the refusals, a pack costs at most 3x its per-call gain, and the repayment pin (core at most 1,536 B, `ceil(B/S)` at most 12, no core term under 25 % of the cells), with twelve registered mutants and three single-arm ones re-run on every invocation. `src/legendpacks.h` is a build product of `bench/legendtier/census.tsv`.
 
-Versions: the legend dictionary moves to `dictv=3a03a2c74f654d09 entries=1164` (the `have=` reading); docs/COMMANDS.md and the 2026-11-13 showcase capture record the pair.
+Versions: the legend dictionary's release pair is stated once in the `versions` entry (`dictv=cd0a012a40de1479 entries=1294`); docs/COMMANDS.md and the newest showcase capture record it.

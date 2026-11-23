@@ -61,6 +61,10 @@
 # Every presence test here reads the ROOT ELEMENT'S ATTRIBUTES through a real XML parser, never the text.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -198,6 +202,11 @@ while True:
         break
     legend += node.group( 1 ).decode( 'utf-8', 'replace' )
     rest    = rest[ node.end(): ]
+# AF1 (2026-11-18): the default --for answer — and a budget's, which keeps the default posture (AF1-fix) — is ANSWER-FIRST: its
+# document legend is the trailing run of comments before </ctx>, inside the same document. Walked the same way, from the close.
+tail = re.search( rb'((?:<!--(?:(?!-->).)*-->\s*)+)</ctx>\s*\Z', raw, re.S )
+if tail and not legend:
+    legend = ''.join( c.decode( 'utf-8', 'replace' ) for c in re.findall( rb'<!--(.*?)-->', tail.group( 1 ), re.S ) )
 clause  = re.search( r'over_ceiling=1 says est_tokens exceeds ([a-z_ ]+)', legend )
 if labelled:
     if clause is None:

@@ -113,30 +113,30 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/report.rb" includes="6"' \
     && ok 'capture: `Point = Struct.new` — the `Struct` receiver is a shown directive (the alias itself is still not indexed)' \
     || no "capture: point.rb rows: $( incs lib/app/point.rb )"
 
-# ── 2. RESOLUTION + LAZY: --impact's importer tier (`<f via="import" p= lazy=>`, uncapped, path order) ──────
-importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f via="import" p="[^"]*" lazy="[01]"/>' | tr '\n' ' '; }
+# ── 2. RESOLUTION + LAZY: --impact's importer tier (`<f p=>`, `lazy="1"` on a lazy one; no lazy= reads lazy="0", uncapped, path order) ──────
+importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f p="[^"]*"( lazy="1")?/>' | tr '\n' ' '; }
 expect(){ # expect SYM 'rows'  — exact importer set
     local got; got="$( importers "$1" )"
     if [ "$got" = "$2" ]; then ok "$3"; else no "$3 — importers of $1: ${got:-<none>}"; fi
 }
 expect lib/app/user.rb:User \
-    '<f via="import" p="lib/app/admin/export.rb" lazy="1"/> <f via="import" p="lib/app/lazy_levels.rb" lazy="1"/> <f via="import" p="lib/app/report.rb" lazy="1"/> <f via="import" p="lib/app/two_scopes.rb" lazy="1"/> ' \
+    '<f p="lib/app/admin/export.rb" lazy="1"/> <f p="lib/app/lazy_levels.rb" lazy="1"/> <f p="lib/app/report.rb" lazy="1"/> <f p="lib/app/two_scopes.rb" lazy="1"/> ' \
     'resolve: App::User is reached by `User.find` (report, two_scopes, lazy_levels) and `::App::User.find` (admin/export) — all inside closures, lazy="1"'
 expect lib/app/admin/user.rb:User \
-    '<f via="import" p="lib/app/admin/audit.rb" lazy="1"/> <f via="import" p="lib/app/lazy_levels.rb" lazy="1"/> <f via="import" p="lib/app/two_scopes.rb" lazy="1"/> ' \
+    '<f p="lib/app/admin/audit.rb" lazy="1"/> <f p="lib/app/lazy_levels.rb" lazy="1"/> <f p="lib/app/two_scopes.rb" lazy="1"/> ' \
     'resolve: LEXICAL — `User.find` inside App::Admin (audit, two_scopes'"'"' second nesting) and `Admin::User.find` inside App (lazy_levels) land on App::Admin::User'
 expect lib/user.rb:User \
-    '<f via="import" p="lib/script.rb" lazy="0"/> ' \
+    '<f p="lib/script.rb"/> ' \
     'resolve: OBJECT LEVEL — script.rb has no module, so `User` is the top-level class; a file-level receiver is load-time (lazy="0")'
 expect Helper \
-    '<f via="import" p="lib/app/eager_after_lazy.rb" lazy="0"/> <f via="import" p="lib/app/lazy_levels.rb" lazy="0"/> <f via="import" p="lib/app/report.rb" lazy="0"/> ' \
+    '<f p="lib/app/eager_after_lazy.rb"/> <f p="lib/app/lazy_levels.rb"/> <f p="lib/app/report.rb"/> ' \
     'lazy: a receiver at CLASS-BODY level runs at load — `Helper.fmt` in report.rb (constant initializer), lazy_levels.rb (bare statement) and eager_after_lazy.rb (below a lazy site) are lazy="0"'
 expect Mailer \
-    '<f via="import" p="lib/app/lazy_levels.rb" lazy="1"/> <f via="import" p="lib/app/report.rb" lazy="1"/> ' \
+    '<f p="lib/app/lazy_levels.rb" lazy="1"/> <f p="lib/app/report.rb" lazy="1"/> ' \
     'lazy: a receiver inside a LAMBDA (lazy_levels `-> { Mailer.deliver }`) and inside a method body (report) is lazy="1"'
 expect lib/decoy/user.rb:User '' 'mutation control: Decoy::User (same basename as two other User files) has no importer — no basename fallback, no bare-name fallback'
 expect lib/app.rb:App '' 'mutation control: `App::Mailer` is a receiver chain, not a reference to App — lib/app.rb receives nothing'
-expect Boom '<f via="import" p="lib/app/report.rb" lazy="1"/> ' 'floor LIFTED (parser version 93): App::Errors::Boom, named only as a `raise` argument and a `rescue` class inside a method, is a lazy importer edge from report.rb'
+expect Boom '<f p="lib/app/report.rb" lazy="1"/> ' 'floor LIFTED (parser version 93): App::Errors::Boom, named only as a `raise` argument and a `rescue` class inside a method, is a lazy importer edge from report.rb'
 printf '%s' "$DEPS" | grep -q '<f p="lib/app/self_use.rb" includes="1" afferent="0"' \
     && ok 'mutation control: `Cache.get` inside App::Cache is shown as a directive and dropped as a self-include' \
     || no "mutation control: self_use.rb row wrong: $( frow lib/app/self_use.rb )"

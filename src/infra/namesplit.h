@@ -201,6 +201,15 @@ inline std::string_view afterLast( std::string_view text, std::string_view sep )
     return text;
 }
 
+/// `text` without its trailing bytes from `blanks`, empty when every byte is one — the ONE right-trim to a set. Spelled as
+/// `substr( 0, find_last_not_of( blanks ) + 1 )` it reads npos + 1 == 0 on an all-blank line: right in Release, an abort under
+/// -fsanitize=integer (llvm-project's reST docs stopped the G1 build that way). npos is tested here, never wrapped.
+inline std::string_view trimTrailing( std::string_view text, std::string_view blanks ) noexcept
+{
+    const std::size_t last = text.find_last_not_of( blanks );
+    return text.substr( 0, last == std::string_view::npos ? 0 : last + 1 );
+}
+
 /// Visits the `sep`-separated fields of `text` in order until `stop` returns true, and says whether it did: `a::b` at "::" ->
 /// a, b; an empty field before the first separator or between two is visited. The empty field after a TRAILING separator (and
 /// the one field of "") is visited only with `visitTrailingEmpty`: a scope path's last segment (`a::` -> a, "") is one, a word

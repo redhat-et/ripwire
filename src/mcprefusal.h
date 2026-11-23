@@ -366,12 +366,16 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // `needs` rides every session's tools/list payload and this tool's schema was measured at the
     // mcpmanifestcheck per-session ceiling before this field existed.
     { "sections",      "lego, compose, or both", "sections=\"lego,compose\"" },
+    // MR1 (owner ruling 168): `for`'s row form, the CLI --rows= twin — a CLOSED set. Terse: it rides tools/list.
+    { "rows",          "lines (the default) or elements", "rows=\"elements\"" },
     // ── boolean ──
     // F-R1-07 (2026-09-10 audit): the CLI's own answer to a route MIS-FIRE is to re-run with --no-route,
     // and the MCP surface had no equivalent — an agent that reads route= and disagrees was told WHICH ranker
     // answered and given no way to ask for the other one. Advertised as a real boolean, not a string, so a
     // quoted "true" refuses instead of being guessed at (mcpBoolArg).
     { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
+    // RT2 MCP parity: the CLI --no-verb-route twin, the opt-out a routed `for` answer's next= names. Terse: it rides tools/list.
+    { "no_verb_route", "a BOOLEAN: true never routes to a verb", "no_verb_route=true", "boolean" },
     // whereis-lean (review C1): the CLI --whereis-full-text twin, the replay a <t_cut next=> names. Terse: it rides tools/list.
     { "full_text",     "a BOOLEAN: true prints every t= line whole", "full_text=true", "boolean" },
     // lane lean2b: the CLI --show-stale twin, the replay quality_delta's stale_next names. Terse: it rides tools/list.
@@ -1068,7 +1072,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
-    { "for",                      "path paths task budget_tokens no_route limit offset sections" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
+    { "for",                      "path paths task budget_tokens no_route no_verb_route limit offset sections rows" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
     { "lego",                     "path paths type limit offset legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },
@@ -1236,6 +1240,8 @@ inline constexpr std::string_view kBatchSubQueryFields[] = {
     // on the live MCP verb — an MCP-only agent that reads suppressed_comment= has no CLI to re-ask from —
     // applies verbatim here, and this was the surface that had NO fallback at all.
     "in",
+    // RT2 MCP parity (2026-11-19): the batch `for` item routes like the live verb, so its opt-out rides here too.
+    "no_verb_route",
 };
 
 // The build-time floor EVERY McpVerbRule table stands on: each row must name a verb kMcpVerbFields knows,

@@ -940,6 +940,105 @@ CloneIdiomTally tallyCloneIdioms( const std::vector<rw::CloneIdiomVerdict>& exac
     return t;
 }
 
+// §P10.5: --clones and --quality-delta share the detector (kMinCloneTokens) but not the POLICY — quality.h exempts fixture paths and
+// shell test-runners from its duplication kind (documented false-positive classes: sibling gate scripts repeat setup boilerplate BY
+// CONVENTION). --clones is a fact verb, so those groups stay VISIBLE — but each one says the sibling verb would ignore it, via the SAME
+// predicates (quality::isFixturePath / isTestScriptPath — one policy, two verbs, no copy). nullptr when a member is on neither path.
+const char* cloneGroupExemptKind( const rw::IngestResult& ing, const rw::CloneGroup& gp )
+{
+    bool allExempt = true, allScript = true;
+    for( rw::NodeId id : gp.members )
+    {
+        const std::string_view p        = rw::rootRelPath( ing, ing.symbols[id].fileId );
+        const bool             isScript = rw::quality::isTestScriptPath( p );
+        allExempt = allExempt && ( isScript || rw::quality::isFixturePath( p ) );
+        allScript = allScript && isScript;
+    }
+    return allExempt ? ( allScript ? "shell-runner" : "fixture" ) : nullptr;
+}
+
+// PG1: what one <group> row of --clones is rendered from. The row is rendered to a string before anything is printed, so the
+// page can be byte-budgeted under the output ceiling (cloneRowsWindow) and print exactly the rows it priced.
+struct CloneRowSource
+{
+    const rw::IngestResult&                   ing;
+    const std::vector<rw::CloneGroup>&        cg;
+    const std::vector<rw::CloneGroup>&        cg3;
+    const std::vector<rw::CloneIdiomVerdict>& vx;
+    const std::vector<rw::CloneIdiomVerdict>& vx3;
+    const std::vector<std::uint32_t>&         gidOfGroup;
+    bool                                      singleRoot;
+    const std::string&                        rootPrefix;
+};
+
+// One <group> row, by its FLAT index (cg's rows, then cg3's): gid= its clone component, the exempt=/idiom= annotations, one <f>
+// per member with p= root-relative on a single root.
+std::string cloneRowXml( const CloneRowSource& src, std::size_t flat, std::vector<char>& esc )
+{
+    const bool            isType3   = flat >= src.cg.size();
+    const rw::CloneGroup& gp        = isType3 ? src.cg3[ flat - src.cg.size() ] : src.cg[ flat ];
+    const char* const     exempt    = cloneGroupExemptKind( src.ing, gp );
+    const std::string     exemptAt  = exempt ? std::string( " exempt=\"" ) + exempt + "\"" : std::string();
+    const unsigned        gid       = flat < src.gidOfGroup.size() ? src.gidOfGroup[ flat ] : 0u;
+    const std::string     idiomAttr = cloneIdiomAttrs( isType3 ? src.vx3[ flat - src.cg.size() ] : src.vx[ flat ] );
+    std::string           row       = isType3 ? std::format( "<group type=\"3\" gid=\"{}\" tokens=\"{}\" n=\"{}\" similarity=\"{:.2f}\"{}{}>", gid, gp.tokens,
+                                                             gp.members.size(), gp.similarity, exemptAt, idiomAttr )
+                                              : std::format( "<group type=\"{}\" gid=\"{}\" tokens=\"{}\" n=\"{}\"{}{}>", gp.type, gid, gp.tokens,
+                                                             gp.members.size(), exemptAt, idiomAttr );
+    for( rw::NodeId id : gp.members )
+    {
+        const rw::Symbol&      sym = src.ing.symbols[id];
+        const std::string_view rp  = src.singleRoot ? rw::sarif::rootRelativeUri( src.ing.files[ sym.fileId ], src.rootPrefix )
+                                                    : std::string_view( src.ing.files[ sym.fileId ] );
+        row += "<f n=\"" + std::string( rw::escapeXml( sym.name, esc ) ) + "\" p=\"" + std::string( rw::escapeXml( rp, esc ) ) + ":" + std::to_string( sym.line ) + "\"/>";
+    }
+    return row + "</group>";
+}
+
+// PG1 (outputceiling.h): the rows a --clones page prints. MEASURED on GA1 DEV (CL1 census, base 36a95d732): the default page printed
+// up to 25,649 characters (gson: 80 rows), over the 24,000 ceiling, and `--offset=K` alone printed EVERY row from K on (gson: 1,658).
+// An explicit --limit=N is the caller's page, unchanged. --page-bytes=0 (cli.h wholeAnswerAsked) is every row from --offset. Otherwise
+// the page is the verb's own default rows (the two per-list heads on a bare call, everything from K after --offset=K) — and when
+// main.cpp's ceiling fit (runMaintenanceViewsServed) found that page over the ceiling, cfg.pageRowBytes is the row budget it chose:
+// the page is then the prefix of those rows that fits it, at least one row, so a chain always advances.
+template <class RowBytesFn>
+rw::PageWindow cloneRowsWindow( const rw::Config& cfg, std::size_t total, std::size_t defaultEnd, RowBytesFn&& rowBytes )
+{
+    if( cfg.pageLimit > 0 )
+    {
+        return rw::pageWindow( total, cfg.pageLimit, cfg.pageOffset );
+    }
+    const std::size_t begin = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, total );
+    const std::size_t end   = rw::wholeAnswerAsked( cfg ) || cfg.pageOffset > 0 ? total : std::min( defaultEnd, total );
+    if( cfg.pageRowBytes == 0 )
+    {
+        return rw::PageWindow{ begin, end };
+    }
+    std::size_t used = 0;
+    std::size_t at   = begin;
+    for( ; at < end; ++at )
+    {
+        const std::size_t b = rowBytes( at );
+        if( at > begin && used + b > cfg.pageRowBytes )
+        {
+            break;   // the page already holds a row: stop BEFORE the overflow row
+        }
+        used += b;
+    }
+    return rw::PageWindow{ begin, at };
+}
+
+// PG1: the next page of a cut --clones answer as one pasteable call ("" when this page reaches the last row): --offset=K, plus the
+// caller's --limit=N and --pack-top-n=N (which sizes the per-list heads, and so decides the row order the offset counts in).
+inline std::string clonesPageNext( const rw::Config& cfg, std::size_t windowEnd, std::size_t total )
+{
+    if( windowEnd >= total )
+    {
+        return {};
+    }
+    return rw::pagedNext( cfg.packTopN > 0 ? "--clones --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string( "--clones" ), cfg.pageLimit, windowEnd );
+}
+
 int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
     using namespace rw;
@@ -999,47 +1098,12 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 
     // The denominator is honest either way: every group that EXISTS, not just the kept ones.
     const std::size_t cloneTotal = cg.size() + cg3.size();
-    const PageWindow  clonePage  = clonePaging ? pageWindow( rows.size(), cfg.pageLimit, cfg.pageOffset )
-                                               : PageWindow{ 0, keep12 + keep3 };
     char              cpab[ kPageDisclosureCap ];
 
-    // §P10.5: --clones and --quality-delta share the detector (kMinCloneTokens) but not the POLICY —
-    // quality.h exempts fixture paths and shell test-runners from its duplication kind (documented
-    // false-positive classes: sibling gate scripts repeat setup boilerplate BY CONVENTION). --clones is a
-    // fact verb, so those groups stay VISIBLE — but each one now says the sibling verb would ignore it,
-    // via the SAME predicates (quality::isFixturePath / isTestScriptPath — one policy, two verbs, no copy).
-    const auto groupExemptKind = [ & ]( const CloneGroup& gp ) -> const char*
+    std::size_t exemptGroupCount = 0;   // over ALL groups (cloneGroupExemptKind above)
+    for( const std::vector<CloneGroup>* list : { &cg, &cg3 } )
     {
-        bool allExempt = true, allScript = true;
-        for( NodeId id : gp.members )
-        {
-            const std::string_view p   = rootRelPath( ing, ing.symbols[id].fileId );
-            const bool         isScript = quality::isTestScriptPath( p );
-            if( !isScript && !quality::isFixturePath( p ) )
-            {
-                allExempt = false;
-            }
-            if( !isScript )
-            {
-                allScript = false;
-            }
-        }
-        return allExempt ? ( allScript ? "shell-runner" : "fixture" ) : nullptr;
-    };
-    std::size_t exemptGroupCount = 0;
-    for( const CloneGroup& gp : cg )
-    {
-        if( groupExemptKind( gp ) )
-        {
-            ++exemptGroupCount;
-        }
-    }
-    for( const CloneGroup& gp : cg3 )
-    {
-        if( groupExemptKind( gp ) )
-        {
-            ++exemptGroupCount;
-        }
+        exemptGroupCount += std::size_t( std::ranges::count_if( *list, [ & ]( const CloneGroup& gp ) { return cloneGroupExemptKind( ing, gp ) != nullptr; } ) );
     }
     const CloneIdiomTally idiomTally = tallyCloneIdioms( vx, vx3 );   // over ALL groups, like exempt_groups=
 
@@ -1050,8 +1114,21 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // detector output (cg + cg3), never the displayed window — a summary that shrank with --limit would be
     // a paging artefact, not a measurement.
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
+    // PG1: the page, byte-budgeted on the rows it will print (cloneRowsWindow above); rendered once, printed as priced.
+    std::vector<char>          esc;
+    const CloneRowSource       rowSrc{ ing, cg, cg3, vx, vx3, grouping.gidOfGroup, clnSingleRoot, clnRootPrefix };
+    std::vector<std::string>   rowXml( rows.size() );
+    const auto                 rowAt = [ & ]( std::size_t rowIndex ) -> const std::string&
+    {
+        if( rowXml[ rowIndex ].empty() )
+        {
+            rowXml[ rowIndex ] = cloneRowXml( rowSrc, rows[ rowIndex ], esc );
+        }
+        return rowXml[ rowIndex ];
+    };
+    const PageWindow           clonePage = cloneRowsWindow( cfg, rows.size(), keep12 + keep3, [ & ]( std::size_t rowIndex ) { return rowAt( rowIndex ).size(); } );
 
-    rw::emitTo( stdout, "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of five: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain), one-statement (a body of one return statement, leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside), call-sequence (a body of call statements and nothing else). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. For one-statement and call-sequence the shared-identifier test leaves out each member's own parameter names, every std:: chain and standard container/string words (size, empty, begin, end, find, rfind, substr, npos, front, back, data, first, second, starts_with, ends_with, contains), and a pair whose bodies are identical once each member's parameters are renamed never demotes. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\" type3_capped=\"1\" (present only on a run where the Type-3 pair cap fired): a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->{}", rw::rootRelPathsLegend( clnSingleRoot ) );
+    rw::emitTo( stdout, "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of five: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain), one-statement (a body of one return statement, leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside), call-sequence (a body of call statements and nothing else). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. For one-statement and call-sequence the shared-identifier test leaves out each member's own parameter names, every std:: chain and standard container/string words (size, empty, begin, end, find, rfind, substr, npos, front, back, data, first, second, starts_with, ends_with, contains), and a pair whose bodies are identical once each member's parameters are renamed never demotes. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\" type3_capped=\"1\" (present only on a run where the Type-3 pair cap fired): a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. A page without an explicit limit is also cut to stay under the 24,000-character output ceiling; next= on a cut page is the next page as one pasteable call, and the pages in turn hold every group once (page-bytes=0, the flag, is every group in one answer). raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->{}", rw::rootRelPathsLegend( clnSingleRoot ) );
     rw::emitTo( stdout, "<clones groups=\"{}\" type3=\"{}\"{} exempt_groups=\"{}\" idiom_groups=\"{}\" demoted_groups=\"{}\" clone_groups=\"{}\" dup_loc=\"{}\" total_loc=\"{}\" dup_pct=\"{:.1f}\"{}{}{}>",
                  cg.size(), cg3.size(),
                  // M2: pageDisclosure's paging half (which spells total= itself) now also rides on a CUT bare run,
@@ -1066,37 +1143,11 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
                  t3Stats.pairCapHit ? " counts_floor=\"1\" type3_capped=\"1\"" : "",
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 clnRootAttr.c_str() );
-    std::vector<char> esc;
-    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+                 clnRootAttr + rw::nextAttrXml( clonesPageNext( cfg, clonePage.end, rows.size() ) ) );
     for( std::size_t rowIndex = clonePage.begin; rowIndex < clonePage.end; ++rowIndex )
     {
-        const std::size_t flat    = rows[ rowIndex ];
-        const bool        isType3 = flat >= cg.size();
-        const CloneGroup& gp      = isType3 ? cg3[ flat - cg.size() ] : cg[ flat ];
-        const char* exemptKind = groupExemptKind( gp );
-        char        exemptAttr[ 40 ] = "";
-        if( exemptKind )
-        {
-            rw::formatTo( exemptAttr, sizeof( exemptAttr ), " exempt=\"{}\"", exemptKind );
-        }
-        const unsigned gid = flat < grouping.gidOfGroup.size() ? grouping.gidOfGroup[ flat ] : 0u;
-        const std::string idiomAttr = cloneIdiomAttrs( isType3 ? vx3[ flat - cg.size() ] : vx[ flat ] );
-        if( isType3 )
-        {
-            rw::emitTo( stdout, "<group type=\"3\" gid=\"{}\" tokens=\"{}\" n=\"{}\" similarity=\"{:.2f}\"{}{}>", gid, gp.tokens, gp.members.size(), gp.similarity, rw::cstr( exemptAttr ), idiomAttr.c_str() );
-        }
-        else
-        {
-            rw::emitTo( stdout, "<group type=\"{}\" gid=\"{}\" tokens=\"{}\" n=\"{}\"{}{}>", gp.type, gid, gp.tokens, gp.members.size(), rw::cstr( exemptAttr ), idiomAttr.c_str() );
-        }
-        for( NodeId id : gp.members )
-        {
-            const Symbol&           s  = ing.symbols[id];
-            const std::string_view  rp = clnSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], clnRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            rw::emitTo( stdout, "<f n=\"{}\" p=\"{}:{}\"/>", ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
-        }
-        rw::emitTo( stdout, "</group>" );
+        const std::string& row = rowAt( rowIndex );
+        std::fwrite( row.data(), 1, row.size(), stdout );
     }
     rw::emitTo( stdout, "</clones>" );
     return 0;
@@ -2108,6 +2159,15 @@ void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
              " cannot be detected this way and are not covered. -->" );
 }
 
+// M1 — the untracked-build clause, written ONLY into a document that carries untracked-build rows (escaped_root='s
+// absent-means-nothing-happened rule), so every other --skipped document stays byte-identical. The class's DEFINITION.
+inline constexpr std::string_view kUntrackedBuildLegend =
+             "<!-- untracked_build= counts files left out of a build/ directory the crawl ENTERED only because git tracks files"
+             " under it: build/ is pruned by name as build output unless git tracks files there, and then only the TRACKED files"
+             " are indexed. Each is one f why=\"untracked-build\" row. Tested after the ignore rules, so a file git already ignores"
+             " is counted as ignored= instead; the accounting invariant adds untracked_build= to its drop classes. --no-ignore"
+             " indexes them. -->";
+
 // The nest-refused clause of the legend, written ONLY into a document that carries nest-refused rows — the same
 // absent-means-nothing-happened rule nest_refused= itself follows — so every other --skipped document stays byte-identical.
 void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
@@ -2237,10 +2297,8 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         // fileBytes == 0 is the NOT-MEASURED sentinel: counted as unmeasured and never degraded/minified (both predicates
         // below are false at 0 bytes), so such a file is rowed only if it still holds a flagged definition — never hidden.
         out.unmeasured += h.fileBytes == 0 ? 1u : 0u;
-        const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
-        const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
         const bool          degraded = rw::fileParseDegraded( ing, f );   // the ONE predicate (model.h) — grep + refusals route through it too
-        const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+        const bool          minified = rw::isMinifiedHealth( h );            // likewise the one minified verdict (ingest.h) --lint's order reads
         const bool          blanked  = rw::isMacroBlankedHealth( h );   // member-macro re-parse: rowed even when the adopted parse is clean
         const bool          useBlank = rw::isUseBoundsBlankedHealth( h );   // its Rust layer: the same rule
         out.degraded += degraded ? 1u : 0u;
@@ -2493,7 +2551,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                                   || cs.prunedDirRows.size() + cs.prunedPackageRows.size() < cs.prunedDirs              // #478 gap 3
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
-                                  || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
+                                  || cs.escaped.size() < cs.escapedFiles                                                // §SEC1
+                                  || cs.untrackedBuild.size() < cs.untrackedBuildFiles;                                 // M1
     char nestAttr[ 48 ] = "";   // absent when zero, like every attribute that only a rare corpus can make non-zero
     if( cs.nestRefusedFiles > 0 )
     {
@@ -2506,6 +2565,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     {
         rw::formatTo( escAttr, sizeof( escAttr ), " escaped_root=\"{}\"", ( unsigned long long ) cs.escapedFiles );
     }
+    // M1 — the same rule, printed right after it: only a tracked build/ that held an untracked file pays a byte
+    const std::string untrackedAttr = cs.untrackedBuildFiles > 0 ? " untracked_build=\"" + std::to_string( cs.untrackedBuildFiles ) + "\"" : std::string();
     rw::formatTo( hdr, sizeof( hdr ),
                    "<skipped indexed=\"{}\" oversize=\"{}\" excluded=\"{}\" unsupported_ext=\"{}\" excluded_dirs=\"{}\""
                    " pruned_dirs=\"{}\" ignored=\"{}\" ignored_dirs=\"{}\" ignore_mode=\"{}\""
@@ -2519,7 +2580,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    skippedHealthRootAttrs( health ),   // extent_suspect_files= then macro_blanked_files=, each absent at 0
                    health.unmeasured,
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
-                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
+                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string( escAttr ) + untrackedAttr, rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
 }
 
@@ -2570,6 +2631,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
         writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
+        w.write( cs.untrackedBuildFiles != 0 ? kUntrackedBuildLegend : std::string_view() );   // M1 — only beside untracked-build rows
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeExtractPartialLegend( w, cs );                         // only into a document that has extract-partial rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=
@@ -2583,6 +2645,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
+        writeDropRows( w, esc, cs.untrackedBuild, "untracked-build", skRootPrefix );   // M1: untracked files in a tracked build/
         writeDropRows( w, esc, cs.prunedPackageRows, "pruned-package", skRootPrefix );   // #478 gap 3: a real package the denylist took
         writeDropRows( w, esc, cs.prunedDirRows,  "pruned-dir",  skRootPrefix );   // #478 gap 3: every other policy prune
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered

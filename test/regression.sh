@@ -287,6 +287,7 @@ else
 fi
 # retired: forspinecheck — the --for caller spine (Change A) was dropped by its own offline kill rule: a spine of up to 2 caller hops from the top 3 seeds named a missed rubric item on 1 of 7 in-sample rows, so the gate that pinned it went with it
 # retired: cacheexclkeycheck — the per-configuration auto-cache key it pinned is a registered NEGATIVE (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03: a 158K-file root with >= 12 gate configurations thrashed the 2 GiB sweep); the retry design keeps ONE superset blob per root and will bring its own gate
+# retired: phantomdefcheck — the attribute-macro phantom gate (train item S) left the train with its code at 82ed4c8bf ("train: move item S (attribute-macro phantoms) to its own lane"); 994f0021f-based lanes still listed it, so the batch merges declare the retirement here
 # THE ABSORB LIST: one gate per line, in byte (LC_ALL=C) order, ending with the `    ; do` line. Two branches
 # that each add a gate then touch different lines and merge without a conflict; the old single line conflicted
 # on every gate added anywhere. A new gate goes on its own line at its sorted place. test/manifestcheck.sh holds
@@ -299,10 +300,13 @@ for _g in \
     abicheck \
     accessshapecheck \
     ackonlycheck \
+    actlinecheck \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedfoldcheck \
     affectedgroupcheck \
+    affectedpathcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
@@ -347,6 +351,7 @@ for _g in \
     bodilessseedcheck \
     bodycalleefilecheck \
     bodydialectcheck \
+    bodypointercheck \
     budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
@@ -369,7 +374,9 @@ for _g in \
     canoncheck \
     capdisclosemapcheck \
     capdisclosurecheck \
+    cappedbodycheck \
     capsweepcheck \
+    carriedpageboundcheck \
     ccheck \
     ccjsoncheck \
     ceilingverdictcheck \
@@ -551,9 +558,11 @@ for _g in \
     foranchornscheck \
     foranswerfirstcheck \
     forautobodycheck \
+    forbasenamedefaultcheck \
     forblowupcheck \
     forbodyfoldcheck \
     forbodyslotcheck \
+    forbudgetcountscheck \
     forbudgetmonotoncheck \
     forcalibfactscheck \
     forcallerhopcheck \
@@ -565,12 +574,15 @@ for _g in \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
+    fordocsaftercodecheck \
+    forendlinecheck \
     forexemplarcheck \
     forfileanchorcheck \
     forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
+    forkeybodycheck \
     forlenscheck \
     forliteralcheck \
     formanifestcheck \
@@ -580,21 +592,25 @@ for _g in \
     fornotesbudgetcheck \
     fornotesjsoncheck \
     foronesidecheck \
+    forpagescheck \
     forrankordercheck \
     forreadercallerscheck \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forroutepagecheck \
     forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \
     forsigspancheck \
+    forsigxcheck \
     forsizetrimcheck \
     forsoftbudgetcheck \
     fortailfoldcheck \
     fortailwidecheck \
     forunusedcheck \
+    forverbroutecheck \
     forwidencheck \
     freshclonecheck \
     freshnesscheck \
@@ -625,12 +641,14 @@ for _g in \
     grepcheck \
     grepcontextcheck \
     grepcorpuscheck \
+    grepdegradedcheck \
     grepfastcheck \
     grepfollowupcheck \
     grepignorecheck \
     grepscancheck \
     grepseamcheck \
     greptiercheck \
+    guardedwalkcheck \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
@@ -639,6 +657,7 @@ for _g in \
     hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headerstaticadjcheck \
     headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
@@ -661,13 +680,16 @@ for _g in \
     ifacedispatchcheck \
     ifacepeelcheck \
     impactdepthcheck \
+    impactfirstwindowcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impactsoledefcheck \
     impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
     importprovedsplitscheck \
+    importrowshortcheck \
     importspellingcheck \
     includeanglecheck \
     includeprecisecheck \
@@ -706,6 +728,10 @@ for _g in \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
+    legendseenblockcheck \
+    legendseencheck \
+    legendseenhookcheck \
+    legendseenportcheck \
     legendtiercheck \
     legobundlecheck \
     legocheck \
@@ -718,6 +744,7 @@ for _g in \
     lintcatalogcheck \
     lintcheck \
     lintdedupcheck \
+    lintordercheck \
     lintpayloadcapcheck \
     lintprecisioncheck \
     lintrulescheck \
@@ -728,6 +755,7 @@ for _g in \
     localdeclcheck \
     localitycheck \
     localscountcheck \
+    locatoragentcheck \
     loopconservationcheck \
     lpincheck \
     lstiercapcheck \
@@ -756,10 +784,14 @@ for _g in \
     mcpeditracecheck \
     mcpflagshipcheck \
     mcpforparitycheck \
+    mcpforroutecheck \
+    mcpforroutepagecheck \
+    mcpforrowscheck \
     mcpframehonestycheck \
     mcpgrepdegradedcheck \
     mcphandlecheck \
     mcpincrementalcheck \
+    mcplisttrimcheck \
     mcpmanifestcheck \
     mcponeparsecheck \
     mcprangeedgecheck \
@@ -825,6 +857,7 @@ for _g in \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
+    notfoundtextcheck \
     nsfiltercheck \
     nulbytecheck \
     numericrefusecheck \
@@ -837,17 +870,23 @@ for _g in \
     osswitchcheck \
     oswin32logiccheck \
     outlinecheck \
+    outputceilingcheck \
     overbudgetcommentcheck \
     ownerhopcheck \
     ownerscheck \
     packcallersharecheck \
+    packkeybodycheck \
+    packlocatecheck \
+    packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
     packtaskquotacheck \
     padscalecheck \
+    pagelegendcheck \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    paramslotcheck \
     parentcachecheck \
     pargatescheck \
     parsehealthcheck \
@@ -995,6 +1034,7 @@ for _g in \
     routehookcheck \
     routeoncecheck \
     routingreportcheck \
+    rowlinescheck \
     rubyargcheck \
     rubyattrscheck \
     rubybarecallcheck \
@@ -1018,7 +1058,9 @@ for _g in \
     runhintcheck \
     runtracecheck \
     rustanccheck \
+    rustglobscalecheck \
     rustimportprecisecheck \
+    rustmacrocallcheck \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
@@ -1080,6 +1122,8 @@ for _g in \
     stdqualcheck \
     strkerncheck \
     structlayoutcheck \
+    subagentprimercheck \
+    subagentroutecheck \
     subjectanchorcheck \
     sublistcountcheck \
     subscriptopcheck \
@@ -1120,6 +1164,7 @@ for _g in \
     tracehandoffcapcheck \
     tracehopcheck \
     traceminecheck \
+    trackedbuilddircheck \
     treecheck \
     truncvocabcheck \
     tsimportprecisecheck \
@@ -1138,6 +1183,8 @@ for _g in \
     vendoredassetcheck \
     vendoredbundlecheck \
     vendorpatchcheck \
+    verbdefrowscheck \
+    verbfixcheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \
@@ -1150,6 +1197,7 @@ for _g in \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
+    wrapperprefixcheck \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \

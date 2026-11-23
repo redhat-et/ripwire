@@ -12,6 +12,7 @@
 #include "contractseed.h" // BODILESS-SEED: a contract method seeds --impact/--callers/--safe-delete/--path from its implementors' bodies
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
+#include "notfoundtext.h"   // BX2 FIX 9: a callers / uses / impact miss carries the name's plain-text occurrences
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
@@ -163,6 +164,7 @@ inline int refuseNotFoundWithAnswer( const rw::IngestResult& ing, const rw::Conf
 {
     rw::emitTo( stderr, "{}{}{}{}\n", prefix, spec, rw::notFoundRenameClause( answer.near ), rw::selectorFaultClause( ing, spec, retryForm ) );
     answer.refused = rw::refusedMatchCount( ing, spec );   // js-def-naming fix 1: several definitions fit and none was chosen: refused=N beside found=0
+    rw::attachNotFoundText( ing, answer );                  // BX2 FIX 9: callers / uses / impact only; plain text, never calls
     rw::writeNotFoundAnswer( stdout, answer, cfg.json );
     return 1;
 }
@@ -214,7 +216,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
         std::vector<std::string> pageOfDef;
         for( std::size_t i = 0; i < page.size(); ++i )
         {
-            pageVia[ i ]   = hopViaCode( oneHopRowIsLink( g, matches, result[ pw.begin + i ], wantCallers ), chAttr.nameOnly( pw.begin + i ) );
+            pageVia[ i ]   = chAttr.viaMacro( pw.begin + i ) != kNoNode ? char( 3 )   // BX1 FIX 2: a see-through row, <via> 3
+                                                                          : hopViaCode( oneHopRowIsLink( g, matches, result[ pw.begin + i ], wantCallers ), chAttr.nameOnly( pw.begin + i ) );
             pageSplit[ i ] = chAttr.splitArm( pw.begin + i ) ? 1 : 0;
             pageTest[ i ]  = isTestSymbol( ing, page[ i ] ) ? 1 : 0;
             if( chAttr.groups.multi() )
@@ -222,7 +225,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                 pageOfDef.push_back( rw::ofDefColumnValue( chAttr.groups, chAttr.tokens, pw.begin + i ) );
             }
         }
-        const std::string chDefRows = rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix );
+        const std::string chDefRows = rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix, rw::callersDefRows( wantCallers ) );   // VERB-DEF-ROWS
         const rw::DeclinedColumnsOut chDcCols   = rw::declinedSitesColumnar( ing, page, chDc, wantCallers );   // BAND DC: the <dc> rows as <dcols> arrays
         const std::string            chDcInRows = chDcCols.block + chIn.rows;
         emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr,
@@ -239,10 +242,11 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     }
     rw::emitTo( stdout, "{}{}{}", ( rw::unprovenDefsKeyJson( chRows.unprovenDefs ) + rw::implsKeyJson( chRows.contractSeeds, chRows.implBodies ) ).c_str(),
                  rw::crossKindKeyJson( chRows.crossKind ).c_str(),
-                 rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false ) );
+                 rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false, rw::callersDefRows( wantCallers ) ) );   // VERB-DEF-ROWS
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
     rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                  rw::countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the XML root's hop_tests=, absent at 0
+                   + rw::viaMacroCappedKeyJson( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling
                    + rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
                    + rw::declinedIfaceKeyJson( chRows.declinedIface )
                    + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),
@@ -262,12 +266,13 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     std::vector<std::string> chAtKeys( result.size() );
     for( std::size_t i = pw.begin; i < pw.end; ++i )
     {
-        chVia[ i ] = hopViaCode( oneHopRowIsLink( g, matches, result[ i ], wantCallers ), chAttr.nameOnly( i ) );
+        chVia[ i ] = chAttr.viaMacro( i ) != kNoNode ? char( 0 ) : hopViaCode( oneHopRowIsLink( g, matches, result[ i ], wantCallers ), chAttr.nameOnly( i ) );
         chHasLink = chHasLink || ( chVia[ i ] == 2 );
         if( chSites.any )
         {
             chAtKeys[ i ] = rw::callSitesKeyJson( chSites.tokens[ i - pw.begin ], chSites.totals[ i - pw.begin ] );
         }
+        chAtKeys[ i ] = rw::viaMacroKeyJson( ing, chAttr.viaMacro( i ) ) + chAtKeys[ i ];   // BX1 FIX 2: "via":"macro:NAME", the via slot
         chAtKeys[ i ] += rw::ofDefKeyJson( chAttr.groups, chAttr.tokens, i ) + rw::splitArmKeyJson( chAttr.splitArm( i ) );
         chAtKeys[ i ] += rw::isTestSymbol( ing, result[ i ] ) ? ",\"test\":true" : "";   // TIER-FOLLOWUP: the XML row's test="1"
         if( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) )
@@ -425,10 +430,12 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const bool chHasModScope = anyModuleScopeRow( ing, chPage ) || anyModuleScopeRow( ing, matches );
             // FE-B: exactly when a row on THIS page is via="name"
             bool chHasVia = false, chHasImpl = false;
-            bool chHasLink = false;
-            for( std::size_t i = pw.begin; i < pw.end && ( !chHasVia || !chHasLink || !chHasImpl ); ++i )
+            bool chHasLink = false, chHasMacro = false;
+            for( std::size_t i = pw.begin; i < pw.end; ++i )
             {
-                chHasVia  = chHasVia || chAttr.nameOnly( i );   // FE-B's via="name": every edge to the matches by name (defattrib.h, one pass)
+                const bool macroRow = chAttr.viaMacro( i ) != kNoNode;   // BX1 FIX 2: its via="macro:" replaces via="name"
+                chHasMacro = chHasMacro || macroRow;
+                chHasVia  = chHasVia || ( chAttr.nameOnly( i ) && !macroRow );   // FE-B's via="name": every edge to the matches by name (defattrib.h, one pass)
                 chHasImpl = chHasImpl || chAttr.viaImpl( i );   // lane L6: via="impl", the one implementor in the tree
                 chHasLink = chHasLink || oneHopRowIsLink( g, matches, result[ i ], wantCallers );
             }
@@ -450,8 +457,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::implsLegend( chRows.contractSeeds > 0 )                           // BODILESS-SEED: likewise for impls=
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
+                           + rw::viaMacroLegend( chHasMacro ) + rw::viaMacroCappedLegend( chRows.viaMacroWithheld > 0 )   // BX1 FIX 2; the ceiling's disclosure
                            + rw::viaLinkLegend( chHasLink )
-                           + rw::defTableLegend( chAttr.groups.multi(), chListing.cut ) + rw::splitArmLegend( chHasSplit )   // attrib-multidef: likewise
+                           + rw::defTableLegend( { .table = chAttr.groups.multi(), .cut = chListing.cut, .sole = wantCallers && chAttr.groups.size() == 1 } )   // attrib-multidef; VERB-DEF-ROWS
+                           + rw::untiedDeclLegend( wantCallers && !chAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
+                           + rw::splitArmLegend( chHasSplit )
                            + rw::memberOwnerLegendFor( chOwnerRows ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
                          ( std::string( rw::modScopeLegend( chHasModScope ) )   // #60: likewise, exactly when a t="modscope" row is
                            + rw::callSitesAtLegend( chSites.any, chSites.anyCut, rw::kCallSitesPerRowCap ) ).c_str(),   // CALLSITE-AT: likewise for sites_at=/sites_total=
@@ -465,6 +475,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             if( cfg.columnar && chHasLink )
             {
                 rw::emitTo( stdout, "<!-- {}-->", rw::kViaLinkColumnarClause );
+            }
+            if( cfg.columnar && chHasMacro )
+            {
+                rw::emitTo( stdout, "<!-- {}-->", rw::kViaMacroColumnarClause );   // BX1 FIX 2: <via> 3
             }
             if( chHasMiss )
             {
@@ -482,7 +496,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             : rw::nextAttrXml( chHintCall ) )
             + rw::nextAttrXml( chAllNext, "all_next" );   // BAND DC: a windowing root names the complete call
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
-        const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
+        const std::string chDeclinedAttr = rw::viaMacroCappedAttrXml( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling
+                                         + rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
                                          + rw::declinedIfaceAttrXml( chRows.declinedIface );
         // Reference-as-value round: value_refs= beside count= (never in it), absent at zero; the <vrs> window after the rows.
         const rw::VrRender   chVr { chSingleRoot, chRootPrefix };
@@ -517,7 +532,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      chNextAttr.c_str() );   // P3 (L7): callers → the SITES (--uses=SELECTOR, spelling mirrored); callees → the body (--expand=SYM)
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
-        rw::emitRaw( stdout, rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix ).c_str() );   // attrib-multidef: the groups the rows name, by ix=
+        rw::emitRaw( stdout, rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix, rw::callersDefRows( wantCallers ) ).c_str() );   // attrib-multidef: the groups the rows name, by ix=; VERB-DEF-ROWS: one group too on --callers
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol&           s  = ing.symbols[ result[i] ];
@@ -526,7 +541,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             // already follows everywhere else (serialize.h/verbs_for.h), so an untested row costs 0 bytes.
             rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}{}{}/>", symTag( s.kind ), ex( rw::qualifiedMemberName( chOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
                          macroRoleAttr( s.kind ), rw::radiusTierRowAttrXml( ing, chTested.testReach, result[i] ),   // TIER-FOLLOWUP: tested="1" | test="1" | nothing
-                         std::string( viaEdgeAttr( chAttr.nameOnly( i ), oneHopRowIsLink( g, matches, result[ i ], wantCallers ) ) )
+                         chAttr.viaMacro( i ) != kNoNode ? rw::viaMacroAttrXml( ing, chAttr.viaMacro( i ) )   // BX1 FIX 2: a see-through row
+                         : std::string( viaEdgeAttr( chAttr.nameOnly( i ), oneHopRowIsLink( g, matches, result[ i ], wantCallers ) ) )
                            + viaImplAttr( chAttr.viaImpl( i ) )   // lane L6: via="impl"
                            + anchorMissAttr( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) ),
                          rw::splitArmAttrXml( chAttr.splitArm( i ) ), rw::ofDefAttrXml( chAttr.groups, chAttr.tokens, i ),   // attrib-multidef
@@ -796,7 +812,8 @@ inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const r
 }
 
 // ONE use-site row: (file, line, role, enclosing canonical id). File scope ⇒ `in` empty.
-struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; bool aliasHedged = false; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
+struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; bool aliasHedged = false;
+                 rw::NodeId viaMacro = rw::kNoNode; };   // BX1 FIX 2: the function-like macro the site invokes (appendMacroUseSites), kNoNode for every other site   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
 
 // XF-ALIAS-HOP (aliashop.h AliasReach): the use-sites written as an alias whose chain reaches one of `defs` (`ColumnPtr` for
 // IColumn), each marked with the alias, ranked as the direct sites are and kept AFTER them (the direct rows keep their order and
@@ -1099,6 +1116,79 @@ inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, cons
     return alias.facts;
 }
 
+// BX1 FIX 2 — MACRO SEE-THROUGH on --uses (test/verbfixcheck.sh F2; the --callers rule is callhierarchy.h macroSeeThroughRows). The
+// C function-like macros whose replacement text calls one of `defs` — the defs' callers of kind macro (BX2: those alone, the first
+// macro hop; not the macros calling those), each once — are the spellings the definition is used through: tmux uses cmdq_get_callback1 only as
+// `cmdq_get_callback( cb, data )`. Their call-shaped sites (role call or macro, the uses verb's own filters) are appended after
+// the direct and alias rows, ranked as those are, each tagged with the macro it invokes, and counted in count=. A site of an
+// unrelated same-named macro is matched by name, as every name-matched role here is. They go in ahead of the last `hedgedTail`
+// rows (the alias rows hedged by name, which stay last and out of count=). Returns how many were added.
+inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId,
+                                        std::vector<UseSite>& sites, std::size_t hedgedTail, rw::MacroCeilingCut& cut )
+{
+    using namespace rw;
+    std::vector<NodeId> macros;
+    std::vector<char>   seen( ing.symbols.size(), 0 );
+    const auto*         ro = g.inEdges.rowOffsets();
+    const auto*         ci = g.inEdges.colIndices();
+    const auto          walk = [ & ]( NodeId n )
+    {
+        for( std::uint32_t k = ro[n]; k < ro[n + 1]; ++k )
+        {
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && rw::seeThroughMacro( ing.symbols[c] ) )
+            {
+                seen[c] = 1;
+                macros.push_back( c );
+            }
+        }
+    };
+    for( const NodeId d : defs )
+    {
+        if( d < seen.size() )
+        {
+            walk( d );
+        }
+    }
+    if( macros.empty() )   // BX2: the defs' own macro callers only — the first macro hop (callhierarchy.h seeThroughMacro)
+    {
+        return 0;
+    }
+    std::vector<std::pair<std::string_view, NodeId>> byName;   // sorted by name (byte order), then id: matchSiteName's binary search
+    for( const NodeId m : macros )
+    {
+        byName.emplace_back( ing.symbols[m].name, m );
+    }
+    std::ranges::sort( byName, []( const auto& a, const auto& b ) { return a.first != b.first ? rw::sortutil::svLess( a.first, b.first ) : a.second < b.second; } );
+    byName.erase( std::unique( byName.begin(), byName.end(), []( const auto& a, const auto& b ) { return a.first == b.first; } ), byName.end() );
+    std::vector<std::string_view> names;
+    std::vector<NodeId>           tags;
+    for( const auto& [ n, m ] : byName )
+    {
+        names.push_back( n );
+        tags.push_back( m );
+    }
+    UsesSelector mSel{};
+    mSel.anyOfNames = names;
+    mSel.anyOfTags  = tags;
+    auto [ got, callsOfName ] = collectUseSites( ing, mSel, std::span<const char>{}, rootForId, {}, nullptr, g.keptForwards );
+    (void)callsOfName;
+    std::erase_if( got, []( const UseSite& u ) { return u.role != RefRole::Call && u.role != RefRole::Macro; } );
+    rankUseSites( ing, g, got );
+    std::vector<NodeId> via;
+    for( UseSite& u : got )
+    {
+        u.viaMacro = u.viaAlias;   // collectUseSites carries the matched name's tag in viaAlias; here it is the macro
+        u.viaAlias = kNoNode;
+        via.push_back( u.viaMacro );
+    }
+    std::vector<char> keep;   // lane bx2-fix2-ceiling: one site per file per macro, at most kMacroSeeThroughFiles (callhierarchy.h macroCeiling)
+    cut = macroCeiling( via, [ & ]( std::size_t i ) { return got[i].fileId; }, keep );
+    std::erase_if( got, [ &, k = std::size_t( 0 ) ]( const UseSite& ) mutable { return keep[ k++ ] == 0; } );
+    EXPECTS( hedgedTail <= sites.size(), "the hedged alias rows are the tail of `sites`" );
+    sites.insert( sites.end() - std::ptrdiff_t( hedgedTail ), got.begin(), got.end() );
+    return got.size();
+}
+
 // XF-ALIAS-HOP: a <u> row written as an alias whose chain reaches the definition says so (via="alias" alias=, hedge="name" when
 // the alias in scope there is not proven to be one that reaches); a direct site adds nothing.
 template <class Escape>
@@ -1194,6 +1284,10 @@ std::optional<int> runUses( const MainDispatch& d )
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
         const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
+        rw::MacroCeilingCut      usMacroCut;   // lane bx2-fix2-ceiling: the sites the per-macro ceiling withheld
+        const std::size_t        usViaMacro   = appendMacroUseSites( ing, g, defs, usRootForId, sites, cfg.columnar ? 0 : usAliasFacts.hedged, usMacroCut );   // BX1 FIX 2: after the direct and alias rows
+        const std::string        usViaMacroAttr = ( usViaMacro > 0 ? " via_macro=\"" + std::to_string( usViaMacro ) + "\"" : std::string() )
+                                                + rw::viaMacroCappedAttrXml( ing, usMacroCut, "--uses=" );
         const std::size_t        usHedged     = usAliasFacts.hedged;   // M1: listed last, never in count=
         const bool               usUnindexed  = rw::usesRolesUnindexed( ing, defs );   // B31: count= cannot see this kind's reads
         const bool               usDeclCapped = rw::memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED
@@ -1215,7 +1309,9 @@ std::optional<int> runUses( const MainDispatch& d )
             const rw::NotFoundNear near = rw::notFoundNear( ing, sel.suggestName, notFoundGitRoot( ing, cfg ) );
             const std::string      msg  = "ripwire: --uses selector matched no indexed definition: " + std::string( sym ) + rw::notFoundRenameClause( near );
             rw::emitTo( stderr, "{}\n", near.renamed ? msg : withDidYouMean( ing, sel.suggestName, msg ) );
-            rw::writeNotFoundAnswer( stdout, rw::NotFoundAnswer{ "uses", { { "of", std::string( sym ) } }, {}, near }, cfg.json );
+            rw::NotFoundAnswer answer{ "uses", { { "of", std::string( sym ) } }, {}, near };
+            rw::attachNotFoundText( ing, answer );   // BX2 FIX 9
+            rw::writeNotFoundAnswer( stdout, answer, cfg.json );
             return 1;
         }
 
@@ -1230,6 +1326,11 @@ std::optional<int> runUses( const MainDispatch& d )
             ? " defs_of_name=\"" + std::to_string( sel.defsOfName ) + "\" narrowed_roles=\"call\" call_sites_of_name=\"" + std::to_string( callSitesOfName ) + "\""
               + rw::declinedCallsAttrXml( usDeclinedCalls )
             : std::string{};
+
+        // VERB-DEF-ROWS (lane v1-verbdef, test/verbdefrowscheck.sh): the definitions defs= counts, as the <def> rows --callers
+        // and --impact print (one group too). A use-site row names no group, so above the 16-group cap none is listed and
+        // defs_listed="0" says so.
+        const rw::UsesDefTable usDefs = rw::usesDefTable( ing, defs, usSingleRoot ? std::string_view( usRootPrefix ) : std::string_view() );
 
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -1258,8 +1359,10 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
                        + rw::aliasUsesLegend( usAliasFacts, cfg.columnar )   // XF-ALIAS-HOP: exactly when a site is written through an alias
+                       + rw::usesViaMacroLegend( usViaMacro > 0 ) + rw::viaMacroCappedLegend( usMacroCut.withheld > 0 )   // BX1 FIX 2; the ceiling's disclosure
                        + rw::unindexedRolesLegend( usUnindexed )   // B31: exactly when the root carries unindexed_roles=
-                       + rw::memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries decl_scan=
+                       + rw::memberDeclScanLegend( usDeclCapped )   // exactly when the root carries decl_scan=
+                       + usDefs.legend ).c_str(),   // VERB-DEF-ROWS: exactly when a <def> row (or defs_listed=) rides
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -1287,12 +1390,13 @@ std::optional<int> runUses( const MainDispatch& d )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
                                    + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } )   // the depth cut that makes count= a floor; absent when none
-                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true );
-            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
+                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true ) + usViaMacroAttr   // BX1 FIX 2
+                                   + usDefs.listedAttr;   // VERB-DEF-ROWS
+            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix, usDefs.rows );   // VERB-DEF-ROWS: before <cols>
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
                      rw::unindexedRolesAttrXml( usUnindexed ),   // B31: beside the count it qualifies; absent when armed
                      rw::memberDeclScanAttrXml( usDeclCapped ),   // USES-DECL-SCAN-CAPPED: external="1" unchecked past the budget
@@ -1301,8 +1405,11 @@ std::optional<int> runUses( const MainDispatch& d )
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str(),   // the depth cut that makes count= a floor; absent when none
-                     rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/false ).c_str() );   // XF-ALIAS-HOP; absent when no alias reaches
+                     rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/false ).c_str(),   // XF-ALIAS-HOP; absent when no alias reaches
+                     usViaMacroAttr,   // BX1 FIX 2: absent when no macro reaches
+                     usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
+        rw::emitRaw( stdout, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
             const UseSite&          u  = sites[ siteIndex ];
@@ -1317,6 +1424,10 @@ std::optional<int> runUses( const MainDispatch& d )
                 rw::emitTo( stdout, " in_id=\"{}\"", ex( u.in ).c_str() );
             }
             emitUseSiteAliasAttrs( ing, u, ex );
+            if( u.viaMacro != kNoNode )
+            {
+                rw::emitTo( stdout, "{}", rw::viaMacroAttrXml( ing, u.viaMacro ) );   // BX1 FIX 2
+            }
             rw::emitTo( stdout, "/>" );
         }
         rw::emitTo( stdout, "</uses>" );
@@ -1422,7 +1533,7 @@ inline std::string safeDeleteFloorLegend( const SafeDeleteLegendFlags& flags, st
     {
         clause += "next= is that uses call. ";   // runSafeDelete names it exactly then (sdNextAttr)
     }
-    clause += rw::defTableLegend( flags.defTable, flags.defTableCut ) + rw::splitArmLegend( flags.splitArms );   // attrib-multidef
+    clause += rw::defTableLegend( { .table = flags.defTable, .cut = flags.defTableCut } ) + rw::splitArmLegend( flags.splitArms );   // attrib-multidef
     clause += rw::viaLinkLegend( flags.linkRows );
     clause += rw::anchorMissLegend( flags.anchorRows );
     clause += rw::implsLegend( flags.contract );
@@ -3343,7 +3454,7 @@ int emitImpactColumnar( const ImpactView& v )
         const std::size_t at = v.attrib.indexOf( v.show[ i ] );
         rowOfDef.push_back( at == SIZE_MAX ? std::string() : rw::ofDefColumnValue( v.attrib.groups, v.attrib.tokens, at ) );
     }
-    const std::string defRows = rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix );
+    const std::string defRows = rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, rw::DefRows::SoleToo );   // IMPACT-SOLE-DEF
     // CodeRabbit 4303967681: a type impact's depth-1 rows hold the symbols that NAME the type beside its callers; the XML and
     // JSON forms say so through their <files> rollup (type_users=, via="type"), which this form does not carry. The
     // <by_type> column marks each such row (1 = reached only through a type mention), present only when one is shown.
@@ -3386,7 +3497,7 @@ int emitImpactJson( const ImpactView& v )
     const std::size_t shownRows = v.page.end - v.page.begin;
     rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"reaches\":{}{}{}{}", jsonStr( v.sym ).c_str(), v.defs, v.reaches,
                  ( rw::impactRingKeyJson( *v.ring ) + rw::unprovenDefsKeyJson( v.unprovenDefs ) + rw::implsKeyJson( v.contractSeeds, v.implBodies ) ).c_str(),   // HOP1: the XML root's reaches_hedged=; H1: absent at zero, like its XML twin
-                 rw::defTableJson( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, /*mcp=*/false ),   // attrib-multidef: the <def> table
+                 rw::defTableJson( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, /*mcp=*/false, rw::DefRows::SoleToo ),   // attrib-multidef: the <def> table; IMPACT-SOLE-DEF: the one group too
                  rw::byDepthKeyJson( v.byDepth ) );                   // 0.6.5: the XML root's by_depth=, as an array
     rw::emitTo( stdout, ",\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
                  v.imports.files.size(), v.imports.shown, v.imports.capped ? "true" : "false" );
@@ -3447,7 +3558,7 @@ int emitImpactXml( const ImpactView& v )
                  rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
                  rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) )   // P3 (L7): "is it safe to change" → "can it go"; hub-fold: a ring cut / the widest hub first
                    + rw::nextAttrXml( impactAllNext( v ), "all_next" ) );   // BAND DC: a windowing root names the complete call
-    rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix ).c_str() );   // attrib-multidef: the groups, by ix=
+    rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, rw::DefRows::SoleToo ).c_str() );   // attrib-multidef: the groups, by ix=; IMPACT-SOLE-DEF: the one group too
     rw::emitImpactFileRollupXml( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: before the symbol window
     const rw::MemberOwners imOwners( v.ing );   // QUALNAME-1: n="Owner.name" on a member row (memberowner.h)
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
@@ -3517,7 +3628,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                  ( std::string( rw::modScopeLegend( imHasModScope ) )
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
                                              !imports.next.empty() && !cfg.columnar, rw::ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )
-                   + rw::defTableLegend( imAttr.groups.multi(), imListing.cut )
+                   + rw::defTableLegend( { .table = imAttr.groups.multi(), .cut = imListing.cut, .sole = imAttr.groups.size() == 1 } )   // IMPACT-SOLE-DEF: the one-group row's clause
+                   + rw::untiedDeclLegend( !imAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
                    + rw::memberOwnerLegendFor( rw::memberOwnerRows( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
                  ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )
                    + rw::valueRefsDepthLegendFor( imValueRefs )
@@ -3746,7 +3858,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         const auto [ rank, prIters, prConverged ] = rankGraph( g );
         const rw::RankDisclosure         prD{ prIters, prConverged, true };   // W2-F: the listing is PageRank-ordered within a depth
         std::vector<NodeId>              show  = reach;
-        rw::orderByDepthThenRank( show, imDepth, rank );   // ranked BEFORE the page window below cuts: the nearest rows (fewest hops) go first
+        rw::orderImpactRows( ing, show, imDepth, rank );   // ranked BEFORE the page window below cuts: the nearest rows (fewest hops) go first
         const std::vector<std::uint32_t> imByDepth = rw::depthCounts( reach, imDepth );
 
         // A6 (survey card A6, agent-lsp): tested/untested partition of the blast radius, over the FULL
@@ -3768,8 +3880,6 @@ std::optional<int> runImpact( const MainDispatch& d )
         // and a separate row tag.
         rw::ImportTier       imports        = rw::impactImportTier( ing, seeds );
         rw::sizeImportTier( imports, cfg.pageLimit, cfg.impactSym );   // cut-fix C: --limit sizes the tier too (offset= does not move it)
-        const auto           importPage     = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
-        const auto           importLazyPage = std::span<const char>( imports.lazy ).first( imports.shown );
 
         // The ONE page window this answer emits. It was spelled inline in the ImpactView initialiser below,
         // which left the legend predicate with nothing to read but the whole `show` set — CodeRabbit
@@ -3804,6 +3914,10 @@ std::optional<int> runImpact( const MainDispatch& d )
         const rw::ImpactDeclinedRows imDc = rw::impactDeclinedRows( ing, g, imDeclineTargets, imDeclinedCalls, cfg.pageLimit, cfg.impactSym,
                                                                     std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ),
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false, cfg.columnar );
+        // IM1 (declinedsites.h): within a path tier, the importers this answer has other evidence for go first — then the page
+        rw::orderImportersByEvidence( ing, imports, rw::impactEvidenceFiles( ing, g, reach, imDc, imValueRefs ) );
+        const auto           importPage     = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
+        const auto           importLazyPage = std::span<const char>( imports.lazy ).first( imports.shown );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
                           imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,

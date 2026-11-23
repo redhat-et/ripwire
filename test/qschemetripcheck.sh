@@ -34,6 +34,41 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-22, IN9 (the 0.7.0 train integration/070-cut-1121 merged with origin/main b576a95e3, which carries #715): RE-PINNED
+#   ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 340/337 -> 342 (rich 343): ONE
+#   number above BOTH sides' bumps (the train's 340, rich 341; main's 337, rich 338). kCacheVersion 54 and kQSnapCacheScheme 38
+#   unchanged. Both sides' entries are kept below, the train's first, then main's. Neither side's hash (448c91aa07…d311066,
+#   a57b75c512…5350ee08a9) can be right once kParserVer moves to 342. Hash a606e48d5b…2f4e02ec.
+# 2026-11-22, lane m1b-tracked-dirs (on the train 0e32486b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 338 -> 340 (PLACEHOLDER, rich 341): the crawl admits a build/ dist/ out/ target/ directory git tracks
+#   files under, and every materialized-tree ingest (computeHeadSnapshot among them) goes through ingest.h ingestTrackedTree so
+#   the HEAD side crawls the same directories. kCacheVersion 54 and kQSnapCacheScheme unchanged: the extraction key moves, the
+#   snapshot blob shape does not. Hash 448c91aa07…d311066.
+# 2026-11-21, lane fx1-two-reds (on integration/070-1120 64b85a6b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 336 -> 338 (rich 339, above the train's rich 337): a Rust macro invocation's re-read drops a bare call
+#   its own file's macro_rules! matcher spells as a literal word (ingest_rustmacroargs.h). kCacheVersion 54 and kQSnapCacheScheme
+#   38 unchanged: the extraction key moves, the snapshot blob shape does not. Hash abdd393688…5a5182b.
+# 2026-11-21, IN8 (owner ruling 135: train 1118a, #717 = the rebase of #716 onto main 5df5a26be, folded into the 0.7.0 train at
+#   4b1f4516e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 334/335 -> 336
+#   (rich 337): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 unchanged. Both sides' entries are
+#   kept below, the 0.7.0 train's first, then train 1118a's. Hash 8ac0bab2fe…a32b9bd.
+# 2026-11-21, IN8 (owner rulings 129/135: the 0.7.0 train integration/070-1121-local merged with main 8861b0d4d, which carries
+#   #709): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged build. kParserVer and kIngestParserVerMirror 332/333 -> 334 (rich
+#   335): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 are main's (the 0.7.0 line moved
+#   neither). Both sides' entries are kept below, the 0.7.0 line's first, then main's. Neither side's hash (0.7.0's
+#   0a4ba8ec92…6dc0274, main's 843630e84b…616ba25) can be right once kParserVer moves to 334. Hash 80e4bc57b7…8bd13d4.
+# 2026-11-20, IN3 (owner ruling 92: the 0.7.0 integration branch integration/070-1120 = integration/070-candidate
+#   + lane/r1b-priority + main ee8d1a50e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and
+#   kIngestParserVerMirror 317/331 -> 332 (rich 333): ONE number above BOTH sides' bumps, so a cache either side's
+#   binary wrote is refused. kCacheVersion and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot
+#   blob shape does not. Both merged sides' entries are kept below, newest first (INT1's 2026-11-19, then main's
+#   2026-11-18 train 1117d1 block). Hash 0a4ba8ec92…6dc0274, re-pinned from the merged build: neither side's
+#   value (main's c1fefa06b4…f246ff2, INT1's 52505b79f1…2dd4dcbf) can be right once kParserVer moves to 332.
+# 2026-11-19, INT1 (the 0.7.0 candidate, integration/070-candidate: lane/rt2-route + main d65f60c6d + lane BX2 minus FIX 2):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and kIngestParserVerMirror 313 -> 317 (rich 318): ONE
+#   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
+#   315, its own entries below), so a cache a lane binary wrote under a placeholder is refused. kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not (hash 52505b79f1…2dd4dcbf).
 # 2026-11-21, lane land-715 (#715 by @himanchalkaushale, #548 arm 1: Clojure calls whose list head carries metadata; stacked on
 #   train 1118a 4b1f4516e): RE-PINNED with UPDATE_GOLDEN=1 (hash a57b75c512…5350ee08a9). Watched text: kParserVer 335 -> 337
 #   (rich file tag 338; the PR's 311/312 renumbered above the train's 335/336): queries/clojure/tags.scm accepts a meta_lit before a
@@ -97,6 +132,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   - land-606 (#446 round 2, @SeddonShen; its placeholder 316): Java base clauses are read as @reference.base captures.
 #   - land-426 (#355, PR #426 by @conka8; its placeholders 216, then 311): the tags pass evaluates tags.scm's string
 #     predicates, and Elixir's keyword tables move into queries/elixir/tags.scm.
+# 2026-11-18, lane BX2 FIX 8 (C-family parameter slot facts): parser tag 313 -> 315 (rich 316) and mirror move together
+#   (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1
+#   (hash ddac96863e…ed98cff).
+# 2026-11-18, lane BX2 FIX 5 (Rust transcriber calls, base integration/0.6.11-batch 259352fc0): parser tag 311 -> 313 (rich 314)
+#   and mirror move together (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived
+#   ONCE with UPDATE_GOLDEN=1 (hash 29a3c7f42e…5c4f976).
 # 2026-11-17, train 1117a-r (rebase-stack on main 9087eb59c: naming-wordy prefix, tidy-681, #420, #473, #540, ROW-MANIFEST): RE-PINNED ONCE
 #   with UPDATE_GOLDEN=1 from the composed build (hash d208bb4995…e892919). It carries the two entries below together: #420's parser tag
 #   311 (rich 312) and tidy-681's codeLocByNode text; each lane's own hash named below was that lane alone. No constant moves; #682 leaves it.

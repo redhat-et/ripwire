@@ -7,7 +7,7 @@
 //
 // THE DESIGN RULE, and it is the whole reason this file is small: the preview does not re-derive the
 // answer. It re-derives the TREE and hands it to the SAME editCheckBundleText() the post-hoc verb calls.
-// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [sigStartByte,
+// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [declStartByte,
 // endByte) span, with the SAME CRLF harmonisation the write path applies, so "what the preview measured"
 // and "what an apply would write" are one function. (2) Every fact downstream — the HEAD baseline, the
 // root spelling, the at= commit anchor, the note children, the legend — is the real tree's, because the
@@ -300,7 +300,9 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     // No excludes: the ONE file here is the one the caller already resolved through the main index, so a
     // --exclude that would drop it can only produce a false "the payload defines nothing".
     std::lock_guard<std::mutex> ingestLk( quality::headSnapshotIngestMutex() );
-    return ingest( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
+    // M1: the one file came out of the main index, which already decided its directory is crawled — a tracked build/
+    // file would otherwise be pruned here by name and read as "the payload defines nothing" (ingest.h ingestTrackedTree).
+    return ingestTrackedTree( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
 // E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
@@ -366,7 +368,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     {
         return refuse( "cannot read '" + path + "' to preview the edit" );
     }
-    const std::size_t a = fsym.sigStartByte, b = fsym.endByte;
+    const std::size_t a = declStartByte( ing, fsym, src ), b = fsym.endByte;   // the span mcpedit splices (declwrap.h)
     if( !( a < b && b <= src.size() ) )
     {
         return refuse( "the definition span for '" + std::string( selector ) + "' does not fit '" + path

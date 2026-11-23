@@ -2233,10 +2233,13 @@ private:
 
     // IX1-V2: a PARAMETER (`impl`, position k of the function `fnName` declared at scope d) stored into a field slot
     // (goValueSlot: `Command{ EvalRW: impl }`, `x.F = impl`) — a slot fact (model.h kValueRefSlotParamScope), no row.
+    // BX2 FIX 8 (test/paramslotcheck.sh): the C family too (a ThroughRows slot row: valueSlot's field store, `tp->signalcb = signalcb`,
+    // typed by the object's declared struct type exactly as a function stored there is). tmux registers client_signal through
+    // proc_set_signals, which stores the parameter into tp->signalcb; proc_signal_cb calls the field — the join now names it.
     void paramSlotFact( std::size_t i, std::size_t d, std::string_view name )
     {
         const VrScope& sc = m_scopes[d];
-        if( !m_slotByName || !sc.isFunction || sc.fnName.empty() || i < 2 )
+        if( ( !m_slotByName && m_slot == nullptr ) || !sc.isFunction || sc.fnName.empty() || i < 2 )
         {
             return;
         }
@@ -2256,7 +2259,7 @@ private:
         {
             return;
         }
-        goValueSlot( j, r );
+        valueSlot( j, r );   // Go's goValueSlot, or the C family's field store (BX2 FIX 8)
         if( r.memberPath().empty() )
         {
             return;

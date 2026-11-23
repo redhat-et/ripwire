@@ -54,7 +54,7 @@ inline constexpr std::size_t kOneSideRootPathMaxHops = 6; // (M): the longest A 
 inline constexpr std::size_t kOneSideMaxEndpointDefs = 32; // (E): definitions one endpoint name may place (more: a namesake flood, the rule is off)
 
 inline constexpr std::string_view kOneSideReachLegend =
-    "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+    "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
     "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
     "not the answer -->";
 
@@ -383,11 +383,15 @@ inline void addShortestPathNodes( const Graph& g, std::span<const NodeId> from, 
     {
         out.insert( out.end(), level.begin(), level.end() );
         std::vector<NodeId> next;
+        // One hop nearer is `toSink[u] - 1`, compared on u's side: every node in `level` is reached (toSink[u] < kUnreached) and the loop
+        // runs only while toSink[u] > 0, so the subtraction cannot wrap. The old `toSink[v] + 1 == toSink[u]` wrapped to 0 for a callee
+        // the walk never reached (toSink[v] == kUnreached) — no wrong row, since 0 never equals a hop count > 0, but an unsigned
+        // overflow the ASan build aborts on (foronesidecheck (a2), (u)).
         for( const NodeId u : level )
         {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1] && toSink[u] > 0; ++k )
             {
-                if( const NodeId v = g.outTargets[k]; toSink[v] + 1 == toSink[u] && !std::ranges::contains( next, v ) )
+                if( const NodeId v = g.outTargets[k]; toSink[v] == toSink[u] - 1 && !std::ranges::contains( next, v ) )
                 {
                     next.push_back( v );
                 }
@@ -490,7 +494,7 @@ inline std::string pointerText( std::string_view text, const std::vector<const R
     {
         const std::string_view p = attrOf( r->attrs, "p" );
         const std::size_t colon = r->tag == 'd' ? std::string_view::npos : p.rfind( ':' ); // <s>/<y> p= is file:line; a pointer names the file
-        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ) } );
+        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ), .kind = "side" } );
     }
     std::string out = filesyms_detail::tailPointerText( text, spans, legend ? kOneSideReachLegend : std::string_view() );
     legend = legend && spans.empty();

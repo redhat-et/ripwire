@@ -104,35 +104,35 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/services.rb" includes="5"' \
     || no "capture: dynamic.rb rows — a non-literal include/autoload/require was invented, or the Object receiver went missing: $( frow lib/app/dynamic.rb ) $( incs lib/app/dynamic.rb )"
 
 # ── 2. RESOLUTION: the index + lexical lookup ────────────────────────────────────────────────────────
-# Evidence is --impact's importer tier (`<f via="import" p= lazy=>`): UNCAPPED, per defining file (file:name
+# Evidence is --impact's importer tier (`<f p=>`, `lazy="1"` on a lazy one; no lazy= reads lazy="0"): UNCAPPED, per defining file (file:name
 # disambiguates a reopened constant), and it carries the lazy bit. --deps' <godfiles> is capped at 12 rows
 # and this fixture has more importees than that — a capped listing is not evidence of absence.
-importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f via="import" p="[^"]*" lazy="[01]"/>' | tr '\n' ' '; }
+importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f p="[^"]*"( lazy="1")?/>' | tr '\n' ' '; }
 expect(){ # expect SYM 'rows'  — exact importer set
     local got; got="$( importers "$1" )"
     if [ "$got" = "$2" ]; then ok "$3"; else no "$3 — importers of $1: ${got:-<none>}"; fi
 }
-expect Base       '<f via="import" p="lib/app/user.rb" lazy="0"/> ' 'resolve: `< Base` inside App::User → App::Base (lib/app/base.rb), load-time (lazy="0")'
-expect Trackable  '<f via="import" p="lib/app/user.rb" lazy="0"/> ' 'resolve: `include Trackable` → App::Trackable, the INNER one — not the top-level decoy'
-expect Searchable '<f via="import" p="lib/app/user.rb" lazy="0"/> ' 'resolve: `extend Searchable` → App::Searchable'
-expect Audited    '<f via="import" p="lib/app/user.rb" lazy="0"/> ' 'resolve: `prepend Audited` → the COMPACT `module App::Audited` (indexed as App::Audited)'
-expect lib/app/user.rb:User       '<f via="import" p="lib/app/admin/user.rb" lazy="0"/> ' 'resolve: `< ::App::User` (absolute) → lib/app/user.rb; report.rb'"'"'s bare `User` does NOT land here'
-expect lib/app/user_ext.rb:User   '<f via="import" p="lib/app/admin/user.rb" lazy="0"/> ' 'resolve: MONKEY PATCH — user_ext.rb reopens App::User with a method and is a real second definer: the same edge lands here too'
-expect lib/app/admin/user.rb:User '<f via="import" p="lib/app/admin/report.rb" lazy="0"/> ' 'resolve: LEXICAL — report.rb'"'"'s `< User` inside App::Admin resolves to App::Admin::User, the innermost nesting'
-expect Mailer     '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Mailer` → App::Services::Mailer, LAZY (lazy="1")'
-expect Job        '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Job` inside `eager_autoload do … end` → App::Services::Job'
-expect Worker     '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Worker` inside `autoload_under "impl" do … end` → App::Services::Worker (no path rule needed)'
-expect LegacyImpl '<f via="import" p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Legacy, "lib/legacy_impl"` → the PATH lands through the load-path rule, lazy'
-expect String     '<f via="import" p="lib/app/shouty.rb" lazy="0"/> '   'resolve: MONKEY PATCH of a core class — `< String` lands on the tree'"'"'s one definer of String (lib/core_ext/string.rb)'
-expect lib/app.rb:App '<f via="import" p="lib/app/uses_ns.rb" lazy="0"/> ' 'resolve: NAMESPACE — `include ::App` edges to lib/app.rb, the one open of App with a body of its own'
-expect Helper     '<f via="import" p="lib/app/geometry/nested_shape.rb" lazy="0"/> ' 'resolve: CHAIN — `< Helper` under `module App; module Geometry` reaches App::Helper; under compact `module App::Geometry` (same innermost open) it must NOT — the memo is keyed on the whole nesting chain'
+expect Base       '<f p="lib/app/user.rb"/> ' 'resolve: `< Base` inside App::User → App::Base (lib/app/base.rb), load-time (lazy="0")'
+expect Trackable  '<f p="lib/app/user.rb"/> ' 'resolve: `include Trackable` → App::Trackable, the INNER one — not the top-level decoy'
+expect Searchable '<f p="lib/app/user.rb"/> ' 'resolve: `extend Searchable` → App::Searchable'
+expect Audited    '<f p="lib/app/user.rb"/> ' 'resolve: `prepend Audited` → the COMPACT `module App::Audited` (indexed as App::Audited)'
+expect lib/app/user.rb:User       '<f p="lib/app/admin/user.rb"/> ' 'resolve: `< ::App::User` (absolute) → lib/app/user.rb; report.rb'"'"'s bare `User` does NOT land here'
+expect lib/app/user_ext.rb:User   '<f p="lib/app/admin/user.rb"/> ' 'resolve: MONKEY PATCH — user_ext.rb reopens App::User with a method and is a real second definer: the same edge lands here too'
+expect lib/app/admin/user.rb:User '<f p="lib/app/admin/report.rb"/> ' 'resolve: LEXICAL — report.rb'"'"'s `< User` inside App::Admin resolves to App::Admin::User, the innermost nesting'
+expect Mailer     '<f p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Mailer` → App::Services::Mailer, LAZY (lazy="1")'
+expect Job        '<f p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Job` inside `eager_autoload do … end` → App::Services::Job'
+expect Worker     '<f p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Worker` inside `autoload_under "impl" do … end` → App::Services::Worker (no path rule needed)'
+expect LegacyImpl '<f p="lib/app/services.rb" lazy="1"/> ' 'resolve: `autoload :Legacy, "lib/legacy_impl"` → the PATH lands through the load-path rule, lazy'
+expect String     '<f p="lib/app/shouty.rb"/> '   'resolve: MONKEY PATCH of a core class — `< String` lands on the tree'"'"'s one definer of String (lib/core_ext/string.rb)'
+expect lib/app.rb:App '<f p="lib/app/uses_ns.rb"/> ' 'resolve: NAMESPACE — `include ::App` edges to lib/app.rb, the one open of App with a body of its own'
+expect Helper     '<f p="lib/app/geometry/nested_shape.rb"/> ' 'resolve: CHAIN — `< Helper` under `module App; module Geometry` reaches App::Helper; under compact `module App::Geometry` (same innermost open) it must NOT — the memo is keyed on the whole nesting chain'
 printf '%s' "$DEPS" | grep -q '<f p="lib/app/geometry/compact_shape.rb" includes="1" afferent="0" instab="0.00"' \
     && ok 'resolve: CHAIN — compact_shape.rb'"'"'s `< Helper` is shown and resolves to nothing (App::Helper is not on its nesting chain)' \
     || no "resolve: CHAIN — compact_shape.rb row wrong: $( frow lib/app/geometry/compact_shape.rb )"
 
 # ── 3. MUTATION CONTROLS ─────────────────────────────────────────────────────────────────────────────
 expect lib/app/services.rb:App '' 'mutation control: the WRAPPER open of App in services.rb (nested opens only) received nothing from `include ::App`'
-expect lib/app/dup.rb:Dup   '<f via="import" p="lib/app/uses_dup.rb" lazy="0"/> ' 'mutation control: `< Dup` → lib/app/dup.rb, the open with a body (empty = defines)'
+expect lib/app/dup.rb:Dup   '<f p="lib/app/uses_dup.rb"/> ' 'mutation control: `< Dup` → lib/app/dup.rb, the open with a body (empty = defines)'
 expect lib/other/dup.rb:Dup ''  'mutation control: lib/other/dup.rb opens App::Dup as a WRAPPER (one nested class, nothing else) and is not a definer'
 expect lib/trackable.rb:Trackable '' 'mutation control: top-level Trackable decoy untouched — App::Trackable wins, and no constant is probed as a path'
 expect lib/decoy/user.rb:User ''  'mutation control: decoy/user.rb (same basename, other namespace) has no importer — no basename fallback'

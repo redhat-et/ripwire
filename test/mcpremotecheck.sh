@@ -461,7 +461,8 @@ if start_server; then
     mcp_post FOR_EVIL_REPLY "{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$WS\",\"task\":$EVIL_JSON}}}"
     FOR_EVIL="$( printf '%s' "$FOR_EVIL_REPLY" \
         | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["result"]["content"][0]["text"] if "error" not in r else "__ERR__")' 2>/dev/null )"
-    if printf '%s' "$FOR_EVIL" | grep -q -- '--> <evil/>'; then
+    # MR1: outside CDATA only — MCP `for`'s line-form rows are CDATA text, where '-->' closes nothing (mcpaudit4hardencheck A4-F7)
+    if printf '%s' "$FOR_EVIL" | python3 -c 'import re,sys; sys.exit(0 if "--> <evil/>" in re.sub(r"<!\[CDATA\[.*?\]\]>", "", sys.stdin.read(), flags=re.S) else 1)'; then
         no "A4-F7 over HTTP: the literal '--> <evil/>' survived uncollapsed (comment injection possible)"
     else
         ok "A4-F7 over HTTP: the '--' run was collapsed before landing in the XML comment"

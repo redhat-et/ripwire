@@ -8,8 +8,20 @@
 # but hooks/ripwire-nudge.sh still switches on Claude tool names, so the port has not landed). An explicit path remains supported for CI and other clients:
 # skills/install.sh PATH.
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
+# (for Claude, --hook also registers the SubagentStart routing note: `ripwire-nudge.sh --subagent-start`, a short
+# factual note for the Explore and Plan subagents, which do not load CLAUDE.md; RIPWIRE_SUBAGENT_ROUTE=0 turns it off)
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
+# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>). It is ON BY DEFAULT with a
+# --hook install, and with --opencode, whose only hook it is (owner ruling 111, 2026-11-20) — a plain skills install
+# still touches no settings.json, and --hook-subagent-primer alone still installs only its own hook. --no-hook-legend-seen installs the advisory entries without it, RIPWIRE_LEGEND_SEEN=0 turns it off at
+# run time, and it keeps its own flag for a hook-only install:
+# skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
+# The subagent primer (a SubagentStart hook: the two-line ripwire brief in every subagent's context) is its own opt-in
+# too, Claude only: skills/install.sh --hook-subagent-primer.
+# A Claude skills install also installs the ripwire-locator subagent into ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/ (lane LC1,
+# owner rulings 185/189): --no-locator-agent, or RIPWIRE_NO_LOCATOR_AGENT=1 in the environment (which the curl installers
+# pass through when they activate the skills), skips it; a copy installed earlier is left where it is.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -284,6 +296,160 @@ install_claude_route()
     fi
 }
 
+# ── The two SubagentStart registrations (the routing note below, the opt-in primer further down) share one test and
+# one merge. subagent_start_names SETTINGS SCRIPT: is an entry naming SCRIPT, from any copy, registered under
+# SubagentStart? merge_subagent_start SETTINGS SCRIPT CMD WHAT WAS: refresh that entry's command in place, or add
+# exactly one (matcher "*", timeout 5); print "ripwire WHAT WAS" only once the file is really written (the D1 lesson
+# at install_claude_route). Neither touches another event or another script's entry.
+subagent_start_names()
+{
+    "$jqBin" -e --arg n "$2" "$jqIsScript"'
+        any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1
+}
+
+merge_subagent_start()
+{
+    mk_tmp "$1"
+    if "$jqBin" --arg n "$2" --arg cmd "$3" "$jqIsScript"'
+        .hooks //= {} |
+        if any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))
+        then .hooks.SubagentStart |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )
+        else .hooks.SubagentStart = ((.hooks.SubagentStart // []) + [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 5 }] }])
+        end
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire $4 $5"
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the $4 into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
+# ── install_claude_subagent_route SETTINGS HOOKCMD — register `ripwire-nudge.sh --subagent-start` as a SubagentStart
+# hook (lane HK2, 2026-11-21). Claude Code's Explore and Plan subagents do not load CLAUDE.md, so the routing a user
+# pasted there never reaches the agent that searches the codebase; this entry puts a short factual note into those two
+# (and only those two: the script decides by agent_type, so the matcher stays "*" and the decision stays in one place).
+# SEPARATE FROM the PreToolUse merge and called from BOTH of its paths, for install_claude_route's reason: a machine
+# that ran --hook before this mode existed has the nudge entry already, and would otherwise never gain this one.
+# Idempotent the same way: an entry that names the nudge script under SubagentStart, from any copy, has its command
+# refreshed in place; otherwise exactly one is added. It never touches another SubagentStart entry — not a user's own,
+# not the opt-in primer's (hooks/ripwire-subagent-primer.sh, --hook-subagent-primer).
+install_claude_subagent_route()
+{
+    subRouteCmd="$2 --subagent-start"
+    if subagent_start_names "$1" "ripwire-nudge.sh"; then
+        subRouteWas="already registered in $1 — command refreshed to $subRouteCmd."
+    else
+        subRouteWas="registered in $1."
+        echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $1:"
+        echo "  hooks.SubagentStart += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$subRouteCmd\" }] }]"
+        echo "  behavior: adds a routing note of under 400 B to the context of each new Explore or Plan subagent, the two"
+        echo "            built-in types that do not load CLAUDE.md (which call ranks files for a task, which prints one"
+        echo "            symbol, which names the tests). Every other subagent type gets nothing. Cannot block a subagent;"
+        echo "            silent outside a git work tree and without ripwire or jq on PATH. It does not follow the meter's"
+        echo "            arm: a control-arm session's subagents get it too."
+        echo "  switch:   RIPWIRE_SUBAGENT_ROUTE=0 turns it off; =all sends it to every subagent type."
+        echo "  counting: none. It writes no row and no file unless RIPWIRE_SUBAGENT_ROUTE_LOG names one."
+        echo "  remove:   delete the SubagentStart entry whose command ends in \"ripwire-nudge.sh --subagent-start\" from $1."
+    fi
+
+    merge_subagent_start "$1" "ripwire-nudge.sh" "$subRouteCmd" "SubagentStart routing note" "$subRouteWas"
+}
+
+# ── install_claude_legend_seen SETTINGS — register hooks/ripwire-legend-seen.sh (lane LS1, 2026-11-18).
+# The one hook this installer registers that REWRITES a tool call: before a `ripwire` Bash command it inserts
+# --legend-seen=<this session's file>, so the answer leaves out legend definitions the agent already received; after
+# it, it records which definitions the received stdout carried. Four events: PreToolUse + PostToolUse on Bash, and
+# SessionStart + PreCompact on every source, which forget the file (a compacted or resumed context no longer holds what
+# it read). Called from BOTH paths of install_claude_hook for the reason install_claude_route gives, and idempotent the
+# same way: an event that already names this script has its command refreshed in place, never a second entry.
+install_claude_legend_seen()
+{
+    seenScript="$( dirname "$src" )/hooks/ripwire-legend-seen.sh"
+    [ -f "$seenScript" ] || {
+        echo "skills/install.sh: hooks/ripwire-legend-seen.sh is missing beside $src; legend-seen hook not registered." >&2
+        return 1
+    }
+    chmod +x "$seenScript" 2>/dev/null || true
+    seenCmd="$( hook_cmd "$seenScript" )" || return 1
+
+    if "$jqBin" -e --arg n "ripwire-legend-seen.sh" "$jqIsScript"'
+        . as $root | all(("PreToolUse","PostToolUse","SessionStart","PreCompact"); . as $k | any(($root.hooks[$k] // [])[]?.hooks[]?; isScript($n)))' \
+        "$1" >/dev/null 2>&1; then
+        seenWas="already registered in $1 — command refreshed to $seenCmd."
+    else
+        seenWas="registered in $1."
+        echo "skills/install.sh will add the legend-seen entries to $1 (ON BY DEFAULT, ruling 111; --no-hook-legend-seen skips it):"
+        echo "  hooks.PreToolUse / PostToolUse += [{ matcher: \"Bash\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
+        echo "  hooks.SessionStart / PreCompact += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
+        echo "  behavior: REWRITES a ripwire Bash command, only by inserting --legend-seen=<session file> after the binary"
+        echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+        echo "            Never a permission decision: the rewritten call goes through your normal permission flow."
+        echo "  state:    entry hashes only, under ~/.ripwire/legend-seen/<session>/; forgotten on resume/clear/compact."
+        echo "            RIPWIRE_LEGEND_SEEN=0 turns it off."
+    fi
+
+    # One pass: refresh the command of every entry that names this script, add the events that have none.
+    mk_tmp "$1"
+    if "$jqBin" --arg n "ripwire-legend-seen.sh" --arg cmd "$seenCmd" "$jqIsScript"'
+        .hooks //= {} |
+        .hooks |= with_entries( .value |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) ) ) |
+        reduce (["PreToolUse","Bash"], ["PostToolUse","Bash"], ["SessionStart","*"], ["PreCompact","*"]) as [$k, $m] (.;
+            if any((.hooks[$k] // [])[]?.hooks[]?; isScript($n)) then .
+            else .hooks[$k] = ((.hooks[$k] // []) + [{ matcher: $m, hooks: [{ type: "command", command: $cmd, timeout: 10 }] }]) end )
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire legend-seen hook $seenWas"
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the legend-seen hook into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
+# ── install_claude_subagent_primer SETTINGS — register hooks/ripwire-subagent-primer.sh (lane AR1, 2026-11-19).
+# A SubagentStart hook: it puts the two-line ripwire brief (orient with --for; --quality-delta then --test-gate before
+# done) into every subagent's context at spawn. Its own opt-in, NOT part of --hook: it is the instrument of a registered
+# A/B (docs/EVALS.md, "Subagent primer"), and an operator must be able to install the main-session hooks without it.
+# Idempotent the way install_claude_legend_seen is: an entry that names this script, from any copy, has its command
+# refreshed in place; otherwise exactly one entry is added. Never touches another event.
+install_claude_subagent_primer()
+{
+    primerScript="$( dirname "$src" )/hooks/ripwire-subagent-primer.sh"
+    [ -f "$primerScript" ] || {
+        echo "skills/install.sh: hooks/ripwire-subagent-primer.sh is missing beside $src; subagent primer not registered." >&2
+        return 1
+    }
+    chmod +x "$primerScript" 2>/dev/null || true
+    primerCmd="$( hook_cmd "$primerScript" )" || return 1
+
+    if subagent_start_names "$1" "ripwire-subagent-primer.sh"; then
+        primerWas="already registered in $1 — command refreshed to $primerCmd."
+    else
+        primerWas="registered in $1."
+        echo "skills/install.sh --hook-subagent-primer will add this OPT-IN, advisory-only entry to $1:"
+        echo "  hooks.SubagentStart += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$primerCmd\" }] }]"
+        echo "  behavior: adds ~660 B of context to each new subagent (orient with --for first; after the last edit, commit,"
+        echo "            --quality-delta=BASE..HEAD, --test-gate). Cannot block a subagent; silent outside a git work tree or without ripwire."
+        echo "  switch:   RIPWIRE_SUBAGENT_PRIMER=0 (or subagent_primer=off in ~/.ripwire/meter.conf) turns it off;"
+        echo "            =auto randomizes per subagent for the registered A/B."
+        echo "  counting: one row per subagent start in ~/.ripwire/subagent_primer.jsonl (session id, agent id and type,"
+        echo "            arm, delivered) — never the brief or any text. RIPWIRE_SUBAGENT_METER=0 opts out of counting."
+    fi
+
+    merge_subagent_start "$1" "ripwire-subagent-primer.sh" "$primerCmd" "subagent primer hook" "$primerWas"
+}
+
+install_claude_subagent_primer_hook()
+{
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --hook-subagent-primer needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    install_claude_subagent_primer "$settings" || exit 1
+}
+
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
@@ -300,6 +466,7 @@ install_claude_hook()
         echo "Add these by hand instead:" >&2
         echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd\"}]}]" >&2
         echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --session-start\"}]}]" >&2
+        echo "  hooks.SubagentStart += [{\"matcher\":\"*\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --subagent-start\",\"timeout\":5}]}]" >&2
         exit 1
     fi
 
@@ -311,7 +478,8 @@ install_claude_hook()
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
-        install_claude_route "$settings"
+        install_claude_route "$settings" || return $?
+        install_claude_subagent_route "$settings" "$hookCmd"
         return $?
     fi
 
@@ -338,6 +506,11 @@ install_claude_hook()
     echo "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting"
     echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
+    if [ "${wantLegendSeen:-0}" -eq 1 ]; then
+        echo "  also:     --hook registers the legend-seen hook too (ON BY DEFAULT, owner ruling 111). That one DOES"
+        echo "            REWRITE a ripwire Bash command — it announces itself below, before it writes. Pass"
+        echo "            --no-hook-legend-seen for the advisory entries alone."
+    fi
 
     mk_tmp "$settings"
     if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg m "$hookMatcher" '
@@ -353,7 +526,89 @@ install_claude_hook()
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
-    install_claude_route "$settings"
+    install_claude_route "$settings" || return $?
+    install_claude_subagent_route "$settings" "$hookCmd"
+}
+
+# ── the legend-seen hook, ON BY DEFAULT with a --hook install (owner ruling 111, 2026-11-20) ───────────────────────
+# It is the one hook here that REWRITES a tool call (it inserts --legend-seen=FILE after the binary word of a ripwire
+# command). That is why it was opt-in until 111: lane LG1 then MEASURED what it saves (~3,184 B/call, a ~19 % cut in
+# total answer bytes from call 2, results/LG1_LEGEND_1120/READOUT.md §1.3) and the ruling turned the default over. What
+# the default does NOT change: the hook's behaviour, the disclosure printed before anything is written, and the two
+# ways off (--no-hook-legend-seen here, RIPWIRE_LEGEND_SEEN=0 at run time). A plain skills install still never touches
+# settings.json — the default rides on a hook install, not on every run. One function per client.
+install_claude_legend_seen_hook()
+{
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --hook-legend-seen needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    install_claude_legend_seen "$settings" || exit 1
+}
+
+install_codex_legend_seen_hook()
+{
+    settings="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/hooks.json" || exit 2
+    adapter="$( dirname "$src" )/hooks/ripwire-codex-legend-seen.sh"
+    shared="$( dirname "$src" )/hooks/ripwire-legend-seen.sh"
+    [ -f "$adapter" ] && [ -f "$shared" ] || { echo "skills/install.sh: hooks/ripwire-codex-legend-seen.sh or its shared hook is missing beside $src" >&2; exit 1; }
+    chmod +x "$adapter" "$shared" 2>/dev/null || true
+    cmd="$( hook_cmd "$adapter" )" || exit 1
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --codex --hook-legend-seen needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    echo "skills/install.sh --codex --hook-legend-seen will add or refresh these entries in $settings:"
+    echo "  PreToolUse / PostToolUse (^Bash\$) and SessionStart (startup|resume|clear|compact) -> $cmd"
+    echo "  behavior: REWRITES a ripwire Bash command, only by inserting --legend-seen=<session file> after the binary"
+    echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+    echo "            Never a permission decision. RIPWIRE_LEGEND_SEEN=0 turns it off."
+    mk_tmp "$settings"
+    if "$jqBin" --arg cmd "$cmd" --arg n "ripwire-codex-legend-seen.sh" "$jqIsScript"'
+        .hooks //= {} |
+        .hooks |= with_entries( .value |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) ) ) |
+        reduce (["PreToolUse","^Bash$"], ["PostToolUse","^Bash$"], ["SessionStart","^(startup|resume|clear|compact)$"]) as [$k, $m] (.;
+            if any((.hooks[$k] // [])[]?.hooks[]?; isScript($n)) then .
+            else .hooks[$k] = ((.hooks[$k] // []) + [{ matcher: $m, hooks: [{ type: "command", command: $cmd, timeout: 10,
+                statusMessage: "Ripwire legend-seen" }] }]) end )
+    ' "$settings" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$settings"; then
+        echo "done. Registered ripwire's legend-seen hook in $settings. Open /hooks in Codex to review and trust it."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
+        exit 1
+    fi
+}
+
+# opencode loads plugin modules, not shell hooks: write ONE loader file into its global plugin dir that imports this
+# checkout's plugin (hooks/opencode/ripwire-legend-seen.js), so the plugin and the shell hook it calls stay version-
+# controlled here. Rewriting the loader is idempotent.
+install_opencode_legend_seen_hook()
+{
+    plugin="$( dirname "$src" )/hooks/opencode/ripwire-legend-seen.js"
+    [ -f "$plugin" ] && [ -f "$( dirname "$src" )/hooks/ripwire-legend-seen.sh" ] || {
+        echo "skills/install.sh: hooks/opencode/ripwire-legend-seen.js or its shared hook is missing beside $src" >&2; exit 1; }
+    chmod +x "$( dirname "$src" )/hooks/ripwire-legend-seen.sh" 2>/dev/null || true
+    pdir="$( abs_root "${XDG_CONFIG_HOME:-$HOME/.config}" "${XDG_CONFIG_HOME:-}" )/opencode/plugin" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --opencode --hook-legend-seen needs jq on PATH to quote the plugin path (not found)." >&2; exit 1; }
+    mkdir -p "$pdir"
+    loader="$pdir/ripwire-legend-seen.js"
+    quoted="$( printf '%s' "$plugin" | "$jqBin" -Rs . )" || exit 1
+    echo "skills/install.sh --opencode --hook-legend-seen will write $loader, a loader for $plugin:"
+    echo "  behavior: REWRITES a ripwire bash command, only by inserting --legend-seen=<session file> after the binary"
+    echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+    echo "            RIPWIRE_LEGEND_SEEN=0 turns it off; delete $loader to remove it."
+    mk_tmp "$loader"
+    {
+        echo "// ripwire legend-seen loader — written by skills/install.sh --opencode --hook-legend-seen; delete this file to remove it."
+        echo "import { pathToFileURL } from \"node:url\";"
+        echo "export const { RipwireLegendSeen } = await import( pathToFileURL( $quoted ).href );"
+    } >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$loader" || { rm -f "$tmp"; echo "skills/install.sh: could not write $loader" >&2; exit 1; }
+    echo "done. Registered ripwire's legend-seen plugin for opencode in $loader."
 }
 
 install_codex_hook()
@@ -420,12 +675,22 @@ install_codex_hook()
 mode="claude"
 explicitMode=0
 wantHook=0
+wantLegendSeen=1          # owner ruling 111 (2026-11-20): the legend-seen hook is ON BY DEFAULT with a hook install
+legendSeenOnly=0          # --hook-legend-seen: install THAT hook and nothing else (the pre-111 invocation, kept)
+wantSubagentPrimer=0
 wantContributor=0
+wantLocatorAgent=1        # owner ruling 189 (2026-11-22): ON BY DEFAULT for Claude; --no-locator-agent / RIPWIRE_NO_LOCATOR_AGENT opt out
+[ -z "${RIPWIRE_NO_LOCATOR_AGENT:-}" ] || wantLocatorAgent=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
         --hook) wantHook=1 ;;
+        --hook-legend-seen) legendSeenOnly=1; wantLegendSeen=1 ;;
+        --no-hook-legend-seen) wantLegendSeen=0 ;;
+        --hook-subagent-primer) wantSubagentPrimer=1 ;;
+        --opencode) mode="opencode"; explicitMode=1 ;;
         --contributor) wantContributor=1 ;;
+        --no-locator-agent) wantLocatorAgent=0 ;;
         --codex) mode="codex"; explicitMode=1 ;;
         --openclaw) mode="openclaw"; explicitMode=1 ;;
         --codex-legacy) mode="codex-legacy"; explicitMode=1 ;;
@@ -437,9 +702,67 @@ for arg in "$@"; do
     esac
 done
 
+if [ "$legendSeenOnly" -eq 1 ] && [ "$wantLegendSeen" -eq 0 ]; then
+    echo "skills/install.sh: --hook-legend-seen and --no-hook-legend-seen contradict each other; pass one" >&2
+    exit 2
+fi
+
+# ── RULING 111: the default, applied where this installer registers the --hook entries. Called from every --hook
+#    path and from --opencode (whose only hook IS this one). NOT from a plain skills install, which touches no
+#    settings file, and NOT from --hook-subagent-primer alone, which is its own narrow single-hook installer.
+install_legend_seen_default()
+{
+    [ "$wantLegendSeen" -eq 1 ] || return 0
+    case "$1" in
+        claude)             install_claude_legend_seen_hook ;;
+        codex|codex-legacy) install_codex_legend_seen_hook ;;
+        opencode)           install_opencode_legend_seen_hook ;;
+    esac
+}
+
+# --hook-subagent-primer is hook-only and Claude-only (SubagentStart is a Claude Code event): it never installs skills.
+# It composes with --hook and --hook-legend-seen in one run.
+if [ "$wantSubagentPrimer" -eq 1 ]; then
+    case "$mode" in
+        # RULING 111 applies to a --hook install, so it reaches here only WITH --hook: this flag is its own narrow
+        # single-hook installer and subagentprimercheck (N) asserts that footprint ("registers no other event").
+        # --hook-legend-seen beside it still installs that hook alone, exactly as it did before the default.
+        claude) if [ "$wantHook" -eq 1 ]; then
+                    install_claude_hook
+                    install_legend_seen_default claude
+                elif [ "$legendSeenOnly" -eq 1 ]; then
+                    install_claude_legend_seen_hook
+                fi
+                install_claude_subagent_primer_hook ;;
+        *) echo "skills/install.sh: --hook-subagent-primer is a Claude Code hook (SubagentStart); it takes --claude (the default) only" >&2; exit 2 ;;
+    esac
+    exit 0
+fi
+# --hook-legend-seen is hook-only too, for the client named (Claude by default): it never installs skills.
+if [ "$legendSeenOnly" -eq 1 ]; then
+    case "$mode" in
+        claude)              [ "$wantHook" -eq 0 ] || install_claude_hook; install_claude_legend_seen_hook ;;
+        codex|codex-legacy)  [ "$wantHook" -eq 0 ] || install_codex_hook; install_codex_legend_seen_hook ;;
+        opencode)            install_opencode_legend_seen_hook ;;
+        *) echo "skills/install.sh: --hook-legend-seen takes --claude (the default), --codex or --opencode" >&2; exit 2 ;;
+    esac
+    exit 0
+fi
+if [ "$mode" = "opencode" ]; then
+    # opencode has no advisory hook slot: the legend-seen plugin is the ONLY thing this installer has for it, and
+    # ruling 111 makes it the default — so --opencode alone now installs it instead of refusing and naming the flag.
+    if [ "$wantLegendSeen" -eq 1 ]; then
+        install_opencode_legend_seen_hook
+        exit 0
+    fi
+    echo "skills/install.sh: --opencode --no-hook-legend-seen leaves nothing to install (the legend-seen plugin is the only thing this installer has for opencode); opencode reads ripwire's skills through AGENTS.md (ripwire wrap opencode)" >&2
+    exit 2
+fi
+
 # Preserve the established hook-only invocation: `--hook` changes settings but does not also install skills.
 if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
     install_claude_hook
+    install_legend_seen_default claude
     exit 0
 fi
 
@@ -719,10 +1042,58 @@ else
     echo "done. $count ripwire skills active in every session (${copied} copied, ${pruned} pruned, ${skipped} contributor-only skipped, ${kept} kept as yours) — every ripwire-* installed above."
 fi
 
+# ── THE LOCATOR SUBAGENT (lane LC1, 2026-11-22, owner ruling 185). A Claude Code subagent file installed beside the skills, for
+#    Claude only: skills/agents/ripwire-locator.md -> ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/ (the user scope of
+#    code.claude.com/docs/en/sub-agents). It runs ripwire in its own context and hands the main thread back only edit ranges,
+#    so a ~7K-token --for answer does not ride every later main-thread request. Ownership as for a skill: a symlink into this
+#    checkout, verified by its result, a copy when a link does not take; a dangling link, a link into this checkout, or a
+#    byte-identical file is ours and refreshed; anything else there is the user's and is kept. A checkout or staged release
+#    without the file installs its skills exactly as before. Never fails the run. test/locatoragentcheck.sh (D) drives it.
+install_claude_locator_agent()
+{
+    agentSrc="$src/agents/ripwire-locator.md"
+    [ -f "$agentSrc" ] || return 0
+    agentDir="$( dirname "$dst" )/agents"
+    agentDst="$agentDir/ripwire-locator.md"
+    if [ -L "$agentDst" ]; then
+        if [ -e "$agentDst" ] && ! cmp -s "$agentDst" "$agentSrc"; then
+            agentLink="$( readlink "$agentDst" 2>/dev/null )" || agentLink=""
+            case "$agentLink" in
+                "$src"/*) ;;
+                *) echo "kept ripwire-locator: $agentDst is a symlink ripwire did not create (yours)"; return 0 ;;
+            esac
+        fi
+        rm -f "$agentDst"
+    elif [ -e "$agentDst" ]; then
+        if [ ! -f "$agentDst" ] || ! cmp -s "$agentDst" "$agentSrc"; then
+            echo "kept ripwire-locator: $agentDst is not ripwire's (your own file); the locator subagent was not installed"
+            return 0
+        fi
+        rm -f "$agentDst"
+    fi
+    mkdir -p "$agentDir"
+    if ln -s "$agentSrc" "$agentDst" 2>/dev/null && [ -L "$agentDst" ] && cmp -s "$agentDst" "$agentSrc"; then
+        echo "installed subagent ripwire-locator -> $agentDst (Claude Code: delegate a code lookup to it; it returns edit ranges)"
+    elif rm -f "$agentDst" && cp "$agentSrc" "$agentDst" 2>/dev/null && cmp -s "$agentDst" "$agentSrc"; then
+        echo "copied subagent ripwire-locator -> $agentDst (a symlink did not take here; re-run after updating ripwire to refresh it)"
+    else
+        rm -f "$agentDst"
+        echo "skills/install.sh: could not install the ripwire-locator subagent at $agentDst; the skills are unaffected." >&2
+    fi
+    return 0
+}
+if [ "$mode" = "claude" ]; then
+    if [ "$wantLocatorAgent" -eq 1 ]; then
+        install_claude_locator_agent
+    else
+        echo "skipped subagent ripwire-locator (--no-locator-agent / RIPWIRE_NO_LOCATOR_AGENT); a copy installed earlier is left as it is"
+    fi
+fi
+
 if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
-        codex|codex-legacy) install_codex_hook ;;
-        claude) install_claude_hook ;;
+        codex|codex-legacy) install_codex_hook; install_legend_seen_default codex ;;
+        claude) install_claude_hook; install_legend_seen_default claude ;;
                 hermes) echo "skills/install.sh: --hook is not ported to the Hermes target yet (Hermes exposes hooks: pre_tool_call in config.yaml, but hooks/ripwire-nudge.sh still switches on Claude tool names); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
         openclaw) echo "skills/install.sh: --hook is not supported for the openclaw target (openclaw's before_tool_call is a plugin API, not a shell hook slot); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
         path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;

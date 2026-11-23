@@ -52,6 +52,10 @@
 # Usage: test/fortailwidecheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 unset RIPWIRE_TAIL_SYM_WIDE_ROWS   # the default-capture arms (w.sym, f.sw) must see the shipped default, not a caller's override (CodeRabbit #601)
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -123,7 +127,10 @@ run "$W" "$TMP/w.symj"  "--for=$Q" --json
 run "$W" "$TMP/w.symf"  "--for=$Q" --legend=full
 run "$W" "$TMP/w.symb"  "--for=$Q" --token-budget=3000
 ( export RIPWIRE_TAIL_SYM_WIDE_ROWS=10; run "$W" "$TMP/w.k10" "--for=$Q"; run "$W" "$TMP/w.k10j" "--for=$Q" --json )
-( export RIPWIRE_NO_TAIL_FOLD=1; run "$DD" "$TMP/d.sym" "--for=$Q"; run "$DD" "$TMP/d.symj" "--for=$Q" --json )
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h), and this docs fixture's widened tail
+# straddles page 1's cut, so the default and its ablation would be cut at different rows. Arm 14 and the DD arms compare the
+# whole <tail>, so the DD XML runs read --page-bytes=0 — the whole answer, row-identical to the joined pages (forpagescheck P2/P11).
+( export RIPWIRE_NO_TAIL_FOLD=1; run "$DD" "$TMP/d.sym" "--for=$Q" --page-bytes=0; run "$DD" "$TMP/d.symj" "--for=$Q" --json )
 export RIPWIRE_TAIL_SYM_WIDE_ROWS=0   # arms 1-13: the walk, read on the pre-card tail (every widened row p= only)
 run "$W" "$TMP/w.xml"   "--for=$Q"
 run "$W" "$TMP/w.page"  "--for=$Q" --limit=100000
@@ -136,7 +143,7 @@ run "$S" "$TMP/s.full"  "--for=$Q" --legend=full
 # fixture D measures the code-first WALK (arms 8, 9): run with SIZE-2's fold off, which counts the widened doc rows instead of
 # listing them (test/fortailfoldcheck.sh is that fold's gate)
 ( export RIPWIRE_NO_TAIL_FOLD=1
-run "$DD" "$TMP/d.xml"  "--for=$Q"
+run "$DD" "$TMP/d.xml"  "--for=$Q" --page-bytes=0
 run "$DD" "$TMP/d.page" "--for=$Q" --limit=100000
 run "$DD" "$TMP/d.json" "--for=$Q" --json
 run "$DD" "$TMP/d.b3000" "--for=$Q" --token-budget=3000

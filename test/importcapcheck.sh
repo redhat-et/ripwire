@@ -477,7 +477,7 @@ fi
 #       a `new` argument, TS `import x = require()`, a `declare module` body, a class method) and none may
 #       become one. The leading text gate (callee is `require`/`import`) and the reach rule are what hold.
 #   J4  the LAZY bit — a require()/import() written inside a function body is lazy="1" on --impact's import
-#       tier; a top-level one is lazy="0"; one file required both ways is lazy="0" (the pair rule)
+#       tier; a top-level one carries no lazy=; one file required both ways carries none either (the pair rule)
 #   J5  the use-site half — --uses reports the import-role ref of a named import
 #   J6  the DEPTH BOUND on blocks — kept at 255 and 256 containers, cut AND announced at 257, as the walk did
 #   J7  the DELIBERATE disclosure differences (the two of the C-family arm 12c, same reason, plus a non-import under a too-deep nest)
@@ -668,8 +668,10 @@ for n in eager lazy_only both; do printf 'function %s_fn() { return 1; }\nmodule
 LZ_BAD=0
 for pair in eager_fn:0 lazy_only_fn:1 both_fn:0; do
     s=${pair%%:*}; want=${pair#*:}
-    got=$("$BIN" "$LZ" --impact="$s" --no-cache 2>/dev/null | grep -o '<f via="import" p="entry\.js" lazy="[01]"' | grep -o 'lazy="[01]"' | head -1)
-    if [ "$got" != "lazy=\"$want\"" ]; then LZ_BAD=1; no "J4: --impact=$s importer edge is ${got:-absent}, want lazy=\"$want\""; fi
+    # IMPORT-ROW-SHORT (2026-11-18): a load-time importer row is <f p="…"/>, a lazy one <f p="…" lazy="1"/>; no row at all is "absent"
+    row=$("$BIN" "$LZ" --impact="$s" --no-cache 2>/dev/null | sed 's/<!--.*-->//' | grep -oE '<f p="entry\.js"( lazy="1")?/>' | head -1)
+    case "$row" in '<f p="entry.js" lazy="1"/>') got=1 ;; '<f p="entry.js"/>') got=0 ;; *) got=absent ;; esac
+    if [ "$got" != "$want" ]; then LZ_BAD=1; no "J4: --impact=$s importer edge reads lazy=$got, want lazy=$want"; fi
 done
 [ "$LZ_BAD" -eq 0 ] && ok "J4: lazy bit — top-level require lazy=0, function-body require lazy=1, a file required both ways lazy=0"
 

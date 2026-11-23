@@ -836,28 +836,46 @@ inline bool rustUseLeavesTree( const CallResultTypes& types, const Reference& r 
 // globs supplying one used name do not compile (E0659): the ladder then answers as before.
 inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Reference& r )
 {
-    bool named = false;
-    types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
-    if( named )
+    ++types.rustGlobAsks;
+    CallResultTypes::RustGlobLast& last = types.rustGlobLast;   // the ladder asks once per candidate of one call: the answer is the call's
+    if( last.fileId == r.fileId && last.at == r.startByte && last.name == std::string_view( r.calleeName ) )
     {
-        return false;
+        return last.answer;
     }
-    bool outside = false;
-    bool other   = false;
-    types.forEachRustScopeAt( r.fileId, r.startByte, [ & ]( const CallResultTypes::Level& lv )
+    ++types.rustGlobAnswers;
+    const std::size_t readsBefore = types.importReads;
+    const auto        answer      = [ & ]
     {
-        types.forEachImport( r.fileId, "*", [ & ]( const Binding& b )
+        const CallResultTypes::RustGlobFacts& facts = types.rustGlobFacts( r.fileId );   // RUST-GLOB-SCALE: the file's globs, read once
+        if( facts.levels.empty() )
         {
-            if( b.kind == LocalBindKind::TypeImport && types.levelAt( r.fileId, b.startByte ) == lv )
+            return false;   // no glob `use` in the file: nothing but a named `use` or the tree can supply the name
+        }
+        bool named = false;
+        if( std::ranges::binary_search( facts.useNames, std::string_view( r.calleeName ), sortutil::svLess ) )
+        {
+            types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
+        }
+        if( named )
+        {
+            return false;
+        }
+        bool outside = false;
+        bool other   = false;
+        types.forEachRustScopeAt( r.fileId, r.startByte, [ & ]( const CallResultTypes::Level& lv )
+        {
+            if( const CallResultTypes::RustGlobLevel* g = facts.at( lv ) )
             {
-                const bool out = types.rustPathProvablyOutside( r.fileId, b.startByte, b.importedName )
-                              && !types.rustRootNamesTreePackage( r.fileId, b.startByte, b.importedName );
-                ( out ? outside : other ) = true;
+                outside = outside || g->outside;
+                other   = other || g->other;
             }
+            return other;   // an in-tree glob at an inner level already decides: no outer level is read
         } );
-        return other;   // an in-tree glob at an inner level already decides: no outer level is read
-    } );
-    return outside && !other;
+        return outside && !other;
+    }();
+    types.rustGlobReads += types.importReads - readsBefore;
+    last = { r.fileId, r.startByte, r.calleeName, answer };
+    return answer;
 }
 
 // ---- aider-style name-quality prior weights --------------------------------------------------------
@@ -2143,6 +2161,73 @@ inline bool reachableByNameFromLocals( std::span<const FnLocalReach> locals, con
     return setAside && !out.empty();
 }
 
+// REACH-OUTSIDE-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh RN). reachableByNameFromLocals stamps every local of the
+// name and then filters `ids`, per call — on llvm-project's cold map 14% of the resolve loop, a name holding thousands of
+// function-local definitions. But a call that NO local of the name holds, asking about the name's WHOLE list, always gets
+// the same answer: every local is set aside (all of them are in the list), so it is the list minus its locals. That list is
+// kept per name (`outside`, in list order), and whether a local holds the call is one search of the name's locals sorted by
+// (file, start), with a running maximum of `end` within each file (`holdsEnd`) to stop the backward scan. Any other call
+// (a local holds it, or `ids` is a narrowed list) walks as before, into `scratch`.
+struct ReachOutside
+{
+    struct Name
+    {
+        std::span<const FnLocalReach> locals;    // the name's FnLocalReachIndex rows, list order (the walk's input)
+        std::uint32_t                 first = 0, last = 0;   // byPlace[ first, last ): the same rows by ( fileId, start, end, id )
+        rw::SmallVec<NodeId, 2>       outside;   // the name's list minus its locals, list order
+    };
+    std::vector<FnLocalReach>  byPlace;
+    std::vector<std::uint32_t> holdsEnd;   // parallel to byPlace: the largest `end` from the file's first row of the name to this one
+    std::vector<Name>          names;
+    ankerl::unordered_dense::map<const rw::SmallVec<NodeId, 2>*, std::uint32_t> nameOf;   // a byName entry's address -> names[]
+    mutable AsideMarks              marks;     // the walk's per-call stamps (reachableByNameFromLocals)
+    mutable rw::SmallVec<NodeId, 2> scratch;   // the walk's answer
+    mutable std::size_t             asks = 0, kept = 0;   // RIPWIRE_STATS `[mem] reach_by_name`
+
+    explicit ReachOutside( std::size_t symbolCount ) : marks( symbolCount ) {}
+
+    // does a local of the name hold the call (its file, start <= the call < end)
+    bool anyLocalHolds( const Name& n, const Reference& r ) const
+    {
+        const auto begin = byPlace.begin() + std::ptrdiff_t( n.first );
+        const auto end   = byPlace.begin() + std::ptrdiff_t( n.last );
+        const auto lo    = std::lower_bound( begin, end, r.fileId, []( const FnLocalReach& x, std::uint32_t f ) noexcept { return x.fileId < f; } );
+        const auto hi    = std::upper_bound( lo, end, r.startByte,
+                                             [ & ]( std::uint32_t at, const FnLocalReach& x ) noexcept { return x.fileId != r.fileId || at < x.start; } );
+        for( auto i = hi; i != lo; )
+        {
+            --i;
+            if( holdsEnd[ std::size_t( i - byPlace.begin() ) ] <= r.startByte )
+            {
+                return false;   // no row from the file's first to this one ends past the call
+            }
+            if( i->end > r.startByte )
+            {
+                return true;    // starts at or before the call (hi's bound) and ends past it
+            }
+        }
+        return false;
+    }
+    // reachableByNameFromLocals' answer as the list itself: null = keep `ids` (no local set aside, or nothing left). `nameList`
+    // is the name's whole byName list, `ids` a subset of it.
+    const rw::SmallVec<NodeId, 2>* answer( const rw::SmallVec<NodeId, 2>& nameList, const rw::SmallVec<NodeId, 2>& ids, const Reference& r ) const
+    {
+        const auto at = nameOf.find( &nameList );
+        if( at == nameOf.end() )
+        {
+            return nullptr;   // no local of the name: nothing to set aside
+        }
+        const Name& name = names[ at->second ];
+        ++asks;
+        if( &ids == &nameList && !anyLocalHolds( name, r ) )
+        {
+            ++kept;
+            return name.outside.empty() ? nullptr : &name.outside;
+        }
+        return reachableByNameFromLocals( name.locals, ids, r, marks, scratch ) ? &scratch : nullptr;
+    }
+};
+
 // JVM OWN-LANGUAGE-FIRST — the candidate filter that keeps the Kotlin<->Java bridge from deleting edges.
 //
 // langCompatible admits a Kotlin/Java pair by bare NAME. Past it, the tier ladder resolves a bare call to the same file,
@@ -2828,10 +2913,42 @@ struct ExternalVetoTables
     HashMap<std::string, char>          pythonMultiFileClasses;   // IMPORT-PROVED-SPLITS: pythonMultiFileClassNames, built once per run
 };
 
+// FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
+// stdlib and third-party ones above all), so its answers are memoized per module spelling — per root on a multi-root run,
+// where the answer depends on the importer's root. PY-SUFFIX-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh PS): the
+// module-form file of `import X [as y]` (pythonModuleFormFile, for recordImportBindFile and its def-scoped twin) asks it too —
+// unmemoized it scanned every path once per such import (`import os` in each of llvm-project's Python files: ~1 s of the
+// external-veto tables), so it reads this memo as well.
+struct PythonSuffixMemo
+{
+    const std::vector<std::uint32_t>*   fileRoot = nullptr;
+    HashMap<std::string, std::uint32_t> answers;
+    std::string                         key;
+    std::size_t                         asks = 0, scans = 0;   // RIPWIRE_STATS `[mem] py_suffix asks= scans=` (FE-A's tables only)
+    std::uint32_t resolve( std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex, std::uint32_t importer )
+    {
+        const bool scoped = fileRoot != nullptr && importer < fileRoot->size();
+        key.assign( module );
+        if( scoped )
+        {
+            key.push_back( '\x1f' );
+            Narrower::appendUint( key, ( *fileRoot )[ importer ] );
+        }
+        ++asks;
+        const auto [ it, fresh ] = answers.try_emplace( key, kNoFile );
+        if( fresh )
+        {
+            ++scans;
+            it->second = resolvePythonModuleSuffix( module, fileIndex, fileRoot, importer );
+        }
+        return it->second;
+    }
+};
+
 // the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
 // none or when the record cannot say which (ind4b fix 5, E3) — recordImportBindFile's and PY-LOCAL-BIND's scoped twin's shared reading
 inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                           const std::vector<std::uint32_t>* fileRoot )
+                                           PythonSuffixMemo& memo )
 {
     EXPECTS( !b.typeName.empty(), "typeName.front() below needs a spec: both callers (recordImportBindFile, recordScopedImportBindFile) take bindings buildPythonImportVetoes already filtered for an empty typeName" );
     // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
@@ -2842,7 +2959,7 @@ inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resol
     }
     if( resolved == kNoFile && b.typeName.front() != '.' )
     {
-        return resolvePythonModuleSuffix( b.typeName, fileIndex, fileRoot, b.fileId );   // absolute spec only, root-scoped to b.fileId's own root
+        return memo.resolve( b.typeName, fileIndex, b.fileId );   // absolute spec only, root-scoped to b.fileId's own root (memo.fileRoot)
     }
     return resolved;
 }
@@ -2859,8 +2976,7 @@ inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resol
 // to a same-named file in a WHOLLY UNRELATED root with no import path connecting them).
 inline void recordImportBindFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
                                   const HashMap<std::string, char>& pythonModuleRebind, std::string& key,
-                                  HashMap<std::string, std::uint32_t>& importBindFile,
-                                  const std::vector<std::uint32_t>* fileRoot = nullptr )
+                                  HashMap<std::string, std::uint32_t>& importBindFile, PythonSuffixMemo& memo )
 {
     // Both are the SAME filter buildExternalVetoTables' own loop already applies before calling this (kind
     // != Import, an empty var or an empty typeName all `continue` there) — restated here because `.front()`
@@ -2876,7 +2992,7 @@ inline void recordImportBindFile( const Binding& b, std::uint32_t resolved, cons
     {
         return;   // issue #287 round 2: something else in this file rebinds `b.var` at module scope — never trust the alias
     }
-    const std::uint32_t moduleFile = pythonModuleFormFile( b, resolved, fileIndex, fileRoot );
+    const std::uint32_t moduleFile = pythonModuleFormFile( b, resolved, fileIndex, memo );
     // issue #287 round 3 (review rv-p6.md HIGH): try_emplace runs even when THIS import is unresolved
     // (moduleFile==kNoFile) — an import whose target is outside the indexed tree (stdlib/third-party/
     // unknown) is STILL a rebinding of `b.var`, not an absence of one. Skipping the emplace here (the
@@ -3121,32 +3237,6 @@ struct PythonImportVetoes
     std::vector<std::vector<std::uint32_t>> importFiles;
     PythonScopeFacts                        scopes;
     HashMap<std::string, char>              multiFileClasses;   // pythonMultiFileClassNames (ExternalVetoTables::pythonMultiFileClasses)
-};
-
-// FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
-// stdlib and third-party ones above all), so its answers are memoized per module spelling — per root on a multi-root run,
-// where the answer depends on the importer's root.
-struct PythonSuffixMemo
-{
-    const std::vector<std::uint32_t>*   fileRoot = nullptr;
-    HashMap<std::string, std::uint32_t> answers;
-    std::string                         key;
-    std::uint32_t resolve( std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex, std::uint32_t importer )
-    {
-        const bool scoped = fileRoot != nullptr && importer < fileRoot->size();
-        key.assign( module );
-        if( scoped )
-        {
-            key.push_back( '\x1f' );
-            Narrower::appendUint( key, ( *fileRoot )[ importer ] );
-        }
-        const auto [ it, fresh ] = answers.try_emplace( key, kNoFile );
-        if( fresh )
-        {
-            it->second = resolvePythonModuleSuffix( module, fileIndex, fileRoot, importer );
-        }
-        return it->second;
-    }
 };
 
 // FE-A: record the module FILE a `from m import x [as y]` binding names (ExternalVetoTables::memberImportFile) — Step-A's
@@ -3530,14 +3620,14 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
 
 // PY-LOCAL-BIND: a def-scoped `import X [as y]` into ExternalVetoTables::scopedImportBindFile, keyed "<scope>#y" — the module file
 // recordImportBindFile would read; two that disagree in one def record kNoFile. A from-import is recordSubmoduleBind's.
-inline void recordScopedImportBindFile( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out )
+inline void recordScopedImportBindFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out, PythonSuffixMemo& memo )
 {
     if( b.importedName != "module" )
     {
         return;
     }
-    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, memo );
     const auto [ it, inserted ] = out.try_emplace( fileNameKey( key, scope, b.var ), file );
     if( !inserted && it->second != file )
     {
@@ -3575,11 +3665,11 @@ inline void recordPythonImportFiles( const IngestResult& ing, const Binding& b, 
     const NodeId scope = pythonImportScope( ing, b );
     if( scope == kNoNode )
     {
-        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, memo );   // memo.fileRoot is ing's (buildPythonImportVetoes)
     }
     else
     {
-        recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
+        recordScopedImportBindFile( b, resolved, fileIndex, scope, key, t.scopedImportBindFile, memo );
         t.scopedImportNames.try_emplace( fileNameKey( key, b.fileId, b.var ), '\0' );
     }
     recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
@@ -3622,6 +3712,10 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     t.multiFileClasses   = pythonMultiFileClassNames( ing );
     addPythonMultiFileImportNames( ing, t.multiFileClasses, callees );
     t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] py_suffix asks={} scans={}\n", memo.asks, memo.scans );
+    }
     return t;
 }
 
@@ -8413,7 +8507,8 @@ inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& 
             while( rest.starts_with( "../" ) && !dir.empty() )
             {
                 dir.pop_back();
-                dir.resize( dir.rfind( '/' ) + 1 );   // npos + 1 == 0: the top level
+                const std::size_t slash = dir.rfind( '/' );
+                dir.resize( slash == std::string::npos ? 0 : slash + 1 );   // no `/` left: the top level
                 rest.remove_prefix( 3 );
             }
             const std::string norm = lexicalNormalize( rest );
@@ -8599,7 +8694,8 @@ inline bool rustFnIsProcMacro( std::string_view source, std::uint32_t start )
     {
         std::string_view inner = line.substr( 2, line.find( ']' ) == std::string_view::npos ? std::string_view::npos : line.find( ']' ) - 2 );
         inner.remove_prefix( std::min( inner.find_first_not_of( " \t" ), inner.size() ) );
-        return inner.substr( 0, std::min( inner.find_last_not_of( " \t" ) + 1, inner.size() ) ) == "proc_macro";
+        const std::size_t last = inner.find_last_not_of( " \t" );   // npos on a blank attribute: never npos + 1
+        return last != std::string_view::npos && inner.substr( 0, last + 1 ) == "proc_macro";
     };
     // The def's start may already include its doc comments and attributes (the Rust extent takes the run): read forward to the item line
     for( std::size_t at = std::min<std::size_t>( start, text.size() ); at < text.size(); )
@@ -8697,7 +8793,8 @@ inline bool rustUseTextNames( std::string_view uses, std::string_view name )
             std::string_view rest = uses.substr( after );
             rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
             std::string_view before = uses.substr( 0, at );
-            before.remove_suffix( before.size() - std::min( before.find_last_not_of( " \t" ) + 1, before.size() ) );
+            const std::size_t last = before.find_last_not_of( " \t" );   // npos when only blanks precede: never npos + 1
+            before                 = last == std::string_view::npos ? std::string_view() : before.substr( 0, last + 1 );
             const bool aliasSlot = before.ends_with( "as" ) && ( before.size() == 2 || !isIdent( before[ before.size() - 3 ] ) );
             if( rest.starts_with( "as" ) && rest.size() > 2 && !isIdent( rest[ 2 ] ) )
             {
@@ -10196,6 +10293,8 @@ isBuiltinLiteralCall( const rw::IngestResult& ing, const rw::Reference& r,
 }
 
 // REACH-SPLIT: one row per function-local def with a recorded span (a def without one is never out of reach), per byName entry
+inline ReachOutside buildReachOutside( const FnLocalReachIndex& index, std::size_t symbolCount );   // below
+
 inline FnLocalReachIndex buildFnLocalReachIndex( const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName )
 {
     FnLocalReachIndex index;
@@ -10213,6 +10312,39 @@ inline FnLocalReachIndex buildFnLocalReachIndex( const IngestResult& ing, const 
         if( index.rows.size() > first ) { index.rangeOfName.emplace( &ids, std::pair{ first, std::uint32_t( index.rows.size() ) } ); }
     }
     return index;
+}
+
+// REACH-OUTSIDE-MEMO's per-name lists from REACH-SPLIT's rows (see ReachOutside). A row depends on its symbol alone, so a
+// symbol with a row in any name's range is a local in every list that holds it.
+inline ReachOutside buildReachOutside( const FnLocalReachIndex& index, std::size_t symbolCount )
+{
+    ReachOutside out( index.rows.empty() ? 0 : symbolCount );
+    std::vector<std::uint8_t> hasRow( index.rows.empty() ? 0 : symbolCount, 0 );
+    for( const FnLocalReach& row : index.rows )
+    {
+        hasRow[ row.id ] = 1;
+    }
+    out.names.reserve( index.rangeOfName.size() );
+    for( const auto& named : index.rangeOfName )
+    {
+        const rw::SmallVec<NodeId, 2>* list = named.first;
+        ReachOutside::Name name{ index.localsOf( *list ), std::uint32_t( out.byPlace.size() ), 0, {} };
+        out.byPlace.insert( out.byPlace.end(), name.locals.begin(), name.locals.end() );
+        name.last = std::uint32_t( out.byPlace.size() );
+        const auto placed = out.byPlace.begin() + std::ptrdiff_t( name.first );
+        std::sort( placed, out.byPlace.end(), []( const FnLocalReach& a, const FnLocalReach& b ) noexcept
+                   { return std::tie( a.fileId, a.start, a.end, a.id ) < std::tie( b.fileId, b.start, b.end, b.id ); } );
+        for( auto i = placed; i != out.byPlace.end(); ++i )
+        {
+            const bool fileStart = i == placed || ( i - 1 )->fileId != i->fileId;
+            out.holdsEnd.push_back( fileStart ? i->end : std::max( out.holdsEnd.back(), i->end ) );
+        }
+        std::copy_if( list->begin(), list->end(), std::back_inserter( name.outside ), [ & ]( NodeId c ) { return hasRow[ c ] == 0; } );
+        out.nameOf.emplace( list, std::uint32_t( out.names.size() ) );
+        out.names.push_back( std::move( name ) );
+    }
+    ENSURES( out.byPlace.size() == index.rows.size() && out.holdsEnd.size() == index.rows.size(), "every local row is placed once" );
+    return out;
 }
 
 // NAME-WALKS over the C++ type-alias records (lane M1 2026-11-18). typeAliasTargets is keyed by alias NAME, so one name
@@ -11308,8 +11440,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
     ArgTypeOverloadPick      argTypePick( ing, scopedRecvDecls );   // B2.3: a C++ call's same-arity overloads, by its arguments' declared types
-    rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
-    AsideMarks               reachAside( ing.fnLocalScopes.empty() ? 0 : ing.symbols.size() );   // the name's locals out of this call's reach (reachableByName); unused, and empty, with no function-local def
     // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
     // (L) fix round 1: "<fileId>#<local>" → the in-tree CLASS a TS named import pins (buildJsImportTables), for resultClassOf
     HashMap<std::string, NodeId> jsPinnedClasses;
@@ -12063,6 +12193,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     const FnLocalReachIndex fnLocalReach = buildFnLocalReachIndex( ing, byName );   // the function-local name set (REACH-SPLIT)
+    const ReachOutside      reachOutside = buildReachOutside( fnLocalReach, N );        // + each name's list without its locals (REACH-OUTSIDE-MEMO)
     ENSURES( symLang.size() == N && symKind.size() == N && symFileId.size() == N, "the dense views cover every symbol id the loop can hold" );
 
     // ---- the per-(name, language) candidate memo: work that is invariant across the calls to one name ---------------
@@ -13262,6 +13393,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // FE-A (FalseEdgeRules above): a candidate the language's own name lookup cannot reach leaves the list here, before
         // Rule 3 and the ladder pick from it; a call left with none — or bound to a global or an outside package — is external=.
         const rw::SmallVec<NodeId, 2>* baseIds = namesakeIds;
+        const rw::SmallVec<NodeId, 2>* reachIds = nullptr;   // the list the call can reach by name, when its locals yield
         if( !scipPinned && !canonical && !narrowed && baseIds != nullptr && bindingTier.empty() )
         {
             switch( recvEv.types.rustBareNarrow( r, falseEdges.decide( r, *baseIds, feKept ), *baseIds, feKept, [ & ] { return falseEdges.isLocalOfCaller( r ); } ) )   // + a Rust bare call's `use`
@@ -13282,9 +13414,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // whichever same-named def competes, and yielding would move them from external= into declined=, so such a call
         // resolves exactly as it did before local defs had bodies.
         const bool localsYield = !scipPinned && !canonical && !narrowed && !builtinGated && it != byName.end() && !ing.fnLocalScopes.empty()
-                                 && reachableByNameFromLocals( fnLocalReach.localsOf( it->second ), *baseIds, r, reachAside, reachScratch )
+                                 && ( reachIds = reachOutside.answer( it->second, *baseIds, r ) ) != nullptr
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
-        const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
+        const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? reachIds : baseIds;
         // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
         // included file's definitions join the name-only tier below instead of deciding the call.
         // a QUALIFIED call (`A::m()`, `Storage<D, S>::reset()`) names its scope: that is the canonical tier's evidence axis,
@@ -14441,6 +14573,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         rw::emitTo( stderr, "[mem] alias_walk calls={} pushes={} elements={}\n", aliasWalk.elementCalls, aliasWalk.elementPushes, aliasWalk.elements );
         rw::emitTo( stderr, "[mem] arrow_walk calls={} visits={}\n", aliasWalk.arrowCalls, aliasWalk.arrowVisits );
+        const Narrower::GuardedWalkStats& gw = narrower.guardedWalkStats;
+        rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} cones={} meant_asks={} meant={}\n", gw.calls, gw.walks, gw.cones, narrower.meantAsks, gw.meant );
+        rw::emitTo( stderr, "[mem] guarded_answer asks={} kept={}\n", gw.calls, gw.answered );
+        rw::emitTo( stderr, "[mem] plausible owned_asks={} reads={}\n", narrower.identity.ownedAsks, narrower.identity.plausibleReads );
+        rw::emitTo( stderr, "[mem] base_edges pairs={}\n", narrower.baseEdgePairs );
+        rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
+        rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
+        rw::emitTo( stderr, "[mem] recv_method asks={} walks={} kept={}\n", recvEv.methodAsks, recvEv.methodWalks, recvEv.methodAnswers.size() );
+        rw::emitTo( stderr, "[mem] rust_glob asks={} answers={} reads={} verdicts={}\n", recvEv.types.rustGlobAsks, recvEv.types.rustGlobAnswers, recvEv.types.rustGlobReads, recvEv.types.rustGlobVerdicts );
+        rw::emitTo( stderr, "[mem] reach_by_name asks={} kept={}\n", reachOutside.asks, reachOutside.kept );
+        rw::emitTo( stderr, "[mem] canon_split asks={} keyed={}\n", narrower.identity.canonSplit.asks, narrower.identity.canonSplit.keyed );
+        rw::emitTo( stderr, "[mem] inherited asks={} walks={}\n", narrower.identity.inheritedAsks, narrower.identity.inheritedWalks );
+        rw::emitTo( stderr, "[mem] subclass_walk clause_asks={} clause_reads={} levels={}\n", narrower.identity.clauseAsks, narrower.identity.clauseReads,
+                    narrower.identity.levelsQueued );
     }
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the
@@ -19833,17 +19979,31 @@ inline std::vector<char> provenCallerReach( const Graph& g, std::span<const Node
 // PageRank-only order drops rows of every depth at once, so a capped answer had no clean boundary. Both
 // helpers read transitiveCallersDepth's depthOut; neither walks the graph again.
 //
-// The ORDER: hop depth first (1 = calls a seed directly), then the order the listing always had within a depth
-// (PageRank descending, node id ascending). Ranked BEFORE the page window cuts (docs/METHODOLOGY.md §9.1), so a
+// The ORDER: hop depth first (1 = calls a seed directly), then (IM1) the depth's production rows before its test="1"
+// rows, then PageRank descending, node id ascending. Ranked BEFORE the page window cuts (docs/METHODOLOGY.md §9.1), so a
 // cut drops the deepest rows first and a capped answer is complete through every depth its rows pass.
-inline void orderByDepthThenRank( std::vector<NodeId>& show, const std::vector<std::uint32_t>& depth, const std::vector<float>& rank )
+// IM1 (test/impactfirstwindowcheck.sh; was orderByDepthThenRank): PageRank alone let a test helper many tests call out-rank a production caller at
+// the same depth, so a depth's tests filled the 40-row window ahead of its production rows (django --impact=salted_hmac:
+// two depth-3 production files past row 40). The test key is isTestSymbol, the predicate behind the row's test="1", so a
+// reader sees the order it is told; nothing is dropped. It is read once per reached row, never inside the comparator.
+inline void orderImpactRows( const IngestResult& ing, std::vector<NodeId>& show, const std::vector<std::uint32_t>& depth, const std::vector<float>& rank )
 {
     EXPECTS( depth.size() == rank.size(), "depth and rank are both indexed by node id" );
+    std::vector<char> isTest( depth.size(), 0 );   // indexed by node id; set for the reached rows only
+    for( const NodeId n : show )
+    {
+        EXPECTS( n < isTest.size(), "a reached row is a node of the graph" );
+        isTest[ n ] = char( isTestSymbol( ing, n ) );
+    }
     std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b )
                {
                    if( depth[a] != depth[b] )
                    {
                        return depth[a] < depth[b];
+                   }
+                   if( isTest[a] != isTest[b] )
+                   {
+                       return isTest[a] < isTest[b];
                    }
                    return rank[a] != rank[b] ? rank[a] > rank[b] : a < b;
                } );

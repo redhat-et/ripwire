@@ -514,9 +514,27 @@ for pair in callers:count impact:reaches uses:defs; do
         no "control --$verb=Box::grow answered $attr='$got' — the contrast below would be vacuous"
         continue
     fi
-    [ "$T" = "$P" ] \
-        && ok "templ: --$verb=Box::grow byte-identical to the control ($attr=\"$got\")" \
+    # RE-PINNED 2026-11-18 at the 0.6.11 batch integration (lane V1, VERB-DEF-ROWS): every answer whose selector resolves
+    # a definition group now prints the <def> table, and a declaration TIED to the definition by edit-check's identity rule
+    # gets its own <def … bodyless="1"/> row. That rule ties the control's `void grow();` to `void Box::grow()` but does
+    # NOT tie the template member's declaration to `template <class T> void Box<T>::grow()` (an untied declaration stays
+    # silent, by V1's frozen rule), so the two answers now differ by exactly that one row and the present-only legend
+    # reading it brings. This arm compares the answer element with bodyless <def> rows masked on BOTH sides (the join this
+    # gate is about: defs=, counts, rows, the definition row); the KNOWN-GAP arm below states the difference and goes red
+    # if it changes shape, so tying template member declarations (the identity-rule follow-up V1 lists) restores the
+    # byte-identity here by deleting the mask, not by guessing.
+    nodecl(){ el "$1" | sed -e 's#<def [^>]*bodyless="1"/>##g'; }
+    [ -n "$( nodecl "$T" )" ] && [ "$( nodecl "$T" )" = "$( nodecl "$P" )" ] \
+        && ok "templ: --$verb=Box::grow identical to the control's answer element, bodyless <def> rows masked ($attr=\"$got\")" \
         || no "templ: --$verb=Box::grow differs from the control — control: $( el "$P" ) — templ: $( el "$T" )"
+    pd="$( el "$P" | grep -oE '<def [^>]*bodyless="1"/>' | tr -d '\n' )"; td="$( el "$T" | grep -oE '<def [^>]*bodyless="1"/>' | tr -d '\n' )"
+    # Since BX1 FIX 7 (b32349df7, merged in the same batch) an UNTIED declaration is no longer silent: it is listed after the
+    # groups with an ix= past them (graphlegend.h kUntiedDeclRowLegend), so the template answer names box.hpp:3 as ix="2".
+    if [ "$pd" = '<def ix="1" t="method" sc="Box" p="box.hpp:3" bodyless="1"/>' ] && [ "$td" = '<def ix="2" t="method" sc="Box" p="box.hpp:3" bodyless="1"/>' ]; then
+        ok "KNOWN GAP (--$verb): the control ties its declaration (box.hpp:3, ix=1); the template member's declaration is untied, listed as ix=2 (BX1 FIX 7)"
+    else
+        no "KNOWN GAP (--$verb) changed shape: control bodyless rows [$pd], templ [$td] — if the template declaration is now tied, drop the mask above"
+    fi
 done
 run plain --pin-census="$TMP/plain.tsv" --no-cache >/dev/null
 run templ --pin-census="$TMP/templ.tsv" --no-cache >/dev/null

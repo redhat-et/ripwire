@@ -162,14 +162,20 @@ PB="$( printf '%s' "$P2ROOT" | attr partition_budget_tokens )"
 
 # (1e) modules + split == the group count the bundles were packed from, on a corpus where the split FIRES
 #      (few modules, many partitions requested) — the arithmetic the legend now asserts.
-"$BIN" "$ROOT/test/zoomfix" --pack-task="engine run scheduler" --partition=16 >"$TMP/zp" 2>/dev/null
+#      The task is the corpus's operating point, not the property: the arm needs a surface the partitioner CANNOT fill
+#      16 ways, so both clauses (the sum, and partitions < requested) are exercised. "engine run scheduler" was that point
+#      until the 0.7.0 pack-task head grew its surface on this fixture from 17 to 22 symbols (main 785143c89: modules=9
+#      split=2 partitions=11; 25b5a9eb7: modules=9 split=7 partitions=16 = requested, so the second clause had nothing to
+#      bite on). "run scheduler" on 25b5a9eb7 reproduces main's operating point exactly (surface 17, modules 9, split 2,
+#      partitions 11). The failure branch below still fires if the split stops firing or reaches the request again.
+"$BIN" "$ROOT/test/zoomfix" --pack-task="run scheduler" --partition=16 >"$TMP/zp" 2>/dev/null
 ZR="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/zp" )"
 ZP="$( printf '%s' "$ZR" | attr partitions )";  ZQ="$( printf '%s' "$ZR" | attr requested )"
 ZM="$( printf '%s' "$ZR" | attr modules )";     ZS="$( printf '%s' "$ZR" | attr split )"
-if [ -n "$ZM" ] && [ "$(( ZM + ZS ))" = "$ZP" ] && [ "$ZP" -lt "$ZQ" ]; then
+if [ -n "$ZM" ] && [ "${ZS:-0}" -ge 1 ] && [ "$(( ZM + ZS ))" = "$ZP" ] && [ "$ZP" -lt "$ZQ" ]; then
     ok "K<N: modules($ZM) + split($ZS) == partitions($ZP), and partitions < requested($ZQ) — both legend clauses hold"
 else
-    no "modules+split != partitions on the K<N corpus (modules=${ZM:-<none>} split=${ZS:-<none>} partitions=${ZP:-<none>} requested=${ZQ:-<none>})"
+    no "modules+split != partitions, the split did not fire, or partitions reached the request on the K<N corpus (modules=${ZM:-<none>} split=${ZS:-<none>} partitions=${ZP:-<none>} requested=${ZQ:-<none>})"
 fi
 
 # (1g) THE TEXT. The numbers above were already right before this fix — only the SENTENCE describing them was
@@ -308,7 +314,9 @@ i=1; while [ $i -le 30 ]; do printf 'int coreFn();\nint t%02d_main(){ return cor
 S2LINE="$( grep -E '^  \[2\]' "$TMP/situ30" || true )"
 # E1 (2026-09-12): runner-less rows sharing their evidence ride ONE `[hops=N] (n): a, b, …` line, so the
 # count is of PATHS (occurrences), not lines — `grep -c` would count the 30 tests as 1.
-S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | grep -o 'test/t[0-9]*\.cpp' | wc -l | tr -d ' ' || true )"
+# PATH-FOLD (2026-11-18): thirty siblings fold (`(30 folded): test/{t1,t10,…}.cpp`), so a full path is no longer a
+# substring of the raw line — the rows are read through the shared reader, which expands a folded line.
+S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | python3 "$ROOT/test/testrowpaths.py" paths text | grep -c '^test/t[0-9]*\.cpp$' || true )"
 case "$S2LINE" in
     *"showing "*" of "*) no "situ [2] still discloses a cut on its ANSWER rows (the 25-row cap was retired): $S2LINE";;
     *"(30)"*)             ok "situ [2]: '(30)' with no cut disclosed — answer rows never page";;

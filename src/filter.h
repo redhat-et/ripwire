@@ -644,6 +644,55 @@ inline const char* shapeDocTierTag( const queryshape::Verdict& shape ) noexcept
     return kDocTierTags[ ( shape.trace ? 1u : 0u ) | ( shape.bugReport ? 2u : 0u ) ];
 }
 
+// The EVIDENCE tier's per-file verdict (kVendoredBundleLineBytes above): 1 for a file holding any def whose own span crams the
+// bundle floor onto each of its lines. Lifted out of rankTierSymbolMultipliersShaped so --lint's order (verbs_lint.h
+// lintShippedFiles) reads the SAME verdict the ranking lenses demote by, not a second copy of the rule.
+inline std::vector<char> vendoredBundleFiles( const IngestResult& ing )
+{
+    std::vector<char> bundle( ing.files.size(), 0 );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.loc == 0 || s.endByte <= s.sigStartByte || s.fileId >= bundle.size() )
+        {
+            continue; // loc==0 is Symbol's own default (never-measured — a def path off ingest.cpp's own
+                       // extractor always leaves loc>=1); guards the division below, not a kind filter.
+        }
+        if( ( s.endByte - s.sigStartByte ) / s.loc >= kVendoredBundleLineBytes )
+        {
+            bundle[s.fileId] = 1;
+        }
+    }
+    return bundle;
+}
+
+// Each file's 1-based place in a symbol ranking, by its best symbol's score — the order the map prints its file groups in
+// (serialize.h: files ordered by their best, first-seen rank; ties by id, radixSortByScoreDescId). 0: no symbol of the file
+// has a positive score. Lifted from forrowfeatures.h (the row-feature dump's file place) so --lint's order reads the map's
+// own file centrality rather than a new score.
+inline std::vector<std::uint32_t> fileRanks( const IngestResult& ing, const std::vector<float>& rank )
+{
+    std::vector<float> best( ing.files.size(), 0.0f );
+    for( std::size_t i = 0; i < ing.symbols.size() && i < rank.size(); ++i )
+    {
+        if( const std::uint32_t f = ing.symbols[i].fileId; f < best.size() )   // a file id past the table has no rank, and no slot
+        {
+            best[f] = std::max( best[f], rank[i] );
+        }
+    }
+    std::vector<std::uint32_t> files( best.size() );
+    for( std::uint32_t f = 0; f < files.size(); ++f )
+    {
+        files[f] = f;
+    }
+    rw::sortutil::radixSortByScoreDescId( files, best );
+    std::vector<std::uint32_t> out( best.size(), 0 );
+    for( std::size_t k = 0; k < files.size() && best[files[k]] > 0.0f; ++k )
+    {
+        out[files[k]] = std::uint32_t( k + 1 );
+    }
+    return out;
+}
+
 // tier factors fanned out per def, via each def's file (every entry in (0,1] — shrink-only keeps the
 // MaxScore bound in lexical.h safe, same argument as its Section down-weight).
 // demoteDocTier: the shape-conditional document factor above, folded into the SAME per-file pass rather
@@ -668,17 +717,13 @@ inline std::vector<float> rankTierSymbolMultipliersShaped( const IngestResult& i
     }
 
     // then the EVIDENCE tier above: any def whose own span trips the bundle floor demotes its whole file.
-    for( const Symbol& s : ing.symbols )
+    const std::vector<char> bundle = vendoredBundleFiles( ing );
+    for( std::size_t f = 0; f < fileMul.size(); ++f )
     {
-        if( s.loc == 0 || s.endByte <= s.sigStartByte || s.fileId >= fileMul.size() )
-        {
-            continue; // loc==0 is Symbol's own default (never-measured — a def path off ingest.cpp's own
-                       // extractor always leaves loc>=1); guards the division below, not a kind filter.
-        }
-        if( ( s.endByte - s.sigStartByte ) / s.loc >= kVendoredBundleLineBytes )
+        if( bundle[f] != 0 )
         {
             // min(), not assignment — a file a PATH rule already demoted further must never be lifted up.
-            fileMul[s.fileId] = std::min( fileMul[s.fileId], kRankTierDemoMul );
+            fileMul[f] = std::min( fileMul[f], kRankTierDemoMul );
         }
     }
 

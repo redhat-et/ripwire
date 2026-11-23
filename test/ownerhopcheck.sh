@@ -74,7 +74,7 @@
 #   (C/scoped) the first cut owner is a method with a same-named free function in its file (scope: Bus.notify vs
 #        notify): next= is the canonical --callees=app/bus.py::Bus::notify, and pasting it resolves defs="1" (the
 #        FILE:NAME form merges both: premise defs >= 2).
-#   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4000
+#   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4100
 #        (less room than the owner row needs) the owner is first or named by qword_cut + next=;
 #        --token-budget=1200 (ceiling spent, reason="budget"): byte-identical to the A/B handle. (B3) a budget sweep
 #        on broadcast: every owner row it serves is disclosed (capped="1" + next=), an absent one is disclosed
@@ -93,6 +93,10 @@
 # Exit: 0 all PASS (named SKIPs allowed), 1 any FAIL, 2 missing prerequisite.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
@@ -145,6 +149,66 @@ J(){ python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(eval(sys
 ndup=0
 HJ(){ H hops "$1" >"$2"; local d; d="$( J "d['dups']" <"$2" )"; ndup=$((ndup+1))
       if [ "$d" != "[]" ]; then no "(D) $3: an <h> row appears twice (owner moved AND left in place): $d"; fi; }
+
+# K2SAME ON OFF — <sigs>/<tail> of ON equal OFF's (the A/B handle) once the rows SIBLING-DEMOTE's K2 keep guard restores BECAUSE OF AN
+# OWNER ROW are mapped back to their pointer form. Prints "SAME <n restored>" or "DIFF <why>".
+# WHY (lane FS2, 2026-11-22, orchestrator ruling: option (i)). K2 (src/forsiblingdemote.h, rule (K2) HOP-CALLEE) keeps a demotable
+# same-file sibling as a full <d> row when its name, or its last segment, is a callee <c n=> under ANY <h> row of the answer — owner
+# rows included. So an owner row can turn the A/B handle's `<t p="P" sym="N" r="R"/>` into `<d ... n="N" p="P" ... r="R" .../>`: the
+# same row, rank and place, printed whole because the answer now names it as a callee. LP1's basename ranking (4ba1fdec6) made this
+# happen on the ts fixture (test/gateway.test.ts's encode, r=38, a via="name" callee of the gateway owner row). That is the one
+# difference allowed, and only exactly: the OFF row must be that pointer, byte for byte; N must be a callee of an owner row
+# (qword=) in ON and of NO <h> row in OFF (else K2 would keep it there too); the ON row must be a <d> with the same n=, p= and r=.
+# Every other byte still compares. The control (R/K2-control) below proves the allowance cannot pass a full row no owner names.
+cat > "$TMP/k2same.py" <<'PY'
+import re, sys
+on, off = ( open( f, encoding = "utf-8" ).read() for f in sys.argv[ 1:3 ] )
+sect = lambda x, t: ( re.search( r'<%s[ >].*?</%s>' % ( t, t ), x, re.S ) or [ None ] )[ 0 ]
+def callees( x, owners_only ):
+    m = re.search( r'<hops\b.*?</hops>', x, re.S ); names = set()
+    for h in re.finditer( r'<h ([^>]*)>(.*?)</h>', m.group( 0 ) if m else "", re.S ):
+        if owners_only and ' qword="' not in ' ' + h.group( 1 ): continue
+        for n in re.findall( r'<c [^>]*?\bn="([^"]*)"', h.group( 2 ) ):
+            names.add( n ); names.add( re.split( r'\.|::', n )[ -1 ] )
+    return names
+own_on, any_off = callees( on, True ), callees( off, False )
+A = lambda tag, k: ( re.search( r'\b%s="([^"]*)"' % k, tag ) or [ None, None ] )[ 1 ]
+son, soff = sect( on, "sigs" ), sect( off, "sigs" )
+if son is None or soff is None: print( "DIFF a <sigs> section is absent" ); sys.exit()
+restored = 0
+def back( m ):
+    global restored
+    tag = m.group( 0 ); n, p, r = A( tag, "n" ), A( tag, "p" ), A( tag, "r" )
+    ptr = '<t p="%s" sym="%s" r="%s"/>' % ( p, n, r )
+    last = re.split( r'\.|::', n or "" )[ -1 ]
+    if n and ptr in soff and ( n in own_on or last in own_on ) and n not in any_off and last not in any_off:
+        restored += 1; return ptr
+    return tag
+son2 = re.sub( r'<d [^>]*/>|<d [^>]*>.*?</d>', back, son, flags = re.S )
+if son2 == soff and sect( on, "tail" ) == sect( off, "tail" ): print( "SAME %d" % restored )
+else: print( "DIFF <sigs>/<tail> differ beyond the owner-named K2 rows (%d mapped back)" % restored )
+PY
+K2SAME(){ python3 "$TMP/k2same.py" "$1" "$2"; }
+# B2K2 ON OFF UON UOFF — (B2)'s spent budget sheds the UNBUDGETED answer (TOKEN-BUDGET-MONOTONE), whose K2 verdicts were taken with
+# the owner row present. So a row K2 restored in the unbudgeted answer (UON vs UOFF: the (R) QTS pair) can be cut by the budget,
+# and the shed's docs_dropped= bookkeeping (forbudgetfit.h: shown rows without a <doc>) then reads that cut doc-less row on one
+# side only. Allowed, exactly: the budgeted <sigs>/<tail> are byte-identical with docs_dropped= masked; its two values differ by
+# at most the number of owner-named K2 rows K2SAME maps back on the unbudgeted pair; and that number is >= 1 whenever they differ.
+B2K2(){ python3 - "$@" <<'PY'
+import re, subprocess, sys
+on, off = ( open( f, encoding = "utf-8" ).read() for f in sys.argv[ 1:3 ] )
+sect = lambda x, t: ( re.search( r'<%s[ >].*?</%s>' % ( t, t ), x, re.S ) or [ "" ] )[ 0 ]
+dd = lambda x: int( ( re.search( r'<sigs [^>]*?\bdocs_dropped="(\d+)"', x ) or [ 0, "0" ] )[ 1 ] )
+mask = lambda x: re.sub( r' docs_dropped="\d+"', '', x )
+if not sect( on, "sigs" ) or mask( sect( on, "sigs" ) ) != mask( sect( off, "sigs" ) ) or sect( on, "tail" ) != sect( off, "tail" ):
+    print( "DIFF <sigs>/<tail> differ beyond docs_dropped=" ); sys.exit()
+delta = abs( dd( on ) - dd( off ) )
+if delta == 0: print( "SAME 0" ); sys.exit()
+k2 = subprocess.run( [ "python3", sys.argv[ 5 ], sys.argv[ 3 ], sys.argv[ 4 ] ], capture_output = True, text = True ).stdout.split() if len( sys.argv ) > 4 and sys.argv[ 3 ] else []
+n = int( k2[ 1 ] ) if len( k2 ) == 2 and k2[ 0 ] == "SAME" else 0
+print( "SAME %d" % delta if 1 <= delta <= n else "DIFF docs_dropped= differs by %d with %d owner-named K2 row(s) on the unbudgeted pair" % ( delta, n ) )
+PY
+}
 
 # ── premises: the fixture still reproduces the gap (rank beyond the 6-cap, inside the head tier) ──────────────────────
 QTS="How does the gateway check a session token?"
@@ -400,9 +464,31 @@ PY
         if [ "$mode" = exact ]; then ok "(R/$r) '$q': every A/B <h> row is still served, exactly the same calls, same order"
         else ok "(R/prefix) '$q': a moved owner frees budget — every A/B <h> row is still served, its calls a prefix, >= 1 row gains names"; fi
     else no "(R/$mode/$r) '$q': $res"; fi
-    if [ "$( SECTS "$on" )" = "$( SECTS "$off" )" ] && [ "$( SECTS "$off" )" != "[]" ]; then ok "(R/sigs/$r) '$q': <sigs>/<tail> byte-identical to the A/B handle"
-    else no "(R/sigs/$r) '$q': <sigs>/<tail> differ from the A/B handle (or are absent)"; fi
+    k2="$( K2SAME "$on" "$off" )"
+    if [ "${k2%% *}" = SAME ] && [ "$( SECTS "$off" )" != "[]" ]; then
+        ok "(R/sigs/$r) '$q': <sigs>/<tail> byte-identical to the A/B handle but for ${k2#SAME } owner-named K2 row(s)"
+        [ "$mode|$r" = "exact|ts" ] && [ "$q" = "$QTS" ] && K2_ON="$on" && K2_OFF="$off"
+    else no "(R/sigs/$r) '$q': <sigs>/<tail> differ from the A/B handle (or are absent): $k2"; fi
 done
+# (R/K2-control) the K2 allowance in K2SAME cannot pass a full row no owner row names: on the (R) QTS pair, one of the A/B handle's
+# pointers whose sym= no owner row lists is printed whole in a copy of the head answer — K2SAME must say DIFF. And the head answer
+# itself must still pass with the owner-named row(s) mapped back, so the control is the only thing that changed.
+if [ -n "${K2_ON:-}" ] && [ -n "${K2_OFF:-}" ]; then
+    ctl="$( python3 - "$K2_ON" "$K2_OFF" "$TMP/k2ctl.xml" <<'PY'
+import re, sys
+on, off = ( open( f, encoding = "utf-8" ).read() for f in sys.argv[ 1:3 ] )
+m = re.search( r'<hops\b.*?</hops>', on, re.S ); hops = m.group( 0 ) if m else ""
+named = set( re.findall( r'<c [^>]*?\bn="([^"]*)"', hops ) )
+for t in re.finditer( r'<t p="([^"]*)" sym="([^"]*)" r="(\d+)"/>', ( re.search( r'<sigs[ >].*?</sigs>', off, re.S ) or [ "" ] )[ 0 ] ):
+    if t.group( 2 ) not in named and t.group( 0 ) in on:
+        open( sys.argv[ 3 ], "w", encoding = "utf-8" ).write( on.replace( t.group( 0 ), '<d l="1" n="%s" p="%s" r="%s"/>' % ( t.group( 2 ), t.group( 1 ), t.group( 3 ) ), 1 ) )
+        print( t.group( 2 ) ); break
+PY
+)"
+    if [ -n "$ctl" ] && [ "$( K2SAME "$TMP/k2ctl.xml" "$K2_OFF" | cut -d' ' -f1 )" = DIFF ] && [ "$( K2SAME "$K2_ON" "$K2_OFF" | cut -d' ' -f1 )" = SAME ]; then
+        ok "(R/K2-control) a pointer no owner row names ($ctl), printed whole, fails K2SAME; the real head answer passes it"
+    else no "(R/K2-control) the K2 allowance is not live: control row '${ctl:-none found}' (want DIFF on the mutant, SAME on the head answer)"; fi
+else no "(R/K2-control) no (R) QTS on/off pair to run the control on"; fi
 # ── (S) the via="name" clause the owner rows alone switch on never costs <sigs> a row (CHANGES 1 of the review) ──────────
 # The header asks "may a <calls> row carry via=name?" over the hop ids AND the owner rows. When only an owner row answers
 # yes, the clause is the owner rows' disclosure: exempt from the sig trim like the qword clause, so <sigs>/<tail> stay the
@@ -433,8 +519,8 @@ sys.exit( 0 if a and b and b[ :len( a ) ] == a and 'over_ceiling="1"' not in ope
 PY
         then ok "(S/$dia '$q' $extra) soft target: the owner rows (a section, reserved first) leave <sigs> a rank prefix of the A/B handle's, no over_ceiling"
         else no "(S/$dia '$q' $extra) soft target: <sigs> is not a rank prefix of the A/B handle's: $( grep -o '<sigs [^>]*>' "$on" | cut -c1-80 ) vs $( grep -o '<sigs [^>]*>' "$off" | cut -c1-80 )"; fi
-    elif [ "$( SECTS "$on" )" = "$( SECTS "$off" )" ] && [ "$( SECTS "$off" )" != "[]" ]; then
-        ok "(S/$dia '$q'${extra:+ $extra}) the owner rows' via=\"name\" clause costs <sigs>/<tail> nothing (byte-identical to the A/B handle)"
+    elif k2="$( K2SAME "$on" "$off" )" && [ "${k2%% *}" = SAME ] && [ "$( SECTS "$off" )" != "[]" ]; then
+        ok "(S/$dia '$q'${extra:+ $extra}) the owner rows' via=\"name\" clause costs <sigs>/<tail> nothing (byte-identical to the A/B handle but for ${k2#SAME } owner-named K2 row(s))"
     else no "(S/$dia '$q'${extra:+ $extra}) <sigs>/<tail> differ from the A/B handle: $( grep -o '<sigs [^>]*>' "$on" ) vs $( grep -o '<sigs [^>]*>' "$off" )"; fi
 done
 for spec in "ts|How does the team review pull requests?" "c|How does the log walk the process tables?"; do
@@ -460,12 +546,17 @@ if ran_ok "$f" "(B1)"; then
     else no "(B1) est_tokens missing or not numeric ('$est')"; fi
 fi
 # (B1b) a ceiling that leaves the owner less than its row: the owner is still first, or its cut is disclosed by name
-f="$TMP/ts.b4.xml"; run ts "$f" "--for=$QTS" --token-budget=4000
+# RE-ANCHOR 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW): 4000 -> 4100. A size-derived threshold,
+# not an owner-hop change: at weight 1 the rows the hops are shed from cost more (est_tokens 3956 with every hop shed, 3825 at
+# weight 0), so 4000 and 4050 now shed all seven hops (shown="0" capped="1" next=, disclosed — B3 holds), and the first budget
+# that funds exactly the owner row (shown="1", gateway, hops:6 shed) is 4100 — the shape weight 0 had at 4000. Measured on this
+# fixture at weights 0/1/2: 4100 serves gateway first at each (shown 2/1/2).
+f="$TMP/ts.b4.xml"; run ts "$f" "--for=$QTS" --token-budget=4100
 if ran_ok "$f" "(B1b)"; then
     HJ "$f" "$TMP/ts.b4.json" "(B1b)"
     got="$( J "('row' if d['rows'] and d['rows'][0]['n']=='gateway' and d['rows'][0].get('qword')=='gateway' else 'cut' if (d['hops'] or {}).get('next')=='--callees=src/middleware/gateway.ts:gateway' and (d['hops'] or {}).get('qword_cut','0')!='0' else '')" <"$TMP/ts.b4.json" )"
-    if [ "$got" = row ] || [ "$got" = cut ] || grep -q 'reason="budget"' "$f"; then ok "(B1b) --token-budget=4000: the owner is first or disclosed ($got)"
-    else no "(B1b) --token-budget=4000: gateway neither the first owner row nor named by qword_cut/next= ($got)"; fi
+    if [ "$got" = row ] || [ "$got" = cut ] || grep -q 'reason="budget"' "$f"; then ok "(B1b) --token-budget=4100: the owner is first or disclosed ($got)"
+    else no "(B1b) --token-budget=4100: gateway neither the first owner row nor named by qword_cut/next= ($got)"; fi
 fi
 # forbudget-soft round C (rule 4): sections are funded from the rows at the soft target's cut (reserve first), so 1200 tokens
 # now leaves the hops a share; re-anchored at 700, the widest budget that still exhausts it (measured: 700 budget, 900 not)
@@ -485,9 +576,10 @@ a, b = ( open( p, encoding = "utf-8" ).read() for p in sys.argv[ 1: ] )
 el = lambda t, n: ( re.search( r'<%s[ >].*?</%s>|<%s [^>]*/>' % ( n, n, n ), t, re.S ) or [ "" ] )[ 0 ]
 h = re.search( r'<hops [^>]*>', a )
 sys.exit( 0 if h and 'shown="0"' in h.group( 0 ) and ' next="' in h.group( 0 ) and "qword=" not in a.split( "-->" )[ -1 ]
-          and el( a, "sigs" ) == el( b, "sigs" ) and el( a, "tail" ) == el( b, "tail" ) else 1 )
+          else 1 )
 PY
-    then ok "(B2) spent budget: the hops are shed whole (no owner row), <sigs>/<tail> equal the A/B handle's"; else no "(B2) spent-budget answer: an owner row rides, or <sigs>/<tail> changed"; fi
+    then b2ok=1; b2="$( B2K2 "$on" "$off" "${K2_ON:-}" "${K2_OFF:-}" "$TMP/k2same.py" )"; [ "${b2%% *}" = SAME ] || b2ok=0; else b2ok=0; b2="the hops are not shed whole"; fi
+    if [ "$b2ok" = 1 ]; then ok "(B2) spent budget: the hops are shed whole (no owner row), <sigs>/<tail> equal the A/B handle's (docs_dropped= delta ${b2#SAME }, owner-named K2 rows only)"; else no "(B2) spent-budget answer: an owner row rides, or <sigs>/<tail> changed: $b2"; fi
 fi
 # (B3) a budget sweep on the 105-callee owner: no budget may drop callee names silently
 qb3="How does broadcast send an event?"; partial=0; seen=0; bad=""

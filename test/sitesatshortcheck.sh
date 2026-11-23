@@ -147,7 +147,9 @@ for d in c go py cap; do
     if out="$( recon uses "$TMP/$d.callers.xml" "$TMP/$d.uses.xml" 1 )"; then ok "(C) $d: every bare line + its row's p= file is a role=call site, and none is missing"
     else no "(C) $d vs --uses:"; printf '%s\n' "$out" | head -6 | sed 's/^/        /'; fi
     # and the uses document itself did not move: it is the reference, so it must be the one the golden binary printed
-    if [ "$( sed 's/<!--.*-->//' "$TMP/$d.uses.xml" )" = "$( sed 's/<!--.*-->//' "$GOLD/$d.uses.xml" )" ]; then ok "(C) $d: the --uses rows are byte-identical to the pre-change binary's"
+    # RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; test/verbdefrowscheck.sh): --uses now leads with its <def> rows, which
+    # this arm does not measure; they are stripped before the comparison, so every use-site row must still be the golden's.
+    if [ "$( sed 's/<!--.*-->//; s/<def [^>]*\/>//g' "$TMP/$d.uses.xml" )" = "$( sed 's/<!--.*-->//' "$GOLD/$d.uses.xml" )" ]; then ok "(C) $d: the --uses rows are byte-identical to the pre-change binary's"
     else no "(C) $d: the --uses rows moved; this change must not touch them"; fi
 done
 

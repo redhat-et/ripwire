@@ -104,6 +104,21 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW; rule 4): docdemotegolden_for.xml 6326 -> 6326 B
+# (est_tokens unchanged). At weight 1 the basename no longer outweighs pin_page's own text: PageCache.pin_page is r=1 again and
+# evict_one r=2 (the pre-basename order), confidence/margin_pct/coverage re-read (76 -> 77, 33 -> 35) and the act line lists the
+# two reads in that order. Mechanically: the same call under RIPWIRE_BASENAME_W=2 is the previous golden byte for byte.
+# RE-PIN 2026-11-22 (lane FS2; rule 4): docdemotegolden_for.xml 6053 -> 6326 B (est_tokens "2423" -> "2530"), two intended 0.7.0 train
+# changes, each proven separately. (1) LP1 (4ba1fdec6) kForBasenameFieldW=2: the query word "evictor" now meets src/evictor.py's
+# basename, so evict_one rises to r=1 over PageCache.pin_page (r=2), and confidence/margin_pct/coverage re-read (78 -> 76, 36 -> 33).
+# (2) BR1B (53824ea8a) the act line: <act read="src/evictor.py:4-11,src/pagecache.py:12-14,src/pagecache.py:4-29"/> and its clause.
+# Mechanically: the same call under RIPWIRE_NO_ACTLINE=1 RIPWIRE_BASENAME_W=0 is the previous golden byte for byte; under
+# RIPWIRE_BASENAME_W=0 alone it is the previous golden plus the act element and clause only (est_tokens masked); and the new capture
+# minus the act line is the RIPWIRE_NO_ACTLINE=1 capture. No demotion byte moved; (g) and (h) are unchanged.
+# RE-PIN 2026-11-18 (lane AF4 T-C, pointer kind as ptr=; rule 4): docdemotegolden_for.xml 6040 -> 6053 B (est_tokens "2418" -> "2423")
+# and docdemotegolden_noroute.xml 9550 -> 9563 B ("3387" -> "3392"). The whole diff, read mechanically: est_tokens= and the demote
+# legend's wording "a <t> in sigs is" -> "a <t> in sigs with no ptr= is" (13 B); no row, rank, pointer or comment position moved
+# (these are demote-only answers, so no pointer gains ptr=).
 # RE-PIN 2026-11-17 (BAND BC, lane body-callee-file; rule 4): docdemotegolden_noroute.xml 9514 -> 9558 B (est_tokens "3369" -> "3387"). The whole diff,
 # read mechanically: est_tokens= and 44 B of the auto-bundle legend, whose bodies clause now reads "callee signatures (c p= their file when it
 # is not the body's)". No row, rank or route byte moved: a fixture whose <c> rows are all same-file prints no p=.

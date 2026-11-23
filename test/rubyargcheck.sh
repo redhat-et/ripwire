@@ -130,8 +130,8 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/dynamic.rb"' \
     && no "mutation control: dynamic.rb has a --deps row — a non-constant argument or rescue was captured: $( incs lib/app/dynamic.rb )" \
     || ok 'mutation control: identifier / string / `repo::Finder` / `self.class` arguments and bare or identifier rescues yield NOTHING'
 
-# ── 2. RESOLUTION + LAZY: --impact's importer tier (`<f via="import" p= lazy=>`, uncapped, path order) ──────
-importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f via="import" p="[^"]*" lazy="[01]"/>' | tr '\n' ' '; }
+# ── 2. RESOLUTION + LAZY: --impact's importer tier (`<f p=>`, `lazy="1"` on a lazy one; no lazy= reads lazy="0", uncapped, path order) ──────
+importers(){ "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -oE '<f p="[^"]*"( lazy="1")?/>' | tr '\n' ' '; }
 expect(){ # expect SYM 'rows'  — exact importer set
     local got; got="$( importers "$1" )"
     if [ "$got" = "$2" ]; then
@@ -143,24 +143,24 @@ expect(){ # expect SYM 'rows'  — exact importer set
 # The importer tier is per FILE (the files that import a file defining SYM), so Boom and Bust — both in errors.rb —
 # share one importer set; lazy= is per (importer, errors.rb) pair. floor.rb and admin/audit.rb name errors.rb nowhere.
 expect lib/app/errors.rb:Boom \
-    '<f via="import" p="lib/app/mixed.rb" lazy="0"/> <f via="import" p="lib/app/rescue_at_load.rb" lazy="1"/> <f via="import" p="lib/app/service.rb" lazy="1"/> <f via="import" p="lib/script.rb" lazy="0"/> ' \
+    '<f p="lib/app/mixed.rb"/> <f p="lib/app/rescue_at_load.rb" lazy="1"/> <f p="lib/app/service.rb" lazy="1"/> <f p="lib/script.rb"/> ' \
     'resolve: errors.rb is reached by `raise`/`rescue` in a method (service, lazy="1"), a file-level `raise` (script, lazy="0") and the two Bust files; the floor and admin files name it nowhere'
 expect lib/app/admin/errors.rb:Boom \
-    '<f via="import" p="lib/app/admin/audit.rb" lazy="1"/> ' \
+    '<f p="lib/app/admin/audit.rb" lazy="1"/> ' \
     'resolve: LEXICAL — `raise Errors::Boom` inside App::Admin lands on App::Admin::Errors::Boom'
 expect Bust \
-    '<f via="import" p="lib/app/mixed.rb" lazy="0"/> <f via="import" p="lib/app/rescue_at_load.rb" lazy="1"/> <f via="import" p="lib/app/service.rb" lazy="1"/> <f via="import" p="lib/script.rb" lazy="0"/> ' \
+    '<f p="lib/app/mixed.rb"/> <f p="lib/app/rescue_at_load.rb" lazy="1"/> <f p="lib/app/service.rb" lazy="1"/> <f p="lib/script.rb"/> ' \
     'lazy: a RESCUE class is lazy even at class-body level (rescue_at_load lazy="1"); one load-time receiver of the same name makes the pair load-time (mixed lazy="0")'
 expect Validator \
-    '<f via="import" p="lib/app/mixin.rb" lazy="0"/> <f via="import" p="lib/app/nested.rb" lazy="1"/> <f via="import" p="lib/app/service.rb" lazy="0"/> <f via="import" p="lib/app/super_yield.rb" lazy="1"/> ' \
+    '<f p="lib/app/mixin.rb"/> <f p="lib/app/nested.rb" lazy="1"/> <f p="lib/app/service.rb"/> <f p="lib/app/super_yield.rb" lazy="1"/> ' \
     'lazy: a class-body argument (`validates_with Validator`) is load-time; a method-body one (nested, super) is lazy'
 expect Helper \
-    '<f via="import" p="lib/app/mixin.rb" lazy="0"/> <f via="import" p="lib/app/nested.rb" lazy="1"/> <f via="import" p="lib/app/rescue_at_load.rb" lazy="0"/> <f via="import" p="lib/app/service.rb" lazy="0"/> <f via="import" p="lib/app/super_yield.rb" lazy="0"/> ' \
+    '<f p="lib/app/mixin.rb"/> <f p="lib/app/nested.rb" lazy="1"/> <f p="lib/app/rescue_at_load.rb"/> <f p="lib/app/service.rb"/> <f p="lib/app/super_yield.rb"/> ' \
     'lazy: a keyword-pair VALUE at class-body level (`delegate :name, to: Helper`) is a load-time argument'
 expect lib/app/user.rb:User \
-    '<f via="import" p="lib/app/mixin.rb" lazy="0"/> <f via="import" p="lib/app/service.rb" lazy="1"/> <f via="import" p="lib/app/super_yield.rb" lazy="1"/> ' \
+    '<f p="lib/app/mixin.rb"/> <f p="lib/app/service.rb" lazy="1"/> <f p="lib/app/super_yield.rb" lazy="1"/> ' \
     'resolve: an argument of a receiver'"'"'d call (`record.is_a?(User)`) and of `yield` reach App::User; the top-level and decoy User are untouched'
-expect Mailer '<f via="import" p="lib/app/service.rb" lazy="1"/> ' 'mutation control: Mailer is reached by its receiver only — the floor file'"'"'s `target = Mailer` and `Mailer || Helper` name it nowhere'
+expect Mailer '<f p="lib/app/service.rb" lazy="1"/> ' 'mutation control: Mailer is reached by its receiver only — the floor file'"'"'s `target = Mailer` and `Mailer || Helper` name it nowhere'
 expect lib/user.rb:User '' 'mutation control: the top-level User has no importer — a file-level `App::Errors::Boom` does not fall back to a bare name'
 expect lib/decoy/user.rb:User '' 'mutation control: Decoy::User (same basename as two other User files) has no importer'
 expect lib/app.rb:App '' 'mutation control: `::App::Errors::Boom` and `App::Errors::Boom` are chains, not references to App — lib/app.rb receives nothing'
@@ -227,7 +227,7 @@ callersTag(){ "$BIN" "$NFIX" --callers="$1" --no-cache --legend=compact 2>/dev/n
 "$BIN" "$NFIX" --deps --limit=1000 --no-cache 2>/dev/null | grep -q '<f p="lib/app/notify/notifier.rb" includes="1" lazy_edges="1" afferent="0" instab="0.00" transitive="1"><inc t="Dev::Config"/>' \
     && ok 'narrow: the DEPENDENCY stays — notifier.rb still carries `Dev::Config` as a resolved lazy pair in --deps' \
     || no "narrow: notifier.rb --deps row lost the argument directive: $( "$BIN" "$NFIX" --deps --limit=1000 --no-cache 2>/dev/null | grep -oE '<f p="lib/app/notify/notifier.rb"[^>]*>' )"
-"$BIN" "$NFIX" --impact=lib/app/dev/config.rb:Config --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -q '<f via="import" p="lib/app/notify/notifier.rb" lazy="1"/>' \
+"$BIN" "$NFIX" --impact=lib/app/dev/config.rb:Config --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -q '<f p="lib/app/notify/notifier.rb" lazy="1"/>' \
     && ok 'narrow: --impact still names notifier.rb as a lazy importer of dev/config.rb — the value use is a use, not evidence' \
     || no 'narrow: --impact lost notifier.rb as an importer of dev/config.rb'
 

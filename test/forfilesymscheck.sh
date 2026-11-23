@@ -60,6 +60,10 @@
 #        the same way; (b5) the legend right before the block defines by="bind", into= and bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops them; (b6) a binder an
 #        earlier head counted past its cap prints once under a later head's free slot
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -157,13 +161,16 @@ w( "kx7", "api.C", "".join( f"int find_home_{i:02d}(void) {{ return {i}; }}\n" f
 PY
 
 run(){ local d="$1"; shift; ( cd "$TMP/$d" || exit 1; "$BIN" "$TMP/$d" --no-cache "$@" 2>/dev/null </dev/null ); }
+# AF1 (2026-11-18): file $2 ends with LITERAL $1 as its last ROW element; the answer-first DOCUMENT legend (comments only) may follow it
+lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[2],encoding="utf8",errors="replace").read(); sys.exit(0 if re.search(re.escape(sys.argv[1])+r"(?:<!--(?:(?!-->).)*-->)*</ctx>$", s, re.S) else 1)' "$1" "$2"; }
 # check.py ANSWER LANG BLOCKLESS_ANSWER: one line per arm, "PASS|FAIL id text"
 cat > "$TMP/check.py" <<'PY'
 import re, sys, xml.dom.minidom as M
 path, lang, offpath = sys.argv[1], sys.argv[2], sys.argv[3]
 s = open( path, encoding = "utf8" ).read().rstrip( "\n" ); off = open( offpath, encoding = "utf8" ).read().rstrip( "\n" ) if offpath != "-" else ""
 def say( good, arm, text ): print( ( "PASS" if good else "FAIL" ), "(%s) %s: %s" % ( arm, lang, text ) )
-m = re.search( r'(<!-- (?:ripwire for )?syms:.*?-->)(<syms [^>]*>.*?</syms>)(?=</ctx>\s*$)', s, re.S )
+# AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
+m = re.search( r'(<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->)(<syms [^>]*>.*?</syms>)(?=(?:<!--(?:(?!-->).)*-->)*</ctx>\s*$)', s, re.S )
 if not m:
     say( False, "a1", "no <syms> block last before </ctx>: %r" % s[ -300: ] ); sys.exit( 0 )
 legend, blk = m.group( 1 ), m.group( 2 )
@@ -325,16 +332,21 @@ fxrun ovl1 ovl1 "$TASK"
 # (h2) the held block's next= keeps the origin call's ranking flags
 RIPWIRE_DEV=1 run py "--for=$TASK" --token-budget=100 --no-route --anchor --pack-top-n=12 >"$TMP/h2.xml"; rc=$?
 # RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= pins read --for='…' (was &apos;…&apos;): nextverb.h leaves ' raw in a "-delimited attribute
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK' --anchor --no-route --pack-top-n=12\"/></ctx>\$" "$TMP/h2.xml"; then ok "(h2) a held block's next= carries --anchor --no-route --pack-top-n=12"; else no "(h2) rc=$rc: $( grep -o '<syms held.*' "$TMP/h2.xml" | head -c 300 )"; fi
+if [ "$rc" = 0 ] && lastrow "<syms held=\"budget\" next=\"--for='$TASK' --anchor --no-route --pack-top-n=12\"/>" "$TMP/h2.xml"; then ok "(h2) a held block's next= carries --anchor --no-route --pack-top-n=12"; else no "(h2) rc=$rc: $( grep -o '<syms held.*' "$TMP/h2.xml" | head -c 300 )"; fi
 run py "--for=$TASK" --max-tokens=2000 --no-route >"$TMP/h3.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK' --no-route\"/></ctx>\$" "$TMP/h3.xml"; then ok "(h2) --max-tokens: next= carries --no-route"; else no "(h2) max-tokens rc=$rc: $( grep -o '<syms held.*' "$TMP/h3.xml" | head -c 300 )"; fi
+if [ "$rc" = 0 ] && lastrow "<syms held=\"budget\" next=\"--for='$TASK' --no-route\"/>" "$TMP/h3.xml"; then ok "(h2) --max-tokens: next= carries --no-route"; else no "(h2) max-tokens rc=$rc: $( grep -o '<syms held.*' "$TMP/h3.xml" | head -c 300 )"; fi
 
 # (c2) a buffer that fails to flush: a real short write (RLIMIT_FSIZE with SIGXFSZ ignored; stdout is a pipe so only the capture file is limited)
 run py "--for=$TASK" >"$TMP/c2.full.xml"
 bash -c 'trap "" XFSZ; ulimit -f 4 2>/dev/null || exit 99; cd "$1" || exit 98; shift; exec "$@"' x "$TMP/py" "$BIN" "$TMP/py" --no-cache "--for=$TASK" </dev/null 2>"$TMP/c2.err" | cat >"$TMP/c2.xml"; rc=${PIPESTATUS[0]}
 if [ "$rc" = 99 ] || { [ "$rc" = 0 ] && [ -s "$TMP/c2.full.xml" ] && [ "$( wc -c <"$TMP/c2.xml" )" -ge "$( wc -c <"$TMP/c2.full.xml" )" ]; }; then
   echo "  SKIP  (c2) this platform does not enforce a file-size limit on the capture buffer (rc=$rc)"
-elif [ "$rc" = 1 ] && grep -aq "buffer failed to flush or read back whole" "$TMP/c2.err" && grep -aq '<syms held="uncaptured"/></ctx>$' "$TMP/c2.xml" && ! grep -aq '<y ' "$TMP/c2.xml"; then
+# AF1-fix (2026-11-18): the answer-first default buffers the WHOLE answer to permute it, and the size limit fails that buffer too; a
+# failed capture is now rendered again straight through (verbs_for.h runForLens) — before, the failed buffer's bytes were written:
+# 8,108 B with this stub and </ctx> in the MIDDLE and a second, truncated root at the end. The answer is the parent's shape again
+# (the short answer the <syms> buffer could read, disclosed, ending with the stub): ONE root, the stub last, then only the trailing
+# legend should the order ever be answer-first.
+elif [ "$rc" = 1 ] && grep -aq "buffer failed to flush or read back whole" "$TMP/c2.err" && grep -aqE '<syms held="uncaptured"/>(<!--([^-]|-[^-])*-->)*</ctx>$' "$TMP/c2.xml" && [ "$( grep -ac '<ctx ' "$TMP/c2.xml" )" = 1 ] && ! grep -aq '<y ' "$TMP/c2.xml"; then
   ok "(c2) a buffer that fails to flush is not the whole answer: stderr says so, exit 1, <syms held=\"uncaptured\"/>, no rows"
 else
   no "(c2) rc=$rc stderr: $( head -c 200 "$TMP/c2.err" ) tail: $( tail -c 160 "$TMP/c2.xml" )"
@@ -358,7 +370,7 @@ if [ "$rc" = 0 ] && grep -q '</ctx>$' "$TMP/one.xml" && ! grep -q '<syms' "$TMP/
 # TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
 # 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
 run py "--for=$TASK" --token-budget=100 >"$TMP/h1.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK'\"/></ctx>\$" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml" \
+if [ "$rc" = 0 ] && lastrow "<syms held=\"budget\" next=\"--for='$TASK'\"/>" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml" \
    && grep -qE '<!-- ripwire for syms: held="budget":[^>]* next= [^>]*--><syms held=' "$TMP/h1.xml"; then ok "(h1) a token budget holds the block: held=\"budget\" next=, no rows, its own legend defines held= and next="; else no "(h1) rc=$rc: $( grep -o '<syms.*' "$TMP/h1.xml" | head -c 300 )"; fi
 run py "--for=$TASK" --json >"$TMP/j1.json"; rc=$?
 if [ "$rc" = 0 ] && [ -s "$TMP/j1.json" ] && ! grep -q 'syms' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) rc=$rc json: $( grep -o '.\{40\}syms.\{80\}' "$TMP/j1.json" | head -c 300 )"; fi

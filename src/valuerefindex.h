@@ -707,7 +707,10 @@ class ParamSlots
 {
 public:
     void take( std::uint32_t refIdx ) { m_refs.push_back( refIdx ); }
-    void build( const IngestResult& ing, TypeKeys& keys )
+    // `slotOfFact( q )`: the (type key, field) fact q's store lands in — SlotIndex::endOf, the rule a function stored there is keyed
+    // by (own-keyed types: TypeKeys; the C family: the object's declared struct type through the typedef / field facts; BX2 FIX 8).
+    template<class SlotOfFact>
+    void build( const IngestResult& ing, const SlotOfFact& slotOfFact )
     {
         for( const std::uint32_t q : m_refs )
         {
@@ -718,7 +721,8 @@ public:
             {
                 continue;   // a method registrar no call of its language reaches by name, or a fact outside its own function's definition
             }
-            const std::string to   = keys.keyOf( r ) + "#" + r.memberPath();
+            const auto [ type, field ] = slotOfFact( q );
+            const std::string to       = type + "#" + field;
             std::string&      have = m_slot[ jsImportKey( r.fromSymbol, std::to_string( r.argCount ) ) ];
             have = have.empty() || have == to ? to : std::string( kConflict );
         }
@@ -834,7 +838,11 @@ public:
     void build( const IngestResult& ing, std::span<const std::uint32_t> values, std::span<const std::vector<NodeId>> targets )
     {
         m_keys.build( ing );
-        m_params.build( ing, m_keys );
+        m_params.build( ing, [ & ]( std::uint32_t q )
+        {
+            End e = endOf( ing, q );
+            return std::pair{ std::move( e.type ), std::move( e.field ) };
+        } );
         for( std::size_t k = 0; k < values.size(); ++k )
         {
             if( targets[k].empty() )
@@ -1028,8 +1036,7 @@ private:
     }
     static const End* find( const std::vector<End>& ends, std::uint32_t ref ) noexcept
     {
-        const auto it = std::ranges::lower_bound( ends, ref, {}, &End::ref );
-        return it != ends.end() && it->ref == ref ? &*it : nullptr;
+        return rw::sortutil::findSorted( ends, ref, {}, &End::ref );
     }
     // One side's end `ref` against every end of the other side with the same field: same type → typed; a side's type
     // unknown → the name tier; two known, different types → no hit.
@@ -1940,6 +1947,84 @@ private:
         const NodeId one = m_paths.nearestOf( cands, r.fileId, at );
         return one == kNoNode ? std::vector<NodeId>{} : std::vector<NodeId>{ one };
     }
+    // The #include adjacency a header-static question walks (lane PF1). Built from the directives of cChainIncluder files alone
+    // (resolve.h): a chain ref.c -> ... -> header.h leaves that set only through an edge INTO a file of another include dialect
+    // (`#include "gen.py"`), since the chain starts in it and each step is one resolved directive of the file before. So when
+    // the narrowed build draws no such edge, every chain of the whole-corpus adjacency is in it and the answer is the same;
+    // when it draws one, the whole-corpus adjacency is built instead. RIPWIRE_STATS prints which, and the directives resolved.
+    static FileAdjacency includeChainAdj( const IngestResult& ing )
+    {
+        FileAdjacency adj = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, nullptr, /*forCallNarrow=*/false, nullptr, nullptr, nullptr, /*cChainOnly=*/true ).first;
+        bool          escapes = false;
+        for( std::uint32_t f = 0; f < adj.size() && !escapes; ++f )
+        {
+            escapes = std::ranges::any_of( adj[f], [ & ]( std::uint32_t t ) { return !cChainIncluder( rootRelPath( ing, t ) ); } );
+        }
+        if( escapes )
+        {
+            adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
+        }
+        if( memstats::enabled() )
+        {
+            const auto resolved = escapes ? std::ptrdiff_t( ing.includes.size() )
+                                          : std::ranges::count_if( ing.includes, [ & ]( const Include& inc )
+                                            { return inc.fileId < ing.files.size() && cChainIncluder( rootRelPath( ing, inc.fileId ) ); } );
+            rw::emitTo( stderr, "[stats] header_static_adj scope={} directives={} of={}\n", escapes ? "all" : "cfamily", resolved, ing.includes.size() );
+        }
+        return adj;
+    }
+    // BX1 FIX 3 (test/verbfixcheck.sh F3): internal linkage is per TRANSLATION UNIT, not per file. A C-family `static` defined in a
+    // file that is not a translation-unit source (a header: resolve.h cxxSourceFile is false) is in every unit that #includes it,
+    // directly or through another header — htop's `static inline Row_idEqualCompare` (Row.h) passed as a comparator from Table.c,
+    // ProcessTable.c and pcp/InDomTable.c bound nothing while the rule kept every static in its own file. True when `refFile`
+    // reaches `defFile` over resolved #include edges (resolve.h buildPreciseIncludeAdj, the call graph's own resolver). A static in
+    // a source file stays private (false), and an unresolved #include proves nothing (false: the bind is not made, a floor).
+    // The adjacency is built on the first such question and the includers of each header once, then reused for the index's life.
+    // COST (lane PF1, test/headerstaticadjcheck.sh): it is includeChainAdj's, the C-family includers' edges — the whole-corpus
+    // build resolved every Python import of cpython to answer 54 of these (911M of a warm --for's 16.5G instructions).
+    bool headerStaticVisibleFrom( std::uint32_t defFile, std::uint32_t refFile ) const
+    {
+        if( defFile >= m_ing.files.size() || refFile >= m_ing.files.size() || cxxSourceFile( m_ing.files[ defFile ] ) )
+        {
+            return false;
+        }
+        if( m_includers.empty() )
+        {
+            const FileAdjacency        fwd = includeChainAdj( m_ing );
+            std::vector<std::uint32_t> from, to;
+            for( std::uint32_t f = 0; f < fwd.size(); ++f )
+            {
+                for( const std::uint32_t t : fwd[f] )
+                {
+                    from.push_back( t );   // reversed: header -> the files that include it
+                    to.push_back( f );
+                }
+            }
+            m_includers = FileAdjacency::fromEdges( std::uint32_t( m_ing.files.size() ), from, to, /*dedup=*/true );
+        }
+        auto it = m_reachesHeader.find( defFile );
+        if( it == m_reachesHeader.end() )
+        {
+            std::vector<char>          seen( m_ing.files.size(), 0 );
+            std::vector<std::uint32_t> work{ defFile };
+            seen[ defFile ] = 1;
+            while( !work.empty() )
+            {
+                const std::uint32_t h = work.back();
+                work.pop_back();
+                for( const std::uint32_t inc : ( h < m_includers.size() ? m_includers[h] : std::span<const std::uint32_t>() ) )
+                {
+                    if( inc < seen.size() && seen[inc] == 0 )
+                    {
+                        seen[inc] = 1;
+                        work.push_back( inc );
+                    }
+                }
+            }
+            it = m_reachesHeader.emplace( defFile, std::move( seen ) ).first;
+        }
+        return it->second[ refFile ] != 0;
+    }
     // `name` as seen from reference `r`'s file, under the visibility rules in the header comment.
     std::vector<NodeId> resolveName( const Reference& r, std::string_view name ) const
     {
@@ -1999,7 +2084,8 @@ private:
             {
                 for( const NodeId id : other )
                 {
-                    if( m_ing.symbols[id].internalLinkage == 0 )
+                    const Symbol& s = m_ing.symbols[id];
+                    if( s.internalLinkage == 0 || headerStaticVisibleFrom( s.fileId, r.fileId ) )   // BX1 FIX 3: a header's static too
                     {
                         out.push_back( id );
                     }
@@ -2046,6 +2132,8 @@ private:
     mutable HashMap<std::string, std::vector<std::string>> m_derivedOf;    //   base → derived classes
     mutable bool                                         m_hierarchyBuilt = false;
     mutable bool                                         m_classDefsBuilt = false;
+    mutable FileAdjacency                                m_includers;       // BX1 FIX 3: header -> its includers (built on first use)
+    mutable HashMap<std::uint32_t, std::vector<char>>    m_reachesHeader;   //   header -> per file: reaches it over #include edges
     HashMap<std::string, std::vector<NodeId>>            m_fnByOwner;   // part 2: "family#Owner::name" → a path language's owned functions
     slot_join::RustPaths                                 m_paths;       // part 2 fix 1: where a Rust path reaches, when a path language is indexed
     std::vector<std::uint8_t>                            m_pyMember;   // per symbol: 1 = a Python def directly in its class (empty: no Python)

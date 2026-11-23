@@ -40,6 +40,10 @@
 # NEVER edits test/fixture itself — every mutation happens on a scratch COPY in a mktemp dir.
 
 set -u
+# MR1 (src/mcpverbs.h forTaskText): MCP `for` serves its <sigs>/<tail> rows as text lines in one CDATA too (the CLI's ROWLINES +
+# RANKSEQ, lossless; test/mcpforrowscheck.sh pins it). This gate reads those rows as elements for another rule, so the line form is
+# off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -172,8 +176,11 @@ equiv() {
 import sys, json, re
 w, c = [ json.loads( l ) for l in sys.stdin.read().splitlines()[:2] ]
 A = re.compile( r"\s([\w:.-]+)=\"([^\"]*)\"" )
+# The span runs from <sigs> through </tail> and so takes in the act line (BR1/BR1B, foractline.h): <act read=.../> sits between
+# </sigs> and <tail> on any answer whose top rows all carry e=, and is absent otherwise (arm 2 here). Optional in the pattern,
+# compared like every other byte of the span: a warm answer that drops or changes it is a DIFF.
 def rows( t ):
-    m = re.search( r"<sigs\b[^>]*>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
+    m = re.search( r"<sigs\b[^>]*>.*?</sigs>(?:<act\b[^>]*/>)?<tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
 ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c ); wr = re.search( r"<ctx\b[^>]*>", w )
 if not ab or "legend=\"ref\"" not in ab.group( 0 ): print( "NOREF" ); sys.exit()
 # ref-posture-disclosure: the root facts are read where the READER finds them, on the warm answer'"'"'s own <ctx> root. This arm

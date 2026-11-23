@@ -1,0 +1,5 @@
+### Fixed — Rust call resolution re-read every glob `use` for every call
+
+The check that keeps an in-tree namesake by name when an outside glob (`use crossterm::style::*;`) may supply a bare Rust call was asked once per call and per in-tree candidate, and each ask re-read the caller file's `use` rows and re-ran the module-path walk for every glob in force. It now reads a file's globs once and answers a call once for all its candidates. On nushell (2,208 files): 2,024,900 asks now compute 10,343 answers; `use` records read fall from 114,460,236 to 206,024 and glob verdicts from 2,030,736 to 1,197. Cold map wall fell from about 1.6 s to 0.6 s and the first warm run from about 1.3 s to 0.36 s (indicative: a shared, loaded machine, five interleaved runs). Output is byte-identical: the full map, the per-call-site resolution census and a `--for` answer match the previous build on nushell, terraform and three Rust trees.
+
+`RIPWIRE_STATS=1` prints the work as `[mem] rust_glob asks= answers= reads= verdicts=`; `test/rustglobscalecheck.sh` gates its growth on a generated crate.

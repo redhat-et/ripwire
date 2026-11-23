@@ -40,6 +40,10 @@
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py: the soft-target readers, shared helpers (CHECKLIST 32)
@@ -153,6 +157,35 @@ bytes_of(){ wc -c < "$1" | tr -d ' '; }
 #    #19. Defining them before the sections fork is the only reason they live here. (forbudget-soft deleted KEPT_NOTE /
 #    FLOOR_NOTE / sigs_unpaid_twin with the hard-ceiling arms that read them: no section reads them any more.)
 FOR_TASK="serialize the map"
+# #11 A11's charge predicate (see the SOFT TARGET note at A11)
+# a11_charged BARE GRAPH: exit 0 when GRAPH is BARE plus bytes AND est_tokens moved by those bytes' price; prints the numbers
+a11_charged(){
+    local b g eb eg
+    b="$( bytes_of "$1" )"; g="$( bytes_of "$2" )"
+    eb="$( grep -aoE 'est_tokens="[0-9]+"' "$1" | head -1 | tr -dc '0-9' )"
+    eg="$( grep -aoE 'est_tokens="[0-9]+"' "$2" | head -1 | tr -dc '0-9' )"
+    printf '%s B / est %s -> %s B / est %s' "$b" "${eb:-<none>}" "$g" "${eg:-<none>}"
+    [ -n "$eb" ] && [ -n "$eg" ] || return 1
+    awk -v b="$b" -v g="$g" -v eb="$eb" -v eg="$eg" 'BEGIN{ d = (g - b) / 2.36 - (eg - eb); if (d < 0) d = -d; exit !( g > b && d <= 2 ) }'
+}
+# NEGATIVE CONTROL: the same graph answer with est_tokens reverted to the bare bundle's value — the block's bytes are in,
+# its charge is not. The predicate must REFUSE it, or a pass above means nothing.
+a11_uncharged_twin(){   # BARE GRAPH OUT
+    local eb; eb="$( grep -aoE 'est_tokens="[0-9]+"' "$1" | head -1 )"
+    python3 -c 'import re, sys
+t = open( sys.argv[ 1 ], encoding="utf-8", errors="surrogateescape" ).read()
+out = re.sub( r"est_tokens=\"[0-9]+\"", sys.argv[ 2 ], t, count = 1 )
+assert out != t, "est_tokens not replaced"
+open( sys.argv[ 3 ], "w", encoding="utf-8", errors="surrogateescape" ).write( out )' "$2" "$eb" "$3"
+}
+# a11_refuses_twin LABEL BARE GRAPH: build GRAPH's uncharged twin and require a11_charged to refuse it
+a11_refuses_twin(){
+    if a11_uncharged_twin "$2" "$3" "$3.unch" && ! a11_charged "$2" "$3.unch" >/dev/null; then
+        ok "$1 negative control: the graph answer with est_tokens reverted to the bare value is refused as uncharged"
+    else
+        no "$1 negative control: an uncharged twin (graph bytes, bare est_tokens) was not refused — the predicate cannot fail"
+    fi
+}
 # WEAK_QUERY is #11 A9's nonsense word. It is spelled ONLY here, at top level, never inside a function: the
 # repo's own bash functions are indexed symbols, so a section body that carried the word would make it match
 # something — and forcalibfactscheck's zero-hit arm runs `--for` with this word on the repo root and requires
@@ -824,10 +857,14 @@ est_11(){
 # A7/A8 — the two appended --for sections must be INSIDE the delivered document's rate band. The --detail
 # shape is a BODY shape (bodies dominate the bytes and are charged at kBytesPerTokenBody), so it takes the
 # 4.20 body ceiling; the graph block is markup. An uncharged section pushes the rate straight out of band.
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h) and a page's est_tokens prices THAT
+# page (forpagescheck, formaxtokenscheck (B)); on src the --detail/--with-graph sections start past page 1's cut. Every arm in
+# #11 is about the WHOLE answer's estimate (and its files are the no-budget references the twins below shed), so each reads
+# --page-bytes=0: the whole answer in one call, row-identical to the joined pages (forpagescheck P2).
 for entry in "for:320:" "for_graph:320:--with-graph" "for_detail:420:--detail=20" "for_both:420:--detail=20 --with-graph"; do
     label="${entry%%:*}"; rest="${entry#*:}"; hi="${rest%%:*}"; args="${rest#*:}"
     # shellcheck disable=SC2086
-    rw src --for="$FOR_TASK" $args >"$TMP/f_$label.out" 2>/dev/null
+    rw src --for="$FOR_TASK" $args --page-bytes=0 >"$TMP/f_$label.out" 2>/dev/null
     B="$( bytes_of "$TMP/f_$label.out" )"
     E="$( forest_of "$TMP/f_$label.out" )"
     if [ -z "$E" ] || [ "$E" -le 0 ] 2>/dev/null; then
@@ -866,7 +903,7 @@ ALLOW="$( awk "BEGIN{printf \"%d\", $TBF*2.36*1.15}" )"   # still read by the no
 # lane hrr (rule 4): the score-order twins of the no-budget references the A7 twin / A7B arms read
 for entry in "for:" "for_graph:--with-graph" "for_detail:--detail=20" "for_both:--detail=20 --with-graph"; do
     # shellcheck disable=SC2086
-    RIPWIRE_NO_HEAD_RR=1 rw src --for="$FOR_TASK" ${entry#*:} >"$TMP/f_${entry%%:*}_so.out" 2>/dev/null
+    RIPWIRE_NO_HEAD_RR=1 rw src --for="$FOR_TASK" ${entry#*:} --page-bytes=0 >"$TMP/f_${entry%%:*}_so.out" 2>/dev/null
 done
 for HRR in twin on; do
 rwm src --for="$FOR_TASK" --token-budget=$TBF >"$TMP/f_tbp.out" 2>/dev/null
@@ -1353,7 +1390,7 @@ PY
 }
 # T3 (contract update, same wave): the bare --for is terminal by default and carries auto BODIES at the
 # 3.80 body rate, so the markup-only 2.50 identity now lives on the --signatures-only shape…
-rw src --for="$FOR_TASK" --signatures-only >"$TMP/f_sigonly.out" 2>/dev/null
+rw src --for="$FOR_TASK" --signatures-only --page-bytes=0 >"$TMP/f_sigonly.out" 2>/dev/null
 if out="$( selfconsistent "$TMP/f_sigonly.out" )"; then
     ok "#11 A9/A10 --for --signatures-only: est_tokens is self-consistent — bytes/est/expected = $out (its own attributes are charged)"
 else
@@ -1381,7 +1418,7 @@ PY
 # multi-word conceptual query — serve <hops> instead of <bodies> by default, so the AUTO-BODY shape this
 # arm is about now lives behind --auto-bodies. Re-anchored there rather than deleted: the mixed-rate
 # identity is the only arm that can catch a mis-rated body span.
-rw src --for="$FOR_TASK" --auto-bodies >"$TMP/f_forauto.out" 2>/dev/null
+rw src --for="$FOR_TASK" --auto-bodies --page-bytes=0 >"$TMP/f_forauto.out" 2>/dev/null
 if out="$( mixedconsistent "$TMP/f_forauto.out" )"; then
     ok "#11 A9/A10 --for --auto-bodies: est_tokens matches markup@2.50 + bodies@3.80 — bytes/span/est/expected = $out"
 else
@@ -1415,7 +1452,7 @@ else
     fold_out="$( foldconsistent "$TMP/f_for.out" 2>/dev/null || true )"
     no "#11 A9/A10 --for (compact route, fold): mixed-rate identity broken — bytes/span/est/expected = ${fold_out:-unreadable} (the fold is mischarged)"
 fi
-RIPWIRE_NO_BODY_FOLD=1 rw src --for="$FOR_TASK" >"$TMP/f_for_nofold.out" 2>/dev/null
+RIPWIRE_NO_BODY_FOLD=1 rw src --for="$FOR_TASK" --page-bytes=0 >"$TMP/f_for_nofold.out" 2>/dev/null
 if out="$( selfconsistent "$TMP/f_for_nofold.out" )"; then
     ok "#11 A9/A10 --for (compact route): est_tokens = round(bytes/2.50) — bytes/est/expected = $out (the <hops> section is charged at the markup rate)"
 else
@@ -1487,7 +1524,8 @@ fi
 # M11 (2026-09-04): the pack-task legend now DEFINES over_ceiling= in prose, so the three greps below read the
 # LABEL — the root attribute over_ceiling="1" or the ladder's colon note — never the bare word.
 # A11 — --pack-task --with-graph. The graph block is a FIXED cost with no trim knob, so at a budget where the
-# bare bundle is conformant and the block pushes it past the allowance, the bundle must SAY over_ceiling.
+# bare bundle is conformant and the block pushes it past the allowance, the bundle must SAY over_ceiling (a HARD budget),
+# or — under the soft target every explicit budget now is — est_tokens must charge the block (see SOFT TARGET below).
 # MEASURED pre-fix: bare 2 046 B conformant, +graph 2 437 B against a 2 171 B allowance, 12.6% over, silent.
 # CA4: PT_TB used to be a hard-coded 800, and the arm's own CONTROL — the bare bundle must be conformant and
 # unlabelled, or "the graph block pushed it over" proves nothing — depends on the header FLOOR staying under
@@ -1511,13 +1549,35 @@ PT_ALLOW="$( awk "BEGIN{printf \"%d\", $PT_TB*2.36*1.15}" )"
 rw src --pack-task="$FOR_TASK" --token-budget=$PT_TB >"$TMP/pt_bare.out" 2>/dev/null
 rw src --pack-task="$FOR_TASK" --token-budget=$PT_TB --with-graph >"$TMP/pt_graph.out" 2>/dev/null
 PTB="$( bytes_of "$TMP/pt_bare.out" )";  PTG="$( bytes_of "$TMP/pt_graph.out" )"
+# SOFT TARGET (FS1, 2026-11-23, orchestrator ruling). An explicit --token-budget on --pack-task has been a SOFT target since
+# forbudget-soft (d099ec21e, on main): src/packtask.h kPackTaskSoftBudgetSentence states "est_tokens may exceed it (the
+# header always ships; no over_ceiling)". So the over_ceiling branch below cannot fire on an explicit budget, and this
+# arm passed on main only because its operating-point search landed at 1500, where the block happened to fit the
+# allowance (main: bare 3 279 B at 1000, over its 2 714 B allowance). On 25b5a9eb7 the bare bundle is smaller (2 680 B at
+# 1000), the search lands at 1000, and +graph is 3 103 B — and main already overshot the same way, unlabelled, at
+# 800/1000/1200 (3 290/3 292/3 715 B). The A7 sweep and A7B-N arms above were REPLACED for exactly this reason ("a soft
+# target makes no byte promise"); this arm was missed. What §F1 protects is that the block is CHARGED, and that is
+# est_tokens' job: graph minus bare must move est_tokens by the delivered bytes it adds, at 2.36 B/token (+-2 tokens for
+# rounding and the root's digit width). An uncharged block adds its bytes and moves est_tokens by ~0 — the negative
+# control below builds exactly that answer from the real one and the predicate must refuse it.
 if [ "$PTG" -le "$PT_ALLOW" ] 2>/dev/null; then
     ok "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B within the $PT_ALLOW B allowance"
 elif grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_graph.out"; then
     ok "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B over the $PT_ALLOW B allowance and SAYS SO (over_ceiling)"
+elif a11_msg="$( a11_charged "$TMP/pt_bare.out" "$TMP/pt_graph.out" )"; then
+    ok "#11 A11 --pack-task --token-budget=$PT_TB --with-graph (soft target, no byte promise): the block is charged — $a11_msg"
 else
-    no "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B EXCEEDS the $PT_ALLOW B allowance unlabelled (bare form is $PTB B) — the spliced block is uncharged"
+    no "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B EXCEEDS the $PT_ALLOW B allowance unlabelled and est_tokens does not price the block ($a11_msg) — the spliced block is uncharged"
 fi
+a11_refuses_twin "#11 A11" "$TMP/pt_bare.out" "$TMP/pt_graph.out"
+# A11U — the UNBUDGETED --with-graph answer (the default budget, a HARD one) is charged by the same predicate, and its
+# uncharged twin is refused: the charge does not depend on an explicit budget being present.
+rw src --pack-task="$FOR_TASK" >"$TMP/ptu_bare.out" 2>/dev/null
+rw src --pack-task="$FOR_TASK" --with-graph >"$TMP/ptu_graph.out" 2>/dev/null
+a11u_msg="$( a11_charged "$TMP/ptu_bare.out" "$TMP/ptu_graph.out" )" \
+    && ok "#11 A11U unbudgeted --pack-task --with-graph: the block is charged — $a11u_msg" \
+    || no "#11 A11U unbudgeted --pack-task --with-graph: est_tokens does not price the block ($a11u_msg)"
+a11_refuses_twin "#11 A11U" "$TMP/ptu_bare.out" "$TMP/ptu_graph.out"
 # control: the bare form at the same budget must NOT be labelled, or the label means nothing
 { [ "$PTB" -le "$PT_ALLOW" ] && ! grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_bare.out"; } 2>/dev/null \
     && ok "#11 A11 control: the bare --pack-task at the same budget is conformant AND unlabelled" \

@@ -9,7 +9,7 @@ gap were still open, on the same lines that explain what `RegexVerdict::Exhauste
 The paragraph still needs a real example of an admitted pattern whose cost in the subject is super-linear,
 so it takes `(a|aa){1,100}b$` — measured ADMITTED on the #688 binary, and the shape `docs/LIMITS.md`
 already names for exactly this residual ("a bounded outer over a branch that repeats itself only through
-the outer quantifier, so no clause fires"). The family is recorded as refused since #484, beside the M2-c
+the outer quantifier, so no clause fires"). The family is recorded as refused since #484, beside the
 note the same sentence already carries for the overlapping-alternation shape.
 
 `docs/LIMITS.md` and `docs/limits_build.py` were regenerated in #688 and already say the screen now refuses

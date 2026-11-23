@@ -261,7 +261,7 @@ inline constexpr std::string_view kForSlotNameLegend =
     "type is not read (the callers rows say via=\"slot-name\"), a candidate, never a fact";
 inline constexpr std::string_view kForCompactSlotJoinLegend =
     "; d slot_by= functions that MAY call this one through a slot it is stored in, slot_fields= F=K@C a struct field F holding K "
-    "stored functions that C calls through (both by the value index, not calls), _more= the rest";
+    "stored functions that C calls through (both by the value index, not calls), slot_by_more=/slot_fields_more= the rest";
 inline constexpr std::string_view kForSlotJoinLegend =
     "; slot_by= on a function d row: up to 4 functions that MAY call it through a slot it is stored in (a struct field, by type or "
     "by field name, a variable, a parameter of a registrar it is passed to), by the value index, never a proven call, "

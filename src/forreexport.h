@@ -1708,6 +1708,7 @@ inline constexpr std::string_view kShortKeyLegend =
     "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved (from=sentence: the route read "
     "the task as words, X is its one code-shaped name and no definition of X resolved); the ladder below says what "
     "the index holds, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
+    "found=0: no definition of X resolved; key= the name a rung searched, q= the Q of Q.leaf. "
     "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
     "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
     "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "

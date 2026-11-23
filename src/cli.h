@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
+#include <system_error>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -19,6 +21,9 @@
 #include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
 #include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
+#include "forrowsform.h" // rw::rowlines::kRowsLines / defaultRowsName — --rows= and the rows= of --version
+#include "foractlineswitch.h" // rw::actline::defaultActName — the act= of --version
+#include "forbodiesform.h" // rw::bodyptr::kBodiesInline / kBodiesPointer — --bodies='s closed set (NB1)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
 
@@ -36,6 +41,7 @@ struct Config
     bool             topKExplicit    = false;    // did the user actually pass --top-k=? (gates the "ride-along map" stderr hint)
     int              packTopN        = 0;        // 0 = disabled
     std::size_t      packBudgetBytes = 65536;    // 64 KB ≈ 16K tokens
+    bool             packBudgetExplicit = false; // CL1: --pack-budget-bytes= was typed (a bare --expand then keeps its own ceiling budget)
     bool             ignoreTests     = false;
     bool             mapDiff         = false;
     bool             mcp             = false;
@@ -54,6 +60,9 @@ struct Config
     bool             legendHaveSeen = false;     // --legend-have= was PRESENT. Absent and present-but-empty both leave
                                                  // legendHave empty, and they must not behave alike: absent is a no-op,
                                                  // an empty value is a refusal (§B5's owner ruling, 2026-07-29).
+    bool             legendSeenGiven = false;    // --legend-seen= was PRESENT (an empty value refuses, as --legend-have='s does)
+    std::string_view legendSeen;                 // --legend-seen=FILE: the entry hashes of the legend definitions the CALLER holds
+                                                 // (legendseen.h). Read in main.cpp; an untrusted FILE serves the whole answer.
     std::string_view legendHave;                 // --legend-have=HAVE[,HAVE]: the CALLER asserts it already holds those legend tiers
                                                  // version, so this answer may take the ref posture. The handshake is what
                                                  // makes a CLI ref answer honest AND deterministic: --legend=ref is refused
@@ -76,16 +85,25 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact|dict|last: the legend posture of every XML verb (P1, compactlegend.h);
+    std::string_view legend;                               // --legend=full|compact|dict|last|first: the legend posture of every XML verb (P1, compactlegend.h);
                                                            // an XML run that names none is RESOLVED to kDefaultLegendPosture (L1)
     std::string_view legendSpelled;                        // the posture AS TYPED, for messages. `legend` is normalised
                                                            // (dict -> compact), so a refusal built from it names a value the
                                                            // caller never wrote: `--legend=dict --json` answered "--legend=compact
                                                            // applies to the XML verbs only". Flag named means named as typed.
-    bool             legendAnswerFirst = false;            // item R, --legend=last: the ANSWER is emitted before the document legend (a pure
-                                                           // permutation — no byte changes). OPT-IN, not the default: measured on 50 --for
-                                                           // answers the shipped ordering left an active cut or floor disclosure outside the
-                                                           // 2 KB prefix on 9 of them, and the honesty invariant outranks the prefix win.
+    std::string_view pageBytesSpec;                        // AF1 --page-bytes=N[:K] as typed: the page size of an answer-first --for answer
+    std::string_view rowsSpec;                             // FMT2 --rows=lines|elements as typed (empty = not typed): the form of a --for answer's <sigs>/<tail> rows (forrowlines.h)
+    std::string_view bodiesSpec;                           // NB1 --bodies=inline|pointer as typed (empty = not typed): the form of the bodies on a --for answer's first page (forbodyptr.h)
+                                                           // (0 = the whole answer in one call) and, after a colon, which page (forpages.h)
+    std::size_t      forPageBytes = 12000;                 // AF1: the page size the default --for answer is served in (forpages.h
+                                                           // kForPageBytesDefault, the owner's 12 KB); 0 = unpaged
+    std::size_t      forPage      = 1;                     // AF1: the 1-based page asked (`--page-bytes=N:K`); a page's next= spells K+1
+    bool             legendAnswerFirst = false;            // item R: the ANSWER is emitted before the document legend (a pure permutation —
+                                                           // no byte changes). THE --for DEFAULT since AF1 (owner decision 2026-11-18), set by
+                                                           // the compact posture (defaulted or spelled) and by --legend=last; --legend=first,
+                                                           // full and dict leave it off. It was opt-in because a TRUNCATED answer-first prefix
+                                                           // loses the readings of its cuts (137 of 154 design cells at 12 KB); the default
+                                                           // answer is now PAGED (forpages.h) and every page keeps the definitions it needs.
                                                            // Orthogonal in principle to legendProseOff, but not combinable as a posture
                                                            // VALUE; under --legend=dict the legend is a 493 B pointer whose position barely
                                                            // matters, so the combination buys little and is deliberately not offered.
@@ -198,6 +216,7 @@ struct Config
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
     bool             anchor = false;                       // --anchor (with --for, EXPERIMENTAL): seed PPR personalization from the lexical anchors and blend graph expansion into the lens rank (LARGER-style; graph.h anchoredLexicalRank)
+    bool             noVerbRoute = false;                  // RT1 --no-verb-route (with --for): never answer a --for question with the verb it names (verbs_forroute.h); the routed answer's next= spells it
     bool             noRoute = false;                      // --no-route (with --for/--query): force plain subtoken+body BM25 (the pre-default-routing behavior). Routing is the DEFAULT: a deterministic confidence-gated query-shape classifier picks name-exact vs subtoken+body and prints which/why in the header (lexical.h chooseForRanker). --route is still accepted (now a no-op: routing is already on). Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace / sanitizer report / compiler diagnostic, or as a pasted issue-template form, the document tier scores down (repo meta-docs — issue templates, CONTRIBUTING, changelogs — twice as hard) and route= says so; --no-route has no route= to disclose it in, so it does not demote either. Routing also orders doc-mention surfacing (filter.h docNoiseSymbolMultipliers): change logs and translated duplicates of a default-language doc are lifted last and to x0.35 of the usual height (BM25 untouched), unless the task asks about changes or translations or names the file.
     bool             adaptive = false;                      // --adaptive (with --for/--query): cut the returned set at the largest relative score gap (Adaptive-k) with a floor (~5) + the existing top-k ceiling, so a sharp query returns few and a flat/broad one hits the ceiling; prints the cut in the header
     bool             noMentionBoost = false;                // --no-mention-boost (with --for): disable the B8 query-mention anchor — by default, files / dotted modules literally NAMED in the task text have their SCORE lifted to within 5% of the top score (the measured #1 competitor-win bucket; bench/headtohead) — a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1; a directly named symbol (Scope.symbol, ns::fn, a verbatim identifier — mention.h NAMED IDENTIFIERS) takes the same first slot. Inert when the text names nothing indexed (byte-identical). Env RIPWIRE_NO_MENTION=1 disables everywhere (incl. the MCP `for` verb).
@@ -233,6 +252,8 @@ struct Config
     // page M+N is the exact continuation of page M — no dropped/duplicated item across the seam.
     int              pageLimit         = 0;                // --limit=N: max items in this response (0 = unbounded)
     int              pageOffset        = 0;                // --offset=M: skip the first M items (0 = from the start)
+    std::size_t      pageRowBytes      = 0;                // PG1, internal (no flag): the row bytes main.cpp's output-ceiling fit gives a
+                                                           //   --clones page (runMaintenanceViewsServed); 0 = the verb's own default page
     bool             metrics           = false;            // --metrics: annotate symbols with fan-in/out + role (descriptive)
     bool             deps              = false;            // --deps: file→file dependency view (#include/import counts)
     bool             hotspots          = false;            // --hotspots: complexity × recent git churn (maintenance-pain map)
@@ -547,12 +568,13 @@ struct Config
                                                              // handler and refuses loudly rather than falling through to the map)
     std::string_view packTask;                              // --pack-task="TASK" (B11/L4): the budget-shared task bundle — ONE call
                                                              // assembling, under ONE deterministic budget (default 6K tokens;
-                                                             // --token-budget overrides), the 5-call orientation dance in FIXED order:
-                                                             // (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop
-                                                             // caller signatures, (4) their field notes, (5) tests_to_run for the top
-                                                             // files, in FIXED order ranking>bodies>callers>notes>tests. Each section
-                                                             // holds a FIXED, up-front proportional quota of the budget (rank40/
-                                                             // body30/caller15/note5/test10, pct); an under-spent section's leftover
+                                                             // --token-budget overrides), the orientation dance in FIXED order:
+                                                             // (1) --for's own 40-row ranked head, (2) ONE full body — the key one,
+                                                             // (3) its 1-hop caller signatures, (4) field notes, (5) tests_to_run,
+                                                             // (6) --for's file-grain tail, filled LAST with everything left, in
+                                                             // FIXED order ranking>body>callers>notes>tests>tail. Each section holds
+                                                             // a FIXED, up-front proportional quota of the budget (rank45/body20/
+                                                             // caller8/note2/test5/tail20, pct); an under-spent section's leftover
                                                              // quota rolls forward, so a small budget still zeroes a section
                                                              // eventually but never past its own fair share. Each section truncates
                                                              // rank-adaptively and the header reports EVERY truncation.
@@ -971,7 +993,7 @@ inline constexpr char kHelpHead[] =
         "                               ranked head (<sigs total=>: the relevance floor within the top 40, or --pack-top-n) is\n"
         "                               the answer and every row of it ships. A ~7.5KB payload TARGET shortens row text toward\n"
         "                               it (tail signatures and doc excerpts first; <sigs shown=S total=T capped=\"1\"> with S=T\n"
-        "                               marks a shrink); rows served past it carry past_target=\"K\" (the last K rows). Only a\n"
+        "                               marks a shrink); past_target=\"K\" counts the rows served past it. Only a\n"
         "                               runaway guard (30KB, a bug signal) cuts rows: over_ceiling=\"1\" and <sigs next=> serving\n"
         "                               them all (S printed of the T rows handed to the trim). The r=1 (top-ranked)\n"
         // §B7.5 (CA4): this said <sigs payload="capped"> — the STRING ENUM the §P8 vocabulary migration
@@ -1282,13 +1304,13 @@ inline constexpr char kHelpHead[] =
         "                               call edges in TRUE direction (finds the shared-caller join a directed --path can't)   [--connect-radius=N (1..12, default 6)]\n"
         "    --impact=SYM               show everything that reaches SYM — the transitive blast radius before a change\n"
         "                               — the indexed symbols that reach SYM (a floor, see counts_floor). file:name disambiguates like --callers\n"
-        "                               rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), PageRank\n"
-        "                               order within a depth; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first\n"
+        "                               rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), non-tests\n"
+        "                               first within a depth, then PageRank; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first\n"
         "                               A windowed answer (has_more=\"1\") names in all_next= the ONE call that lists every row of total=, in columnar form;\n"
         "                               --limit sizes the declined call sites too: where that call holds more of them than rows it says shown_dc=\n"
         "                               (of declined_calls=), and its dc_next= lists them all\n"
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
-        "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
+        "                               emitted as <f p=> rows, lazy=\"1\" on a lazy one (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
         "                               no_file_edges=\"go\" on the root: SYM's file is in a language this build almost never resolves imports for, so importers= is a floor.\n"
         "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"
@@ -1358,7 +1380,10 @@ inline constexpr char kHelpHead[] =
         "                               `--affected=widget` stays the ./src/widget.cpp pattern); only an item matching NO indexed\n"
         "                               path is offered to the symbol resolver, and `file:NAME` reaches the symbol reading\n"
         "                               explicitly. seeded_by=\"file|symbol|mixed\" + seeds=N report which reading fired and how\n"
-        "                               many defs it seeded. An item matching NEITHER refuses (exit 1) naming both readings.\n"
+        "                               many defs it seeded. An item matching NEITHER (a deleted, non-source or typo'd path in a\n"
+        "                               git diff list) is named on the answer -- unused=N, one <unused item= reason=not_indexed|\n"
+        "                               not_found near=> row each -- and the other items still answer; only a list with NO usable\n"
+        "                               item refuses (exit 1), naming both readings.\n"
         "                               seed_test_files=N of the matched files are TEST files: a test cannot reach a change it is part\n"
         "                               of, so its own symbols are not seeds of the caller walk, and its row carries seed_kind=\"test\"\n"
         "                               -- it is listed because the argument matched it (it changed, run it), not because it reaches.\n"
@@ -1378,6 +1403,8 @@ inline constexpr char kHelpHead[] =
         "                               Its co-change section is the check for Fowler's SHOTGUN SURGERY: the files this change\n"
         "                               usually lands in but did not. Backtested on two histories (EVALS.md): a named partner is\n"
         "                               edited within the next 3 commits in 56% / 32% of alarms, against a 1-2% chance baseline\n"
+        "                               A FILES item that resolves to no indexed file is named in an `unused:` block (reason=not_indexed|\n"
+        "                               not_found, near=) and the report covers the rest, exit 0; only a list with NO usable item refuses (exit 1)\n"
         "    --handoff                  brief the next session — verified disk truth first, labelled guesses second\n"
         "                               continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols,\n"
         "                               blast radius, tests-to-run) + <heuristic> labeled suggestions (co-change partners, committed notes,\n"
@@ -1387,6 +1414,9 @@ inline constexpr char kHelpHead[] =
         "    --test-gate[=F1,F2]        before a PR: name the tests to run and the untested blast radius; exit 4 if either is non-empty\n"
         "                               agent self-check before a PR (pair with --quality-delta): names the tests to run + the UNTESTED blast radius;\n"
         "                               exit 4 if either obligation is non-empty (run the tests, then rely on green). (default = git diff)\n"
+        "                               A FILES item that resolves to no indexed file is named (unused=N, <unused item= reason= near=>) and\n"
+        "                               the gate answers for the rest, but NEVER exits 0 for it: 4 when an obligation gates, else 6 (partial,\n"
+        "                               as --quality-delta); only a list with NO usable item refuses (exit 1)\n"
         "      run= on a test row        --affected/--situ/--test-gate/--exercises/--pr-context/--pack-task name harness FILES, not commands. A row carries\n"
         "                               run=\"<cmd>\" when a runner is DERIVABLE from real evidence: a test-dir .sh/.py whose basename stem\n"
         "                               matches the harness's, or whose TEXT names the harness file; for TS/JS, the nearest package.json\n"
@@ -1486,8 +1516,9 @@ inline constexpr char kHelpHead[] =
         "                               tokens) and EVERY one is served: the bodies carry p= l= t= for each, the root adds map_next=\n"
         "                               (the shell call that prints the map you did not get — orient once per session, then look up\n"
         "                               lean). If a byte budget cut some, the root adds unserved_total=N (the true count) and\n"
-        "                               unserved_next=\"--expand=FILE:LINE:NAME,…\" (the call serving them; past 16 it serves the first\n"
-        "                               16 and unserved_listed=\"16\" says so — a larger --pack-budget-bytes serves the rest) — never the\n"
+        "                               unserved_next=\"--expand=FILE:LINE:NAME,…\" (the call serving them, each selector naming the one\n"
+        "                               definition that starts on LINE; past 16 the page serves the request's first K and it is the\n"
+        "                               same call with --offset=K, so following it serves every definition once) — never the\n"
         "                               generic map. map_next= and unserved_next= are quoted for the shell; map_next= names every root\n"
         "                               plus the crawl-scope flags (--exclude, --max-file-size, --no-ignore, --ignore-tests). --outline\n"
         "                               follows the same rule for its one token (several --outline tokens keep the ordinary map). An\n"
@@ -2626,14 +2657,17 @@ inline constexpr char kHelpTail[] =
         "    --pack-task=\"TASK\"         the whole orientation dance in ONE call, under ONE shared budget\n"
         "                               the budget-shared task bundle: ONE call assembling, under ONE deterministic budget\n"
         "                               (default 6K tokens; --token-budget overrides), the whole orientation dance in FIXED order —\n"
-        "                               (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures,\n"
-        "                               (4) their field notes, (5) tests_to_run for the top files, emitted in FIXED order\n"
-        "                               ranking>bodies>callers>notes>tests. Each section holds a FIXED, up-front proportional quota\n"
-        "                               of the budget (rank40/body30/caller15/note5/test10, percent); an under-spent section's\n"
-        "                               leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section\n"
-        "                               eventually but never past its own fair share. Each section truncates rank-adaptively and\n"
-        "                               the header reports EVERY truncation (no silent caps). A tiny budget degrades to\n"
-        "                               ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
+        "                               (1) --for's own 40-row ranked head (its order, its rules; rows past the first ten are\n"
+        "                               pointer rows), (2) ONE full body, the key one — the symbol the task names, else the\n"
+        "                               top-ranked; every other candidate is a <b next=--expand=...> pointer, (3) that body's\n"
+        "                               1-hop caller signatures, (4) field notes, (5) tests_to_run, (6) --for's file-grain tail,\n"
+        "                               filled LAST with everything the sections above leave, in FIXED order\n"
+        "                               ranking>body>callers>notes>tests>tail. Each section holds a FIXED, up-front proportional\n"
+        "                               quota of the budget (rank45/body20/caller8/note2/test5/tail20, percent); an under-spent\n"
+        "                               section's leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes\n"
+        "                               a section eventually but never past its own fair share. Each section truncates\n"
+        "                               rank-adaptively and the header reports EVERY truncation (no silent caps). A tiny budget\n"
+        "                               degrades to ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
         "    --partition=N              (with --pack-task, N=2..16) FAN OUT: one shared core plus N per-agent slices, not one bundle\n"
         "                               (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"
@@ -2828,8 +2862,9 @@ inline constexpr char kHelpTail[] =
         "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact|dict|last legend posture for every XML verb — compact is the default; dict drops the prose\n"
-        "                               for a pointer; full restores the long form; last puts the ANSWER before the legend\n"
+        "    --legend=full|compact|dict|last|first legend posture for every XML verb — compact is the default; dict drops the\n"
+        "                               prose for a pointer; full restores the long form; --for answers ANSWER-FIRST and in\n"
+        "                               pages by default (last spells that); first is the legend-first order, unpaged\n"
         "                               --legend=dict (item D, 2026-11-17) drops the prose legend of ONE TIER — the core plus\n"
         "                               this answer's own verb pack — and names that tier: every root attribute stays exactly\n"
         "                               where it was, and legend=\"dict\" dict=\"ripwire --legend-dict=KEY\" dictv= is added, so one\n"
@@ -2875,6 +2910,49 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
+        "    --page-bytes=N[:K]         (--for or the bare map; 0 with --lint/--expand/--grep/--clones) the page size of the answer-first\n"
+        "                               --for answer: 12000 by default, 0 = the whole answer in one call. The answer is rendered\n"
+        "                               whole and cut at row boundaries into pages of about N bytes; the root says page= pages=\n"
+        "                               withheld_bytes= and next=,\n"
+        "                               which is this flag with :K, the next page. Page 1 keeps the whole legend after its\n"
+        "                               rows; a later page re-sends none and ends <about legend=\"ref\" have=\"page1\"/>.\n"
+        "                               Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first\n"
+        "                               (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.\n"
+        "                               ROWS AS LINES: the answer-first answer serves the rows of <sigs> and <tail> as text lines in\n"
+        "                               one CDATA per section, defined by its own legend: 'P:L-E N k=v.. | SIG' is a <d> row (path,\n"
+        "                               first-last line, name, its other attributes, signature), 'P SYMS' a <t> row, and a line\n"
+        "                               starting with < is the row verbatim; a sigs row whose rank is the previous row's + 1 spells\n"
+        "                               no r= (<sigs rseq=\"1\">). Lossless, applied to each page after it is cut (the page size and\n"
+        "                               est_tokens= count the element form, an upper bound). RIPWIRE_NO_ROWLINES=1 serves the\n"
+        "                               elements (the A/B handle); --legend=first, --json and MCP for are not in this form.\n"
+        "                               --page-bytes=0 on an answer over the 24,000-character OUTPUT CEILING (the agent harness's\n"
+        "                               ~30,000-character inline limit less a fifth) prints one stderr line naming its size first.\n"
+        "                               THE BARE MAP pages the same way: over the ceiling it is cut between its file groups and\n"
+        "                               inventory rows into 24,000 B pages (page= pages= withheld_bytes= has_more= next=|page_next=);\n"
+        "                               --page-bytes=N sets that size, :K a page, 0 the whole map. Beside a report verb, refused.\n"
+        "                               --page-bytes=0 IS THE WHOLE ANSWER on every verb that pages: --for, the bare map, --lint\n"
+        "                               (every finding; with --offset=K, every one from K), --expand (every body uncut), --grep\n"
+        "                               (every match) and --clones (every clone group). Those four page by their own unit (next=;\n"
+        "                               --expand's unserved_next=, which past 16 definitions is --offset=K, the first K skipped), so\n"
+        "                               beside them it takes 0 only, and not with their own size (--limit=N, --pack-budget-bytes=N).\n"
+        "                               Over the ceiling: the one stderr line.\n"
+        "    --rows=lines|elements      (with --for) the form of the <sigs> and <tail> rows: lines, the default, is ROWS AS LINES\n"
+        "                               above; elements is one XML element per row as 0.6.x served them, byte for byte the\n"
+        "                               answer lines decodes to. The flag decides over RIPWIRE_NO_ROWLINES in both directions;\n"
+        "                               any other value, or the flag without --for, is refused. ripwire --version says which\n"
+        "                               form this binary serves by default in this environment (rows=).\n"
+        "    --bodies=inline|pointer    (with --for) the form of the bodies on the answer's FIRST page: inline, the default, serves\n"
+        "                               each body's text; pointer serves each one (fold, key, slice member, follow) as the skip row\n"
+        "                               that names it, <skip p= n= l= e= bytes= next=>, l..e its source lines, next= the --expand\n"
+        "                               that serves it, and the page ends at the row it ended at with the bodies (no later row moves\n"
+        "                               up). Its root says body_form=\"pointer\". Later pages, routed answers, --token-budget,\n"
+        "                               --expand, --pack-task and MCP keep their bodies. The flag decides over RIPWIRE_BODY_POINTERS\n"
+        "                               in both directions; any other value, or the flag without --for, is refused.\n"
+        "    --no-verb-route            (with --for) never ROUTE: a bare --for whose text names a symbol in backticks and asks who\n"
+        "                               calls it, where it is used, what it reaches or what breaks is answered by --callers /\n"
+        "                               --uses / --impact, the route disclosed as the root's first child <route … next=>; files\n"
+        "                               naming it only as text follow as <text_only> rows; warn=1 there carries the first --for\n"
+        "                               page too. This flag is that next=: the ranked --for answer, unrouted.\n"
         "    --legend-dict[=core|KEY]   print the legend dictionary, or one TIER of it to hold with --legend-have=\n"
         "                               Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one\n"
         "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines). =core: the 13\n"
@@ -2884,7 +2962,9 @@ inline constexpr char kHelpTail[] =
         "                               is the core alone). Line 1 of a tier carries have=, the value --legend-have= takes; it\n"
         "                               hashes exactly the entries= lines after it. =tiers lists every tier (name, have=,\n"
         "                               entries, bytes, census); =roster the completeness attributes the dictionary defines;\n"
-        "                               =index every entry by what it defines. Answered wherever it stands; nothing else runs.\n"
+        "                               =index every entry by what it defines; =seen reads answers on stdin and prints the\n"
+        "                               hashes of the entries they carry, the lines --legend-seen=FILE takes. Answered wherever it\n"
+        "                               stands; nothing else runs.\n"
         "    --legend-have=HAVE[,HAVE]  say which legend tiers you HOLD; their definitions are left out of the answer\n"
         "                               you HOLD those legend tiers: every line `ripwire --legend-dict=core` (or =KEY) printed,\n"
         "                               read by you. HAVE is the have= on that text's line 1; several join with commas. The\n"
@@ -2898,7 +2978,19 @@ inline constexpr char kHelpTail[] =
         "                               --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass\n"
         "                               nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside\n"
         "                               a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a\n"
-        "                               valid HAVE too (have=\"full\"), about 130 KB and about 130 calls to repay.\n"
+        "                               valid HAVE too (have=\"full\"), about 160 KB (about 130 calls to repay, measured at 131 KB).\n"
+        "    --legend-seen=FILE         leave out the legend definitions FILE says you already hold\n"
+        "                               FILE: one entry hash per line (16 hex), the hashes `ripwire --legend-dict=seen` prints for\n"
+        "                               answers you RECEIVED (stdin; their comments, CDATA skipped) — append them as you go:\n"
+        "                               `ripwire . --for=Q | tee -a seen.log`, then `ripwire --legend-dict=seen <seen.log >seen.txt`.\n"
+        "                               An answer loses exactly the definitions FILE holds, from its top-level comments (--for's\n"
+        "                               trailing legend included); rows, CDATA and every root attribute but est_tokens= (repriced)\n"
+        "                               are byte-identical, and a comment `legend-seen: N definitions you hold were left out`\n"
+        "                               marks where, with the dictv= of the dictionary holding them. A hash is of the definition's TEXT, so one from another build only matches\n"
+        "                               an unchanged definition. FILE never refuses: missing, unreadable, over 4 MiB or holding a\n"
+        "                               line that is no hash, the answer is served whole and stderr says so. Same argv + same\n"
+        "                               FILE bytes = same answer. REFUSED: an empty value, --legend-have=, --legend=full|dict,\n"
+        "                               --mcp/--listen/--lsp. hooks/ripwire-legend-seen.sh keeps FILE for a Claude Code session.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
@@ -3013,11 +3105,14 @@ inline constexpr char kHelpTail[] =
         "                               (exit 2 or 6, see its row). Nothing derived from a partial ingest is cached. The\n"
         "                               default is 65% of physical RAM (or of the cgroup's memory.max when lower); this flag,\n"
         "                               or RIPWIRE_MAX_MEMORY when the flag is absent, replaces it; below 64M is refused.\n"
-        "                               A run whose peak went over the limit between two readings (the guard reads it between\n"
-        "                               phases) is not stopped: it finishes and says so, with one stderr line, memory_peak= in\n"
-        "                               the default map's header, and _memory_peak in the MCP envelope. The limit is a rule of\n"
-        "                               thumb that keeps the machine from running out of memory, and the 65% default is not a\n"
-        "                               measured threshold, so an overshoot is information, not a failure.\n"
+        "                               The limit is also read at operator new (every allocation of 256 KiB or more, and every\n"
+        "                               64 MiB of smaller ones): an allocation that would pass it refuses the run, exit 5, one\n"
+        "                               stderr line. RIPWIRE_MEM_BUDGET_MB=<MiB> sets that line alone and =0 turns it off;\n"
+        "                               servers do not arm it. A peak it cannot see (tree-sitter's own malloc) that went over\n"
+        "                               the limit between readings is not stopped: it finishes and says so, with one stderr\n"
+        "                               line, memory_peak= in the default map's header, and _memory_peak in the MCP envelope.\n"
+        "                               The limit is a rule of thumb that keeps the machine from running out of memory, and the\n"
+        "                               65% default is not a measured threshold, so an overshoot is information, not a failure.\n"
         "    --refetch                  when the root is a git URL, clone it fresh instead of reusing the cached copy\n"
         "                               when the root is a git URL, force a fresh clone instead of reusing the\n"
         "                               cached one (default: reuse forever; stderr notes the cached clone's age)\n"
@@ -3466,6 +3561,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     // the --for lens modifiers (each refused alone by validateConfig)
     { "--anchor",             &Config::anchor             },
     { "--no-route",           &Config::noRoute            },
+    { "--no-verb-route",      &Config::noVerbRoute        },   // RT1: the --for answer even when the question names a symbol a verb answers
     { "--adaptive",           &Config::adaptive           },
     { "--no-mention-boost",   &Config::noMentionBoost     },
     { "--cochange-boost",     &Config::cochangeBoost      },
@@ -3537,6 +3633,9 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--arch=",        &Config::archRules       , EmptyValue::Refuse, "a layering-rules file path",             "--arch=arch_rules.txt" },
     { "--path=",        &Config::pathSpec        , EmptyValue::Refuse, "two symbol names, FROM,TO",              "--path=main,rankGraph" },
     { "--defs=",        &Config::defsSpec        , EmptyValue::Refuse, "up to 16 symbol names, A[,B…]",          "--defs=parseArgs,rankGraph" },
+    { "--page-bytes=",  &Config::pageBytesSpec   , EmptyValue::Refuse, "a page size in bytes, N or N:K (0 = the whole answer)", "--page-bytes=6000" },
+    { "--rows=",        &Config::rowsSpec        , EmptyValue::Refuse, "lines or elements",                      "--rows=elements" },
+    { "--bodies=",      &Config::bodiesSpec      , EmptyValue::Refuse, "inline or pointer",                      "--bodies=pointer" },
     { "--connect=",     &Config::connectSpec     , EmptyValue::Refuse, "two or more symbol names, A,B[,C]",      "--connect=parseArgs,serialize,rankGraph" },
     { "--impact=",      &Config::impactSym       , EmptyValue::Refuse, "a symbol name",                          "--impact=parseArgs" },
     { "--mentions=",    &Config::mentionsSym     , EmptyValue::Refuse, "a symbol name",                          "--mentions=parseArgs" },
@@ -3554,7 +3653,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact, dict or last",                  "--legend=compact" },
+    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact, dict, last or first",         "--legend=compact" },
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
@@ -3848,8 +3947,8 @@ inline constexpr IntFlag kIntFlags[] =
 //                              aliases that warn once per RUN, not per flag — state a BoolFlag row has
 //                              nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
-inline constexpr std::size_t kHandWrittenFlagArms = 27;   // +1 lane/legend-ref-cli (2026-11-16): --legend-have= (value arm taking a dictionary version, same shape as --mcp-legend= but open-valued: the value is checked against legenddict::dictionaryVersion() in main.cpp, not against a closed set here, because cli.h cannot include legenddict.h without shifting declaration order); +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (closed-value arms, same shape as --grep-in=); +1 #350 (2026-09-28): --max-memory= (byte-size arm, same shape as --max-file-size=); +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=); +1 lane/flag-biggest-first (2026-09-23): --readability (deprecation-warning alias, same shape as --stable/--most-important-last/--no-auto-order) — its kBoolFlags row is renamed to --biggest-first (same Config::readability member), so the old spelling moves OUT of the table and becomes a hand-written arm, per the house rule that deprecation-warning aliases stay hand-written
-inline constexpr std::size_t kTotalFlagArms = 226;  // +1 task E (2026-10-25, #440): --lsp-langmap= (kViewFlags row) — the --lsp client languageId→tag alias map file, config not recompile; +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kHandWrittenFlagArms = 28;   // +1 lane/ls1-legendseen (2026-11-18): --legend-seen=FILE (value arm taking a path, same shape as --legend-have=: read in main.cpp, never against a closed set here); +1 lane/legend-ref-cli (2026-11-16): --legend-have= (value arm taking a dictionary version, same shape as --mcp-legend= but open-valued: the value is checked against legenddict::dictionaryVersion() in main.cpp, not against a closed set here, because cli.h cannot include legenddict.h without shifting declaration order); +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (closed-value arms, same shape as --grep-in=); +1 #350 (2026-09-28): --max-memory= (byte-size arm, same shape as --max-file-size=); +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=); +1 lane/flag-biggest-first (2026-09-23): --readability (deprecation-warning alias, same shape as --stable/--most-important-last/--no-auto-order) — its kBoolFlags row is renamed to --biggest-first (same Config::readability member), so the old spelling moves OUT of the table and becomes a hand-written arm, per the house rule that deprecation-warning aliases stay hand-written
+inline constexpr std::size_t kTotalFlagArms = 231;  // +1 lane/nb1-nobodies-flag (2026-11-21, owner ruling 162): --bodies= (kViewFlags row) — inline|pointer, the form of the bodies on a --for answer's first page, forbodyptr.h; +1 lane/fmt2-rowlines (2026-11-21, owner ruling 153): --rows= (kViewFlags row) — lines|elements, the form of a --for answer's <sigs>/<tail> rows, forrowlines.h; +1 task E (2026-10-25, #440): --lsp-langmap= (kViewFlags row) — the --lsp client languageId→tag alias map file, config not recompile; +1 lane/ls1-legendseen (2026-11-18): --legend-seen= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/rt1-route (2026-11-18): --no-verb-route (kBoolFlags row) — the --for answer, never routed to the verb the question names (verbs_forroute.h); +1 lane/af1-answerfirst (2026-11-18): --page-bytes= (kViewFlags row) — the page size (and page) of the answer-first --for answer, forpages.h; +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -4175,6 +4274,13 @@ inline void validatePagingHonored( Config& c ) noexcept
     // row would make the shaping guard refuse the budgets the map does honour): the honoring decision lives here,
     // where it is about the flags typed, and the refusal above skips it.
     if( !c.inDir.empty() )
+    {
+        return;
+    }
+    // PG1: `--expand=… --offset=K` continues a many-definition --expand (main.cpp's unserved_next=): it skips the first K
+    // definitions its selectors resolve to. Not a kPagingHonoringVerbs row for the --in reason above (a row would refuse the
+    // budgets the map beside it honours); --limit stays refused, since the body budget is --expand's page size.
+    if( c.forTask.empty() && !c.expand.empty() && c.pageLimit <= 0 && !c.lint && c.lintRulesDir.empty() )
     {
         return;
     }
@@ -4661,14 +4767,14 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // Every opt-in spelling resolves `legend` to "compact" and carries its difference in a Config flag of its own
 // (legendProseOff, legendAnswerFirst) — see the note there for the 25 call sites that would have silently flipped
 // had either been a third value of the dialect switch. `full` restores the long form as before.
-inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict", "last" };
+inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict", "last", "first" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );
-// A posture's spelling lives in THREE places: this table, the flag-table hint ("full, compact, dict or last") and
+// A posture's spelling lives in THREE places: this table, the flag-table hint ("full, compact, dict, last or first") and
 // validateLegendModifier's refusal. Adding `last` left both prose copies reading "full, compact or dict", so the
 // refusal named a value set that no longer existed and a correct --legend=last looked like a typo in the error text.
 // This count is the tripwire: raise it only together with both strings.
-static_assert( std::ranges::size( kLegendPostures ) == 4,
+static_assert( std::ranges::size( kLegendPostures ) == 5,
                "a new --legend posture needs its spelling in the flag-table hint AND in validateLegendModifier's refusal" );
 
 // WHEN EACH OPT-IN COLLAPSES INTO THE DEFAULT. An option with no stated expiry criterion is a permanent flag, and
@@ -4680,6 +4786,10 @@ static_assert( std::ranges::size( kLegendPostures ) == 4,
 //   last — when the answer carries its disclosure readings in the prefix (root tag, then cuts and floors, then rows,
 //          then the schema dictionary). Measured 2026-11-17: as the DEFAULT this ordering left an active cut or floor
 //          outside 2 KB on 9 of 50 --for answers, and no prefix win pays for a reader that cannot tell it was cut.
+//          COLLAPSED 2026-11-18 (AF1, owner decision): the default --for answer is answer-first AND paged (forpages.h).
+//          A page is not a truncated prefix: its own cut rides the ROOT (page= pages= withheld_bytes= next=) and page 1
+//          keeps the whole legend before </ctx>, so a reader holds every reading of every marker it was served.
+//          `last` stays as a spelling of the default; `first` is the opt-out (today's legend-first order, unpaged).
 // Neither condition is a promise about a date. Each is a gate that must be green first, so the option retires on
 // evidence instead of accumulating.
 
@@ -4765,6 +4875,44 @@ inline void refuseLegendHaveMisuse( Config& c )
     c.ok = false;
 }
 
+// --legend-seen=FILE (lane LS1, legendseen.h). Its FILE is read in main.cpp and never refuses — an unreadable or corrupt
+// one serves the whole answer, said on stderr. What refuses here is ARGV that cannot mean anything: an empty value (the
+// §B5 ruling: a shell variable that expanded to nothing must not read as a reduced answer), a server transport (the
+// capture deadlock --legend-have= documents), and a second legend posture for the same answer.
+inline void refuseLegendSeenMisuse( Config& c )
+{
+    if( !c.legendSeenGiven || !c.ok )
+    {
+        return;
+    }
+    const char* why = nullptr;
+    if( c.legendSeen.empty() )
+    {
+        why = "needs the file that holds the legend-entry hashes you already have — an empty value names none (a shell variable that "
+              "expanded to nothing?). Write it from answers you received: ripwire . --callers=main | tee /dev/stderr | ripwire "
+              "--legend-dict=seen >>seen.txt, then pass --legend-seen=seen.txt";
+    }
+    else if( c.mcp || c.lsp || !c.listen.empty() )
+    {
+        why = "serves one finished answer, so it cannot combine with a server transport (--mcp/--listen/--lsp); the servers already "
+              "send each definition once per session — see --mcp-legend=session";
+    }
+    else if( !c.legendHave.empty() )
+    {
+        why = "and --legend-have= are two legend postures for one answer — pass one (--legend-seen= is per definition and needs no tier)";
+    }
+    else if( c.legend == "full" || c.legendSpelled == "dict" )
+    {
+        why = "leaves out the definitions of the default compact legend you hold — it cannot combine with --legend=full or --legend=dict";
+    }
+    if( why == nullptr )
+    {
+        return;
+    }
+    rw::emitTo( stderr, "ripwire: --legend-seen= {}\n", why );
+    c.ok = false;
+}
+
 [[nodiscard]] inline bool isLegendPosture( std::string_view v ) noexcept
 {
     return std::ranges::contains( kLegendPostures, v );
@@ -4833,8 +4981,9 @@ static inline void validateLegendModifier( Config& c ) noexcept
         const bool servesStdout = c.mcp || !c.listen.empty() || c.lsp;
         if( !servesStdout && !c.json )
         {
-            c.legend          = kDefaultLegendPosture;
-            c.legendDefaulted = true;
+            c.legend            = kDefaultLegendPosture;
+            c.legendDefaulted   = true;
+            c.legendAnswerFirst = true;   // AF1: answer-first (and paged) is the --for default; only --for reads it
             // ITEM D IS OPT-IN, NOT THE DEFAULT (owner decision 2026-11-17, after the blast radius was measured).
             // The posture is lossless and measured — see the readout — but making it the DEFAULT reds 89 of 849 gates,
             // 80 of them on ONE contract: they assert that every attribute an answer emits is defined in THAT ANSWER'S
@@ -4865,6 +5014,19 @@ static inline void validateLegendModifier( Config& c ) noexcept
         c.legend            = kDefaultLegendPosture;
         c.legendAnswerFirst = true;
     }
+    // AF1: a SPELLED --legend=compact is the default posture, so it answers --for as the default does — answer-first, paged.
+    else if( c.legend == "compact" )
+    {
+        c.legendAnswerFirst = true;
+    }
+    // AF1: --legend=first is the OPT-OUT — the legend-first order this tool served before the default flip, unpaged, byte for
+    // byte. Normalised exactly as `last` is; the difference is that legendAnswerFirst stays false.
+    if( c.legend == "first" )
+    {
+        c.legendSpelled     = c.legend;
+        c.legend            = kDefaultLegendPosture;
+        c.legendAnswerFirst = false;
+    }
     // r2-LO: legend=ref is a SESSION posture — definitions sent once per server process, after the session read the
     // dictionary (legenddict.h). A CLI run is one answer with no session to have been served anything, so a ref answer
     // here would point at definitions its reader never received. Refused, naming both places ref and the dictionary live.
@@ -4878,7 +5040,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
     if( !isLegendPosture( c.legend ) )
     {
-        rw::emitTo( stderr, "ripwire: --legend needs full, compact, dict or last — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
+        rw::emitTo( stderr, "ripwire: --legend needs full, compact, dict, last or first — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
         c.ok = false;
     }
     // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend
@@ -5041,6 +5203,185 @@ inline bool activeSinceHostNeedsBaseline( const Config& c ) noexcept
     return anySinceHostActive( c, /*baselineOnly=*/true );
 }
 
+// AF1 --page-bytes=N[:K] (forpages.h): N is the page size in bytes (0 = the whole answer), K the 1-based page. It shapes the
+// answer-first --for answer on its default path only, so every other combination REFUSES rather than being accepted and
+// ignored: a budget is a shed with its own contract (forbudgetfit.h), the legend-first postures are unpaged by definition,
+// and the other dialects and the file page carry no answer-first document to cut.
+// The value's grammar, N or N:K: false on anything else (a page from 1; 0:K is not a page).
+[[nodiscard]] inline bool parsePageBytesSpec( std::string_view spec, std::size_t& bytes, std::size_t& page ) noexcept
+{
+    const auto parse = []( std::string_view v, std::size_t& out ) noexcept
+    {
+        const auto [ end, ec ] = std::from_chars( v.data(), v.data() + v.size(), out );
+        return !v.empty() && ec == std::errc() && end == v.data() + v.size() && out <= 100000000u;
+    };
+    const std::size_t colon = spec.find( ':' );
+    page = 1;
+    if( !parse( spec.substr( 0, colon ), bytes ) ) { return false; }
+    if( colon != std::string_view::npos && !( parse( spec.substr( colon + 1 ), page ) && page >= 1 ) ) { return false; }
+    return bytes > 0 || page == 1;
+}
+
+// CL1 (mappages.h): the runs whose map main.cpp pages under the output ceiling — the bare default map, one root, every shaping
+// knob at its default (an explicit --top-k / --max-tokens / --token-budget is the caller's size), XML at the default legend,
+// PageRank order. main.cpp also refuses --page-bytes when a report verb answers instead (§B11.4's winner): this predicate
+// reads flags, not the dispatch table, so it cannot see every verb.
+inline bool mapPageEligible( const Config& c ) noexcept
+{
+    return c.forTask.empty() && c.query.empty() && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0
+        && !c.json && !c.html && !c.mermaid && !c.columnar && !c.candidates && !c.topKExplicit && c.maxTokens <= 0 && c.tokenBudget == 0
+        && !c.mapDiff && c.rankBy == RankBy::PageRank && c.inDir.empty() && c.pageLimit == 0 && c.pageOffset == 0 && c.legendDefaulted
+        && !c.mcp && !c.lsp && c.listen.empty() && c.batchFile.empty() && c.roots.size() == 1 && !honorsPaging( c );
+}
+
+// LT1: the verbs the output ceiling pages by their OWN unit, not by bytes — --lint (findings, continued by --offset=K) and a bare
+// --expand (bodies and body lines, continued by unserved_next= / lines= next=). --page-bytes takes only 0 there: one switch, the
+// same on every paged verb, for "the whole answer"; a page size in bytes would be a second paging grammar beside the verb's own.
+inline bool lintPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && ( c.lint || !c.lintRulesDir.empty() ) && c.match.empty() && c.pattern.empty();
+}
+inline bool expandPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && !c.expand.empty() && !lintPagedVerbAsked( c );
+}
+// PG1: --grep/--regex (matches, continued by --offset=K) and --clones (clone groups, continued by --offset=K) join the family: a
+// default page is byte-budgeted under the output ceiling, and --page-bytes=0 is the whole answer, as on --lint.
+inline bool rowPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && c.expand.empty() && !lintPagedVerbAsked( c ) && ( !c.grep.empty() || c.clones );
+}
+
+// PG1: wholeOnlyConflict's --grep / --clones arm — N == 0 alone, and not beside --limit=N (their own page size).
+[[nodiscard]] inline const char* rowPagedWholeConflict( const Config& c, std::size_t bytes ) noexcept
+{
+    if( bytes != 0 )
+    {
+        return c.clones ? "takes 0 only beside --clones (the whole answer): --clones pages by clone groups — follow the root's next= (--offset=K), or --limit=N"
+                        : "takes 0 only beside --grep (the whole answer): --grep pages by matches — follow the root's next= (--offset=K), or --limit=N";
+    }
+    if( c.pageLimit > 0 )
+    {
+        return c.clones ? "=0 (the whole answer) does not combine with --limit=N, --clones' own page size — pass one"
+                        : "=0 (the whole answer) does not combine with --limit=N, --grep's own page size — pass one";
+    }
+    return nullptr;
+}
+
+// Why --page-bytes=N cannot shape a --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
+[[nodiscard]] inline const char* wholeOnlyConflict( const Config& c, std::size_t bytes ) noexcept
+{
+    if( lintPagedVerbAsked( c ) )
+    {
+        if( bytes != 0 )         { return "takes 0 only beside --lint (the whole answer): --lint pages by findings — follow the root's next= (--offset=K), or --limit=N"; }
+        if( c.sarif )            { return "=0 does not combine with --sarif, which is never paged"; }
+        if( c.pageLimit > 0 )    { return "=0 (the whole answer) does not combine with --limit=N, --lint's own page size — pass one"; }
+        return nullptr;
+    }
+    if( rowPagedVerbAsked( c ) )
+    {
+        return rowPagedWholeConflict( c, bytes );
+    }
+    if( bytes != 0 )             { return "takes 0 only beside --expand (the whole answer): --expand pages by body lines — follow a body's next= or unserved_next=, or --pack-budget-bytes=N"; }
+    if( c.packBudgetExplicit )   { return "=0 (the whole answer) does not combine with --pack-budget-bytes=N, --expand's own size — pass one"; }
+    return nullptr;
+}
+
+// Why --page-bytes cannot shape this run, or nullptr when it can.
+[[nodiscard]] inline const char* pageBytesConflict( const Config& c ) noexcept
+{
+    if( c.forTask.empty() )                                     { return mapPageEligible( c ) ? nullptr : "pages a --for answer or the bare map only"; }
+    if( !c.legendAnswerFirst )                                  { return "pages the answer-first order only (not --legend=first, full or dict)"; }
+    if( c.tokenBudget > 0 || ( c.maxTokens > 0 && c.detail > 0 ) ) { return "does not combine with a token budget, which sheds the answer instead"; }
+    if( c.json || c.columnar || c.candidates )                  { return "pages the XML answer only"; }
+    if( c.pageLimit > 0 || c.pageOffset > 0 )                   { return "does not combine with --limit/--offset, the file-grain page"; }
+    if( !c.legendHave.empty() )                                 { return "does not combine with --legend-have=, a second posture for one answer"; }
+    return nullptr;
+}
+
+inline void validatePageBytes( Config& c ) noexcept
+{
+    if( c.pageBytesSpec.empty() || !c.ok )
+    {
+        return;
+    }
+    std::size_t bytes = 0, page = 1;
+    if( !parsePageBytesSpec( c.pageBytesSpec, bytes, page ) )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes needs a page size in bytes, N or N:K (K a page from 1; 0 = the whole answer) — got '{}', "
+                            "e.g. --page-bytes=6000\n", c.pageBytesSpec );
+        c.ok = false;
+        return;
+    }
+    const char* why = lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) || rowPagedVerbAsked( c ) ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
+    if( why != nullptr )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes{}{}\n", why[0] == '=' ? "" : " ", why );
+        c.ok = false;
+        return;
+    }
+    c.forPageBytes = bytes;
+    c.forPage      = page;
+}
+
+// LT1: --page-bytes=0 was given and accepted — the caller's explicit "whole answer", on any verb that pages (--for, the bare map,
+// --lint, --expand). Read after validatePageBytes; every paged verb asks this one predicate.
+inline bool wholeAnswerAsked( const Config& c ) noexcept
+{
+    return !c.pageBytesSpec.empty() && c.forPageBytes == 0;
+}
+
+// CL1 (outputceiling.h): the body budget of a bare --expand. The historic 64 KB default let one call print 51,406 characters
+// (GA1 DEV gson, --expand=toString: 33 definitions) — past the agent harness's 30,000-character inline limit, so the answer
+// reached the agent as a 2 KB preview. The default now leaves room under kOutputCeilingChars for the root, the legend and
+// the <calls> rows; packBodies' existing cut vocabulary carries the rest: a cut body says truncated="1" lines="lo-hi/T" and
+// next= (the slice that continues it), unserved definitions are named by the root's unserved_next=. An explicit
+// --pack-budget-bytes=N is the caller's size and is left alone. --for keeps its own budgets (it is paged by forpages.h).
+inline constexpr std::size_t kExpandCeilingBodyBytes = 16000;
+// The <bodies> section a bare --expand's render must fit (main.cpp refits the budget when <b> tag attributes push it over), and
+// the smallest budget a refit may reach. kOutputCeilingChars less the root (with unserved_next=, up to ~1.5 KB) and the legend.
+inline constexpr std::size_t kExpandCeilingBodiesBytes = 20000;
+inline constexpr std::size_t kExpandCeilingFloorBytes  = 2000;
+inline void applyExpandCeiling( Config& c ) noexcept
+{
+    if( c.ok && !c.expand.empty() && c.forTask.empty() && !c.packBudgetExplicit && !wholeAnswerAsked( c ) )
+    {
+        c.packBudgetBytes = std::min( c.packBudgetBytes, kExpandCeilingBodyBytes );
+    }
+}
+
+// A two-value modifier of --for that only shapes its answer (--rows=, --bodies=): a closed set, and refused on any other verb rather
+// than accepted and ignored. `flag` is the name without dashes, `noun` what it shapes, `example` the value the refusal suggests.
+struct ForClosedModifier
+{
+    std::string_view flag, a, b, example, noun;
+};
+inline void validateForClosedModifier( Config& c, std::string_view spec, const ForClosedModifier& m ) noexcept
+{
+    if( spec.empty() || !c.ok )
+    {
+        return;
+    }
+    if( spec != m.a && spec != m.b )
+    {
+        rw::emitTo( stderr, "ripwire: --{} needs {} or {} — got '{}', e.g. --{}={}\n", m.flag, m.a, m.b, spec, m.flag, m.example );
+        c.ok = false;
+        return;
+    }
+    if( c.forTask.empty() )
+    {
+        rw::emitTo( stderr, "ripwire: --{} shapes the {} of a --for answer only\n", m.flag, m.noun );
+        c.ok = false;
+    }
+}
+// The two: FMT2 --rows=lines|elements (forrowlines.h), the form of a --for answer's <sigs>/<tail> rows; NB1 --bodies=inline|pointer
+// (forbodyptr.h), the form of the bodies on its first page.
+inline void validateForClosedModifiers( Config& c ) noexcept
+{
+    validateForClosedModifier( c, c.rowsSpec, { "rows", rw::rowlines::kRowsLines, rw::rowlines::kRowsElements, rw::rowlines::kRowsElements, "rows" } );
+    validateForClosedModifier( c, c.bodiesSpec, { "bodies", rw::bodyptr::kBodiesInline, rw::bodyptr::kBodiesPointer, rw::bodyptr::kBodiesPointer, "bodies" } );
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -5051,6 +5392,9 @@ inline void validateModifierGuards( Config& c ) noexcept
     validateLspShaping( c );         // the server transport refuses the shaping knobs outright — see its header
 
     validateLegendModifier( c );
+    validatePageBytes( c );          // AF1: after the posture, which decides whether the answer is answer-first at all
+    applyExpandCeiling( c );         // CL1: a bare --expand's body budget keeps the whole answer under the output ceiling
+    validateForClosedModifiers( c ); // FMT2 --rows= is lines|elements, NB1 --bodies= is inline|pointer; each with --for only
     validateSectionsModifier( c );   // L2 (round-1 lever B1): --sections= modifies --for only, closed set
     validateGrepHandleModifier( c );
     validateDefaultCeilingModifiers( c );   // P4 (L7): --zoom-levels / --include-builtins ride their verb only
@@ -5071,6 +5415,7 @@ inline void validateModifierGuards( Config& c ) noexcept
         c.ok = false;
     }
     refuseLegendHaveMisuse( c );
+    refuseLegendSeenMisuse( c );
     if( !c.mcpTools.empty() && !c.mcp )   // --listen sets c.mcp, so this covers both transports
     {
         rw::emitRaw( stderr, "ripwire: --mcp-tools is read by the MCP server only — pass --mcp (or --listen) too, e.g. ripwire . --mcp --mcp-tools=core\n" );
@@ -5462,6 +5807,13 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
+    // --no-verb-route shapes only --for; alone it does nothing — refuse loudly, as --no-route does.
+    if( c.noVerbRoute && c.forTask.empty() )
+    {
+        rw::emitRaw( stderr, "ripwire: --no-verb-route modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-verb-route)\n" );
+        c.ok = false;
+    }
+
     // --adaptive cuts the --for/--query result set at the relevance cliff; alone it does nothing — refuse loudly.
     if( c.adaptive && c.forTask.empty() && c.query.empty() )
     {
@@ -5789,8 +6141,13 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
             // The version token is the LABEL (cmake/version_stamp.cmake): a build off the tag says -dev, so a build of main is
             // never mistaken for the release it follows; MCP/LSP serverInfo, --html and --doctor print the same one.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
+            // rows= (FMT2, owner ruling 153) names the form of a --for answer's <sigs>/<tail> rows this binary serves by default in
+            // THIS environment (lines; elements under RIPWIRE_NO_ROWLINES), so an experiment records it without an answer byte.
+            // act= (BR1, foractline.h) names whether a --for page carries its act line in THIS environment (off under RIPWIRE_NO_ACTLINE).
+            // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
+                        kRipwireGitStamp );
             std::exit( 0 );
         }
 
@@ -5868,6 +6225,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             {
                 if( !parsePosU64( a.data() + 20, c.packBudgetBytes ) )
                 { refuseFlagValue( "--pack-budget-bytes", "a positive integer", a.data() + 20, "--pack-budget-bytes=32768" );  c.ok = false;  return c; }
+                c.packBudgetExplicit = true;
                 rw::emitRaw( stderr, "ripwire: --pack-budget-bytes is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" );
             }
             // §B8.2 verifier finding N4 (W2FIX-CLI): same std::size_t-byte-count reasoning as --token-budget
@@ -5928,6 +6286,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     c.ok = false; return c;
                 }
                 c.mcpLegend = v;
+            }
+            else if( startsWith( a, "--legend-seen=" ) )
+            {
+                c.legendSeen      = a.substr( 14 );
+                c.legendSeenGiven = true;
             }
             else if( startsWith( a, "--legend-have=" ) )
             {

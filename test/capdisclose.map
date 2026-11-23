@@ -12,6 +12,7 @@
 # function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
 # by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
 # A new cap constant on the answer path needs a row here in the same commit.
+kAnswerPageBytesDefault	none:the default page stop the answer-first ORDER rules read (AF2 G, KB1 insertKeyBodies: a key body is added only when the answer block ends inside it): a block moves or is added, every row is still emitted once (answerFirst's size ENSURES; forkeybodycheck K3n); the page cut itself is disclosed by page= pages= withheld_bytes= next= (forpages.h)
 kImportSpecDepth	sink:atDepthCap
 kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
@@ -142,9 +143,11 @@ kReexportUseCap	pending:B43 SILENT CUT, follow-up card: 0 fires
 kRowFeaturesMaxHops	none:a dev-only TSV dump (RIPWIRE_ROW_FEATURES), never an answer (Stage 0 audit)
 kRowFeaturesMaxPath	sink:DISCLOSE
 kRunTraceRelevantLinesCap	sink:isCapped
+kSameDirHeadRank	none:TL1 M2's ORDER key (foranswerfirst.h headRowDirs): the directories of sigs rows r <= 5 lead the tail past row 24; a permutation, every row emitted once (answerFirst ENSURES; foranswerfirstcheck SD2)
 kShortKeyBodyBytes	legend
 kShortKeyRows	legend
 kShown	sink:truncated,selfExecutablePath
+kSigxKeepRank	none:SIGX (forsigx.h): rows past this rank MOVE their attributes and text to <sigx> after the rows, verbatim; nothing is cut (forsigxcheck S1 rebuilds the unmoved answer byte for byte)
 kSketchHashes	none:the minhash sketch width, not a cut (Stage 0 audit)
 kSteerStmts	none:the steering-local distance, not a cut: a read 10+ statements after its write counts as steered; it names which locals the tangle row lists in locals=, none dropped (QD-TANGLE, train ge2)
 kSupport	none:a minimum-commits threshold, not a cut (Stage 0 audit)
@@ -164,6 +167,9 @@ kGrepLiftRowCap	pending:B43 grep lift row cap, not audited yet (LARGE-PARTIAL-1 
 kGrepMatchedLineMaxBytes	sink:cut
 kGrepRefSitesScanned	pending:B43 grep ref-site scan bound, not audited yet (LARGE-PARTIAL-1 scope widening)
 kGrepTierFileBudget	pending:B43 disclosed elsewhere: tier_budget= / tier_partial= on the grep root (Stage 0 row 10)
+kGrepHeldFilesListed	sink:heldFiles
+kGuardTailRows	none:AF2 G's ORDER guard (foranswerfirst.h promoteGuarded): a promoted section moves ahead of <tail> only while tail row 24 still ends inside the default page; it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
+kGuardTailRowsBody	none:ruling 120's BODY-class ORDER guard (foranswerfirst.h promoteGuarded pass 2): a kPromotableBody section moves ahead of <tail> only while tail row 12 still ends inside the default page and nothing the page already delivers behind </tail> loses it (postPageOneFloors); it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
 kHeadDefLineAbove	none:a shape window of the whereis def-line test, not a cut
 kHealthWsSampleBytes	none:a sample size for the file-health whitespace heuristic, not a cut
 kHeldAskedHitsMax	pending:B43 grep held-row bound, not audited yet (LARGE-PARTIAL-1 scope widening)
@@ -209,3 +215,8 @@ kVrTextCap	sink:cut
 kWhereisParseMaxBlobs	pending:B43 disclosed elsewhere: <unparsed blobs= rows= next=> on the whereis answer
 kWhereisTextPreviewCapBytes	sink:cutAttr,shownCount
 kWhereisTextWholeMaxBytes	none:the whole-line threshold of the t= preview; the cut itself is disclosed by t_bytes= and <t_cut>
+kKeyBodyMax	legend
+kRoutedCarriedPageFloorBytes	none:RL1 a RESERVE, not a cut (verbs_forroute.h runForVerbRoute): the least of the page a carried --for page keeps when the routed verb's rows are windowed to make room; the cuts it leads to are the verb's own window (shown= total= has_more= next_offset=, root next=) and forpages.h's page (page= pages= continued= deferred= next=), each disclosed where it falls and proved lossless by forroutepagecheck (L1)/(L2)
+kRoutedFitTries	none:RL1 a bound on how often the routed verb is re-rendered with a smaller row limit (fitRoutedVerb); when it is spent the question is NOT ROUTED and the --for answer is served byte for byte, so no row is cut by it
+kMcpCarriedFilePageFirstLimit	none:MR1 the FIRST row limit a routed MCP answer renders its carried file page at (mcpFittedFilePage), an upper start the fit scales DOWN by measured bytes; the cut it leads to is the file page's own window (has_more="1" next_offset=K, `for` limit=L offset=K), disclosed on the page root and proved lossless by mcpforroutepagecheck (L2)
+kActRows	legend

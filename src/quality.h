@@ -3210,19 +3210,41 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 54;   // MUST equal ingest.cpp's kCacheVersion (gated); 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 337;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 342;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 342 = 2026-11-22 (IN9): the 0.7.0 train (340, rich 341) merged with origin/main b576a95e3 (337, #715,
+                                                          //   rich 338) — ONE number above both. Rich file tag 343. Both histories below.
+                                                          // --- history: the 0.7.0 train carried 340 ---
+                                                          // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER, rich 341): the crawl admits a git-tracked
+                                                          //   build/ dist/ out/ target/ (ingest_crawl.h TrackedBuildDirs). History below.
+                                                          // 338 = 2026-11-21 (lane fx1-two-reds, rich 339): a Rust macro invocation's re-read drops a bare call its own
+                                                          //   file's `macro_rules!` matcher spells as a literal word. History below.
+                                                          // 336 = 2026-11-21 (IN8, ruling 135): train 1118a folded into the 0.7.0 train — ONE number above the train's 334 and
+                                                          //   train 1118a's 335. Rich file tag 337. Both histories below.
+                                                          // --- history: main b576a95e3 carried 337 ---
                                                           // 337 = 2026-11-21 (#548 arm 1, @himanchalkaushale, PR #715 (its 311): Clojure calls under list-head metadata; rich 338)
+                                                          // --- history: train 1118a (4b1f4516e) carried 335 ---
                                                           // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind, rich 336): C++ using-declarations + namespace aliases recorded
+                                                          // --- history: the 0.7.0 train after main 8861b0d4d carried 334 ---
+                                                          // 334 = 2026-11-21 (IN8, rulings 129/135): the 0.7.0 train merged with main 8861b0d4d — ONE number above main's 333
+                                                          //   and the 0.7.0 line's 332. Rich file tag 335. Both histories below, main's first.
+                                                          // --- history: main 8861b0d4d carried 333 ---
                                                           // 333 = 2026-11-18 (train 1117d2 on train 1117d1, rich 334; members below, each was a placeholder)
                                                           //   std-namesake (placeholder 317): a Rust binding written as a standard type keeps its spine on the tombstone
                                                           //   rust-self-chain (placeholder 319; kCacheVersion 53): Rust RecvCall records for member calls on a call's result, async ReturnType bit
                                                           //   rust-macro-args (placeholder 315): calls inside Rust macro arguments are references
+                                                          // --- history: the 0.7.0 line (21d4b66b7) carried 332 ---
+                                                          // 332 = 2026-11-20 (IN3, ruling 92): the 0.7.0 integration's ONE number, above main's 331
+                                                          //   and the stack's 317. Rich file tag 333. Both histories below, main's first.
+                                                          // --- history: main ee8d1a50e carried 331 ---
                                                           // 331 = 2026-11-18 (train 1117d1, rich 332; members below, each was a placeholder)
                                                           //   go-cpp-edges (placeholder 317): a Go generic result type `Set[T]` records its ReturnType as the instantiated class
                                                           //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
                                                           //   overload-split (placeholder 329): a Go qualified generic instantiation keeps its package qualifier
                                                           //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row (GO-METHOD-EXPR)
                                                           //   edge-strays-1118 (placeholder 327): Rust `<T as Trait>::m` calls are qualified by T, else by Trait
+                                                          // --- history: integration/070-candidate carried 317 ---
+                                                          // 317 = 2026-11-19 (INT1 0.7.0 candidate: ONE number for lane BX2 FIX 5 (placeholder 313: Rust macro_rules! transcriber
+                                                          //   calls) and FIX 8 (placeholder 315: C-family parameter slot facts), above main 313/314 and both placeholders; rich 318)
                                                           // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;
                                                           //   see the kParserVer note): #446 round 2 (@SeddonShen, lane land-606, its placeholder 316): Java base clauses as
                                                           //   @reference.base captures; #355 (PR #426 by @conka8, its placeholders 216 then 311): tags-pass string predicates +
@@ -5133,7 +5155,12 @@ inline std::string crawlSkipDirPathspecs()
     std::string specs;
     for( const std::string_view dir : kCrawlSkipDirs )
     {
-        specs += " " + shSingleQuote( ":(exclude,glob)**/" + std::string( dir ) + "/**" );
+        // M1: a build-output name in a COMMIT is tracked by construction, and the crawl of a materialized tree indexes it
+        // (ingest.h CrawlTreeAllTracked) — so it must be extracted, or the arm loses exactly what the working tree indexes.
+        if( !isTrackedBuildOutputName( dir ) )
+        {
+            specs += " " + shSingleQuote( ":(exclude,glob)**/" + std::string( dir ) + "/**" );
+        }
     }
     specs += " " + shSingleQuote( ":(exclude,glob)**/cmake-build-?*/**" );   // isSkippedCrawlDir: the prefix plus at least one byte
     specs += " " + shSingleQuote( ":(exclude,glob)**/?*.dSYM/**" );          // isSkippedCrawlDir: a name longer than the suffix
@@ -5458,7 +5485,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     //    parse — byte-identical output either way. The working-tree side's excludes are applied here too
     //    (A4-F5) so both trees see the same file set. (Keys were computed once in step 1.)
     const std::string cachePath  = useCache ? headSnapCachePath( repoHex, exclHex, headSha ) : std::string{};
-    IngestResult headIng = ingest( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
+    IngestResult headIng = ingestTrackedTree( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
 
     // Hygiene: cap each (repo, excludes) family to the 2 newest files (delete older sha's). Done AFTER the
     // ingest so the file we just wrote/used is the newest → always retained. Best-effort; never throws.
@@ -5659,7 +5686,7 @@ inline RefTreeLoad loadRefTree( const std::string& repoRoot, const std::string& 
         // ingest() writes single-writer process-global query caches — serialize on the SAME mutex every other
         // materialized-tree reader in this file uses, rather than introducing a second lock order.
         std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
-        out.ing = ingest( tmpRoot.c_str(), excludes,
+        out.ing = ingestTrackedTree( tmpRoot.c_str(), excludes,
                           cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
     }
     if( out.ing.memoryStop.isSet() )
@@ -5983,7 +6010,7 @@ inline RefTreeLoad loadRefSubset( const std::string& repoRoot, const std::string
     }
     {
         std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
-        out.ing = ingest( tmpRoot.c_str(), excludes, std::string_view {}, maxFileBytes );
+        out.ing = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view {}, maxFileBytes );
     }
     if( out.ing.memoryStop.isSet() )
     {
@@ -6071,7 +6098,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     // the ref tree is immutable for its sha → reuse the qheadsnap INGEST cache family keyed by refSha (the
     // family's keep-2 cap holds exactly the HEAD blob + this ref blob between commits).
     const std::string ingestCachePath = headSnapCachePath( repoHex, exclHex, refSha );
-    IngestResult refIng = ingest( tmpRoot.c_str(), excludes, std::string_view( ingestCachePath ), maxFileBytes );
+    IngestResult refIng = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view( ingestCachePath ), maxFileBytes );
     evictOldHeadSnapCaches( cacheDirLadder(), repoHex, exclHex, ingestCachePath, 2 );
     if( refIng.symbols.empty() && refIng.files.empty() )
     { DISCLOSE( "quality: churn-window ref tree ingested empty — churn evidence unavailable" ); return { {}, false }; }
@@ -13100,7 +13127,7 @@ inline std::vector<std::string_view> pythonGlobImportTails( std::string_view tex
         }
         std::string_view module = line.substr( 5, imp - 5 );
         module.remove_prefix( std::min( module.find_first_not_of( " \t" ), module.size() ) );
-        module.remove_suffix( module.size() - std::min( module.find_last_not_of( " \t" ) + 1, module.size() ) );
+        module = namesplit::trimTrailing( module, " \t" );
         const std::size_t dot = module.rfind( '.' );
         const std::string_view tail = dot == std::string_view::npos ? module : module.substr( dot + 1 );
         if( !tail.empty() )

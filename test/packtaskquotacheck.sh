@@ -153,10 +153,25 @@ if grep -qE 'quotas per section are FIXED' "$B2000F" && grep -qE 'ROLLS FORWARD'
 else
     no "header legend does not name the new quota policy — a reader can't tell WHY a starved section still got something"
 fi
-# the percentages named in the legend must match src/packtask.h's own constants (a hand-edited legend can drift)
-grep -qE 'rank40/body30/caller15/note5/test10' "$B2000F" \
-    && ok "header legend's stated percentages match the source constants (40/30/15/5/10)" \
-    || no "header legend's percentages don't match — the disclosure has drifted from the code"
+# The percentages named in the legend must match src/packtask.h's own constants (a hand-edited legend can drift).
+# PB1 (2026-11-19): the split is READ OUT OF THE SOURCE rather than written twice. The old form pinned the literal
+# rank40/body30/caller15/note5/test10 here, so a deliberate re-split failed this arm with a message about drift
+# and told nobody which of the two numbers was stale — a gate should compare the code and the disclosure, not the
+# code and a third copy of itself.
+EXPECT="$( python3 - "$ROOT/src/packtask.h" <<'PY_EOF'
+import re, sys
+src = open( sys.argv[1], encoding = 'utf-8' ).read()
+def pct( name ):
+    m = re.search( r'kPackTaskQuota' + name + r'Pct\s*=\s*(\d+)', src )
+    return m.group( 1 ) if m else '?'
+print( 'rank%s/body%s/caller%s/note%s/test%s/tail%s'
+       % tuple( pct( n ) for n in ( 'Ranking', 'Bodies', 'Callers', 'Notes', 'Tests', 'Tail' ) ) )
+PY_EOF
+)"
+case "$EXPECT" in *'?'*) no "could not read the quota constants out of src/packtask.h — this arm proves nothing";; esac
+grep -qF "$EXPECT" "$B2000F" \
+    && ok "header legend's stated percentages match the source constants ($EXPECT)" \
+    || no "header legend's percentages don't match src/packtask.h ($EXPECT) — the disclosure has drifted from the code"
 
 # ── 5) determinism ×3 under the new budgeting (fixed notes file + fixed HEAD) ──────────────────────────────
 D1="$( runw --pack-task="$TASK" --token-budget=2000 )"

@@ -49,6 +49,10 @@
 # wrong binary gave false greens when this gate read RIPWIRE_BIN only — knob-honesty-068 delta review N7).
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 # body-fold (train 31): a compact-route --for answer now ends with <fold kind="bodies"> and its present-only clause (forbodyfoldcheck
@@ -301,6 +305,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # most-called first, then by path", +28 B) and impact.xml's import-tier clause ("limit=/offset= window the symbol rows only"
 # -> "most-imported first; limit= sizes it, offset= windows the symbol rows only", +32 B). Both
 # restate the rows' new order and the tier's new --limit reach; the rows of both pins are unchanged on this fixture.
+# RE-ANCHORED BY HAND 2026-11-19 (lane im1-impact, test/impactfirstwindowcheck.sh), impact.xml only, two sentences and nothing
+# else: kImpactDepthLegend "PageRank order within a depth" -> "non-tests first within a depth, then PageRank" and the import-tier
+# clause "most-imported first" -> "files holding a reached row, a counted declined call or a SYM binding first, then
+# most-imported". Both restate the rows' new order; the pin's rows (perimeter, diagonal; geometry.cpp, sub/consumer.cpp) are
+# unchanged on this fixture: no test row, and both importers hold a reached row.
 # RE-ANCHORED BY HAND 2026-09-24 (CodeRabbit on #331), one sentence: test-gate.xml's legend gains the N=0 definition of
 # untested_modscope= ("untested_modscope=0: no <file-scope> owner excluded from untested= (#324). ", +75 B) before its
 # closing "-->". The root already printed untested_modscope="0"; the full legend now defines it. Checked: the pin equals
@@ -399,6 +408,40 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # a line are one site; no file: p='s)", +8 B, inside the 3769 B full:callers target). Checked mechanically
 # (test/sitesatshortcheck.sh arm B does the same on its own goldens): putting each row's p= file back in front of its bare
 # line and reversing that one phrase gives the previous pin byte for byte (at= masked), 3907 -> 3885 B.
+# RE-ANCHORED BY HAND 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF, by design), impact.xml only: a one-group --impact answer
+# names the definition it measured (test/impactsoledefcheck.sh). Checked mechanically: the previous pin equals the 994f0021f
+# binary's --legend=full output byte for byte (at= masked); the new pin differs by exactly two insertions, the row
+# <def ix="1" t="fn" p="geometry.cpp:4"/> after the root and the sole-definition legend clause (graphlegend.h kSoleDefLegend,
+# 230 B, registered in test/legend_over_target.tsv). 4575 -> 4844 B. The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS, by design; gate test/verbdefrowscheck.sh), callers.xml and
+# impact.xml only. Checked mechanically against the 57b4c3ee3 pins (at= masked): callers.xml differs by exactly two insertions,
+# the rows <def ix="1" t="fn" p="geometry.cpp:4"/><def ix="1" t="fn" p="geometry.h:12" bodyless="1"/> after the root and the
+# sole-definition clause (graphlegend.h kSoleDefLegend); impact.xml by the tied declaration's row (geometry.h:12) and the clause's
+# rewording ("this radius" -> "this answer", the tied-declaration sentence). 3875 -> 4187 B and 4844 -> 4887 B. Five others unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane/t3-lossless, IMPORT-ROW-SHORT, by design), impact.xml only: its importer rows print
+# <f p="…"/> (were <f via="import" p="…" lazy="0"/>) and the importers= sentence of the full legend names that row and reads
+# "no lazy= means at least one edge is load-time" (was lazy="0" means ...). Checked mechanically (test/importrowshortcheck.sh arm B
+# does the same on its own goldens): putting via="import" and lazy="0" back on each row and reversing those two phrases gives
+# the previous pin byte for byte (at= masked).
+# RE-ANCHORED BY HAND 2026-11-18 (lane s1-small, DEF-READING-TRIM, by design; gate test/verbdefrowscheck.sh (11)), callers.xml and
+# impact.xml only: the old kSoleDefLegend sentence replaced by the shortened one (graphlegend.h), string for string, nothing else
+# (checked mechanically against a fresh --legend=full run, at= masked). 4197 -> 4144 B and 4903 -> 4850 B. Five others unchanged.
+# RE-ANCHORED 2026-11-21 (lane rp1-repin-m2, owner ruling 171 "re-pin and investigate"), for.xml only: M2 made --for score a
+# symbol's file BASENAME by default (weight 2), and "geometry" is the basename of geometry.h/geometry.cpp, so the probe's ranking
+# moved: perimeter r2 (was diagonal), geometry.h's Point and perimeter prototype join the rows (kept 9 of 40, was 7), the prototype
+# carries same_as=, docs_after_code= and the wider files_first= ride, coverage= drops (the answer is no longer thin), and the hop
+# and fold follow the new order. Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=0 prints the previous pin byte for
+# byte (at= masked), so every changed byte is the ranking's. The pin is the DEFAULT ranking's, never the W=0 one. 5780 -> 5980 B.
+# The six other pins are unchanged (none of them ranks).
+# RE-ANCHORED BY HAND 2026-11-22 (lane BR1b, the act line, src/foractline.h, by design), for.xml only: --legend=first answers
+# now carry the act line too (so they stay byte permutations of the answer-first answer), so the pin gains exactly three things —
+# <act read="geometry.h:12-12,geometry.cpp:11-19,sub/consumer.cpp:8-11"/> right after </sigs>, the "<!-- the act line: …" clause
+# at the end of the leading legend run, and est_tokens= 2310 -> 2415 (the 264 added bytes, exact). Checked: removing those three
+# from the new output (at= masked) gives the previous pin byte for byte, and RIPWIRE_NO_ACTLINE=1 reproduces the previous pin.
+# RE-ANCHORED 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW), for.xml only: margin_pct 68 -> 62,
+# files_first 6 -> 3, est_tokens 2415 -> 2460, and the hops serve diagonal (sub/consumer.cpp) beside the first owner (shown 1 -> 2,
+# noedge 5 -> 4). Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=2 prints the previous pin byte for byte (at= masked),
+# so every changed byte is the ranking's. Captured with the arm's own setup (same git fixture, HOME, warm cache). 6242 -> 6354 B.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -469,6 +512,9 @@ probeFor()
 {
     case "$1" in
         --help|--version|--mcp|--listen=|--mcp-token=|--allow-remote-edits|--refetch) return 1 ;;
+        # --legend-seen=FILE names a caller's file, not a verb: an unreadable FILE serves the default answer (never a refusal)
+        # while --legend=full refuses the pairing, so the rows-identical universe has nothing to compare. legendseencheck owns it.
+        --legend-seen=) return 1 ;;
         --cache=|--index-out=|--pin-census=|--note-add=|--export=|--quality-baseline|--quality-ack=|--quality-ack|--ack-only=) return 1 ;;
         --replace-symbol-body=|--insert-after-symbol=|--insert-before-symbol=|--edit-payload=|--edit-plan=|--edit-target-file=|--run-trace=|--baseline|--baseline-update|--arch=|--scan-skill=|--scan-skills=|--lint-rules=) return 1 ;;
         --eval|--eval-retrieval|--eval=knownitem|--eval=*|--eval-skills|--eval-mined=|--eval-stray=|--doctor|--wrap) return 1 ;;
@@ -617,7 +663,7 @@ probeFor()
 # --impact importers_next= readings are present-only and ride neither probe).
 # RE-PINNED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): ripwire.impact/v1 810 -> 940 (measured 924, the
 # --impact=distance probe; 797 on the base binary b343b988). The answer now carries by_depth= on the root and d= on its
-# first <s> row (the listing runs nearest first, graph.h orderByDepthThenRank), and the compact legend reads both: the
+# first <s> row (the listing runs nearest first, graph.h orderImpactRows), and the compact legend reads both: the
 # present-only <s d=N> row (+64 B with its separator) and by_depth= (+63 B). Both are absent at reaches="0". No other schema moved.
 # RE-PINNED 2026-10-04 (lane count-floor-068, CALLSITE-LINE): ripwire.safe-delete/v1 720 -> 820 (measured 805, the
 # --safe-delete=distance probe; 715 on the base binary 255dc199). Each caller row now carries sites_l=, its call-site LINES
@@ -804,13 +850,19 @@ ripwire.merge-scout/v1            570   558
 ripwire.whereis/v1               1050  1037
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
-ripwire.pack-task/v1             990   974
+ripwire.pack-task/v1            1070  1054
 ripwire.pack-top-n/v1            830   813
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            510   508
 ripwire.for/v1                   1100  1099
 ripwire.defs/v1                   490   472
 '
+# RE-PINNED 2026-11-21 (lane rp1-repin-m2, owner ruling 171): ripwire.pack-task/v1 990 -> 1070. M2 (the --for basename field, on by
+#   default) lifts geometry.h's struct Point to r=1 of --pack-task=geometry, and that row carries sc=, so the present-only sc= reading
+#   ("sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it.", 96 B) rides again: measured
+#   1254 B raw, 1054 B net of the two registered riding clauses (key-body-pointer-rows 90 + file-tail-rows 110, which explain their
+#   own bytes), against 958 net with RIPWIRE_BASENAME_W=0 -- +96 B, exactly that reading. The rule above on the NET figure (the
+#   registry explains the rest; applying it to the raw 1254 would hand those 200 B a second time): 1054 -> 1060, + 10 = 1070.
 # PINNED 2026-10-27 (lane/defs-lookup): ripwire.defs/v1 on this gate's --defs=zzqq9 probe. First pin 340 on 316 B, measured BEFORE
 # the not-found readings existed; RE-PINNED 2026-10-28 to 490 on 472 B = the verb's purpose line (~290 B) plus the shared not-found
 # answer's found=/of=/near= readings (compactlegendcheck UG required them). Present-only: none of the defs row readings ride here.
@@ -851,13 +903,19 @@ fi
 # (U-twin-fold) FIX1 B2 (rule 4: a re-pin keeps a twin for the old path): the 820 -> 1100 re-pin of ripwire.for/v1 above paid for
 # ONE reading, the fold's compact clause; with the fold off (RIPWIRE_NO_BODY_FOLD=1, so neither the fold nor its clause rides) the
 # same --for=geometry probe's compact prose legend still fits the OLD 820 B pin, measured by the same `leg prose` operand.
+# RE-PINNED 2026-11-21 (lane rp1-repin-m2, owner ruling 171): 820 -> 840. M2 (the --for basename field, on by default) turned this
+# probe from a THIN answer (kept 2 of 40) into a fuller one (kept 8 of 40: "geometry" is geometry.h/geometry.cpp's basename), so
+# its present-only readings changed: coverage= left (no longer thin), sc=, d same_as=, d e= and the doc-mentions note joined.
+# Measured 903 B raw, 825 B net of the registered riding tail clauses (tail-code-first 61 + tail-sym-skip 17), against 897 raw /
+# 819 net with RIPWIRE_BASENAME_W=0 (1 B under the old 820). The table's rule on the NET figure: 825 -> 830, + 10 = 840. The twin's
+# purpose is unchanged: the fold-off legend is held to a pin that excludes the fold clause (the (U) arm's ripwire.for/v1 pin holds it).
 ( cd "$REPO" && RIPWIRE_NO_BODY_FOLD=1 "$BIN" . --for=geometry --legend=compact >"$TMP/uf.c" 2>/dev/null </dev/null \
   && RIPWIRE_NO_BODY_FOLD=1 "$BIN" . --for=geometry --legend=full >"$TMP/uf.full" 2>/dev/null </dev/null ); rcUf=$?
 ufRest="$( leg prose "$TMP/uf.c" "$TMP/uf.full" )"
 if [ "$rcUf" -ne 0 ] || grep -q '<fold ' "$TMP/uf.c"; then
     no "(U-twin-fold) the fold-off --for=geometry probe exited $rcUf or still carries a <fold>"
 else
-    lt_gate "(U-twin-fold) --for=geometry compact prose with the fold off (the pre-fold pin)" ripwire.for/v1 "$ufRest" 820 "$( leg bytes "$TMP/uf.c" )" "$LT_GUARD_COMPACT" "$TMP/uf.c"
+    lt_gate "(U-twin-fold) --for=geometry compact prose with the fold off (the pre-fold pin)" ripwire.for/v1 "$ufRest" 840 "$( leg bytes "$TMP/uf.c" )" "$LT_GUARD_COMPACT" "$TMP/uf.c"
 fi
 # (U-twin-callers) the pre-2026-10-09 ripwire.callers/v1 pin, kept the same way: the 330 -> 450 re-pin paid for ONE
 # reading, the caller row's sites_at=. The --callers=distance compact answer with exactly that reading cut out still fits
@@ -961,7 +1019,8 @@ doc = open( sys.argv[ 1 ], "rb" ).read()
 CORE = { "p", "n", "t", "id", "l", "k", "c" }
 m = re.match( rb"\A(?:\s*<!--.*?-->)+", doc, re.S ); lead = m.group( 0 ) if m else b""
 m2 = re.match( rb"\A\s*<[\w-]+\b[^>]*>((?:\s*<!--.*?-->)+)", doc[ len( lead ): ], re.S )
-legend = ( lead + ( m2.group( 1 ) if m2 else b"" ) ).decode( "utf-8", "replace" )
+m3 = None if m2 else re.search( rb"((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z", doc[ len( lead ): ], re.S )   # AF1: an answer-first legend trails the rows
+legend = ( lead + ( m2.group( 1 ) if m2 else b"" ) + ( m3.group( 1 ) if m3 else b"" ) ).decode( "utf-8", "replace" )
 body = re.sub( rb"<!--.*?-->", b"", re.sub( rb"<!\[CDATA\[.*?\]\]>", b"", doc, flags = re.S ), flags = re.S )
 keys = set()
 for e in re.finditer( rb"<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+=\"[^\"]*\")*)\s*/?>", body ):
@@ -1454,13 +1513,19 @@ spfield(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_RE
 # TOKEN-BUDGET-MONOTONE (2026-11-14): a budgeted answer is now the no-budget answer shed, demoted siblings included, so the
 # reference is that answer as served (the switch dropped here and on the P4 next= runs below): its <d> rows by r= are what a cut
 # keeps a prefix of (src 'rank symbols by pagerank' @3000: <d> r=1..10,13,14,15,18 — the demoted 11,12,16,17 ride as <t>).
+# AF1-fix (2026-11-18): the compact dialect is the DEFAULT posture, ANSWER-FIRST (and, unbudgeted, PAGED); the reader's U is "all
+# after </sigs>", which in an answer-first answer would count the trailing document legend as reserved sections. The rows a budget
+# keeps do not depend on the posture (answerFirst permutes after the shed), so the compact dialect is read through its
+# --legend=first twin — the same compact dialect, legend first, unpaged — and softPair (SPp) proves the default-posture answer is
+# a byte permutation of that twin. The full dialect is legend-first already.
+spPost(){ if [ "$1" = compact ]; then printf -- '--legend=first'; else printf -- '--legend=%s' "$1"; fi; }
 spRef(){
     local d; for d in compact full; do
         rm -f "$TMP/sp.ref.$1.$d.rows"
-        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
+        ( cd "$2" && "$BIN" "$3" --for="$4" "$( spPost $d )" ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d" 0 "$4" "$TMP/sp.ref.$1.$d.rows" >/dev/null
         rm -f "$TMP/sp.ref.$1.$d.so.rows"   # lane hrr: the RIPWIRE_NO_HEAD_RR=1 twin reference
-        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
+        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" "$( spPost $d )" ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d.so" 0 "$4" "$TMP/sp.ref.$1.$d.so.rows" >/dev/null
     done
 }
@@ -1473,14 +1538,21 @@ softPair(){
     for d in compact full; do
         rm -f "$TMP/sp.$d.rows"
         rm -f "$TMP/sp.$d.so.rows"
-        ( cd "$dir" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=$d ) >"$TMP/sp.$d.so" 2>/dev/null; rc=$?
+        ( cd "$dir" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" "$( spPost $d )" ) >"$TMP/sp.$d.so" 2>/dev/null; rc=$?
         if [ "$rc" -ne 0 ]; then spWhy="$spWhy $d [RIPWIRE_NO_HEAD_RR=1 twin]: exit $rc;"
         else
             line="$( python3 "$TMP/softp.py" "$TMP/sp.$d.so" "$tb" "$task" "$TMP/sp.$d.so.rows" "$TMP/sp.ref.$lab.$d.so" )"
             case "$line" in OK*) ;; *) spWhy="$spWhy $d [RIPWIRE_NO_HEAD_RR=1 twin]: ${line:-no <ctx>/<sigs> in the answer or its no-budget reference};" ;; esac
         fi
-        ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=$d ) >"$TMP/sp.$d" 2>/dev/null; rc=$?
+        ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" "$( spPost $d )" ) >"$TMP/sp.$d" 2>/dev/null; rc=$?
         if [ "$rc" -ne 0 ]; then spWhy="$spWhy $d: exit $rc;"; continue; fi
+        if [ "$d" = compact ]; then   # (SPp) the answer as served (default posture) is a byte permutation of the twin read above
+            # TL1 M2 adds its order clause to the answer-first legend where it reorders the tail (foranswerfirst.h kTailSameDirClause),
+            # so the posture is a permutation of the twin with M2 off; foranswerfirstcheck (SD) pins M2 and its clause
+            ( cd "$dir" && RIPWIRE_NO_TAIL_SAMEDIR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=compact ) >"$TMP/sp.$d.af" 2>/dev/null
+            python3 -c 'import sys; a,b=(open(p,"rb").read() for p in sys.argv[1:3]); sys.exit(0 if a and sorted(a)==sorted(b) else 1)' "$TMP/sp.$d.af" "$TMP/sp.$d" \
+                || spWhy="$spWhy $d: (SPp) the default-posture answer is not a byte permutation of its --legend=first twin;"
+        fi
         line="$( python3 "$TMP/softp.py" "$TMP/sp.$d" "$tb" "$task" "$TMP/sp.$d.rows" "$TMP/sp.ref.$lab.$d" "$TMP/sp.ref.$lab.$d.so" )"
         case "$line" in OK*) ;; *) spWhy="$spWhy $d: ${line:-no <ctx>/<sigs> in the answer or its no-budget reference};" ;; esac
         eval "spLine_$d=\"\$line\""
@@ -1711,7 +1783,29 @@ facts = [ f.strip() for f in m.group( 1 ).split( " | " ) ]
 # answer needed is one the default does not take; (FX4) holds the rung clause of the default ledger to its root instead.
 facts = [ f for f in facts if not f.startswith( ( "task_echo", "over_ceiling:" ) ) ]
 kept  = re.search( r"<!-- ledger: (.*?) -->", dflt )
-missing = [ f for f in facts if not kept or f not in kept.group( 1 ).split( " | " ) ]
+keptf = kept.group( 1 ).split( " | " ) if kept else []
+# PB1 (2026-11-19): the `tail:` fact is compared by SECTION and by whether it still discloses a cut, not verbatim.
+# --pack-task's file tail is the one section filled LAST, from whatever the DELIVERED document leaves, and the compact
+# legend is smaller than the full one — so the same budget legitimately buys the compact answer more tail rows
+# (MEASURED on src/ at --token-budget=3000: "kept 0 of 142" with --legend=full, "kept 6 of 142" by default). That is
+# the budget contract working, not a posture changing the answer behind the reader's back, and holding a count that
+# DEPENDS on the posture to a verbatim match would force the tail to be cut against a fixed legend allowance instead
+# of against the bytes actually delivered — which is what makes the per-answer ceiling hold. What this arm exists for
+# is unchanged and is still asserted: the fact is present, and a cut disclosed in full is still disclosed by default.
+def sect( f ):
+    return f.split( ":", 1 )[ 0 ]
+def discloses_cut( f ):
+    return ( "omitted" in f ) or ( "capped" in f ) or ( "dropped" in f )
+missing = []
+for f in facts:
+    if sect( f ) == "tail":
+        peer = next( ( k for k in keptf if sect( k ) == "tail" ), None )
+        if peer is None:
+            missing.append( f + "   [tail absent by default]" )
+        elif discloses_cut( f ) and not discloses_cut( peer ):
+            missing.append( f + "   [a cut disclosed in full, silent by default: " + peer + "]" )
+    elif f not in keptf:
+        missing.append( f )
 cut = sum( 1 for f in facts if "omitted" in f or "capped" in f or "dropped" in f )
 print( "OK %d %d" % ( len( facts ), cut ) if not missing else "MISSING " + " ; ".join( missing ) )
 PY
@@ -1796,7 +1890,13 @@ echo
 # --for probe: its routed default answer now reorders its head and carries files_first= with its present-only compact clause
 # (kForFilesFirstNote); the other nine verbs unmoved. The old bar is kept as the twin: with RIPWIRE_NO_HEAD_RR=1 the same loop
 # still pays <= 8,200 B (LT). Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 8,400 B (34,716 B in full on the fixture) ==="
+# RE-ANCHORED 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS, by design; gate test/verbdefrowscheck.sh): 8,400 -> 8,800 B, measured
+# 8,789 (twin 8,200 -> 8,700 B, measured 8,644). The loop's --callers and --uses probes now print the <def> rows of `distance`
+# (geometry.cpp:4 and its geometry.h:12 declaration) and so carry the compact `def ix=` reading, which --impact alone carried;
+# the reading itself was reworded for the tied-declaration rows (126 -> 135 B). Three answers x 135 B is more than one
+# registry row can explain (legendtarget.py measures the clause once), so the bar moves instead. Same rule: the next
+# multiple of 100 B. The other seven verbs unmoved.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 8,800 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0; loopBytesT=0; : >"$TMP/l.all"; : >"$TMP/l.allt"
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -1806,8 +1906,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
     RIPWIRE_NO_HEAD_RR=1 rrun "$v" --legend=compact >"$TMP/l.ct"; cat "$TMP/l.ct" >>"$TMP/l.allt"; loopBytesT=$(( loopBytesT + $( leg bytes "$TMP/l.ct" ) ))
 done
-lt_gate "(L) ten-verb loop compact legend bill [full: $fullBytes B]" loop "$loopBytes" 8400 "$loopBytes" "$LT_GUARD_LOOP" "$TMP/l.all"
-lt_gate "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop compact legend bill (the pre-hrr bar)" loop "$loopBytesT" 8200 "$loopBytesT" "$LT_GUARD_LOOP" "$TMP/l.allt"
+lt_gate "(L) ten-verb loop compact legend bill [full: $fullBytes B]" loop "$loopBytes" 8800 "$loopBytes" "$LT_GUARD_LOOP" "$TMP/l.all"
+lt_gate "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop compact legend bill (the pre-hrr bar)" loop "$loopBytesT" 8700 "$loopBytesT" "$LT_GUARD_LOOP" "$TMP/l.allt"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="
@@ -2359,9 +2459,14 @@ condPair D25 "--communities over test/chafix (a cross-module <bridge> row)" "$CH
 condPair D25 "--community=${chaModule:-0} over test/chafix (its peer <bridge> row)" "$CHA" "--community=${chaModule:-0}" '!bridge:to' '!bridge:to_label' '!bridge:edges'
 condPair D26 "--safe-delete=total_area (the rest of its root)" "$FIX" "--safe-delete=total_area" \
     safe-delete:t safe-delete:defs safe-delete:ambiguous_callers safe-delete:dead_code_candidate
-condPair D27 "--impact=distance (<f lazy=> importer rows)" "$FIX" "--impact=distance" f:lazy
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\",\"legend\":\"full\"}" >"$TMP/d.full"
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\"}" >"$TMP/d.comp"
+# IMPORT-ROW-SHORT (2026-11-18): an importer row prints lazy= only when it is 1, so the probe is the one committed corpus with a
+# lazy importer (test/impactimportfix: barrel.js and lazyimporter.js require ./Widget inside a function body). --impact=distance
+# over test/fixture now carries no lazy= at all, which is why it stays in (D30)'s mirror loop as an answer that LACKS the field.
+LAZYFIX="$ROOT/test/impactimportfix"
+[ -d "$LAZYFIX" ] || no "(D27) fixture missing: $LAZYFIX — the lazy= row reading would be vacuous"
+condPair D27 "--impact=Widget over test/impactimportfix (<f lazy=1> importer rows)" "$LAZYFIX" "--impact=Widget" f:lazy
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\"}" >"$TMP/d.comp"
 condArm D27 "MCP impact at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" f:lazy
 condPair D28 "the flagless map (its always-on header)" "$FIX" "" '!#files' '!#symbols' '!#edges' '#shown' '!#ambiguous' '!#order'
 "$BIN" "$FIX" "$H1" >"$TMP/d.full" 2>/dev/null </dev/null
@@ -2388,9 +2493,9 @@ rrun --communities --legend=compact >"$TMP/d30.cm"
 rrun --impact=distance --format=columnar --legend=compact >"$TMP/d30.col"
 [ "$( ca carries "$TMP/d30.col" impact:importers )" = 1 ] && [ "$( ca carries "$TMP/d30.col" f:lazy )" != 1 ] \
     || no "(D30) control: the columnar --impact now prints an <f lazy=> row, so it no longer proves that reading is present-only"
-rrun --impact=distance --legend=compact >"$TMP/d30.imp"
+cdRun "$TMP/d30.imp" "$LAZYFIX" --impact=Widget --legend=compact
 [ "$( ca carries "$TMP/d30.imp" f:lazy )" = 1 ] && [ "$( ca carries "$TMP/d30.imp" "#files" )" != 1 ] && [ "$( ca carries "$TMP/d30.imp" lens )" != 1 ] \
-    || no "(D30) control: --impact=distance no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
+    || no "(D30) control: --impact=Widget over test/impactimportfix no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
 d30bad=0; d30n=0
 for v in "--from-trace=$TMP/trace.txt" "--communities" "--community=0" "--impact=distance --format=columnar" "--impact=distance" ""; do
     rrun $v --legend=compact >"$TMP/d30.c"
@@ -3097,7 +3202,10 @@ esac
 fx4bad=""
 for tb in 900 1200 1500 2000; do
     d="$( "$BIN" "$ROOT/src" --no-cache --pack-task="rank symbols by pagerank" --token-budget=$tb 2>/dev/null )"
-    root="$( printf '%s' "$d" | grep -oE '<ctx [^>]*>' | head -1 )"; led="$( printf '%s' "$d" | grep -oE '<!-- ledger: [^>]*-->' | head -1 )"
+    # the ledger comment ends at its first "-->", not its first ">": a header note it carries may spell one (docs_dropped=: "r>24";
+    # RP1 2026-11-21 — M2's ranking put such a note into the tb=2000 ledger and the old [^>]* match read it as "no kept ledger")
+    root="$( printf '%s' "$d" | grep -oE '<ctx [^>]*>' | head -1 )"
+    led="$( printf '%s' "$d" | python3 -c 'import re, sys; m = re.search( r"<!-- ledger: .*?-->", sys.stdin.read(), re.S ); sys.stdout.write( m.group( 0 ) if m else "" )' )"
     [ -n "$led" ] || { fx4bad="$fx4bad [tb=$tb: no kept ledger]"; continue; }
     ro=0; lo=0
     case "$root" in *'over_ceiling="1"'*) ro=1 ;; esac
@@ -3157,7 +3265,9 @@ fx7bad=""
 for sym in pageWindow emitTo; do
     for lg in "" "--legend=full"; do
         # shellcheck disable=SC2086
-        "$BIN" "$ROOT/src" --no-cache --expand=$sym $lg >"$FXT/x7" 2>/dev/null
+        # CL1: src/ files are over a bare --expand's output-ceiling budget, where reason= says "whole-file NB over pack-budget MB"
+        # (no comparison was priced); this arm reads the priced comparison, so it runs at the historic budget, explicitly
+        "$BIN" "$ROOT/src" --no-cache --expand=$sym $lg --pack-budget-bytes=65536 >"$FXT/x7" 2>/dev/null
         n="$( wc -c < "$FXT/x7" | tr -d ' ' )"
         said="$( grep -oE 'reason="(file|bundle) [0-9]+B' "$FXT/x7" | head -1 | grep -oE '[0-9]+' )"
         [ "$said" = "$n" ] || fx7bad="$fx7bad [$sym ${lg:-default}: reason says ${said:-none}B, delivered ${n}B]"

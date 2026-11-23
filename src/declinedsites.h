@@ -571,6 +571,7 @@ struct ImpactDeclinedRows
 {
     DeclinedSiteCut               cut;
     std::vector<DeclinedSiteView> views;
+    std::vector<std::uint32_t>    sites;   // IM1: EVERY site declined_calls= counts (served order; `views` is its cut) — the import tier's evidence
 };
 inline ImpactDeclinedRows impactDeclinedRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets, std::size_t calls,
                                               int pageLimit, std::string_view sym, std::size_t rowWindow, const VrRender& vr, bool candidates,
@@ -582,7 +583,78 @@ inline ImpactDeclinedRows impactDeclinedRows( const IngestResult& ing, const Gra
     out.cut   = declinedSiteCut( sites.size(), pageLimit, "--impact=", sym, rowWindow, columnar );
     out.views = declinedSiteViews( ing, g, std::span<const std::uint32_t>( sites ).first( out.cut.shown ), /*callersForm=*/true, targets, DefGroups{}, vr,
                                    candidates );
+    out.sites = std::move( sites );
     return out;
+}
+
+// ── IM1: the --impact import tier, EVIDENCE FIRST within a path tier ───────────────────────────────────────────────────────
+// The tier ranked an importer by tier, then by how many files import IT, then path (graph.h impactImportTierOfFiles). An
+// importer the same answer ALSO has evidence for ranked like a file that only includes the header: envoy
+// --impact=chargeResponseStat listed 40 of 141 importers, and router.cc and ratelimit.cc — each holding a declined call the
+// answer counts in declined_calls= — sat past the cut. EVIDENCE is three facts the answer already states, never a new
+// measurement: the file holds a reached symbol (a reaches= row), a declined call site declined_calls= counts (a <dc> row's
+// universe), or one of SYM's value-binding sites (value_refs=, a <vr> row). Within each path tier (source, then test/bench,
+// then docs: filter.h's LB-G key, unchanged) the evidence importers move first, and the old order holds inside both halves
+// (a stable sort). A pure permutation of the tier: its counts, its window and its continuation are
+// unchanged, `lazy` travels with its file, and every dialect and the MCP twin read the one reordered tier.
+// Gate: test/impactfirstwindowcheck.sh arm (4). impactEvidenceFiles: per file id, 1 = the answer holds evidence for that file.
+inline std::vector<char> impactEvidenceFiles( const IngestResult& ing, const Graph& g, std::span<const NodeId> reach, const ImpactDeclinedRows& dc,
+                                              const ValueRefRows& valueRefs )
+{
+    std::vector<char> evidence( ing.files.size(), 0 );
+    const auto        mark = [ & ]( std::uint32_t fileId ) { if( fileId < evidence.size() ) { evidence[ fileId ] = 1; } };
+    for( const NodeId n : reach )
+    {
+        if( n < ing.symbols.size() )
+        {
+            mark( ing.symbols[ n ].fileId );
+        }
+    }
+    for( const std::uint32_t site : dc.sites )
+    {
+        if( site < g.declinedSiteRef.size() && g.declinedSiteRef[ site ] < ing.references.size() )
+        {
+            mark( ing.references[ g.declinedSiteRef[ site ] ].fileId );
+        }
+    }
+    for( const ValueRefRow& row : valueRefs.rows )
+    {
+        if( row.ref < ing.references.size() )
+        {
+            mark( ing.references[ row.ref ].fileId );
+        }
+    }
+    return evidence;
+}
+
+// ... and the stable reorder by it: (tier, evidence first), the incoming order (fan-in, path) kept inside each class.
+inline void orderImportersByEvidence( const IngestResult& ing, ImportTier& t, const std::vector<char>& evidence )
+{
+    EXPECTS( t.lazy.size() == t.files.size(), "lazy is parallel to files" );
+    if( t.files.size() < 2 )
+    {
+        return;
+    }
+    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, t.files, []( std::uint32_t f ) { return f; } );
+    const auto                      keyOf      = [ & ]( std::uint32_t i )
+    {
+        const std::uint32_t f = t.files[ i ];
+        return std::pair<std::uint8_t, char>( f < tierOfFile.size() ? tierOfFile[ f ] : std::uint8_t( 0xFFu ),
+                                               char( f < evidence.size() && evidence[ f ] ? 0 : 1 ) );
+    };
+    std::vector<std::uint32_t> order( t.files.size() );
+    std::iota( order.begin(), order.end(), 0u );
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return keyOf( a ) < keyOf( b ); } );
+    std::vector<std::uint32_t> files( order.size() );
+    std::vector<char>          lazy( order.size() );
+    for( std::size_t i = 0; i < order.size(); ++i )
+    {
+        files[ i ] = t.files[ order[ i ] ];
+        lazy[ i ]  = t.lazy[ order[ i ] ];
+    }
+    t.files.swap( files );
+    t.lazy.swap( lazy );
+    ENSURES( t.lazy.size() == t.files.size() && t.files.size() == order.size(), "a permutation: no importer dropped or added" );
 }
 
 }   // namespace rw

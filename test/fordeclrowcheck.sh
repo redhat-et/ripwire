@@ -93,13 +93,15 @@ silent(){ # arm, argv...
     local arm="$1"; shift
     if run "$@" >"$TMP/o" && ! grep -q 'decl_rows' "$TMP/o" && grep -q '</ctx>$' "$TMP/o"; then ok "($arm) silent: $*"; else no "($arm) must be silent: $*"; fi
 }
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 two_rows(){ # file, subject: rows="2", the definition row, the header row decl_only, closes before </ctx>
     python3 - "$1" "$2" <<'PY'
 import re, sys
 s = open( sys.argv[1], encoding="utf8" ).read()
 # a trailing <shortkey> (the out-of-band fallback ladder, gate barrelshortkeycheck: `app::run_it` is unproven under namespace app)
-# whose legend declares it outside est_tokens may follow; nothing else may
-m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?</ctx>$', s, re.S )
+# whose legend declares it outside est_tokens may follow; nothing else may — except, since AF1 (2026-11-18), the answer-first
+# DOCUMENT legend: the trailing run of comments the default --for answer ends with, inside the same answer. No row may.
+m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$', s, re.S )
 if not m or m.group( 1 ) != sys.argv[2] or m.group( 2 ) != "2": sys.exit( 1 )
 rows = re.findall( r'<d [^>]*/>', m.group( 3 ) )
 if len( rows ) != 2: sys.exit( 1 )
@@ -129,7 +131,9 @@ silent n5 "--for=add a new argument to fold_tested"
 silent n6 "--for=change the signature of data_var"
 silent n6 '--for=change the signature of `Fwd`'
 silent n4 '--for=add a new argument to `jfn`'
-silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers'
+# n8 names `solo_fn` in backticks and asks about callers, so a BARE call is answered by --callers=solo_fn since lane/rt1-route
+# (verbs_forroute.h, test/forverbroutecheck.sh). This arm measures the --for answer's <decl_rows>, so it asks for that answer.
+silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers' --no-verb-route
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys
@@ -197,7 +201,8 @@ sys.exit( 0 if "p=\"api.h:1\"" in r.stdout and "decl_only=\"1\"" in r.stdout els
 run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
 run "--for=run_it" --token-budget=100 >"$TMP/s2.xml" || no "(s2) the budgeted run exited $?"
-if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
+# AF1-fix (2026-11-18): a budget keeps the default posture, answer-first, so only the trailing document legend may follow the held block
+if [ -s "$TMP/s2.xml" ] && python3 -c 'import re,sys; sys.exit(0 if re.search(r"<decl_rows of=\"run_it\" held=\"budget\" next=\"--for=run_it\"/>(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z",open(sys.argv[1]).read(),re.S) else 1)' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
 if python3 -c '
 import sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()

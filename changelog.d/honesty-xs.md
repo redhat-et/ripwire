@@ -1,6 +1,6 @@
 ### Fixed — `--exemplar` hedges an off-task pick, `--help-task` abstains with a next step, `--pattern` counts member calls
 
-Three answers that were confident-wrong or ended with nothing to do next. Found by the Fable answer audit and confirmed by the Opus audit verify (2026-11-11).
+Three answers that were confident-wrong or ended with nothing to do next. Found by a pre-release answer audit and confirmed by a second audit (2026-11-11).
 
 - `--exemplar=TASK`: when the task matched the corpus but the role pick shares no word with the task or the names it matched (hono `'a middleware'` → `useState`), the pick now carries `low_confidence="1" off_task="1"`, and the low_confidence reading no longer calls such a pick a fallback. The pick itself is unchanged. `test/exemplarconfcheck.sh` arm 5, with a positive arm where a real `middleware/` family is picked and not hedged.
 - `--help-task`: an abstain carries `next="--for='<task>'"`, or `reason="system-event"` for a harness report. A recommend whose command stands on a plain word that the task names only after `of` reads `confidence="low"` (nushell `'… a pipeline of commands'` → `--expand='commands'` used to read high). `test/taskroutecheck.sh` HT-a/HT-b, with the corpus recommend count pinned so a route lost fails.

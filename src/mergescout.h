@@ -294,7 +294,7 @@ inline SymTreeIndex indexCommittish( const std::string& root, const std::string&
     }
     quality::TmpTreeGuard guard{ tmpRoot };
     const std::string cachePath = msCachePath( repoHex, exclHex, committish );
-    IngestResult ing = ingest( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
+    IngestResult ing = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
     // buildTreeIndex on an empty IngestResult already produces an empty-but-valid SymTreeIndex — see the
     // function comment above for why an empty `ing` here is trusted rather than re-checked.
     SymTreeIndex index = buildTreeIndex( ing, tmpRoot );

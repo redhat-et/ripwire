@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 865 gate scripts (counts snapshot 2026-11-22) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 912 gate scripts (counts snapshot 2026-11-22) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -387,6 +387,44 @@ source files over 512 KB by default, which on the C++ corpus silently excluded t
 largest and most central files while ripwire indexed both — some of ripwire's margin on that corpus
 is that asymmetry rather than ranking. And the latency figure is warm against warm: it does not
 include either tool's index build.
+
+---
+
+## 2b. The 0.7.0 comparison tables (measured 2026-11-22)
+
+The three tables under "How ripwire compares" in the README. Six tools at these versions: ripwire 0.7.0 (the release
+commit, local Release build with profile-guided optimization), codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft
+0.29.0, crg 2.4.0. One machine: Apple M5 Pro, 18 cores, 48 GB. One tool at a time, each at its default settings.
+
+**Speed and memory.**
+- Each run starts only when the machine is quiet: load per core under about 0.12 (0.18 when a macOS media-analysis
+  service was using about one core), free memory at least 15 %, and no other measured process running.
+- Wall clock is measured per run. ripwire's figures are the median of 5 runs, the others' the median of 3.
+- "Cold" indexes from nothing. "First answer from nothing" adds one question, asked through each tool's documented query
+  entry once its index is built; the README prints the sum of the two medians.
+- Peak memory is the largest sum of resident memory over the tool's whole process tree, sampled 8 times a second, with a
+  background daemon counted once. GB = 2³⁰ bytes.
+- llvm-project: one run per tool, with limits of 1 hour and 36 GB. A run the limit stops is reported as stopped, never as
+  the tool failing.
+
+**Answers.**
+- 213 tasks from 37 open-source repositories in 11 languages. None of them was used while building or tuning any tool
+  compared.
+- Each task is a real commit. The question is the commit message, the tool answers from the code before the commit, and
+  the right answer is every file the commit edited and every function it modified.
+- One call per task, through each tool's documented free-text entry. Every tool is scored by the same grader, whose rules
+  and code were frozen (content digest recorded) before any tool ran on these tasks.
+- **Complete** means every edited file is named and every modified function is located beside its own file.
+  **Partial** means some of them are. **Missed** means none, or the call failed.
+- One task of 214 was excluded before the run, because the grader could not score one tool's answer format on it.
+- The questions are not published, so the set stays usable as an untouched check for later releases. The README shows
+  four examples from a development set built the same way.
+- "Says when the answer was cut" and "gives the next call to continue" are read from each answer's own text, under
+  definitions written down before any count was taken.
+
+**Provenance, stated plainly.** The harness, the grader and the frozen task set behind these tables live outside this
+repository for now. The rule at the top of this file asks for an in-repo pin, and these numbers do not have one yet.
+Treat them as reported, not yet reproducible from this checkout, until the harness is committed.
 
 ---
 
@@ -1620,6 +1658,51 @@ corpus of 200 real command shapes drawn from the meter's `detail` field (command
 local, never committed), precision ≥ 0.95. Arm assignment is the meter's `arm` per session, so the
 two routers never disagree inside one session. The readout uses `bench/routing_ab_report.py` with a
 `router=` column; the two arms are read separately and never pooled.
+
+### Subagent primer — a SubagentStart hook with the two-line brief — PRE-REGISTERED 2026-11-19 (before any live run)
+
+**Why.** Lane SUB1 mined the 25 product-implementing subagents of one orchestrator session. Orientation was 40.6% of
+their input tokens, and each orientation token was re-read ~165 times. Yet they made a median of one ripwire
+navigation call before the first edit, and 12 of 25 made none. Lane AR1 then counted what reached all 83 subagent
+contexts of that session. No hook output reached any of them. SessionStart does not fire for a subagent. The prompt
+router runs on the parent side. PreToolUse does fire inside subagents, but its advice was retired (above). The
+session's meter arm was also `control`, so even its main session got no primer. The generic guidance did arrive:
+the CLAUDE.md use-when protocol (81 of 83), the MCP server's instructions (83 of 83), and 33 deferred ripwire MCP
+tools (83 of 83, none loaded). It was not acted on. The owner reports one earlier, unrecorded run in which telling
+the orchestrator to tell its subagents "orient with ripwire, check with --quality-delta" used "about half the
+tokens". No transcript or readout of that run was found. This registration is designed to reproduce or refute it.
+
+**What differs from the retired nudge.** The nudge spoke mid-task, after a tool was chosen, and named a verb
+without an argument. `hooks/ripwire-subagent-primer.sh` speaks once, into an empty context, before the first tool.
+It carries two runnable commands and the order to run them in. Gate: `test/subagentprimercheck.sh`.
+
+**Arms (unit = one fresh subagent on one focused task; paired by task).** A: plain brief, hook off. B: plain
+brief, hook on (`RIPWIRE_SUBAGENT_PRIMER=on`). C: plain brief plus the same two lines pasted into it, hook off. Both carry CK1's check line (after the last edit: commit, `--quality-delta=BASE..HEAD`, then `--test-gate`); the primer is 657 B. C is
+the placement the owner's evidence credits. B against C asks whether the hook can stand in for the brief. The arm is
+set per orchestrator session by environment, one session per arm. Briefs are fixed text, passed verbatim. Task order
+is shuffled per session. Every other hook and the meter arm are pinned identical across the three sessions.
+
+**Tasks.** 16 tasks drawn from the SUB1 pilot's 52 commit-tasks (`results/SUB1_SUBAGENT_ORIENT_1119/tasks_all.json`,
+local). Each starts at the parent commit in a fresh worktree, with a brief written without the diff. Success is the
+task's own gate passing at the end.
+
+**Outcomes (the PG6 spec's definitions: k_o from the dirty-file tap, never from Edit/Write alone).**
+P1, behaviour: a ripwire navigation verb before the first edit (yes/no). In the SUB1 session 1 of 83 subagents had
+one among its first five calls. P2, cost: Σ ctx_t to completion, and B_o, as paired ratios B/A and C/A (median,
+with a bootstrap interval over tasks). Secondary: k_o, `--quality-delta` run before the final report (yes/no),
+turns after the first claim of done, success.
+
+**Bands, registered now.** Success guard: B or C may lose at most 1 of 16 tasks against A, or its cost reading is
+void. KEEP the hook (recommend it in `--hook`'s output) if B/A ≤ 0.75 on Σ ctx and P1 rises ≥ +30 pp. MOVE TO THE
+BRIEF (build the `Agent`-prompt rewrite arm) if C/A ≤ 0.75 while B/A > 0.90. REMOVE the hook if B/A > 0.90 and P1
+rises < +20 pp. Anything else is REWORD and re-run once.
+
+**Power.** P1, by exact two-sided Fisher at α = 0.05, from a 2% base: at 16 per arm a rise to 50% has power 0.89
+and a rise to 40% has 0.72. At 12 per arm those fall to 0.71 and 0.47, which is why the round runs 16. P2: SUB1's
+unpaired log-scale spread of B_o is σ ≈ 0.64 (IQR 65K–155K). Paired by task, assume σ_diff 0.5–0.7. Halving
+(δ = ln 2) then needs 4–8 pairs at α = 0.05 and power 0.8, so 16 tasks resolve "about half" with margin. A 25% cut
+needs 23–46 pairs, and this round cannot see it. That is stated now so that a null on a small effect is not read as
+"no effect".
 
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
@@ -5888,7 +5971,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**865 gate scripts** at the counts snapshot 2026-11-22; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**912 gate scripts** at the counts snapshot 2026-11-22; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -7057,7 +7140,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 865 at the counts snapshot 2026-11-22. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 912 at the counts snapshot 2026-11-22. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites

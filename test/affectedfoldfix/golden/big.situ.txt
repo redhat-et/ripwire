@@ -1,0 +1,23 @@
+ripwire situational-awareness — 2 changed file(s), 2 symbols in them
+root: big
+  change_set: granularity=file changed_symbols=2 file_symbols=2 files_narrowed=0 files_file_granular=2 diff_hunks=0 diff_hunks_located=0 diff_hunks_unlocated=0 evidence=0 — seeds = symbols a diff -U0-vs-HEAD hunk overlaps (function/method body spans only); an unlocated hunk (module-level, deletion, rename) returns its file to file-granular
+  [1] blast radius: 46 symbols across 46 files transitively depend on these changes (showing 8 of 46 files — shown=8 total=46 capped=1 prcontext_cap=20 (--pr-context's own per-file list is cut at 20 too); next: --situ=pkg/core.py,web/lib.ts --limit=46)
+        counts_floor=1 graph_ambiguous=0 graph_unresolved=0 graph_unindexed=1 (files no grammar in this build could read at all) (the map header's own gauges) — every count above is a FLOOR, never a total: call edges are name-based, so dynamic dispatch, callbacks and macros can be missing; a zero is "none found", never "none exists"
+        pkg/mid.py  (1 dependent symbols)
+        tests/integration/api/test_api01.py  (1 dependent symbols)
+        tests/integration/api/test_api02.py  (1 dependent symbols)
+        tests/integration/api/test_api03.py  (1 dependent symbols)
+        tests/integration/api/test_api04.py  (1 dependent symbols)
+        tests/integration/api/test_api05.py  (1 dependent symbols)
+        tests/integration/api/test_api06.py  (1 dependent symbols)
+        tests/integration/test_flow1.py  (1 dependent symbols)
+  [2] tests to run (45) order=evidence: [changed] you edited it, [partner] named after a changed file, then hops asc (1 = direct); "(n): a, b" = n runner-less files sharing that evidence; a (run: …) is relative to root:
+        [hops=1] (18): tests/unit/alpha/test_a01.py, tests/unit/alpha/test_a02.py, tests/unit/alpha/test_a03.py, tests/unit/alpha/test_a04.py, tests/unit/alpha/test_a05.py, tests/unit/alpha/test_a06.py, tests/unit/alpha/test_a07.py, tests/unit/alpha/test_a08.py, tests/unit/alpha/test_a09.py, tests/unit/alpha/test_a10.py, tests/unit/beta/test_b01.py, tests/unit/beta/test_b02.py, tests/unit/beta/test_b03.py, tests/unit/beta/test_b04.py, tests/unit/beta/test_b05.py, tests/unit/beta/test_b06.py, tests/unit/beta/test_b07.py, tests/unit/beta/test_b08.py   (run each: pytest {p})
+        tests/unit/my dir/test_sp1.py [hops=1]   (run: pytest -- 'tests/unit/my dir/test_sp1.py')
+        [hops=1] (3): tests/unit/test_top1.py, tests/unit/test_top2.py, tests/unit/test_top3.py   (run each: pytest {p})
+        [hops=1] (12): web/__tests__/deep/y1.spec.ts, web/__tests__/deep/y2.spec.ts, web/__tests__/deep/y3.spec.ts, web/__tests__/deep/y4.spec.ts, web/__tests__/x1.test.ts, web/__tests__/x2.test.ts, web/__tests__/x3.test.ts, web/__tests__/x4.test.ts, web/__tests__/x5.test.ts, web/__tests__/x6.test.ts, web/__tests__/x7.test.ts, web/__tests__/x8.test.ts   (run: not derivable)
+        [hops=2] (11): tests/integration/api/test_api01.py, tests/integration/api/test_api02.py, tests/integration/api/test_api03.py, tests/integration/api/test_api04.py, tests/integration/api/test_api05.py, tests/integration/api/test_api06.py, tests/integration/test_flow1.py, tests/integration/test_flow2.py, tests/integration/test_flow3.py, tests/integration/test_flow4.py, tests/zeta_only.py   (run each: pytest {p})
+        script_gates_unmodelled=0 — test/*.sh gates never appear above: script-to-binary edges are not call edges (a path count)
+  [3] co-change — usually edited with these but NOT in your diff (0) window="18mo" commits="0":
+        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)
+  next: --test-gate
