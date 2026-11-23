@@ -104,6 +104,10 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW; rule 4): docdemotegolden_for.xml 6326 -> 6326 B
+# (est_tokens unchanged). At weight 1 the basename no longer outweighs pin_page's own text: PageCache.pin_page is r=1 again and
+# evict_one r=2 (the pre-basename order), confidence/margin_pct/coverage re-read (76 -> 77, 33 -> 35) and the act line lists the
+# two reads in that order. Mechanically: the same call under RIPWIRE_BASENAME_W=2 is the previous golden byte for byte.
 # RE-PIN 2026-11-22 (lane FS2; rule 4): docdemotegolden_for.xml 6053 -> 6326 B (est_tokens "2423" -> "2530"), two intended 0.7.0 train
 # changes, each proven separately. (1) LP1 (4ba1fdec6) kForBasenameFieldW=2: the query word "evictor" now meets src/evictor.py's
 # basename, so evict_one rises to r=1 over PageCache.pin_page (r=2), and confidence/margin_pct/coverage re-read (78 -> 76, 36 -> 33).
