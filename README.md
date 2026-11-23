@@ -227,7 +227,6 @@ tracks. codegraph sizes itself to the machine, so its figures are what it took w
 | Failed calls | **0** | 0 | 0 | 0 | 0 | 0 |
 | Says when the answer was cut | **209** | 197 | 207 | 163 | 0 | 193 |
 | Gives the next call to continue, of those cut | **209 of 209** | 0 of 197 | 206 of 207 | 163 of 163 | — | 0 of 193 |
-| Over Claude Code's 30,000-character inline limit | **0** | 0 | 0 | 0 | 0 | 0 |
 
 **What the tasks are.** Each task is a real commit from an open-source project. The question is that commit's message,
 and the tool answers from the code as it was *before* the commit. The right answer is what the commit actually changed:
