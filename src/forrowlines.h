@@ -420,7 +420,7 @@ inline void encodeSection( std::string_view doc, const answerfirst::Block& b, st
         out.append( doc.substr( b.begin, b.end - b.begin ) );
         return;
     }
-    const bool rankSeq = sec && b.name == "sigs" && sec->open.find( " rseq=\"" ) == std::string_view::npos && elideSequentialRanks( sec->rows );
+    const bool rankSeq = b.name == "sigs" && sec->open.find( " rseq=\"" ) == std::string_view::npos && elideSequentialRanks( sec->rows );
     const bool linable = linableSection( sec, comments );
     std::string body;
     for( std::size_t i = 0; linable && i < sec->rows.size(); ++i )
