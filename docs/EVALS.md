@@ -400,8 +400,8 @@ commit, local Release build with profile-guided optimization), codegraph 1.6.2, 
 - Each run starts only when the machine is quiet: load per core under about 0.12 (0.18 when a macOS media-analysis
   service was using about one core), free memory at least 15 %, and no other measured process running.
 - Wall clock is measured per run. ripwire's figures are the median of 5 runs, the others' the median of 3.
-- "Cold" indexes from nothing. "One question once indexed" asks the same question through each tool's documented query
-  entry with its index already built.
+- "Cold" indexes from nothing. "First answer from nothing" adds one question, asked through each tool's documented query
+  entry once its index is built; the README prints the sum of the two medians.
 - Peak memory is the largest sum of resident memory over the tool's whole process tree, sampled 8 times a second, with a
   background daemon counted once. MB = 2²⁰ bytes.
 - llvm-project: one run per tool, with limits of 1 hour and 36 GB. A run the limit stops is reported as stopped, never as
