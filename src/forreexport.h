@@ -1926,6 +1926,7 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
     }
     // the definitions whose span may hold a leaf definition (only in the leaf definitions' files), sorted by file
     std::vector<std::uint32_t> leafFiles;
+    leafFiles.reserve( sameLeaf.size() );
     for( const Symbol* s : sameLeaf )
     {
         leafFiles.push_back( s->fileId );
@@ -1946,6 +1947,7 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
                                                { return b.kind == LocalBindKind::ModuleAlias && b.importedName == "*" && !b.isFromAssignment && b.var == q.front(); } );
     LeafWalk            lw{ ing, {}, {}, {}, {} };
     std::vector<Proven> all;
+    all.reserve( sameLeaf.size() );
     for( const Symbol* s : sameLeaf )
     {
         all.push_back( leafProof( ing, *s, owners, q, lw, leafIsMember( *s, spans ), qAliased ) );

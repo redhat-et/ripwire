@@ -1297,6 +1297,7 @@ inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<S
 inline std::vector<NodeId> answerAnchorsOf( const IngestResult& ing, std::span<const NodeId> answer, const std::vector<GrepHit>& enriched )
 {
     std::vector<NodeId> readers;
+    readers.reserve( enriched.size() );
     for( const GrepHit& h : enriched )
     {
         readers.push_back( h.enclosingId );
@@ -4378,6 +4379,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
     }
     std::size_t ranked = std::min( rows.size(), policy.rankedRows );
+    all.reserve( all.size() + ranked );
     for( std::size_t i = 0; i < ranked; ++i )
     {
         all.push_back( rows[i].raw );

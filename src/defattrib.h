@@ -1075,6 +1075,7 @@ inline void attachRollupOfDef( RollupT& rollup, const IngestResult& ing, const R
         return;
     }
     std::vector<std::uint32_t> files;
+    files.reserve( rollup.shown );
     for( std::size_t i = 0; i < rollup.shown; ++i )
     {
         files.push_back( rollup.rows[i].fileId );

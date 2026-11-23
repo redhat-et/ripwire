@@ -162,6 +162,7 @@ inline std::size_t spliceInitSlots( std::string& sigs, const IngestResult& ing, 
     // one scan: the Value references made inside a candidate (the index is built only when there is one)
     std::vector<std::vector<std::uint32_t>> refsOf( cand.size() );
     std::vector<std::pair<NodeId, std::size_t>> byId;   // (symbol, candidate index), sorted: one binary search per reference
+    byId.reserve( cand.size() );
     for( std::size_t c = 0; c < cand.size(); ++c )
     {
         byId.emplace_back( cand[c].first, c );

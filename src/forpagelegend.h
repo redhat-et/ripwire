@@ -183,6 +183,7 @@ inline const std::array<std::string_view, kTravelCount>& travelBodies()
         }
     }
     std::vector<std::size_t> bySize;
+    bySize.reserve( at.size() );
     for( const auto& [ p, i ] : at ) { bySize.push_back( i ); }
     std::stable_sort( bySize.begin(), bySize.end(), []( std::size_t a, std::size_t b ) { return travelBodies()[ a ].size() > travelBodies()[ b ].size(); } );
     std::vector<std::size_t> gone;

@@ -397,6 +397,7 @@ inline void markActLine( Stream& st )
         const std::size_t      at   = from == nullptr ? 0 : from->at;
         rows.push_back( scope::rowsOnly( std::string( head ) + std::string( st.view.substr( at, to.at - at ) ) ) );
     }
+    views.reserve( views.size() + rows.size() );
     for( const std::string& r : rows ) { views.push_back( r ); }
     const std::size_t legendAt = st.blocks[ st.streamBlocks - 1 ].end;
     return scope::shed( st.view.substr( legendAt, st.closeAt - legendAt ), views );

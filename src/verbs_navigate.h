@@ -1154,6 +1154,7 @@ inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::G
         return 0;
     }
     std::vector<std::pair<std::string_view, NodeId>> byName;   // sorted by name (byte order), then id: matchSiteName's binary search
+    byName.reserve( macros.size() );
     for( const NodeId m : macros )
     {
         byName.emplace_back( ing.symbols[m].name, m );

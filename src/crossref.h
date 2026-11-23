@@ -3072,6 +3072,7 @@ inline std::optional<std::vector<std::vector<RawRow>>> listTreesOfRefs( const st
         return std::nullopt;
     }
     std::vector<std::string> tips;
+    tips.reserve( refs.size() );
     for( const RefInfo& r : refs )
     {
         tips.push_back( r.tip );

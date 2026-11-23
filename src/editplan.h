@@ -503,6 +503,7 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
 
     std::sort( files.begin(), files.end(), []( const FileStage& a, const FileStage& b ) { return a.disk < b.disk; } );
     std::vector<std::unique_ptr<mcpedit::EditLock>> locks;
+    locks.reserve( files.size() );
     for( const FileStage& file : files ) { locks.push_back( std::make_unique<mcpedit::EditLock>( file.disk ) ); }
     for( const FileStage& file : files )
     {

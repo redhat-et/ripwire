@@ -5962,7 +5962,7 @@ inline std::string materializeCommitSubset( const std::string& root, const std::
 {
     namespace fs = std::filesystem;
     std::error_code   ec;
-    const std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( os::getpid() );
+    std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( os::getpid() );   // not const: moved out on return
     fs::remove_all( fs::path( tmpRoot ), ec );
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     {
@@ -11579,6 +11579,7 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
                                  TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
 {
     std::vector<std::string> paths;
+    paths.reserve( ratchetable.size() );
     for( const auto& [ key, nowOfKey ] : ratchetable )
     {
         paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowOfKey->at ].fileId ], root ) );

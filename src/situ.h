@@ -1162,6 +1162,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     const ChangedFileSplit     situSplit = splitChangedFiles( ing, changedFile );
     const std::vector<TestRow> testRows  = rankTestRows( ing, reach, situDepth, nullptr, situSplit.src, situSplit.tests );
     std::vector<std::uint32_t> tests;
+    tests.reserve( testRows.size() );
     for( const TestRow& r : testRows )
     {
         tests.push_back( r.fileId );

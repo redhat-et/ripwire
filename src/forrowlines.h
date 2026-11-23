@@ -351,7 +351,11 @@ struct LineAttr
         line = definitionLine( *row.tag, row.tag->selfClosing ? std::string_view() : row.rest.substr( 0, row.rest.size() - 4 ) );
     }
     const bool usable = line && !line->starts_with( '<' ) && line->find( '\n' ) == std::string::npos && parseLine( *line ) == row.xml;
-    return usable ? std::move( *line ) : row.xml;
+    if( usable )   // two returns, not ?: — the ?: of an xvalue and a const lvalue copied *line instead of moving it
+    {
+        return std::move( *line );
+    }
+    return row.xml;
 }
 
 // ── one section. Its children as rows; nullopt when the section is self-closing, empty or not read (a child tag of another shape, or

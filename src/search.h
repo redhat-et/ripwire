@@ -505,7 +505,7 @@ inline RegexInfo riAlternate( RegexInfo a, RegexInfo b )
 // means no byte need appear). Sound result: ALL, empty prefix/suffix, exact unknown. (Cox: star ⇒ match
 // of the child but as a *requirement* it's empty; we conservatively use ALL.) PLUS r = a+ delegates to the
 // child's match (≥1 copy ⇒ the child's required trigrams must appear) but loses exact/affix precision.
-inline RegexInfo riStar( RegexInfo /*child*/ )
+inline RegexInfo riStar( const RegexInfo& /*child*/ )
 {
     RegexInfo r; r.canEmpty = true; r.exactKnown = false; r.match = TriQuery::all(); return r;
 }
@@ -514,7 +514,7 @@ inline RegexInfo riPlus( RegexInfo child )
     dropExact( child );
     RegexInfo r; r.canEmpty = child.canEmpty; r.exactKnown = false; r.match = std::move( child.match ); return r;   // ≥1 copy ⇒ child trigrams required
 }
-inline RegexInfo riQuest( RegexInfo /*child*/ )   // a? : zero-or-one ⇒ optional ⇒ no required trigram (ALL)
+inline RegexInfo riQuest( const RegexInfo& /*child*/ )   // a? : zero-or-one ⇒ optional ⇒ no required trigram (ALL)
 {
     RegexInfo r; r.canEmpty = true; r.exactKnown = false; r.match = TriQuery::all(); return r;
 }
@@ -660,9 +660,9 @@ private:
             return atom;
         }
         const char c = peek();
-        if( c == '*' ) { next(); return riStar(  std::move( atom ) ); }
+        if( c == '*' ) { next(); return riStar( atom ); }
         if( c == '+' ) { next(); return riPlus(  std::move( atom ) ); }
-        if( c == '?' ) { next(); return riQuest( std::move( atom ) ); }
+        if( c == '?' ) { next(); return riQuest( atom ); }
         if( c == '{' )                                   // bounded/unbounded repetition {n}, {n,}, {n,m}
         {
             // We don't model the exact count for the prefilter — treat {0,*}/{1,*} soundly:
@@ -689,7 +689,7 @@ private:
             {
                 return riPlus( std::move( atom ) ); // ≥1 mandatory copy
             }
-            return riQuest( std::move( atom ) );                         // 0 mandatory copies ⇒ optional
+            return riQuest( atom );                         // 0 mandatory copies ⇒ optional
         }
         return atom;
     }

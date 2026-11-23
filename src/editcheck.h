@@ -353,6 +353,7 @@ inline std::vector<EditCheckGroup> editCheckGroups( const IngestResult& ing, con
     const bool                  anyDefinition = !std::all_of( gk.members.begin(), gk.members.end(),
                                                               [ & ]( const std::vector<NodeId>& members ) { return editCheckDeclOnlyGroup( ing, members ); } );
     std::vector<EditCheckGroup> groups;
+    groups.reserve( gk.members.size() );
     for( const std::vector<NodeId>& members : gk.members )
     {
         // M2: a declaration-only group beside a definition is never offered — its own answer has no call edges
@@ -1504,7 +1505,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                                               renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
                                                   && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty(),
                                               callerIds.size() };
-    const std::string verdictLine = editCheckVerdictOnlyText( verdictFacts, g, root, fsym, ecPathRel( fsym.fileId ), ecSingleRoot );
+    std::string verdictLine = editCheckVerdictOnlyText( verdictFacts, g, root, fsym, ecPathRel( fsym.fileId ), ecSingleRoot );
 
     // card A1 — the preview sentence, FIRST, because every number below it is about bytes that are not on
     // disk and a reader who meets that fact at the end has already read the document as a fact about the tree.

@@ -4976,6 +4976,7 @@ inline SwitchArms switchArmsOf( std::string_view src, const std::vector<Tok>& to
         afterLbl = false;
     }
     std::vector<ArmEnd> ends;
+    ends.reserve( arms.ranges.size() );
     for( const auto& [ first, end ] : arms.ranges )
     {
         ends.push_back( armEndOf( src, toks, first, end ) );
@@ -5511,6 +5512,7 @@ inline std::vector<PyConst> pyChainConsts( std::string_view src, const std::vect
 inline std::pair<std::string, std::string> pyUnhandledOutcome( bool isMatch, std::string_view subject, const std::vector<PyConst>& consts, const std::vector<PyEnum>& enums )
 {
     std::vector<std::string> named;
+    named.reserve( consts.size() );
     for( const PyConst& c : consts )
     {
         named.push_back( c.text );

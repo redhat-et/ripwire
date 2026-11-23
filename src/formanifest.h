@@ -1232,6 +1232,7 @@ inline DefiningLine definingLine( std::string_view txt, const std::vector<Featur
 inline void retargetCfgTouchLines( const IngestResult& ing, const std::vector<std::string_view>& features, std::vector<ExemplarTouch>& touch )
 {
     std::vector<FeatureForms> forms; // HOISTING: per feature, its spellings, built once
+    forms.reserve( features.size() );
     for( const std::string_view f : features )
     {
         forms.push_back( { std::string( f ), "`" + std::string( f ) + "`", "\"" + std::string( f ) + "\"" } );

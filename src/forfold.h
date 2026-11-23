@@ -247,7 +247,14 @@ inline std::vector<NodeId> slicePicks( const IngestResult& ing, const std::vecto
         {
             std::string scratch;
             const std::string* text = lexicalScanText( ing, ms.fileId, scratch );
-            files.emplace_back( ms.fileId, text == &scratch ? std::move( scratch ) : *text );
+            if( text == &scratch )   // the ?: of an xvalue and a const lvalue is a const prvalue: it copied scratch, never moved it
+            {
+                files.emplace_back( ms.fileId, std::move( scratch ) );
+            }
+            else
+            {
+                files.emplace_back( ms.fileId, *text );
+            }
             it = files.end() - 1;
         }
         const std::string& src = it->second;

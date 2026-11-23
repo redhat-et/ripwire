@@ -1519,6 +1519,7 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     if( d.multiRoot )
     {
         std::vector<std::string> rootDirs;
+        rootDirs.reserve( d.ws.size() );
         for( const WorkspaceRoot& r : d.ws )
         {
             rootDirs.push_back( r.arg );
@@ -2840,7 +2841,7 @@ int runDefaultMap( const MainDispatch& d )
             // the ROOT ATTRIBUTES ride too: the compact legend reads root=/est_tokens=/topk_default= etc. present-only, so a
             // candidate without them would price a legend shorter than the one delivered. The est_tokens= values are the
             // candidates' own prices (the layer reprices them, and a placeholder of another digit count would move the delta).
-            const std::string topk       = ctxLeanAttr;
+            const std::string& topk      = ctxLeanAttr;
             const std::string fileEst    = std::to_string( static_cast<std::size_t>( double( wholeFile.xml.size() + kExpandWholeFileLegend.size() + ctxRootAttr.size() ) / rw::kBytesPerTokenBody ) + 1 );
             const std::string bundleRoot = "<ctx" + ctxUnprovenAttr + ( mapTopK == 0 ? ctxRootAttr + " est_tokens=\"" + std::to_string( payloadTokens ) + "\"" : std::string() ) + topk + ctxUnservedAttr + noteBuf + wholeFileNext + " mode=\"bundle\">";
             const std::string fileRoot   = "<ctx" + ctxUnprovenAttr + ctxRootAttr + topk + " mode=\"whole-file\" est_tokens=\"" + fileEst + "\">";
@@ -5396,6 +5397,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                 }
             }
             hc.root             = std::string( cfg.rootPath );
+            hc.roots.reserve( hc.roots.size() + cfg.roots.size() );
             for( std::string_view r : cfg.roots )
             {
                 hc.roots.emplace_back( r );

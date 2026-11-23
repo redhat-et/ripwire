@@ -692,6 +692,7 @@ inline void nonGapReasons( std::string_view why, std::string& out )
     attrFiles( answerBody, "bind=\"", af.files );
     std::ranges::sort( af.files );
     std::vector<FoldRow> cand;
+    cand.reserve( in.hits.size() );
     for( const CorpusHit& h : in.hits )
     {
         cand.push_back( { h.file, h.line } );

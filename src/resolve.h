@@ -9125,7 +9125,7 @@ struct Narrower
     // by-name reading
     std::optional<MeantClasses> unjudgedBase( std::size_t parent, const std::string& base, std::span<const NodeId> from, bool drawn, bool baseDefined ) const
     {
-        const MeantClasses byName{ {}, walkMeant[ parent ].unbound };
+        MeantClasses byName{ {}, walkMeant[ parent ].unbound };   // not const: moved out on return
         if( drawn )
         {
             return std::nullopt;   // every edge drawn is the name collision: the evidence names a class the tree does not define here
