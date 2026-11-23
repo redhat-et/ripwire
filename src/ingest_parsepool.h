@@ -592,18 +592,29 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     continue;
                 }
-                const TSNode root = ts_tree_root_node( pending.tree );
-                const std::size_t firstNewDefIndex = out.defs.size();
-                ExtractShortfall  tagsShortfall;
-                underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
+                // The same per-file degrade as the claim loop's try/catch below: a deferred file's tags pass runs the same
+                // extraction, so a throw here (bad_alloc, …) marks THIS file extract-partial instead of escaping the
+                // worker's thread entry, which would std::terminate the process. The tree is freed on both paths.
+                try
                 {
-                    captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
-                                      TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
-                    rereadMacroArguments( macroArgWork, cursor, { *pending.le, pending.fileId, pending.bytes, root, std::span<const RawDef>( out.defs ).subspan( firstNewDefIndex ) },
-                                          out.refs, tagsShortfall );
-                } );
-                notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
-                finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+                    const TSNode root = ts_tree_root_node( pending.tree );
+                    const std::size_t firstNewDefIndex = out.defs.size();
+                    ExtractShortfall  tagsShortfall;
+                    underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
+                    {
+                        captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
+                                          TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
+                        rereadMacroArguments( macroArgWork, cursor, { *pending.le, pending.fileId, pending.bytes, root, std::span<const RawDef>( out.defs ).subspan( firstNewDefIndex ) },
+                                              out.refs, tagsShortfall );
+                    } );
+                    notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
+                    finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+                }
+                catch( ... )
+                {
+                    DISCLOSE( ( FileExtractThrew{ scan, pending.fileId } ), FileExtractThrew::DisclosureWhy::WorkerThrew,
+                              "ingest: worker exception on a deferred file's tags pass — its facts so far are kept and it is marked extract-partial" );
+                }
                 ts_tree_delete( pending.tree );
                 pending.tree = nullptr;
             }

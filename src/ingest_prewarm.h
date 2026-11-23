@@ -634,7 +634,22 @@ inline void launchQueryCompiles( QueryPrewarm& prewarm )
 
         for( std::size_t i = 0; i < prewarm.toCompile.size(); ++i )
         {
-            prewarm.compilePool.emplace_back( [ &prewarm, i ]() noexcept { prewarm.compiledQueries[ i ] = compileQueryStandalone( *prewarm.toCompile[ i ] ); } );
+            // A throw escaping a std::thread entry is std::terminate (CONTRIBUTING.md §3), and compileQueryStandalone builds
+            // a std::string. A query that did not compile is already a degrade its consumer handles: it stays nullptr, and
+            // captureTagsFacts discloses each file that needed it (ingest_astquery.h).
+            prewarm.compilePool.emplace_back( [ &prewarm, i ]() noexcept
+            {
+                try
+                {
+                    prewarm.compiledQueries[ i ] = compileQueryStandalone( *prewarm.toCompile[ i ] );
+                }
+                catch( ... )
+                {
+                    DISCLOSE( Diagnostics::answerUnchanged,
+                              "a query left uncompiled stays absent, and captureTagsFacts discloses each file that needed it as extract-partial",
+                              "ingest: prewarm query compile worker exception — that grammar's query stays absent" );
+                }
+            } );
         }
     }
 }
