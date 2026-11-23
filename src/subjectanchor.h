@@ -359,6 +359,7 @@ inline bool asksDependents( const std::vector<std::string_view>& words, const st
     std::vector<std::string_view> text;   // trimmed words, sentence order
     std::string_view              name;
     bool                          callee = false;
+    text.reserve( text.size() + words.size() );
     for( const std::string_view w : words )
     {
         text.push_back( detail::graphSubjectTrimWord( w ).text );
