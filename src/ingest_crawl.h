@@ -1075,7 +1075,7 @@ bool kotlinStringsNestTooDeep( std::string_view bytes ) noexcept
     };
     // String and interpolation frames strictly alternate above top-level code, so twice the ceiling bounds the stack —
     // and the string push that would pass the ceiling IS the verdict, so it is reached before the array could fill.
-    std::array<NestFrame, 2u * kMaxKotlinStringNestDepth> frames {};
+    std::array<NestFrame, std::size_t{ 2 } * kMaxKotlinStringNestDepth> frames {};
     std::size_t       frameCount  = 0;
     std::uint32_t     stringDepth = 0;
     const std::size_t byteCount   = bytes.size();
@@ -2117,7 +2117,7 @@ public:
     }
 
 private:
-    static constexpr std::uintmax_t kMaxSphinxConfBytes = 256u * 1024u;
+    static constexpr std::uintmax_t kMaxSphinxConfBytes = std::uintmax_t{ 256 } * 1024;
 
     static docparse::SphinxTxt readConf( const std::string& dir )
     {

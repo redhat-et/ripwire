@@ -3702,8 +3702,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
         imAttr.markNamed( imNamed, show[ i ] );
     }
     const DefTableListing imListing = defTableListing( imAttr.groups, imNamed );
-    const bool          imHasVia    = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
-    const bool          imHasLink   = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
+    const bool          imHasVia    = std::any_of( show.begin() + std::ptrdiff_t( ipw.begin ), show.begin() + std::ptrdiff_t( ipw.end ), [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
+    const bool          imHasLink   = std::any_of( show.begin() + std::ptrdiff_t( ipw.begin ), show.begin() + std::ptrdiff_t( ipw.end ), [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
     // BAND DC (handoffwindow.h): the complete call a windowing root names, the CLI root's all_next= by the same rule
     const std::string   imAllNext   = directRootAllNext( "--impact=", symbol, ipw.end < show.size(), show.size() );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,

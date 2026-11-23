@@ -1311,7 +1311,7 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
     const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 prab[ 192 ];
     rw::emitTo( stdout, "{}{}{}{}{}", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ), rw::gitstamp::shallowLegend( coShallow ),
-                 rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) );   // sweep: ditto
+                 rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + std::ptrdiff_t( prpw.begin ), prs.begin() + std::ptrdiff_t( prpw.end ), []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) );   // sweep: ditto
     rw::emitTo( stdout, "<cochange pairs=\"{}\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
@@ -1742,7 +1742,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             coMinRecurAttr( pminrec, sizeof( pminrec ), cfg.cochangeRecur );
             const bool cfShallow = gitstamp::isShallow( fidRepo );   // 0.6.6: this file's repo is depth-limited — qualified on the root
             rw::emitTo( stdout, "{}{}{}{}{}", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ), gitstamp::shallowLegend( cfShallow ),
-                         rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) );   // sweep: at= was undefined on this screen
+                         rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + std::ptrdiff_t( ppw.begin ), ps.begin() + std::ptrdiff_t( ppw.end ), []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading

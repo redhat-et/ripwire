@@ -42,7 +42,7 @@ namespace rw
 // value also bounds a WORST CASE: tree-sitter's parse is quadratic on pathological comment-dense input
 // (~4 s/MB²), so 4 MB caps such a file at ~1 min (real code parses linearly, ~0.7 s/MB). Overridable
 // per run via --max-file-size (CLI) for repos with genuinely-large hand-authored source.
-constexpr std::size_t kDefaultMaxFileBytes = 4u * 1024u * 1024u;   // 4 MB (was 1 MB pre-2026-07)
+constexpr std::size_t kDefaultMaxFileBytes = std::size_t{ 4 } * 1024 * 1024;   // 4 MB (was 1 MB pre-2026-07)
 
 // The JSON lane's OWN crawl ceiling (found live by bench/multiswe): .json is indexed for CONFIG
 // keys, and real config files (package.json, tsconfig, angular.json…) are tens of KB at most — while
@@ -50,7 +50,7 @@ constexpr std::size_t kDefaultMaxFileBytes = 4u * 1024u * 1024u;   // 4 MB (was 
 // that slips under both the 4MB skip and the minified-line heuristic and explodes into tens of thousands
 // of junk t="sec" symbols (measured: >2min ingest on a nlohmann/json historical tree vs 0.3s without the
 // data files). Generous on purpose: every real-world config file observed is far below it.
-constexpr std::size_t kMaxJsonConfigBytes = 256u * 1024u;          // 256 KB
+constexpr std::size_t kMaxJsonConfigBytes = std::size_t{ 256 } * 1024;          // 256 KB
 
 // JSON-lane nesting ceiling (companion to kMaxJsonConfigBytes; see jsonNestsTooDeep in ingest.cpp): real
 // config nests a handful of levels; hundreds means a parser-torture fixture or generated data whose
@@ -85,7 +85,7 @@ constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 // config: NeMo's cicd-main.yml is a hand-maintained 293 KB workflow. 512 KB clears every real config file
 // observed in the 90-repo breadth corpus (4 449 .yml/.yaml files) while still amputating the data class.
 // Counted in skipped_oversize= exactly like the JSON drop (test/yamllangcheck.sh pins both sides).
-constexpr std::size_t kMaxYamlConfigBytes = 512u * 1024u;          // 512 KB — deliberately NOT kMaxJsonConfigBytes
+constexpr std::size_t kMaxYamlConfigBytes = std::size_t{ 512 } * 1024;          // 512 KB — deliberately NOT kMaxJsonConfigBytes
 
 // YAML-lane nesting ceiling (companion to kMaxYamlConfigBytes; see yamlNestsTooDeep in ingest.cpp) — and
 // unlike JSON's, this one is MEMORY-SAFETY load-bearing, not merely a superlinear-parse guard.

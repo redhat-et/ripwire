@@ -572,7 +572,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     };
 
     constexpr std::size_t kMaxPendingParsedFiles = 4;
-    constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
+    constexpr std::size_t kMaxPendingParsedBytes = std::size_t{ 8 } * 1024 * 1024;
     std::vector<PendingParsedFile> pendingParsed;
     pendingParsed.reserve( kMaxPendingParsedFiles );
     std::size_t pendingParsedBytes = 0;

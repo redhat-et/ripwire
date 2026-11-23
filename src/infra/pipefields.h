@@ -29,7 +29,7 @@ public:
     bool timedOut = false;
 
     PipeFieldReader( std::FILE* pipe, const std::atomic<bool>* abandon, std::chrono::steady_clock::time_point deadline )
-        : pipe_( pipe ), abandon_( abandon ), deadline_( deadline ), block_( 64u * 1024u ) {}
+        : pipe_( pipe ), abandon_( abandon ), deadline_( deadline ), block_( std::size_t{ 64 } * 1024 ) {}
 
     bool next( std::string& field )
     {

@@ -1409,7 +1409,7 @@ inline constexpr std::size_t kSkillJoinedOverlapBytes = 128;
 inline constexpr std::size_t kSkillInjectionSpanBytes = 32;
 static_assert( kSkillInjectionSpanBytes < kSkillJoinedOverlapBytes && kSkillJoinedOverlapBytes < kSkillJoinedWindowBytes,
                "a joined-body window overlap must exceed the longest INJECTION match, or a match across a window edge is lost" );
-inline constexpr std::size_t kSkillScanStackBytes     = 256 * 1024 * 1024;   // the grep scan threads' size (search.h kGrepScanStackBytes)
+inline constexpr std::size_t kSkillScanStackBytes     = std::size_t{ 256 } * 1024 * 1024;   // the grep scan threads' size (search.h kGrepScanStackBytes)
 
 // Sort findings (line, rule, severity WORST first) STABLY, then keep the first row per (line, rule): so a (line, rule) reported
 // twice keeps its worst severity, and the earlier row on a tie. Keeping the first row after a non-stable sort on (line, rule)

@@ -60,8 +60,8 @@ namespace lsp
 // that is genuinely new, and it is deliberately small: parse ONLY Content-Length, ignore every other
 // header the spec allows, and never allocate past the ceilings (degrade-don't-crash, the mcphttp posture).
 
-inline constexpr std::size_t kLspMaxHeaderBytes = 64u * 1024u;
-inline constexpr std::size_t kLspMaxBodyBytes   = 32u * 1024u * 1024u;
+inline constexpr std::size_t kLspMaxHeaderBytes = std::size_t{ 64 } * 1024;
+inline constexpr std::size_t kLspMaxBodyBytes   = std::size_t{ 32 } * 1024 * 1024;
 inline constexpr std::size_t kLspHoverDefCap    = 8u;     // definitions rendered in one hover
 inline constexpr std::size_t kLspHoverUseCap    = 8u;     // use-site links rendered in one hover
 inline constexpr std::size_t kLspWorkspaceCap   = 20u;    // workspace/symbol picker rows (D9)

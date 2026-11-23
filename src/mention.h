@@ -570,7 +570,7 @@ inline void mentionUnkeptFiles( const IngestResult& ing, const RawMention& m, co
     const std::size_t fileCount = ing.files.size();
     for( std::size_t suffixLen = m.segments.size(); suffixLen >= 1; --suffixLen )
     {
-        const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+        const std::vector<std::string> suffix( m.segments.end() - std::ptrdiff_t( suffixLen ), m.segments.end() );   // suffixLen <= segments.size()
         const std::size_t              before = out.size();
         bool                           named  = false;
         for( std::uint32_t f = 0; f < fileCount; ++f )
@@ -1344,7 +1344,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         }
         for( std::size_t suffixLen = m.segments.size(); suffixLen >= 1 && !matchedFile; --suffixLen )
         {
-            const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+            const std::vector<std::string> suffix( m.segments.end() - std::ptrdiff_t( suffixLen ), m.segments.end() );   // suffixLen <= segments.size()
             for( std::uint32_t f = 0; f < fileCount && mentionedFiles.size() < kMentionMaxFiles; ++f )
             {
                 if( !pathSuffixMatches( rootRelPath( ing, f ), suffix ) )
@@ -1691,7 +1691,7 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
         order[i] = i;
     }
     const std::size_t topN = std::min( kDocMentionMaxAnchors, N );
-    std::partial_sort( order.begin(), order.begin() + topN, order.end(), [ & ]( NodeId a, NodeId b ) noexcept
+    std::partial_sort( order.begin(), order.begin() + std::ptrdiff_t( topN ), order.end(), [ & ]( NodeId a, NodeId b ) noexcept   // topN <= N = size
     { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );
 
     // Set ONLY where a refusal is provable — a doc below its anchor's lift target that a cap turned away.
@@ -1952,7 +1952,7 @@ inline bool resolveUniqueMentionFile( const IngestResult& ing, const RawMention&
     const std::uint32_t fileCount = std::uint32_t( ing.files.size() );
     for( std::size_t suffixLen = m.segments.size(); suffixLen >= 1; --suffixLen )
     {
-        const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+        const std::vector<std::string> suffix( m.segments.end() - std::ptrdiff_t( suffixLen ), m.segments.end() );   // suffixLen <= segments.size()
         std::uint32_t                  count = 0, match = 0;
         for( std::uint32_t f = 0; f < fileCount; ++f )
         {

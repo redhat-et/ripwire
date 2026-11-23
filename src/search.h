@@ -1416,7 +1416,7 @@ inline AbandonedFileCount countStoppedFiles( const std::vector<char>& perFileAba
 // deepest line goes, and at most half of each stack by construction. MEASURED in the lane that set it (thread
 // start-up and a warm scan of this tree, 8 MiB vs 256 MiB, interleaved: no difference past run-to-run noise); the
 // line bounds it buys are in the CHANGELOG entry. Literal scans use the same threads and never recurse.
-inline constexpr std::size_t kGrepScanStackBytes = 256 * 1024 * 1024;
+inline constexpr std::size_t kGrepScanStackBytes = std::size_t{ 256 } * 1024 * 1024;
 
 // FAULT INJECTION (non-NDEBUG; faultSwitchOn is constexpr false under NDEBUG): RIPWIRE_FAULT_SCAN_STACK_MIXED=1 refuses every
 // ODD scan thread any stack above half of what was asked, so one scan obtains two sizes — the degrade a strict overcommit

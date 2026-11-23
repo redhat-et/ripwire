@@ -695,8 +695,8 @@ std::optional<int> runFromTrace( const MainDispatch& d )
 // byte derived FROM the captured text (the lines cut, the mapping) is a deterministic function of it.
 
 inline constexpr std::uint32_t kRunTraceTimeoutSecDefault = 600;                 // the cap when --run-timeout is not given
-inline constexpr std::size_t   kRunTraceHeadCapBytes      = 8u * 1024 * 1024;    // capture cap: first 8 MB kept …
-inline constexpr std::size_t   kRunTraceTailCapBytes      = 24u * 1024 * 1024;   // … plus the last 24 MB; the dropped middle is COUNTED
+inline constexpr std::size_t   kRunTraceHeadCapBytes      = std::size_t{ 8 } * 1024 * 1024;    // capture cap: first 8 MB kept …
+inline constexpr std::size_t   kRunTraceTailCapBytes      = std::size_t{ 24 } * 1024 * 1024;   // … plus the last 24 MB; the dropped middle is COUNTED
 inline constexpr std::size_t   kRunTraceRelevantLinesCap  = 40;                  // <lines view="relevant"> cap (first/last half split past it)
 inline constexpr std::size_t   kRunTraceTailLines         = 10;                  // success record: the disclosed tail length
 inline constexpr std::size_t   kRunTraceFallbackTailLines = 25;                  // failure with zero relevant lines: fall back to this tail

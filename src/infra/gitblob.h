@@ -43,8 +43,9 @@ inline void sha1CompressBlock( std::array<std::uint32_t, 5>& h, const unsigned c
     std::uint32_t w[ 80 ];
     for( unsigned i = 0; i < 16; ++i )
     {
-        w[ i ] = ( std::uint32_t( block[ 4 * i ] ) << 24 ) | ( std::uint32_t( block[ 4 * i + 1 ] ) << 16 )
-               | ( std::uint32_t( block[ 4 * i + 2 ] ) << 8 ) | std::uint32_t( block[ 4 * i + 3 ] );
+        const std::size_t at = std::size_t{ 4 } * i;   // i < 16, so at + 3 <= 63: inside the 64-byte block
+        w[ i ] = ( std::uint32_t( block[ at ] ) << 24 ) | ( std::uint32_t( block[ at + 1 ] ) << 16 )
+               | ( std::uint32_t( block[ at + 2 ] ) << 8 ) | std::uint32_t( block[ at + 3 ] );
     }
     for( unsigned i = 16; i < 80; ++i )
     {

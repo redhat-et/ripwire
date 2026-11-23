@@ -194,7 +194,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     const rw::ClosureBlocksOut chIn = rw::closureBlocks( ing, g, chClosures, chSingleRoot, chRootPrefix, /*json=*/cfg.json && !cfg.columnar );
     if( cfg.columnar )
     {
-        std::vector<NodeId> page( result.begin() + pw.begin, result.begin() + pw.end );
+        std::vector<NodeId> page( result.begin() + std::ptrdiff_t( pw.begin ), result.begin() + std::ptrdiff_t( pw.end ) );   // pageWindow( result.size(), … )
         const std::string attr = "of=\"" + ex( sym ) + "\"" + rw::narrowedAttrXml( chRows.narrowed ) + " defs=\"" + std::to_string( matches.size() )
                                + "\" count=\"" + std::to_string( result.size() ) + "\""
                                + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
@@ -3409,7 +3409,7 @@ int emitImpactColumnar( const ImpactView& v )
     std::vector<char>       esc;
     char                    ipab[ kPageDisclosureCap ];
     const std::size_t       shownRows = v.page.end - v.page.begin;
-    std::vector<NodeId>     rows( v.show.begin() + v.page.begin, v.show.begin() + v.page.end );
+    std::vector<NodeId>     rows( v.show.begin() + std::ptrdiff_t( v.page.begin ), v.show.begin() + std::ptrdiff_t( v.page.end ) );   // a pageWindow of show
     const std::string       attr = "of=\"" + std::string( escapeXml( v.sym, esc ) ) + "\" defs=\"" + std::to_string( v.defs )
                                  + "\" reaches=\"" + std::to_string( v.reaches ) + "\""
                                  + rw::impactRingAttrXml( *v.ring )                               // HOP1: the XML root's reaches_hedged= (its <ring> rows: XML/JSON only)
@@ -3448,7 +3448,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) )   // P3 (L7); hub-fold: the XML root's next=, same rule
                                  + rw::nextAttrXml( impactAllNext( v ), "all_next" );   // BAND DC: a windowing root names the complete call
     const std::vector<char> via    = impactJsonVia( v );
-    const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end );   // FE-B: in `rows` order
+    const std::vector<char> rowVia( via.begin() + std::ptrdiff_t( v.page.begin ), via.begin() + std::ptrdiff_t( v.page.end ) );   // FE-B: in `rows` order
     std::vector<std::string> rowOfDef;   // attrib-multidef: of_def per row, only on a multi-group selector
     for( std::size_t i = v.page.begin; i < v.page.end && v.attrib.groups.multi(); ++i )
     {
@@ -3608,13 +3608,13 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
     rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                  reach.empty() ? std::string()
                                : std::string( rw::impactDepthLegend( cfg.columnar ) )
-                                     + rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+                                     + rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + std::ptrdiff_t( imPage.begin ), show.begin() + std::ptrdiff_t( imPage.end ),
                                                                                                 [ & ]( rw::NodeId n ) { return n < imWalk.typeOnly.size() && imWalk.typeOnly[ n ] != 0; } ) ),
                  ( std::string( cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend )
                    + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar )
                    + rw::importersRollupLegend( rw::importTierRollupShown( imports ) ) ).c_str(),   // IMPACT-ROLLUP: every dialect carries it
                  ( rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + rw::impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )
-                   + rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+                   + rw::viaNameLegend( std::any_of( show.begin() + std::ptrdiff_t( imPage.begin ), show.begin() + std::ptrdiff_t( imPage.end ),
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),

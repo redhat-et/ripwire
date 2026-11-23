@@ -213,7 +213,7 @@ inline FileAnchor anchorOfMention( const IngestResult& ing, const mention_detail
     // a SHORTER suffix is never a page: a file at a path the subject did not write is listed as near, picked by nobody
     for( std::size_t suffixLen = m.segments.size() - 1; suffixLen >= 1 && a.total == 0; --suffixLen )
     {
-        const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+        const std::vector<std::string> suffix( m.segments.end() - std::ptrdiff_t( suffixLen ), m.segments.end() );   // suffixLen < segments.size()
         collectFiles( ing, a, [ & ]( std::uint32_t f ) { return isCode( f ) && pathSuffixMatches( rootRelPath( ing, f ), suffix ); } );
         a.near = a.total > 0;
     }
@@ -736,7 +736,7 @@ inline std::uint32_t applyFileSubjectLift( const IngestResult& ing, std::string_
         const FileAnchor& a = anchors[ai];
         if( a.kind == 'd' )
         {
-            files.insert( files.end(), a.files.begin(), a.files.begin() + std::min( a.files.size(), kForFilePageDirFiles ) );   // serving order
+            files.insert( files.end(), a.files.begin(), a.files.begin() + std::ptrdiff_t( std::min( a.files.size(), kForFilePageDirFiles ) ) );   // serving order
         }
         else if( a.picksOne() )
         {

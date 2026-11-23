@@ -266,7 +266,7 @@ inline std::string popenTrimmed( const std::string& cmd )
         return {};
     }
     std::string                  out;
-    std::array<char, 64 * 1024> block;
+    std::array<char, std::size_t{ 64 } * 1024> block;
     for( std::size_t got = std::fread( block.data(), 1, block.size(), pipe ); got > 0; got = std::fread( block.data(), 1, block.size(), pipe ) )
     {
         ASSUME( got <= block.size(), "fread returns at most the count it was asked for" );
@@ -848,7 +848,7 @@ inline GitCommandLines gitCommandLinesBy( const std::string& cmd, std::chrono::s
     }
     out.isStarted = true;
     std::string       tail;
-    std::vector<char> block( 64u * 1024u );
+    std::vector<char> block( std::size_t{ 64 } * 1024 );
     const auto        flush = [ & ]( std::string_view row )
     {
         while( !row.empty() && ( row.back() == '\r' ) )

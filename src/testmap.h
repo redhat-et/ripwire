@@ -743,7 +743,7 @@ struct ClassNewSpelling
         return out;
     }
     void adopt( const Reference& r ) { first[ r.fileId ] = written( r ); mixed[ r.fileId ] = 0; }
-    void note( const Reference& r ) { mixed[ r.fileId ] |= char( written( r ) != first[ r.fileId ] ); }
+    void note( const Reference& r ) { char& m = mixed[ r.fileId ]; m = char( m | char( written( r ) != first[ r.fileId ] ) ); }   // 0/1 flags
     void hedge( ClassNewRow& row ) const { row.line = mixed[ row.testFile ] ? 0 : row.line; }   // the emitter omits l= for line 0
 };
 
@@ -868,7 +868,8 @@ inline std::vector<ClassNewRow> classNewBestRows( const ClassNewScan& s, std::sp
     std::vector<char> jsRow( best.size(), 0 );   // a TS/JS test file holding a row: its constructions resolve through ClassNewJsBinds
     for( const ClassNewSite& site : sites )
     {
-        jsRow[ ing.symbols[ site.caller ].fileId ] |= char( langFacts( ing.symbols[ site.caller ].lang ).importBoundConstruction );
+        char& isJsRow = jsRow[ ing.symbols[ site.caller ].fileId ];   // 0/1 flags: the OR fits a char
+        isJsRow       = char( isJsRow | char( langFacts( ing.symbols[ site.caller ].lang ).importBoundConstruction ) );
     }
     const std::optional<ClassNewJsBinds> js = std::ranges::any_of( jsRow, []( char c ) { return c != 0; } )
                                                   ? std::optional<ClassNewJsBinds>( std::in_place, ing, jsRow ) : std::nullopt;

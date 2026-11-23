@@ -2639,7 +2639,8 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
         Narrower::appendUint( key, b.fromSymbol );
         key.push_back( '#' );
         key.append( b.var );
-        t.localNameSet[ key ] |= localNameEvidence( b.kind );
+        char& evidence = t.localNameSet[ key ];   // one lookup, as before; the flags are kLocalName* bits, so the OR fits a char
+        evidence       = char( evidence | localNameEvidence( b.kind ) );
         if( b.kind == LocalBindKind::VarDecl )
         {
             t.localShadowSpans[ key ].push_back( VarSpan{ b.spanStart, b.spanEnd } );
@@ -14722,7 +14723,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         g.outNameOnly.assign( edges.size(), 0u );
     }
     {
-        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
+        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + std::ptrdiff_t( N ) );   // N + 1 offsets: N fits
         for( const E& e : edges )
         {
             const std::uint32_t pos = cur[ e.from ]++;
@@ -15792,7 +15793,7 @@ inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector
         anchorIds[i] = NodeId( i );
     }
     const std::size_t anchorCount = std::min( anchorcfg::kAnchorCount, N );
-    std::partial_sort( anchorIds.begin(), anchorIds.begin() + anchorCount, anchorIds.end(),
+    std::partial_sort( anchorIds.begin(), anchorIds.begin() + std::ptrdiff_t( anchorCount ), anchorIds.end(),   // anchorCount <= N = size
                        [ & ]( NodeId a, NodeId b )
                        {
                            if( lex[a] != lex[b] ) { return lex[a] > lex[b]; }
@@ -19926,7 +19927,7 @@ inline std::vector<NodeId> transitiveCallersDepth( const Graph& g, std::span<con
     const std::size_t head  = expandCallers( g, q, 0, nSeed, seen, depth );   // the seeds first: a direct caller and a first-hop node share d=1
     enqueueUnseen( firstHop, 1, seen, depth, q );
     expandCallers( g, q, head, SIZE_MAX, seen, depth );
-    std::vector<NodeId> out( q.begin() + nSeed, q.end() );   // reached, minus the seeds
+    std::vector<NodeId> out( q.begin() + std::ptrdiff_t( nSeed ), q.end() );   // reached, minus the seeds (q opens with them: nSeed <= size)
     std::sort( out.begin(), out.end() );
     return out;
 }

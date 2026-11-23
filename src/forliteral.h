@@ -4515,7 +4515,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         head += "\"";
         const bool above = lit_detail::servedBodyHead( served, head );
         owners.push_back( h.enclosingId );
-        ownerAbove.push_back( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) );
+        ownerAbove.push_back( char( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) ) );   // 0, 1 or 2
         if( above || out.bodies >= kForLiteralBodies )
         {
             continue;

@@ -5971,7 +5971,7 @@ inline std::string materializeCommitSubset( const std::string& root, const std::
     }
     guard.p = tmpRoot;
     const std::string archiveFile = tmpRoot + ".tar";
-    constexpr std::size_t kChunkBytes = 64 * 1024;   // well under every ARG_MAX this builds on
+    constexpr std::size_t kChunkBytes = std::size_t{ 64 } * 1024;   // well under every ARG_MAX this builds on
     for( std::size_t at = 0; at < paths.size(); )
     {
         std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " archive --format=tar --output=" + shSingleQuote( archiveFile )
@@ -9421,7 +9421,7 @@ struct SidecarWriteLock
             {
                 break;
             }
-            struct timespec ts{ 0, 10 * 1000 * 1000 };   // 10 ms
+            struct timespec ts{ 0, long{ 10 } * 1000 * 1000 };   // 10 ms
             os::nanosleep( &ts, nullptr );
         }
         if( !locked )

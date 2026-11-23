@@ -685,7 +685,7 @@ namespace mcpedit
                     break;
                 }
                 contended = attempt == 19;
-                struct timespec ts{ 0, 10 * 1000 * 1000 };   // 10 ms
+                struct timespec ts{ 0, long{ 10 } * 1000 * 1000 };   // 10 ms
                 os::nanosleep( &ts, nullptr );
             }
             // `contended` is disclosed to the caller in full via runEditVerb's -32603 message below — a real

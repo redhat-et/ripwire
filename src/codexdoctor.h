@@ -36,7 +36,7 @@ inline std::string readSmallFile( const std::filesystem::path& path, bool& ok )
     ok = false;
     std::error_code ec;
     const std::uintmax_t byteCount = std::filesystem::file_size( path, ec );
-    if( ec || byteCount > 1024 * 1024 ) { return {}; }
+    if( ec || byteCount > std::uintmax_t{ 1024 } * 1024 ) { return {}; }
     std::ifstream input( path, std::ios::binary );
     if( !input ) { return {}; }
     std::string text( std::istreambuf_iterator<char>( input ), {} );

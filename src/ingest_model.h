@@ -569,7 +569,7 @@ inline DefSpanIndex buildDefSpanIndex( const IngestResult& result, const std::ve
         // first-line heading both at byte 0) would get stdlib-dependent innermost attribution. Tie-break on
         // endByte DESCENDING (wider container first, so the sweep opens it before the nested span), then id
         // for totality → cross-platform byte-identical output.
-        std::sort( index.spans.begin() + begin, index.spans.begin() + end,
+        std::sort( index.spans.begin() + std::ptrdiff_t( begin ), index.spans.begin() + std::ptrdiff_t( end ),   // a window of spans: end <= size
                    []( const DefSpan& a, const DefSpan& b ) noexcept
                    {
                        if( a.startByte != b.startByte )
@@ -752,7 +752,7 @@ inline std::vector<std::uint32_t> orderReferences( const std::vector<RawRef>& ra
         const std::size_t count = end - begin;
         if( count < kRadixThreshold )
         {
-            std::sort( refOrder.begin() + begin, refOrder.begin() + end, lessRefByByteName );
+            std::sort( refOrder.begin() + std::ptrdiff_t( begin ), refOrder.begin() + std::ptrdiff_t( end ), lessRefByByteName );   // a window: end <= size
             return;
         }
 
@@ -825,7 +825,7 @@ inline std::vector<std::uint32_t> orderReferences( const std::vector<RawRef>& ra
             }
             if( tieEnd - tieBegin > 1 )
             {
-                std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
+                std::sort( refOrder.begin() + std::ptrdiff_t( tieBegin ), refOrder.begin() + std::ptrdiff_t( tieEnd ), lessRefByName );   // a window: tieEnd <= size
             }
             tieBegin = tieEnd;
         }

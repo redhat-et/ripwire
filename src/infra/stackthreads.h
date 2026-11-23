@@ -45,8 +45,8 @@ namespace rw
 // failure a macOS run cannot see. regexguard.h static_asserts the libstdc++ number's budget on every platform. This is
 // still a planning number, not a measurement: running these callers on runOnStackThreads with the SETTLED size (and
 // reading the real thread stack, which glibc does not size at 8 MiB when RLIMIT_STACK is unlimited) is a follow-up.
-inline constexpr std::size_t kCallerStackBytesFloorLibcxx    = 512 * 1024;
-inline constexpr std::size_t kCallerStackBytesFloorLibstdcxx = 8 * 1024 * 1024;
+inline constexpr std::size_t kCallerStackBytesFloorLibcxx    = std::size_t{ 512 } * 1024;
+inline constexpr std::size_t kCallerStackBytesFloorLibstdcxx = std::size_t{ 8 } * 1024 * 1024;
 #if defined( _LIBCPP_VERSION )
 inline constexpr std::size_t kCallerStackBytesFloor = kCallerStackBytesFloorLibcxx;
 #else
@@ -71,7 +71,7 @@ public:
     const bool          isSized;
 };
 
-inline constexpr std::size_t kStackThreadBytesFloor = 8 * 1024 * 1024;   // the smallest stack a refused thread is retried with
+inline constexpr std::size_t kStackThreadBytesFloor = std::size_t{ 8 } * 1024 * 1024;   // the smallest stack a refused thread is retried with
 
 // work( settledBytes ) on `threadCount` threads; returns the settled stack size after every thread has been joined. Each
 // thread asks for `stackBytes` and, when the system refuses that much (a strict overcommit policy, an address-space
@@ -93,10 +93,10 @@ inline constexpr std::size_t nextStackTryBytes( std::size_t tryBytes, std::size_
     }
     return ( tryBytes / 2 < floorBytes ) ? floorBytes : tryBytes / 2;
 }
-static_assert( nextStackTryBytes( 12 * 1024 * 1024, 12 * 1024 * 1024 ) == kStackThreadBytesFloor, "a 12 MiB request retries at the 8 MiB floor" );
-static_assert( nextStackTryBytes( kStackThreadBytesFloor, 12 * 1024 * 1024 ) == 0, "the floor is the last try" );
-static_assert( nextStackTryBytes( 256 * 1024 * 1024, 256 * 1024 * 1024 ) == 128 * 1024 * 1024, "a power-of-two request still halves" );
-static_assert( nextStackTryBytes( 4 * 1024 * 1024, 4 * 1024 * 1024 ) == 0, "a request below the floor is tried once" );
+static_assert( nextStackTryBytes( std::size_t{ 12 } * 1024 * 1024, std::size_t{ 12 } * 1024 * 1024 ) == kStackThreadBytesFloor, "a 12 MiB request retries at the 8 MiB floor" );
+static_assert( nextStackTryBytes( kStackThreadBytesFloor, std::size_t{ 12 } * 1024 * 1024 ) == 0, "the floor is the last try" );
+static_assert( nextStackTryBytes( std::size_t{ 256 } * 1024 * 1024, std::size_t{ 256 } * 1024 * 1024 ) == std::size_t{ 128 } * 1024 * 1024, "a power-of-two request still halves" );
+static_assert( nextStackTryBytes( std::size_t{ 4 } * 1024 * 1024, std::size_t{ 4 } * 1024 * 1024 ) == 0, "a request below the floor is tried once" );
 
 template<typename Work, typename RefusePolicy = decltype( &isStackNeverRefused )>
 std::size_t runOnStackThreads( std::size_t threadCount, std::size_t stackBytes, Work& work, RefusePolicy isRefused = &isStackNeverRefused ) noexcept

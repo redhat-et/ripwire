@@ -328,7 +328,8 @@ inline std::vector<char> defGroupUntied( const IngestResult& ing, std::span<cons
     for( std::size_t i = 0; i < matches.size(); ++i )
     {
         const Symbol& s = ing.symbols[ matches[i] ];
-        declOnly[ groups.ofMatch[i] ] &= char( langCompatible( s.lang, Lang::C ) && !isDefinitionNotDeclaration( s ) );
+        char& isDeclOnly = declOnly[ groups.ofMatch[i] ];   // 0/1 flags: the AND fits a char
+        isDeclOnly       = char( isDeclOnly & char( langCompatible( s.lang, Lang::C ) && !isDefinitionNotDeclaration( s ) ) );
     }
     if( std::none_of( declOnly.begin(), declOnly.end(), []( char c ) { return c != 0; } ) )
     {
@@ -859,7 +860,7 @@ inline std::vector<char> defGroupsSilent( const DefGroups& groups, const RowDefT
     std::vector<char> silent( groups.size(), 0 );
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        silent[k] = groups.untied[k] && !named[k];
+        silent[k] = char( groups.untied[k] && !named[k] );
     }
     return silent;
 }

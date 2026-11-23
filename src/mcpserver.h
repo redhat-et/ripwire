@@ -56,8 +56,8 @@ namespace mcphttp
 {
 
 // ── size ceilings (degrade-don't-crash: a hostile client cannot make us allocate without bound) ──
-inline constexpr std::size_t kMaxHeaderBytes = 64u * 1024u;              // request line + headers cap → 431
-inline constexpr std::size_t kMaxBodyBytes   = 8u  * 1024u * 1024u;      // JSON-RPC body cap (§ requirements) → 413
+inline constexpr std::size_t kMaxHeaderBytes = std::size_t{ 64 } * 1024;              // request line + headers cap → 431
+inline constexpr std::size_t kMaxBodyBytes   = std::size_t{ 8 } * 1024 * 1024;      // JSON-RPC body cap (§ requirements) → 413
 inline constexpr int         kRecvTimeoutSec = 10;                       // SO_RCVTIMEO — a partial (slow-loris) request is dropped
 
 // constant-time string compare — no early-out on the first mismatched byte (a wrong token must not be

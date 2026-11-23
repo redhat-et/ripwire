@@ -2111,7 +2111,7 @@ inline constexpr bool kRegexEngineRecursesPerVisit = true;
 // Half of every stack is held back on top of this, so the engine's measured crash sits at 2 × 128 ÷ 100.7 = 2.5× the
 // bound or further; at 256 MiB `a*b` was run at twice its bound on all three of those builds without a crash.
 inline constexpr std::uint64_t kRegexStackBytesPerVisit = 128;
-inline constexpr std::uint64_t kRegexStackReserveBytes  = 256 * 1024;   // the frames below the match: the scan, the worker, regex_search
+inline constexpr std::uint64_t kRegexStackReserveBytes  = std::uint64_t{ 256 } * 1024;   // the frames below the match: the scan, the worker, regex_search
 
 // A caller off a sized thread bounds its subjects by kCallerStackBytesFloor (src/infra/stackthreads.h). Under libstdc++ that
 // floor must leave the engine a real budget after the half held back and the reserve. At 512 KiB it left 0 visits, so every

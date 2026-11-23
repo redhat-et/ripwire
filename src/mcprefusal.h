@@ -1214,7 +1214,7 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
     constexpr int     kMaxEditDistance = 3;   // same bandwidth cutoff nearestName searches within
     std::string       msg  = "unknown field: '" + cappedEcho( field ) + "'";
     const std::string near = nearestName( declared, field );
-    if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
+    if( !near.empty() && std::size_t{ 2 } * std::size_t( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )   // the distance is in [0, kMaxEditDistance + 1]
     {
         msg += " (did you mean '" + near + "'?)";
     }

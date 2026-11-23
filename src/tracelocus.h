@@ -216,7 +216,7 @@ inline NameLadder nameCandidates( std::string_view rawFunc )
 
     NameLadder ladder;
     ladder.total = spellings.size();
-    ladder.rungs.assign( spellings.begin(), spellings.begin() + std::min( spellings.size(), kNameCandidateCap ) );
+    ladder.rungs.assign( spellings.begin(), spellings.begin() + std::ptrdiff_t( std::min( spellings.size(), kNameCandidateCap ) ) );
     return ladder;
 }
 

@@ -2637,7 +2637,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         { return rank[ order[a] ] != rank[ order[b] ] ? rank[ order[a] ] > rank[ order[b] ] : order[a] < order[b]; } );
         std::sort( m.files.begin(), m.files.end() );
         const std::size_t topN = std::min<std::size_t>( 5, m.members.size() );
-        m.top.assign( m.members.begin(), m.members.begin() + topN );
+        m.top.assign( m.members.begin(), m.members.begin() + std::ptrdiff_t( topN ) );   // topN <= members.size()
         m.name = ing.symbols[ order[ m.members.front() ] ].name;
     }
 

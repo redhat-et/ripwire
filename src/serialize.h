@@ -9979,7 +9979,7 @@ inline void packGraphBlock( std::FILE* out, const IngestResult& ing, const std::
     }
     sortutil::radixSortByScoreDescId( order, rank );
     const std::size_t keep = std::min( kWithGraphNodeCap, S );
-    const std::vector<NodeId> nodes( order.begin(), order.begin() + keep );   // rank order, id 0..keep-1 index
+    const std::vector<NodeId> nodes( order.begin(), order.begin() + std::ptrdiff_t( keep ) );   // keep <= S = size; rank order, id 0..keep-1 index
 
     const auto indexOf = [ & ]( NodeId id ) -> std::size_t   // linear scan is fine at keep<=8
     {

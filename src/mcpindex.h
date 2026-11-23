@@ -463,7 +463,7 @@ namespace mcpdetail
                 }
                 else if( c >= 'a' && c <= 'f' )
                 {
-                    d = std::uint64_t( c - 'a' + 10 );
+                    d = std::uint64_t( c - 'a' ) + 10;   // c is in 'a'..'f' (the branch above): 10..15
                 }
                 else
                 {
