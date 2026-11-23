@@ -191,7 +191,8 @@ inline const std::array<std::string_view, kTravelCount>& travelBodies()
         gone.push_back( c );
         const std::string kept = firstPageLegend( legend, gone );
         bool orphans = false;
-        for( const std::string_view name : spelledNames( travelBodies()[ c ] ) )
+        const std::string_view body = travelBodies()[ c ];
+        for( const std::string_view name : spelledNames( body ) )
         {
             const std::string carried = " " + std::string( name ) + "=\"";
             for( std::size_t k = 0; k < pages.size() && !orphans; ++k )

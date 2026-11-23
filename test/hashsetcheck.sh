@@ -42,6 +42,7 @@ graph.h         singletons         the same, read as out.defSides
 mcpverbs.h      viaOut             which direction the BFS edge was stored in
 clones.h        pairSeen           being removed by QD-ENVOY-TIME (candidate-major walk)
 resolve.h       visibleMemo        memoized fileVisibleFrom include-suffix verdict (NARROW-MEMO)
+resolve.h       clauseMeansMemo    memoized clauseMeans verdict per (d, c) (SUBCLASS-CLAUSE-MEMO): memo->second is the answer
 '
 pairs="$( printf '%s\n' "$REGISTRY" | awk 'NF{print $1 " " $2}' )"
 

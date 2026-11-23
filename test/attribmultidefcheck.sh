@@ -776,8 +776,18 @@ fi
 # full 2716 est_tokens, measured on the composed binary) sheds both, so 100..1500 serve one shed answer with no split row. The
 # reading now leaves the legend with the last of them (forbudgetfit.h splitReadingShed; before, it rode rowless at 100 and 500,
 # which this arm caught). The control moves to 3000, a budget U fits whole: U's own rows and reading, byte for byte.
+# 0.7.0 cut (25b5a9eb7): U grew on this fixture — <hops> total 3 -> 6, shown 1 -> 4 — so its price is now compact 2167 /
+# full 3363 est_tokens (main 785143c89: 1644 / 2772), and 3000 no longer fits the full form whole: it shed the hops and
+# every split row with them, the very case @100 is for. The control moves to 4000, and stops trusting the number: its
+# premise (the unbudgeted U costs no more than the control budget) is measured first, and the control answer must be the
+# unbudgeted answer byte for byte, as this comment always said it was.
+S2_CONTROL=4000
 for lg in compact full; do
-    for n in 100 3000; do
+    ( cd "$FIX/cpp" && "$BIN" . --no-cache --for="how does ManifestParser ParseDefault work" --legend=$lg ) >"$DIR/s2_u_$lg.out" 2>/dev/null
+    s2u="$( grep -oE 'est_tokens="[0-9]+"' "$DIR/s2_u_$lg.out" | head -1 | tr -dc '0-9' )"
+    if [ -z "$s2u" ] || [ "$s2u" -gt "$S2_CONTROL" ]; then no "[S2] $lg control premise: the unbudgeted answer costs est_tokens=${s2u:-<none>}, over the $S2_CONTROL control budget — move S2_CONTROL"
+    else ok "[S2] $lg control premise: the unbudgeted answer costs est_tokens=$s2u, within the $S2_CONTROL control budget"; fi
+    for n in 100 $S2_CONTROL; do
         ( cd "$FIX/cpp" && "$BIN" . --no-cache --for="how does ManifestParser ParseDefault work" --token-budget=$n --legend=$lg ) >"$DIR/s2_${n}_$lg.out" 2>/dev/null; s2_rc=$?
         s2="$( python3 -c '
 import re, sys
@@ -797,6 +807,8 @@ print( rows, clause, marker )' "$DIR/s2_${n}_$lg.out" )"
         else
             if [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; then ok "[S2] $lg @$n control: $r2 split row(s) and the reading ride"
             else no "[S2] $lg @$n control: split rows=$r2 reading=$c2 (want >=1 and 1)"; fi
+            if cmp -s "$DIR/s2_${n}_$lg.out" "$DIR/s2_u_$lg.out"; then ok "[S2] $lg @$n control: byte-identical to the unbudgeted answer"
+            else no "[S2] $lg @$n control: differs from the unbudgeted answer (a budget U fits whole must not move a byte)"; fi
         fi
     done
 done
