@@ -8,37 +8,37 @@
 # tidy-advisory-baseline-candidate.txt against this file, and commit the rows you accept (or the whole candidate).
 # Locally: python3 scripts/tidyadvisory_diff.py --report <clang-tidy output> --baseline .clang-tidy-baseline.txt
 #          --normalized-out <file>   (python3 scripts/tidyadvisory_diff.py --selftest checks the parser)
-# generated from: the CI report of job 127414521171 (PR 537 head 51695de4a; content on main e5498e79f) as regenerated in b73e29d45, with bugprone-easily-swappable-parameters disabled in .clang-tidy (0.7.1): a --scope=bugprone-easily-swappable-parameters partial regeneration from that check's now-empty report; every other row unchanged
-# rows: 355
-src/arch.h	bugprone-exception-escape	inline bool archWriteBaseline( const std::string& sidecarPath,
-src/arch.h	bugprone-exception-escape	inline int openArchBaselineSidecar( const std::string& sidecarPath ) noexcept
-src/arch.h	bugprone-exception-escape	inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath, ArchBaselineRead& baseline ) noexcept
+# generated from: partial regenerations on top of the 0.7.1 swappable-parameters drop: the per-event ratchet checks from a local clang-tidy 22.1.8 run at d64ebe62a (macOS, the five TUs); bugprone-exception-escape for src/ingest_prewarm.h and src/ingest_parsepool.h from the same run's ingest.cpp TU
+# rows: 358
+src/arch.h	bugprone-exception-escape	inline bool archWriteBaseline( const std::string& sidecarPath,	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/arch.h	bugprone-exception-escape	inline int openArchBaselineSidecar( const std::string& sidecarPath ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/arch.h	bugprone-exception-escape	inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath, ArchBaselineRead& baseline ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/atoms.h	bugprone-branch-clone	{ // `if( 0 )` disables a block and `while( 1 )` loops forever — universal idioms every C
 src/backhops.h	bugprone-unchecked-optional-access	return m_targets.try_emplace( site, m_pix->targets( site ) ).first->second;
 src/backhops.h	bugprone-unchecked-optional-access	std::ranges::copy_if( m_pix->sitesIn( std::span<const NodeId>( &u, 1 ) ), std::back_inserter( out ), [ & ]( std::uint32_t site ) { return isCall( m_ing.references[ site ] ); } );
 src/backhops.h	bugprone-unchecked-optional-access	std::ranges::copy_if( m_pix->sitesTo( std::span<const NodeId>( &d, 1 ) ), std::back_inserter( out ), [ & ]( std::uint32_t site )
 src/callhierarchy.h	bugprone-unchecked-optional-access	const ValueRefIndex& vri = valueIndex != nullptr ? *valueIndex : *local;
 src/cli.h	bugprone-branch-clone	{
-src/cli.h	bugprone-exception-escape	[[noreturn]] inline void serveHelpSelector( std::string_view want ) noexcept
-src/cli.h	bugprone-exception-escape	auto deprecatedOrderFlag = [&]( const char* oldFlag, const char* newValue ) noexcept
-src/cli.h	bugprone-exception-escape	auto deprecatedReadabilityFlag = [&]() noexcept
-src/cli.h	bugprone-exception-escape	inline Config parseArgs( int argc, char** argv ) noexcept
-src/cli.h	bugprone-exception-escape	inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed, int& out ) noexcept
-src/cli.h	bugprone-exception-escape	inline void noticeShapingFlagIgnored( const Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	inline void refuseEmptyValue( std::string_view flag, const char* needs, const char* example ) noexcept
-src/cli.h	bugprone-exception-escape	inline void refuseFlagValue( const char* flag, const char* wanted, std::string_view got, const char* example ) noexcept
-src/cli.h	bugprone-exception-escape	inline void refuseLspShapingFlag( Config& c, const char* head ) noexcept
-src/cli.h	bugprone-exception-escape	inline void refusePagingFamilyFlag( Config& c, const PagingFamilyFlagGuard& g ) noexcept
-src/cli.h	bugprone-exception-escape	inline void validateAgent( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	inline void validateConfig( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	inline void validateModifierGuards( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	inline void validatePagingHonored( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	inline void validatePlanLanes( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	static inline void validateLegendModifier( Config& c ) noexcept
-src/cli.h	bugprone-exception-escape	static inline void validateSectionsModifier( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	[[noreturn]] inline void serveHelpSelector( std::string_view want ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	auto deprecatedOrderFlag = [&]( const char* oldFlag, const char* newValue ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	auto deprecatedReadabilityFlag = [&]() noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline Config parseArgs( int argc, char** argv ) noexcept	kept: a.substr( 7 ) runs only after a.starts_with( "--help=" ) (pos <= size); the rest is allocation, the operator-new seam
+src/cli.h	bugprone-exception-escape	inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed, int& out ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void noticeShapingFlagIgnored( const Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void refuseEmptyValue( std::string_view flag, const char* needs, const char* example ) noexcept	kept: substr( 0, n ) cannot throw (pos 0); the rest is emitTo's allocation, the operator-new seam
+src/cli.h	bugprone-exception-escape	inline void refuseFlagValue( const char* flag, const char* wanted, std::string_view got, const char* example ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void refuseLspShapingFlag( Config& c, const char* head ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void refusePagingFamilyFlag( Config& c, const PagingFamilyFlagGuard& g ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void validateAgent( Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void validateConfig( Config& c ) noexcept	kept: os.h path_is_system_dir's substr( 0, dir.size() ) cannot throw (pos 0); the rest is emitTo's allocation, the operator-new seam
+src/cli.h	bugprone-exception-escape	inline void validateModifierGuards( Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void validatePagingHonored( Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	inline void validatePlanLanes( Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	static inline void validateLegendModifier( Config& c ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/cli.h	bugprone-exception-escape	static inline void validateSectionsModifier( Config& c ) noexcept	kept: substr( 0, comma ) cannot throw (pos 0); the rest is emitTo's allocation, the operator-new seam
 src/cli.h	clang-analyzer-optin.performance.Padding	struct Config
 src/cloneidiom.h	bugprone-branch-clone	{
-src/clones.h	bugprone-exception-escape	inline bool cloneIsKeyword( std::string_view w ) noexcept
+src/clones.h	bugprone-exception-escape	inline bool cloneIsKeyword( std::string_view w ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/codexdoctor.h	bugprone-implicit-widening-of-multiplication-result	if( ec || byteCount > 1024 * 1024 ) { return {}; }
 src/compactlegend.h	clang-analyzer-optin.performance.Padding	struct CompactCompletenessTerm
 src/compactlegend.h	misc-redundant-expression	if( shape != std::string_view::npos && shape <= 40 )
@@ -59,7 +59,7 @@ src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::ssc
 src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::sscanf( buf, "@@ -%d +%d,%d @@", &oldStart, &newStart, &newCount ) == 3 ) { oldCount = 1; }
 src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::sscanf( buf, "@@ -%d,%d +%d @@", &oldStart, &oldCount, &newStart ) == 3 ) { newCount = 1; }
 src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	if( std::sscanf( buf, "@@ -%d,%d +%d,%d @@", &oldStart, &oldCount, &newStart, &newCount ) == 4 ) {}
-src/docdrift.h	bugprone-exception-escape	const auto indexWorker = [ & ]() noexcept
+src/docdrift.h	bugprone-exception-escape	const auto indexWorker = [ & ]() noexcept	kept: the work runs inside try/catch; only the degrade line's emitTo in the handler can throw, and only allocation
 src/editcheck.h	performance-inefficient-vector-operation	for( const std::vector<NodeId>& members : gk.members )
 src/editcheck.h	performance-no-automatic-move	return verdictLine;
 src/editplan.h	bugprone-inc-dec-in-conditions	if( objectIndex != 0 && ( at >= array.size() || array[at++] != ',' ) ) { return false; }
@@ -71,6 +71,7 @@ src/fordeclrow.h	bugprone-inc-dec-in-conditions	else if( span[i] == ')' && depth
 src/forfilepage.h	bugprone-narrowing-conversions	const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
 src/forfilepage.h	bugprone-narrowing-conversions	files.insert( files.end(), a.files.begin(), a.files.begin() + std::min( a.files.size(), kForFilePageDirFiles ) ); // serving order
 src/forfold.h	performance-move-const-arg	files.emplace_back( ms.fileId, text == &scratch ? std::move( scratch ) : *text );
+src/forlegendentries.h	bugprone-throwing-static-initialization	const std::string kForDocPageClause = rw::forpages::detail::pageClause( rw::forpages::kForPageBytesDefault );	kept: allocation only (one std::string built before main); kForDocList views it, so a lazy accessor would reorder static init
 src/forliteral.h	bugprone-narrowing-conversions	ownerAbove.push_back( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) );
 src/forliteral.h	performance-enum-size	enum class OpenerKind
 src/forliteral.h	performance-inefficient-vector-operation	for( const GrepHit& h : enriched )
@@ -90,7 +91,7 @@ src/gitmine.h	bugprone-implicit-widening-of-multiplication-result	std::vector<ch
 src/gitoracle.h	performance-unnecessary-value-param	inline void writeHistoryProbe( std::FILE* out, const HistoryIndex& idx, Escape escape )
 src/gitoracle.h	performance-unnecessary-value-param	inline void writeNameFate( std::FILE* out, const std::string& name, const NameFate& f, Escape escape )
 src/graph.h	bugprone-branch-clone	{
-src/graph.h	bugprone-exception-escape	inline bool isImpureName( const std::string& n ) noexcept
+src/graph.h	bugprone-exception-escape	inline bool isImpureName( const std::string& n ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/graph.h	bugprone-narrowing-conversions	std::partial_sort( anchorIds.begin(), anchorIds.begin() + anchorCount, anchorIds.end(),
 src/graph.h	bugprone-narrowing-conversions	std::vector<NodeId> out( q.begin() + nSeed, q.end() ); // reached, minus the seeds
 src/graph.h	bugprone-narrowing-conversions	std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
@@ -98,6 +99,7 @@ src/graph.h	bugprone-narrowing-conversions	t.localNameSet[ key ] |= localNameEvi
 src/graph.h	bugprone-return-const-ref-from-parameter	return pairs > 0 ? adj : full;
 src/graph.h	bugprone-switch-missing-default-case	switch( prov )
 src/graph.h	bugprone-unchecked-optional-access	&& openedPaths.find( std::string( rubyTypedWritten( *typed ) ) ) == openedPaths.end();
+src/graph.h	bugprone-unchecked-optional-access	const std::string_view head = *head_;	kept: mayRunCandidate's three callers (graph.h, the writtenHead tier) each test head_.has_value() first; resolve hot path, so no new branch
 src/graph.h	clang-analyzer-deadcode.DeadStores	case FalseEdgeRules::Verdict::External: disposition = vetoExternal( r ); continue;
 src/graph.h	clang-analyzer-deadcode.DeadStores	case FalseEdgeRules::Verdict::Local: ++g.unresolvedOut[ r.fromSymbol ]; disposition = CallDisposition::Unresolved; continue;
 src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Bound;
@@ -146,8 +148,8 @@ src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r ); 
 src/graph.h	performance-inefficient-string-concatenation	scope.dirs.push_back( dirOwner ? identDir : ( identDir.empty() ? stem : identDir + "/" + stem ) );
 src/hopbody.h	bugprone-argument-comment	/*ranges=*/nullptr, /*notes=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
 src/htmlexport.h	bugprone-narrowing-conversions	m.top.assign( m.members.begin(), m.members.begin() + topN );
-src/infra/diagnostics.cpp	bugprone-exception-escape	RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcept
-src/infra/diagnostics.cpp	bugprone-exception-escape	const auto formatMarker = [ & ]( std::size_t kept ) noexcept
+src/infra/diagnostics.cpp	bugprone-exception-escape	RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/infra/diagnostics.cpp	bugprone-exception-escape	const auto formatMarker = [ & ]( std::size_t kept ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/infra/emit.h	bugprone-empty-catch	catch( const std::system_error& )
 src/infra/gitblob.h	bugprone-implicit-widening-of-multiplication-result	w[ i ] = ( std::uint32_t( block[ 4 * i ] ) << 24 ) | ( std::uint32_t( block[ 4 * i + 1 ] ) << 16 )
 src/infra/internedtext.h	bugprone-std-namespace-modification	template <class Domain> struct std::formatter<rw::InternedTextOf<Domain>, char> : std::formatter<std::string_view, char>
@@ -155,9 +157,9 @@ src/infra/internedtext.h	clang-analyzer-optin.performance.Padding	class TextPool
 src/infra/os.h	bugprone-command-processor	[[gnu::always_inline]] inline int system( const char* command ) { return ::system( command ); }
 src/infra/os.h	bugprone-command-processor	[[gnu::always_inline]] inline std::FILE* popen( const char* command, const char* mode ) { return ::popen( command, mode ); }
 src/infra/pipefields.h	bugprone-implicit-widening-of-multiplication-result	: pipe_( pipe ), abandon_( abandon ), deadline_( deadline ), block_( 64u * 1024u ) {}
-src/infra/profileScope.h	bugprone-exception-escape	inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept
-src/infra/profileScope.h	bugprone-exception-escape	void teardown() noexcept
-src/infra/profileScope.h	bugprone-exception-escape	~Reporter()
+src/infra/profileScope.h	bugprone-exception-escape	inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/infra/profileScope.h	bugprone-exception-escape	void teardown() noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/infra/profileScope.h	bugprone-exception-escape	~Reporter()	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/infra/profileScope.h	bugprone-unhandled-exception-at-new	static Registry* core = new Registry(); // leaked on purpose; see header
 src/infra/radixSort.inl	bugprone-incorrect-roundings	return uint16_t( clamped * 65535.f + 0.5f );
 src/infra/radixSort.inl	bugprone-incorrect-roundings	return uint16_t( clamped * 65535.f + 0.5f );
@@ -204,9 +206,8 @@ src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + 
 src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + begin, refOrder.begin() + end, lessRefByByteName );
 src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
 src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
-src/ingest_parsepool.h	bugprone-exception-escape	pool.emplace_back( [ &shared, t ]() noexcept { runParseWorker( shared, t ); } );
+src/ingest_parsepool.h	bugprone-exception-escape	pool.emplace_back( [ &shared, t ]() noexcept { runParseWorker( shared, t ); } );	kept: since e89d83066 the extraction degrades per file on both paths; what escapes is the worker's setup allocation (reserve), the operator-new seam
 src/ingest_parsepool.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
-src/ingest_prewarm.h	bugprone-exception-escape	prewarm.compilePool.emplace_back( [ &prewarm, i ]() noexcept { prewarm.compiledQueries[ i ] = compileQueryStandalone( *prewarm.toCompile[ i ] ); } );
 src/ingest_relations.h	bugprone-branch-clone	{
 src/ingest_sidecap.h	bugprone-branch-clone	case ExtractFamily::DocsData: break;
 src/ingest_valuerefs.h	bugprone-branch-clone	{
@@ -220,7 +221,7 @@ src/ingest_valuerefs.h	performance-move-const-arg	r.memberCtor = slotCtor( std::
 src/ingest_valuerefs.h	performance-unnecessary-value-param	bool paramDefault( std::string param, Slot& s ) const
 src/ingest_valuerefs.h	performance-unnecessary-value-param	void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
 src/jsrunner.h	bugprone-unchecked-optional-access	pending.push_back( { *target, detail::scanModule( *bytes, key ) } );
-src/legenddict.h	bugprone-suspicious-missing-comma	"<about legend=\"ref\" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and "
+src/legenddict.h	bugprone-suspicious-missing-comma	"<about legend=\"ref\" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it "	kept: intended — each entry of kCoreEntries is one definition spread over several adjacent literals
 src/lexical.h	bugprone-incorrect-roundings	cut.dropPct = ( bestDrop >= kMinCliffDrop ) ? int( bestDrop * 100.0 + 0.5 ) : 0;
 src/lexical.h	bugprone-incorrect-roundings	cut.dropPct = int( bestCapDrop * 100.0 + 0.5 );
 src/lintrules.h	performance-inefficient-vector-operation	for( const ErrorMaskRule& rule : kErrorMaskRules )
@@ -228,8 +229,9 @@ src/lsp.h	bugprone-branch-clone	case rw::SymKind::NamedType: return 5; // Class 
 src/lsp.h	bugprone-branch-clone	{
 src/lsp.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kLspMaxBodyBytes = 32u * 1024u * 1024u;
 src/lsp.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kLspMaxHeaderBytes = 64u * 1024u;
-src/main.cpp	bugprone-exception-escape	inline ExpandToken parseExpandToken( const std::string& token, const char* verb = "--expand" ) noexcept
-src/main.cpp	bugprone-exception-escape	int main( int argc, char** argv )
+src/lsp.h	bugprone-throwing-static-initialization	rw::lspmap::LangMap gLangMap;	kept: allocation only (the map's default construction before main); bad_alloc at startup is the operator-new seam
+src/main.cpp	bugprone-exception-escape	inline ExpandToken parseExpandToken( const std::string& token, const char* verb = "--expand" ) noexcept	kept: substr( colon + 1 ) with colon < size (rfind hit), so pos <= size; the rest is allocation, the operator-new seam
+src/main.cpp	bugprone-exception-escape	int main( int argc, char** argv )	kept: main's escaping throws are allocation and std::async's system_error when no thread can start, both fatal by design; FileGraphStopped is caught in dispatchMain
 src/main.cpp	bugprone-unsafe-functions	std::rewind( capture );
 src/main.cpp	clang-analyzer-unix.Errno	for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
 src/main.cpp	clang-analyzer-unix.Stream	for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
@@ -239,7 +241,7 @@ src/main.cpp	performance-unnecessary-copy-initialization	const std::string topk 
 src/mcpedit.h	bugprone-implicit-widening-of-multiplication-result	struct timespec ts{ 0, 10 * 1000 * 1000 }; // 10 ms
 src/mcpedit.h	performance-unnecessary-copy-initialization	const std::string pcFileIdentity = path;
 src/mcpindex.h	bugprone-empty-catch	catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
-src/mcpindex.h	bugprone-exception-escape	std::thread( [ root, timingsOn ]() noexcept
+src/mcpindex.h	bugprone-exception-escape	std::thread( [ root, timingsOn ]() noexcept	kept: the work runs inside try/catch; only the timing line's emitTo after it can throw, and only allocation
 src/mcpindex.h	bugprone-misplaced-widening-cast	d = std::uint64_t( c - 'a' + 10 );
 src/mcpindex.h	clang-analyzer-unix.Stream	while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
 src/mcprefusal.h	bugprone-implicit-widening-of-multiplication-result	if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
@@ -263,8 +265,8 @@ src/naminglens.h	bugprone-branch-clone	{
 src/nextverb.h	bugprone-branch-clone	if( static_cast<unsigned char>( c ) < 0x20 || c == 0x7f ) { a += '?'; ++i; }
 src/packtask.h	bugprone-narrowing-conversions	const std::vector<NodeId> topRanked( order.begin(), order.begin() + topRankedN );
 src/packtask.h	clang-analyzer-optin.performance.Padding	struct PackTaskInputs
-src/pageview.h	bugprone-exception-escape	inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
-src/pageview.h	bugprone-exception-escape	inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t rowTotal,
+src/pageview.h	bugprone-exception-escape	inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/pageview.h	bugprone-exception-escape	inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t rowTotal,	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/pathpairs.h	bugprone-return-const-ref-from-parameter	return pp.active() ? pp.pairs.front().chain : path;
 src/quality.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kChunkBytes = 64 * 1024; // well under every ARG_MAX this builds on
 src/quality.h	bugprone-implicit-widening-of-multiplication-result	struct timespec ts{ 0, 10 * 1000 * 1000 }; // 10 ms
@@ -288,16 +290,17 @@ src/search.h	bugprone-signed-char-misuse	for( int ch = lo; ch <= hi; ++ch )
 src/search.h	clang-analyzer-deadcode.DeadStores	scanned = text.size(); // the literal branch's cursor is not shared with this one; keep it honest
 src/search.h	performance-unnecessary-value-param	inline RegexInfo riQuest( RegexInfo /*child*/ ) // a? : zero-or-one ⇒ optional ⇒ no required trigram (ALL)
 src/search.h	performance-unnecessary-value-param	inline RegexInfo riStar( RegexInfo /*child*/ )
-src/serialize.h	bugprone-exception-escape	inline std::size_t legoPreCapRowCount( const IngestResult& ing, const std::vector<std::vector<NodeId>>& implementors ) noexcept
+src/serialize.h	bugprone-exception-escape	inline std::size_t legoPreCapRowCount( const IngestResult& ing, const std::vector<std::vector<NodeId>>& implementors ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/serialize.h	bugprone-incorrect-roundings	return TokenEstimate{ std::size_t( estTokensF + 0.5 ), std::size_t( modelBytesF + 0.5 ) };
 src/serialize.h	bugprone-incorrect-roundings	return TokenEstimate{ std::size_t( estTokensF + 0.5 ), std::size_t( modelBytesF + 0.5 ) };
 src/serialize.h	bugprone-incorrect-roundings	return std::size_t( double( emittedBytes ) / bytesPerToken + 0.5 );
 src/serialize.h	bugprone-incorrect-roundings	return std::size_t( tokensF + 0.5 );
 src/serialize.h	bugprone-narrowing-conversions	const std::vector<NodeId> nodes( order.begin(), order.begin() + keep ); // rank order, id 0..keep-1 index
 src/serialize.h	clang-analyzer-unix.Stream	while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+src/shstatus.h	bugprone-unchecked-optional-access	const detail::Walker& w2 = *last;	kept: the round loop above runs at least once (round 0 < 6) and emplaces last on every round
 src/situ.h	performance-inefficient-vector-operation	for( const TestRow& r : testRows )
-src/skillscan.h	bugprone-exception-escape	inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally, bool fullLegend ) noexcept
-src/skillscan.h	bugprone-exception-escape	inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally ) noexcept
+src/skillscan.h	bugprone-exception-escape	inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally, bool fullLegend ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/skillscan.h	bugprone-exception-escape	inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/skillscan.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kSkillScanStackBytes = 256 * 1024 * 1024; // the grep scan threads' size (search.h kGrepScanStackBytes)
 src/skillscan.h	misc-redundant-expression	ASSUME( eol == std::string_view::npos || eol >= 2, "the text starts with \"#!\", so a newline is at index 2 or later" );
 src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> entry, std::shared_ptr<SliceRdState> brk, std::shared_ptr<SliceRdState> cont,
@@ -321,7 +324,7 @@ src/slice.h	performance-unnecessary-value-param	void tryPyPartFrom( std::shared_
 src/slice.h	performance-unnecessary-value-param	void withPartFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, TSNode body, SliceRdState& state, SliceRdStep done )
 src/subjectanchor.h	performance-inefficient-vector-operation	for( const std::string_view w : words )
 src/taskroute.h	clang-analyzer-deadcode.DeadStores	hasUpper = true;
-src/testmap.h	bugprone-exception-escape	const auto groupable = [ & ]( std::uint32_t i ) noexcept
+src/testmap.h	bugprone-exception-escape	const auto groupable = [ & ]( std::uint32_t i ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/testmap.h	bugprone-narrowing-conversions	jsRow[ ing.symbols[ site.caller ].fileId ] |= char( langFacts( ing.symbols[ site.caller ].lang ).importBoundConstruction );
 src/testmap.h	bugprone-narrowing-conversions	void note( const Reference& r ) { mixed[ r.fileId ] |= char( written( r ) != first[ r.fileId ] ); }
 src/testmap.h	performance-unnecessary-value-param	inline JoinedTestRows testRowsList( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, const TestRowShape& shape, EscapeFn esc, std::string_view sep = {} )
@@ -334,7 +337,7 @@ src/testmap.h	performance-unnecessary-value-param	std::string_view open, std::st
 src/testmap.h	performance-unnecessary-value-param	{ return runHint( idx, fileId, " run=\"", "\"", esc ); }
 src/testmap.h	performance-unnecessary-value-param	{ return runHint( idx, fileId, ",\"run\":\"", "\"", esc ); }
 src/tracelocus.h	bugprone-narrowing-conversions	ladder.rungs.assign( spellings.begin(), spellings.begin() + std::min( spellings.size(), kNameCandidateCap ) );
-src/tsprobe.cpp	bugprone-exception-escape	int main( int argc, char** argv )
+src/tsprobe.cpp	bugprone-exception-escape	int main( int argc, char** argv )	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
 src/valuerefindex.h	bugprone-unchecked-optional-access	const ValueRefIndex& vri = cached != nullptr ? *cached : *local;
 src/verbs_change.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kRunTraceHeadCapBytes = 8u * 1024 * 1024; // capture cap: first 8 MB kept …
 src/verbs_change.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kRunTraceTailCapBytes = 24u * 1024 * 1024; // … plus the last 24 MB; the dropped middle is COUNTED
@@ -361,7 +364,7 @@ src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend(
 src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) ); // sweep: ditto
 src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) ); // sweep: at= was undefined on this screen
 src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) ); // sweep: at= was undefined on this screen
-src/wrap.h	bugprone-exception-escape	inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
-src/wrap.h	bugprone-exception-escape	inline void wrapEmitAgent( const std::string_view agent, const WrapListing& asked, const std::string_view executablePath ) noexcept
-src/wrap.h	bugprone-exception-escape	inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
+src/wrap.h	bugprone-exception-escape	inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept	kept: allocation only — every escaping throw is bad_alloc/bad_array_new_length (formatting through emitTo/formatTo, a string or container growing, a static table's first build): the operator-new seam, fatal either way (CONTRIBUTING §3)
+src/wrap.h	bugprone-exception-escape	inline void wrapEmitAgent( const std::string_view agent, const WrapListing& asked, const std::string_view executablePath ) noexcept	kept: library-internal — libc++ reports std::string operator+'s out_of_range path in wrapVerbGroupLines, which concatenation never takes; the rest is allocation, the operator-new seam
+src/wrap.h	bugprone-exception-escape	inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,	kept: library-internal — libc++ reports std::string operator+'s out_of_range path in wrapCliAddPost, which concatenation never takes; the rest is allocation, the operator-new seam
 src/wrap.h	clang-analyzer-optin.performance.Padding	struct AgentTarget

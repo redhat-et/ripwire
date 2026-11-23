@@ -30,6 +30,8 @@ GATING MODES (0.7.1; each is opt-in, and each is the only way this script exits 
   --scope GLOBS        the report came from a `--checks='-*,GLOBS'` run: compare it against only the baseline rows whose
                        check matches GLOBS (comma list, clang-tidy's `*` globs). With --normalized-out the candidate is a
                        PARTIAL regeneration: every out-of-scope baseline row kept as it is, the in-scope rows replaced.
+  --scope-files GLOBS  narrow --scope further to rows whose file matches GLOBS (comma list, `*` globs): a report taken
+                       from one translation unit regenerates only the headers it is authoritative for.
   --gate               exit 1 when status=ok and there is a NEW row, exit 2 when status is anything but ok (a crashed run,
                        a missing input or a suspect-empty report is not a pass). GONE rows never fail: fewer findings is
                        the direction the ratchet wants. scripts/tidycheck.sh --ratchet runs this on every CI event.
@@ -37,6 +39,9 @@ GATING MODES (0.7.1; each is opt-in, and each is the only way this script exits 
                        when any check has MORE rows than its ceiling (a check absent from FILE has ceiling 0) and also when
                        it has FEWER — a fixed row lowers the ceiling in the same commit, so the next change cannot spend
                        the slack. --ratchet-update rewrites FILE from the baseline (and exits 0).
+  --annotate TSV       rewrite --baseline in place with the one-line reasons in TSV (file TAB check TAB anchor TAB reason;
+                       `*` as file or anchor matches any, an anchor ending in `*` is a prefix). Rows, order and header stay;
+                       only the 4th field changes. Exit 1 if a TSV line matches no row (a reason for nothing is a typo).
 
 status= is one of: ok | noinput (no report file) | nobaseline (no baseline file) | tool-failed (rc != 0) |
 suspect-empty (0 findings parsed against a non-empty baseline: a crashed or truncated run looks like this, not like a
@@ -228,8 +233,9 @@ def issue_body(new_keys, new_lines, gone_keys, base_n, sha, url, nrows):
     return "\n".join(head + body_mid + out + tail) + "\n"
 
 
-def in_scope(check, globs):
-    return any(fnmatch.fnmatchcase(check, g) for g in globs)
+def in_scope(check, globs, path=None, fglobs=None):
+    return any(fnmatch.fnmatchcase(check, g) for g in globs) and (
+        not fglobs or path is None or any(fnmatch.fnmatchcase(path, g) for g in fglobs))
 
 
 def scope_globs(text):
@@ -284,6 +290,44 @@ def ratchet(a):
     return 1 if (grew or shrank) else 0
 
 
+def annotate(a):
+    reasons = {}
+    rows = read_baseline(a.baseline, reasons)
+    rules = []
+    with open(a.annotate, encoding="utf-8") as fh:
+        for ln in fh:
+            ln = ln.rstrip("\n")
+            if not ln.strip() or ln.startswith("#"):
+                continue
+            f, c, an, why = ln.split("\t", 3)
+            rules.append([f, c, an, why.strip(), 0])
+
+    def hit(rule, key):
+        f, c, an = key.split("\t", 2)
+        if rule[1] != c or rule[0] not in ("*", f):
+            return False
+        pat = rule[2]
+        return pat == "*" or an == pat or (pat.endswith("*") and an.startswith(pat[:-1]))
+    for key in set(rows):
+        for rule in rules:
+            if hit(rule, key):
+                reasons[key] = rule[3]
+                rule[4] += 1
+                break
+    with open(a.baseline, encoding="utf-8") as fh:
+        head = [ln for ln in fh if ln.startswith("#")]
+    with open(a.baseline, "w", encoding="utf-8") as fh:
+        fh.writelines(head)
+        for k in sorted(rows):
+            fh.write(k + ("\t" + reasons[k] if k in reasons else "") + "\n")
+    unused = [r for r in rules if r[4] == 0]
+    print("tidyadvisory_diff: annotated %d of %d row(s) from %d rule(s); %d rule(s) matched nothing" % (
+        sum(1 for k in set(rows) if k in reasons), len(rows), len(rules), len(unused)))
+    for r in unused:
+        print("  UNUSED  %s\t%s\t%s" % tuple(r[:3]))
+    return 1 if unused else 0
+
+
 def run(a):
     status = "ok"
     extra = []
@@ -313,12 +357,17 @@ def run(a):
         extra.append("no exit-status file %s" % a.rc)
     full_base = list(base)
     globs = scope_globs(a.scope)
+    fglobs = scope_globs(getattr(a, "scope_files", ""))
+
+    def row_in(r):
+        f, c, _ = r.split("\t", 2)
+        return in_scope(c, globs, f, fglobs)
     if globs:
-        outside = [f for f in findings if not in_scope(f[2], globs)]
+        outside = [f for f in findings if not in_scope(f[2], globs, f[0], fglobs)]
         if outside:
             extra.append("%d finding(s) outside --scope ignored" % len(outside))
-        findings = [f for f in findings if in_scope(f[2], globs)]
-        base = [r for r in base if in_scope(r.split("\t", 2)[1], globs)]
+        findings = [f for f in findings if in_scope(f[2], globs, f[0], fglobs)]
+        base = [r for r in base if row_in(r)]
     if status == "ok" and not findings and base:
         status = "suspect-empty"
         extra.append("0 findings parsed against %d baseline rows" % len(base))
@@ -351,7 +400,7 @@ def run(a):
                 print("    %s%s  %s%s" % (f, (":" + where) if (where and title == "NEW") else "", an[:110],
                                          "  x%d" % ctr[k] if ctr[k] > 1 else ""))
     if a.normalized_out and status != "noinput":
-        kept = [r for r in full_base if not in_scope(r.split("\t", 2)[1], globs)] if globs else []
+        kept = [r for r in full_base if not row_in(r)] if globs else []
         write_rows(a.normalized_out, kept + [keyof(f) for f in findings], a.note, reasons)
     if a.issue_body and status == "ok" and nrows:
         with open(a.issue_body, "w", encoding="utf-8") as fh:
@@ -430,6 +479,11 @@ def selftest():
         check(gate(empty, "bugprone-use-after-move") == 0, "gate PASSES an empty report when the scope has no baseline rows (a zero-row check)")
         check(gate(same, "bugprone-exception-escape", rc=put("rc1", "1\n")) == 2, "gate is an ERROR when clang-tidy's exit status is non-zero")
         check(gate(os.path.join(tmp, "missing.txt"), "bugprone-exception-escape") == 2, "gate is an ERROR on a missing report")
+        nsf = argparse.Namespace(report=new, baseline=base, rc=rc0, root="/r", normalized_out=None, issue_body=None, status_out=None,
+                                 run_url="", sha="", note="", scope="bugprone-exception-escape", scope_files="src/a.h", gate=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc_files = run(nsf)
+        check(rc_files == 0, "--scope-files src/a.h leaves the planted src/b.h row outside the comparison (gate passes)")
         cand = os.path.join(tmp, "cand.txt")
         gate(new, "bugprone-exception-escape", out=cand)
         rows = read_baseline(cand)
@@ -476,12 +530,19 @@ def main():
     ap.add_argument("--note", default="")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--scope", default="")
+    ap.add_argument("--scope-files", dest="scope_files", default="")
     ap.add_argument("--gate", action="store_true")
     ap.add_argument("--ratchet")
     ap.add_argument("--ratchet-update", dest="ratchet_update", action="store_true")
+    ap.add_argument("--annotate")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.annotate:
+        if not a.baseline or not os.path.isfile(a.baseline) or not os.path.isfile(a.annotate):
+            print("tidyadvisory_diff: --annotate needs an existing --baseline and TSV")
+            return 2
+        return annotate(a)
     if a.ratchet:
         if not a.baseline or not os.path.isfile(a.baseline) or (not a.ratchet_update and not os.path.isfile(a.ratchet)):
             print("tidyadvisory_diff: --ratchet needs an existing --baseline and ratchet file")
