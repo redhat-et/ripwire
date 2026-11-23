@@ -198,12 +198,9 @@ row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070
 | Cold index, llvm-project (limit 1 h) | **28** | 509 | 291 | stopped at 1 h | failed | stopped at 1 h |
 | First answer from nothing, envoy | **3.0** | 38.5 | 15.3 | 108.8 | 24.7 | 58.9 |
 | First answer from nothing, vscode | **6.2** | 176.3 | 61.8 | 267.7 | 59.5 | 184.8 |
-| One question once indexed, envoy | 0.71 | 0.87 | 0.65 | 6.0 | 1.8 | **0.26** |
-| One question once indexed, vscode | 1.09 | 2.46 | 0.64 | 10.2 | 4.8 | **0.32** |
 
-<sub>Cold = index from nothing. "First answer from nothing" = the cold index plus one question (the sum of the two medians), what an
-agent waits for at the start of a session. "One question once indexed" = the same question asked
-of each tool's documented query entry (ripwire `--for`) with its index already built. ripwire: median of 5 runs;
+<sub>Cold = index from nothing. "First answer from nothing" = the cold index plus one question asked through each tool's documented
+query entry (ripwire `--for`), the sum of the two medians: what an agent waits for at the start of a session. ripwire: median of 5 runs;
 others: median of 3; all on 2026-11-22 on a quiet machine. llvm-project: one run per tool, each alone, limit 1 hour and
 36 GB; "stopped at 1 h" is our limit, not the tool failing (crg had parsed 16,600 of 77,918 files; graphify had finished
 parsing and was still building). graft failed: its parser aborted on 59,479 of 73,559 files and the process exited with
