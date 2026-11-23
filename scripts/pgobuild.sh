@@ -132,7 +132,7 @@ train_workload(){
     run "$CORPUS" --clones --cache="$TRAIN/c.bin"
     if [ "$CORPUS" = "$ROOT" ]; then
         run "$CORPUS" --expand=buildGraph --cache="$TRAIN/c.bin"
-        run "$CORPUS" --grep=DEGRADED_PATH_ALERT --cache="$TRAIN/c.bin"
+        run "$CORPUS" --grep=DISCLOSE --cache="$TRAIN/c.bin"
         run "$CORPUS" --for=guardedBaseWalk --cache="$TRAIN/c.bin"
         run "$CORPUS" --for="src/resolve.h Narrower::guardedBaseWalk receiver narrowing" --cache="$TRAIN/c.bin"
     fi
