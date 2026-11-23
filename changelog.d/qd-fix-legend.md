@@ -5,4 +5,5 @@ has no `why=`, and the default (compact) legend defined `fix=` only inside the `
 rows carried `fix=` without `why=` (for example one minor complexity row) therefore met an undefined attribute, and
 `legendcoveragecheck` arm (G) failed with `quality-delta-refs-default | r@fix`. The compact dictionary now has its own
 `r fix=` reading, which steps aside wherever an `r` row carries `why=`, so other answers keep their bytes.
-`repeateddecisioncheck` arm (L2) pins it on a two-commit range.
+The full legend already carried the QD-REPEATED-DECISION sentence. `repeateddecisioncheck` arm (L2) pins the
+default legend on a two-commit range.
