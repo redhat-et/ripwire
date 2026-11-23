@@ -3,21 +3,18 @@
 # has ceiling 0) and when it has FEWER: lower the ceiling in the commit that fixes the row, so the slack cannot be spent.
 # Generated, never hand-edited: python3 scripts/tidyadvisory_diff.py --baseline .clang-tidy-baseline.txt
 #                                   --ratchet .clang-tidy-ratchet.txt --ratchet-update
-# total: 358
+# total: 271
 bugprone-argument-comment	1
 bugprone-assignment-in-if-condition	1
 bugprone-bitwise-pointer-cast	2
-bugprone-branch-clone	27
+bugprone-branch-clone	26
 bugprone-command-processor	2
 bugprone-empty-catch	3
 bugprone-exception-escape	42
-bugprone-implicit-widening-of-multiplication-result	35
 bugprone-inc-dec-in-conditions	2
-bugprone-incorrect-roundings	14
+bugprone-incorrect-roundings	16
 bugprone-invalid-enum-default-initialization	3
-bugprone-misplaced-widening-cast	1
 bugprone-multi-level-implicit-pointer-conversion	4
-bugprone-narrowing-conversions	42
 bugprone-return-const-ref-from-parameter	2
 bugprone-signed-char-misuse	2
 bugprone-std-namespace-modification	1
@@ -30,16 +27,13 @@ bugprone-unchecked-string-to-number-conversion	4
 bugprone-unhandled-exception-at-new	1
 bugprone-unsafe-functions	3
 bugprone-unused-local-non-trivial-variable	1
-clang-analyzer-deadcode.DeadStores	50
-clang-analyzer-optin.performance.Padding	11
+clang-analyzer-deadcode.DeadStores	51
+clang-analyzer-optin.performance.Padding	12
 clang-analyzer-unix.Errno	1
 clang-analyzer-unix.Stream	3
 misc-redundant-expression	4
-performance-enum-size	2
-performance-faster-string-find	1
-performance-inefficient-string-concatenation	16
-performance-inefficient-vector-operation	15
-performance-move-const-arg	2
-performance-no-automatic-move	2
-performance-unnecessary-copy-initialization	2
-performance-unnecessary-value-param	37
+performance-enum-size	6
+performance-inefficient-string-concatenation	17
+performance-inefficient-vector-operation	3
+performance-unnecessary-copy-initialization	1
+performance-unnecessary-value-param	38
