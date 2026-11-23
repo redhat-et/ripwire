@@ -185,7 +185,9 @@ agent's context every session, whether or not it calls them.
 
 ### How ripwire compares
 
-Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22.
+Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22:
+ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. **Bold** = the best value in a
+row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070-comparison-tables-measured-2026-11-22).
 
 #### Speed
 
@@ -194,10 +196,13 @@ Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, de
 | Cold index, envoy | **2.3** | 37.6 | 14.6 | 102.8 | 22.8 | 58.6 |
 | Cold index, vscode | **5.1** | 173.9 | 61.1 | 257.5 | 54.6 | 184.5 |
 | Cold index, llvm-project (limit 1 h) | **28** | 509 | 291 | stopped at 1 h | failed | stopped at 1 h |
+| First answer from nothing, envoy | **3.0** | 38.5 | 15.3 | 108.8 | 24.7 | 58.9 |
+| First answer from nothing, vscode | **6.2** | 176.3 | 61.8 | 267.7 | 59.5 | 184.8 |
 | One question once indexed, envoy | 0.71 | 0.87 | 0.65 | 6.0 | 1.8 | **0.26** |
 | One question once indexed, vscode | 1.09 | 2.46 | 0.64 | 10.2 | 4.8 | **0.32** |
 
-<sub>Cold = index from nothing, the wait before the first answer. "One question once indexed" = the same question asked
+<sub>Cold = index from nothing. "First answer from nothing" = the cold index plus one question (the sum of the two medians), what an
+agent waits for at the start of a session. "One question once indexed" = the same question asked
 of each tool's documented query entry (ripwire `--for`) with its index already built. ripwire: median of 5 runs;
 others: median of 3; all on 2026-11-22 on a quiet machine. llvm-project: one run per tool, each alone, limit 1 hour and
 36 GB; "stopped at 1 h" is our limit, not the tool failing (crg had parsed 16,600 of 77,918 files; graphify had finished
@@ -210,10 +215,10 @@ an error after 42 s, the same on a second attempt.</sub>
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Indexing envoy | **668** | 5,399 | 2,040 | 3,434 | 3,481 | 2,100 |
 | Indexing vscode | **1,106** | 12,258 | 4,595 | 4,086 | 5,656 | 3,227 |
-| Indexing llvm-project (limit 36 GB) | **5,199** | 16,466 | 19,704 | 9,755 at the stop | 6,074 at the failure | 5,603 at the stop |
+| Indexing llvm-project (limit 36 GB) | **5,199** | 16,466 ▲ | 19,704 ▲ | 9,755 at the stop | 6,074 at the failure | 5,603 at the stop |
 | Index on disk, vscode | **276** | 2,075 | 1,664 | 585 | 1,368 | 5,600 |
 
-<sub>Peak resident memory over the whole process tree, background daemon included; MB = 2²⁰ bytes. llvm-project: ripwire's
+<sub>▲ = more than a 16 GB machine has. Peak resident memory over the whole process tree, background daemon included; MB = 2²⁰ bytes. llvm-project: ripwire's
 figure is the larger of its cold index (3,823) and its first question; ripwire indexes 80,576 of the 180,650 files git
 tracks. codegraph sizes itself to the machine, so its figures are what it took with 48 GB available. Its llvm-project peak is not much above its vscode peak because, measured per file indexed, vscode cost it about 3.5 times as much: 16,305 files at 12,258 MB on vscode (almost all TypeScript), 76,181 files at 16,466 MB on llvm-project (mostly C and C++); its vscode figure repeats within 7% over three runs (12,154 to 12,952 MB).</sub>
 
@@ -222,9 +227,10 @@ tracks. codegraph sizes itself to the machine, so its figures are what it took w
 | One call per task · 213 held-out tasks | ripwire | codegraph | cbm | graphify | graft | crg |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Complete | **126** | 68 | 66 | 55 | 34 | 53 |
-| Partial | **83** | 98 | 117 | 123 | 137 | 114 |
+| Partial | 83 | 98 | 117 | 123 | 137 | 114 |
 | Missed | **4** | 47 | 30 | 35 | 42 | 46 |
-| Failed calls | **0** | 0 | 0 | 0 | 0 | 0 |
+| Complete, of the 135 tasks that touch two or more files | **57** | 16 | 14 | 12 | 4 | 5 |
+| Failed calls | 0 | 0 | 0 | 0 | 0 | 0 |
 | Says when the answer was cut | **209** | 197 | 207 | 163 | 0 | 193 |
 | Gives the next call to continue, of those cut | **209 of 209** | 0 of 197 | 206 of 207 | 163 of 163 | — | 0 of 193 |
 

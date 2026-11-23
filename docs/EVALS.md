@@ -390,6 +390,44 @@ include either tool's index build.
 
 ---
 
+## 2b. The 0.7.0 comparison tables (measured 2026-11-22)
+
+The three tables under "How ripwire compares" in the README. Six tools at these versions: ripwire 0.7.0 (the release
+commit, local Release build with profile-guided optimization), codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft
+0.29.0, crg 2.4.0. One machine: Apple M5 Pro, 18 cores, 48 GB. One tool at a time, each at its default settings.
+
+**Speed and memory.**
+- Each run starts only when the machine is quiet: load per core under about 0.12 (0.18 when a macOS media-analysis
+  service was using about one core), free memory at least 15 %, and no other measured process running.
+- Wall clock is measured per run. ripwire's figures are the median of 5 runs, the others' the median of 3.
+- "Cold" indexes from nothing. "One question once indexed" asks the same question through each tool's documented query
+  entry with its index already built.
+- Peak memory is the largest sum of resident memory over the tool's whole process tree, sampled 8 times a second, with a
+  background daemon counted once. MB = 2²⁰ bytes.
+- llvm-project: one run per tool, with limits of 1 hour and 36 GB. A run the limit stops is reported as stopped, never as
+  the tool failing.
+
+**Answers.**
+- 213 tasks from 37 open-source repositories in 11 languages. None of them was used while building or tuning any tool
+  compared.
+- Each task is a real commit. The question is the commit message, the tool answers from the code before the commit, and
+  the right answer is every file the commit edited and every function it modified.
+- One call per task, through each tool's documented free-text entry. Every tool is scored by the same grader, whose rules
+  and code were frozen (content digest recorded) before any tool ran on these tasks.
+- **Complete** means every edited file is named and every modified function is located beside its own file.
+  **Partial** means some of them are. **Missed** means none, or the call failed.
+- One task of 214 was excluded before the run, because the grader could not score one tool's answer format on it.
+- The questions are not published, so the set stays usable as an untouched check for later releases. The README shows
+  four examples from a development set built the same way.
+- "Says when the answer was cut" and "gives the next call to continue" are read from each answer's own text, under
+  definitions written down before any count was taken.
+
+**Provenance, stated plainly.** The harness, the grader and the frozen task set behind these tables live outside this
+repository for now. The rule at the top of this file asks for an in-repo pin, and these numbers do not have one yet.
+Treat them as reported, not yet reproducible from this checkout, until the harness is committed.
+
+---
+
 ## 3. LocBench — localization accuracy
 
 **Source:** `bench/locbench/README.md`, `bench/locbench/dataset.lock`,
