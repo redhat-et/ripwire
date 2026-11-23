@@ -1007,7 +1007,6 @@ int emitGrepReport( const MainDispatch& d )
     const std::vector<std::uint8_t>*  tested     = d.testedPtr;
     const GrepScanPhases*             prefetched = d.grepPhases;
     const std::string&                root       = d.root;
-    const bool                        valueUses  = d.valueUses;
     const std::string          pat( cfg.grep );
 
     // §P0.4: an invalid --regex used to scan nothing and print hits="0" at exit 0 with an EMPTY stderr —

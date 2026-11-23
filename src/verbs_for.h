@@ -3895,9 +3895,6 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             forConf.attrs += " coverage=\"" + std::to_string( forCoverage ) + "\"";
             forConf.note  += kForCoverageLegend;
         }
-        // The confidence pair's own bytes, captured BEFORE the budget clause below is appended — see the
-        // charging note there for why the two disclosures are charged differently.
-        const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
         // P1 (L7): the two halves separately, captured at the SAME early point — the compact dialect emits its own
         // short clause (kForCompactLegendConfidence) in place of the early note, and the exemption below must
         // subtract what that dialect emitted, never the appended budget clause (which is charged, see below).
@@ -3915,8 +3912,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // the flag was inert would be its own false disclosure.
         //
         // CHARGING, and why it splits from the confidence pair's. Both ride forConf, but only the
-        // confidence half is EXEMPT from the byte budget (confidenceExemptBytes is taken from
-        // confidenceOwnBytes above, captured before this append): confidence= must survive a tight ceiling
+        // confidence half is EXEMPT from the byte budget (confidenceExemptBytes is taken from the two halves'
+        // sizes captured at the same early point, before this append): confidence= must survive a tight ceiling
         // because it qualifies the ANSWER — the fordisclosurecheck precedent. These two attributes qualify
         // the BUDGET, and a budget disclosure that made the bundle exceed its own budget would be the
         // funniest possible way to fail this finding. So they are charged like any other bytes, and the
@@ -4467,7 +4464,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const bool        compactLegendOn      = cfg.legend == "compact";
         const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
                                                                  : confidenceEarlyNoteBytes;
-        const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
+        const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == the confidence pair's own bytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
                                                + tailCodeFirstLegend( headerParts, compactLegendOn ).size()
                                                + tailWideLegend( headerParts, compactLegendOn ).size() + tailSameDirLegend( headerParts ).size();
