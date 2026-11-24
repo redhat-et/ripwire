@@ -11579,6 +11579,7 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
                                  TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
 {
     std::vector<std::string> paths;
+    paths.reserve( ratchetable.size() );
     for( const auto& [ key, nowOfKey ] : ratchetable )
     {
         paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowOfKey->at ].fileId ], root ) );

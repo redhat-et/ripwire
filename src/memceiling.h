@@ -87,7 +87,7 @@ namespace rw::memceiling
 
 inline constexpr std::uint64_t kMiB              = 1024ull * 1024ull;
 inline constexpr std::uint64_t kFloorMiB         = 64;                // memguard's own floor: below it a value is a typo
-inline constexpr std::size_t   kLargeBytes       = 256 * 1024;        // largealloc's kMinBytes: these read on every call
+inline constexpr std::size_t   kLargeBytes       = std::size_t( 256 ) * 1024; // largealloc's kMinBytes: these read on every call
 inline constexpr std::uint64_t kSmallStrideBytes = 64ull * kMiB;      // per thread, small allocations between two readings
 inline constexpr int           kRefusalExit      = 5;                 // the memory-refusal exit (memguard.h)
 inline constexpr std::size_t   kLabelBytes       = 96;

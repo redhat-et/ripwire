@@ -47,9 +47,10 @@ inline std::string reading( std::uint64_t bytes )
 
 // one `[mem] phase=<phase> cur_mib=<now> peak_mib=<lifetime peak>` line when RIPWIRE_STATS is set (either reading may be
 // `unavailable`)
-inline void mark( std::string_view phase )
+inline void mark( const char* literal )   // a string literal: notePhase keeps the pointer, so it must be NUL-terminated and live forever
 {
-    memceiling::notePhase( phase.data() );   // every caller passes a string literal, so data() is NUL-terminated and lives forever
+    memceiling::notePhase( literal );
+    const std::string_view phase( literal );
     if( !enabled() )
     {
         return;
