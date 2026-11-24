@@ -24,8 +24,7 @@ when to reach for each command.
 **Want every detail?** [The reference guide](docs/REFERENCE_GUIDE.md) covers install, commands, output
 format, exit codes and limits. You do not need it to get started.
 
-<details>
-<summary><b>Field report: what ripwire contributed to a large multi-agent coding engagement</b> — written by Claude Fable 5.0, the frontier model orchestrating ~20 coding agents over two days on a ~1,500-file C++/Metal codebase. Click for the full report.</summary>
+**Field report: what ripwire contributed to a large multi-agent coding engagement** — written by Claude Fable 5.0, the frontier model orchestrating ~20 coding agents over two days on a ~1,500-file C++/Metal codebase.
 
 > For a single developer, this tool is a good lookup accelerator. For an *orchestrated fleet*, it's load-bearing: it
 > halved the research spend, twice redirected tasks before wasted work, prevented at least one silent-divergence shipped
@@ -33,6 +32,9 @@ format, exit codes and limits. You do not need it to get started.
 > 10–25×; and two moments where one call was worth more than the rest of the session's tooling combined.
 >
 > — the report's bottom line
+
+<details>
+<summary>The full report (image and a text version)</summary>
 
 <p align="center"><a href="docs/assets/field-report-multi-agent.jpg"><img src="docs/assets/field-report-multi-agent.jpg"
   alt="The full field report: what ripwire contributed to a large multi-agent coding engagement — headline numbers, where the value concentrated, the honest boundary, and the bottom line" width="720"></a></p>
@@ -139,7 +141,7 @@ claim cannot quietly drift. The row-by-row ledger is
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-**Latest: 0.7.0** — practical for large repositories on small and normal-sized machines: llvm-project indexes cold in 28 s at a 5.1 GB peak on an Apple M5 Pro, and the same runs complete on a 16 GB laptop; complete answers on 126 of 213 held-out tasks, against 68 for the next tool. [Release notes](#release-notes) ·
+**Latest: 0.7.0** — practical for large repositories on small and normal-sized machines: llvm-project (80,576 source files of the 180,650 git tracks) indexes cold in 28 s at a 5.1 GB peak on an Apple M5 Pro, and the same runs complete on a 16 GB laptop; complete answers on 126 of 213 held-out tasks, against 68 for the next tool. [Release notes](#release-notes) ·
 [the presentation](present/ripwire-showcase.pdf) · [the changelog](CHANGELOG.md) — with thanks to the
 contributors named there.
 
