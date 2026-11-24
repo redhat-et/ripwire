@@ -872,6 +872,8 @@ struct ShellWord
     std::size_t begin          = 0;
     bool        literalDollar  = false;   // a `$` the shell does not expand: single-quoted (`'$X'`) or escaped (`\$X`)
     bool        unquotedDollar = false;   // a `$` expansion outside quotes (`-d $BODY`)
+    bool        nameCut        = false;   // a quote or `\` ends a `$NAME` piece before more name bytes: `"$A"b`
+                                          // expands $A then `b`, but the joined text reads `$Ab`
 };
 
 // Does the unquoted `$` at text[at] start an expansion (`$NAME`, `${`, `$1`, `$@`, …)? A lone `$`, `$/` or `$'` does not.
@@ -926,6 +928,8 @@ struct ShellCutter
     bool         heredocTabs    = false;
     bool         literalDollar  = false;   // the word's ShellWord flags, so far
     bool         unquotedDollar = false;
+    bool         nameCut        = false;
+    std::size_t  pieceEnd       = std::string::npos;   // where the last quote or `\\` piece boundary fell in `word`
 
     void startWord( std::size_t at ) noexcept
     {
@@ -944,13 +948,32 @@ struct ShellCutter
         }
         if( inWord && !dropNextWord )
         {
-            command.words.push_back( { std::move( word ), wordBegin, literalDollar, unquotedDollar } );
+            command.words.push_back( { std::move( word ), wordBegin, literalDollar, unquotedDollar, nameCut } );
         }
         dropNextWord = dropNextWord && !inWord;
         word.clear();
         inWord         = false;
         literalDollar  = false;
         unquotedDollar = false;
+        nameCut        = false;
+        pieceEnd       = std::string::npos;
+    }
+    // A piece boundary (a quote opens or closes, a `\\` escapes a byte) at the end of `word`: when the word so far ends in
+    // an unbraced `$NAME`, the shell's name stops here; remember where, so the next byte appended can be checked.
+    void pieceBoundary() noexcept
+    {
+        std::size_t at = word.size();
+        while( at > 0 && namesplit::isIdentChar( word[ at - 1 ] ) )
+        {
+            --at;
+        }
+        pieceEnd = ( at > 0 && at < word.size() && word[ at - 1 ] == '$' ) ? word.size() : std::string::npos;
+    }
+    // Append one byte; a name byte right where a `$NAME` piece ended joins the two names in the cut text.
+    void append( char c )
+    {
+        nameCut = nameCut || ( pieceEnd == word.size() && namesplit::isIdentChar( c ) );
+        word += c;
     }
     void endCommand( ShellJoin join )
     {
@@ -1015,7 +1038,7 @@ struct ShellCutter
         switch( c )
         {
             case ' ': case '\t': case '\r': endWord(); return 1;
-            case '\'': case '"': startWord( i ); quote = c; return 1;
+            case '\'': case '"': startWord( i ); pieceBoundary(); quote = c; return 1;
             case ';': endCommand( ShellJoin::Sequence ); return 1;
             case '|': endCommand( next == '|' ? ShellJoin::Or : ShellJoin::Pipe ); return ( next == '|' || next == '&' ) ? 2 : 1;
             case '(': case ')': case '`':
@@ -1032,6 +1055,7 @@ struct ShellCutter
         const char c = line[i];
         if( c == quote )
         {
+            pieceBoundary();
             quote = 0;
             return 1;
         }
@@ -1043,7 +1067,7 @@ struct ShellCutter
         }
         literalDollar = literalDollar || ( quote == '\'' && c == '$' );
         cut.modelled = cut.modelled && !( quote == '"' && ( c == '`' || ( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '(' ) ) );
-        word += c;
+        append( c );
         return 1;
     }
     // An unquoted `\` at line[i]: the next byte joins the word as a literal; a trailing `\` continues the command.
@@ -1054,8 +1078,9 @@ struct ShellCutter
         if( i + 1 < line.size() )
         {
             startWord( i );
+            pieceBoundary();
             literalDollar = literalDollar || line[ i + 1 ] == '$';
-            word += line[ i + 1 ];
+            append( line[ i + 1 ] );
         }
         return 2;
     }
@@ -1064,7 +1089,7 @@ struct ShellCutter
     {
         startWord( i );
         unquotedDollar = unquotedDollar || ( line[i] == '$' && shellExpansionAt( line, i ) );
-        word += line[i];
+        append( line[i] );
     }
     // The line is cut: does it end inside a quote, or on `\`, `&&`, `||` or `|` that carries the command onto the next?
     ShellLine finish( char quote )
@@ -1959,8 +1984,13 @@ inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, s
 // An unquoted `$` expansion is word-split and globbed: a value `x https://evil.example` adds a destination, so the word
 // proves nothing unless every expansion in it resolves to values with no blank and no glob byte, and none holds a `$`
 // or backtick of its own (`U=https://a/$SUFFIX` carries whatever SUFFIX held at the assignment).
+// A cut `$NAME` piece (ShellWord::nameCut) reads another variable than the one the shell splits, so it proves nothing.
 inline bool unquotedExpansionsFixed( const ShellWord& w, int line, const ShellBindings* bindings )
 {
+    if( w.unquotedDollar && w.nameCut )
+    {
+        return false;
+    }
     for( std::size_t at = w.unquotedDollar ? w.text.find( '$' ) : std::string::npos; at != std::string::npos; at = w.text.find( '$', at + 1 ) )
     {
         const ShellVarRef       ref  = shellExpansionAt( w.text, at ) ? shellVarRefAt( w.text, at ) : ShellVarRef{};
@@ -2024,8 +2054,9 @@ inline LineHosts curlLineHosts( std::string_view line, const ShellLine& cut, int
     std::vector<std::string> expanded;
     for( const ShellWord* w : words )
     {
-        // a single-quoted or escaped `$` is a literal byte: substituting it would invent a host
-        const bool expands = !w->literalDollar && expandDestination( w->text, lineNum, w->begin, bindings, expanded );
+        // a single-quoted or escaped `$` is a literal byte, and a cut `$NAME` piece reads another name: substituting
+        // either would invent a host
+        const bool expands = !w->literalDollar && !w->nameCut && expandDestination( w->text, lineNum, w->begin, bindings, expanded );
         if( !expands || !std::all_of( expanded.begin(), expanded.end(), [ & ]( const std::string& text ) { return addDestinationHost( text, answer ); } ) )
         {
             return LineHosts{};
