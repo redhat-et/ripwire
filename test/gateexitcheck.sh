@@ -744,7 +744,10 @@ SHHDIR="$( mktemp -d )"
 . "$ROOT/scripts/cxxstd.sh"
 SHCXX="${CXX:-c++}"
 if command -v "$SHCXX" >/dev/null 2>&1; then
-    if "$SHCXX" "$( ripwire_cxx_std_flag "$SHCXX" )" -O1 -I"$ROOT/src" "$ROOT/test/shstatus_harness.cpp" -o "$SHHDIR/shh" 2>"$SHHDIR/cc.log"; then
+    # diagnostics.cpp supplies Diagnostics::ConsoleLog::handleAssert for shstatus.h's ASSUME (UnguardedSkip): linked as every
+    # other standalone harness links it (columnarcommacheck, clonepersistcheck)
+    if "$SHCXX" "$( ripwire_cxx_std_flag "$SHCXX" )" -O1 -I"$ROOT/src" -I"$ROOT/src/infra" "$ROOT/test/shstatus_harness.cpp" \
+        "$ROOT/src/infra/diagnostics.cpp" -o "$SHHDIR/shh" 2>"$SHHDIR/cc.log"; then
         SHH="$SHHDIR/shh"
     else
         no "(H4) test/shstatus_harness.cpp did not compile with $SHCXX: $( head -c 600 "$SHHDIR/cc.log" )"
