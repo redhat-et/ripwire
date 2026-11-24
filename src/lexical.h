@@ -553,12 +553,15 @@ inline int basenameFieldTf( int fileTf, double lengthNorm ) noexcept
     return std::max( fileTf, int( std::lround( fileTf * lengthNorm ) ) );
 }
 
-// Pass 2.5: add each symbol's basename tf to its tf row. avgLength is the corpus mean of dl (the statistics' own mean; dl
-// already holds the basename tokens, pass 1.6). RIPWIRE_BASENAME_FLAT=1 restores the flat (unscaled) field, the A/B handle.
-inline void addBasenameFieldTf( const IngestResult& ing, const BasenameFieldEvidence& field, const std::vector<int>& dl, double avgLength,
-                                std::vector<int>& tfFlat )
+// Pass 2.5: add each symbol's basename tf to its tf row. meanLengthOf( i ) is the mean of dl symbol i's BM25 score divides by
+// (the counted units' avgdl, or avgdlAll for a statistics-excluded unit); dl already holds the basename tokens (pass 1.6).
+// RIPWIRE_BASENAME_FLAT=1 restores the flat (unscaled) field, the A/B handle; 0 or unset keeps the scaling (envKnob warns on
+// any other spelling and ignores it).
+template <class MeanLengthOf>
+inline void addBasenameFieldTf( const IngestResult& ing, const BasenameFieldEvidence& field, const std::vector<int>& dl,
+                                MeanLengthOf&& meanLengthOf, std::vector<int>& tfFlat )
 {
-    const bool        flat      = std::getenv( "RIPWIRE_BASENAME_FLAT" ) != nullptr;
+    const bool        flat      = envKnob<int>( "RIPWIRE_BASENAME_FLAT" ).value_or( 0 ) == 1;
     const double      b         = resolveBm25Params().b;
     const std::size_t fileCount = field.fileWeight.size();
     const std::size_t stride    = field.stride;
@@ -569,6 +572,7 @@ inline void addBasenameFieldTf( const IngestResult& ing, const BasenameFieldEvid
         {
             continue;
         }
+        const double     avgLength  = meanLengthOf( i );
         const double     lengthNorm = flat ? 1.0 : 1.0 - b + b * dl[i] / ( avgLength > 0 ? avgLength : 1.0 );
         int* const       tfRow      = tfFlat.data() + i * stride;
         const int* const fileRow    = field.fileTf.data() + std::size_t( f ) * stride;
@@ -1219,17 +1223,25 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
-    // pass 2.5 — the basename field's tf (θ10, #728), length-scaled per symbol (addBasenameFieldTf above). It runs after EITHER
-    // pass-2 branch, so the scan and persisted-stats paths add the identical integers (postings parity holds by construction).
-    // The mean is the statistics' own (the counted units' dl, the same doc order as the corpus stats below).
+    // corpus stats (lengths; dl is final here — the fold below never touches it, and pass 2.5 reads them) — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
+    // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
+    // statsOut: the counted units' average (the same doc order: identical doubles when every unit counts) scores the
+    // counted units; an OUT unit scores against the whole corpus (avgdlAll, S, its df plus dfOut), as with no statsOut.
+    double avgdl = 0, avgdlAll = 0;
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
+        avgdlAll += isUnranked( i ) ? 0 : dl[i];
+    }
+    avgdl /= double( statsS ? statsS : 1 );
+    avgdlAll /= double( allS ? allS : 1 );
+
+    // pass 2.5 — the basename field's tf (θ10, #728), length-scaled per symbol against the SAME mean its score divides by
+    // (addBasenameFieldTf above). It runs after EITHER pass-2 branch, so the scan and persisted-stats paths add the identical
+    // integers (postings parity holds by construction).
     if( !basenameField.fileWeight.empty() )
     {
-        double lengthSum = 0;
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            lengthSum += statsWeight( i ) != 0 ? dl[i] : 0;
-        }
-        addBasenameFieldTf( ing, basenameField, dl, lengthSum / double( statsS ? statsS : 1 ), tfFlat );
+        addBasenameFieldTf( ing, basenameField, dl, [ & ]( std::size_t i ) { return statsWeight( i ) != 0 ? avgdl : avgdlAll; }, tfFlat );
     }
 
     // ── IDF-guard admission + fold (rung R3) — runs identically after EITHER pass-2 branch ──────────
@@ -1414,18 +1426,6 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
-    // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
-    // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
-    // statsOut: the counted units' average (the same doc order: identical doubles when every unit counts) scores the
-    // counted units; an OUT unit scores against the whole corpus (avgdlAll, S, its df plus dfOut), as with no statsOut.
-    double avgdl = 0, avgdlAll = 0;
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
-        avgdlAll += isUnranked( i ) ? 0 : dl[i];
-    }
-    avgdl /= double( statsS ? statsS : 1 );
-    avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     const auto       countOut = [ & ]( const int* tfRow )
     {

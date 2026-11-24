@@ -16,7 +16,8 @@
 #   L4 [G] short symbols keep the flat lift: every helper's s= is identical in the default and the FLAT answer (count >= 1)
 #   L5 [G] the lift still reaches a file-only question: a helper of widget.py scores > 0 for a question whose only matching
 #          word is the file's name (the field is on, only rescaled)
-#   X1 [G] determinism: two default runs are byte-identical
+#   F1 [G] RIPWIRE_BASENAME_FLAT=0 is the scaled default, not the flat field (only 1 selects flat)
+#   X1 [G] determinism: two default runs exit 0 and are byte-identical
 #
 # Usage:  bash test/forbasenamelengthcheck.sh [BIN]   — BIN is $1, else RIPWIRE_BIN, else build/ripwire.
 set -u
@@ -99,10 +100,16 @@ else no "L4 helper scores differ default vs FLAT (or none listed: $nh)"; diff "$
 pos="$( awk '$2 > 0' "$TMP/h_on.txt" | wc -l | tr -d ' ' )"
 [ "$pos" -ge 1 ] && ok "L5 a file-only question: $pos widget.py helpers score > 0 on the basename word" || no "L5 no widget.py helper scores > 0 (the field is off)"
 
+echo "=== F: only FLAT=1 selects the flat field ==="
+cli env RIPWIRE_BASENAME_FLAT=0 "$BIN" "$R" --no-cache --for="$Q_LONG" --format=candidates > "$TMP/long_flat0.xml"
+if grep -q '<cand ' "$TMP/long_flat0.xml" && cmp -s "$TMP/long_on.xml" "$TMP/long_flat0.xml"; then ok "F1 FLAT=0 answers byte-identical to the default (scaled)"
+else no "F1 FLAT=0 differs from the default (or no <cand> rows): presence alone switched the field"; fi
+
 echo "=== X: determinism ==="
-cli "$BIN" "$R" --no-cache --for="$Q_LONG" > "$TMP/x1.xml"
-cli "$BIN" "$R" --no-cache --for="$Q_LONG" > "$TMP/x2.xml"
-if [ -s "$TMP/x1.xml" ] && cmp -s "$TMP/x1.xml" "$TMP/x2.xml"; then ok "X1 two default --for runs are byte-identical"; else no "X1 nondeterministic or empty --for answer"; fi
+cli "$BIN" "$R" --no-cache --for="$Q_LONG" > "$TMP/x1.xml"; rc1=$?
+cli "$BIN" "$R" --no-cache --for="$Q_LONG" > "$TMP/x2.xml"; rc2=$?
+if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ -s "$TMP/x1.xml" ] && cmp -s "$TMP/x1.xml" "$TMP/x2.xml"; then ok "X1 two default --for runs succeed and are byte-identical"
+else no "X1 rc=$rc1/$rc2, nondeterministic or empty --for answer"; fi
 
 if [ "$FAIL" -ne 0 ]; then echo "forbasenamelengthcheck: FAIL"; exit 1; fi
 echo "forbasenamelengthcheck: PASS"
