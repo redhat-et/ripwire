@@ -361,7 +361,10 @@ else no "(#353 flow) issue-line pins: $want_pos/3 WARN, $want_neg/2 CRITICAL as 
 # base — plus x01/x02, and x03/x04 (CodeRabbit on #722: a here-document body and an if-block assignment bind
 # nothing the proof may read), and c14/c14b, c15/c15b, v15/v15b/v15c (CodeRabbit round 4 on #722: a quoted "$@" or
 # "${arr[@]}" as one option's value, a curl 8.13 `--url @FILE` URL list, literal or via $VAR, and a `read` or
-# `printf -v` behind an assignment prefix or `command` that rebinds the host; each went WARN local-dest on 3a49cc23f). On e75cf3094 45 of them went CRITICAL -> WARN (cred-to-owner, local-dest). Every fixture must
+# `printf -v` behind an assignment prefix or `command` that rebinds the host; each went WARN local-dest on 3a49cc23f),
+# and v16/v16b, v17 (CodeRabbit round 5: a ```text sample's assignment, and `"https://$NAME"e` read as $NAMEe; v16b and
+# v17 went WARN local-dest on 38bfc93d9). Each fixture's rows are pinned as line:sev in line order, duplicates kept, so a
+# row that moves to another line or goes missing beside a same-severity row fails too. On e75cf3094 45 of them went CRITICAL -> WARN (cred-to-owner, local-dest). Every fixture must
 # keep its main (b576a95e3) net-exfil severities exactly, and the NODEST ones may name no host: their text does not say
 # where the request goes. Real-looking attacker hosts are .example; vendor hosts stay (they ARE the class).
 ADV="$ROOT/test/skillfix/adv353"
@@ -372,104 +375,107 @@ while IFS='|' read -r adv_name adv_want; do
     adv_seen=$(( adv_seen + 1 ))
     case "$adv_want" in *critical*) adv_crit=$(( adv_crit + 1 )) ;; esac
     if [ ! -f "$ADV/$adv_name.md" ]; then no "(#353 adversarial) fixture missing: $adv_name.md"; continue; fi
-    adv_got="$( grep -oE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" sev=\"[a-z]+\"" "$TMP/adv_out.txt" | sed -E 's/.*sev="([a-z]+)"/\1/' | sort -u | tr '\n' ' ' | sed 's/ $//' )"
-    if [ "$adv_got" = "$adv_want" ]; then adv_ok=$(( adv_ok + 1 )); else no "(#353 adversarial) $adv_name: net-exfil sev [$adv_got], want [$adv_want] as on main"; fi
+    adv_got="$( grep -oE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" sev=\"[a-z]+\"" "$TMP/adv_out.txt" | sed -E 's/.*\.md:([0-9]+)" rule="[^"]*" sev="([a-z]+)"/\1:\2/' | sort -t: -k1,1n | tr '\n' ' ' | sed 's/ $//' )"
+    if [ "$adv_got" = "$adv_want" ]; then adv_ok=$(( adv_ok + 1 )); else no "(#353 adversarial) $adv_name: net-exfil rows [$adv_got], want [$adv_want] (line:sev) as on main"; fi
 done <<'ADVWANT'
-c01-resolve|critical
-c02-connect-to|critical
-c03-x-proxy|critical
-c03b-bundled-x|critical
-c04-proxy-long|critical
-c05-url-twice|critical
-c06-multi-url|critical
-c07-config|critical
-c07b-next|critical
-c08-env-proxy-prefix|critical
-c08b-env-proxy-http|critical
-c08c-env-cmd-prefix|critical
-c09-export-proxy|critical
-c10-curlrc|critical
-c10b-curl-home|critical
-c11-local-curl-binary|critical
-c11b-path-shadow|critical
-c12-function-shadow|critical
-c13-location-trusted|critical
-h01-userinfo|critical
-h02-suffix-host|critical
-h03-port-at|critical
-h04-path-at|critical
-h05-punycode|critical
-h05b-unicode|critical
-h06-uppercase|critical
-h07-trailing-dot|critical
-h08-v4mapped|critical
-h08b-v4mapped-hex|critical
-h09-decimal-ip|critical
-h09b-octal-ip|critical
-h09c-hex-ip|critical
-h10-localhost-evil|critical
-h10b-nipio|critical
-h11-backslash-userinfo|critical
-h12-ansic-userinfo|critical
-h12b-ansic-local|critical
-h13-unresolved-userinfo|critical
-h13b-unresolved-userinfo-local|critical
-h13c-default-userinfo|critical
-h14-ip-trailing-dot|critical
-l01-socat-relay|critical
-l02-ssh-forward|critical
-l03-gopher-smtp|critical
-l04-host-header-proxy|critical
-l05-python-relay|critical
-m01-dns-exfil|critical
-m02-ssh-sink|critical
-m03-python-sink|critical
-m04-git-sink|critical
-m05-wget-sink|critical
-m06-httpie-sink|critical
-p01-relabel-no-cred|warn
+c01-resolve|10:critical
+c02-connect-to|10:critical
+c03-x-proxy|10:critical
+c03b-bundled-x|10:critical
+c04-proxy-long|10:critical
+c05-url-twice|10:critical
+c06-multi-url|10:critical
+c07-config|10:critical
+c07b-next|10:critical
+c08-env-proxy-prefix|10:critical
+c08b-env-proxy-http|10:critical
+c08c-env-cmd-prefix|10:critical
+c09-export-proxy|11:critical
+c10-curlrc|11:critical
+c10b-curl-home|10:critical
+c11-local-curl-binary|10:critical
+c11b-path-shadow|11:critical
+c12-function-shadow|11:critical
+c13-location-trusted|10:critical
+c14-quoted-argv-list|11:critical
+c14b-array-list|11:critical
+c15-url-at-file|10:critical
+c15b-url-at-var|11:critical
+h01-userinfo|10:critical
+h02-suffix-host|10:critical
+h03-port-at|10:critical
+h04-path-at|10:critical
+h05-punycode|10:critical
+h05b-unicode|10:critical
+h06-uppercase|10:critical
+h07-trailing-dot|10:critical
+h08-v4mapped|10:critical
+h08b-v4mapped-hex|10:critical
+h09-decimal-ip|10:critical
+h09b-octal-ip|10:critical
+h09c-hex-ip|10:critical
+h10-localhost-evil|10:critical
+h10b-nipio|10:critical
+h11-backslash-userinfo|10:critical
+h12-ansic-userinfo|10:critical
+h12b-ansic-local|10:critical
+h13-unresolved-userinfo|11:critical
+h13b-unresolved-userinfo-local|11:critical
+h13c-default-userinfo|10:critical
+h14-ip-trailing-dot|10:critical
+l01-socat-relay|11:critical
+l02-ssh-forward|11:critical
+l03-gopher-smtp|10:critical
+l04-host-header-proxy|10:critical
+l05-python-relay|11:critical
+m01-dns-exfil|10:critical
+m02-ssh-sink|10:critical
+m03-python-sink|10:critical
+m04-git-sink|10:critical
+m05-wget-sink|10:critical
+m06-httpie-sink|10:critical
+p01-relabel-no-cred|9:warn
 p02-dig-only|
-s01-github-io|critical
-s02-gist-host|critical
-s03-redirect-legacy-pages|critical
-s04-issue-body-channel|critical
-s04b-victim-auth-public-issue|critical
-s05-ssh-key-takeover|critical
-s06-cf-member-invite|critical
-s07-relabel-other-secret|critical
-s07b-indirect-other-secret|critical
-s08-env-dump-declare|critical
-s09-kubeconfig-asset|critical
-s10-airtable-attacker-base|critical
-v01-other-fence-reassign|critical
-v02-default-expansion|critical
-v03-pattern-subst|critical
-v04-heredoc-assign|critical
-v05-comment-assign|critical
-v06-assign-after-use|critical
-v07-export-unset|critical
-v08-source-file|critical
-v09-dynamic-export|critical
-v10-declare-split|critical
-v11-eval-escaped|critical
-v12-printf-v-dynamic|critical
-v13-indirect-ref|critical
-v14-local-other-fn|critical
-x01-eval-curl-local|critical
-x02-background-listener|critical
-x03-heredoc-local|critical
-x04-if-block-assign|critical
-c14-quoted-argv-list|critical
-c14b-array-list|critical
-c15-url-at-file|critical
-c15b-url-at-var|critical
-v15-read-assign-prefix|critical
-v15b-command-read|critical
-v15c-prefix-printf-v|critical
+s01-github-io|10:critical
+s02-gist-host|10:critical
+s03-redirect-legacy-pages|10:critical
+s04-issue-body-channel|10:critical
+s04b-victim-auth-public-issue|11:critical
+s05-ssh-key-takeover|10:critical
+s06-cf-member-invite|10:critical
+s07-relabel-other-secret|11:critical
+s07b-indirect-other-secret|11:critical
+s08-env-dump-declare|10:critical
+s09-kubeconfig-asset|10:critical
+s10-airtable-attacker-base|10:critical
+v01-other-fence-reassign|17:critical
+v02-default-expansion|11:critical
+v03-pattern-subst|11:critical
+v04-heredoc-assign|15:critical
+v05-comment-assign|12:critical
+v06-assign-after-use|10:critical
+v07-export-unset|12:critical
+v08-source-file|12:critical
+v09-dynamic-export|12:critical
+v10-declare-split|12:critical
+v11-eval-escaped|12:critical
+v12-printf-v-dynamic|12:critical
+v13-indirect-ref|12:critical
+v14-local-other-fn|11:critical
+v15-read-assign-prefix|12:critical
+v15b-command-read|12:critical
+v15c-prefix-printf-v|12:critical
+v16-example-fence-bind|20:critical
+v16b-example-fence-only|16:critical
+v17-param-boundary|12:critical
+x01-eval-curl-local|10:critical
+x02-background-listener|11:critical
+x03-heredoc-local|13:critical
+x04-if-block-assign|13:critical
 ADVWANT
 adv_files="$( find "$ADV" -name '*.md' | wc -l | tr -d ' ' )"
 if [ "$adv_seen" -ge 80 ] && [ "$adv_ok" = "$adv_seen" ] && [ "$adv_files" = "$adv_seen" ] && [ "$adv_crit" -ge 78 ]; then
-    ok "(#353 adversarial) $adv_ok/$adv_seen fixtures keep main's net-exfil severity ($adv_crit CRITICAL on main, all still CRITICAL)"
+    ok "(#353 adversarial) $adv_ok/$adv_seen fixtures keep main's net-exfil rows, line and severity each ($adv_crit CRITICAL on main, all still CRITICAL)"
 else no "(#353 adversarial) $adv_ok of $adv_seen fixtures as on main ($adv_files files, $adv_crit CRITICAL wanted)"; fi
 adv_nodest=0
 for adv_name in v08-source-file v09-dynamic-export v10-declare-split v11-eval-escaped v12-printf-v-dynamic h06-uppercase h07-trailing-dot \
@@ -477,13 +483,13 @@ for adv_name in v08-source-file v09-dynamic-export v10-declare-split v11-eval-es
                 h13c-default-userinfo h14-ip-trailing-dot c08-env-proxy-prefix c08b-env-proxy-http c08c-env-cmd-prefix c10b-curl-home \
                 c11-local-curl-binary m05-wget-sink x01-eval-curl-local x03-heredoc-local x04-if-block-assign \
                 c14-quoted-argv-list c14b-array-list c15-url-at-file c15b-url-at-var v15-read-assign-prefix v15b-command-read \
-                v15c-prefix-printf-v; do
+                v15c-prefix-printf-v v16-example-fence-bind v16b-example-fence-only v17-param-boundary; do
     if grep -qE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" sev=\"critical\"/>" "$TMP/adv_out.txt" \
        && ! grep -qE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" [^>]*(dest|owner)=" "$TMP/adv_out.txt"; then adv_nodest=$(( adv_nodest + 1 ))
     else no "(#353 adversarial) $adv_name: want bare CRITICAL rows only (no dest=, owner= on any): $( grep -oE "<f p=\"[^\"]*/$adv_name\.md:[^>]*>" "$TMP/adv_out.txt" )"; fi
 done
-if [ "$adv_nodest" = 30 ]; then ok "(#353 adversarial) the 30 rebinding, here-doc, conditional, escaped, non-canonical, rerouted, word-list, URL-file and second-sink lines name no dest= (resolution refused, host unproved)"
-else no "(#353 adversarial) only $adv_nodest/30 unprovable-host fixtures are bare CRITICAL rows"; fi
+if [ "$adv_nodest" = 33 ]; then ok "(#353 adversarial) the 33 rebinding, here-doc, example-fence, conditional, escaped, cut-name, non-canonical, rerouted, word-list, URL-file and second-sink lines name no dest= (resolution refused, host unproved)"
+else no "(#353 adversarial) only $adv_nodest/33 unprovable-host fixtures are bare CRITICAL rows"; fi
 if [ "$adv_rc" = 2 ]; then ok "(#353 adversarial) the set exits 2"; else no "(#353 adversarial) the set exits $adv_rc, want 2"; fi
 
 # ── check 19 (0.6.6): a bundled SHELL SCRIPT is scanned as code, not through the markdown fence tracker ──
