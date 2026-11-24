@@ -13,6 +13,7 @@
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
 #include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
 #include "foractline.h"     // BR1: the act line — the page's top undelivered ranges, read in one turn
+#include "fortinyshape.h"   // THETA6 (dev knob RIPWIRE_TINY_SHAPE): the named-location tiny shape
 #include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
@@ -5938,6 +5939,24 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
 // is rendered into a buffer here; nullopt: not this posture, or no buffer to render into, or a capture that failed (the caller then
 // renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
 // print twice).
+// THETA6 (fortinyshape.h): whether this call may take the tiny shape at all — the knob on, page 1 of the default page, and nothing
+// else asked for a shape. An explicit --page-bytes turns it off: that is how the shape's <more next=> returns the full page 1.
+inline bool forTinyShapeEligible( const rw::Config& cfg )
+{
+    return rw::tinyshape::tinyShapeOn() && cfg.pageBytesSpec.empty() && cfg.forPage == 1 && cfg.tokenBudget == 0 && cfg.maxTokens == 0
+        && cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && cfg.sections.empty() && !cfg.compress && !cfg.withGraph;
+}
+
+// The tiny answer for the raw render `doc`, or nullopt (not eligible, or the detector did not fire).
+inline std::optional<std::string> forTinyShape( const rw::Config& cfg, std::string_view doc )
+{
+    if( !forTinyShapeEligible( cfg ) )
+    {
+        return std::nullopt;
+    }
+    return rw::tinyshape::tinyAnswer( doc, cfg.forTask, forUnbudgetedCall( cfg ) + " --page-bytes=" + std::to_string( cfg.forPageBytes ) );
+}
+
 inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
@@ -6000,6 +6019,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             std::string doc = r.out->bytes;
             (void)rw::actline::insertActLine( doc, 0, &r.ledger );   // BR1 (foractline.h): into the raw render, as every path does — first
+            if( std::optional<std::string> tiny = forTinyShape( d.cfg, doc ) )   // THETA6: a named location is served its ranges only
+            {
+                std::fwrite( tiny->data(), 1, tiny->size(), stdout );
+                return r.rc;
+            }
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document

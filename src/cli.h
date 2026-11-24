@@ -6173,8 +6173,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // THIS environment (lines; elements under RIPWIRE_NO_ROWLINES), so an experiment records it without an answer byte.
             // act= (BR1, foractline.h) names whether a --for page carries its act line in THIS environment (off under RIPWIRE_NO_ACTLINE).
             // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
+            // tiny=on (THETA6, fortinyshape.h) only under the dev knob RIPWIRE_TINY_SHAPE: the default line is unchanged.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, {}act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, std::getenv( "RIPWIRE_TINY_SHAPE" ) ? "tiny=on, " : "",
+                        rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
                         kRipwireGitStamp );
             std::exit( 0 );
         }
