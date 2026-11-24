@@ -13,12 +13,14 @@
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
-#   (C3) REFILL, never growth: default page 1 bytes <= --legend=last page 1 bytes, and its withheld_bytes= is <= (it holds at
-#        least the rows the full-legend page 1 holds)
+#   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1, and its
+#        withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
 #   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte; --page-bytes=0 is unchanged by the core
 #   (C5) ROW IDENTITY under the core: following next= to the last page, every page's <d>/<t> rows joined equal the
 #        --page-bytes=0 answer's rows in order; (C5n) dropping one row makes it fail
 #   (C6) a one-page default answer carries the core legend too, and every default page is well-formed XML
+#   (C7) THE CUT IS FORM-INDEPENDENT: page 1 in the line form and in the element form (RIPWIRE_NO_ROWLINES) ends at the same row
+#        (equal withheld_bytes=), so the row form stays a lossless re-spelling (rowlinescheck (L1)) and next= needs no --rows=
 set -u
 export RIPWIRE_NO_ROWLINES=1   # (C5) reads rows as elements; the line form is lossless (rowlinescheck (L1))
 unset RIPWIRE_NO_CORE_LEGEND
@@ -27,6 +29,8 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
 command -v python3 >/dev/null 2>&1 || { echo "corelegendcheck: python3 required"; exit 2; }
+fail=0
+no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "corelegendcheck: BIN=$BIN"
 cd "$ROOT" || exit 2
@@ -38,6 +42,8 @@ RIPWIRE_NO_CORE_LEGEND=1 "$BIN" . --for="$TASK"          >"$WORK/knob_1.xml" 2>/
 "$BIN" . --for="$TASK" --page-bytes=0                    >"$WORK/whole.xml" 2>/dev/null
 RIPWIRE_NO_CORE_LEGEND=1 "$BIN" . --for="$TASK" --page-bytes=0 >"$WORK/whole_knob.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=100000000            >"$WORK/onepage.xml" 2>/dev/null
+env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK"                 >"$WORK/lines_1.xml" 2>/dev/null
+env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --legend=last   >"$WORK/lines_last_1.xml" 2>/dev/null
 k=1
 while :; do   # follow next= (pasteable shell: shlex, never by hand)
     nx="$( python3 -c 'import re,sys,html; d=open(sys.argv[1],encoding="utf-8").read(); m=re.match(r"<ctx\b[^>]*?\snext=\"([^\"]*)\"",d); print(html.unescape(m.group(1)) if m else "")' "$WORK/core_$k.xml" )"
@@ -79,9 +85,10 @@ say(okc, f"(C1) default page 1 legend {nb} B in {nc} comment(s), <= 1024 B, carr
 say(not core_ok(core.replace(POINTER, ""))[0], "(C1n) the checker fails page 1 with the pointer removed")
 say(not core_ok(last)[0], "(C1n) the checker fails the full-legend (--legend=last) page 1")
 say("<!-- page=K of pages=N:" in last and len(lleg.encode()) > 1024, "(C2) --legend=last page 1 carries the page clause and the full legend")
-cw, lw = root_int(core, "withheld_bytes"), root_int(last, "withheld_bytes")
-say(len(core.encode()) <= len(last.encode()) and cw is not None and lw is not None and cw <= lw,
-    f"(C3) refill: page 1 {len(core.encode())} B <= {len(last.encode())} B; withheld_bytes {cw} <= {lw}")
+lc, ll = rd(W + "/lines_1.xml"), rd(W + "/lines_last_1.xml")
+cw, lw = root_int(lc, "withheld_bytes"), root_int(ll, "withheld_bytes")
+say(len(lc.encode()) <= len(ll.encode()) and cw is not None and lw is not None and cw <= lw,
+    f"(C3) refill: page 1 as served {len(lc.encode())} B <= {len(ll.encode())} B; withheld_bytes {cw} <= {lw}")
 say(knob == last, "(C4) RIPWIRE_NO_CORE_LEGEND=1 page 1 == --legend=last page 1, byte for byte")
 say(rd(W + "/whole.xml") == rd(W + "/whole_knob.xml"), "(C4) --page-bytes=0 is untouched by the core legend")
 ROW = re.compile(r"<d\b[^>]*>.*?</d>|<t\b[^>]*/>", re.S)
@@ -96,8 +103,10 @@ for p in sorted(glob.glob(W + "/core_*.xml")) + [W + "/onepage.xml"]:
     r = subprocess.run(["xmllint", "--noout", p], capture_output=True)
     if r.returncode: say(False, f"(C6) {p.rsplit('/',1)[1]} is not well-formed: {r.stderr[:200]!r}")
 say(True, "(C6) every default page parsed (xmllint)")
+ew = root_int(core, "withheld_bytes")
+say(cw is not None and cw == ew, f"(C7) one cut in both row forms: withheld_bytes lines {cw} == elements {ew}")
 sys.exit(1 if bad else 0)
 PY
-rc=$?
-[ "$rc" -eq 0 ] && echo "corelegendcheck: PASS" || echo "corelegendcheck: FAIL"
-exit "$rc"
+[ $? -eq 0 ] || no "an arm above failed"
+[ "$fail" -eq 0 ] && echo "corelegendcheck: PASS" || echo "corelegendcheck: FAIL"
+exit "$fail"

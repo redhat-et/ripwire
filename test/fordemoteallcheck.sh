@@ -39,6 +39,9 @@
 #        2500 (red before: 29 / 50 / 62 against 24 / 29 / 36). Premise, counted: each answer carries >= 1 pointer and its twin's tail
 #        >= 1 file; FAILS on zero.
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 # FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
 # one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
 # reads those rows as elements for another rule, so the line form is off here.

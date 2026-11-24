@@ -5859,7 +5859,7 @@ inline bool serveForPage( const rw::Config& cfg, std::string& doc )
         return true;
     }
     const std::string           call = forUnbudgetedCall( cfg );
-    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ), .rows = cfg.rowsSpec };
+    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ) };
     const rw::forpages::PageResult res = rw::forpages::pageAnswer( doc, ask );
     const bool exists = res.outcome == rw::forpages::PageResult::Outcome::Paged || cfg.forPage == 1;
     if( !exists )

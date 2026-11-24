@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,7 +50,7 @@
 #include "legenddict.h"      // detail::aboutPointer — the ref posture's closing pointer
 #include "forpagelegend.h"   // LD1: a clause only a later page uses travels with that page
 #include "nextverb.h"        // nextAttrXml — the ONE next= spelling
-#include "forrowlines.h"     // θ5: encodeRows — page 1's refill is measured as delivered (rows as lines)
+#include "forrowlines.h"     // θ5: encodeRows — page 1's refill is measured in the default row form (rows as lines)
 
 namespace rw::forpages
 {
@@ -66,7 +67,6 @@ struct PageAsk
     std::size_t      page      = 1;
     std::string_view call;
     bool             coreLegend = false;   // θ5: page 1 carries the core legend and refills with rows (the defaulted CLI posture)
-    std::string_view rows;                 // θ5: --rows= as typed (Config::rowsSpec), so the refill measures page 1 as delivered
 };
 
 struct PageResult
@@ -444,8 +444,8 @@ inline void markActLine( Stream& st )
     return scope::shed( st.view.substr( legendAt, st.closeAt - legendAt ), views );
 }
 
-// θ5 REFILL: under the core legend page 1 ends at the LAST cut whose page 1, as delivered (priced, rows as lines), is no larger than
-// today's page 1 with the full legend — so page 1 never grows and the freed legend bytes go to the next rows in page order. At least
+// θ5 REFILL: under the core legend page 1 ends at the LAST cut whose page 1, as the DEFAULT delivers it (priced, rows as lines), is no
+// larger than today's page 1 with the full legend — so page 1 never grows and the freed legend bytes go to the next rows in page order. At least
 // two pages stay (a whole answer is pageAnswer's case). Deterministic in the document and the ask, so every page of one answer
 // computes the same ends and page k starts where page 1 ended. `st.gone` is left as the returned ends shed.
 [[nodiscard]] inline std::size_t deliveredFirstPage( Stream& st, const PageAsk& ask, const std::vector<std::size_t>& ends )
@@ -453,7 +453,9 @@ inline void markActLine( Stream& st )
     st.gone       = shedFor( st, ends );
     std::string p = firstPage( st, ask, st.cuts[ ends[ 0 ] ], ends.size() );
     pricePage( p );
-    (void)rowlines::encodeRows( p, ask.rows );
+    // ALWAYS the line form, whatever --rows= or RIPWIRE_NO_ROWLINES says: the cut must not depend on the row form, so --rows=elements
+    // holds the same rows as the default (the row form is a lossless re-spelling: rowlinescheck (L1), mcpforrowscheck (N2))
+    (void)rowlines::encodeRows( p, rowlines::kRowsLines );
     return p.size();
 }
 // Today's page 1 (the full legend) is no smaller than the whole answer, so pageAnswer serves the answer whole: the same test as there.
@@ -464,12 +466,30 @@ inline void markActLine( Stream& st )
     st.gone         = shedFor( st, ends );
     return firstPage( st, full, st.cuts[ ends[ 0 ] ], ends.size() ).size() >= st.view.size();
 }
+// THE REFILL IS <tail> ROWS ONLY (θ5 as measured offline): a cut inside the tail section, or right after its close. A page 1 that
+// leaves no tail open gets no refill, and a refill never opens a later section — measured: refilling past the tail spent 28 KB more
+// row bytes over the l1 sets than the emulation and won no complete answer.
+[[nodiscard]] inline bool tailCut( const Stream& st, const Cut& c ) noexcept
+{
+    if( c.openSec != std::string_view::npos )
+    {
+        return st.blocks[ c.openSec ].name == "tail";
+    }
+    return std::ranges::any_of( std::span( st.blocks ).first( st.streamBlocks ),
+                                [&c]( const answerfirst::Block& b ) { return !b.comment && b.name == "tail" && b.end == c.at; } );
+}
 [[nodiscard]] inline std::vector<std::size_t> coreEnds( Stream& st, const PageAsk& ask, std::vector<std::size_t> ends )
 {
+    const Cut& first = st.cuts[ ends[ 0 ] ];
+    if( first.openSec == std::string_view::npos || !tailCut( st, first ) )
+    {
+        st.gone = shedFor( st, ends );
+        return ends;
+    }
     PageAsk full = ask;
     full.coreLegend         = false;
     const std::size_t today = deliveredFirstPage( st, full, ends );
-    for( std::size_t last = ends[ 0 ] + 1; last + 1 < st.cuts.size(); ++last )
+    for( std::size_t last = ends[ 0 ] + 1; last + 1 < st.cuts.size() && tailCut( st, st.cuts[ last ] ); ++last )
     {
         std::vector<std::size_t> e = pageEnds( st.cuts, ask.pageBytes, last );
         if( deliveredFirstPage( st, ask, e ) > today ) { break; }
