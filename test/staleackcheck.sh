@@ -296,4 +296,39 @@ else
     grep -o '<quality-delta[^>]*>\|<sa[^>]*/>' "$TMP/clean2"
 fi
 
+# ── (6) CR721 — the RANGE form's stale_next= replays the SAME answer: it names the two commits compared, not the symbolic
+#     range (HEAD~1..HEAD after HEAD moves compares another pair). Fixture: knotty() + 60 uncalled helpers acked, all deleted, then a tweak commit, so
+#     HEAD~1..HEAD has no regression and 61 stale acks (enough for the fold to pay). PREMISE: the fold is there (stale_next=).
+#     RED before (rebased train tip 43be39fcd): stale_next="--quality-delta=HEAD~1..HEAD --show-stale".
+REPO3="$( mktemp -d )"; trap 'rm -rf "$REPO" "$REPO2" "$REPO3" "$TMP"' EXIT
+run3(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$REPO3" "$@"; }
+G3=( git -C "$REPO3" -c user.email=x@y -c user.name=x -c commit.gpgsign=false )
+mkdir -p "$REPO3/src"; echo 'int stable( int a ) { return a + 1; }' >"$REPO3/src/lib.cpp"
+"${G3[@]}" init -q; "${G3[@]}" add -A; "${G3[@]}" commit -qm init
+cat >>"$REPO3/src/lib.cpp" <<'EOF'
+int knotty( int a, long b, int c ) {
+    int r = 0;
+    for( int i = 0; i < a; ++i ) {
+        if( i % 2 == 0 ) { if( i > b ) { r += i; } else { r -= 1; } }
+        else { for( int j = 0; j < b; ++j ) { if( j > c ) { r += j; } else { r--; } } }
+        while( r > c && r > b ) { r = r - 1; if( r % 3 == 0 ) { r += 2; } }
+    }
+    return r;
+}
+EOF
+for i in $( seq 1 60 ); do echo "int helper$i( int a ) { return a * $i + 7; }" >>"$REPO3/src/lib.cpp"; done
+run3 --quality-delta --quality-ack="fixture 3: accepted" >/dev/null 2>&1
+"${G3[@]}" add -A; "${G3[@]}" commit -qm knotty
+echo 'int stable( int a ) { return a + 1; }' >"$REPO3/src/lib.cpp"; "${G3[@]}" commit -qam gone
+echo 'int stable( int a ) { return a + 2; }' >"$REPO3/src/lib.cpp"; "${G3[@]}" commit -qam tweak
+b3="$( "${G3[@]}" rev-parse HEAD~1 )"; t3="$( "${G3[@]}" rev-parse HEAD )"
+for sel in ""; do
+    run3 --quality-delta=HEAD~1..HEAD ${sel:+"$sel"} --no-cache >"$TMP/range5" 2>/dev/null; r5=$?
+    want="--quality-delta=$b3..$t3${sel:+ $sel} --show-stale"
+    got="$( grep -oE 'stale_next="[^"]*"' "$TMP/range5" | head -1 | sed 's/^stale_next="//; s/"$//' )"
+    if [ "$r5" != 0 ] || [ -z "$got" ]; then no "(6) PREMISE '${sel:-all kinds}': want rc 0 and a folded range answer with stale_next=, got rc=$r5 '${got:-none}'"
+    elif [ "$got" = "$want" ]; then ok "(6) '${sel:-all kinds}': stale_next= names the compared commits${sel:+ and keeps $sel}"
+    else no "(6) '${sel:-all kinds}': want stale_next=\"$want\", got \"$got\""; fi
+done
+
 [ "$fail" -eq 0 ] && echo "staleackcheck: ALL PASS" || { echo "staleackcheck: SOME CHECKS FAILED"; exit 1; }
