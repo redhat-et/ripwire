@@ -7024,7 +7024,7 @@ inline std::string_view qualifierOuterName( std::string_view qualified ) noexcep
 struct NamesakeWalk
 {
     HashMap<std::string_view, HashSet<std::string_view>> ancestorsOf;
-    std::size_t                                           probes   = 0;   // derives-from questions asked
+    std::size_t                                           probes   = 0;   // derives-from questions asked (of every candidate: order-free)
     std::size_t                                           walks    = 0;   // distinct outer names walked
     std::size_t                                           pushes   = 0;   // names those walks entered
     std::size_t                                           namesake = 0;   // inherit edges judged namesakes
@@ -7252,7 +7252,10 @@ inline bool isNamesakeBaseEdge( const IngestResult& ing, const ClassIdentity& id
             const std::string& nOuter = ing.symbols[ ids.enclosingClass[ n ] ].name;
             return n != derived && ( nOuter == outerName || walk.derives( outerName, nOuter, chaUp ) );
         };
-        if( std::ranges::any_of( nested->second, inScope ) )
+        // every candidate is asked, not up to the first yes: the candidates come in node-id (file) order, and a short circuit
+        // made the RIPWIRE_STATS probes= count depend on where the matching class sat in it. The verdict is the same OR.
+        const auto inScopeCount = std::ranges::count_if( nested->second, inScope );
+        if( inScopeCount > 0 )
         {
             return true;
         }
@@ -9125,7 +9128,7 @@ struct Narrower
     // by-name reading
     std::optional<MeantClasses> unjudgedBase( std::size_t parent, const std::string& base, std::span<const NodeId> from, bool drawn, bool baseDefined ) const
     {
-        MeantClasses byName{ {}, walkMeant[ parent ].unbound };   // not const: moved out on return
+        MeantClasses byName{ {}, walkMeant[ parent ].unbound };   // not const: the return below moves it
         if( drawn )
         {
             return std::nullopt;   // every edge drawn is the name collision: the evidence names a class the tree does not define here

@@ -3510,10 +3510,10 @@ $ ./build/ripwire . --slice-depth=3
 _Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost._
 
 ```
-$ ./build/ripwire . --at=src/graph.h:15069
+$ ./build/ripwire . --at=src/graph.h:15093
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
-<at schema="ripwire.at/v1" p="src/graph.h" l="15069" sym="rankGraphTeleport" chain="1" root=".">
-<s n="rankGraphTeleport" t="fn" l="15067" el="15095"/>
+<at schema="ripwire.at/v1" p="src/graph.h" l="15093" sym="rankGraphTeleport" chain="1" root=".">
+<s n="rankGraphTeleport" t="fn" l="15091" el="15119"/>
 </at>
 ```
 
@@ -3831,7 +3831,7 @@ $ ./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all
 
 **Answers:** the dark-content dashboard: what is built but switched OFF in this repo the dark-content dashboard: what is BUILT but OFF in this repo.
 
-Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all. BASH: in .sh/.bash/.zsh every $X / ${X...} expansion is an env read unless the same file assigned X before it (X=, export X=, local/declare/readonly, read, for, mapfile, getopts, printf -v, ((X=…)); read/select/getopts/mapfile also set REPLY/OPTARG/ MAPFILE). An assignment takes effect where its command ends; a prefix X=v cmd is not a write; a function's local/declare (and any later write of that name in it) hides reads only to that function's end, a write inside $( ) or ( ) only to that subshell's end, and a write in a pipeline component or a background job (cmd | read X, X=1 &, a piped while loop) nothing past its command (after shopt -s lastpipe the pipeline's last command runs in the script itself). Each read row carries form= (required ${X:?}/${X?}, default ${X:-d}, unset-default ${X-d}, settest ${X:+w}/${X+w} or a -n/-z operand of [ / [[ / test, assign ${X:=d}, plain $X), colon=1|0 (does an EMPTY value count as unset), default= the literal word, and test=n|z; write rows list the name's assignments repo-wide; ambient="1" tags a name Bash or the login always sets (PWD, HOME, BASH_SOURCE, RANDOM and the like). A shell file whose header is a GENERATED/DO-NOT-EDIT banner is skipped (generated_skipped=N). Bash LIMITS: lexical order within one file, no flow — a name set only by eval, by printf -v "$1", in a function defined below the read, or in a sourced file still reads as external (the write rows let a consumer that follows source join them). An expansion nested more than 32 deep in another's word is not read past that depth, and the root counts such files (nesting_cut=N). A file --flags cannot open or read to its end is counted as unreadable=N on the root: every count is then a floor. .zsh files are read with Bash's rules (no zsh-only expansion flags), and a script with no .sh/.bash/.zsh extension (a bare #!/bin/bash file) is not scanned. --flags --json emits the same rows as JSON (raise --limit to lift the site cap).
+Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all. BASH: in .sh/.bash/.zsh every $X / ${X...} expansion is an env read unless the same file assigned X before it (X=, export X=, local/declare/readonly, read, for, mapfile, getopts, printf -v, ((X=…)); read/select/getopts/mapfile also set REPLY/OPTARG/ MAPFILE). An assignment takes effect where its command ends; a prefix X=v cmd is not a write; a function's local/declare (and any later write of that name in it) hides reads only to that function's end (a local run in a child shell, ( local X ), binds nothing past that shell, and declare -g writes the global), a write inside $( ) or ( ) only to that subshell's end, and a write in a pipeline component or a background job (cmd | read X, X=1 &, a piped while loop) nothing past its command (after shopt -s lastpipe the pipeline's last command runs in the script itself; the scan does not track set -m, under which Bash still runs it in a child shell, so its write can hide a later read). Each read row carries form= (required ${X:?}/${X?}, default ${X:-d}, unset-default ${X-d}, settest ${X:+w}/${X+w} or a -n/-z operand of [ / [[ / test, assign ${X:=d}, plain $X), colon=1|0 (does an EMPTY value count as unset), default= the literal word, and test=n|z; write rows list the name's assignments repo-wide; ambient="1" tags a name Bash or the login always sets (PWD, HOME, BASH_SOURCE, RANDOM and the like). A shell file whose header is a GENERATED/DO-NOT-EDIT banner is skipped (generated_skipped=N). Bash LIMITS: lexical order within one file, no flow — a name set only by eval, by printf -v "$1", in a function defined below the read, or in a sourced file still reads as external (the write rows let a consumer that follows source join them). An expansion nested more than 32 deep in another's word is not read past that depth, and the root counts such files (nesting_cut=N). A file --flags cannot open or read to its end is counted as unreadable=N on the root, and one too big to read (over the crawl's --max-file-size, a data lane's own ceiling (YAML 512 KB), or --flags' own 64 MB cap) as oversize=N, with oversize_limit= the smallest ceiling that dropped one. JSON over its 256 KB ceiling is not counted: no gate is live in a .json file. With either count present, gates= is a floor, and dark_gates= and the per-kind counts are incomplete in either direction (a declaration in a missing file can reclassify a gate). .zsh files are read with Bash's rules (no zsh-only expansion flags), and a script with no .sh/.bash/.zsh extension (a bare #!/bin/bash file) is not scanned. --flags --json emits the same rows and root counts as JSON, read the same way (raise --limit to lift the site cap).
 
 **Try it**
 
@@ -4096,8 +4096,8 @@ $ ./build/ripwire . --from-trace=-
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:15069
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:15112
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:15093
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:15136
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1930
     #3 0x102e01a44 in main src/main.cpp:4835
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
@@ -4790,7 +4790,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=6c4aa81a81163d18 entries=1320
+ripwire legend dictionary ripwire.dict/v1 dictv=0d983acad983c50f entries=1322
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -5125,7 +5125,7 @@ $ ./build/ripwire . --max-file-size=8K --top-k=3
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--expand`, `--skipped`
+**Shaped by:** `--expand`, `--flags`, `--skipped`
 
 **Caveats (stated by the binary):**
 

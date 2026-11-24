@@ -47,16 +47,14 @@ inline std::string reading( std::uint64_t bytes )
 
 // one `[mem] phase=<phase> cur_mib=<now> peak_mib=<lifetime peak>` line when RIPWIRE_STATS is set (either reading may be
 // `unavailable`)
-// `literal` is a pointer, not a view, because notePhase KEEPS it (the refusal names the last phase): every caller passes a
-// string literal, which is NUL-terminated and lives forever. A string_view could arrive unterminated, so its data() could not.
-inline void mark( const char* literal )
+inline void mark( const char* literal )   // a string literal: notePhase keeps the pointer, so it must be NUL-terminated and live forever
 {
     memceiling::notePhase( literal );
+    const std::string_view phase( literal );
     if( !enabled() )
     {
         return;
     }
-    const std::string_view phase( literal );
     rw::emitTo( stderr, "[mem] phase={} cur_mib={} peak_mib={}\n", phase, reading( os::mem_footprint() ), reading( os::mem_footprint_peak() ) );
     if( phase == "graph-end" )   // the allocator line's cost on this run: footprint readings taken, how many on a large block,
     {                            // and how many the OS could not answer (admitted unchecked — memceiling.h noteUnreadable)

@@ -860,7 +860,7 @@ inline std::vector<char> defGroupsSilent( const DefGroups& groups, const RowDefT
     std::vector<char> silent( groups.size(), 0 );
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        silent[k] = char( groups.untied[k] && !named[k] );
+        silent[k] = static_cast<char>( groups.untied[k] && !named[k] );
     }
     return silent;
 }

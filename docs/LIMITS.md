@@ -45,7 +45,7 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-22 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-23 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
@@ -278,6 +278,8 @@ Discloses: `capped`, `reads_capped`, `writes_capped`
 | --- | --- | --- | --- |
 | `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEnvNameLen` | `128` | BOUNDARY | longest plausible environment-variable name |
+| `kMaxFlagFileBytes` | `67108864` | INDEXING | 64 MiB read cap; a file past it counts in oversize= (#699) |
+| `kMaxReadWholeBytes` | `4194304` | INDEXING | 4 MiB read cap for every verb but --flags; a file past it is disclosed unread |
 | `kMaxShellNesting` | `32` | INDEXING | — |
 | `kMaxSitesShown` | `8` | OUTPUT | <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail |
 

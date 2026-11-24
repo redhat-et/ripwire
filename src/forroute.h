@@ -27,6 +27,9 @@
 //                 "blast radius" with no who-calls and no where-used word is TRANSITIVE (→ --impact); with one it stays
 //                 direct-radius (→ --uses). Off (kBareBlastRadiusOn = false): every "blast radius" is direct-radius, as RT2 had it.
 // A vetoed question is answered as every unrouted question is: the --for answer, byte for byte.
+// R1 (lane R1, 2026-11-23) — an apply/invoke word ("apply", "invoke" and their forms) is a where-used cue unless "how do|does|did"
+// leads it in its sentence: "how does rake invoke the task … `multitask` …" asks how the actor works, and the backticked symbol is
+// not what is invoked. "where is `X` invoked", "what invokes `X`", a passive "how is `X` applied" still route (howDoBefore).
 #pragma once
 
 #include <algorithm>
@@ -247,12 +250,80 @@ template <class OkAt>
     } );
 }
 
+// Where the sentence that `from` sits in ends: the first '?', or the first '.' followed by whitespace or the end — a '.' inside a
+// dotted name (`Application.initialize`) does not end it (Python's (?:[^?.]|\.(?!\s|$))*). npos: the text's end.
+[[nodiscard]] inline bool endsSentenceAt( std::string_view lq, std::size_t i ) noexcept
+{
+    const bool spaceNext = i + 1 == lq.size() || lq[ i + 1 ] == ' ' || lq[ i + 1 ] == '\t' || lq[ i + 1 ] == '\n' || lq[ i + 1 ] == '\r'
+                        || lq[ i + 1 ] == '\f' || lq[ i + 1 ] == '\v';
+    return lq[ i ] == '?' || ( lq[ i ] == '.' && spaceNext );
+}
+[[nodiscard]] inline std::size_t sentenceEnd( std::string_view lq, std::size_t from )
+{
+    for( std::size_t i = from; i < lq.size(); ++i )
+    {
+        if( endsSentenceAt( lq, i ) )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+// Where the sentence that `at` sits in begins: just after the last sentence end (sentenceEnd's reading) before `at`; 0 if none.
+[[nodiscard]] inline std::size_t sentenceStart( std::string_view lq, std::size_t at )
+{
+    for( std::size_t i = at; i > 0; --i )
+    {
+        if( endsSentenceAt( lq, i - 1 ) )
+        {
+            return i;
+        }
+    }
+    return 0;
+}
+
+// `word`, bounded on both sides, at an offset in [from, the end of from's sentence).
+[[nodiscard]] inline bool wordInSentence( std::string_view lq, std::size_t from, std::string_view word )
+{
+    const std::size_t      stop = sentenceEnd( lq, from );
+    const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
+    return occursWhere( span, word, [ & ]( std::size_t at ) { return isBoundary( lq, from + at ) && isBoundary( lq, from + at + word.size() ); } );
+}
+
+// R1 (the rake-12 everyday question): "how does rake invoke the task … `multitask` …" asks how the ACTOR works; the backticked
+// symbol is not what gets invoked, so --uses on it drops the answer. True when "how" + do|does|did precedes `at` in its sentence;
+// a passive "how is `X` invoked", "where is `X` applied" and "what invokes `X`" stay where-used.
+[[nodiscard]] inline bool howDoBefore( std::string_view lq, std::size_t at )
+{
+    const std::size_t      from = sentenceStart( lq, at );
+    const std::string_view head = lq.substr( from, at - from );
+    return occursWhere( head, "how", [ & ]( std::size_t h )
+    {
+        const std::size_t k = afterBoundedWord( head, h, 3 );
+        if( k == std::string_view::npos || k == h + 3 )
+        {
+            return false;   // not the word "how", or no space after it
+        }
+        static constexpr std::string_view kAux[] = { "does", "did", "do" };
+        return std::ranges::any_of( kAux, [ & ]( std::string_view aux ) { return head.substr( k, aux.size() ) == aux && isBoundary( head, k + aux.size() ); } );
+    } );
+}
+
 // rule R2's where-used cues (RT2; see the header for the pattern this transcribes).
 [[nodiscard]] inline bool isWhereUsed( std::string_view lq )
 {
     constexpr std::string_view kWords[] = { "usage", "usages", "reference", "references", "referenced", "referencing", "pass", "passes",
-                                            "passed", "passing", "apply", "applies", "applied", "invoke", "invokes", "invoked" };
+                                            "passed", "passing" };
     if( std::ranges::any_of( kWords, [ & ]( std::string_view w ) { return hasBoundedWord( lq, w, true ); } ) )
+    {
+        return true;
+    }
+    // R1: an apply/invoke word cues where-used unless "how do|does|did" leads it in its sentence (howDoBefore).
+    constexpr std::string_view kActWords[] = { "apply", "applies", "applied", "invoke", "invokes", "invoked" };
+    if( std::ranges::any_of( kActWords, [ & ]( std::string_view w )
+        {
+            return occursWhere( lq, w, [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + w.size() ) && !howDoBefore( lq, at ); } );
+        } ) )
     {
         return true;
     }
@@ -276,30 +347,6 @@ template <class OkAt>
         const std::size_t base = at + 8;
         return occursWhere( rest, "use", [ & ]( std::size_t u ) { return isBoundary( lq, base + u ); } );
     } );
-}
-
-// Where the sentence that `from` sits in ends: the first '?', or the first '.' followed by whitespace or the end — a '.' inside a
-// dotted name (`Application.initialize`) does not end it (Python's (?:[^?.]|\.(?!\s|$))*). npos: the text's end.
-[[nodiscard]] inline std::size_t sentenceEnd( std::string_view lq, std::size_t from )
-{
-    for( std::size_t i = from; i < lq.size(); ++i )
-    {
-        const bool spaceNext = i + 1 == lq.size() || lq[ i + 1 ] == ' ' || lq[ i + 1 ] == '\t' || lq[ i + 1 ] == '\n' || lq[ i + 1 ] == '\r'
-                            || lq[ i + 1 ] == '\f' || lq[ i + 1 ] == '\v';
-        if( lq[ i ] == '?' || ( lq[ i ] == '.' && spaceNext ) )
-        {
-            return i;
-        }
-    }
-    return std::string_view::npos;
-}
-
-// `word`, bounded on both sides, at an offset in [from, the end of from's sentence).
-[[nodiscard]] inline bool wordInSentence( std::string_view lq, std::size_t from, std::string_view word )
-{
-    const std::size_t      stop = sentenceEnd( lq, from );
-    const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
-    return occursWhere( span, word, [ & ]( std::size_t at ) { return isBoundary( lq, from + at ) && isBoundary( lq, from + at + word.size() ); } );
 }
 
 // \b(does|do|did)\b S \bcall\b starting at `from`, within one sentence.

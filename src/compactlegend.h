@@ -696,6 +696,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "anchor",            "<c anchor=missing>: that markdown link named a heading this file does not have, so the edge is the file", true, "c", MapHeaderRead::No, "missing" },
     // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: the callers selector the M1 rule narrowed
     { "narrowed",          "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "callers", MapHeaderRead::No, {}, "callers" },
+    // CALLERS-TWO-COPY-BIND (src/forgraphverb.h kSourceCopyLegend), present-only: beside narrowed=, the copies the bind left out
+    { "copy_p",            "copy_p=: beside narrowed=, the other definitions the spelling fits are COPIES (CI/tool dot dir, vendoring dir, demo/generated tier, or a generated/copied banner), so the one source definition answers; p:line each, not counted", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "copy_next",         "copy_next=: the callers call on the first copy_p= copy", false, "callers", MapHeaderRead::No, {}, "callers" },
     // CALLSITE-AT (2026-10-09): a callers row's call sites (editcheck.h rowCallSites); keyed to the callers schema, so the
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
     { "sites_at",          "<s sites_at=>: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },

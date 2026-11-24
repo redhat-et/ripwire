@@ -24,15 +24,10 @@ when to reach for each command.
 **Want every detail?** [The reference guide](docs/REFERENCE_GUIDE.md) covers install, commands, output
 format, exit codes and limits. You do not need it to get started.
 
-<details>
-<summary><b>Field report: what ripwire contributed to a large multi-agent coding engagement</b> — written by Claude Fable 5.0, the frontier model orchestrating ~20 coding agents over two days on a ~1,500-file C++/Metal codebase. Click for the full report.</summary>
+**Field report: what ripwire contributed to a large multi-agent coding engagement** — written by Claude Fable 5.0, the frontier model orchestrating ~20 coding agents over two days on a ~1,500-file C++/Metal codebase. Its bottom line: a good lookup accelerator for one developer, and load-bearing for an orchestrated fleet. It halved the research spend, redirected two tasks before work was wasted, caught at least one bug before it shipped, and made code-quality checks a per-task gate: about 2× on the whole workflow, 10–25× per lookup.
 
-> For a single developer, this tool is a good lookup accelerator. For an *orchestrated fleet*, it's load-bearing: it
-> halved the research spend, twice redirected tasks before wasted work, prevented at least one silent-divergence shipped
-> bug, and turned code-quality hygiene from a hope into a per-task mechanical gate. Whole-workflow ~2×; per-lookup
-> 10–25×; and two moments where one call was worth more than the rest of the session's tooling combined.
->
-> — the report's bottom line
+<details>
+<summary>The full report (image and a text version)</summary>
 
 <p align="center"><a href="docs/assets/field-report-multi-agent.jpg"><img src="docs/assets/field-report-multi-agent.jpg"
   alt="The full field report: what ripwire contributed to a large multi-agent coding engagement — headline numbers, where the value concentrated, the honest boundary, and the bottom line" width="720"></a></p>
@@ -139,7 +134,7 @@ claim cannot quietly drift. The row-by-row ledger is
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-**Latest: 0.6.10** — more complete `--for` answers, warm runs on large repositories that use 35 to 67 % less CPU, and about half the peak memory of an index on macOS. [Release notes](#release-notes) ·
+**Latest: 0.7.0** — practical for large repositories on small and normal-sized machines: llvm-project (80,576 source files of the 180,650 git tracks) indexes cold in 28 s at a 5.1 GB peak; complete answers on 126 of 213 held-out tasks, against 68 for the next tool. [Release notes](#release-notes) ·
 [the presentation](present/ripwire-showcase.pdf) · [the changelog](CHANGELOG.md) — with thanks to the
 contributors named there.
 
@@ -1143,7 +1138,7 @@ report back. The exe is not code-signed. `Expand-Archive` does not pass the down
 files it extracts, so SmartScreen does not prompt for an exe unpacked this way; no prompt is not a verdict. In PowerShell:
 
 ```powershell
-$v = "0.6.10"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
+$v = "0.7.0"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
 Invoke-WebRequest "$u/$a.zip" -OutFile "$a.zip"; Invoke-WebRequest "$u/$a.zip.sha256" -OutFile "$a.zip.sha256"
 # extracts only when the SHA-256 matches; on a mismatch it throws and nothing is unpacked
 if ((Get-FileHash "$a.zip" -Algorithm SHA256).Hash -eq (Get-Content "$a.zip.sha256").Split(" ")[0]) { Expand-Archive "$a.zip" -DestinationPath "$env:LOCALAPPDATA\Programs" } else { throw "SHA-256 mismatch: do not run $a.zip" }
@@ -1825,9 +1820,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>912 gate scripts</b> (counts snapshot 2026-11-22), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>912 gate scripts</b> (counts snapshot 2026-11-23), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **912 gate scripts** at the counts snapshot 2026-11-22 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **912 gate scripts** at the counts snapshot 2026-11-23 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1836,7 +1831,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-22 the tool had 469 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-23 the tool had 469 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names
@@ -2086,10 +2081,12 @@ disagrees with `--help`, the guide is the defect.
 ## Release notes
 
 A one-line summary of the newest release is at the top of this page. Every per-release note from
-0.6.0 to 0.6.10 is one click away, and the full record is the changelog.
+0.6.0 to 0.7.0 is one click away, and the full record is the changelog.
 
 <details>
-<summary><b>Per-release notes, 0.6.10 back to 0.6.0</b> — what each release changed, with its own measurements and its own caveats</summary>
+<summary><b>Per-release notes, 0.7.0 back to 0.6.0</b> — what each release changed, with its own measurements and its own caveats</summary>
+
+**ripwire 0.7.0 — practical for large repositories on small and normal-sized machines, more complete answers, and a quality gate that sees tangle.** On an Apple M5 Pro (48 GB) ripwire indexes llvm-project cold in 28 s at a 5.1 GB peak, where two of five peer tools stopped at a one-hour limit and one failed, and the same runs complete on a 16 GB Apple M2 laptop; 0.6.9 and earlier could exhaust memory there (one process reached 149.7 GB). On 213 held-out tasks, one call each, ripwire's answer was complete on 126, against 68 for the next tool (the tables above: method, machine and setup notes). `--for` answers a who-calls, where-used or what-breaks question with the verb it asks for, prints the manifest lines a task names, and says when a zero means "not indexed"; an allocator-level memory ceiling stops a runaway index with exit 5; `--quality-delta` gains a thirteenth kind, tangle. Every entry, with its measurement and its floors, is in [CHANGELOG.md](CHANGELOG.md).
 
 **ripwire 0.6.10 — more complete `--for` answers, much less CPU and memory on large repositories, and fewer coupling claims the index cannot back.** On our fixed in-sample questions (the same questions, commands and grader as the answers table above), everyday answers complete went from 129 to 132 of 163, multi-file from 12 to 19 of 39 and large repositories from 23 to 30 of 56, with no everyday answer stating something wrong; the answers are larger (everyday 2.37 MB against 1.95 MB in total, large repositories 1.97 MB against 1.38 MB), and one everyday question that read complete in 0.6.9 reads none (the footnote above names it). `--for` reaches registration rows and the registry key to what is registered under it (Python signals, TypeScript providers, computed-key registrars and their readers), the sites of a literal, a `--flag` and its default, the family an add-a-new-X task joins, the manifest lines that list a file, Cargo `[[bin]]` and package.json `bin` / `main` entries, the doc sections for a prose question about the docs, re-export and alias hops, both sides of a missing `path from A to B`, the callers of the one function a sentence asks about and the implementations that can run at an interface call. `--path` and `--connect` hops print the call site and the callee's signature, `--impact` sums up the importers a cut listing hides and answers a file path, `--defs` prints an alias's target, reST and Sphinx documents are real units, and `ripwire wrap claude` routes edits through a ranged Read and Claude Code's native Edit. Fewer claims are false: `--arch`, `--deps`, `--cochange`, `--impact` and `--export=cc.json` no longer report coupling from edges the index never had, `--deps` stops calling every deep graph `tangled`, a "not found" from an index the memory guard cut no longer reads as proof of absence, `unused` is printed only when the scan can prove it, and a call to a Rust prelude name, a macro with no in-tree binding or a Python builtin no longer binds a same-named definition. Faster and lighter, as percent changes (each is that pull request's own measurement against the build just before it, on one machine; absolute seconds and megabytes come with the 0.7.0 table): warm `--deps` and `--for` on large trees use 35 to 67 % less CPU (vscode `--deps` -67 %, cockroach `--for` -57 %, envoy `--deps` -35 %, #542) and warm TypeScript `--deps` a further 22 % less (#554); on macOS the peak memory of an index is about halved (-47 to -49 % on envoy, cockroach and vscode, #497), a warm run's peak is 30 to 40 % lower and at or under the cold run's (#556), the include closure of a large tree is held in an eighth of the memory (#505), and a refused file no longer makes every warm run rewrite the whole cache (#553). Each entry in the changelog gives its own measurement and its floors. Caches are rebuilt once on first run and quality snapshots of the older scheme are not used. Thanks to @pt-act (a committed filename can no longer be read as commit metadata in `git log` framing: #433, #469), @llvm-x86 (a runnable `run=` hint for a TS/JS test in a subdirectory package, and Cargo and package.json entry points on `--for`: #335, #442, #459, #460, #511), @lennix1337 (langfacts slice 6c, Windows warm runs that leave the cache directory's ACL alone, shell test scripts read as tests: #471, #468, #496), @jflowers (an aliased Python `import a.b as c`, C / C++ include roots and the foreign-qualifier veto: #530, #524, #526, #478), @s0undt3ch (the installer hardening list: #293, #482) and @rainhuang0220 (#330); and for reports that led to fixes, @muayyad-alsadi (reST and Sphinx: #409), @pguerrerolinares (`--for` on a file name: #466) and @gucliti (the router skill's language list: #521).
 

@@ -1203,20 +1203,21 @@ namespace cloneidiomdetail
 {
 
 // One member's classification inputs. `ids` is filled only when the shape was recognized — the identifier
-// set exists to answer condition (2), and there is nothing to answer when (1) already failed.
+// set exists to answer condition (2), and there is nothing to answer when (1) already failed. Widest members first, the
+// one-byte fields last, so the struct carries no padding holes.
 struct MemberShape
 {
-    CloneIdiom                 idiom  = CloneIdiom::None;
     std::vector<std::uint64_t> ids;      // sorted + unique FNV-1a of every non-keyword identifier in the body (one-statement, call-sequence: the narrowed set)
-    std::uint64_t              alpha  = 0;   // one-statement and call-sequence only: the parameter-renamed body hash (OneStatementFacts::alpha)
-    std::uint32_t              fileId = 0;
     std::string                scope;
-    bool                       read   = false;   // the body was read; an unread member proves no operand difference
     std::vector<std::uint64_t> literals;         // idiomLiteralSet of the body
     std::vector<std::uint64_t> valueIds;         // the subset of `ids` used as a value somewhere (operand path (6))
     std::vector<std::uint64_t> callIds;          // the subset of `ids` called somewhere, `f(` not after `.`/`->` (operand path (6))
-    bool                       literalArg = false;   // a compared literal is a direct argument of some call (operand path (5))
     std::vector<std::uint64_t> paramTypes;       // IdiomParams::types, in parameter order
+    std::uint64_t              alpha  = 0;   // one-statement and call-sequence only: the parameter-renamed body hash (OneStatementFacts::alpha)
+    std::uint32_t              fileId = 0;
+    CloneIdiom                 idiom  = CloneIdiom::None;
+    bool                       read   = false;   // the body was read; an unread member proves no operand difference
+    bool                       literalArg = false;   // a compared literal is a direct argument of some call (operand path (5))
     bool                       typed  = false;   // IdiomParams::typed
 };
 

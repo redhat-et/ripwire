@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 912 gate scripts (counts snapshot 2026-11-22) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 912 gate scripts (counts snapshot 2026-11-23) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5971,7 +5971,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**912 gate scripts** at the counts snapshot 2026-11-22; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**912 gate scripts** at the counts snapshot 2026-11-23; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -7140,7 +7140,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 912 at the counts snapshot 2026-11-22. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 912 at the counts snapshot 2026-11-23. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
@@ -14677,8 +14677,8 @@ v0.6.9 on envoy, cockroach and vscode.
 
 **Caveats.** Three warm runs per cell, on a loaded machine; v0.6.9's warm peak varied most between runs, which is why the
 median is quoted. Dev builds, not release builds. One verb (`--deps`); other verbs have other peaks. The per-step
-mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, for main since 0.6.10, in
-`changelog.d/mem-ref-shrink.md` and the other `changelog.d/` fragments.
+mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, since 0.6.10, in
+CHANGELOG.md [0.7.0] ("each indexed reference takes 120 B less memory" and the entries around it).
 
 ## The warm path is graph rebuild, not ranking — graph-section cache, PRE-REGISTERED 2026-11-14 (before any implementation number)
 
