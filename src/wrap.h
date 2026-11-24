@@ -331,12 +331,16 @@ inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view a
 // own usage the whole-symbol edit verbs were never called there. For it the pair names the route that needs the fewest reads: a body
 // ripwire delivered is the verbatim text of its lines, so inside the working directory it is edited directly; a ranged Read is for
 // what was not delivered, and always for a file outside the working directory. Every other agent keeps the verbs.
+// θ17 (2026-11-24): the line no longer says "use your native Edit on it directly". On the M5 calibration traces (141 Claude Code
+// sessions, 2.1.209) the agent Read the file before editing in 37 of 37 cases where a delivered body sat in the edited file, and
+// Claude Code's Edit tool states it needs a prior Read; the line now says where the edit text comes from and that a ranged Read
+// of l..e is enough when a Read is needed.
 inline constexpr std::string_view kEditLinesSkipRead[ 2 ] = {
     "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
     "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand. Read listed ranges in ONE turn (parallel, ranged; a page's `<act read=>` lists its top ones); search only for what ripwire marks missing.",
 };
 inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
-    "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — inside your working directory, use your native Edit on it directly.",
+    "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — your native Edit's old_string can come from it; when that Edit needs a prior Read of the file, a ranged Read of `l`..`e` is enough.",
     "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. Read every listed range in ONE turn (parallel Read calls; a page's `<act read=>` lists its top ones); don't re-search what ripwire listed, search only for what it marks missing. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
 };
 

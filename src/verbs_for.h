@@ -5845,11 +5845,17 @@ inline bool forPagingApplies( const rw::Config& cfg ) noexcept
 }
 // NB1 (forbodyptr.h, ruling 162): under --bodies=pointer (or RIPWIRE_BODY_POINTERS) the first page served is rewritten to the pointer
 // form, AFTER paging cut it with its bodies in — so it ends at the row it ended at — and before the row lines encode it.
+// θ17 (forbodyptr.h pointEditBodies, default OFF: RIPWIRE_BODIES_EDIT): only an edit task's bodies in its top file become pointer rows.
 inline void forBodyPointers( const MainDispatch& d, std::string& page )
 {
+    const std::string_view root = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
     if( d.cfg.forPage == 1 && rw::bodyptr::bodyPointersOn( d.cfg.bodiesSpec ) )
     {
-        (void)rw::bodyptr::pointBodies( page, d.ing, d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view() );
+        (void)rw::bodyptr::pointBodies( page, d.ing, root );
+    }
+    else if( d.cfg.forPage == 1 && rw::bodyptr::bodyEditFormOn( d.cfg.bodiesSpec ) )
+    {
+        (void)rw::bodyptr::pointEditBodies( page, d.ing, root, d.cfg.forTask );
     }
 }
 inline bool serveForPage( const rw::Config& cfg, std::string& doc )

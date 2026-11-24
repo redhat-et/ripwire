@@ -351,6 +351,7 @@ for _g in \
     bodilessseedcheck \
     bodycalleefilecheck \
     bodydialectcheck \
+    bodyeditcheck \
     bodypointercheck \
     budgetmonotonecheck \
     budgetpolicycheck \
