@@ -843,24 +843,21 @@ inline NetFlow netFlow( std::string_view line, std::string_view lowered ) noexce
     return scan.flow;
 }
 
-// ── #353 flow: what a `$VAR` holds, where a curl line sends, and whose credential it carries ─────────────────────────
-// gradeNetExfil reads one line, so `BASE_URL=https://api.cloudflare.com/…` three lines up was invisible: a token on its
-// way to its own service and a token on its way out read alike, both CRITICAL. The idea is NVIDIA SkillSpector's taint
-// tracking (follow a value through an intermediate variable; keep the finding whenever an operand, a flag or a command
+// ── #353 flow: where a curl line sends, and whose credential it carries ──────────────────────────────────────────────
+// gradeNetExfil reads one line: a token on its way to its own service and a token on its way out read alike, both
+// CRITICAL. The idea is NVIDIA SkillSpector's taint tracking (keep the finding whenever an operand, a flag or a command
 // lies outside what the proof models); none of its code is used.
-//   resolution   `$VAR` / `${VAR}` stands for a literal when the document binds VAR at exactly ONE site, that site is a
-//                plain assignment that always runs (`VAR=…`, `export VAR=…`; ShellBlockState) or a `for VAR in` list of
-//                literal words, and it comes before the use (ShellBindings). Any other binding form is a site too, and leaves the variable unresolved; a
-//                document that binds names the table cannot read (`source`, `eval`, `declare`, `printf -v`, a dynamic
-//                `export`, `${!ref}`) resolves nothing.
-//   destination  the hosts the line's curl commands send to, when every one is proved (curlLineHosts); dest= names them.
+//   destination  the hosts the line's curl commands send to, when every one is a LITERAL URL on the line itself
+//                (curlLineHosts); dest= names them. A `$VAR` destination is never resolved from the document: five
+//                review rounds on #722 found a new way to mis-bind one each time (fences, frontmatter, loops, quote
+//                boundaries, vanishing words), so a destination that is not literal stays unproved.
 //   owner        the credential variable's name names the owner of every host (kCredentialOwners); owner= says so. It is
 //                INFORMATION, never a downgrade: an adversarial review (round 2) showed a token sent to its own service's
 //                API still moves data to an object the attacker controls there (a gist, an issue body, an ssh key, a member
 //                invite), and the line can be redirected away from what it says (proxy env, curlrc, a shadowed curl).
-// A credential variable sent only to a canonical loopback or RFC 1918 host is WARN why="local-dest", and only when the
-// document shows no relay, forward or redirect (ShellDocSignals: a HEURISTIC, not a proof). Everything else that
-// carried a credential stays CRITICAL.
+// A credential variable sent only to a literal canonical loopback or RFC 1918 host is WARN why="local-dest", and only
+// when the document shows no relay, forward or redirect (ShellDocSignals: a HEURISTIC, not a proof). Everything else
+// that carried a credential stays CRITICAL.
 inline constexpr const char* kNetExfilLocalWhy = "local-dest";
 
 // One shell word: quotes removed and backslash escapes resolved (case kept), and where its first byte sits in the line.
@@ -872,8 +869,6 @@ struct ShellWord
     std::size_t begin          = 0;
     bool        literalDollar  = false;   // a `$` the shell does not expand: single-quoted (`'$X'`) or escaped (`\$X`)
     bool        unquotedDollar = false;   // a `$` expansion outside quotes (`-d $BODY`)
-    bool        nameCut        = false;   // a quote or `\` ends a `$NAME` piece before more name bytes: `"$A"b`
-                                          // expands $A then `b`, but the joined text reads `$Ab`
 };
 
 // Does the unquoted `$` at text[at] start an expansion (`$NAME`, `${`, `$1`, `$@`, …)? A lone `$`, `$/` or `$'` does not.
@@ -882,13 +877,6 @@ inline bool shellExpansionAt( std::string_view text, std::size_t at ) noexcept
     const char next = at + 1 < text.size() ? text[ at + 1 ] : '\0';
     return next == '{' || namesplit::isIdentChar( next ) || std::string_view( "@*#?$!-" ).find( next ) != std::string_view::npos;
 }
-
-// A here-document a line opens: its body runs from the next line to the delimiter line (`<<-` strips leading tabs).
-struct ShellHeredoc
-{
-    std::string delimiter;
-    bool        stripTabs = false;
-};
 
 // What joins a simple command to its neighbour. Nested marks the edge of a `(`, `$(`, backtick or `<(` context.
 enum class ShellJoin : char { LineEnd, Sequence, And, Or, Pipe, Background, Nested };
@@ -905,16 +893,12 @@ struct ShellCommand
 struct ShellLine
 {
     std::vector<ShellCommand> commands;
-    std::vector<ShellHeredoc> heredocs;                              // the here-documents the line opens, in order
-    std::size_t               commentAt  = std::string_view::npos;   // where a `#` comment starts
-    int                       parenDepth = 0;                        // unquoted `(` / `$(` opened minus `)` closed
-    bool                      modelled   = true;
-    bool                      openQuote  = false;   // the line ends inside a quote: the next line continues it
-    bool                      continues  = false;   // the line ends in `\`, `&&`, `||` or `|`: the next line continues it
+    std::size_t               commentAt = std::string_view::npos;   // where a `#` comment starts
+    bool                      modelled  = true;
 };
 
 // cutShellLine's state. Quotes are joined into the word they sit in (`"https://a"@b` is ONE word, as the shell passes
-// it), a redirect's target is dropped (a here-document's delimiter is kept in cut.heredocs), and a `#` that starts a
+// it), a redirect's target is dropped, and a `#` that starts a
 // word ends the line.
 struct ShellCutter
 {
@@ -924,14 +908,8 @@ struct ShellCutter
     std::size_t  wordBegin      = 0;
     bool         inWord         = false;
     bool         dropNextWord   = false;   // the word after a redirect operator is its target, not an argument
-    bool         heredocPending = false;   // that target is a here-document delimiter
-    bool         heredocTabs    = false;
     bool         literalDollar  = false;   // the word's ShellWord flags, so far
     bool         unquotedDollar = false;
-    bool         nameCut        = false;
-    std::size_t  pieceEnd       = std::string::npos;   // where the last quote or `\\` piece boundary fell in `word`
-    std::size_t  dollarAt       = 0;                   // the last `$` appended, and whether only name bytes follow it
-    bool         nameRun        = false;
 
     void startWord( std::size_t at ) noexcept
     {
@@ -943,45 +921,20 @@ struct ShellCutter
     }
     void endWord()
     {
-        if( inWord && dropNextWord && heredocPending )
-        {
-            cut.heredocs.push_back( { word, heredocTabs } );
-            heredocPending = false;
-        }
         if( inWord && !dropNextWord )
         {
-            command.words.push_back( { std::move( word ), wordBegin, literalDollar, unquotedDollar, nameCut } );
+            command.words.push_back( { std::move( word ), wordBegin, literalDollar, unquotedDollar } );
         }
         dropNextWord = dropNextWord && !inWord;
         word.clear();
         inWord         = false;
         literalDollar  = false;
         unquotedDollar = false;
-        nameCut        = false;
-        pieceEnd       = std::string::npos;
-        nameRun        = false;
-    }
-    // A piece boundary (a quote opens or closes, a `\\` escapes a byte) at the end of `word`: when the word so far ends in
-    // an unbraced `$NAME`, the shell's name stops here; remember where, so the next byte appended can be checked. O(1):
-    // append keeps the name run, so a word glued from k pieces (`a""a""…`) is not re-read at every boundary.
-    void pieceBoundary() noexcept
-    {
-        pieceEnd = ( nameRun && word.size() > dollarAt + 1 ) ? word.size() : std::string::npos;
-    }
-    // Append one byte; a name byte right where a `$NAME` piece ended joins the two names in the cut text.
-    void append( char c )
-    {
-        const bool nameByte = namesplit::isIdentChar( c );
-        nameCut  = nameCut || ( pieceEnd == word.size() && nameByte );
-        dollarAt = c == '$' ? word.size() : dollarAt;
-        nameRun  = c == '$' || ( nameRun && nameByte );
-        word += c;
     }
     void endCommand( ShellJoin join )
     {
         endWord();
-        dropNextWord   = false;
-        heredocPending = false;
+        dropNextWord = false;
         if( !command.words.empty() )
         {
             command.trail = join;
@@ -1002,9 +955,7 @@ struct ShellCutter
         dropNextWord = true;
         if( const std::string_view rest = line.substr( i ); rest.starts_with( "<<" ) && !rest.starts_with( "<<<" ) )
         {
-            heredocPending = true;
-            heredocTabs    = rest.size() > 2 && rest[2] == '-';
-            return heredocTabs ? 3 : 2;
+            return rest.size() > 2 && rest[2] == '-' ? 3 : 2;   // `<<` / `<<-`: the delimiter word is dropped like a target
         }
         std::size_t n = 1;
         while( i + n < line.size() && n < 3 && ( line[ i + n ] == '<' || line[ i + n ] == '>' || line[ i + n ] == '&' || line[ i + n ] == '|' ) )
@@ -1026,7 +977,6 @@ struct ShellCutter
         if( ( ( c == '<' || c == '>' ) && next == '(' ) || ( c == '$' && next == '(' ) )
         {
             cut.modelled = false;
-            ++cut.parenDepth;
             endCommand( ShellJoin::Nested );
             return 2;
         }
@@ -1040,12 +990,11 @@ struct ShellCutter
         switch( c )
         {
             case ' ': case '\t': case '\r': endWord(); return 1;
-            case '\'': case '"': startWord( i ); pieceBoundary(); quote = c; return 1;
+            case '\'': case '"': startWord( i ); quote = c; return 1;
             case ';': endCommand( ShellJoin::Sequence ); return 1;
             case '|': endCommand( next == '|' ? ShellJoin::Or : ShellJoin::Pipe ); return ( next == '|' || next == '&' ) ? 2 : 1;
             case '(': case ')': case '`':
                 cut.modelled = false;
-                cut.parenDepth += c == '(' ? 1 : ( c == ')' ? -1 : 0 );
                 endCommand( ShellJoin::Nested );
                 return 1;
             default: return ampersandOrAngleAt( line, i );
@@ -1057,32 +1006,29 @@ struct ShellCutter
         const char c = line[i];
         if( c == quote )
         {
-            pieceBoundary();
             quote = 0;
             return 1;
         }
         if( quote == '"' && c == '\\' && i + 1 < line.size() && std::string_view( "$`\"\\" ).find( line[ i + 1 ] ) != std::string_view::npos )
         {
             literalDollar = literalDollar || line[ i + 1 ] == '$';
-            append( line[ i + 1 ] );
+            word += line[ i + 1 ];
             return 2;
         }
         literalDollar = literalDollar || ( quote == '\'' && c == '$' );
         cut.modelled = cut.modelled && !( quote == '"' && ( c == '`' || ( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '(' ) ) );
-        append( c );
+        word += c;
         return 1;
     }
     // An unquoted `\` at line[i]: the next byte joins the word as a literal; a trailing `\` continues the command.
     std::size_t escapeAt( std::string_view line, std::size_t i )
     {
-        cut.modelled  = cut.modelled && i + 1 < line.size();
-        cut.continues = cut.continues || i + 1 >= line.size();
+        cut.modelled = cut.modelled && i + 1 < line.size();
         if( i + 1 < line.size() )
         {
             startWord( i );
-            pieceBoundary();
             literalDollar = literalDollar || line[ i + 1 ] == '$';
-            append( line[ i + 1 ] );
+            word += line[ i + 1 ];
         }
         return 2;
     }
@@ -1091,16 +1037,12 @@ struct ShellCutter
     {
         startWord( i );
         unquotedDollar = unquotedDollar || ( line[i] == '$' && shellExpansionAt( line, i ) );
-        append( line[i] );
+        word += line[i];
     }
-    // The line is cut: does it end inside a quote, or on `\`, `&&`, `||` or `|` that carries the command onto the next?
+    // The line is cut: a quote still open at its end leaves it unmodelled.
     ShellLine finish( char quote )
     {
-        const auto listJoin = []( ShellJoin j ) noexcept { return j == ShellJoin::And || j == ShellJoin::Or || j == ShellJoin::Pipe; };
-        const bool openList = !inWord && command.words.empty() && !cut.commands.empty() && listJoin( cut.commands.back().trail );
-        cut.modelled  = cut.modelled && quote == 0;
-        cut.openQuote = quote != 0;
-        cut.continues = cut.continues || openList;
+        cut.modelled = cut.modelled && quote == 0;
         endCommand( ShellJoin::LineEnd );
         return std::move( cut );
     }
@@ -1149,83 +1091,17 @@ inline std::string_view assignedName( std::string_view word ) noexcept
     return ( eq != std::string_view::npos && isShellIdent( word.substr( 0, eq ) ) ) ? word.substr( 0, eq ) : std::string_view{};
 }
 
-// One place the document binds a variable. Only a literal site carries values: the one value of a plain assignment, or
-// the words of a `for NAME in …` list.
-struct ShellBindingSite
-{
-    std::string              name;
-    int                      line = 0;
-    std::size_t              col  = 0;
-    bool                     literal = false;
-    std::vector<std::string> values;
-    bool                     splits  = false;   // some value holds a blank, glob, `$` or backtick (set once, when collected)
-};
-
 // What a document does that the per-line proof cannot see. A HEURISTIC, not a proof: a short, tested list of the
-// shell forms that rebind a name behind the site table's back, or that can carry a request past the host its line
-// names. Each only ever withholds resolution or the local-dest WARN; none raises or lowers a severity by itself.
+// shell forms that rebind names or run code the line does not show, or that can carry a request past the host its line
+// names. Each only ever withholds the local-dest WARN; none raises or lowers a severity by itself.
 struct ShellDocSignals
 {
     bool rebinds = false;   // `source` / `.`, `eval`, `declare` / `typeset`, `printf -v`, `export` of a computed name, `${!ref}`
     bool relays  = false;   // a relay, forward, redirect, proxy, curl config or shadowed curl anywhere in the document
 };
 
-// Every binding site in one document, sorted by name and then position.
-struct ShellBindings
-{
-    std::vector<ShellBindingSite> sites;
-    ShellDocSignals               signals;
-
-    // The ONE literal site binding `name` before (line, col), or null: no site, two or more sites, a site that binds
-    // from a command, a variable or a read, a site at or after the use, or a document that rebinds names unseen.
-    const ShellBindingSite* resolve( std::string_view name, int line, std::size_t col ) const noexcept
-    {
-        if( signals.rebinds )
-        {
-            return nullptr;
-        }
-        const auto byName = []( const ShellBindingSite& s, std::string_view n ) noexcept { return rw::sortutil::svLess( s.name, n ); };
-        const auto first  = std::lower_bound( sites.begin(), sites.end(), name, byName );
-        if( first == sites.end() || first->name != name || ( first + 1 != sites.end() && ( first + 1 )->name == name ) )
-        {
-            return nullptr;
-        }
-        const bool before = first->line < line || ( first->line == line && first->col < col );
-        return ( first->literal && before ) ? &*first : nullptr;
-    }
-};
-
-// Commands whose later identifier words a run may (re)bind: `read URL`, `unset URL`, `local URL`, `getopts o URL`.
-inline constexpr std::string_view kShellBindingCommands = "read readarray mapfile getopts unset local declare typeset";
-// Words that leave the next word in command position for a plain assignment or a `for` (`then URL=…`, `do for …`).
+// Words that leave the next word in command position (`then curl …`, `do curl …`, a `$ ` prompt).
 inline constexpr std::string_view kShellLeadWords = "then do else elif if while until ! { $";
-
-// Every `NAME=`, `NAME+=`, `NAME:=` (`${NAME:=x}`) and `NAME[` (an array element) on the line, wherever it sits — in a
-// quote, a URL query or prose too: a site the proof cannot read only makes the variable unresolved. Each starts
-// non-literal; noteLiteralAssignment upgrades the plain assignments.
-inline void noteAssignmentSites( std::string_view ln, int lineNum, std::vector<ShellBindingSite>& sites )
-{
-    for( std::size_t i = 0; i < ln.size(); )
-    {
-        if( !namesplit::isIdentStart( ln[i] ) || ( i > 0 && ( namesplit::isIdentChar( ln[ i - 1 ] ) || ln[ i - 1 ] == '$' ) ) )
-        {
-            ++i;
-            continue;
-        }
-        std::size_t end = i;
-        while( end < ln.size() && namesplit::isIdentChar( ln[end] ) )
-        {
-            ++end;
-        }
-        const char after = end < ln.size() ? ln[end] : '\0';
-        const bool binds = after == '=' || after == '[' || ( ( after == '+' || after == ':' ) && end + 1 < ln.size() && ln[ end + 1 ] == '=' );
-        if( binds )
-        {
-            sites.push_back( { std::string( ln.substr( i, end - i ) ), lineNum, i, false, {} } );
-        }
-        i = end;
-    }
-}
 
 // The first word of a command that is not a lead word (`then`, `do`, a `$ ` prompt, …).
 inline std::size_t firstCommandWord( const std::vector<ShellWord>& w ) noexcept
@@ -1236,25 +1112,6 @@ inline std::size_t firstCommandWord( const std::vector<ShellWord>& w ) noexcept
         ++k;
     }
     return k;
-}
-
-// `for NAME in w…` / `select NAME in w…` at word k: a site, literal when the line is modelled and no word expands (no
-// `$`, backtick, glob or brace), its values the words. False when word k starts no such loop.
-inline bool noteLoopSite( const std::vector<ShellWord>& w, std::size_t k, bool modelled, int lineNum, std::vector<ShellBindingSite>& sites )
-{
-    if( k + 1 >= w.size() || ( w[k].text != "for" && w[k].text != "select" ) || !isShellIdent( w[ k + 1 ].text ) )
-    {
-        return false;
-    }
-    const auto expands = []( const ShellWord& x ) noexcept { return x.text.find_first_of( "$`*?[{" ) != std::string::npos; };
-    ShellBindingSite site{ w[ k + 1 ].text, lineNum, w[ k + 1 ].begin, false, {} };
-    site.literal = modelled && k + 3 < w.size() && w[ k + 2 ].text == "in" && std::none_of( w.begin() + std::ptrdiff_t( k + 3 ), w.end(), expands );
-    for( std::size_t v = k + 3; site.literal && v < w.size(); ++v )
-    {
-        site.values.push_back( w[v].text );
-    }
-    sites.push_back( std::move( site ) );
-    return true;
 }
 
 // The word that names the command bash runs, from the first command word k: past `NAME=value` prefixes (`IFS= read
@@ -1268,144 +1125,7 @@ inline std::size_t commandNameWord( const std::vector<ShellWord>& w, std::size_t
     return k;
 }
 
-// The identifier words a binding command (`read`, `unset`, `local`, …) or `printf -v` may set: never literal. The
-// command may follow assignment prefixes or a `command` / `builtin` wrapper.
-inline void noteBindingWordSites( const std::vector<ShellWord>& w, std::size_t first, int lineNum, std::vector<ShellBindingSite>& sites )
-{
-    const std::size_t k = commandNameWord( w, first );
-    const bool bindsWords = k < w.size() && namesplit::hasField( kShellBindingCommands, " ", w[k].text, false );
-    const bool printfV    = k < w.size() && w[k].text == "printf";
-    for( std::size_t v = k + 1; v < w.size(); ++v )
-    {
-        if( isShellIdent( w[v].text ) && ( bindsWords || ( printfV && w[ v - 1 ].text == "-v" ) ) )
-        {
-            sites.push_back( { w[v].text, lineNum, w[v].begin, false, {} } );
-        }
-    }
-}
-
-// `;`, `&&` or a line end: the joins after which a plain assignment has run in the current shell.
-inline bool joinsInShell( ShellJoin join ) noexcept
-{
-    return join == ShellJoin::LineEnd || join == ShellJoin::Sequence || join == ShellJoin::And;
-}
-
-// The `NAME=` sites noteAssignmentSites appended for one line: [first, rawEnd) of the document's site list, in column
-// order. The command-level sites of the same line come after rawEnd, so a search must stop there.
-struct ShellLineSites
-{
-    std::size_t first  = 0;
-    std::size_t rawEnd = 0;
-};
-
-// `[$ ][export|readonly [-flags]] NAME=value` standing alone, with nothing before it on its line but `;`, after
-// nothing but `;`, `&&` or the line end, outside every compound command, in a fully modelled line (literalOk): the one
-// assignment form whose value is known and that always runs. Behind `&&` / `||`, after `then` / `do` / `if`, or in an
-// `if`/loop body it may not run, and the variable keeps whatever it held. It upgrades the site noteAssignmentSites
-// found at the word's first byte (the NAME is unquoted, so it starts the word); that pass appended the line's sites
-// in column order, so a binary search finds it and a line of 50,000 assignments stays linear.
-inline void noteLiteralAssignment( const ShellCommand& cmd, std::size_t k, bool literalOk, std::vector<ShellBindingSite>& sites, ShellLineSites line )
-{
-    const std::vector<ShellWord>& w = cmd.words;
-    std::size_t a = k + ( k < w.size() && ( w[k].text == "export" || w[k].text == "readonly" ) ? 1 : 0 );
-    while( a < w.size() && a > k && w[a].text.starts_with( '-' ) )
-    {
-        ++a;
-    }
-    const std::string_view name   = a + 1 == w.size() ? assignedName( w[a].text ) : std::string_view{};
-    const bool             prompt = std::all_of( w.begin(), w.begin() + std::ptrdiff_t( k ), []( const ShellWord& x ) noexcept { return x.text == "$"; } );
-    const bool             runs   = ( cmd.lead == ShellJoin::LineEnd || cmd.lead == ShellJoin::Sequence ) && joinsInShell( cmd.trail );
-    if( !literalOk || name.empty() || !prompt || !runs )
-    {
-        return;
-    }
-    const auto last = sites.begin() + std::ptrdiff_t( line.rawEnd );
-    const auto site = std::lower_bound( sites.begin() + std::ptrdiff_t( line.first ), last, w[a].begin,
-                                        []( const ShellBindingSite& x, std::size_t col ) noexcept { return x.col < col; } );
-    if( site != last && site->col == w[a].begin && site->name == name )
-    {
-        site->literal = true;
-        site->values  = { w[a].text.substr( name.size() + 1 ) };
-    }
-}
-
-// The command-level binding sites of one cut command (the `NAME=` sites are noteAssignmentSites'). literalOk=false
-// keeps every site it notes non-literal.
-inline void noteCommandSites( const ShellCommand& cmd, bool literalOk, int lineNum, std::vector<ShellBindingSite>& sites, ShellLineSites line )
-{
-    const std::size_t k = firstCommandWord( cmd.words );
-    if( noteLoopSite( cmd.words, k, literalOk, lineNum, sites ) )
-    {
-        return;
-    }
-    noteBindingWordSites( cmd.words, k, lineNum, sites );
-    noteLiteralAssignment( cmd, k, literalOk, sites, line );
-}
-
-// How one command moves the compound-command depth: `if`, `while`, `until` or `{` before its command word, or a
-// `for NAME in` / `for ((` / `select NAME in` / `case … in` header, opens one; `fi`, `done`, `esac` or `}` closes one.
-inline int blockDepthDelta( const ShellCommand& cmd ) noexcept
-{
-    const std::vector<ShellWord>& w = cmd.words;
-    const std::size_t             k = firstCommandWord( w );
-    int delta = int( std::count_if( w.begin(), w.begin() + std::ptrdiff_t( k ), []( const ShellWord& x ) noexcept
-                                    { return x.text == "if" || x.text == "while" || x.text == "until" || x.text == "{"; } ) );
-    if( k >= w.size() )
-    {
-        return delta;
-    }
-    const std::string_view verb    = w[k].text;
-    const bool             loopIn  = k + 2 < w.size() && isShellIdent( w[ k + 1 ].text ) && w[ k + 2 ].text == "in";
-    const bool             arith   = k + 1 == w.size() && cmd.trail == ShellJoin::Nested;   // `for ((`
-    const bool             caseIn  = k + 2 < w.size() && w.back().text == "in";
-    const bool             opens   = ( ( verb == "for" || verb == "select" ) && ( loopIn || arith ) ) || ( verb == "case" && caseIn );
-    const bool             closes  = verb == "fi" || verb == "done" || verb == "esac" || verb == "}";
-    return delta + ( opens ? 1 : 0 ) - ( closes ? 1 : 0 );
-}
-
-// Where collectShellBindings stands between lines. A here-document body is data, never a binding the proof may read
-// (its `NAME=` lines stay non-literal sites). An assignment inside a compound command or a `(…)` / `$(…)` that spans
-// lines, or on a line a `\`, `&&`, `||`, `|` or an open quote continues, may not run in this shell. A markdown fence
-// line restarts the depth, quote and continuation reading (each fenced block is read on its own); a here-document
-// body runs on to its delimiter.
-struct ShellBlockState
-{
-    std::vector<ShellHeredoc> heredocs;    // every here-document opened so far, in order
-    std::size_t               heredocAt = 0;
-    int                       depth     = 0;
-    bool                      openQuote = false;
-    bool                      continued = false;
-
-    // True when `line` belongs to a pending here-document body (its delimiter line included).
-    bool bodyLine( std::string_view line )
-    {
-        if( heredocAt >= heredocs.size() )
-        {
-            return false;
-        }
-        const ShellHeredoc& h    = heredocs[heredocAt];
-        const std::size_t   from = h.stripTabs ? std::min( line.find_first_not_of( '\t' ), line.size() ) : 0;
-        heredocAt += line.substr( from ) == h.delimiter ? 1 : 0;
-        return true;
-    }
-    // Does an assignment on the next line start where every earlier line has finished (no open block, quote or list)?
-    bool atTop() const noexcept { return depth == 0 && !openQuote && !continued; }
-    void afterLine( const ShellLine& cut )
-    {
-        heredocs.insert( heredocs.end(), cut.heredocs.begin(), cut.heredocs.end() );
-        depth     = std::max( 0, depth + cut.parenDepth );
-        openQuote = openQuote != cut.openQuote;
-        continued = cut.continues;
-    }
-    void fence() noexcept
-    {
-        depth     = 0;
-        openQuote = false;
-        continued = false;
-    }
-};
-
-// Commands that bind names the site table cannot read, and listeners or relays (matched on the command's basename).
+// Commands that rebind names or run code the line does not show, and listeners or relays (matched on the command's basename).
 inline constexpr std::string_view kShellRebindCommands = "source . eval declare typeset";
 inline constexpr std::string_view kShellRelayCommands  = "source . eval socat nc ncat netcat";
 // Case-folded text anywhere in a document that relays, forwards, proxies, reconfigures or shadows curl.
@@ -1490,62 +1210,28 @@ inline bool lineRelayText( std::string_view line )
         || std::any_of( std::begin( kShellRelayTexts ), std::end( kShellRelayTexts ), [ & ]( std::string_view t ) noexcept { return low.find( t ) != std::string::npos; } );
 }
 
-// One cut line's commands: their binding sites (literal only at the top level of a modelled line outside a here-document
-// body), the block depth they open or close, and their document signals.
-inline void noteLineCommands( const ShellLine& cut, bool body, int lineNum, ShellLineSites at, ShellBlockState& block, ShellBindings& bindings )
+// The document's relay signals, read once: every line's commands (commandSignals) and text (lineRelayText). A
+// HEURISTIC over every line, fenced or not, here-document body or not: a signal only ever withholds the local-dest WARN.
+inline ShellDocSignals collectShellSignals( const std::vector<std::string>& lines )
 {
-    const bool topLevel = cut.modelled && !body && block.atTop();
-    for( const ShellCommand& cmd : cut.commands )
+    ShellDocSignals signals;
+    for( const std::string& ln : lines )
     {
-        noteCommandSites( cmd, topLevel && block.depth == 0, lineNum, bindings.sites, at );
-        block.depth = body ? block.depth : std::max( 0, block.depth + blockDepthDelta( cmd ) );
-        const ShellDocSignals sig = commandSignals( cmd, cut.modelled );
-        bindings.signals.rebinds  = bindings.signals.rebinds || sig.rebinds;
-        bindings.signals.relays   = bindings.signals.relays || sig.relays;
+        const ShellLine cut = cutShellLine( ln );
+        for( const ShellCommand& cmd : cut.commands )
+        {
+            const ShellDocSignals sig = commandSignals( cmd, cut.modelled );
+            signals.rebinds = signals.rebinds || sig.rebinds;
+            signals.relays  = signals.relays || sig.relays;
+        }
+        signals.rebinds = signals.rebinds || ln.find( "${!" ) != std::string::npos;
+        signals.relays  = signals.relays || signals.rebinds || lineRelayText( ln );
     }
+    return signals;
 }
 
-// `exampleLines[i]` marks a line inside a fence the scan reads as documentation data (```text, ```example, …): like a
-// here-document body, its `NAME=` lines stay non-literal sites, so a shown sample never proves a host.
-inline ShellBindings collectShellBindings( const std::vector<std::string>& lines, const std::vector<bool>& exampleLines )
-{
-    ShellBindings   bindings;
-    ShellBlockState block;
-    for( std::size_t i = 0; i < lines.size(); ++i )
-    {
-        const int      lineNum = int( i ) + 1;
-        const bool     body    = block.bodyLine( lines[i] ) || ( i < exampleLines.size() && exampleLines[i] );
-        ShellLineSites at{ bindings.sites.size(), 0 };
-        noteAssignmentSites( lines[i], lineNum, bindings.sites );
-        at.rawEnd = bindings.sites.size();
-        if( !body && lines[i].starts_with( "```" ) )
-        {
-            block.fence();
-        }
-        const ShellLine cut = cutShellLine( lines[i] );
-        noteLineCommands( cut, body, lineNum, at, block, bindings );
-        if( !body )
-        {
-            block.afterLine( cut );
-        }
-        bindings.signals.rebinds = bindings.signals.rebinds || lines[i].find( "${!" ) != std::string::npos;
-        bindings.signals.relays  = bindings.signals.relays || bindings.signals.rebinds || lineRelayText( lines[i] );
-    }
-    // Read each binding's split safety once here, not at every unquoted use (a 1 MB literal x 3000 `$V` reads was 8x).
-    for( ShellBindingSite& site : bindings.sites )
-    {
-        site.splits = std::any_of( site.values.begin(), site.values.end(), []( const std::string& v ) noexcept { return v.find_first_of( " \t\n*?[$`" ) != std::string::npos; } );
-    }
-    std::stable_sort( bindings.sites.begin(), bindings.sites.end(), []( const ShellBindingSite& a, const ShellBindingSite& b ) noexcept
-    {
-        return std::tie( a.name, a.line, a.col ) < std::tie( b.name, b.line, b.col );
-    } );
-    return bindings;
-}
-
-// What the destination step may cost: a line naming more hosts, or a host text longer once expanded, proves nothing.
+// What the destination step may cost: a line naming more hosts proves nothing.
 inline constexpr std::size_t kFlowMaxDestinations = 16;
-inline constexpr std::size_t kFlowMaxExpandedBytes = 4096;
 
 // The variable a `$` at text[at] names: `name` for `$NAME` or a closed `${NAME}` (empty for `${NAME:-x}`, `$(`, `$1`, a
 // lone `$`), `rawName` for the identifier after `$` / `${` however it ends, and `end`, the byte past the reference.
@@ -1569,73 +1255,6 @@ inline ShellVarRef shellVarRefAt( std::string_view text, std::size_t at ) noexce
     const bool             closed = !braced || ( end < text.size() && text[end] == '}' );
     const bool             named  = !raw.empty() && namesplit::isIdentStart( raw[0] ) && closed;
     return { named ? raw : std::string_view{}, raw, named ? end + ( braced ? 1 : 0 ) : at + 1 };
-}
-
-// Every expansion so far, each extended by each of `values`; false past the bounds (one multi-valued variable per word,
-// kFlowMaxDestinations expansions, kFlowMaxExpandedBytes per expansion), all checked before anything is built.
-inline bool substituteValues( std::vector<std::string>& out, const std::vector<std::string>& values )
-{
-    if( ( values.size() != 1 && out.size() != 1 ) || out.size() * values.size() > kFlowMaxDestinations )
-    {
-        return false;
-    }
-    // One side holds a single string, so the longest pair is the two longest: past the byte bound is refused before a
-    // byte is copied (a short `$U` naming a 1 MB literal no longer builds 1 MB on every line that reads it).
-    const auto longest = []( const std::vector<std::string>& v ) noexcept
-    {
-        std::size_t most = 0;
-        for( const std::string& x : v )
-        {
-            most = std::max( most, x.size() );
-        }
-        return most;
-    };
-    if( longest( out ) + longest( values ) > kFlowMaxExpandedBytes )
-    {
-        return false;
-    }
-    std::vector<std::string> next;
-    next.reserve( out.size() * values.size() );
-    for( const std::string& o : out )
-    {
-        for( const std::string& v : values )
-        {
-            next.push_back( o + v );
-        }
-    }
-    out = std::move( next );
-    return true;
-}
-
-// A destination word with every resolvable `$NAME` / `${NAME}` replaced by what it holds; an unresolved one stays as
-// written, so hostOfUrl refuses it wherever it reaches the host. A `for` variable expands to each of its words.
-inline bool expandDestination( std::string_view text, int line, std::size_t col, const ShellBindings* bindings, std::vector<std::string>& out )
-{
-    out.assign( 1, std::string{} );
-    if( text.size() > kFlowMaxExpandedBytes )
-    {
-        return false;   // the word's own bytes are past the bound before anything is substituted
-    }
-    for( std::size_t i = 0; i < text.size(); )
-    {
-        const ShellVarRef       ref  = text[i] == '$' ? shellVarRefAt( text, i ) : ShellVarRef{};
-        const ShellBindingSite* site = ( !ref.name.empty() && bindings != nullptr ) ? bindings->resolve( ref.name, line, col ) : nullptr;
-        if( site == nullptr )
-        {
-            for( std::string& o : out )
-            {
-                o += text[i];
-            }
-            ++i;
-            continue;
-        }
-        if( !substituteValues( out, site->values ) )
-        {
-            return false;
-        }
-        i = ref.end;
-    }
-    return std::none_of( out.begin(), out.end(), []( const std::string& o ) noexcept { return o.size() > kFlowMaxExpandedBytes; } );
 }
 
 // The bracketed IPv6 host `[…]` at the start of `authority` and its optional `:port`, or empty.
@@ -1983,48 +1602,21 @@ inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, s
     return curls > 0 && curls == netVerbWords( line.substr( 0, cut.commentAt ) ) && !words.empty() && words.size() <= kFlowMaxDestinations;
 }
 
-// An unquoted `$` expansion is word-split and globbed: a value `x https://evil.example` adds a destination, so the word
-// proves nothing unless every expansion in it resolves to values with no blank and no glob byte, and none holds a `$`
-// or backtick of its own (`U=https://a/$SUFFIX` carries whatever SUFFIX held at the assignment).
-// A cut `$NAME` piece (ShellWord::nameCut) reads another variable than the one the shell splits, so it proves nothing.
-inline bool unquotedExpansionsFixed( const ShellWord& w, int line, const ShellBindings* bindings )
+// No word on the line holds an unquoted `$` expansion: one is word-split and globbed (`x https://evil.example` adds a
+// destination) or vanishes when empty (the option parser then pairs the wrong words), so the argv the parse read is
+// not the one curl gets.
+inline bool lineArgvFixed( const ShellLine& cut ) noexcept
 {
-    if( w.unquotedDollar && w.nameCut )
+    return std::none_of( cut.commands.begin(), cut.commands.end(), []( const ShellCommand& cmd ) noexcept
     {
-        return false;
-    }
-    for( std::size_t at = w.unquotedDollar ? w.text.find( '$' ) : std::string::npos; at != std::string::npos; at = w.text.find( '$', at + 1 ) )
-    {
-        const ShellVarRef       ref  = shellExpansionAt( w.text, at ) ? shellVarRefAt( w.text, at ) : ShellVarRef{};
-        const ShellBindingSite* site = ( !ref.name.empty() && bindings != nullptr ) ? bindings->resolve( ref.name, line, w.begin ) : nullptr;
-        if( shellExpansionAt( w.text, at ) && ( site == nullptr || site->splits ) )
-        {
-            return false;
-        }
-    }
-    return true;
+        return std::any_of( cmd.words.begin(), cmd.words.end(), []( const ShellWord& w ) noexcept { return w.unquotedDollar; } );
+    } );
 }
 
-// Every word of every command on the line keeps its argument boundaries (unquotedExpansionsFixed).
-inline bool lineArgvFixed( const ShellLine& cut, int lineNum, const ShellBindings* bindings )
-{
-    for( const ShellCommand& cmd : cut.commands )
-    {
-        for( const ShellWord& w : cmd.words )
-        {
-            if( !unquotedExpansionsFixed( w, lineNum, bindings ) )
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-// Adds the host one expanded destination names; false when it names none or the line passes kFlowMaxDestinations.
+// Adds the host one literal destination names; false when it names none or the line passes kFlowMaxDestinations.
 // A destination that starts with `@` names a file, not a host: curl 8.13+ reads `--url @FILE` as a list of URLs, so
-// `--url @localhost` (or a $VAR holding `@localhost`) goes wherever that file says. Refused in every role, which is
-// the stricter rule: a positional `@host` is no URL anyone writes on purpose.
+// `--url @localhost` goes wherever that file says. Refused in every role, which is the stricter rule: a positional
+// `@host` is no URL anyone writes on purpose.
 inline bool addDestinationHost( const std::string& text, LineHosts& answer )
 {
     if( text.starts_with( '@' ) )
@@ -2045,21 +1637,19 @@ inline bool addDestinationHost( const std::string& text, LineHosts& answer )
     return answer.hosts.size() <= kFlowMaxDestinations;
 }
 
-inline LineHosts curlLineHosts( std::string_view line, const ShellLine& cut, int lineNum, const ShellBindings* bindings )
+// The hosts a curl line sends to, proved only from LITERAL destination words: a destination holding a `$` or backtick
+// anywhere (quoted, single-quoted or not) is never resolved from the document, so the line's hosts stay unknown.
+inline LineHosts curlLineHosts( std::string_view line, const ShellLine& cut )
 {
     LineHosts                     answer;
     std::vector<const ShellWord*> words;
-    if( !lineDestinationWords( line, cut, words ) || !lineArgvFixed( cut, lineNum, bindings ) )
+    if( !lineDestinationWords( line, cut, words ) || !lineArgvFixed( cut ) )
     {
         return LineHosts{};
     }
-    std::vector<std::string> expanded;
     for( const ShellWord* w : words )
     {
-        // a single-quoted or escaped `$` is a literal byte, and a cut `$NAME` piece reads another name: substituting
-        // either would invent a host
-        const bool expands = !w->literalDollar && !w->nameCut && expandDestination( w->text, lineNum, w->begin, bindings, expanded );
-        if( !expands || !std::all_of( expanded.begin(), expanded.end(), [ & ]( const std::string& text ) { return addDestinationHost( text, answer ); } ) )
+        if( w->text.find_first_of( "$`" ) != std::string::npos || !addDestinationHost( w->text, answer ) )
         {
             return LineHosts{};
         }
@@ -2124,11 +1714,11 @@ inline std::string destAttr( const LineHosts& hosts )
     return hosts.known ? out : std::string{};
 }
 
-// The document context gradeNetExfil reads past its line: the binding sites, and which line this is.
+// The document context gradeNetExfil reads past its line: the document's relay signals, and which line this is.
 struct NetExfilContext
 {
-    const ShellBindings* bindings = nullptr;   // null = line-local: no `$VAR` resolves, and no local-dest (the document is unseen)
-    int                  line     = 0;
+    const ShellDocSignals* signals = nullptr;   // null = line-local: no local-dest (the document is unseen)
+    int                    line    = 0;
 };
 
 // Where a net-exfil row's line sends: dest= (the proved hosts, empty when any is unproved) and owner= (the service a
@@ -2154,14 +1744,14 @@ struct NetExfilGrade
 };
 
 // #353 flow: a credential row that has proved a local destination (localDestWhy) is WARN; every row carries the hosts it
-// proved, and a credential row the service its credential names. `ctx` brings the document's bindings and signals;
-// without it `$VAR` never resolves and nothing is local.
+// proved (literal destinations only), and a credential row the service its credential names. `ctx` brings the
+// document's relay signals; without it nothing is local.
 inline NetExfilGrade gradeNetExfil( std::string_view line, const NetExfilContext& ctx = {} )
 {
     std::string lowered( line );
     std::transform( lowered.begin(), lowered.end(), lowered.begin(), []( char c ) noexcept { return char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
     const NetFlow flow = netFlow( line, lowered );
-    const auto    hostsOf = [ & ]( const ShellLine& cut ) { return curlLineHosts( line, cut, ctx.line, ctx.bindings ); };
+    const auto    hostsOf = [ & ]( const ShellLine& cut ) { return curlLineHosts( line, cut ); };
     if( flow.sensitiveUpload )
     {
         return { true, SkillSeverity::Critical, kNetExfilSensitiveWhy, { destAttr( hostsOf( cutShellLine( line ) ) ), {} } };
@@ -2182,7 +1772,7 @@ inline NetExfilGrade gradeNetExfil( std::string_view line, const NetExfilContext
     {
         return { true, SkillSeverity::Warn, kNetExfilNoCredWhy, { destAttr( hosts ), {} } };
     }
-    const bool  docRelays = ctx.bindings == nullptr || ctx.bindings->signals.relays;
+    const bool  docRelays = ctx.signals == nullptr || ctx.signals->relays;
     const char* local     = localDestWhy( !otherCredential, hosts, cut, docRelays );
     return { true, local != nullptr ? SkillSeverity::Warn : SkillSeverity::Critical, local, { destAttr( hosts ), local != nullptr ? std::string_view{} : ownerAttr( hosts, cut, lowered ) } };
 }
@@ -2526,23 +2116,6 @@ private:
     SkillLineFence m_state;
 };
 
-// #353 flow: which lines sit inside an example-tagged fence, read with the same tracker and body bounds as the line scan
-// (never in a shell script, never in the frontmatter), so collectShellBindings promotes no binding the scan calls data.
-inline std::vector<bool> exampleFenceLines( const std::vector<std::string>& lines, int frontmatterEnd, bool wholeFileIsCode )
-{
-    std::vector<bool> out( lines.size(), false );
-    if( wholeFileIsCode )
-    {
-        return out;
-    }
-    SkillFenceTracker fences;
-    for( std::size_t i = std::size_t( std::max( frontmatterEnd, 0 ) ); i < lines.size(); ++i )
-    {
-        out[i] = fences.readLine( lines[i] ).inExampleFence;
-    }
-    return out;
-}
-
 // GE-SKILLSCAN: feed one body line to the whitespace-normalized joined-body INJECTION pass (A4-F12 §3). A phrase split across a
 // newline ("Ignore previous\ninstructions") matches nothing in the per-line scan; the line's content, whitespace runs collapsed
 // to one space and trimmed, joins `joinedBody` (space-separated), and `joinedLineOffsets` records where it starts so a cross-line
@@ -2822,7 +2395,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     SkillFindingSink sink{ findings, stackBytes };
     // #353 flow: where the document binds each variable, read once. Only a curl line's destination consults it
     // (curlLineHosts), so a document without one skips the pass.
-    const ShellBindings bindings = text.find( "curl" ) != std::string_view::npos ? collectShellBindings( lines, exampleFenceLines( lines, frontmatterEnd, wholeFileIsCode ) ) : ShellBindings{};
+    const ShellDocSignals docSignals = text.find( "curl" ) != std::string_view::npos ? collectShellSignals( lines ) : ShellDocSignals{};
 
     // ── fenced-block injection suppression policy ─────────────────────────────────────────────────
     //
@@ -2879,7 +2452,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
                 // excluded here too, the same policy as the per-line scan just above.
                 appendJoinedBodyLine( ln, lineNum, joinedBody, joinedLineOffsets );
             }
-            scanBodyExfilLine( sink, exfilPats, NetExfilContext{ &bindings, lineNum }, ln, lineInFence );   // ── EXFILTRATE (regex)
+            scanBodyExfilLine( sink, exfilPats, NetExfilContext{ &docSignals, lineNum }, ln, lineInFence );   // ── EXFILTRATE (regex)
             if( !bashAllowed && !allowedTools.empty() )
             {
                 scanScopeCreepLine( sink, lineNum, ln );   // ── SCOPE-CREEP: Bash definitely not allowed
@@ -3326,10 +2899,10 @@ inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillSca
                                "forward, proxy, curl config or shadowed curl (a heuristic list, not a proof), WARN. Any other "
                                "credential row is CRITICAL." : "",
                       anyDest ? " dest= (net-exfil rows, present only then) lists the hosts the line's curl commands send to, "
-                                "space-separated, when every one is proved: a literal URL, or a $VAR this document assigns exactly once, "
-                                "to a literal, in an assignment that always runs, before the line. It is where the URLs point, not proof of the last hop (a relay or proxy "
-                                "set elsewhere in the file can carry the request on). Absent = a host could not be proved (an unresolved "
-                                "$VAR, an unquoted $VAR that could split, a proxy option or VAR=x prefix, another network verb), "
+                                "space-separated, when every one is proved: a literal URL on the line itself (a $VAR destination is never "
+                                "resolved). It is where the URLs point, not proof of the last hop (a relay or proxy "
+                                "set elsewhere in the file can carry the request on). Absent = a host could not be proved (a $VAR "
+                                "destination, an unquoted $VAR anywhere on the line, a proxy option or VAR=x prefix, another network verb), "
                                 "and why=local-dest was not granted on it." : "",
                       anyOwner ? " owner= (CRITICAL credential rows, present only then) names the service whose name the line's "
                                  "credential variables carry and which owns every dest= host (cloudflare, github, airtable). For triage "
