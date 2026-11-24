@@ -42,7 +42,7 @@
 #       (depth_cut= counts the walks cut). FXD: `Root` -> C1 -> ... -> C9 = std::vector<Elem>, so C8's record is
 #       unread: depth_cut=1, elements=0. FXN: the chain ends at C8, a struct (no alias records): nothing is left unread,
 #       depth_cut=0.
-#   (E) SAMPLING — the watchdog itself: a `ps` that fails, or answers empty, while the child still runs is a SAMPLING
+#   (E) SAMPLING — the watchdog itself: a `ps` that fails, answers empty, or prints a value and then fails, while the child still runs is a SAMPLING
 #       failure (KILLED=3: the child is killed and reaped and the arm FAILS), never a finish and never the ceiling kill
 #       (KILLED=1) the control arm needs. Run with a `ps` shim on PATH; a child that exits normally while the shim
 #       fails still finishes (KILLED=0, rc=0).
@@ -151,7 +151,8 @@ capped(){
     while kill -0 "$pid" 2>/dev/null; do
         st="$( ps -o stat= -p "$pid" 2>/dev/null )" || st=''
         case "$st" in Z*) break ;; esac
-        rss="$( ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ' )" || rss=''
+        rss="$( ps -o rss= -p "$pid" 2>/dev/null )" || rss=''   # ps's own status, not a pipe's last stage
+        rss="${rss// /}"
         if [ -z "$st" ] || ! [ "$rss" -ge 0 ] 2>/dev/null; then
             # an empty or failed sample: either the child exited between kill -0 and ps (then it is gone and kill -0 now
             # fails), or ps failed with the child still running — a run the watchdog cannot see, so it is not let finish
@@ -253,12 +254,15 @@ arm FXD  "$FXD"       3  alias_walk '[mem] alias_walk calls=1 pushes=8 elements=
 arm FXN  "$FXN"       3  alias_walk '[mem] alias_walk calls=1 pushes=8 elements=0 depth_cut=0'
 
 # ── (E) SAMPLING ────────────────────────────────────────────────────────────────────────────────────────────────
-mkdir -p "$TMP/psfail" "$TMP/psempty" "$TMP/psslow"
+mkdir -p "$TMP/psfail" "$TMP/psempty" "$TMP/psslow" "$TMP/psrssfail"
 printf '#!/bin/sh\nexit 1\n' >"$TMP/psfail/ps"
+# psrssfail: the stat sample succeeds, the RSS sample prints a number and THEN exits 1 — a value from a failed ps is
+# no sample (CR #694: the old `ps | tr` tested tr's status and kept the 123)
+printf '#!/bin/sh\ncase "$*" in *stat=*) echo S; exit 0 ;; esac\necho 123\nexit 1\n' >"$TMP/psrssfail/ps"
 printf '#!/bin/sh\nexit 0\n' >"$TMP/psempty/ps"
 printf '#!/bin/sh\nsleep 1\nexit 1\n' >"$TMP/psslow/ps"
-chmod +x "$TMP/psfail/ps" "$TMP/psempty/ps" "$TMP/psslow/ps"
-for shim in psfail psempty; do
+chmod +x "$TMP/psfail/ps" "$TMP/psempty/ps" "$TMP/psslow/ps" "$TMP/psrssfail/ps"
+for shim in psfail psempty psrssfail; do
     t0=$SECONDS
     PATH="$TMP/$shim:$PATH" capped "$TMP/e_$shim.out" "$TMP/e_$shim.err" sleep 30
     if [ "$KILLED" -eq 3 ] && [ $(( SECONDS - t0 )) -lt 20 ] && ! kill -0 "$!" 2>/dev/null; then
