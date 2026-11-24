@@ -13,8 +13,16 @@
 #   (P)  PAGING CONTRACTS: under the knob, an explicit --page-bytes=N:2 and --page-bytes=0 are the knob-off answers byte for byte
 #   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
-#   (G)  SPREAD GUARD (lane THETA6-GUARD): a named symbol with a 1-hop caller in ANOTHER non-test file stays the full answer;
-#        non-vacuous: the knob-off answer's <callers> holds such a caller (counted, FAIL on 0) and the call IS tiny under force
+#   (G)  A CALLER IN ANOTHER FILE IS NAMED (lanes THETA6-GUARD, THETA6-FINISH): a named symbol with a 1-hop caller in ANOTHER
+#        non-test file is tiny and its <edges> line says "called by <that file>:L <caller>"; non-vacuous: the knob-off answer's
+#        <callers> holds such a caller (counted, FAIL on 0)
+#   (G7) TOO SPREAD TO NAME: a named symbol with more other-file callers than the edges line lists in full (kSpreadEdgeMax 6) stays
+#        the full answer; non-vacuous: the knob-off <callers> shows >= 7 such callers (counted, FAIL on fewer) and the call IS tiny
+#        under force
+#   (E)  THE EDGES LINE (θ6b): a named symbol whose body calls a function in another non-test file is tiny and its <edges> line says
+#        "calls <file>:L <callee>"; non-vacuous: the knob-off body's <calls> holds >= 1 <c p=> in another file (counted, FAIL on 0)
+#   (E0) NO CROSS-FILE EDGE, NO LINE: a named symbol whose body's only callee is in its own file is tiny with no <edges>;
+#        non-vacuous: the knob-off body's <calls> holds >= 1 same-file <c> (counted, FAIL on 0) and none in another file
 #   (G0) A TEST-FILE CALLER DOES NOT TRIP IT: a symbol whose only other-file callers are test files is tiny (the knob-off <callers>
 #        holds >= 1 test-file caller and 0 other non-test-file callers, counted, FAIL on 0)
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
@@ -35,8 +43,14 @@ F="$WORK/fx"; mkdir -p "$F/pkg" "$F/ev"
 printf 'def frobnicate_cache(widgets):\n    """Flush every widget in the cache."""\n    for w in widgets:\n        w.flush()\n    return len(widgets)\n\n\ndef warm_cache(widgets):\n    for w in widgets:\n        w.load()\n' >"$F/pkg/cache.py"
 printf 'from pkg.cache import frobnicate_cache, warm_cache\n\n\ndef render_page(widgets):\n    warm_cache(widgets)\n    return [w.draw() for w in widgets]\n\n\ndef refresh(widgets):\n    frobnicate_cache(widgets)\n    return render_page(widgets)\n' >"$F/pkg/render.py"
 printf 'def page_title(name):\n    return name.title()\n\n\ndef page_slug(name):\n    return name.lower().replace(" ", "-")\n' >"$F/pkg/util.py"
+printf 'def fmt_line(row):\n    """Format one report row."""\n    return str(row).strip()\n\n\ndef fmt_all(rows):\n    return [fmt_line(r) for r in rows]\n' >"$F/pkg/fmt.py"
+printf 'from pkg.fmt import fmt_line\n\n\ndef build_report(rows):\n    """Build the report lines."""\n    out = [fmt_line(r) for r in rows]\n    return out\n' >"$F/pkg/report.py"
 mkdir -p "$F/pkg/tests" "$F/shapes"
 printf 'from pkg.util import page_title\n\n\ndef test_page_title():\n    assert page_title("a b") == "A B"\n' >"$F/pkg/tests/test_util.py"
+printf 'def notify_hub(x):\n    return x\n' >"$F/pkg/hub.py"
+for i in $( seq 1 8 ); do
+    printf 'from pkg.hub import notify_hub\n\n\ndef call_hub_%d(x):\n    return notify_hub(x)\n' "$i" >"$F/pkg/hubc$i.py"
+done
 for i in $( seq 1 12 ); do
     printf 'def area_of_shape(x):\n    return x * %d\n' "$i" >"$F/shapes/s$i.py"
 done
@@ -139,11 +153,39 @@ def callers_files(t):
     return out
 SPREADQ = "Where is `frobnicate_cache` defined?"
 TESTQ = "Where is `page_title` defined?"
-s_off, s_on, s_force = run(BIN, ["--for=" + SPREADQ]), run(BIN, ["--for=" + SPREADQ], "1"), run(BIN, ["--for=" + SPREADQ], "force")
+s_off, s_on = run(BIN, ["--for=" + SPREADQ]), run(BIN, ["--for=" + SPREADQ], "1")
 xf = [f for f in callers_files(s_off) if f != "pkg/cache.py" and "/tests/" not in f]
+def edges_text(t):
+    m = re.search(r'<edges shown="\d+" total="\d+"><!\[CDATA\[(.*?)\]\]></edges>', t)
+    return m.group(1) if m else None
 if not xf: no("(G) vacuous: the knob-off answer has 0 other-file callers of frobnicate_cache")
-elif 'shape="tiny"' not in s_force: no("(G) vacuous: the spread question is not tiny even under force")
-else: (ok if s_on == s_off and 'confidence="high"' in s_off else no)("(G) the spread question (%d other-file callers: %s) stays the full answer" % (len(xf), ",".join(xf)))
+else:
+    e = edges_text(s_on)
+    good = 'shape="tiny"' in s_on.split(">", 1)[0] and e is not None and re.search(r"called by pkg/render\.py:\d+ refresh\b", e) and xml_ok(s_on)
+    (ok if good else no)("(G) %d other-file caller(s) (%s) -> tiny, named on the edges line: %s" % (len(xf), ",".join(xf), e))
+# (G7)
+HUBQ = "Where is `notify_hub` defined?"
+h_off, h_on, h_force = run(BIN, ["--for=" + HUBQ]), run(BIN, ["--for=" + HUBQ], "1"), run(BIN, ["--for=" + HUBQ], "force")
+hx = [f for f in callers_files(h_off) if f != "pkg/hub.py" and "/tests/" not in f]
+if len(hx) < 7: no("(G7) vacuous: the knob-off answer shows %d other-file callers of notify_hub (< 7)" % len(hx))
+elif 'shape="tiny"' not in h_force: no("(G7) vacuous: the too-spread question is not tiny even under force")
+else: (ok if h_on == h_off and 'confidence="high"' in h_off else no)("(G7) %d other-file callers (> 6) -> the full answer" % len(hx))
+# (E) / (E0): the body's callees, against the knob-off answer's <calls>
+def callees(t):
+    return [dict(re.findall(r'(\w+)="([^"]*)"', c)) for c in re.findall(r"<c ([^>]*)>", re.sub(r"<!\[CDATA\[.*?\]\]>", "", t, flags=re.S))]
+EDGEQ, SAMEFQ = "Where is `build_report` defined?", "Where is `fmt_all` defined?"
+e_off, e_on = run(BIN, ["--for=" + EDGEQ]), run(BIN, ["--for=" + EDGEQ], "1")
+xc = [c for c in callees(e_off) if c.get("p", "pkg/report.py") != "pkg/report.py"]
+if not xc: no("(E) vacuous: the knob-off body of build_report calls 0 other-file functions")
+else:
+    e = edges_text(e_on)
+    good = 'shape="tiny"' in e_on.split(">", 1)[0] and e is not None and "calls pkg/fmt.py:1 fmt_line" in e and len(e_on.encode()) <= 2048 and xml_ok(e_on) and not outside_cdata_newline(e_on)
+    (ok if good else no)("(E) %d other-file callee(s) -> tiny, named on the edges line: %s" % (len(xc), e))
+f_off, f_on = run(BIN, ["--for=" + SAMEFQ]), run(BIN, ["--for=" + SAMEFQ], "1")
+cs = callees(f_off); same_f = [c for c in cs if "p" not in c]; other_f = [c for c in cs if "p" in c]
+if not same_f: no("(E0) vacuous: the knob-off body of fmt_all calls 0 same-file functions")
+elif other_f: no("(E0) the fixture's fmt_all calls %d other-file functions" % len(other_f))
+else: (ok if 'shape="tiny"' in f_on.split(">", 1)[0] and "<edges" not in f_on else no)("(E0) %d same-file callee(s), 0 other-file -> tiny with no <edges>" % len(same_f))
 t_off, t_on = run(BIN, ["--for=" + TESTQ]), run(BIN, ["--for=" + TESTQ], "1")
 cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f in cf if f != "pkg/util.py" and "/tests/" not in f]
 if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")

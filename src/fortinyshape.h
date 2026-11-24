@@ -14,11 +14,15 @@
 //      drop inside the served head, or every positive match already shown — no new scorer);
 //   3. NOT RELATIONAL: forroute's own cue readers find no route kind (kindOf == None: no transitive / radius / where-used / call
 //      word), no callees question (asksCallees) and no call-path question (asksPath).
-//   4. NOT SPREAD OVER FILES (lane THETA6-GUARD, 11-24): the render computed no relational block that points past the named file —
-//      a <callers> 1-hop caller (no d="2") in another non-test file (filter.h isTestPath), any <dispatch> (a dynamic call's candidate
-//      implementations), or a <reexports> hop (<rx p=>) in a file that holds no <def>. Such an answer names files the tiny rows
-//      never list, and nothing in the tiny shape would tell the agent they exist (a silent miss, priced 10 V), so the call keeps
-//      the full page. Measured on the in-sample sets: 0 completes lost on S1/MF1/LD (6 before), 0 golds on NL1 dev / NL1H.
+//   4. NOT SPREAD PAST WHAT IT CAN NAME (lane THETA6-GUARD, then THETA6-FINISH, 11-24): any <dispatch> (a dynamic call's candidate
+//      implementations) or a <reexports> hop (<rx p=>) in a file that holds no <def> keeps the full page. A <callers> 1-hop caller
+//      (no d="2") in another non-test file (filter.h isTestPath) keeps the full page unless every cross-file edge fits on the edges
+//      line (kSpreadEdgeMax). An answer whose files the tiny shape never names is a silent miss (priced 10 V): the agent has no word
+//      that more exists. Measured with the rubric grader on NL1 dev / NL1H / NL2 / S1 / MF1 / LD: 0 rows lost (4 silent before).
+// THE EDGES LINE (θ6b): the named symbol's cross-file non-test edges the render already computed — the callees in its served bodies
+// (<calls><c p=>), then its callers (1-hop, then d="2") — as one <edges> CDATA line "calls P:L N, ..; called by P:L N, .. (+K more)",
+// distinct files first. In NL2's three silent misses the second gold was a callee in another file the full page named only as an
+// attribute; the line names it at ~40 B an edge.
 // SAME-NAME COMPLETION: when ranked <d> rows past the top kTinyRows carry the named symbol's name (overloads, one method per class),
 // up to kTinyRows more of them follow the top rows, so a multi-definition answer is not cut at row 8 without a word.
 // And only where nothing else asked for a shape: page 1, no explicit --page-bytes (an explicit one is how "more" escapes the shape),
@@ -27,20 +31,23 @@
 // THE SHAPE. The root's identity attributes (task route root confidence margin_pct at schema) plus shape="tiny" and est_tokens= priced
 // for the bytes served; the root= clause when the render had one; one tiny clause (the row grammar + "more"); the act line and its
 // clause when the render had them; <sigs shown=K total=T> holding the top K ranked <d> rows as "P:L-E N" lines in one CDATA (no
-// bodies, no metrics, no tail, no fold, no hops); and <more next="--for=… --page-bytes=N"/>, the exact call for the full page 1 (an
-// explicit --page-bytes turns the shape off, so the call returns the page this question gets with the knob unset). One page: no
-// page= / next= of a cut, so no continuation token can break.
+// bodies, no metrics, no tail, no fold, no hops); the <edges> line when the named symbol has cross-file edges; and
+// <more next="--for=… --page-bytes=N"/>, the exact call for the full page 1 (an explicit --page-bytes turns the shape off, so the call
+// returns the page this question gets with the knob unset). One page: no page= / next= of a cut, so no continuation token can break.
 //
 // RIPWIRE_TINY_SHAPE (any value) turns it ON; RIPWIRE_TINY_SHAPE_FORCE skips the detector (measurement only). Unset, the answer is byte-identical to one served before this file existed
 // (test/tinyshapecheck.sh (I)). --version discloses tiny=on only when it is on (the default line is unchanged).
 // Gate: test/tinyshapecheck.sh.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "foractline.h"     // kActClause / detail::rankedCandidates — the act line's ranked-row reader
@@ -60,6 +67,11 @@ namespace rw::tinyshape
 [[nodiscard]] inline bool tinyShapeOn() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE" ) != nullptr || tinyShapeForced(); }
 
 inline constexpr std::size_t kTinyRows = 8;   // ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines
+// θ6b (lane THETA6-FINISH, 11-24): the edges line. A plain tiny answer names its first kEdgeCap cross-file edges (+K more); a named
+// symbol with a caller in another file keeps the tiny shape only when ALL its cross-file edges fit in kSpreadEdgeMax. Swept on NL1 dev,
+// NL1H, NL2, S1, MF1, LD with the rubric grader: cap 2/4/6 all keep every gold item; the callers rule at 8 loses mf1-fzf-03.
+inline constexpr std::size_t kEdgeCap       = 2;
+inline constexpr std::size_t kSpreadEdgeMax = 6;
 
 inline constexpr std::string_view kTinyClause =
     "<!-- tiny shape (a named location): each sigs line is P:L-E N, a ranked definition (path:first-last line, name), best first; "
@@ -92,11 +104,10 @@ struct RangeRow
     return rows;
 }
 
-// Each open tag `<name ...>` inside `b` (CDATA skipped), as the tag's text up to its '>'.
-template <class Fn> inline void forEachChildTag( std::string_view doc, const answerfirst::Block& b, std::string_view name, Fn&& fn )
+// Each tag inside `b` past the block's own open tag (CDATA skipped), as the tag's text up to its '>' (close tags included).
+template <class Fn> inline void forEachTag( std::string_view doc, const answerfirst::Block& b, Fn&& fn )
 {
     const std::string_view body = doc.substr( b.begin, b.end - b.begin );
-    const std::string      open = "<" + std::string( name ) + " ";
     std::size_t            at   = body.find( '>' );   // past the block's own open tag
     while( at != std::string_view::npos && at < body.size() )
     {
@@ -110,37 +121,179 @@ template <class Fn> inline void forEachChildTag( std::string_view doc, const ans
         }
         const std::size_t gt = body.find( '>', lt );
         if( gt == std::string_view::npos ) { return; }
-        if( body.substr( lt ).starts_with( open ) ) { fn( body.substr( lt, gt - lt ) ); }
+        fn( body.substr( lt, gt - lt ) );
         at = gt + 1;
     }
 }
 
-// Guard 4: a relational block of the render points past the named file `topFile` (escaped, as the rows print it).
-[[nodiscard]] inline bool spreadsPastFile( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile )
+// Each open tag `<name ...>` inside `b` (CDATA skipped), as the tag's text up to its '>'.
+template <class Fn> inline void forEachChildTag( std::string_view doc, const answerfirst::Block& b, std::string_view name, Fn&& fn )
 {
+    const std::string open = "<" + std::string( name ) + " ";
+    forEachTag( doc, b, [ & ]( std::string_view tag )
+    {
+        if( tag.starts_with( open ) ) { fn( tag ); }
+    } );
+}
+
+// How far the render's relational blocks point past the named file `topFile` (escaped, as the rows print it): guard 4.
+enum class Spread
+{
+    None,      // nothing past the named file but what the edges line can name
+    Callers,   // a 1-hop caller in another non-test file: tiny only when every cross-file edge fits on the edges line
+    Opaque,    // a <dispatch> (dynamic call candidates) or a <reexports> hop outside the <def> files: always the full page
+};
+
+// A 1-hop <callers> row (no d="2") in a file other than `topFile` that is not a test file.
+[[nodiscard]] inline bool hasOtherFileCaller( std::string_view doc, const answerfirst::Block& callers, std::string_view topFile )
+{
+    bool found = false;
+    forEachChildTag( doc, callers, "s", [ & ]( std::string_view tag )
+    {
+        const std::string_view at   = rw::attrOf( tag, "p" );
+        const std::string_view file = at.substr( 0, std::min( at.rfind( ':' ), at.size() ) );
+        found = found || ( rw::attrOf( tag, "d" ).empty() && !file.empty() && file != topFile && !isTestPath( rowlines::unescaped( file ) ) );
+    } );
+    return found;
+}
+
+// A <reexports> hop (<rx p=>) in a file that holds none of the block's <def>s.
+[[nodiscard]] inline bool reexportsElsewhere( std::string_view doc, const answerfirst::Block& reexports )
+{
+    std::vector<std::string_view> defs;
+    bool                          found = false;
+    forEachChildTag( doc, reexports, "def", [ & ]( std::string_view tag ) { defs.push_back( rw::attrOf( tag, "p" ) ); } );
+    forEachChildTag( doc, reexports, "rx", [ & ]( std::string_view tag ) { found = found || !std::ranges::contains( defs, rw::attrOf( tag, "p" ) ); } );
+    return found;
+}
+
+[[nodiscard]] inline Spread spreadOf( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile )
+{
+    Spread s = Spread::None;
     for( const answerfirst::Block& b : blocks )
     {
         if( b.comment ) { continue; }
-        if( b.name == "dispatch" ) { return true; }
-        bool spread = false;
-        if( b.name == "callers" )
-        {
-            forEachChildTag( doc, b, "s", [ & ]( std::string_view tag )
-            {
-                const std::string_view at   = rw::attrOf( tag, "p" );
-                const std::string_view file = at.substr( 0, std::min( at.rfind( ':' ), at.size() ) );
-                spread = spread || ( rw::attrOf( tag, "d" ).empty() && !file.empty() && file != topFile && !isTestPath( rowlines::unescaped( file ) ) );
-            } );
-        }
-        else if( b.name == "reexports" )
-        {
-            std::vector<std::string_view> defs;
-            forEachChildTag( doc, b, "def", [ & ]( std::string_view tag ) { defs.push_back( rw::attrOf( tag, "p" ) ); } );
-            forEachChildTag( doc, b, "rx", [ & ]( std::string_view tag ) { spread = spread || !std::ranges::contains( defs, rw::attrOf( tag, "p" ) ); } );
-        }
-        if( spread ) { return true; }
+        if( b.name == "dispatch" || ( b.name == "reexports" && reexportsElsewhere( doc, b ) ) ) { return Spread::Opaque; }
+        if( b.name == "callers" && hasOtherFileCaller( doc, b, topFile ) ) { s = Spread::Callers; }
     }
-    return false;
+    return s;
+}
+
+// One edge of the named symbol into another non-test file: a callee its served body calls, or a caller of it (unescaped values).
+struct Edge
+{
+    bool        callee = true;
+    std::string file, line, name;
+};
+
+// Whether a <b> body's n= is one of the named symbols (by last name segment), as resolves() matches a row.
+[[nodiscard]] inline bool namesASymbol( std::string_view nEsc, const std::vector<std::string>& syms )
+{
+    const std::string      name = rowlines::unescaped( nEsc );
+    const std::string_view seg  = forroute::lastSegment( name );
+    return !seg.empty() && std::ranges::any_of( syms, [ & ]( const std::string& s ) { return forroute::lastSegment( s ) == seg; } );
+}
+
+// The callees the named symbol's served bodies call (<bodies><b><calls><c>), in page order; when no body is a named symbol's, the
+// bodies defined in the named file. A <c> without p= is in its body's file.
+inline void bodyCallees( std::string_view doc, const answerfirst::Block& bodies, std::string_view topFile, const std::vector<std::string>& syms,
+                         std::vector<Edge>& out )
+{
+    bool anyNamed = false;
+    forEachChildTag( doc, bodies, "b", [ & ]( std::string_view tag ) { anyNamed = anyNamed || namesASymbol( rw::attrOf( tag, "n" ), syms ); } );
+    bool             inPicked = false;
+    std::string_view bodyFile;
+    forEachTag( doc, bodies, [ & ]( std::string_view tag )
+    {
+        if( tag.starts_with( "<b " ) )
+        {
+            bodyFile = rw::attrOf( tag, "p" );
+            inPicked = anyNamed ? namesASymbol( rw::attrOf( tag, "n" ), syms ) : bodyFile == topFile;
+        }
+        else if( tag.starts_with( "</b" ) ) { inPicked = false; }
+        else if( inPicked && tag.starts_with( "<c " ) )
+        {
+            const std::string_view p = rw::attrOf( tag, "p" );
+            out.push_back( { true, rowlines::unescaped( p.empty() ? bodyFile : p ), std::string( rw::attrOf( tag, "l" ) ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
+        }
+    } );
+}
+
+// The named symbol's callers (<callers><s p=F:L>): the 1-hop rows, then the d="2" rows.
+inline void blockCallers( std::string_view doc, const answerfirst::Block& callers, std::vector<Edge>& out )
+{
+    for( const bool twoHop : { false, true } )
+    {
+        forEachChildTag( doc, callers, "s", [ & ]( std::string_view tag )
+        {
+            const std::string at = rowlines::unescaped( rw::attrOf( tag, "p" ) );
+            const std::size_t colon = at.rfind( ':' );
+            if( ( rw::attrOf( tag, "d" ) == "2" ) != twoHop || colon == std::string::npos ) { return; }
+            out.push_back( { false, at.substr( 0, colon ), at.substr( colon + 1 ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
+        } );
+    }
+}
+
+// θ6b (lane THETA6-FINISH): the edges the render already computed from the named symbol into OTHER non-test files — its body's
+// callees, then its callers — de-duplicated by file:line and ordered distinct files first (a file's second edge after every file's
+// first), so a capped line still names as many files as it can. `topFile` is the top row's p= (escaped, as the rows print it).
+[[nodiscard]] inline std::vector<Edge> crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile,
+                                                       const std::vector<std::string>& syms )
+{
+    std::vector<Edge> all;
+    for( const answerfirst::Block& b : blocks )
+    {
+        if( !b.comment && b.name == "bodies" ) { bodyCallees( doc, b, topFile, syms, all ); }
+    }
+    for( const answerfirst::Block& b : blocks )
+    {
+        if( !b.comment && b.name == "callers" ) { blockCallers( doc, b, all ); }
+    }
+    const std::string                          named = rowlines::unescaped( topFile );
+    std::vector<std::pair<std::size_t, Edge>>  ranked;   // (how many earlier kept edges share its file, the edge)
+    for( Edge& e : all )
+    {
+        const auto sameFile = [ & ]( const std::pair<std::size_t, Edge>& k ) { return k.second.file == e.file; };
+        const bool dup = std::ranges::any_of( ranked, [ & ]( const std::pair<std::size_t, Edge>& k ) { return sameFile( k ) && k.second.line == e.line; } );
+        if( e.file.empty() || e.file == named || isTestPath( e.file ) || dup ) { continue; }
+        const auto nth = static_cast<std::size_t>( std::ranges::count_if( ranked, sameFile ) );
+        ranked.emplace_back( nth, std::move( e ) );
+    }
+    std::ranges::stable_sort( ranked, {}, &std::pair<std::size_t, Edge>::first );
+    std::vector<Edge> out;
+    out.reserve( ranked.size() );
+    for( auto& [ nth, e ] : ranked ) { out.push_back( std::move( e ) ); }
+    return out;
+}
+
+// One group of the edges line: "calls P:L N, P:L N" (callees) or "called by P:L N" (callers) over the first `shown` edges; empty if none.
+[[nodiscard]] inline std::string edgeGroup( const std::vector<Edge>& edges, std::size_t shown, bool callee )
+{
+    std::string group;
+    for( const Edge& e : std::span( edges ).first( shown ) )
+    {
+        if( e.callee == callee ) { group.append( group.empty() ? "" : ", " ).append( e.file ).append( ":" ).append( e.line ).append( " " ).append( e.name ); }
+    }
+    return group.empty() ? group : ( callee ? "calls " : "called by " ) + group;
+}
+
+// The <edges> element: the first `cap` edges as "calls P:L N, ..; called by P:L N, .." plus "(+K more)" when cut; empty for none.
+[[nodiscard]] inline std::string edgesElement( const std::vector<Edge>& edges, std::size_t cap )
+{
+    const std::size_t shown   = std::min( cap, edges.size() );
+    const std::string callees = edgeGroup( edges, shown, true );
+    const std::string callers = edgeGroup( edges, shown, false );
+    std::string       text    = callees + ( callees.empty() || callers.empty() ? "" : "; " ) + callers;
+    if( text.empty() || text.find( "]]>" ) != std::string::npos ) { return {}; }
+    if( shown < edges.size() ) { text.append( " (+" ).append( std::to_string( edges.size() - shown ) ).append( " more)" ); }
+    return "<edges shown=\"" + std::to_string( shown ) + "\" total=\"" + std::to_string( edges.size() ) + "\"><![CDATA[" + text + "]]></edges>";
+}
+
+// Guard 4's verdict: the tiny shape answers when nothing points past the named file, or when only other-file callers do and every
+// cross-file edge fits on the edges line; never past a <dispatch> or an outside <reexports> hop.
+[[nodiscard]] inline bool edgesCoverSpread( Spread spread, std::size_t edgeCount ) noexcept
+{
+    return spread == Spread::None || ( spread == Spread::Callers && edgeCount <= kSpreadEdgeMax );
 }
 
 // The rows the tiny shape lists: the top kTinyRows, then up to kTinyRows more ranked rows that carry a named symbol's name.
@@ -232,10 +385,10 @@ template <class Fn> inline void forEachChildTag( std::string_view doc, const ans
     const std::vector<detail::RangeRow>   ranked = detail::rankedRanges( doc, blocks );
     const std::vector<detail::RangeRow>   top( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
     const std::vector<std::string>        syms = forced ? std::vector<std::string>{} : detail::namedSymbols( task );
-    if( top.empty() || ( !forced && ( !detail::resolves( syms, top ) || detail::spreadsPastFile( doc, blocks, top.front().p ) ) ) )
-    {
-        return std::nullopt;
-    }
+    if( top.empty() || ( !forced && !detail::resolves( syms, top ) ) ) { return std::nullopt; }
+    const detail::Spread            spread = forced ? detail::Spread::None : detail::spreadOf( doc, blocks, top.front().p );
+    const std::vector<detail::Edge> edges  = detail::crossFileEdges( doc, blocks, top.front().p, syms );
+    if( !detail::edgesCoverSpread( spread, edges.size() ) ) { return std::nullopt; }
     const std::vector<detail::RangeRow> rows = detail::listedRows( ranked, syms );
 
     std::string lines;
@@ -264,6 +417,7 @@ template <class Fn> inline void forEachChildTag( std::string_view doc, const ans
     if( !total.empty() ) { out.append( " total=\"" ).append( total ).append( "\"" ); }
     out.append( "><![CDATA[" ).append( lines ).append( "]]></sigs>" );
     if( act != blocks.end() ) { out.append( doc.substr( act->begin, act->end - act->begin ) ); }
+    out.append( detail::edgesElement( edges, spread == detail::Spread::Callers ? kSpreadEdgeMax : kEdgeCap ) );
     out.append( "<more" ).append( nextAttrXml( moreCall ) ).append( "/>" );
     out.append( "</ctx>" );
     out.insert( priceAt, rw::pricedRootAttrTokens( out.size(), rw::kBytesPerTokenDefault, 0, nullptr ) );
