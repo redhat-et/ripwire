@@ -72,9 +72,9 @@ Q="$TMP/qd.xml"
 "$BIN" "$R" --quality-delta --no-cache >"$Q" 2>"$Q.err"; echo $? >"$Q.rc"
 "$BIN" "$R" --quality-delta --no-cache >"$Q.2" 2>/dev/null; rc2=$?
 "$BIN" "$R" --quality-delta --json --no-cache >"$TMP/qd.json" 2>/dev/null; rcj=$?
-M="$( "$BIN" "$R" --metrics --no-cache 2>/dev/null )"; rcm=$?
+M="$( "$BIN" "$R" --metrics --page-bytes=0 --no-cache 2>/dev/null )"; rcm=$?   # the whole answer: main pages --metrics at 24 KB
 mkdir -p "$TMP/head" && "${G[@]}" -C "$R" archive HEAD | tar -x -C "$TMP/head"
-MH="$( "$BIN" "$TMP/head" --metrics --no-cache 2>/dev/null )"; rcmh=$?
+MH="$( "$BIN" "$TMP/head" --metrics --page-bytes=0 --no-cache 2>/dev/null )"; rcmh=$?
 rc="$( cat "$Q.rc" )"
 case "$rc" in 0|2) ;; *) no "quality-delta exit status $rc (stderr: $( head -c 300 "$Q.err" ))";; esac
 if [ "$rc2" != "$rc" ] || [ "$rcj" != "$rc" ]; then no "quality-delta exit status differs between runs: $rc, again $rc2, --json $rcj"; fi
