@@ -228,6 +228,11 @@ done
 for n in SH_SUB_KEEP SH_SUBST_KEEP SH_BG_KEEP SH_GRP_KEEP; do
     if has "$n"; then no "shopt: $n should be absent (lastpipe is still on in the script): $( gate "$n" )"; else ok "shopt: $n absent"; fi
 done
+# lastpipe runs the last command here only while job control is off (CR #720 thread 4660750368): the scan does not
+# track `set -m`, so --help must say so rather than describe lastpipe as unconditional.
+if tr '\n' ' ' <"$TMP/help" | tr -s ' ' | grep -q 'the scan does not track set -m, under which Bash still runs it in a child shell, so its write can hide a later read'; then
+    ok '--help discloses that set -m (job control) is not tracked beside lastpipe'
+else no '--help describes lastpipe as unconditional (no set -m limit)'; fi
 # The read lookup is linear: every write of X has left scope (its subshell closed) before every read.
 mkdir -p "$TMP/quad" && python3 -c 'n=160000; print("#!/bin/bash"); print("(X=1)\n"*n, end=""); print(": \"$X\"\n"*n, end="")' >"$TMP/quad/quad.sh" \
     || no "could not write the expired-writes fixture"

@@ -1745,6 +1745,8 @@ inline void shellNarrowEach( FileHarvest& fh, const std::vector<std::size_t>& in
 // `shopt -s NAME …` / `shopt -u NAME …`: only lastpipe matters here (ShellScan::isLastPipe, file order). The frame's
 // wordsLeft holds the mode while the list runs: 1 = -s, 2 = -u. It takes effect at once; when the shopt turns out to
 // have run in a child shell (`( shopt -u lastpipe )`, `shopt -u lastpipe &`), the end of that child undoes it.
+// Not tracked: `set -m` (job control on), under which Bash runs a pipeline's last command in a child shell even with
+// lastpipe set, so that command's write is taken as the script's and can hide a later read (--help says so).
 inline void shellShoptWord( const ShellWord& w, ShellScan::Frame& f, ShellScan& st )
 {
     if( w.word == "-s" || w.word == "-u" )
