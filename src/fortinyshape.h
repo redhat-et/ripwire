@@ -24,7 +24,7 @@
 // explicit --page-bytes turns the shape off, so the call returns the page this question gets with the knob unset). One page: no
 // page= / next= of a cut, so no continuation token can break.
 //
-// RIPWIRE_TINY_SHAPE (any value) turns it ON. Unset, the answer is byte-identical to one served before this file existed
+// RIPWIRE_TINY_SHAPE (any value) turns it ON; RIPWIRE_TINY_SHAPE_FORCE skips the detector (measurement only). Unset, the answer is byte-identical to one served before this file existed
 // (test/tinyshapecheck.sh (I)). --version discloses tiny=on only when it is on (the default line is unchanged).
 // Gate: test/tinyshapecheck.sh.
 #pragma once
@@ -46,15 +46,10 @@
 namespace rw::tinyshape
 {
 
-// The knob's three postures: unset = Off; "force" = the shape on EVERY eligible call, the detector skipped (the measurement arm that
-// labels which questions the shape serves completely, lane THETA6 Step 0; never a product posture); any other value = Detect.
-enum class TinyMode : unsigned char { Off, Detect, Force };
-[[nodiscard]] inline TinyMode tinyMode() noexcept
-{
-    const char* const v = std::getenv( "RIPWIRE_TINY_SHAPE" );
-    return v == nullptr ? TinyMode::Off : std::string_view( v ) == "force" ? TinyMode::Force : TinyMode::Detect;
-}
-[[nodiscard]] inline bool tinyShapeOn() noexcept { return tinyMode() != TinyMode::Off; }
+// RIPWIRE_TINY_SHAPE_FORCE (any value): the shape on EVERY eligible call, the detector skipped: the measurement arm that labels which
+// questions the shape serves completely (lane THETA6 Step 0), never a product posture. It implies the knob.
+[[nodiscard]] inline bool tinyShapeForced() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE_FORCE" ) != nullptr; }
+[[nodiscard]] inline bool tinyShapeOn() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE" ) != nullptr || tinyShapeForced(); }
 
 inline constexpr std::size_t kTinyRows = 8;   // ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines
 
@@ -154,7 +149,7 @@ struct RangeRow
     const std::optional<answerfirst::RootBody> rb = doc.starts_with( "<ctx" ) ? answerfirst::rootBody( doc ) : std::nullopt;
     if( !rb ) { return std::nullopt; }
     const std::string_view rootOpen = doc.substr( 0, rb->openEnd );
-    const bool             forced   = tinyMode() == TinyMode::Force;
+    const bool             forced   = tinyShapeForced();
     if( !forced && ( rw::attrOf( rootOpen, "confidence" ) != "high" || detail::relational( task ) ) ) { return std::nullopt; }
     const std::vector<answerfirst::Block> blocks = answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
     const std::vector<detail::RangeRow>   rows   = detail::topRanges( doc, blocks );

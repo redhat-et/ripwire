@@ -9,7 +9,7 @@
 #   (M)  ESCALATION IN ONE CALL: the <more next=> call, run with the knob ON, returns the knob-OFF default answer byte for byte
 #   (R)  A RELATIONAL QUESTION STAYS FULL: a call-path question naming the same symbol (RT3 keeps it on --for) is the knob-off answer
 #   (L)  A LOW-CONFIDENCE QUESTION STAYS FULL: confidence="low" with a code-shaped span -> the knob-off answer; non-vacuous: under
-#        RIPWIRE_TINY_SHAPE=force (the detector skipped) the same call IS tiny, so only the detector kept it full
+#        RIPWIRE_TINY_SHAPE_FORCE=1 (the detector skipped) the same call IS tiny, so only the detector kept it full
 #   (P)  PAGING CONTRACTS: under the knob, an explicit --page-bytes=N:2 and --page-bytes=0 are the knob-off answers byte for byte
 #   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
@@ -22,7 +22,7 @@ command -v python3 >/dev/null 2>&1 || { echo "tinyshapecheck: python3 required";
 command -v xmllint >/dev/null 2>&1 || { echo "tinyshapecheck: xmllint required"; exit 2; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "tinyshapecheck: BIN=$BIN${BASE_BIN:+ BASE_BIN=$BASE_BIN}"
-unset RIPWIRE_TINY_SHAPE
+unset RIPWIRE_TINY_SHAPE RIPWIRE_TINY_SHAPE_FORCE
 export HOME="$WORK/home" TMPDIR="$WORK/tmp/"; mkdir -p "$HOME" "$TMPDIR"
 
 F="$WORK/fx"; mkdir -p "$F/pkg" "$F/ev"
@@ -41,8 +41,9 @@ def ok(m): print("  ok   " + m)
 def no(m):
     global bad; bad += 1; print("  FAIL " + m)
 def run(b, args, knob=None):
-    env = {k: v for k, v in os.environ.items() if k != "RIPWIRE_TINY_SHAPE"}
-    if knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}
+    if knob == "force": env["RIPWIRE_TINY_SHAPE_FORCE"] = "1"
+    elif knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
     p = subprocess.run([b, F, "--no-cache"] + args, cwd=F, env=env, capture_output=True)
     return p.stdout.decode("utf-8", "replace")
 def xml_ok(t):
@@ -113,7 +114,7 @@ for pb in ("--page-bytes=400:2", "--page-bytes=0"):
 
 # (V)
 v_on = subprocess.run([BIN, "--version"], env=dict(os.environ, RIPWIRE_TINY_SHAPE="1"), capture_output=True, text=True).stdout
-v_off = subprocess.run([BIN, "--version"], env={k: v for k, v in os.environ.items() if k != "RIPWIRE_TINY_SHAPE"}, capture_output=True, text=True).stdout
+v_off = subprocess.run([BIN, "--version"], env={k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}, capture_output=True, text=True).stdout
 (ok if "tiny=on, " in v_on and "tiny=" not in v_off else no)("(V) --version tiny=on only under the knob")
 print("tinyshapecheck: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 sys.exit(1 if bad else 0)

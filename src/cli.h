@@ -6175,7 +6175,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
             // tiny=on (THETA6, fortinyshape.h) only under the dev knob RIPWIRE_TINY_SHAPE: the default line is unchanged.
             rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, {}act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, std::getenv( "RIPWIRE_TINY_SHAPE" ) ? "tiny=on, " : "",
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, std::getenv( "RIPWIRE_TINY_SHAPE" ) || std::getenv( "RIPWIRE_TINY_SHAPE_FORCE" ) ? "tiny=on, " : "",
                         rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
                         kRipwireGitStamp );
             std::exit( 0 );
