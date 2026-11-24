@@ -445,8 +445,8 @@ inline void encodeSection( std::string_view doc, const answerfirst::Block& b, st
         for( const Row& r : sec->rows ) { out.append( r.xml ); }
     }
     out.append( sec->close );
-    applied.rankSeq  = applied.rankSeq || rankSeq;
-    applied.rowLines = applied.rowLines || rowLines;
+    applied.rankSeq  |= rankSeq;
+    applied.rowLines |= rowLines;
 }
 
 // Page 1 of several names, on its root, the section that goes on past it (continued=) and the ones that start later (deferred=).
