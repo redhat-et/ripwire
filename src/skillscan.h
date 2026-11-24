@@ -1967,8 +1967,15 @@ inline bool lineArgvFixed( const ShellLine& cut, int lineNum, const ShellBinding
 }
 
 // Adds the host one expanded destination names; false when it names none or the line passes kFlowMaxDestinations.
+// A destination that starts with `@` names a file, not a host: curl 8.13+ reads `--url @FILE` as a list of URLs, so
+// `--url @localhost` (or a $VAR holding `@localhost`) goes wherever that file says. Refused in every role, which is
+// the stricter rule: a positional `@host` is no URL anyone writes on purpose.
 inline bool addDestinationHost( const std::string& text, LineHosts& answer )
 {
+    if( text.starts_with( '@' ) )
+    {
+        return false;
+    }
     const std::size_t scheme = text.find( "://" );
     answer.web = answer.web && ( scheme == std::string::npos || text.starts_with( "http://" ) || text.starts_with( "https://" ) );
     std::string host = hostOfUrl( text );
