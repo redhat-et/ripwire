@@ -705,15 +705,20 @@ else no "(f2) the long net-exfil line: exit $rc, finding $( grep -o 'rule="[^"]*
 # (f4) #353 flow: the binding pass and the curl destination proof finish inside a 20 s time limit (a limit, not a proof of
 # linear scaling). Three hostile shapes, each a bare CRITICAL row (no dest=, owner= or why=: nothing is proved): 50,000 assignments of one variable on one line (the doc-wide binding pass, then a resolve that must refuse
 # the twice-bound host), a curl line with 40,000 `$V` destination words (past the destination cap: unproved), and a
-# 4,000-byte value referenced 3,000 times in one word (past the expansion cap: unproved). The CRITICAL row must be the
-# curl on line 4 (the fence puts the binding on line 3), and no net-exfil row may grade WARN.
+# short local URL whose five quoted `$W` reads of a 1,000-byte value pass the 4,096-byte expansion cap only once
+# substituted (the source word is ~40 bytes, so only the expanded-byte guard refuses it; without that guard the row
+# would prove 127.0.0.1 and grade WARN local-dest). The CRITICAL row must be the curl on line 4 (the fence puts the
+# binding on line 3), and no net-exfil row may grade WARN. A control, flow_expand_ok, is the same shape with a 500-byte
+# value (2,500 bytes expanded, under the cap): it must prove dest="127.0.0.1", so the guarded arm does reach expansion.
 python3 - "$SK" <<'PY2'
 import sys
 sk = sys.argv[1]
 fence = lambda body: "# probe\n```bash\n" + body + "\n```\n"
 open(f"{sk}/flow_sites.md", "w").write(fence("U=https://api.github.com; " * 50000 + "\n" + 'curl "$U/user" -H "Authorization: Bearer $GITHUB_TOKEN"'))
 open(f"{sk}/flow_dests.md", "w").write(fence('V=https://api.github.com\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" ' + "$V " * 40000))
-open(f"{sk}/flow_expand.md", "w").write(fence("W=" + "a" * 4000 + '\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" "https://' + "$W" * 3000 + '"'))
+expand = lambda n: fence("W=" + "a" * n + '\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" "http://127.0.0.1/' + "$W" * 5 + '"')
+open(f"{sk}/flow_expand.md", "w").write(expand(1000))
+open(f"{sk}/flow_expand_ok.md", "w").write(expand(500))
 PY2
 for flowCase in flow_sites flow_dests flow_expand; do
     rc="$( capRun 20 "$TMP/$flowCase.out" "$TMP/$flowCase.err" --scan-skill="$SK/$flowCase.md" )"
@@ -723,6 +728,10 @@ for flowCase in flow_sites flow_dests flow_expand; do
         ok "(f4) #353 flow, $flowCase: a bare CRITICAL row (no dest=, owner=, why=) inside the 20 s limit"
     else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = over the 20 s limit), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
 done
+rc="$( capRun 20 "$TMP/flow_expand_ok.out" "$TMP/flow_expand_ok.err" --scan-skill="$SK/flow_expand_ok.md" )"
+if [ "$rc" = 1 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="warn" why="local-dest" dest="127.0.0.1"/>' "$TMP/flow_expand_ok.out"; then
+    ok "(f4) #353 flow, flow_expand_ok: 2,500 expanded bytes (under the cap) prove dest=\"127.0.0.1\", WARN local-dest: the capped arm reaches expansion"
+else no "(f4) #353 flow, flow_expand_ok: exit $rc (want 1), $( grep -o '<f [^>]*>' "$TMP/flow_expand_ok.out" | head -1 | cut -c1-200 )"; fi
 printf '# probe\n\nplain prose line\n' >"$SK/clean.md"
 if [ "$FAULTS" -eq 1 ]; then
     rc="$( RIPWIRE_FAULT_REGEX_MATCH=1 capRun 20 "$TMP/f3.out" "$TMP/f3.err" --scan-skill="$SK/clean.md" )"
