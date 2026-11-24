@@ -1131,6 +1131,7 @@ struct ShellBindingSite
     std::size_t              col  = 0;
     bool                     literal = false;
     std::vector<std::string> values;
+    bool                     splits  = false;   // some value holds a blank, glob, `$` or backtick (set once, when collected)
 };
 
 // What a document does that the per-line proof cannot see. A HEURISTIC, not a proof: a short, tested list of the
@@ -1502,6 +1503,11 @@ inline ShellBindings collectShellBindings( const std::vector<std::string>& lines
         }
         bindings.signals.rebinds = bindings.signals.rebinds || lines[i].find( "${!" ) != std::string::npos;
         bindings.signals.relays  = bindings.signals.relays || bindings.signals.rebinds || lineRelayText( lines[i] );
+    }
+    // Read each binding's split safety once here, not at every unquoted use (a 1 MB literal x 3000 `$V` reads was 8x).
+    for( ShellBindingSite& site : bindings.sites )
+    {
+        site.splits = std::any_of( site.values.begin(), site.values.end(), []( const std::string& v ) noexcept { return v.find_first_of( " \t\n*?[$`" ) != std::string::npos; } );
     }
     std::stable_sort( bindings.sites.begin(), bindings.sites.end(), []( const ShellBindingSite& a, const ShellBindingSite& b ) noexcept
     {
@@ -1955,12 +1961,11 @@ inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, s
 // or backtick of its own (`U=https://a/$SUFFIX` carries whatever SUFFIX held at the assignment).
 inline bool unquotedExpansionsFixed( const ShellWord& w, int line, const ShellBindings* bindings )
 {
-    const auto splits = []( const std::string& v ) noexcept { return v.find_first_of( " \t\n*?[$`" ) != std::string::npos; };
     for( std::size_t at = w.unquotedDollar ? w.text.find( '$' ) : std::string::npos; at != std::string::npos; at = w.text.find( '$', at + 1 ) )
     {
         const ShellVarRef       ref  = shellExpansionAt( w.text, at ) ? shellVarRefAt( w.text, at ) : ShellVarRef{};
         const ShellBindingSite* site = ( !ref.name.empty() && bindings != nullptr ) ? bindings->resolve( ref.name, line, w.begin ) : nullptr;
-        if( shellExpansionAt( w.text, at ) && ( site == nullptr || std::any_of( site->values.begin(), site->values.end(), splits ) ) )
+        if( shellExpansionAt( w.text, at ) && ( site == nullptr || site->splits ) )
         {
             return false;
         }
