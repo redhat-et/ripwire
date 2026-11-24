@@ -3336,8 +3336,13 @@ std::optional<QdStaleFold> qdStaleFold( const QdReport& rep, const Escape& ex )
     }
     const std::string kinds  = quality::staleByKindValue( rep.staleAcks );   // shared with the MCP twin (lane lean2b)
     // A range replay names the two commits this answer compared (CR721), not the symbolic range: HEAD~1..HEAD followed after
-    // HEAD moved would compare another pair. The working-tree replay stays the bare verb.
+    // HEAD moved would compare another pair. It carries the --quality-kinds selector too, so the replay lists the stale acks
+    // of the kinds this answer counted and no others. The working-tree replay stays the bare verb.
     std::string replay = c.refPair ? "--quality-delta=" + c.refs.baseSha + ".." + c.refs.targetSha : std::string( "--quality-delta" );
+    if( c.refPair && !c.cfg.qualityKinds.empty() )
+    {
+        replay += " " + rw::nextFlag( "--quality-kinds=", c.cfg.qualityKinds );
+    }
     if( c.scope.active() )
     {
         replay += " " + rw::nextFlag( "--scope=", c.cfg.qualityScope );
