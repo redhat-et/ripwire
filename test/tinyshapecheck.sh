@@ -23,6 +23,12 @@
 #        "calls <file>:L <callee>"; non-vacuous: the knob-off body's <calls> holds >= 1 <c p=> in another file (counted, FAIL on 0)
 #   (E0) NO CROSS-FILE EDGE, NO LINE: a named symbol whose body's only callee is in its own file is tiny with no <edges>;
 #        non-vacuous: the knob-off body's <calls> holds >= 1 same-file <c> (counted, FAIL on 0) and none in another file
+#   (E4) THE CAP: a body calling 5 functions in 5 other files lists the first 4 and says "(+1 more)", shown="4" total="5";
+#        non-vacuous: the knob-off <calls> holds >= 5 other-file <c> (counted, FAIL on fewer)
+#   (N)  EXACT EDGES FIRST (θ6e): a body whose first call is a name-only match (via="name") and whose second is exact lists the exact
+#        one first; non-vacuous: the knob-off <calls> holds a via="name" other-file <c> before an exact other-file <c> (FAIL if not)
+#   (B)  G13: "How does `X` work?" (a breadth word) stays the full answer; non-vacuous: confidence="high" and tiny under force
+#   (C)  CAPS: a question that is one ALL-CAPS constant stays the full answer; non-vacuous: confidence="high" and tiny under force
 #   (G0) A TEST-FILE CALLER DOES NOT TRIP IT: a symbol whose only other-file callers are test files is tiny (the knob-off <callers>
 #        holds >= 1 test-file caller and 0 other non-test-file callers, counted, FAIL on 0)
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
@@ -48,6 +54,18 @@ printf 'from pkg.fmt import fmt_line\n\n\ndef build_report(rows):\n    """Build 
 mkdir -p "$F/pkg/tests" "$F/shapes"
 printf 'from pkg.util import page_title\n\n\ndef test_page_title():\n    assert page_title("a b") == "A B"\n' >"$F/pkg/tests/test_util.py"
 printf 'def notify_hub(x):\n    return x\n' >"$F/pkg/hub.py"
+for i in 1 2 3 4 5; do
+    printf 'def stage_%d(x):\n    return x + %d\n' "$i" "$i" >"$F/pkg/st$i.py"
+done
+printf 'from pkg.st1 import stage_1\nfrom pkg.st2 import stage_2\nfrom pkg.st3 import stage_3\nfrom pkg.st4 import stage_4\nfrom pkg.st5 import stage_5\n\n\ndef fan_out(x):\n    """Run every stage."""\n    return stage_1(x) + stage_2(x) + stage_3(x) + stage_4(x) + stage_5(x)\n' >"$F/pkg/fan.py"
+# (N): execute_step is reached by name only (untyped receiver) and ranks above log_line (12 callers), so the page lists it first
+printf 'class Worker:\n    def execute_step(self):\n        return 1\n' >"$F/pkg/aworker.py"
+for i in $( seq 1 12 ); do
+    printf 'def use_worker_%d(w):\n    return w.execute_step()\n' "$i" >"$F/pkg/wu$i.py"
+done
+printf 'def log_line(x):\n    return x\n' >"$F/pkg/zhelpers.py"
+printf 'from pkg.zhelpers import log_line\n\n\ndef run_job(job):\n    """Run one job and log it."""\n    r = job.execute_step()\n    log_line(job)\n    return r\n' >"$F/pkg/job.py"
+printf 'MAX_ROWS_PER_PAGE = 10\n' >"$F/pkg/config.py"
 for i in $( seq 1 8 ); do
     printf 'from pkg.hub import notify_hub\n\n\ndef call_hub_%d(x):\n    return notify_hub(x)\n' "$i" >"$F/pkg/hubc$i.py"
 done
@@ -186,6 +204,32 @@ cs = callees(f_off); same_f = [c for c in cs if "p" not in c]; other_f = [c for 
 if not same_f: no("(E0) vacuous: the knob-off body of fmt_all calls 0 same-file functions")
 elif other_f: no("(E0) the fixture's fmt_all calls %d other-file functions" % len(other_f))
 else: (ok if 'shape="tiny"' in f_on.split(">", 1)[0] and "<edges" not in f_on else no)("(E0) %d same-file callee(s), 0 other-file -> tiny with no <edges>" % len(same_f))
+# (E4)
+CAPQ = "Where is `fan_out` defined?"
+c_off, c_on = run(BIN, ["--for=" + CAPQ]), run(BIN, ["--for=" + CAPQ], "1")
+cx = [c for c in callees(c_off) if c.get("p", "pkg/fan.py") != "pkg/fan.py"]
+if len(cx) < 5: no("(E4) vacuous: the knob-off body of fan_out calls %d other-file functions (< 5)" % len(cx))
+else:
+    m = re.search(r'<edges shown="(\d+)" total="(\d+)"><!\[CDATA\[(.*?)\]\]></edges>', c_on)
+    good = bool(m) and m.group(1) == "4" and m.group(2) == str(len(cx)) and m.group(3).endswith("(+%d more)" % (len(cx) - 4)) and m.group(3).count("pkg/st") == 4
+    (ok if good else no)("(E4) %d other-file callees -> 4 listed: %s" % (len(cx), m.group(0) if m else None))
+# (N)
+NQ = "Where is `run_job` defined?"
+n_off, n_on = run(BIN, ["--for=" + NQ]), run(BIN, ["--for=" + NQ], "1")
+nc = [c for c in callees(n_off) if c.get("p", "pkg/job.py") != "pkg/job.py"]
+first_name = next((j for j, c in enumerate(nc) if c.get("via") == "name"), None)
+first_exact = next((j for j, c in enumerate(nc) if c.get("via") != "name"), None)
+if first_name is None or first_exact is None or first_name > first_exact:
+    no("(N) vacuous: the knob-off <calls> of run_job lacks a name-only other-file callee before an exact one: %s" % nc)
+else:
+    e = edges_text(n_on) or ""
+    good = e.startswith("calls pkg/zhelpers.py:1 log_line") and "execute_step" in e
+    (ok if good else no)("(N) the exact callee is listed before the name-only one: %s" % e)
+# (B) / (C)
+for arm, q in (("(B)", "How does `build_report` work?"), ("(C)", "MAX_ROWS_PER_PAGE")):
+    q_off, q_on, q_force = run(BIN, ["--for=" + q]), run(BIN, ["--for=" + q], "1"), run(BIN, ["--for=" + q], "force")
+    if 'confidence="high"' not in q_off or 'shape="tiny"' not in q_force: no("%s vacuous: confidence high %s, tiny under force %s" % (arm, 'confidence="high"' in q_off, 'shape="tiny"' in q_force))
+    else: (ok if q_on == q_off else no)("%s %r stays the full answer (high confidence, tiny under force)" % (arm, q))
 t_off, t_on = run(BIN, ["--for=" + TESTQ]), run(BIN, ["--for=" + TESTQ], "1")
 cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f in cf if f != "pkg/util.py" and "/tests/" not in f]
 if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")

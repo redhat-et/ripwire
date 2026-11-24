@@ -13,7 +13,8 @@
 //   2. HIGH CONFIDENCE by the existing signal: the root's confidence="high" (lexical.h kForConfidenceNote: a material relative score
 //      drop inside the served head, or every positive match already shown — no new scorer);
 //   3. NOT RELATIONAL: forroute's own cue readers find no route kind (kindOf == None: no transitive / radius / where-used / call
-//      word), no callees question (asksCallees) and no call-path question (asksPath).
+//      word), no callees question (asksCallees) and no call-path question (asksPath); no breadth or indirection word (G13: how does,
+//      callers, callback, handler, flow ...; lane THETA13's patterns) and not one lone ALL-CAPS constant (its sites span files).
 //   4. NOT SPREAD PAST WHAT IT CAN NAME (lane THETA6-GUARD, then THETA6-FINISH, 11-24): any <dispatch> (a dynamic call's candidate
 //      implementations) or a <reexports> hop (<rx p=>) in a file that holds no <def> keeps the full page. A <callers> 1-hop caller
 //      (no d="2") in another non-test file (filter.h isTestPath) keeps the full page unless every cross-file edge fits on the edges
@@ -44,6 +45,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
+#include <regex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -69,8 +71,10 @@ namespace rw::tinyshape
 inline constexpr std::size_t kTinyRows = 8;   // ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines
 // θ6b (lane THETA6-FINISH, 11-24): the edges line. A plain tiny answer names its first kEdgeCap cross-file edges (+K more); a named
 // symbol with a caller in another file keeps the tiny shape only when ALL its cross-file edges fit in kSpreadEdgeMax. Swept on NL1 dev,
-// NL1H, NL2, S1, MF1, LD with the rubric grader: cap 2/4/6 all keep every gold item; the callers rule at 8 loses mf1-fzf-03.
-inline constexpr std::size_t kEdgeCap       = 2;
+// NL1H, NL2, S1, MF1, LD with the rubric grader: cap 2/4/6 all keep every gold item; the callers rule at 8 loses mf1-fzf-03. The NL3
+// seal's one silent miss was a cap-2 cut behind a name-only match: exact edges now rank first (θ6e), and the cap is the conservative 4
+// (no cap binds on the tuning sets; 4 costs ~11 B a pick over 2).
+inline constexpr std::size_t kEdgeCap       = 4;
 inline constexpr std::size_t kSpreadEdgeMax = 6;
 
 inline constexpr std::string_view kTinyClause =
@@ -182,7 +186,8 @@ enum class Spread
 // One edge of the named symbol into another non-test file: a callee its served body calls, or a caller of it (unescaped values).
 struct Edge
 {
-    bool        callee = true;
+    bool        callee   = true;
+    bool        nameOnly = false;   // via="name": resolved by the name alone, so it may be the wrong definition (θ6e ranks it last)
     std::string file, line, name;
 };
 
@@ -214,7 +219,8 @@ inline void bodyCallees( std::string_view doc, const answerfirst::Block& bodies,
         else if( inPicked && tag.starts_with( "<c " ) )
         {
             const std::string_view p = rw::attrOf( tag, "p" );
-            out.push_back( { true, rowlines::unescaped( p.empty() ? bodyFile : p ), std::string( rw::attrOf( tag, "l" ) ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
+            out.push_back( { true, rw::attrOf( tag, "via" ) == "name", rowlines::unescaped( p.empty() ? bodyFile : p ), std::string( rw::attrOf( tag, "l" ) ),
+                             rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
         }
     } );
 }
@@ -229,14 +235,15 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
             const std::string at = rowlines::unescaped( rw::attrOf( tag, "p" ) );
             const std::size_t colon = at.rfind( ':' );
             if( ( rw::attrOf( tag, "d" ) == "2" ) != twoHop || colon == std::string::npos ) { return; }
-            out.push_back( { false, at.substr( 0, colon ), at.substr( colon + 1 ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
+            out.push_back( { false, rw::attrOf( tag, "via" ) == "name", at.substr( 0, colon ), at.substr( colon + 1 ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
         } );
     }
 }
 
 // θ6b (lane THETA6-FINISH): the edges the render already computed from the named symbol into OTHER non-test files — its body's
-// callees, then its callers — de-duplicated by file:line and ordered distinct files first (a file's second edge after every file's
-// first), so a capped line still names as many files as it can. `topFile` is the top row's p= (escaped, as the rows print it).
+// callees, then its callers — de-duplicated by file:line; the exact-resolved edges first, then the name-only (via="name") ones (θ6e),
+// each tier ordered distinct files first (a file's second edge after every file's first), so a capped line names as many files as
+// it can with the edges most likely to be real. `topFile` is the top row's p= (escaped, as the rows print it).
 [[nodiscard]] inline std::vector<Edge> crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile,
                                                        const std::vector<std::string>& syms )
 {
@@ -250,16 +257,16 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
         if( !b.comment && b.name == "callers" ) { blockCallers( doc, b, all ); }
     }
     const std::string                          named = rowlines::unescaped( topFile );
-    std::vector<std::pair<std::size_t, Edge>>  ranked;   // (how many earlier kept edges share its file, the edge)
+    std::vector<std::pair<std::size_t, Edge>>  ranked;   // (how many earlier kept edges of its tier share its file, the edge)
     for( Edge& e : all )
     {
         const auto sameFile = [ & ]( const std::pair<std::size_t, Edge>& k ) { return k.second.file == e.file; };
         const bool dup = std::ranges::any_of( ranked, [ & ]( const std::pair<std::size_t, Edge>& k ) { return sameFile( k ) && k.second.line == e.line; } );
         if( e.file.empty() || e.file == named || isTestPath( e.file ) || dup ) { continue; }
-        const auto nth = static_cast<std::size_t>( std::ranges::count_if( ranked, sameFile ) );
+        const auto nth = static_cast<std::size_t>( std::ranges::count_if( ranked, [ & ]( const std::pair<std::size_t, Edge>& k ) { return sameFile( k ) && k.second.nameOnly == e.nameOnly; } ) );
         ranked.emplace_back( nth, std::move( e ) );
     }
-    std::ranges::stable_sort( ranked, {}, &std::pair<std::size_t, Edge>::first );
+    std::ranges::stable_sort( ranked, {}, []( const std::pair<std::size_t, Edge>& k ) { return std::pair( k.second.nameOnly, k.first ); } );
     std::vector<Edge> out;
     out.reserve( ranked.size() );
     for( auto& [ nth, e ] : ranked ) { out.push_back( std::move( e ) ); }
@@ -340,10 +347,51 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     return out;
 }
 
+// G13 (lane THETA13, adopted by THETA6-FINISH 11-24): a breadth or indirection word in the question (how does, callers, callback,
+// handler, flow ...) asks for more than one location, so the call keeps the full page. The two patterns are THETA13's (feat.py REL and
+// BREADTH) verbatim. Measured: fires on 3 tiny picks of 211; with the caps guard it turns the multi-file item cost (+4.2 % of session)
+// into a saving and keeps the 1-file one (-1.27 %).
+[[nodiscard]] inline bool asksBreadthOrIndirection( std::string_view q )
+{
+    static const std::regex kIndirection(
+        R"(\b(who calls|callers?|called (from|by)|call sites?|calls? (into|out)|callees?|what (does|do) .{0,30}call|uses? of|usages?|)"
+        R"(every (place|site|caller|use)|all (the )?(places|sites|callers|uses|implement)|implement(s|ed|ers|ations?|ors)?|overrid(e|es|den|)"
+        R"(ing)|subclass(es)?|interface|trait|virtual|abstract|callback|hook(s|ed)?|handler(s)?|dispatch(ed|es|er)?|regist(er|ry|ered|)"
+        R"(ration)|plugin|middleware|listener|event|signal|observer|visitor|polymorph|indirect|function pointer|vtable|blast|impact|)"
+        R"(what breaks|affected|ripple|end[- ]to[- ]end|flow|path from|trace|pipeline|lifecycle|wired?|plumb))", std::regex::ECMAScript | std::regex::icase );
+    static const std::regex kBreadth(
+        R"(\b(orient|overview|map of|architecture|subsystems?|how does|how do|walk me|explain how|which files|what files|where .{0,40} (and|)"
+        R"(then) |across|throughout)\b)", std::regex::ECMAScript | std::regex::icase );
+    const std::string       text( q );
+    return std::regex_search( text, kIndirection ) || std::regex_search( text, kBreadth );
+}
+
+// The caps guard (THETA13's, DEV-tested here): a question that is one ALL-CAPS identifier (a constant, an env var, a feature flag) is
+// answered by its use sites across files more than by its one definition, so the call keeps the full page.
+[[nodiscard]] inline bool loneConstant( std::string_view q )
+{
+    static const std::regex kConstant( R"([A-Z][A-Z0-9]*(_[A-Z0-9]+)+|[A-Z]{3,}[A-Z0-9]*)", std::regex::ECMAScript );
+    std::string bare;
+    for( const char c : q )
+    {
+        if( c != '`' && c != '(' && c != ')' ) { bare.push_back( c ); }
+    }
+    const std::size_t first = bare.find_first_not_of( " \t\n\r" );
+    const std::size_t last  = bare.find_last_not_of( " \t\n\r" );
+    return first != std::string::npos && std::regex_match( bare.substr( first, last - first + 1 ), kConstant );
+}
+
 [[nodiscard]] inline bool relational( std::string_view q )
 {
     const std::string lq = rw::routeLower( q );
     return forroute::kindOf( q ) != forroute::RouteKind::None || forroute::detail::asksCallees( lq ) || forroute::detail::asksPath( lq );
+}
+
+// The question asks for more than one named location: a route kind or call cue (forroute), a breadth or indirection word (G13), or a
+// lone constant (its sites, not its definition).
+[[nodiscard]] inline bool asksBeyondOneLocation( std::string_view q )
+{
+    return relational( q ) || asksBreadthOrIndirection( q ) || loneConstant( q );
 }
 
 [[nodiscard]] inline bool resolves( const std::vector<std::string>& syms, const std::vector<RangeRow>& rows )
@@ -380,7 +428,7 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     if( !rb ) { return std::nullopt; }
     const std::string_view rootOpen = doc.substr( 0, rb->openEnd );
     const bool             forced   = tinyShapeForced();
-    if( !forced && ( rw::attrOf( rootOpen, "confidence" ) != "high" || detail::relational( task ) ) ) { return std::nullopt; }
+    if( !forced && ( rw::attrOf( rootOpen, "confidence" ) != "high" || detail::asksBeyondOneLocation( task ) ) ) { return std::nullopt; }
     const std::vector<answerfirst::Block> blocks = answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
     const std::vector<detail::RangeRow>   ranked = detail::rankedRanges( doc, blocks );
     const std::vector<detail::RangeRow>   top( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
