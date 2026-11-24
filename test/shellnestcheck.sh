@@ -88,12 +88,12 @@ done
 R="$TMP/r-fold"; mkdir -p "$R/test"; "${G[@]}" -C "$R" init -q; echo 'echo hi' >"$R/test/a.sh"; gen subshell 5000 "$R/test/deep_check.sh"
 printf '# ripwire quality acks v1\nack complexity 0123456789abcdef 5 a target long gone\n' >"$R/.ripwire_quality_acks"
 "${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm a
-cap60 "$BIN" "$R" --quality-delta --no-cache --show-stale >"$TMP/fold-full.xml" 2>/dev/null
+cap60 "$BIN" "$R" --quality-delta --no-cache --show-stale >"$TMP/fold-full.xml" 2>/dev/null; ffrc=$?
 cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP/fold.xml" 2>/dev/null; frc=$?
 full="$( grep -oE '<quality-delta [^>]*' "$TMP/fold-full.xml" )"; root="$( grep -oE '<quality-delta [^>]*' "$TMP/fold.xml" )"
-if printf '%s' "$full" | grep -q 'head_basis="identity"' && printf '%s' "$full" | grep -q 'stale="1"' && [ "$( cutof "$TMP/fold-full.xml" )" = 1 ]; then
+if { [ "$ffrc" = 0 ] || [ "$ffrc" = 2 ]; } && printf '%s' "$full" | grep -q 'head_basis="identity"' && printf '%s' "$full" | grep -q 'stale="1"' && [ "$( cutof "$TMP/fold-full.xml" )" = 1 ]; then
     ok "(f) premise: identity tree, one stale ack, --show-stale root has shell_cut=\"1\""
-else no "(f) premise: want head_basis=identity, stale=1 and shell_cut=1 under --show-stale; got: $full"; fi
+else no "(f) premise: want rc 0/2, head_basis=identity, stale=1 and shell_cut=1 under --show-stale; got rc=$ffrc: $full"; fi
 if [ "$frc" = 0 ] && [ "$( cutof "$TMP/fold.xml" )" = 1 ]; then ok "(f) the default (folded) answer keeps shell_cut=\"1\""
 else no "(f) the default answer dropped shell_cut= (rc=$frc): $root"; fi
 
@@ -114,8 +114,8 @@ PY
 vrepo(){ local R="$TMP/v-$1"; mkdir -p "$R/test"; "${G[@]}" -C "$R" init -q; echo 'echo hi' >"$R/test/a.sh"
     "${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm a; vgen "$2" "$3" "$R/test/deep_check.sh"; printf '%s' "$R"; }
 vac(){ grep -oE '<r kind="defect-shape"[^>]*defect="vacuous-assert"[^>]*' "$1" | grep 'deep_check.sh'; }
-R="$( vrepo v0 0 noguard )"; cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP/v0.xml" 2>/dev/null
-if [ -n "$( vac "$TMP/v0.xml" )" ]; then ok "(v0) premise: the unguarded absence assertion rows vacuous-assert"; else no "(v0) premise: no vacuous-assert row on the unguarded script"; fi
+R="$( vrepo v0 0 noguard )"; cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP/v0.xml" 2>/dev/null; v0rc=$?
+if { [ "$v0rc" = 0 ] || [ "$v0rc" = 2 ]; } && [ -n "$( vac "$TMP/v0.xml" )" ]; then ok "(v0) premise: the unguarded absence assertion rows vacuous-assert"; else no "(v0) premise: want rc 0/2 and a vacuous-assert row on the unguarded script; got rc=$v0rc"; fi
 R="$( vrepo v 5000 guard )"; cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP/v.xml" 2>/dev/null; vrc=$?
 vr="$( vac "$TMP/v.xml" )"; c="$( cutof "$TMP/v.xml" )"
 if { [ "$vrc" = 0 ] || [ "$vrc" = 2 ]; } && [ -z "$vr" ] && [ "${c:-0}" = 1 ]; then ok "(v) cut tree: no vacuous-assert row, shell_cut=\"1\""
