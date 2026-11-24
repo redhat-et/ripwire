@@ -1537,14 +1537,30 @@ inline ShellVarRef shellVarRefAt( std::string_view text, std::size_t at ) noexce
 }
 
 // Every expansion so far, each extended by each of `values`; false past the bounds (one multi-valued variable per word,
-// kFlowMaxDestinations expansions, kFlowMaxExpandedBytes per expansion), checked before anything is built.
+// kFlowMaxDestinations expansions, kFlowMaxExpandedBytes per expansion), all checked before anything is built.
 inline bool substituteValues( std::vector<std::string>& out, const std::vector<std::string>& values )
 {
     if( ( values.size() != 1 && out.size() != 1 ) || out.size() * values.size() > kFlowMaxDestinations )
     {
         return false;
     }
+    // One side holds a single string, so the longest pair is the two longest: past the byte bound is refused before a
+    // byte is copied (a short `$U` naming a 1 MB literal no longer builds 1 MB on every line that reads it).
+    const auto longest = []( const std::vector<std::string>& v ) noexcept
+    {
+        std::size_t most = 0;
+        for( const std::string& x : v )
+        {
+            most = std::max( most, x.size() );
+        }
+        return most;
+    };
+    if( longest( out ) + longest( values ) > kFlowMaxExpandedBytes )
+    {
+        return false;
+    }
     std::vector<std::string> next;
+    next.reserve( out.size() * values.size() );
     for( const std::string& o : out )
     {
         for( const std::string& v : values )
@@ -1553,7 +1569,7 @@ inline bool substituteValues( std::vector<std::string>& out, const std::vector<s
         }
     }
     out = std::move( next );
-    return std::none_of( out.begin(), out.end(), []( const std::string& o ) noexcept { return o.size() > kFlowMaxExpandedBytes; } );
+    return true;
 }
 
 // A destination word with every resolvable `$NAME` / `${NAME}` replaced by what it holds; an unresolved one stays as
