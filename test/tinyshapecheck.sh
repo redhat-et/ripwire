@@ -10,7 +10,8 @@
 #   (R)  A RELATIONAL QUESTION STAYS FULL: a call-path question naming the same symbol (RT3 keeps it on --for) is the knob-off answer
 #   (L)  A LOW-CONFIDENCE QUESTION STAYS FULL: confidence="low" with a code-shaped span -> the knob-off answer; non-vacuous: under
 #        RIPWIRE_TINY_SHAPE_FORCE=1 (the detector skipped) the same call IS tiny, so only the detector kept it full
-#   (P)  PAGING CONTRACTS: under the knob, an explicit --page-bytes=N:2 and --page-bytes=0 are the knob-off answers byte for byte
+#   (P)  PAGING AND ROW-FORM CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0 and --rows=elements are the
+#        knob-off answers byte for byte (every call here must exit 0 with output: run() FAILs a call that does not)
 #   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
 #   (G)  A CALLER IN ANOTHER FILE IS NAMED (lanes THETA6-GUARD, THETA6-FINISH): a named symbol with a 1-hop caller in ANOTHER
@@ -31,6 +32,12 @@
 #   (C)  CAPS: a question that is one ALL-CAPS constant stays the full answer; non-vacuous: confidence="high" and tiny under force
 #   (G0) A TEST-FILE CALLER DOES NOT TRIP IT: a symbol whose only other-file callers are test files is tiny (the knob-off <callers>
 #        holds >= 1 test-file caller and 0 other non-test-file callers, counted, FAIL on 0)
+#   (F)  A CUT CALLERS BLOCK IS A FLOOR (CodeRabbit on #742): a symbol whose <callers> block is cut (d2_capped="1") and has
+#        cross-file edges is tiny and its <edges> carries floor="1"; non-vacuous: the knob-off <callers> is cut (FAIL if not)
+#   (F0) A CUT BLOCK WITH NO EDGE TO NAME STAYS FULL: the callers are all in the named file, the block is cut -> the full answer;
+#        non-vacuous: the knob-off <callers> is cut, confidence="high", and the call IS tiny under force
+#   (Q)  AN EDGE THE LINE CANNOT CARRY STAYS FULL: a caller in a directory named with "]]>" -> the full answer; non-vacuous: the
+#        knob-off <callers> holds that caller (FAIL on 0) and confidence="high"
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
@@ -66,6 +73,17 @@ done
 printf 'def log_line(x):\n    return x\n' >"$F/pkg/zhelpers.py"
 printf 'from pkg.zhelpers import log_line\n\n\ndef run_job(job):\n    """Run one job and log it."""\n    r = job.execute_step()\n    log_line(job)\n    return r\n' >"$F/pkg/job.py"
 printf 'MAX_ROWS_PER_PAGE = 10\n' >"$F/pkg/config.py"
+# (F): deep_leaf <- mid_hop (another file) <- 6 second-hop callers, more than the block shows; (F0): the same chain in one file
+printf 'def deep_leaf(x):\n    return x\n' >"$F/pkg/leaf.py"
+printf 'from pkg.leaf import deep_leaf\n\n\ndef mid_hop(x):\n    return deep_leaf(x)\n' >"$F/pkg/mid.py"
+for i in $( seq 1 6 ); do
+    printf 'from pkg.mid import mid_hop\n\n\ndef top_caller_%d(x):\n    return mid_hop(x)\n' "$i" >"$F/pkg/top$i.py"
+done
+{ printf 'def solo_leaf(x):\n    return x\n\n\ndef solo_mid(x):\n    return solo_leaf(x)\n'
+  for i in $( seq 1 6 ); do printf '\n\ndef solo_caller_%d(x):\n    return solo_mid(x)\n' "$i"; done; } >"$F/pkg/solo.py"
+# (Q): a caller in a directory whose name holds the CDATA terminator
+printf 'def quote_leaf(x):\n    return x\n' >"$F/pkg/quote.py"
+mkdir -p "$F/pkg/q]]>d"; printf 'from pkg.quote import quote_leaf\n\n\ndef quote_user(x):\n    return quote_leaf(x)\n' >"$F/pkg/q]]>d/quser.py"
 for i in $( seq 1 8 ); do
     printf 'from pkg.hub import notify_hub\n\n\ndef call_hub_%d(x):\n    return notify_hub(x)\n' "$i" >"$F/pkg/hubc$i.py"
 done
@@ -88,6 +106,8 @@ def run(b, args, knob=None):
     if knob == "force": env["RIPWIRE_TINY_SHAPE_FORCE"] = "1"
     elif knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
     p = subprocess.run([b, F, "--no-cache"] + args, cwd=F, env=env, capture_output=True)
+    if p.returncode != 0 or not p.stdout:   # a failed call must not compare equal to another failed call (CodeRabbit on #742)
+        no("ripwire %s (knob %s) exited %d with %d B of output: %s" % (" ".join(args), knob, p.returncode, len(p.stdout), p.stderr.decode("utf-8", "replace").strip()[:300]))
     return p.stdout.decode("utf-8", "replace")
 def xml_ok(t):
     p = subprocess.run(["xmllint", "--noout", "-"], input=t.encode(), capture_output=True); return p.returncode == 0
@@ -151,7 +171,7 @@ if 'confidence="low"' in off[LOWQ] and 'shape="tiny"' in forced and on[LOWQ] == 
 else: no("(L) low %s, forced tiny %s, on==off %s" % ('confidence="low"' in off[LOWQ], 'shape="tiny"' in forced, on[LOWQ] == off[LOWQ]))
 
 # (P)
-for pb in ("--page-bytes=400:2", "--page-bytes=0"):
+for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements"):
     a = run(BIN, ["--for=" + NAMED, pb], "1"); b = run(BIN, ["--for=" + NAMED, pb])
     (ok if a == b and 'shape="tiny"' not in a else no)("(P) %s under the knob is the knob-off answer" % pb)
 
@@ -235,6 +255,27 @@ cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f
 if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")
 elif nf: no("(G0) the fixture has %d non-test other-file callers: %s" % (len(nf), nf))
 else: (ok if 'shape="tiny"' in t_on.split(">", 1)[0] else no)("(G0) a symbol called only from a test file (%d) is tiny" % len(tf))
+# (F) / (F0): a cut <callers> block
+def callers_cut(t):
+    m = re.search(r"<callers [^>]*>", t)
+    return bool(m) and ('capped="1"' in m.group(0) or 'd2_capped="1"' in m.group(0))
+d_off, d_on = run(BIN, ["--for=Where is `deep_leaf` defined?"]), run(BIN, ["--for=Where is `deep_leaf` defined?"], "1")
+if not callers_cut(d_off): no("(F) vacuous: the knob-off <callers> of deep_leaf is not cut")
+else:
+    m = re.search(r'<edges shown="\d+" total="\d+" floor="1"><!\[CDATA\[(.*?)\]\]></edges>', d_on)
+    good = 'shape="tiny"' in d_on.split(">", 1)[0] and bool(m) and "pkg/mid.py" in m.group(1) and xml_ok(d_on)
+    (ok if good else no)("(F) a cut callers block -> tiny, edges floor=\"1\": %s" % (m.group(0) if m else None))
+SOLOQ = "Where is `solo_leaf` defined?"
+o_off, o_on, o_force = run(BIN, ["--for=" + SOLOQ]), run(BIN, ["--for=" + SOLOQ], "1"), run(BIN, ["--for=" + SOLOQ], "force")
+if not callers_cut(o_off) or 'confidence="high"' not in o_off or 'shape="tiny"' not in o_force:
+    no("(F0) vacuous: cut %s, confidence high %s, tiny under force %s" % (callers_cut(o_off), 'confidence="high"' in o_off, 'shape="tiny"' in o_force))
+else: (ok if o_on == o_off else no)("(F0) a cut callers block with no cross-file edge stays the full answer")
+# (Q)
+QQ = "Where is `quote_leaf` defined?"
+q_off, q_on = run(BIN, ["--for=" + QQ]), run(BIN, ["--for=" + QQ], "1")
+qx = [f for f in callers_files(q_off) if "]]&gt;" in f or "]]>" in f]
+if not qx or 'confidence="high"' not in q_off: no("(Q) vacuous: %d callers under a ]]> directory, confidence high %s" % (len(qx), 'confidence="high"' in q_off))
+else: (ok if q_on == q_off else no)("(Q) a caller path holding ]]> (%s) -> the full answer" % qx[0])
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
 a_off, a_on = run(BIN, ["--for=" + SAMEQ]), run(BIN, ["--for=" + SAMEQ], "1")

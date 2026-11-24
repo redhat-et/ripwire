@@ -5940,11 +5940,13 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
 // renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
 // print twice).
 // THETA6 (fortinyshape.h): whether this call may take the tiny shape at all — the knob on, page 1 of the default page, and nothing
-// else asked for a shape. An explicit --page-bytes turns it off: that is how the shape's <more next=> returns the full page 1.
+// else asked for a shape. An explicit --page-bytes turns it off: that is how the shape's <more next=> returns the full page 1. The
+// shape's rows are lines, so the element row form (--rows=elements, or RIPWIRE_NO_ROWLINES) keeps the full answer (CodeRabbit on #742).
 inline bool forTinyShapeEligible( const rw::Config& cfg )
 {
     return rw::tinyshape::tinyShapeOn() && cfg.pageBytesSpec.empty() && cfg.forPage == 1 && cfg.tokenBudget == 0 && cfg.maxTokens == 0
-        && cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && cfg.sections.empty() && !cfg.compress && !cfg.withGraph;
+        && cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && cfg.sections.empty() && !cfg.compress && !cfg.withGraph
+        && rw::rowlines::rowLinesOn( cfg.rowsSpec );
 }
 
 // The tiny answer for the raw render `doc`, or nullopt (not eligible, or the detector did not fire).

@@ -45,7 +45,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
-#include <regex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,6 +55,7 @@
 #include "foranswerfirst.h" // rootBody / topLevelBlocks — the one CDATA-safe scanner of a --for answer's blocks
 #include "forroute.h"       // the route cue readers and rule E's identifier predicates
 #include "filter.h"         // isTestPath — the one language-neutral test-path convention
+#include "infra/namesplit.h" // namesplit::isIdentChar — the ONE ASCII identifier-byte test (\b's word character)
 #include "forrowlines.h"    // readSection / unescaped — the one strict row reader
 #include "nextverb.h"       // nextAttrXml — a continuation attribute
 #include "serialize.h"      // attrOf / pricedRootAttrTokens / kBytesPerTokenDefault
@@ -200,13 +200,15 @@ struct Edge
 }
 
 // The callees the named symbol's served bodies call (<bodies><b><calls><c>), in page order; when no body is a named symbol's, the
-// bodies defined in the named file. A <c> without p= is in its body's file.
-inline void bodyCallees( std::string_view doc, const answerfirst::Block& bodies, std::string_view topFile, const std::vector<std::string>& syms,
+// bodies defined in the named file. A <c> without p= is in its body's file. Returns whether a picked body's <calls> was cut (capped="1"):
+// its callees past the cut are not on the page.
+[[nodiscard]] inline bool bodyCallees( std::string_view doc, const answerfirst::Block& bodies, std::string_view topFile, const std::vector<std::string>& syms,
                          std::vector<Edge>& out )
 {
     bool anyNamed = false;
     forEachChildTag( doc, bodies, "b", [ & ]( std::string_view tag ) { anyNamed = anyNamed || namesASymbol( rw::attrOf( tag, "n" ), syms ); } );
     bool             inPicked = false;
+    bool             cut      = false;
     std::string_view bodyFile;
     forEachTag( doc, bodies, [ & ]( std::string_view tag )
     {
@@ -216,6 +218,7 @@ inline void bodyCallees( std::string_view doc, const answerfirst::Block& bodies,
             inPicked = anyNamed ? namesASymbol( rw::attrOf( tag, "n" ), syms ) : bodyFile == topFile;
         }
         else if( tag.starts_with( "</b" ) ) { inPicked = false; }
+        else if( inPicked && tag.starts_with( "<calls " ) ) { cut = cut || rw::attrOf( tag, "capped" ) == "1"; }
         else if( inPicked && tag.starts_with( "<c " ) )
         {
             const std::string_view p = rw::attrOf( tag, "p" );
@@ -223,10 +226,12 @@ inline void bodyCallees( std::string_view doc, const answerfirst::Block& bodies,
                              rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
         }
     } );
+    return cut;
 }
 
-// The named symbol's callers (<callers><s p=F:L>): the 1-hop rows, then the d="2" rows.
-inline void blockCallers( std::string_view doc, const answerfirst::Block& callers, std::vector<Edge>& out )
+// The named symbol's callers (<callers><s p=F:L>): the 1-hop rows, then the d="2" rows. Returns whether the block was cut (capped="1"
+// or d2_capped="1" on its open tag): callers past the cut are not on the page.
+[[nodiscard]] inline bool blockCallers( std::string_view doc, const answerfirst::Block& callers, std::vector<Edge>& out )
 {
     for( const bool twoHop : { false, true } )
     {
@@ -238,24 +243,36 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
             out.push_back( { false, rw::attrOf( tag, "via" ) == "name", at.substr( 0, colon ), at.substr( colon + 1 ), rowlines::unescaped( rw::attrOf( tag, "n" ) ) } );
         } );
     }
+    const std::string_view open = doc.substr( callers.begin, doc.find( '>', callers.begin ) - callers.begin );
+    return rw::attrOf( open, "capped" ) == "1" || rw::attrOf( open, "d2_capped" ) == "1";
 }
+
+// The cross-file edges, and whether a block they were read from was cut: then `list` is a floor, not every edge (CodeRabbit on #742).
+struct EdgeSet
+{
+    std::vector<Edge> list;
+    bool              floor = false;
+};
 
 // θ6b (lane THETA6-FINISH): the edges the render already computed from the named symbol into OTHER non-test files — its body's
 // callees, then its callers — de-duplicated by file:line; the exact-resolved edges first, then the name-only (via="name") ones (θ6e),
 // each tier ordered distinct files first (a file's second edge after every file's first), so a capped line names as many files as
-// it can with the edges most likely to be real. `topFile` is the top row's p= (escaped, as the rows print it).
-[[nodiscard]] inline std::vector<Edge> crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile,
+// it can with the edges most likely to be real. A file:line reached both ways keeps its exact record (sorted before the de-duplication).
+// `topFile` is the top row's p= (escaped, as the rows print it).
+[[nodiscard]] inline EdgeSet crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile,
                                                        const std::vector<std::string>& syms )
 {
     std::vector<Edge> all;
+    bool              cut = false;
     for( const answerfirst::Block& b : blocks )
     {
-        if( !b.comment && b.name == "bodies" ) { bodyCallees( doc, b, topFile, syms, all ); }
+        if( !b.comment && b.name == "bodies" ) { cut = bodyCallees( doc, b, topFile, syms, all ) || cut; }
     }
     for( const answerfirst::Block& b : blocks )
     {
-        if( !b.comment && b.name == "callers" ) { blockCallers( doc, b, all ); }
+        if( !b.comment && b.name == "callers" ) { cut = blockCallers( doc, b, all ) || cut; }
     }
+    std::ranges::stable_sort( all, {}, &Edge::nameOnly );   // exact records first, so a file:line reached both ways keeps the exact one
     const std::string                          named = rowlines::unescaped( topFile );
     std::vector<std::pair<std::size_t, Edge>>  ranked;   // (how many earlier kept edges of its tier share its file, the edge)
     for( Edge& e : all )
@@ -267,9 +284,9 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
         ranked.emplace_back( nth, std::move( e ) );
     }
     std::ranges::stable_sort( ranked, {}, []( const std::pair<std::size_t, Edge>& k ) { return std::pair( k.second.nameOnly, k.first ); } );
-    std::vector<Edge> out;
-    out.reserve( ranked.size() );
-    for( auto& [ nth, e ] : ranked ) { out.push_back( std::move( e ) ); }
+    EdgeSet out{ {}, cut };
+    out.list.reserve( ranked.size() );
+    for( auto& [ nth, e ] : ranked ) { out.list.push_back( std::move( e ) ); }
     return out;
 }
 
@@ -284,16 +301,20 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     return group.empty() ? group : ( callee ? "calls " : "called by " ) + group;
 }
 
-// The <edges> element: the first `cap` edges as "calls P:L N, ..; called by P:L N, .." plus "(+K more)" when cut; empty for none.
-[[nodiscard]] inline std::string edgesElement( const std::vector<Edge>& edges, std::size_t cap )
+// The <edges> element: the first kEdgeCap edges (every edge with `listAll`) as "calls P:L N, ..; called by P:L N, .." plus "(+K more)"
+// when cut, and floor="1" when a block the edges came from was cut (total= is then a floor); empty for no edges, and for edges whose text
+// holds "]]>" (the caller then keeps the full page).
+[[nodiscard]] inline std::string edgesElement( const EdgeSet& set, bool listAll )
 {
-    const std::size_t shown   = std::min( cap, edges.size() );
+    const std::vector<Edge>& edges = set.list;
+    const std::size_t shown   = listAll ? edges.size() : std::min( edges.size(), kEdgeCap );
     const std::string callees = edgeGroup( edges, shown, true );
     const std::string callers = edgeGroup( edges, shown, false );
     std::string       text    = callees + ( callees.empty() || callers.empty() ? "" : "; " ) + callers;
     if( text.empty() || text.find( "]]>" ) != std::string::npos ) { return {}; }
     if( shown < edges.size() ) { text.append( " (+" ).append( std::to_string( edges.size() - shown ) ).append( " more)" ); }
-    return "<edges shown=\"" + std::to_string( shown ) + "\" total=\"" + std::to_string( edges.size() ) + "\"><![CDATA[" + text + "]]></edges>";
+    return "<edges shown=\"" + std::to_string( shown ) + "\" total=\"" + std::to_string( edges.size() ) + ( set.floor ? "\" floor=\"1" : "" ) + "\"><![CDATA[" + text
+           + "]]></edges>";
 }
 
 // Guard 4's verdict: the tiny shape answers when nothing points past the named file, or when only other-file callers do and every
@@ -303,10 +324,11 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     return spread == Spread::None || ( spread == Spread::Callers && edgeCount <= kSpreadEdgeMax );
 }
 
-// The rows the tiny shape lists: the top kTinyRows, then up to kTinyRows more ranked rows that carry a named symbol's name.
+// The rows the tiny shape lists: the top kTinyRows, then up to kTinyRows more ranked rows that carry a named symbol's name. The cut is
+// disclosed by the caller's <sigs shown= total=> and its <more next=> call for the full page.
 [[nodiscard]] inline std::vector<RangeRow> listedRows( const std::vector<RangeRow>& ranked, const std::vector<std::string>& syms )
 {
-    std::vector<RangeRow> rows( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
+    std::vector<RangeRow> shown( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
     std::size_t           more = 0;
     for( std::size_t i = kTinyRows; i < ranked.size() && more < kTinyRows; ++i )
     {
@@ -314,11 +336,11 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
         const std::string_view seg  = forroute::lastSegment( name );
         if( std::ranges::any_of( syms, [ & ]( const std::string& s ) { return !seg.empty() && forroute::lastSegment( s ) == seg; } ) )
         {
-            rows.push_back( ranked[ i ] );
+            shown.push_back( ranked[ i ] );
             ++more;
         }
     }
-    return rows;
+    return shown;
 }
 
 // The question's named symbols, as rule E reads a backtick span, plus its bare code-shaped words.
@@ -348,37 +370,89 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
 }
 
 // G13 (lane THETA13, adopted by THETA6-FINISH 11-24): a breadth or indirection word in the question (how does, callers, callback,
-// handler, flow ...) asks for more than one location, so the call keeps the full page. The two patterns are THETA13's (feat.py REL and
-// BREADTH) verbatim. Measured: fires on 3 tiny picks of 211; with the caps guard it turns the multi-file item cost (+4.2 % of session)
-// into a saving and keeps the 1-file one (-1.27 %).
+// handler, flow ...) asks for more than one location, so the call keeps the full page. The phrases are THETA13's two patterns (feat.py
+// REL and BREADTH), matched here by a plain phrase scan (regexguard.h owns the one regex engine) and case-insensitively on ASCII:
+//   kIndirectionStems: REL's alternatives, each matched as a STEM at a word start (REL has no trailing \b, so `callers?` is the stem
+//                      "caller", `overrid(e|es|den|ing)` the three stems override/overridden/overriding, and so on);
+//   kBreadthWords:     BREADTH's alternatives, each matched as a WHOLE phrase (\b on both sides);
+//   plus the two windowed alternatives, `what (does|do) .{0,30}call` and `where .{0,40} (and|then) `.
+// Measured: fires on 3 tiny picks of 211; with the caps guard it trims 1 recoverable and 2 silent items for 4 picks.
+inline constexpr std::string_view kIndirectionStems[] = {
+    "who calls", "caller", "called from", "called by", "call site", "call into", "call out", "calls into", "calls out", "callee",
+    "use of", "uses of", "usage", "every place", "every site", "every caller", "every use", "all places", "all sites", "all callers",
+    "all uses", "all implement", "all the places", "all the sites", "all the callers", "all the uses", "all the implement", "implement",
+    "override", "overridden", "overriding", "subclass", "interface", "trait", "virtual", "abstract", "callback", "hook", "handler",
+    "dispatch", "register", "registry", "registration", "plugin", "middleware", "listener", "event", "signal", "observer", "visitor",
+    "polymorph", "indirect", "function pointer", "vtable", "blast", "impact", "what breaks", "affected", "ripple", "end-to-end",
+    "end to end", "end-to end", "end to-end", "flow", "path from", "trace", "pipeline", "lifecycle", "wire", "plumb",
+};
+inline constexpr std::string_view kBreadthWords[] = {
+    "orient", "overview", "map of", "architecture", "subsystem", "subsystems", "how does", "how do", "walk me", "explain how",
+    "which files", "what files", "across", "throughout",
+};
+
+// The two windowed alternatives: `head`, then 0..`span` characters that are not a line break, then `tail`; with `wordAfterTail`, a word
+// character must follow `tail` (BREADTH's trailing \b after its final space).
+struct WindowedPhrase
+{
+    std::string_view head;
+    std::size_t      span;
+    std::string_view tail;
+    bool             wordAfterTail;
+};
+inline constexpr WindowedPhrase kWindowedPhrases[] = {
+    { "what does ", 30, "call", false }, { "what do ", 30, "call", false }, { "where ", 40, " and ", true }, { "where ", 40, " then ", true },
+};
+
+// Whether `w` matches `lq` (lowered) at offset `at`.
+[[nodiscard]] inline bool windowedAt( std::string_view lq, std::size_t at, const WindowedPhrase& w ) noexcept
+{
+    if( !lq.substr( at ).starts_with( w.head ) ) { return false; }
+    for( std::size_t k = 0, from = at + w.head.size(); k <= w.span && from + k <= lq.size(); ++k )
+    {
+        if( k > 0 && ( lq[ from + k - 1 ] == '\n' || lq[ from + k - 1 ] == '\r' ) ) { return false; }
+        const std::size_t end = from + k + w.tail.size();
+        if( lq.substr( from + k ).starts_with( w.tail ) && ( !w.wordAfterTail || ( end < lq.size() && namesplit::isIdentChar( lq[ end ] ) ) ) ) { return true; }
+    }
+    return false;
+}
+
 [[nodiscard]] inline bool asksBreadthOrIndirection( std::string_view q )
 {
-    static const std::regex kIndirection(
-        R"(\b(who calls|callers?|called (from|by)|call sites?|calls? (into|out)|callees?|what (does|do) .{0,30}call|uses? of|usages?|)"
-        R"(every (place|site|caller|use)|all (the )?(places|sites|callers|uses|implement)|implement(s|ed|ers|ations?|ors)?|overrid(e|es|den|)"
-        R"(ing)|subclass(es)?|interface|trait|virtual|abstract|callback|hook(s|ed)?|handler(s)?|dispatch(ed|es|er)?|regist(er|ry|ered|)"
-        R"(ration)|plugin|middleware|listener|event|signal|observer|visitor|polymorph|indirect|function pointer|vtable|blast|impact|)"
-        R"(what breaks|affected|ripple|end[- ]to[- ]end|flow|path from|trace|pipeline|lifecycle|wired?|plumb))", std::regex::ECMAScript | std::regex::icase );
-    static const std::regex kBreadth(
-        R"(\b(orient|overview|map of|architecture|subsystems?|how does|how do|walk me|explain how|which files|what files|where .{0,40} (and|)"
-        R"(then) |across|throughout)\b)", std::regex::ECMAScript | std::regex::icase );
-    const std::string       text( q );
-    return std::regex_search( text, kIndirection ) || std::regex_search( text, kBreadth );
+    const std::string lq = rw::routeLower( q );
+    for( std::size_t at = 0; at < lq.size(); ++at )
+    {
+        if( at > 0 && namesplit::isIdentChar( lq[ at - 1 ] ) ) { continue; }   // every phrase starts with a letter: \b is "no word character before"
+        const std::string_view from = std::string_view( lq ).substr( at );
+        const auto wholeWord = [ & ]( std::string_view w ) { return from.starts_with( w ) && ( from.size() == w.size() || !namesplit::isIdentChar( from[ w.size() ] ) ); };
+        if( std::ranges::any_of( kIndirectionStems, [ & ]( std::string_view s ) { return from.starts_with( s ); } ) || std::ranges::any_of( kBreadthWords, wholeWord )
+            || std::ranges::any_of( kWindowedPhrases, [ & ]( const WindowedPhrase& w ) { return windowedAt( lq, at, w ); } ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // The caps guard (THETA13's, DEV-tested here): a question that is one ALL-CAPS identifier (a constant, an env var, a feature flag) is
-// answered by its use sites across files more than by its one definition, so the call keeps the full page.
+// answered by its use sites across files more than by its one definition, so the call keeps the full page. The word, with backticks and
+// parentheses dropped and blanks trimmed, is [A-Z][A-Z0-9]* segments joined by single underscores (two or more segments), or one segment
+// that starts with three capitals.
 [[nodiscard]] inline bool loneConstant( std::string_view q )
 {
-    static const std::regex kConstant( R"([A-Z][A-Z0-9]*(_[A-Z0-9]+)+|[A-Z]{3,}[A-Z0-9]*)", std::regex::ECMAScript );
     std::string bare;
     for( const char c : q )
     {
         if( c != '`' && c != '(' && c != ')' ) { bare.push_back( c ); }
     }
     const std::size_t first = bare.find_first_not_of( " \t\n\r" );
-    const std::size_t last  = bare.find_last_not_of( " \t\n\r" );
-    return first != std::string::npos && std::regex_match( bare.substr( first, last - first + 1 ), kConstant );
+    if( first == std::string::npos ) { return false; }
+    const std::string_view word = std::string_view( bare ).substr( first, bare.find_last_not_of( " \t\n\r" ) - first + 1 );
+    const auto upper = []( char c ) { return c >= 'A' && c <= 'Z'; };
+    const auto upperOrDigit = [ & ]( char c ) { return upper( c ) || ( c >= '0' && c <= '9' ); };
+    if( !upper( word.front() ) || !std::ranges::all_of( word, [ & ]( char c ) { return upperOrDigit( c ) || c == '_'; } ) ) { return false; }
+    if( word.find( '_' ) == std::string_view::npos ) { return word.size() >= 3 && upper( word[ 1 ] ) && upper( word[ 2 ] ); }
+    return word.back() != '_' && word.find( "__" ) == std::string_view::npos;
 }
 
 [[nodiscard]] inline bool relational( std::string_view q )
@@ -434,9 +508,13 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     const std::vector<detail::RangeRow>   top( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
     const std::vector<std::string>        syms = forced ? std::vector<std::string>{} : detail::namedSymbols( task );
     if( top.empty() || ( !forced && !detail::resolves( syms, top ) ) ) { return std::nullopt; }
-    const detail::Spread            spread = forced ? detail::Spread::None : detail::spreadOf( doc, blocks, top.front().p );
-    const std::vector<detail::Edge> edges  = detail::crossFileEdges( doc, blocks, top.front().p, syms );
-    if( !detail::edgesCoverSpread( spread, edges.size() ) ) { return std::nullopt; }
+    const detail::Spread  spread = forced ? detail::Spread::None : detail::spreadOf( doc, blocks, top.front().p );
+    const detail::EdgeSet edges  = detail::crossFileEdges( doc, blocks, top.front().p, syms );
+    if( !detail::edgesCoverSpread( spread, edges.list.size() ) ) { return std::nullopt; }
+    // A cut block with no cross-file edge on the page: the edges past the cut are unknown and there is no line to say so (CodeRabbit on #742).
+    if( !forced && edges.floor && edges.list.empty() ) { return std::nullopt; }
+    const std::string edgesLine = detail::edgesElement( edges, spread == detail::Spread::Callers );
+    if( edgesLine.empty() && !edges.list.empty() ) { return std::nullopt; }   // an edge the line cannot carry ("]]>" in a path)
     const std::vector<detail::RangeRow> rows = detail::listedRows( ranked, syms );
 
     std::string lines;
@@ -461,11 +539,12 @@ inline void blockCallers( std::string_view doc, const answerfirst::Block& caller
     const auto act = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment && b.name == "act"; } );
     if( act != blocks.end() ) { out.append( actline::kActClause ); }
     const std::string_view total = rw::attrOf( doc.substr( doc.find( "<sigs" ) ), "total" );
-    out.append( "<sigs shown=\"" ).append( std::to_string( std::ranges::count( lines, '\n' ) + 1 ) ).append( "\"" );
+    const auto shown = std::ranges::count( lines, '\n' ) + 1;   // the listed rows: kTinyRows plus the same-name rows, of total=
+    out.append( "<sigs shown=\"" ).append( std::to_string( shown ) ).append( "\"" );
     if( !total.empty() ) { out.append( " total=\"" ).append( total ).append( "\"" ); }
     out.append( "><![CDATA[" ).append( lines ).append( "]]></sigs>" );
     if( act != blocks.end() ) { out.append( doc.substr( act->begin, act->end - act->begin ) ); }
-    out.append( detail::edgesElement( edges, spread == detail::Spread::Callers ? kSpreadEdgeMax : kEdgeCap ) );
+    out.append( edgesLine );
     out.append( "<more" ).append( nextAttrXml( moreCall ) ).append( "/>" );
     out.append( "</ctx>" );
     out.insert( priceAt, rw::pricedRootAttrTokens( out.size(), rw::kBytesPerTokenDefault, 0, nullptr ) );
