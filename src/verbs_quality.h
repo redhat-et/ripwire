@@ -3364,14 +3364,19 @@ void emitQdXmlDocument( std::FILE* out, const QdReport& rep, const QdStaleFold* 
     const std::vector<quality::StaleAck>& served = fold != nullptr ? c.part.foreignAcks : rep.saRows;
     // the legend is passed the same values the root element below prints, so "the legend defines what the header emits" is
     // read off one set of values rather than restated as a second condition that could drift from it
-    emitQualityDeltaLegend( { basis.baseSel.marker, c.refPair, rep.root.identity.xml, !served.empty(), c.part.ackedCount > 0,
-                              basis.registerMacroExcluded > 0, rep.configDiag.total() > 0, basis.regs, c.part.outOfScope,
-                              c.scope.active() || !c.part.foreignAcks.empty(), !c.part.foreignAcks.empty(), rep.baselineAbsorbed,
-                              basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, fold != nullptr,
-                              refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), rep.kd.peakOver != 0,
-                              rep.kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
-                              basis.rustTestExcluded, refs.staleTree, !basis.extras.ratchetRef.empty(), !basis.extras.improved.empty(),
-                              basis.extras.shellCut > 0 }, out );
+    emitQualityDeltaLegend( { .marker = basis.baseSel.marker, .refPair = c.refPair, .identityAttrs = rep.root.identity.xml,
+                              .anySaRow = !served.empty(), .anyAcked = c.part.ackedCount > 0,
+                              .anyRegisterMacro = basis.registerMacroExcluded > 0, .anyRegisterMacroWarning = rep.configDiag.total() > 0,
+                              .rows = basis.regs, .disclosedRows = c.part.outOfScope,
+                              .scoped = c.scope.active() || !c.part.foreignAcks.empty(), .anyForeignAck = !c.part.foreignAcks.empty(),
+                              .baselineAbsorbed = rep.baselineAbsorbed, .headBasis = basis.headBasis,
+                              .anyDeclinedCallExcluded = basis.declinedCallExcluded > 0, .anyValueRefExcluded = basis.valueRefExcluded > 0,
+                              .staleCollapsed = fold != nullptr, .kindsSkipped = refs.kinds != quality::kAllKinds, .degraded = refs.degraded,
+                              .memoryStopped = !refs.memoryStop.empty(), .memoryPeak = rep.kd.peakOver != 0,
+                              .memorySkippedShare = rep.kd.memorySkipped != 0 && refs.selected != quality::kAllKinds,
+                              .historyUnread = basis.historyUnread.any(), .anyRustTestExcluded = basis.rustTestExcluded,
+                              .staleTree = refs.staleTree, .ratchetRead = !basis.extras.ratchetRef.empty(),
+                              .anyImproved = !basis.extras.improved.empty(), .shellCut = basis.extras.shellCut > 0 }, out );
     // at= anchors this regression list to the commit (+dirty state) it was computed against (QdRootFields::at). R-I: the range
     // form's base_ref= and target_ref= carry FULL shas because a wave measurement gets quoted into handoffs where a 9-char
     // prefix is one collision from unverifiable.
