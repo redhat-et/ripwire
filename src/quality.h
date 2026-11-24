@@ -1390,20 +1390,22 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
 // defectRowKey of every row holding such a site: a released ack of a format-arity row stopped matching and the row gated
 // again. addDefectFacetSchemeAliases re-files such an ack to the current key; this is the old value it needs. A facet the
 // two-bit scheme never had (unchecked-status, unhandled-arm) has none (0).
+// The two-bit scheme's facet mask: facets 0..kLegacyFacetMask (format-arity, utf8-cut, dedup-first, vacuous-assert) had a site value.
+inline constexpr std::uint64_t kLegacyFacetMask = 3;
+
 inline std::uint64_t defectLegacySiteValue( defectshape::Facet f, std::string_view text )
 {
-    constexpr std::uint64_t kLegacyMask = 3;
-    if( static_cast<std::uint64_t>( f ) > kLegacyMask )
+    if( static_cast<std::uint64_t>( f ) > kLegacyFacetMask )
     {
         return 0;
     }
     std::string id( defectshape::facetName( f ) );
     id.push_back( '\0' );
     id.append( text );
-    std::uint64_t h = fnv1a64( id ) & ~kLegacyMask;
+    std::uint64_t h = fnv1a64( id ) & ~kLegacyFacetMask;
     if( h == 0 )
     {
-        h = kLegacyMask + 1;
+        h = kLegacyFacetMask + 1;
     }
     return h | static_cast<std::uint64_t>( f );
 }
@@ -9810,7 +9812,7 @@ inline void addDefectFacetSchemeAliases( IdentityAliases& al, const gtl::btree_m
     {
         return;
     }
-    constexpr std::size_t           kTwoBitFacets = 4;   // format-arity, utf8-cut, dedup-first, vacuous-assert
+    constexpr std::size_t           kTwoBitFacets = kLegacyFacetMask + 1;   // every facet the two-bit scheme had
     const std::vector<DefectSiteAt> sites         = defectSitesOf( ing, root, nullptr );   // sorted by (anchor, site)
     for( auto it = sites.begin(); it != sites.end(); )
     {
