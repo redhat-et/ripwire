@@ -359,7 +359,9 @@ else no "(#353 flow) issue-line pins: $want_pos/3 WARN, $want_neg/2 CRITICAL as 
 # backslash and unresolved userinfo, upper-case and trailing-dot hosts, rebinding through source/eval/declare/printf -v,
 # and a credential sent to its own service that still moves data to an attacker's gist, issue, ssh key, invite or
 # base — plus x01/x02, and x03/x04 (CodeRabbit on #722: a here-document body and an if-block assignment bind
-# nothing the proof may read). On e75cf3094 45 of them went CRITICAL -> WARN (cred-to-owner, local-dest). Every fixture must
+# nothing the proof may read), and c14/c14b, c15/c15b, v15/v15b/v15c (CodeRabbit round 4 on #722: a quoted "$@" or
+# "${arr[@]}" as one option's value, a curl 8.13 `--url @FILE` URL list, literal or via $VAR, and a `read` or
+# `printf -v` behind an assignment prefix or `command` that rebinds the host; each went WARN local-dest on 3a49cc23f). On e75cf3094 45 of them went CRITICAL -> WARN (cred-to-owner, local-dest). Every fixture must
 # keep its main (b576a95e3) net-exfil severities exactly, and the NODEST ones may name no host: their text does not say
 # where the request goes. Real-looking attacker hosts are .example; vendor hosts stay (they ARE the class).
 ADV="$ROOT/test/skillfix/adv353"
@@ -457,6 +459,13 @@ x01-eval-curl-local|critical
 x02-background-listener|critical
 x03-heredoc-local|critical
 x04-if-block-assign|critical
+c14-quoted-argv-list|critical
+c14b-array-list|critical
+c15-url-at-file|critical
+c15b-url-at-var|critical
+v15-read-assign-prefix|critical
+v15b-command-read|critical
+v15c-prefix-printf-v|critical
 ADVWANT
 adv_files="$( find "$ADV" -name '*.md' | wc -l | tr -d ' ' )"
 if [ "$adv_seen" -ge 80 ] && [ "$adv_ok" = "$adv_seen" ] && [ "$adv_files" = "$adv_seen" ] && [ "$adv_crit" -ge 78 ]; then
@@ -466,13 +475,15 @@ adv_nodest=0
 for adv_name in v08-source-file v09-dynamic-export v10-declare-split v11-eval-escaped v12-printf-v-dynamic h06-uppercase h07-trailing-dot \
                 h11-backslash-userinfo h12-ansic-userinfo h12b-ansic-local h13-unresolved-userinfo h13b-unresolved-userinfo-local \
                 h13c-default-userinfo h14-ip-trailing-dot c08-env-proxy-prefix c08b-env-proxy-http c08c-env-cmd-prefix c10b-curl-home \
-                c11-local-curl-binary m05-wget-sink x01-eval-curl-local x03-heredoc-local x04-if-block-assign; do
+                c11-local-curl-binary m05-wget-sink x01-eval-curl-local x03-heredoc-local x04-if-block-assign \
+                c14-quoted-argv-list c14b-array-list c15-url-at-file c15b-url-at-var v15-read-assign-prefix v15b-command-read \
+                v15c-prefix-printf-v; do
     if grep -qE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" sev=\"critical\"/>" "$TMP/adv_out.txt" \
        && ! grep -qE "<f p=\"[^\"]*/$adv_name\.md:[0-9]+\" rule=\"EXFILTRATE:net-exfil\" [^>]*(dest|owner)=" "$TMP/adv_out.txt"; then adv_nodest=$(( adv_nodest + 1 ))
     else no "(#353 adversarial) $adv_name: want bare CRITICAL rows only (no dest=, owner= on any): $( grep -oE "<f p=\"[^\"]*/$adv_name\.md:[^>]*>" "$TMP/adv_out.txt" )"; fi
 done
-if [ "$adv_nodest" = 23 ]; then ok "(#353 adversarial) the 23 rebinding, here-doc, conditional, escaped, non-canonical, rerouted and second-sink lines name no dest= (resolution refused, host unproved)"
-else no "(#353 adversarial) only $adv_nodest/23 unprovable-host fixtures are bare CRITICAL rows"; fi
+if [ "$adv_nodest" = 30 ]; then ok "(#353 adversarial) the 30 rebinding, here-doc, conditional, escaped, non-canonical, rerouted, word-list, URL-file and second-sink lines name no dest= (resolution refused, host unproved)"
+else no "(#353 adversarial) only $adv_nodest/30 unprovable-host fixtures are bare CRITICAL rows"; fi
 if [ "$adv_rc" = 2 ]; then ok "(#353 adversarial) the set exits 2"; else no "(#353 adversarial) the set exits $adv_rc, want 2"; fi
 
 # ── check 19 (0.6.6): a bundled SHELL SCRIPT is scanned as code, not through the markdown fence tracker ──
