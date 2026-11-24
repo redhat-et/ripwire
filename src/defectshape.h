@@ -2094,7 +2094,7 @@ private:
     }
 
     // ── the index: scopes, functions, assignments, writers, judgments ──────────────────────────────────────────────
-    void visit( std::uint32_t list, std::uint32_t scope, std::vector<Judgment::Reach> reach )
+    void visit( std::uint32_t list, std::uint32_t scope, const std::vector<Judgment::Reach>& reach )
     {
         if( list == kNone )
         {
@@ -3968,19 +3968,20 @@ inline void Script::unreadRcFileSites( std::vector<std::uint32_t>& at ) const
             }
         }
         const std::uint32_t scope = scope_[c];
+        const auto ranRcFileBefore = [ & ]   // a run node before this one, in its scope, that ran an rc file
+        {
+            for( std::uint32_t d = 0; d < a_.facts.size(); ++d )
+            {
+                if( a_.facts[d].seen && scope_[d] == scope && node( d ).pos < n.pos && isRun( d ) && a_.facts[d].cons.how.rfind( "rc file", 0 ) == 0 )
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
         const bool afterRun = std::any_of( a_.calls.begin(), a_.calls.end(), [ & ]( const sh::Call& call )
                                            { return call.node != kNone && scope_[call.node] == scope && call.how.rfind( "rc file", 0 ) == 0 && node( call.node ).pos < n.pos; } )
-                           || [ & ]
-                              {
-                                  for( std::uint32_t d = 0; d < a_.facts.size(); ++d )
-                                  {
-                                      if( a_.facts[d].seen && scope_[d] == scope && node( d ).pos < n.pos && isRun( d ) && a_.facts[d].cons.how.rfind( "rc file", 0 ) == 0 )
-                                      {
-                                          return true;
-                                      }
-                                  }
-                                  return false;
-                              }();
+                           || ranRcFileBefore();
         if( target.empty() || !afterRun )
         {
             continue;
@@ -4973,6 +4974,7 @@ inline SwitchArms switchArmsOf( std::string_view src, const std::vector<Tok>& to
         afterLbl = false;
     }
     std::vector<ArmEnd> ends;
+    ends.reserve( arms.ranges.size() );
     for( const auto& [ first, end ] : arms.ranges )
     {
         ends.push_back( armEndOf( src, toks, first, end ) );
@@ -5508,6 +5510,7 @@ inline std::vector<PyConst> pyChainConsts( std::string_view src, const std::vect
 inline std::pair<std::string, std::string> pyUnhandledOutcome( bool isMatch, std::string_view subject, const std::vector<PyConst>& consts, const std::vector<PyEnum>& enums )
 {
     std::vector<std::string> named;
+    named.reserve( consts.size() );
     for( const PyConst& c : consts )
     {
         named.push_back( c.text );

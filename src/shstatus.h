@@ -2133,6 +2133,7 @@ inline std::string varsAsGlob( std::string_view tgt )
 inline void compilerOutputs( const Node& n, std::vector<std::string>& targets )
 {
     std::vector<std::string> ws;
+    ws.reserve( n.words.size() );
     for( const Word& w : n.words )
     {
         ws.push_back( unq( w.text ) );

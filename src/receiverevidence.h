@@ -368,7 +368,8 @@ struct CallResultTypes
         const char bit = b.kind == LocalBindKind::TypeAlias ? kCppScopeAliased : b.var != "*" ? kCppScopeUsingDeclared : char( 0 );
         if( bit != 0 )
         {
-            cppScopeNames[ b.var ] |= bit;
+            char& names = cppScopeNames[ b.var ];
+            names       = static_cast<char>( names | bit );
         }
     }
     // a C++ using-directive / using-declaration, or (fix round 3) a C++ alias: the rows that carry their scope's span (model.h)

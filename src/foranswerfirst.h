@@ -93,10 +93,10 @@ struct AnswerFirstFallback
     };
     void disclose( DisclosureWhy why ) noexcept
     {
-        rw::emitTo( stderr, "ripwire: --legend=last: {}\n",
-                    why == DisclosureWhy::SizeChanged
-                        ? "the permuted answer changed size, so the original order is served — the answer is complete either way"
-                        : "the answer did not buffer whole, so it is served in the default order — the answer is complete either way" );
+        // literal text, no formatting: emitRaw cannot throw where emitTo's std::print could (bad_alloc) out of this noexcept sink
+        rw::emitRaw( stderr, why == DisclosureWhy::SizeChanged
+                                 ? "ripwire: --legend=last: the permuted answer changed size, so the original order is served — the answer is complete either way\n"
+                                 : "ripwire: --legend=last: the answer did not buffer whole, so it is served in the default order — the answer is complete either way\n" );
     }
 };
 

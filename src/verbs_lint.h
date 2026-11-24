@@ -1101,7 +1101,7 @@ std::vector<LintOut> dedupeLintFindings( const EnclosingSymbolIndex& enclosing, 
     const IngestResult& ing = enclosing.ing;
     HashMap<std::string, char> seenRow;
     std::vector<LintOut>       deduped;  deduped.reserve( outs.size() );
-    for( const LintOut& o : outs )
+    for( LintOut& o : outs )   // `outs` is ours (moved in): a kept row moves out of it
     {
         const Symbol* e = enclosing( o.fileId, o.startByte );
         std::string   key;
@@ -1117,7 +1117,7 @@ std::vector<LintOut> dedupeLintFindings( const EnclosingSymbolIndex& enclosing, 
             continue; // same visible row already kept
         }
         seenRow.emplace( std::move( key ), 0 );
-        deduped.push_back( o );
+        deduped.push_back( std::move( o ) );
     }
     return deduped;
 }

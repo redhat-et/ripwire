@@ -790,7 +790,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         const bool   isAlias = kinds.is( node, JsK::VariableDeclarator ) && aliasDecls.find( ts_node_start_byte( node ) ) != aliasDecls.end();
         const JsScopeAt at{ kinds, ancestors, scratch.cur };
         const JsDecl    d = isAlias ? JsDecl{} : at.declarationOf( node );
-        for( std::string name : jsPatternNames( d.binding, src ) )
+        for( const std::string& name : jsPatternNames( d.binding, src ) )
         {
             if( imported.find( name ) != imported.end() ) { recorder.add( node, LocalBindKind::JsShadow, name, d.scope ); }
         }

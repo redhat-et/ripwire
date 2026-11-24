@@ -2978,7 +2978,7 @@ inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang
         // and decltype types write nothing (writtenTypeOf's own refusal), and pushRawBind drops the record.
         DeclType written         = declTypeOfName( fieldChild( p, NodeField::Type ), src );
         written.directDeclarator = cppDirectDeclarator( declarator );
-        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), std::move( written ), BindSite{ ts_node_start_byte( p ), 0u, 0u },
+        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), written, BindSite{ ts_node_start_byte( p ), 0u, 0u },
                        LocalBindKind::ParamType, binds );
     }
 }
