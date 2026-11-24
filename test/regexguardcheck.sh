@@ -705,7 +705,8 @@ else no "(f2) the long net-exfil line: exit $rc, finding $( grep -o 'rule="[^"]*
 # (f4) #353 flow: the binding pass and the curl destination proof finish inside a 20 s time limit (a limit, not a proof of
 # linear scaling). Three hostile shapes, each a bare CRITICAL row (no dest=, owner= or why=: nothing is proved): 50,000 assignments of one variable on one line (the doc-wide binding pass, then a resolve that must refuse
 # the twice-bound host), a curl line with 40,000 `$V` destination words (past the destination cap: unproved), and a
-# 4,000-byte value referenced 3,000 times in one word (past the expansion cap: unproved). None may grade WARN.
+# 4,000-byte value referenced 3,000 times in one word (past the expansion cap: unproved). The CRITICAL row must be the
+# curl on line 4 (the fence puts the binding on line 3). None may grade WARN.
 python3 - "$SK" <<'PY2'
 import sys
 sk = sys.argv[1]
@@ -716,7 +717,7 @@ open(f"{sk}/flow_expand.md", "w").write(fence("W=" + "a" * 4000 + '\ncurl -H "Au
 PY2
 for flowCase in flow_sites flow_dests flow_expand; do
     rc="$( capRun 20 "$TMP/$flowCase.out" "$TMP/$flowCase.err" --scan-skill="$SK/$flowCase.md" )"
-    if [ "$rc" = 2 ] && grep -qE '<f p="[^"]*:[0-9]+" rule="EXFILTRATE:net-exfil" sev="critical"/>' "$TMP/$flowCase.out" \
+    if [ "$rc" = 2 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="critical"/>' "$TMP/$flowCase.out" \
        && ! grep -qE 'rule="EXFILTRATE:net-exfil" [^>]*(dest|owner|why)=' "$TMP/$flowCase.out"; then
         ok "(f4) #353 flow, $flowCase: a bare CRITICAL row (no dest=, owner=, why=) inside the 20 s limit"
     else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = over the 20 s limit), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
