@@ -4459,7 +4459,7 @@ $ ./build/ripwire . --skipped
 
 **Answers:** scan a single skill file before installing (any file, not just .md) EXFILTRATE:net-exfil (a network verb plus a $VAR or base64 on one fenced line) needs a destination: a verb named but not run, as in command -v curl, does not fire.
 
-It is CRITICAL only when a credential-shaped source is on that line: a credential-named var, an Authorization: header with a var, an env dump or a key file. Otherwise it is WARN and the row says why="no-cred-source". A sensitive file read fed into an upload (cat /etc/passwd | curl ... @-, curl -d @.env ...) is CRITICAL with or without a var: why="sensitive-read-upload". A credential var sent by bare curl over HTTP(S) only to localhost, 127/8, ::1 or a private-LAN host, with no redirect and no relay, proxy, curl-config or curl-shadowing (a curl function or alias) signal in the file, is WARN why="local-dest". A host held in a $VAR counts when the file binds it exactly once, by a literal assignment that always runs before the line (not behind if, && or a loop); dest= names the hosts proved; owner= names the service a credential var names (still CRITICAL).
+It is CRITICAL only when a credential-shaped source is on that line: a credential-named var, an Authorization: header with a var, an env dump or a key file. Otherwise it is WARN and the row says why="no-cred-source". A sensitive file read fed into an upload (cat /etc/passwd | curl ... @-, curl -d @.env ...) is CRITICAL with or without a var: why="sensitive-read-upload". A credential var sent by bare curl over HTTP(S) only to localhost, 127/8, ::1 or a private-LAN host, with no redirect and no relay, proxy, curl-config or curl-shadowing (a curl function or alias) signal in the file, is WARN why="local-dest". A host held in a $VAR counts when the file binds it exactly once, by a literal assignment that always runs before the line, or by a literal for NAME in w... list at a use inside that loop (not by an assignment behind if or && or inside a loop body); dest= names the hosts proved; owner= names the service a credential var names (still CRITICAL).
 
 **Try it**
 
@@ -4790,7 +4790,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=e6de02a6e8c41cbe entries=1324
+ripwire legend dictionary ripwire.dict/v1 dictv=a0f1f099ffd1d95f entries=1324
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
