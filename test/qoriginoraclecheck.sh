@@ -206,10 +206,9 @@ printf '%s' "$PE" | grep -q 'kind="new-clone-of-reused-helper"' \
 #      selector would be "FILE:a | b", which resolves nothing). Premise: the row is there and gates. RED before CR721
 #      (main b576a95e3 and train GE3 cbed31d4c): next="--expand='copy.cpp:… | …'".
 crow="$( printf '%s' "$PE" | grep -oE '<r kind="new-clone-of-reused-helper"[^>]*' | head -1 )"
-case "$crow" in
-    *'gating="1"'*next=*) no "(e2) the gating clone-group row offers a single-body next=: $crow" ;;
-    *'gating="1"'*)       ok "(e2) the gating clone-group row carries no next=: $crow" ;;
-    *)                    no "(e2) PREMISE: want a gating new-clone-of-reused-helper row, got '${crow:-none}'" ;;
-esac
+# CR721: the two facts are tested independently, so a next= BEFORE gating="1" cannot slip past an order-bound pattern.
+if ! printf '%s' "$crow" | grep -q ' gating="1"'; then no "(e2) PREMISE: want a gating new-clone-of-reused-helper row, got '${crow:-none}'"
+elif printf '%s' "$crow" | grep -q ' next='; then   no "(e2) the gating clone-group row offers a single-body next=: $crow"
+else                                                  ok "(e2) the gating clone-group row carries no next=: $crow"; fi
 
 [ "$fail" -eq 0 ] && echo "qoriginoraclecheck: ALL PASS" || { echo "qoriginoraclecheck: SOME CHECKS FAILED"; exit 1; }
