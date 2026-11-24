@@ -30,6 +30,8 @@
 #       the d4 two-source refusal carries no copy_p= either
 #   (d8) MCP find_referencing_symbols answers the same copy as the CLI: the bound file, narrowed, copy_p, copy_next equal the CLI --json
 #       root's, and the MCP answer carries copy_note
+#   (d9) a space-bearing copy path (.github/work flow.ts): copy_next= keeps nextFlag's shell quotes raw (nextAttrXml), pastes to
+#       the copy alone, and the CLI --json / MCP copy_next carry the same value
 #   (e4) --for is not reached: `callers of ApplicationRef.tick` on the d6 tree appends no graph block (the M1 rule alone binds there)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): AF2 E1 puts the bridge AHEAD
@@ -107,6 +109,14 @@ export class ApplicationRef {
   tick(): void { ghTick(); }
 }
 function ghTick(): void {}
+T
+# (d9) the space-bearing copy: a .github copy whose path has a space, so copy_next='s selector is shell-quoted
+F1S="$TMP/fx1s"; cp -R "$F1" "$F1S"; mkdir -p "$F1S/.github"
+cat > "$F1S/.github/work flow.ts" <<'T'
+export class ApplicationRef {
+  tick(): void { wfTick(); }
+}
+function wfTick(): void {}
 T
 
 # ── M3 fixtures ──
@@ -360,6 +370,24 @@ d8mcp="$( mcpq "$F1V" find_referencing_symbols twin | sed -n 2p )"
 if [ "$( rc d8j )" = 0 ] && [ -n "$d8mcp" ] && [ "$d8mcp" = "$d8cli" ] && [ "${d8cli#*copy_p=extensions/}" != "$d8cli" ]; then
     ok "(d8) MCP find_referencing_symbols == CLI --json on the two-copy bind: $d8mcp"
 else no "(d8) CLI [$d8cli] vs MCP [$d8mcp]"; fi
+
+# (d9) a space-bearing copy path: copy_next= is the nextFlag-quoted call with its apostrophes RAW (nextAttrXml, the one next=
+#      escaper), not escapeXml's &apos; -- pasted out of the raw answer it binds the copy alone; the CLI --json and MCP spell the same
+#      value. RED before the fix (copy_next="--callers=&apos;.github/work flow.ts:tick&apos;").
+want9="--callers='.github/work flow.ts:tick'"
+run "$F1S" d9 --callers=ApplicationRef.tick
+run "$F1S" d9j --callers=ApplicationRef.tick --json --legend=full
+d9raw="$( python3 -c 'import re,sys; m=re.search(r" copy_next=\"([^\"]*)\"", open(sys.argv[1], encoding="utf8", errors="replace").read()); print(m.group(1) if m else "-")' "$TMP/d9.xml" )"
+d9js="$( python3 -c 'import json,sys
+try: print(json.loads(open(sys.argv[1], encoding="utf8").read()).get("copy_next","-"))
+except ValueError: print("unparsable")' "$TMP/d9j.xml" )"
+d9mcp="$( mcpq "$F1S" find_referencing_symbols twin | sed -n 2p )"
+d9paste="$( cd "$F1S" && eval "\"\$BIN\" \"\$F1S\" --no-cache --legend=compact $d9raw" 2>/dev/null )"; d9prc=$?
+d9pof="$( printf '%s' "$d9paste" | python3 -c 'import re,sys; m=re.search(r"<callers [^>]*\bof=\"([^\"]*)\"", sys.stdin.read()); print(m.group(1) if m else "-")' )"
+if [ "$( rc d9 )" = 0 ] && [ "$d9raw" = "$want9" ] && [ "$( count d9 '&apos;' )" = 0 ] && [ "$( rc d9j )" = 0 ] && [ "$d9js" = "$want9" ] \
+   && [ "${d9mcp#*copy_next="$want9" copy_note=1}" != "$d9mcp" ] && [ "$d9prc" = 0 ] && [ "$d9pof" = ".github/work flow.ts:tick" ]; then
+    ok "(d9) space-bearing copy: copy_next=$d9raw raw (no &apos;), pastes to of=$d9pof; --json and MCP spell it the same"
+else no "(d9) rc=$( rc d9 )/$( rc d9j ) copy_next xml=[$d9raw] json=[$d9js] mcp=[$d9mcp] paste rc=$d9prc of=[$d9pof]"; fi
 
 # (e4) --for is not reached by the two-copy bind
 run "$F1V" e4 --for="callers of ApplicationRef.tick"

@@ -275,7 +275,7 @@ inline std::string sourceCopyAttrXml( const IngestResult& ing, std::span<const N
     const SourceCopyDisclosure d = sourceCopyDisclosure( ing, copies );
     std::vector<char>          esc;
     std::string                out = " copy_p=\"" + std::string( escapeXml( d.p, esc ) ) + "\"";
-    return d.next.empty() ? out : out + " copy_next=\"" + std::string( escapeXml( d.next, esc ) ) + "\"";
+    return out + nextAttrXml( d.next, "copy_next" );   // nextFlag's shell quotes stay raw (the one next= escaper); empty next => nothing
 }
 inline std::string sourceCopyKeysJson( const IngestResult& ing, std::span<const NodeId> copies )
 {
