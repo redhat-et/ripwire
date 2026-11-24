@@ -2173,6 +2173,10 @@ if printf '%s' "$LEG" | grep -q '<quality-delta '; then
     EX="$( printf '%s' "$LEG" | grep -o 'EXIT 2 fires only on[^.]*' )"
     if [ -n "$EX" ] && ! printf '%s\n' "$EX" | grep -vq 'format-arity'; then ok "$L: every 'EXIT 2 fires only on' sentence names the format-arity exception"
     else no "$L: an 'EXIT 2 fires only on' sentence omits format-arity (or none found): ${EX:-<none>}"; fi
+    # CR721: the exit-2 sentence states the whole predicate. A new function at the ceiling or tangle 6 can be the only gating
+    # row, with preexisting-worse=0, so "fires only on preexisting-worse" is false. RED before (43be39fcd): that wording.
+    if printf '%s' "$LEG" | grep -q 'EXIT 2 fires only on preexisting-worse'; then no "$L: the legend says EXIT 2 fires only on preexisting-worse rows"
+    else ok "$L: the exit-2 sentence does not limit gating to preexisting-worse rows"; fi
     if printf '%s' "$LEG" | grep -q 'report-only by facet, not by size'; then ok "$L: the legend says the report-only facets are sev=minor by facet, not by size (D3)"
     else no "$L: the legend does not say 'report-only by facet, not by size' — sev=minor is otherwise defined as a small numeric delta"; fi
     if printf '%s' "$LEG" | grep -q 'f-strings are not checked'; then ok "$L: the legend names the Python formats it does not check"
