@@ -591,5 +591,28 @@ say $? "(39) [N] an unrouted --for --offset is the --for file page byte for byte
 run f40 wide --for='Where is `target_fn` used?' --offset=100 --no-verb-route
 if grep -q '<route ' "$DIR/f40.out"; then no "(40) [N] --no-verb-route --offset routed"; else ok "(40) [N] --no-verb-route --offset is the --for file page, never routed"; fi
 
+# ── R1 arms (41–42): an apply/invoke word led by "how do|does|did" is not a where-used cue (forroute.h howDoBefore) ──────
+# The rake-12 everyday shape ("how does rake invoke the task … `multitask` …") asks how the actor works; RT2 routed it to
+# --uses on the backticked symbol and the answer lost the mechanism. (41) and (41b) are RED on the RT2/RT3 binary (it routed).
+r1Unrouted(){ local n="$1" q="$2"
+    if run "r$n" plain --for="$q" && run "r${n}o" plain --for="$q" --no-verb-route; then
+        cmp -s "$DIR/r$n.out" "$DIR/r${n}o.out" && ! grep -q '<route ' "$DIR/r$n.out"
+        say $? "($n) [P] R1: '$q' stays on --for (the unrouted answer, byte for byte)" "($n) [P] R1: '$q' was routed: '$( firstChild "$DIR/r$n.out" )'"
+    else
+        no "($n) [P] a run exited non-zero: $( head -c 200 "$DIR/r${n}o.err" )"
+    fi; }
+r1Unrouted 41 'When I run the program, how does `run_main` invoke the work, and how is `compute_total` added up?'
+r1Unrouted 41b 'How does the build apply `compute_total` to each input?'
+# (42) [N] the where-used forms R1 must NOT touch: still kind=where-used, verb=--uses (non-vacuity for (41): the cue is live)
+for q in 'Where is `compute_total` invoked?' 'What invokes `compute_total`?' 'How is `compute_total` invoked?' 'Where is `compute_total` applied?'; do
+    if run r42 plain --for="$q"; then
+        F="$( firstChild "$DIR/r42.out" )"
+        [ "$( attr "$F" kind )" = where-used ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ]
+        say $? "(42) [N] R1: '$q' still routes where-used → --uses" "(42) [N] R1: '$q' route reads '$F'"
+    else
+        no "(42) [N] a run exited non-zero: $( head -c 200 "$DIR/r42.err" )"
+    fi
+done
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"
