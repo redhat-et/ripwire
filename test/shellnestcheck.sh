@@ -16,6 +16,7 @@
 #        and there is no shell_cut= (the budget cut nothing real). Red on a build with a budget under 40.
 #   (n2) SHALLOW: the same file at depth 1: no shell_cut= (premise for n1: the row exists without nesting too).
 #   (v)  CUT TREE: an absence assertion whose guard lies past the cut is not judged vacuous (premise v0: the facet is live).
+#   (u)  CUT CASE: a case whose *) arm lies past the cut is not judged unhandled-arm (premise u0: depth 1, no row).
 #   (f)  FOLD: the subshell script committed with one stale ack: the identity-tree verdict fold keeps shell_cut="1".
 # Usage: test/shellnestcheck.sh [BIN]
 set -u
@@ -119,6 +120,27 @@ R="$( vrepo v 5000 guard )"; cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP
 vr="$( vac "$TMP/v.xml" )"; c="$( cutof "$TMP/v.xml" )"
 if { [ "$vrc" = 0 ] || [ "$vrc" = 2 ]; } && [ -z "$vr" ] && [ "${c:-0}" = 1 ]; then ok "(v) cut tree: no vacuous-assert row, shell_cut=\"1\""
 else no "(v) cut tree: want no vacuous-assert row and shell_cut=\"1\"; got rc=$vrc row='${vr:-none}' shell_cut='${c:-none}'"; fi
+
+# (u) CR721 CUT CASE NOT JUDGED: a function-ending case WITH a *) arm whose second arm holds a 5,000-deep quoted substitution.
+#     The cut makes the rest of the file one word, so *) and esac are lost; unhandled-arm must not report a missing *) arm the
+#     file has. Premise (u0): the same file at depth 1 has no row (the *) arm is seen), and n2 above shows the facet is live.
+#     RED before this fix (train GE3 7a387ab51, and the rebased tip 43be39fcd): an unhandled-arm row on test/deep_check.sh.
+ugen(){ python3 - "$1" "$2" <<'PY'
+import sys
+n, out = int(sys.argv[1]), sys.argv[2]
+q = '"' + '$( echo "' * n + "y" + '" )' * n + '"'
+open(out, "w").write('#!/usr/bin/env bash\nset -u\nkindof() { case "$1" in a) echo x ;; b) echo ' + q + ' ;; *) echo z ;; esac; }\nkindof a\n')
+PY
+}
+uarm(){ grep -oE '<r kind="defect-shape"[^>]*defect="unhandled-arm"[^>]*' "$1" | grep 'deep_check.sh'; }
+for n in 1 5000; do
+    R="$TMP/u-$n"; mkdir -p "$R/test"; "${G[@]}" -C "$R" init -q; echo 'echo hi' >"$R/test/a.sh"
+    "${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm a; ugen "$n" "$R/test/deep_check.sh"
+    cap60 "$BIN" "$R" --quality-delta --no-cache >"$TMP/u$n.xml" 2>/dev/null; urc=$?
+    ur="$( uarm "$TMP/u$n.xml" )"; c="$( cutof "$TMP/u$n.xml" )"; want=0; label=u0; [ "$n" = 5000 ] && { want=1; label=u; }
+    if { [ "$urc" = 0 ] || [ "$urc" = 2 ]; } && [ -z "$ur" ] && [ "${c:-0}" = "$want" ]; then ok "($label) depth $n: no unhandled-arm row, shell_cut=${c:-none}"
+    else no "($label) depth $n: want rc 0/2, no unhandled-arm row and shell_cut=$want; got rc=$urc row='${ur:-none}' shell_cut='${c:-none}'"; fi
+done
 
 [ "$fail" = 0 ] && echo "shellnestcheck: PASS" || echo "shellnestcheck: FAIL"
 exit "$fail"

@@ -5867,6 +5867,12 @@ inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>&
         return;
     }
     const rw::shstatus::Tree t = parseShellScan( src, cut );
+    if( t.cut )
+    {
+        // CR721: a cut inside a quoted substitution makes the rest of the file one word, so a *) arm and its esac past the
+        // cut are lost and the prefix reads as a case with no catch-all. A cut tree is not judged (as scanVacuousAssertBash).
+        return;
+    }
     uash::endingCaseSites( src, t, out );
     uash::assignedCaseSites( src, t, fnSpans, out );
 }
