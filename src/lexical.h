@@ -530,7 +530,57 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
 // normalization (test/ownerhopcheck.sh G/guard: `broadcast` among 105 short handlers of pkg/broadcast.py, rank 2 -> 107;
 // at 1 it stays at 2). Weight 1 keeps the held-out completeness unchanged (126 / 83 / 4 of 213) and fixes that case.
 // RIPWIRE_BASENAME_W still overrides it (0 = the historical ranking). test/forbasenamedefaultcheck.sh pins it.
+// LENGTH-SCALED (θ10, #728): at weight 1 a long gold symbol still sank (textual's 1,000-line `Widget` class behind its own
+// short methods, vscode's TextSearchManager.search) because BM25 divides the one basename tf by each symbol's OWN length
+// norm. A file name is evidence about the FILE, so every symbol of that file should take the same lift whatever its body
+// length: see basenameFieldTf below and test/forbasenamelengthcheck.sh.
 inline constexpr int kForBasenameFieldW = 1;
+
+// The basename field's per-FILE evidence (pass 1.6): each file's basename tokenized once, its weighted tf per match-table row
+// (fileCount × stride) and its weighted token count. Applied per symbol in pass 2.5, once every symbol's length is final.
+struct BasenameFieldEvidence
+{
+    std::vector<int> fileTf;
+    std::vector<int> fileWeight;
+    std::size_t      stride = 0;
+};
+
+// The basename tf a symbol takes: the file's tf times the symbol's BM25 length norm (1 - b + b·dl/avgdl), so after BM25 divides
+// by that same norm a long symbol keeps what a mean-length one keeps; never less than the flat tf, so a short symbol keeps
+// exactly the lift it had (no symbol is lifted ABOVE the flat field's mean-length weight by being short).
+inline int basenameFieldTf( int fileTf, double lengthNorm ) noexcept
+{
+    return std::max( fileTf, int( std::lround( fileTf * lengthNorm ) ) );
+}
+
+// Pass 2.5: add each symbol's basename tf to its tf row. avgLength is the corpus mean of dl (the statistics' own mean; dl
+// already holds the basename tokens, pass 1.6). RIPWIRE_BASENAME_FLAT=1 restores the flat (unscaled) field, the A/B handle.
+inline void addBasenameFieldTf( const IngestResult& ing, const BasenameFieldEvidence& field, const std::vector<int>& dl, double avgLength,
+                                std::vector<int>& tfFlat )
+{
+    const bool        flat      = std::getenv( "RIPWIRE_BASENAME_FLAT" ) != nullptr;
+    const double      b         = resolveBm25Params().b;
+    const std::size_t fileCount = field.fileWeight.size();
+    const std::size_t stride    = field.stride;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const std::uint32_t f = ing.symbols[i].fileId;
+        if( f >= fileCount || field.fileWeight[f] == 0 )
+        {
+            continue;
+        }
+        const double     lengthNorm = flat ? 1.0 : 1.0 - b + b * dl[i] / ( avgLength > 0 ? avgLength : 1.0 );
+        int* const       tfRow      = tfFlat.data() + i * stride;
+        const int* const fileRow    = field.fileTf.data() + std::size_t( f ) * stride;
+        for( std::size_t m = 0; m < stride; ++m )
+        {
+            if( fileRow[m] > 0 )
+            {
+                tfRow[m] += basenameFieldTf( fileRow[m], lengthNorm );
+            }
+        }
+    }
+}
 
 // The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
 // without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
@@ -895,6 +945,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // follows the last '/', which the root prefix cannot change — and applied anyway so the two path passes
     // cannot drift apart. One reading of ing.files[f], one rule; a future reader who changes one pass finds
     // the other already agreeing rather than discovering half the path tokenization was still absolute.
+    // Since θ10 this pass only COLLECTS the evidence and adds the basename tokens to dl; the tf lands in pass 2.5 below, after
+    // pass 2, because its length scaling reads each symbol's final length (doc + body).
+    BasenameFieldEvidence basenameField;
     {
         int kwBase = basenameFieldDefaultW;
         if( const std::optional<int> baseW = envKnob<int>( "RIPWIRE_BASENAME_W" ) )
@@ -904,29 +957,22 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         if( kwBase > 0 )
         {
             const std::size_t fileCount = ing.files.size();
-            std::vector<int>  fileTf( fileCount * matchCount, 0 );
-            std::vector<int>  fileWt( fileCount, 0 );
+            basenameField.stride        = matchCount;
+            basenameField.fileTf.assign( fileCount * matchCount, 0 );
+            basenameField.fileWeight.assign( fileCount, 0 );
             for( std::size_t f = 0; f < fileCount; ++f )
             {
                 const std::string_view path = rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix );
                 const std::size_t      cut  = path.find_last_of( '/' );
                 const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
-                scanTextInto( fileTf.data() + f * matchCount, fileWt[f], base, kwBase );
+                scanTextInto( basenameField.fileTf.data() + f * matchCount, basenameField.fileWeight[f], base, kwBase );
             }
             for( std::size_t i = 0; i < S; ++i )
             {
-                const std::uint32_t f = ing.symbols[i].fileId;
-                if( f >= fileCount || fileWt[f] == 0 )
+                if( const std::uint32_t f = ing.symbols[i].fileId; f < fileCount )
                 {
-                    continue;
+                    dl[i] += basenameField.fileWeight[f];
                 }
-                int* const       tfRow = tfFlat.data() + i * matchCount;
-                const int* const fRow  = fileTf.data() + std::size_t( f ) * matchCount;
-                for( std::size_t m = 0; m < matchCount; ++m )
-                {
-                    tfRow[m] += fRow[m];
-                }
-                dl[i] += fileWt[f];
             }
         }
     }
@@ -1171,6 +1217,19 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 dfVariant[v] += dfPerFile[ f * variantCount + v ];
             }
         }
+    }
+
+    // pass 2.5 — the basename field's tf (θ10, #728), length-scaled per symbol (addBasenameFieldTf above). It runs after EITHER
+    // pass-2 branch, so the scan and persisted-stats paths add the identical integers (postings parity holds by construction).
+    // The mean is the statistics' own (the counted units' dl, the same doc order as the corpus stats below).
+    if( !basenameField.fileWeight.empty() )
+    {
+        double lengthSum = 0;
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            lengthSum += statsWeight( i ) != 0 ? dl[i] : 0;
+        }
+        addBasenameFieldTf( ing, basenameField, dl, lengthSum / double( statsS ? statsS : 1 ), tfFlat );
     }
 
     // ── IDF-guard admission + fold (rung R3) — runs identically after EITHER pass-2 branch ──────────

@@ -559,6 +559,7 @@ for _g in \
     foranswerfirstcheck \
     forautobodycheck \
     forbasenamedefaultcheck \
+    forbasenamelengthcheck \
     forblowupcheck \
     forbodyfoldcheck \
     forbodyslotcheck \
