@@ -51,6 +51,8 @@
 #         conjunct (iv) in code), with the kPromotable subset reported beside it so a RES displacement is never merely implied
 #   (G10n) the vacuity disclosure: the fixture's own population for G10, in both directions, including whether it offers a
 #         post-tail RES section at all -- where it does not, the RES half is recorded UNTESTED rather than passed
+#   (CP1) P-CALLERS-PROMOTE: a subject --callers <graph_verb> with defs="1" and count <= kCallersPromoteMaxCount precedes <tail>
+#   (CP2) ...and one over the cap stays behind </tail>; (CP0/CPn/CP2n) the cap is read from the source and both probes offer the shape
 #   (G11) TL3: the two guarantees are the ruling's -- kGuardTailRows 24 (AF2, frozen) and kGuardTailRowsBody 12 (ruling 120).
 #         A VALUE PIN, read out of src/foranswerfirst.h: either default moving reddens this arm and forces a decision, which
 #         is the opposite of a gate that follows its own constant wherever it goes
@@ -1058,6 +1060,40 @@ say(len(rb) > 24 and (CLAUSE in legend(bud)) == (not inrank),
     "(SD3) a budget that sheds (%d tail rows kept) states the order it serves: clause %s, rows in rank order %s" % (len(rb), "present" if CLAUSE in legend(bud) else "absent", inrank))
 sys.exit(1 if bad else 0)
 PY_SD
+[ $? -eq 0 ] || fail=1
+
+# (CP) P-CALLERS-PROMOTE (2026-11-24, src/foranswerfirst.h smallSubjectCallers): a `callers of X` task's subject --callers
+# <graph_verb> whose <callers> bound ONE definition and lists <= kCallersPromoteMaxCount callers goes directly ahead of <tail>.
+# LD bisect: ld-cockroach-08's 4-caller block sat on page 3 behind a 16 KB tail. Positive probe: rowBlockOrder (one definition,
+# one caller on this tree); negative probe: topLevelBlocks (one definition, well over the cap). Each arm first proves its probe
+# offers the shape (CPn / CP2n), so a renamed function or a moved count reddens the arm instead of passing it blind.
+CP_MAX="$( sed -n 's/^inline constexpr std::size_t kCallersPromoteMaxCount = \([0-9]*\);.*/\1/p' "$ROOT/src/foranswerfirst.h" )"
+"$BIN" . --for="callers of rowBlockOrder" $OPTIN >"$WORK/cp_new.xml" 2>/dev/null
+"$BIN" . --for="callers of rowBlockOrder" $LEGACY >"$WORK/cp_old.xml" 2>/dev/null
+"$BIN" . --for="callers of topLevelBlocks" $OPTIN $WHOLE >"$WORK/cp_big.xml" 2>/dev/null
+python3 - "$WORK" "${CP_MAX:-}" <<'PY_CP'
+import os, re, sys
+W, cap = sys.argv[1], sys.argv[2]
+bad = 0
+def say(ok, msg):
+    global bad
+    print(("  PASS  " if ok else "  FAIL  ") + msg); bad |= (not ok)
+rd = lambda n: open(os.path.join(W, n), encoding="utf-8", errors="replace").read()
+GV = re.compile(r'<graph_verb endpoints="subject" verb="--callers=[^"]*"[^>]*>(?:<!--.*?-->)*<callers [^>]*\bdefs="(\d+)"[^>]*\bcount="(\d+)"', re.S)   # legacy order: the block's notes sit ahead of <callers>
+def shape(d):
+    m = GV.search(d); return (m.start(), int(m.group(1)), int(m.group(2))) if m else (-1, 0, 0)
+say(cap.isdigit() and int(cap) >= 1, "(CP0) kCallersPromoteMaxCount read out of src/foranswerfirst.h: %r" % cap)
+cap = int(cap) if cap.isdigit() else 0
+new, old, big = rd("cp_new.xml"), rd("cp_old.xml"), rd("cp_big.xml")
+at, defs, n = shape(new); oat, _, _ = shape(old)
+say(at >= 0 and defs == 1 and 1 <= n <= cap and new.find("<tail") > 0 and oat > old.find("</tail>") > 0,
+    "(CPn) the positive probe offers the shape: subject --callers block defs=%d count=%d (cap %d), behind </tail> in the legacy order (at %d, </tail> at %d)" % (defs, n, cap, oat, old.find("</tail>")))
+say(0 <= at < new.find("<tail"), "(CP1) the small subject callers block is emitted ahead of <tail> on the default page 1 (block at %d, <tail> at %d)" % (at, new.find("<tail")))
+bat, bdefs, bn = shape(big)
+say(bat >= 0 and bdefs == 1 and bn > cap, "(CP2n) the negative probe offers the shape over the cap: defs=%d count=%d (cap %d)" % (bdefs, bn, cap))
+say(bat > big.find("</tail>") > 0, "(CP2) a caller list over the cap does NOT move: block at %d, </tail> at %d" % (bat, big.find("</tail>")))
+sys.exit(1 if bad else 0)
+PY_CP
 [ $? -eq 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi

@@ -205,8 +205,54 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
     return false;
 }
 
-// Would the permutation actually move anything? A comment before a row block, or a resolved routed section
-// sitting behind <sigs>. Separated so answerFirst stays one job: assemble.
+// P-CALLERS-PROMOTE (2026-11-24): a SMALL SUBJECT CALLERS ANSWER goes directly ahead of <tail>. The shape is the
+// <graph_verb endpoints="subject" verb="--callers=…"> block FOR-ROUTE-DECLINED appends (forgraphverb.h) whose <callers> child
+// bound ONE definition (defs="1") and lists at most kCallersPromoteMaxCount callers (count=, tests included). That block IS the
+// answer to a `callers of X` task, and it is small by its own count, but resolvedRouted() above does not call it resolved (it
+// has no <path reachable="1">), so it sat behind </tail>, where G cannot reach it once the tail overflows the stop.
+// MEASURED (LD bisect, ld-cockroach-08): the 4-caller, 1,187 B block sat on page 3 at byte 25,320; moved ahead of <tail> it is
+// on page 1 and the row goes ✗ -> ✓ (R1-R4). The l1 transform on S1/MF1/LD/NL1 and GA1 DEV touched that row alone (2 subject
+// --callers blocks in the corpus; the other binds defs="2"), so the cap is a bound on the moved bytes, not a fitted value:
+// every cap from 6 to 1000 selects the same row. Not promoted: two or more definitions (an ambiguous name's callers are
+// not the subject's), a count above the cap (a long caller list is a blast-radius listing, not a named answer), any other verb.
+// It is unguarded on purpose: at ≤ 8 rows the block is ~1.6 KB, and the tail rows it moves stay in order on the next page.
+inline constexpr std::size_t kCallersPromoteMaxCount = 8;
+
+[[nodiscard]] inline bool smallSubjectCallers( std::string_view block, std::string_view name )
+{
+    if( name != "graph_verb" ) { return false; }
+    const std::string_view open = block.substr( 0, block.find( '>' ) + 1 );
+    if( attrOf( open, "endpoints" ) != "subject" || !attrOf( open, "verb" ).starts_with( "--callers=" ) ) { return false; }
+    const std::size_t close = block.rfind( "</" );
+    if( open.size() < 2 || open[ open.size() - 2 ] == '/' || close == std::string_view::npos || close <= open.size() ) { return false; }
+    for( const Block& k : topLevelBlocks( block, open.size(), close ) )
+    {
+        if( k.comment ) { continue; }
+        if( k.name != "callers" ) { return false; }
+        const std::string_view tag   = block.substr( k.begin, block.find( '>', k.begin ) + 1 - k.begin );
+        const std::string_view count = attrOf( tag, "count" );
+        std::size_t            n     = 0;
+        const auto [ end, ec ]       = std::from_chars( count.data(), count.data() + count.size(), n );
+        return attrOf( tag, "defs" ) == "1" && ec == std::errc() && end == count.data() + count.size() && n >= 1 && n <= kCallersPromoteMaxCount;
+    }
+    return false;
+}
+
+// P-CALLERS-PROMOTE: does a small subject callers block sit behind <tail> (so rowBlockOrder would move it)?
+[[nodiscard]] inline bool smallSubjectCallersBehindTail( std::string_view view, const std::vector<Block>& blocks )
+{
+    bool sawTail = false;
+    for( const Block& b : blocks )
+    {
+        if( b.comment ) { continue; }
+        if( sawTail && smallSubjectCallers( view.substr( b.begin, b.end - b.begin ), b.name ) ) { return true; }
+        sawTail = sawTail || b.name == "tail";
+    }
+    return false;
+}
+
+// Would the permutation actually move anything? A comment before a row block, a resolved routed section
+// sitting behind <sigs>, or a small subject callers block behind </tail>. Separated so answerFirst stays one job: assemble.
 [[nodiscard]] inline bool permutationWouldMove( std::string_view view, const std::vector<Block>& blocks ) noexcept
 {
     std::size_t sigsAt = blocks.size();
@@ -220,7 +266,7 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
         if( b.comment ) { if( k + 1 < blocks.size() ) { return true; } continue; }
         if( k > sigsAt && resolvedRouted( view.substr( b.begin, b.end - b.begin ), b.name ) ) { return true; }
     }
-    return false;
+    return smallSubjectCallersBehindTail( view, blocks );
 }
 
 // The FIRST WORD of a comment: `syms` in `<!-- syms t= n= …`. This is what separates the two kinds of
@@ -399,6 +445,13 @@ inline constexpr std::string_view kSubjectCallersOpen = "<callers by=\"subject\"
         sawSigs = sawSigs || b.name == "sigs";
     }
     rest.insert( rest.end(), stubs.begin(), stubs.end() );   // no <tail> after them: they stay, in order, at the end
+    // P-CALLERS-PROMOTE: every small subject callers block behind </tail> moves directly ahead of <tail>, relative order kept.
+    const auto tailAt = std::ranges::find_if( rest, [ & ]( std::size_t j ) { return blocks[ j ].name == "tail"; } );
+    if( tailAt != rest.end() )
+    {
+        (void)std::stable_partition( tailAt, rest.end(), [ & ]( std::size_t j )
+                                     { return smallSubjectCallers( view.substr( blocks[ j ].begin, blocks[ j ].end - blocks[ j ].begin ), blocks[ j ].name ); } );
+    }
     routed.insert( routed.end(), rest.begin(), rest.end() );
     return routed;
 }
