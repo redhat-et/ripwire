@@ -8,7 +8,7 @@
 #include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
 #include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
-#include "subjectanchor.h"   // isToolOrVendoredPath — the shipped-not-authored path tier --lint's order sorts last (LT1)
+#include "filter.h"   // isToolOrVendoredPath — the shipped-not-authored path tier --lint's order sorts last (LT1)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
                        // pilot conversion used to spell the fallback here; the choice now lives in one header.
@@ -1019,7 +1019,7 @@ struct LintRowOrder
 };
 
 // The files nobody here authors, by the house's OWN verdicts — no new heuristic: a tool / vendored / generated path
-// (subjectanchor.h subject_detail::isToolOrVendoredPath, which already holds filter.h's demo/generated table), a minified file
+// (filter.h rw::isToolOrVendoredPath, which already holds the demo/generated table), a minified file
 // (--skipped's minified-suspect, ingest.h isMinifiedHealth), and a bundle (filter.h's evidence tier, vendoredBundleFiles).
 std::vector<char> lintShippedFiles( const rw::IngestResult& ing )
 {
@@ -1027,7 +1027,7 @@ std::vector<char> lintShippedFiles( const rw::IngestResult& ing )
     for( std::uint32_t f = 0; f < shipped.size(); ++f )
     {
         const bool minified = f < ing.fileHealth.size() && rw::isMinifiedHealth( ing.fileHealth[f] );
-        shipped[f] = char( shipped[f] != 0 || minified || rw::subject_detail::isToolOrVendoredPath( rw::rootRelPath( ing, f ) ) );
+        shipped[f] = char( shipped[f] != 0 || minified || rw::isToolOrVendoredPath( rw::rootRelPath( ing, f ) ) );
     }
     return shipped;
 }
