@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -48,6 +49,7 @@
 #include "legenddict.h"      // detail::aboutPointer — the ref posture's closing pointer
 #include "forpagelegend.h"   // LD1: a clause only a later page uses travels with that page
 #include "nextverb.h"        // nextAttrXml — the ONE next= spelling
+#include "forrowlines.h"     // θ5: encodeRows — page 1's refill is measured as delivered (rows as lines)
 
 namespace rw::forpages
 {
@@ -63,6 +65,8 @@ struct PageAsk
     std::size_t      pageBytes = kForPageBytesDefault;
     std::size_t      page      = 1;
     std::string_view call;
+    bool             coreLegend = false;   // θ5: page 1 carries the core legend and refills with rows (the defaulted CLI posture)
+    std::string_view rows;                 // θ5: --rows= as typed (Config::rowsSpec), so the refill measures page 1 as delivered
 };
 
 struct PageResult
@@ -131,7 +135,8 @@ inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
 // and without the act line, markActLine), so the
 // page the group starts on (page 1 at the default size, forkeybody.h) ends at the row it ended at without it, the group is never split
 // across pages, and every other page holds the same rows.
-inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes )
+// θ5: `firstEnd` (when not npos) is page 1's last cut, chosen by coreEnds; every later page is measured as before from its end.
+inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes, std::size_t firstEnd = std::string_view::npos )
 {
     std::vector<std::size_t> ends;
     std::size_t from = 0, i = 0;
@@ -139,6 +144,7 @@ inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::siz
     {
         std::size_t last = i;
         while( last + 1 < cuts.size() && cuts[ last + 1 ].at - cuts[ last + 1 ].free <= from + pageBytes ) { ++last; }
+        if( ends.empty() && firstEnd < cuts.size() ) { last = firstEnd; }
         ends.push_back( last );
         from = cuts[ last ].at - cuts[ last ].free;
         i    = last + 1;
@@ -202,6 +208,41 @@ struct PageAt
            " order, no legend but what only its rows use (this one defines the rest), ending"
            " <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the"
            " whole answer in one call -->";
+}
+
+// θ5 (PLAN_071 §1.5, lane THETA5 2026-11-24): THE CORE FIRST-CALL LEGEND. Page 1's document legend was 29 % of page 1 and never
+// came before a completing byte (offline, tmp/orch-1124/l1-harness theta5: 165/86/7 -> 168/83/7 complete/partial/wrong, page 1
+// -7.5 %, 0 rows lose an item). The default CLI page 1 keeps the FIRST (schema) comment of the document legend, cut at a "; "
+// clause boundary so it and the pointer to the full legend fit kCoreLegendBytes; the other document-legend comments and the page
+// clause leave page 1, and the bytes they held go to rows (coreEnds). The row-line clauses (forrowlines.h) are written after
+// paging and stay whole. The full legend is one call away, named in the core: the same call with --legend=last (an XML comment
+// cannot spell the dashes), which serves the same answer-first pages with today's legend. MCP and every spelled posture keep it.
+inline constexpr std::size_t      kCoreLegendBytes   = 1024;
+inline constexpr std::string_view kFullLegendPointer = "; FULL LEGEND (every definition): this call with the legend=last flag";
+
+// THE SWITCH: the defaulted CLI posture (Config::legendDefaulted) serves the core, unless RIPWIRE_NO_CORE_LEGEND is set (any value:
+// today's full page-1 legend — for the gates that pin the in-page definition contract, and for the loop harness's A/B).
+[[nodiscard]] inline bool coreLegendOn( bool legendDefaulted ) noexcept
+{
+    return legendDefaulted && std::getenv( "RIPWIRE_NO_CORE_LEGEND" ) == nullptr;
+}
+
+[[nodiscard]] inline std::string coreLegend( std::string_view legend )
+{
+    constexpr std::string_view open = "<!--", close = " -->";
+    const std::size_t          end  = legend.find( "-->" );
+    if( !legend.starts_with( open ) || end == std::string_view::npos ) { return std::string( legend ); }
+    std::string_view head = legend.substr( 0, end );
+    while( head.ends_with( ' ' ) || head.ends_with( ';' ) ) { head.remove_suffix( 1 ); }
+    const std::size_t room = kCoreLegendBytes - kFullLegendPointer.size() - close.size();
+    if( head.size() > room )
+    {
+        const std::size_t j = head.rfind( "; ", room - 2 );
+        head = head.substr( 0, j == std::string_view::npos || j <= open.size() ? room : j );
+    }
+    std::string out( head );
+    out.append( kFullLegendPointer ).append( close );
+    return out;
 }
 // What a document's price is read from: where the root's est_tokens= attribute sits (the space before it through its closing
 // quote) and the bytes of its <bodies> section (priced at kBytesPerTokenBody; the rest is markup). nullopt: the <ctx> root's open
@@ -345,6 +386,7 @@ inline void markActLine( Stream& st )
 
 // Page 1: the whole root plus the page disclosure, rows [0, end), the close of a section left open, the document legend less the
 // clauses that travel with a later page (LD1, forpagelegend.h: `gone`), and the page clause.
+// θ5: under ask.coreLegend the core legend and no page clause (coreLegend above).
 [[nodiscard]] inline std::string firstPage( const Stream& st, const PageAsk& ask, const Cut& end, std::size_t pages )
 {
     const std::string_view v = st.view;
@@ -357,8 +399,8 @@ inline void markActLine( Stream& st )
     out += '>';
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
-    out += scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone );   // the document legend, less what travels
-    out += pageClause( ask.pageBytes );
+    const std::string legend = scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone );   // less what travels
+    out += ask.coreLegend ? coreLegend( legend ) : legend + pageClause( ask.pageBytes );   // θ5: the core legend and no page clause
     out.append( v.substr( st.closeAt ) );
     return out;
 }
@@ -400,6 +442,89 @@ inline void markActLine( Stream& st )
     for( const std::string& r : rows ) { views.push_back( r ); }
     const std::size_t legendAt = st.blocks[ st.streamBlocks - 1 ].end;
     return scope::shed( st.view.substr( legendAt, st.closeAt - legendAt ), views );
+}
+
+// θ5 REFILL: under the core legend page 1 ends at the LAST cut whose page 1, as delivered (priced, rows as lines), is no larger than
+// today's page 1 with the full legend — so page 1 never grows and the freed legend bytes go to the next rows in page order. At least
+// two pages stay (a whole answer is pageAnswer's case). Deterministic in the document and the ask, so every page of one answer
+// computes the same ends and page k starts where page 1 ended. `st.gone` is left as the returned ends shed.
+[[nodiscard]] inline std::size_t deliveredFirstPage( Stream& st, const PageAsk& ask, const std::vector<std::size_t>& ends )
+{
+    st.gone       = shedFor( st, ends );
+    std::string p = firstPage( st, ask, st.cuts[ ends[ 0 ] ], ends.size() );
+    pricePage( p );
+    (void)rowlines::encodeRows( p, ask.rows );
+    return p.size();
+}
+// Today's page 1 (the full legend) is no smaller than the whole answer, so pageAnswer serves the answer whole: the same test as there.
+[[nodiscard]] inline bool wholeToday( Stream& st, const PageAsk& ask, const std::vector<std::size_t>& ends )
+{
+    PageAsk full = ask;
+    full.coreLegend = false;
+    st.gone         = shedFor( st, ends );
+    return firstPage( st, full, st.cuts[ ends[ 0 ] ], ends.size() ).size() >= st.view.size();
+}
+[[nodiscard]] inline std::vector<std::size_t> coreEnds( Stream& st, const PageAsk& ask, std::vector<std::size_t> ends )
+{
+    PageAsk full = ask;
+    full.coreLegend         = false;
+    const std::size_t today = deliveredFirstPage( st, full, ends );
+    for( std::size_t last = ends[ 0 ] + 1; last + 1 < st.cuts.size(); ++last )
+    {
+        std::vector<std::size_t> e = pageEnds( st.cuts, ask.pageBytes, last );
+        if( deliveredFirstPage( st, ask, e ) > today ) { break; }
+        ends = std::move( e );
+    }
+    st.gone = shedFor( st, ends );
+    return ends;
+}
+
+// θ5: a WHOLE default answer (one page) carries the core legend too; nothing is withheld, so there is nothing to refill.
+inline void coreWhole( std::string& doc, const Stream& st )
+{
+    const std::size_t legendAt = st.blocks[ st.streamBlocks - 1 ].end;
+    std::string       out( doc, 0, legendAt );
+    out += coreLegend( std::string_view( doc ).substr( legendAt, st.closeAt - legendAt ) );
+    out.append( doc, st.closeAt );
+    if( out.size() < doc.size() )
+    {
+        pricePage( out );
+        doc.swap( out );
+    }
+}
+
+// The page ends of one answer and whether page 1 is served whole although it has later pages. θ5 refills only an answer today's
+// posture PAGES: one whose full-legend page 1 would be no smaller than the whole answer is served whole today, every row in it,
+// so it is served whole here too, with the core legend — never cut to a page 1 the shorter legend makes smaller than the whole
+// (measured: mf1-ninja-01 lost an item at byte 10,834 that way). Leaves `st.gone` as the returned ends shed (LD1).
+struct PagePlan
+{
+    std::vector<std::size_t> ends;
+    bool                     wholeFirst = false;
+};
+[[nodiscard]] inline PagePlan planPages( Stream& st, const PageAsk& ask )
+{
+    PagePlan plan{ .ends = pageEnds( st.cuts, ask.pageBytes ) };
+    if( plan.ends.size() < 2 )
+    {
+        return plan;
+    }
+    plan.wholeFirst = ask.coreLegend && wholeToday( st, ask, plan.ends );
+    if( ask.coreLegend && !plan.wholeFirst )
+    {
+        plan.ends = coreEnds( st, ask, std::move( plan.ends ) );   // θ5 refill
+    }
+    st.gone = shedFor( st, plan.ends );
+    return plan;
+}
+// The answer served whole: unchanged, or under the core posture with the core legend (θ5).
+[[nodiscard]] inline PageResult servedWhole( std::string& doc, const Stream& st, const PageAsk& ask, std::size_t pages )
+{
+    if( ask.coreLegend )
+    {
+        coreWhole( doc, st );
+    }
+    return { PageResult::Outcome::Whole, pages };
 }
 } // namespace detail
 
@@ -448,15 +573,15 @@ inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
 {
     std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
     if( !st ) { return {}; }
-    const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes );
-    const std::size_t              pages = ends.size();
+    const detail::PagePlan          plan  = detail::planPages( *st, ask );
+    const std::vector<std::size_t>& ends  = plan.ends;
+    const std::size_t               pages = ends.size();
     if( ask.page == 0 || ask.page > pages || ( pages == 1 && ask.page != 1 ) ) { return { PageResult::Outcome::PastLast, pages }; }
-    if( pages == 1 ) { return { PageResult::Outcome::Whole, 1 }; }
+    if( pages == 1 || ( plan.wholeFirst && ask.page == 1 ) ) { return detail::servedWhole( doc, *st, ask, pages ); }
     const detail::Cut& end = st->cuts[ ends[ ask.page - 1 ] ];
-    st->gone = detail::shedFor( *st, ends );   // LD1
     std::string out = ask.page == 1 ? detail::firstPage( *st, ask, end, pages )
                                     : detail::continuationPage( *st, ask, st->cuts[ ends[ ask.page - 2 ] ], end, pages );
-    if( ask.page == 1 && out.size() >= doc.size() ) { return { PageResult::Outcome::Whole, pages }; }   // paging saves nothing on page 1
+    if( ask.page == 1 && out.size() >= doc.size() ) { return detail::servedWhole( doc, *st, ask, pages ); }   // paging saves nothing on page 1
     detail::pricePage( out );
     doc.swap( out );
     return { PageResult::Outcome::Paged, pages };
