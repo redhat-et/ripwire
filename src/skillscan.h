@@ -1823,6 +1823,15 @@ inline CurlArg curlArgKind( std::string_view w ) noexcept
     return w.starts_with( "--" ) ? curlLongOptionKind( w ) : curlShortBundleKind( w );
 }
 
+// `"$@"`, `"${@:2}"`, `"${arr[@]}"` or `"${!prefix@}"`: even quoted, the shell makes zero or several arguments of it,
+// so it cannot stand for the one value an option takes (`-H "$@"` may also pass the URL after it). A `$` reference
+// whose text holds an `@` is enough to refuse; a quoted scalar (`"$HEADER"`) stays one word.
+inline bool expandsToWordList( std::string_view text ) noexcept
+{
+    const std::size_t dollar = text.find( '$' );
+    return dollar != std::string_view::npos && text.find( '@', dollar ) != std::string_view::npos;
+}
+
 // The words a curl command sends to (every positional argument, and --url's value), appended to `out`; false when an
 // argument is outside the model above.
 inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::size_t first, std::vector<const ShellWord*>& out )
@@ -1838,7 +1847,7 @@ inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::s
         }
         if( kind == CurlArg::NextIsValue || kind == CurlArg::NextIsUrl )
         {
-            if( ++k == words.size() )
+            if( ++k == words.size() || expandsToWordList( words[k].text ) )
             {
                 return false;
             }
