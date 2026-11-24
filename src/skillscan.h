@@ -930,6 +930,8 @@ struct ShellCutter
     bool         unquotedDollar = false;
     bool         nameCut        = false;
     std::size_t  pieceEnd       = std::string::npos;   // where the last quote or `\\` piece boundary fell in `word`
+    std::size_t  dollarAt       = 0;                   // the last `$` appended, and whether only name bytes follow it
+    bool         nameRun        = false;
 
     void startWord( std::size_t at ) noexcept
     {
@@ -957,22 +959,22 @@ struct ShellCutter
         unquotedDollar = false;
         nameCut        = false;
         pieceEnd       = std::string::npos;
+        nameRun        = false;
     }
     // A piece boundary (a quote opens or closes, a `\\` escapes a byte) at the end of `word`: when the word so far ends in
-    // an unbraced `$NAME`, the shell's name stops here; remember where, so the next byte appended can be checked.
+    // an unbraced `$NAME`, the shell's name stops here; remember where, so the next byte appended can be checked. O(1):
+    // append keeps the name run, so a word glued from k pieces (`a""a""…`) is not re-read at every boundary.
     void pieceBoundary() noexcept
     {
-        std::size_t at = word.size();
-        while( at > 0 && namesplit::isIdentChar( word[ at - 1 ] ) )
-        {
-            --at;
-        }
-        pieceEnd = ( at > 0 && at < word.size() && word[ at - 1 ] == '$' ) ? word.size() : std::string::npos;
+        pieceEnd = ( nameRun && word.size() > dollarAt + 1 ) ? word.size() : std::string::npos;
     }
     // Append one byte; a name byte right where a `$NAME` piece ended joins the two names in the cut text.
     void append( char c )
     {
-        nameCut = nameCut || ( pieceEnd == word.size() && namesplit::isIdentChar( c ) );
+        const bool nameByte = namesplit::isIdentChar( c );
+        nameCut  = nameCut || ( pieceEnd == word.size() && nameByte );
+        dollarAt = c == '$' ? word.size() : dollarAt;
+        nameRun  = c == '$' || ( nameRun && nameByte );
         word += c;
     }
     void endCommand( ShellJoin join )
@@ -1062,7 +1064,7 @@ struct ShellCutter
         if( quote == '"' && c == '\\' && i + 1 < line.size() && std::string_view( "$`\"\\" ).find( line[ i + 1 ] ) != std::string_view::npos )
         {
             literalDollar = literalDollar || line[ i + 1 ] == '$';
-            word += line[ i + 1 ];
+            append( line[ i + 1 ] );
             return 2;
         }
         literalDollar = literalDollar || ( quote == '\'' && c == '$' );
