@@ -24,6 +24,7 @@
 // Regular expressions are spelled as small hand matchers (the binary links no regex engine for this); each names the
 // Python pattern it implements.
 
+#include "infra/Diagnostics.h"  // ASSUME — the skip trio's recursion bound (UnguardedSkip)
 #include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
 #include "infra/shellword.h"   // trimView / shellIsRedirect — shared with darkflags.h
 #include "infra/sortutil.h"    // sortUnique / svLess
@@ -127,26 +128,33 @@ struct Tree
 inline constexpr int kMaxShellNest = 64;   // shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N
 struct NestBudget
 {
-    int  depth = 0;
-    bool cut   = false;
+    int  depth     = 0;
+    int  unguarded = 0;   // skipQuote/skipBrace frames since the innermost NestLevel (UnguardedSkip)
+    bool cut       = false;
 };
 // One level of the budget for the scope of a recursion; `over` = the budget is spent (and the cut is recorded).
 class NestLevel
 {
 public:
-    explicit NestLevel( NestBudget& b ) noexcept : b_( b )
+    explicit NestLevel( NestBudget& b ) noexcept : b_( b ), savedUnguarded_( b.unguarded )
     {
+        b_.unguarded = 0;
         over_  = b_.depth >= kMaxShellNest;
         b_.cut = b_.cut || over_;   // the disclosure: Tree::cut, then the answer's shell_cut= (quality.h defectSitesOf)
         ++b_.depth;
     }
-    ~NestLevel() { --b_.depth; }
+    ~NestLevel()
+    {
+        --b_.depth;
+        b_.unguarded = savedUnguarded_;
+    }
     NestLevel( const NestLevel& )            = delete;
     NestLevel& operator=( const NestLevel& ) = delete;
     bool over() const noexcept { return over_; }
 
 private:
     NestBudget& b_;
+    int         savedUnguarded_;
     bool        over_ = false;
 };
 
@@ -499,9 +507,31 @@ inline std::size_t pastBacktick( std::string_view s, std::size_t i ) noexcept
     return j == std::string_view::npos ? s.size() : j + 1;
 }
 
+// skipQuote and skipBrace carry no budget guard of their own: they stay bounded only because every cycle of the skip trio
+// passes through skipParen's NestLevel. skipBrace calls only skipQuote and skipQuote calls only skipParen, so at most
+// kMaxUnguardedSkips of their frames ever sit above one NestLevel. A new call that closes a cycle around skipParen would
+// recurse unbudgeted; this frame count is that invariant in code.
+inline constexpr int kMaxUnguardedSkips = 2;   // skipBrace -> skipQuote
+class UnguardedSkip
+{
+public:
+    explicit UnguardedSkip( NestBudget& b ) noexcept : b_( b )
+    {
+        ++b_.unguarded;
+        ASSUME( b_.unguarded <= kMaxUnguardedSkips, "skipQuote/skipBrace recurse only through skipParen's budget guard" );
+    }
+    ~UnguardedSkip() { --b_.unguarded; }
+    UnguardedSkip( const UnguardedSkip& )            = delete;
+    UnguardedSkip& operator=( const UnguardedSkip& ) = delete;
+
+private:
+    NestBudget& b_;
+};
+
 std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb );
 inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBudget& nb )   // s[i] is the opening quote
 {
+    const UnguardedSkip frame( nb );
     ++i;
     while( i < s.size() )
     {
@@ -529,7 +559,7 @@ inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBud
     }
     return i;
 }
-// The one budget guard of the skip trio: skipQuote and skipBrace recurse only through skipParen, so each nesting level of
+// The one budget guard of the skip trio: skipQuote and skipBrace recurse only through skipParen (UnguardedSkip), so each nesting level of
 // "$( … "$( … )" … )" or ${ … "$( … )" … } costs one level here.
 inline std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '('
 {
@@ -576,6 +606,7 @@ inline std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb 
 }
 inline std::size_t skipBrace( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '{' of a ${...}
 {
+    const UnguardedSkip frame( nb );
     int depth = 0;
     while( i < s.size() )
     {
