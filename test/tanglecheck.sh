@@ -204,5 +204,32 @@ if [ -z "$pr" ] || ! printf '%s %s' "$pw" "$pn" | grep -qE '^[0-9]+\.[0-9] [0-9]
 elif [ "$prc" = 1 ] && [ "$first" = "First: tangle grow1 (was=$pw now=$pn)" ]; then ok "(p1) the pin refusal names the tangle row in display units: $first"
 else no "(p1) want rc 1 and 'First: tangle grow1 (was=$pw now=$pn)', got rc=$prc '$first'"; fi
 
+# (k4) MEASURED, NOT EDITED (QD-RATCHET-BASE: credit only for a real code change): a floor pinned with --quality-baseline whose one
+#      tangle line is rewritten to deep +6 — what a floor written by a binary that measured the same body differently holds. The
+#      body is unchanged in the working tree (only another file is added): no <improved> entry and no row for it. Premise: exactly
+#      one tangle line rewritten, the answer says baseline="sidecar", frozen over the bar in --metrics. RED before the body-identity
+#      guard (#721 tip a5d3ad3ae: <i kind="tangle" sym="frozen"> for a score the code never had).
+F="$TMP/frozen"; mkdir -p "$F/src"; "${G[@]}" -C "$F" init -q
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import tanglefixtures as t; open(sys.argv[2], "w").write("#include <vector>\n" + t.overbar("frozen", 40, mult=29))' "$ROOT/test/lib" "$F/src/frozen.cpp"
+"${G[@]}" -C "$F" add -A && "${G[@]}" -C "$F" commit -qm v1
+"$BIN" "$F" --quality-baseline --no-cache >/dev/null 2>&1
+FS="$F/.ripwire_quality_baseline"
+fl="$( grep -cE '^tangle [0-9a-f]+ [0-9a-f]+$' "$FS" 2>/dev/null )"; fl="${fl:-0}"
+if [ "$fl" = 1 ]; then
+    python3 -c 'import re, sys
+p = sys.argv[1]; t = open(p).read()
+t = re.sub(r"^(tangle [0-9a-f]+) ([0-9a-f]+)$", lambda m: "%s %x" % (m.group(1), int(m.group(2), 16) + (6 << 8)), t, flags=re.M)
+open(p, "w").write(t)' "$FS"
+fi
+printf 'int other( int x )\n{\n    return x + 1;\n}\n' >"$F/src/other.cpp"
+FQ="$( "$BIN" "$F" --quality-delta --no-cache 2>/dev/null )"
+fm="$( "$BIN" "$F" --metrics --page-bytes=0 --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="frozen"' | head -1 )"
+fsrc="$( printf '%s' "$FQ" | grep -oE '<quality-delta [^>]*' | grep -oE ' baseline="[^"]*"' )"
+if [ "$fl" != 1 ] || [ "$fsrc" != ' baseline="sidecar"' ] || [ -z "$fm" ] || [ "$( attr "$fm" tangle | cut -d. -f1 )" -lt 6 ]; then
+    no "(k4) PREMISE: tangle lines in the floor $fl (want 1), answer$fsrc (want baseline=\"sidecar\"), frozen over the bar: '${fm:-none}'"
+elif printf '%s' "$FQ" | grep -qE '<(i|r) kind="tangle" sym="[^"]*frozen"'; then
+    no "(k4) frozen (body unchanged, floor measured deep +6): want no row and no credit, got $( printf '%s' "$FQ" | grep -oE '<(i|r) kind="tangle" sym="[^"]*frozen"[^>]*>' )"
+else ok "(k4) frozen (body unchanged, floor measured deep +6, tangle=$( attr "$fm" tangle )): no row, no <improved> entry"; fi
+
 [ "$fail" = 0 ] && echo "tanglecheck: PASS" || echo "tanglecheck: FAIL"
 exit "$fail"

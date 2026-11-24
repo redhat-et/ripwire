@@ -11595,8 +11595,9 @@ inline std::string tangleLocals( const TangleDetailFacts& d )
 // Each callable key's current inputs: the highest-scoring overload, as computeSnapshot records it.
 struct TangleNow
 {
-    TangleInputs in;
-    NodeId       at = kNoNode;
+    TangleInputs  in;
+    NodeId        at   = kNoNode;
+    std::uint32_t defs = 0;   // the key's definitions (an overload set shares one key)
 };
 inline gtl::btree_map<std::uint64_t, TangleNow> tangleNowByKey( const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode )
 {
@@ -11610,9 +11611,11 @@ inline gtl::btree_map<std::uint64_t, TangleNow> tangleNowByKey( const IngestResu
         }
         const TangleInputs in   = tangleInputsOf( s );
         TangleNow&         slot = nowByKey[ keyByNode[i] ];
+        ++slot.defs;
         if( slot.at == kNoNode || tangleOutranks( in, slot.in ) )
         {
-            slot = { in, i };
+            slot.in = in;
+            slot.at = i;
         }
     }
     return nowByKey;
@@ -11975,10 +11978,25 @@ inline void appendRepeatedDecisionFixes( std::vector<Regression>& regs, const In
 // D4 facet on the rows (appendTangleRatchet).
 // Judged only when the kind is selected and against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
 // reading every function as new would bury the answer in rows that are not about this change.
+// QD-RATCHET-BASE — a score moves only when the code does. A function whose body is the very body the floor recorded
+// (QD-RENAME-IDENTITY's identity, one definition on each side) is not judged at all: whatever moved its reading was the measurement
+// (a floor another binary wrote), not the code, so it earns no row and no credit.
+inline bool tangleBodyUnchanged( const Snapshot& base, std::uint64_t key, const TangleNow& now, const std::vector<std::uint64_t>& nowBody ) noexcept
+{
+    if( now.defs != 1 || now.at >= nowBody.size() || nowBody[ now.at ] == 0 )
+    {
+        return false;
+    }
+    const auto defs = base.defsBySym.find( key );
+    const auto cid  = base.bodyCidBySym.find( key );
+    return defs != base.defsBySym.end() && defs->second == 1 && cid != base.bodyCidBySym.end() && cid->second == nowBody[ now.at ];
+}
+
+// `nowBody`: the head's body identity per node (MoveIdentities::body).
 template<class Existed, class MovedAt, class Stamp>
 inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode,
                               const Snapshot& base, std::string_view root, const KindScope& scope, Existed&& existed, MovedAt&& movedAt, Stamp&& stamp,
-                              DeltaExtras* extras )
+                              DeltaExtras* extras, const std::vector<std::uint64_t>& nowBody )
 {
     if( !kindSelected( scope.kinds, "tangle" ) || !base.tangleKnown )
     {
@@ -11994,6 +12012,10 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
         const TangleInputs  was   = tangleBaseInputs( base, key );
         const std::uint32_t was10 = tangleScore10( was );
         const std::uint32_t now10 = tangleScore10( best.in );
+        if( !isNew && tangleBodyUnchanged( base, key, best, nowBody ) )
+        {
+            continue;   // the body the floor recorded: no row, no credit
+        }
         if( extras != nullptr && !isNew && tangleCredited( was, best.in ) )
         {
             extras->improved.push_back( improvementAt( "tangle", g.canonId[ best.at ], was10, now10, ing, best.at, root ) );
@@ -12328,7 +12350,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     perSymbolKind( kMaterialityBars[1], newSymbolCeiling( kLocBar ), base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
     perSymbolKind( kMaterialityBars[2], 0,                           base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
     perSymbolKind( kMaterialityBars[3], 0,                           base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
-    appendTangleRows( regs, ing, g, keyByNode, base, root, scope, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras );   // QD-TANGLE
+    appendTangleRows( regs, ing, g, keyByNode, base, root, scope, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras, nowMove.body );   // QD-TANGLE
     appendRepeatedDecisionFixes( regs, ing, keyByNode );   // QD-REPEATED-DECISION: fix= on the complexity and tangle rows above
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
