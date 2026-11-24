@@ -46,14 +46,15 @@
 namespace rw::tinyshape
 {
 
-[[nodiscard]] inline bool tinyShapeOn() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE" ) != nullptr; }
-// RIPWIRE_TINY_SHAPE=force: the shape on EVERY eligible call, the detector skipped — the measurement arm that labels which questions
-// the shape would serve completely (lane THETA6 Step 0), never a product posture.
-[[nodiscard]] inline bool tinyShapeForced() noexcept
+// The knob's three postures: unset = Off; "force" = the shape on EVERY eligible call, the detector skipped (the measurement arm that
+// labels which questions the shape serves completely, lane THETA6 Step 0; never a product posture); any other value = Detect.
+enum class TinyMode : unsigned char { Off, Detect, Force };
+[[nodiscard]] inline TinyMode tinyMode() noexcept
 {
-    const char* v = std::getenv( "RIPWIRE_TINY_SHAPE" );
-    return v != nullptr && std::string_view( v ) == "force";
+    const char* const v = std::getenv( "RIPWIRE_TINY_SHAPE" );
+    return v == nullptr ? TinyMode::Off : std::string_view( v ) == "force" ? TinyMode::Force : TinyMode::Detect;
 }
+[[nodiscard]] inline bool tinyShapeOn() noexcept { return tinyMode() != TinyMode::Off; }
 
 inline constexpr std::size_t kTinyRows = 8;   // ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines
 
@@ -153,7 +154,7 @@ struct RangeRow
     const std::optional<answerfirst::RootBody> rb = doc.starts_with( "<ctx" ) ? answerfirst::rootBody( doc ) : std::nullopt;
     if( !rb ) { return std::nullopt; }
     const std::string_view rootOpen = doc.substr( 0, rb->openEnd );
-    const bool             forced   = tinyShapeForced();
+    const bool             forced   = tinyMode() == TinyMode::Force;
     if( !forced && ( rw::attrOf( rootOpen, "confidence" ) != "high" || detail::relational( task ) ) ) { return std::nullopt; }
     const std::vector<answerfirst::Block> blocks = answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
     const std::vector<detail::RangeRow>   rows   = detail::topRanges( doc, blocks );
