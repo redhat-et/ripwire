@@ -3226,7 +3226,7 @@ stderr:
 
 ## `./build/ripwire . --whereis=rankGraphTeleport`
 
-*Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default renders two pages under the same 60-row cap, the definitions page (kind="def" rows and the kind="text" lines no parse read, the references counted in <refs count= next=>) and the whole list, and serves the definitions page when it shows more definitions, whatever its bytes, else only when it is strictly shorter. Here the branches' copies sit in blobs past the parse guard (<unparsed>, kind="text", never counted as definitions), so both pages show HEAD's one definition and the default serves the shorter whole list: that definition, then HEAD's references.*
+*Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default renders two pages under the same 60-row cap, the definitions page (kind="def" rows and the kind="text" lines no parse read, the references counted in <refs count= next=>) and the whole list, and serves the definitions page when it shows more definitions, whatever its bytes, else only when it is strictly shorter. Here it serves the definitions page (listing="defs"): HEAD's one definition, then the branches' lines in blobs past the parse guard (<unparsed>) as kind="text" rows, a line several refs hold printed once with refs=N (folded= counts the copies it stands for), and HEAD's references counted in <refs count= next=>.*
 
 **wall time: 5.48s**
 
@@ -3280,7 +3280,7 @@ ripwire: warning: --whereis left 252 branch blobs unparsed, their rows kind=text
 
 ## `./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all`
 
-*The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list before any branch row arrives, so it can show fewer definitions than the definitions page. The default serves this page only when both show the same definitions and the definitions page is not strictly shorter (a tie serves this page), as above: here it is the default's own page, HEAD's one definition and then its references.*
+*The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list before any branch row arrives, so it can show fewer definitions than the definitions page. The default serves this page only when both show the same definitions and the definitions page is not strictly shorter (a tie serves this page); here the default served the definitions page above, so this page is asked for by name: HEAD's one definition, then its references.*
 
 **wall time: 5.45s**
 
@@ -3339,7 +3339,7 @@ ripwire: warning: --whereis left 252 branch blobs unparsed, their rows kind=text
 
 ## `./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text`
 
-*The same page with every t= line whole: the page above previews each line over 300 B (200 B and t_bytes=, the <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.*
+*The --whereis-listing=all page with every t= line whole: that page previews each line over 300 B (200 B and t_bytes=, its <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.*
 
 **wall time: 6.11s**
 
