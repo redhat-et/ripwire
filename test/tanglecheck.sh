@@ -197,7 +197,8 @@ pr="$( "$BIN" "$P" --quality-delta --no-cache 2>/dev/null | grep -oE '<r kind="t
 pw="$( attr "$pr" was )"; pn="$( attr "$pr" now )"
 "$BIN" "$P" --quality-baseline --no-cache >/dev/null 2>"$TMP/pin.err"; prc=$?
 first="$( tr '\n' ' ' <"$TMP/pin.err" | grep -oE 'First: [^)]*\)' )"
-if [ -z "$pr" ] || [ "${pw#*.}" = "$pw" ]; then no "(p1) PREMISE: want a gating tangle row on grow1 with a decimal was=, got '${pr:-none}'"
+# CR721: BOTH values are display units (tenths as one decimal place: the fixture's was 40 -> now 42 calls both land in 10.x)
+if [ -z "$pr" ] || ! printf '%s %s' "$pw" "$pn" | grep -qE '^[0-9]+\.[0-9] [0-9]+\.[0-9]$'; then no "(p1) PREMISE: want a gating tangle row on grow1 with decimal was= and now=, got '${pr:-none}'"
 elif [ "$prc" = 1 ] && [ "$first" = "First: tangle grow1 (was=$pw now=$pn)" ]; then ok "(p1) the pin refusal names the tangle row in display units: $first"
 else no "(p1) want rc 1 and 'First: tangle grow1 (was=$pw now=$pn)', got rc=$prc '$first'"; fi
 
