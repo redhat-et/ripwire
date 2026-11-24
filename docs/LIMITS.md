@@ -492,6 +492,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kCallersPromoteMaxCount` | `8` | — | — |
 | `kGuardTailRows` | `24` | — | — |
 | `kGuardTailRowsBody` | `12` | — | — |
 

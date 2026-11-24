@@ -170,6 +170,7 @@ kGrepTierFileBudget	pending:B43 disclosed elsewhere: tier_budget= / tier_partial
 kGrepHeldFilesListed	sink:heldFiles
 kGuardTailRows	none:AF2 G's ORDER guard (foranswerfirst.h promoteGuarded): a promoted section moves ahead of <tail> only while tail row 24 still ends inside the default page; it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
 kGuardTailRowsBody	none:ruling 120's BODY-class ORDER guard (foranswerfirst.h promoteGuarded pass 2): a kPromotableBody section moves ahead of <tail> only while tail row 12 still ends inside the default page and nothing the page already delivers behind </tail> loses it (postPageOneFloors); it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
+kCallersPromoteMaxCount	none:P-CALLERS-PROMOTE's ORDER bound (foranswerfirst.h smallSubjectCallers / rowBlockOrder): a subject --callers <graph_verb> with defs="1" and count <= 8 moves ahead of <tail>; it reorders, every row is still emitted once (answerFirst's size ENSURES; foranswerfirstcheck CP1/CP2)
 kHeadDefLineAbove	none:a shape window of the whereis def-line test, not a cut
 kHealthWsSampleBytes	none:a sample size for the file-health whitespace heuristic, not a cut
 kHeldAskedHitsMax	pending:B43 grep held-row bound, not audited yet (LARGE-PARTIAL-1 scope widening)
