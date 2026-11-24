@@ -1229,9 +1229,22 @@ inline bool noteLoopSite( const std::vector<ShellWord>& w, std::size_t k, bool m
     return true;
 }
 
-// The identifier words a binding command (`read`, `unset`, `local`, …) or `printf -v` may set: never literal.
-inline void noteBindingWordSites( const std::vector<ShellWord>& w, std::size_t k, int lineNum, std::vector<ShellBindingSite>& sites )
+// The word that names the command bash runs, from the first command word k: past `NAME=value` prefixes (`IFS= read
+// -r U` runs `read`, which sets U) and the `command` / `builtin` wrappers, which run the builtin in this shell.
+inline std::size_t commandNameWord( const std::vector<ShellWord>& w, std::size_t k ) noexcept
 {
+    while( k < w.size() && ( !assignedName( w[k].text ).empty() || w[k].text == "command" || w[k].text == "builtin" ) )
+    {
+        ++k;
+    }
+    return k;
+}
+
+// The identifier words a binding command (`read`, `unset`, `local`, …) or `printf -v` may set: never literal. The
+// command may follow assignment prefixes or a `command` / `builtin` wrapper.
+inline void noteBindingWordSites( const std::vector<ShellWord>& w, std::size_t first, int lineNum, std::vector<ShellBindingSite>& sites )
+{
+    const std::size_t k = commandNameWord( w, first );
     const bool bindsWords = k < w.size() && namesplit::hasField( kShellBindingCommands, " ", w[k].text, false );
     const bool printfV    = k < w.size() && w[k].text == "printf";
     for( std::size_t v = k + 1; v < w.size(); ++v )
@@ -1401,7 +1414,7 @@ inline ShellDocSignals exportSignals( const std::vector<ShellWord>& w, std::size
 inline ShellDocSignals commandSignals( const ShellCommand& cmd, bool modelled )
 {
     const std::vector<ShellWord>& w    = cmd.words;
-    const std::size_t             k    = firstCommandWord( w );
+    const std::size_t             k    = commandNameWord( w, firstCommandWord( w ) );   // `IFS= eval …` still evals
     const std::string_view        verb = k < w.size() ? namesplit::afterLast( w[k].text, "/" ) : std::string_view{};
     ShellDocSignals               out  = exportSignals( w, k, modelled );
     const auto shortFlag = [ & ]( std::string_view letters )
