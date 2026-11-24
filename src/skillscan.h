@@ -1480,6 +1480,24 @@ inline CurlArg curlLongOptionKind( std::string_view w ) noexcept
                                                                  : CurlArg::Unknown;
 }
 
+// Does an option word follow redirects? `--location`, or `-L` in a short bundle BEFORE its value letter: in `-dLABEL`
+// the L is part of -d's value, in `-Ld x` it is the flag.
+inline bool curlOptionFollows( std::string_view w ) noexcept
+{
+    if( w.starts_with( "--" ) )
+    {
+        return w == "--location";
+    }
+    for( std::size_t j = 1; j < w.size() && kCurlValueShort.find( w[j] ) == std::string_view::npos; ++j )
+    {
+        if( w[j] == 'L' )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // A short-option bundle: flags, then at most one value letter, whose value is the rest of the word or the next word.
 inline CurlArg curlShortBundleKind( std::string_view w ) noexcept
 {
@@ -1515,9 +1533,9 @@ inline bool expandsToWordList( std::string_view text ) noexcept
     return dollar != std::string_view::npos && text.find( '@', dollar ) != std::string_view::npos;
 }
 
-// The words a curl command sends to (every positional argument, and --url's value), appended to `out`; false when an
-// argument is outside the model above.
-inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::size_t first, std::vector<const ShellWord*>& out )
+// The words a curl command sends to (every positional argument, and --url's value), appended to `out`, and whether an
+// option in option position follows redirects (curlOptionFollows); false when an argument is outside the model above.
+inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::size_t first, std::vector<const ShellWord*>& out, bool& follows )
 {
     bool positionalOnly = false;
     for( std::size_t k = first; k < words.size(); ++k )
@@ -1528,6 +1546,7 @@ inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::s
         {
             return false;
         }
+        follows = follows || ( kind != CurlArg::Positional && curlOptionFollows( words[k].text ) );
         if( kind == CurlArg::NextIsValue || kind == CurlArg::NextIsUrl )
         {
             if( ++k == words.size() || expandsToWordList( words[k].text ) )
@@ -1571,12 +1590,13 @@ struct LineHosts
 {
     bool                     known = false;
     bool                     web   = true;   // every destination is http://, https:// or scheme-less (no gopher://, dict://, …)
+    bool                     follows = false;   // a curl on the line follows redirects (-L, --location)
     std::vector<std::string> hosts;          // distinct, in line order
 };
 
 // The destination words of every curl command on a fully modelled line, or false when a command is not one the proof
 // reads (a curl the cut did not parse as a command, another network verb, an argument outside the option model).
-inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, std::vector<const ShellWord*>& words )
+inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, std::vector<const ShellWord*>& words, bool& follows )
 {
     if( !cut.modelled || line.find( "/dev/tcp/" ) != std::string_view::npos || line.find( "/dev/udp/" ) != std::string_view::npos )
     {
@@ -1593,7 +1613,7 @@ inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, s
         if( k < cmd.words.size() && cmd.words[k].text == "curl" )   // `./scripts/curl` is another program: the count below refuses it
         {
             ++curls;
-            if( !curlCommandDestinations( cmd.words, k + 1, words ) )
+            if( !curlCommandDestinations( cmd.words, k + 1, words, follows ) )
             {
                 return false;
             }
@@ -1643,7 +1663,7 @@ inline LineHosts curlLineHosts( std::string_view line, const ShellLine& cut )
 {
     LineHosts                     answer;
     std::vector<const ShellWord*> words;
-    if( !lineDestinationWords( line, cut, words ) || !lineArgvFixed( cut ) )
+    if( !lineDestinationWords( line, cut, words, answer.follows ) || !lineArgvFixed( cut ) )
     {
         return LineHosts{};
     }
@@ -1669,30 +1689,14 @@ inline bool onlyBareCurl( const ShellLine& cut ) noexcept
     } );
 }
 
-// A curl option that follows a redirect (`-L`, `--location`, `--location-trusted`): a 307 from the local host re-sends
-// the body wherever it points.
-inline bool followsRedirect( const ShellLine& cut ) noexcept
-{
-    for( const ShellCommand& cmd : cut.commands )
-    {
-        for( const ShellWord& w : cmd.words )
-        {
-            if( w.text.starts_with( "--location" ) || ( w.text.size() > 1 && w.text[0] == '-' && w.text[1] != '-' && w.text.find( 'L' ) != std::string::npos ) )
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 // why="local-dest" when a credential-VARIABLE row (an env dump, a key file or a credential-file read stays CRITICAL
 // wherever it goes) sends only to canonical local hosts over http(s), from a line of bare curl commands that follow no
-// redirect, in a document with no relay signal; null (the row keeps its severity) otherwise.
+// redirect (LineHosts::follows, from the option parse), in a document with no relay signal; null (the row keeps its
+// severity) otherwise.
 inline const char* localDestWhy( bool credentialVarOnly, const LineHosts& hosts, const ShellLine& cut, bool docRelays )
 {
     const bool allLocal = std::all_of( hosts.hosts.begin(), hosts.hosts.end(), []( const std::string& h ) noexcept { return isLocalHost( h ); } );
-    return ( credentialVarOnly && hosts.known && hosts.web && allLocal && !docRelays && onlyBareCurl( cut ) && !followsRedirect( cut ) ) ? kNetExfilLocalWhy : nullptr;
+    return ( credentialVarOnly && hosts.known && hosts.web && allLocal && !docRelays && onlyBareCurl( cut ) && !hosts.follows ) ? kNetExfilLocalWhy : nullptr;
 }
 
 // owner=: the service every credential variable on the line names, when it owns every proved host and every `$` in an
