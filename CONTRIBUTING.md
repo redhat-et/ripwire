@@ -295,7 +295,7 @@ finds neither.
 `scripts/tidycheck.sh --ratchet` runs its `RATCHET` list (unchecked `optional` access, use-after-move, dangling handles,
 suspicious missing comma, signed-char misuse, `string_view::data()` misuse, throwing static initialisation,
 inc/dec in conditions) on every event and fails on any finding that is not already a row of `.clang-tidy-baseline.txt`;
-`bugprone-exception-escape`, too slow for every event, is gated the same way from the nightly advisory report.
+`bugprone-exception-escape`, too slow for every event, is gated the same way by its own nightly job (`tidy-exception-escape`), which keeps the advisory run inside its time limit.
 `test/tidyratchetcheck.sh` holds the baseline to the per-check ceilings in `.clang-tidy-ratchet.txt`: more rows fail,
 and so do fewer — a fix lowers its ceiling in the same commit (`python3 scripts/tidyadvisory_diff.py --baseline
 .clang-tidy-baseline.txt --ratchet .clang-tidy-ratchet.txt --ratchet-update`). A row that is kept carries its reason

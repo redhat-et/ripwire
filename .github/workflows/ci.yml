@@ -268,11 +268,16 @@ jobs:
       - name: clang-tidy — ADVISORY, never gates (nightly and workflow_dispatch only)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
+        # 0.7.1: bugprone-exception-escape runs in its own job (tidy-exception-escape below). It was nearly the whole
+        # cost of this step — 5 h 27 min on the 2026-11-23 nightly against the ~1 h 55 min noted above, then cancelled at
+        # the 6 h job limit on a workflow_dispatch of the 0.7.1 tree — while the rest of the catalogue measured 231 s
+        # over the five TUs locally. The TUs run in parallel (one clang-tidy each; xargs exits non-zero if any failed).
         run: |
           rc=0
-          clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
-            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp \
-            >tidy-advisory.txt 2>&1 || rc=$?
+          printf '%s\n' src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp \
+            | xargs -P 4 -I{} sh -c 'clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet --checks=-bugprone-exception-escape "$1" \
+                >"tidy-advisory.$( echo "$1" | tr / _ ).part" 2>&1' _ {} || rc=$?
+          cat tidy-advisory.*.part > tidy-advisory.txt
           echo "$rc" > tidy-advisory.rc
           cat tidy-advisory.txt
           exit "$rc"
@@ -288,7 +293,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python3 scripts/tidyadvisory_diff.py --report tidy-advisory.txt --rc tidy-advisory.rc \
-            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" \
+            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" --scope '*,-bugprone-exception-escape' \
             --normalized-out tidy-advisory-baseline-candidate.txt --issue-body tidy-advisory-issue.md \
             --status-out tidy-advisory.status --run-url "$RUN_URL" --sha "$GITHUB_SHA" \
             --note "run $GITHUB_RUN_ID at $GITHUB_SHA ($GITHUB_EVENT_NAME), clang-tidy $CLANG_VERSION, deduplicated across translation units" \
@@ -312,16 +317,63 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # GATING, nightly half of the ratchet (0.7.1): bugprone-exception-escape is too slow for every event (it is most of
-      # the ~1 h 55 min above), so its NEW rows are gated here, from the advisory report this job already wrote — with the
-      # same diff and the whole RATCHET_NIGHTLY list. Not continue-on-error: a NEW row reddens the nightly, and so does a
-      # crashed or empty advisory run (status != ok is never a pass). The advisory step and its diff above stay advisory.
-      - name: clang-tidy — nightly ratchet over the advisory report (no NEW exception-escape or other high-signal row)
-        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+  # ─── tidy-exception-escape: bugprone-exception-escape on its own, nightly and workflow_dispatch only ─────────────
+  #
+  # The cost of the advisory catalogue is this one check: it walks every call reachable from each noexcept function,
+  # and main.cpp's TU is the whole header-only program. It runs here, in parallel per TU, under a per-TU `timeout`
+  # that leaves room inside the job's own limit, so a slow night ends as tool-failed (rc 124, recorded) with its
+  # artifact uploaded instead of being cancelled at GitHub's 6 h job limit. Then the NIGHTLY half of the ratchet:
+  # a NEW exception-escape row (not in .clang-tidy-baseline.txt) fails the job, and so does a failed or timed-out run
+  # (status != ok is never a pass). The per-event half is scripts/tidycheck.sh --ratchet in the style job.
+  tidy-exception-escape:
+    name: tidy-exception-escape (nightly ratchet half — bugprone-exception-escape)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    env:
+      CLANG_VERSION: "22"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # no step in this job pushes or fetches with the token
+      - name: Install clang-tidy (PINNED major — see the style job)
         run: |
-          python3 scripts/tidyadvisory_diff.py --report tidy-advisory.txt --rc tidy-advisory.rc \
-            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" \
-            --scope "$( bash scripts/tidycheck.sh --list | sed -n 's/^ratchet-nightly: //p' )" --gate
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) ! -name 'ubuntu*' -print -delete || true
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "$CLANG_VERSION" all
+          clang-tidy-"$CLANG_VERSION" --version
+      - name: Configure a compile database for clang-tidy
+        run: |
+          cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build-tidy --target ripwire_version_stamp
+      - name: clang-tidy — bugprone-exception-escape over the five TUs (parallel, 320 min per TU)
+        continue-on-error: true
+        run: |
+          rc=0
+          printf '%s\n' src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp \
+            | xargs -P 5 -I{} sh -c 'timeout 320m clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet --checks="-*,bugprone-exception-escape" "$1" \
+                >"tidy-exc.$( echo "$1" | tr / _ ).part" 2>&1; r=$?; echo "$1 rc=$r" >> tidy-exc.rcs; exit "$r"' _ {} || rc=$?
+          cat tidy-exc.rcs
+          cat tidy-exc.*.part > tidy-exc.txt
+          echo "$rc" > tidy-exc.rc
+          exit "$rc"
+      - name: clang-tidy — nightly ratchet, no NEW bugprone-exception-escape row
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/tidyadvisory_diff.py --report tidy-exc.txt --rc tidy-exc.rc \
+            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" --scope bugprone-exception-escape --gate
+      - name: upload the exception-escape report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidy-exception-escape
+          path: |
+            tidy-exc.txt
+            tidy-exc.rc
+            tidy-exc.rcs
+          if-no-files-found: ignore
+          retention-days: 14
 
   # ─── tidy-advisory-report: ONE tracking issue for the advisory clang-tidy's NEW findings (nightly only) ─────
   #
@@ -1241,7 +1293,7 @@ jobs:
   # watched live by whoever triggered it. See CONTRIBUTING.md §5 for the paragraph-length version.
   report-failure:
     name: report-failure (open or update the tracking issue)
-    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff]
+    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff, tidy-exception-escape]
     if: failure() && github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
@@ -1285,7 +1337,7 @@ jobs:
 
   report-green:
     name: report-green (close the tracking issue on this workflow's own green schedule run)
-    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff]
+    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff, tidy-exception-escape]
     if: success() && github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:

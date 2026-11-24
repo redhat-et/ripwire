@@ -9,8 +9,8 @@
 #                                       and diffs the report against .clang-tidy-baseline.txt's rows for those checks
 #                                       with scripts/tidyadvisory_diff.py --scope --gate: exits 1 on any finding that is
 #                                       not already a baseline row, 2 when clang-tidy failed. CI's style job runs it
-#                                       on every event. RATCHET_NIGHTLY's extra check is gated from the nightly
-#                                       advisory report instead (ci.yml), with the same diff — see RATCHET below.
+#                                       on every event. RATCHET_NIGHTLY's extra check is gated by its own nightly
+#                                       job instead (ci.yml tidy-exception-escape), with the same diff — see RATCHET below.
 #   scripts/tidycheck.sh --list         Prints the gating list, both ratchet lists and the TU list, and exits.
 #
 # WHAT GATES AND WHAT DOES NOT. `.clang-tidy`'s broad catalogue stays ADVISORY (CI runs it with continue-on-error;
@@ -56,7 +56,8 @@ GATING='bugprone-use-after-move,bugprone-dangling-handle,bugprone-sizeof-express
 # 30ed48862, Homebrew clang-tidy 22.1.8, macOS: the per-event list below took 154 s (unchecked-optional-access) + 31 s
 # (the rest) on main.cpp, while exception-escape alone ran more than 8 h and was stopped (libc++ exposes every
 # string_view::substr's throw; CI's libstdc++ does not, so it is cheaper there, but not measured). So it is gated
-# NIGHTLY, from the advisory report the nightly already produces (ci.yml): same diff, same --gate, no second run.
+# NIGHTLY, in its own job (ci.yml tidy-exception-escape: parallel TUs, a per-TU timeout inside the job limit), with
+# the same diff and --gate. The advisory catalogue runs without it: it was nearly that step's whole 5 h 27 min.
 RATCHET='bugprone-unchecked-optional-access,bugprone-use-after-move,bugprone-dangling-handle,misc-dangling-*,bugprone-suspicious-missing-comma,bugprone-signed-char-misuse,bugprone-suspicious-stringview-data-usage,bugprone-throwing-static-initialization,bugprone-inc-dec-in-conditions'
 RATCHET_NIGHTLY="$RATCHET,bugprone-exception-escape"
 

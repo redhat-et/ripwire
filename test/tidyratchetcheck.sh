@@ -9,7 +9,7 @@
 #       Pure file arithmetic, so it runs here on every leg.
 #   (b) NEW HIGH-SIGNAL FINDING. scripts/tidycheck.sh --ratchet runs the high-signal set (its RATCHET list) over the
 #       five CI TUs on every CI event and fails on any finding that is not already a baseline row; exception-escape,
-#       too slow for every event, is gated the same way from the nightly advisory report (RATCHET_NIGHTLY). That needs
+#       too slow for every event, is gated the same way by ci.yml's nightly tidy-exception-escape job. That needs
 #       clang-tidy 22 and the compile database, so the whole-tree runs are CI's; THIS gate proves the mechanism on
 #       planted sources: a planted finding of two ratchet checks must fail it BY NAME and a near-miss twin must pass.
 #
@@ -61,7 +61,7 @@ for pc in grown:GREW newcheck:GREW fewer:SHRANK; do
 done
 
 # ─── (b) the high-signal set, on planted sources, through the same diff the CI step uses ─────────────────────────
-# ratchet-nightly is the per-event list plus exception-escape (gated from the nightly report): the plant covers both.
+# ratchet-nightly is the per-event list plus exception-escape (gated by the nightly tidy-exception-escape job): the plant covers both.
 RATCHET="$( "$ROOT/scripts/tidycheck.sh" --list | sed -n 's/^ratchet-nightly: //p' )"
 [ -n "$RATCHET" ] || no "scripts/tidycheck.sh --list printed no ratchet-nightly: line"
 case ",$RATCHET," in *,bugprone-unchecked-optional-access,*) ;; *) no "the per-event ratchet lost bugprone-unchecked-optional-access" ;; esac

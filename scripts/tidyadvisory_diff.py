@@ -234,12 +234,15 @@ def issue_body(new_keys, new_lines, gone_keys, base_n, sha, url, nrows):
 
 
 def in_scope(check, globs, path=None, fglobs=None):
-    return any(fnmatch.fnmatchcase(check, g) for g in globs) and (
+    """globs as clang-tidy reads them: a check is in scope when a plain glob matches it and no `-glob` does."""
+    plus = [g for g in globs if not g.startswith("-")]
+    minus = [g[1:] for g in globs if g.startswith("-")]
+    return any(fnmatch.fnmatchcase(check, g) for g in plus) and not any(fnmatch.fnmatchcase(check, g) for g in minus) and (
         not fglobs or path is None or any(fnmatch.fnmatchcase(path, g) for g in fglobs))
 
 
 def scope_globs(text):
-    return [g.strip() for g in (text or "").split(",") if g.strip() and not g.strip().startswith("-")]
+    return [g.strip() for g in (text or "").split(",") if g.strip()]
 
 
 RATCHET_HEADER = """\
@@ -490,6 +493,7 @@ def selftest_modes(check):
         check(gate(same, "bugprone-exception-escape") == 0, "gate PASSES a scoped report whose only row is baselined (the branch-clone row is out of scope, not GONE)")
         check(gate(new, "bugprone-exception-escape") == 1, "gate FAILS a NEW in-scope row (planted src/b.h exception-escape)")
         check(gate(new, "bugprone-unchecked-optional-access,bugprone-exception-*") == 1, "a glob in --scope matches the planted row's check")
+        check(gate(new, "*,-bugprone-exception-escape,-bugprone-branch-clone") == 0, "a -glob in --scope excludes a check, as clang-tidy's --checks does (no row left in scope: pass)")
         check(gate(new, "bugprone-branch-clone") == 2, "gate is an ERROR, not a pass, on an empty scoped report against a non-empty scoped baseline")
         check(gate(empty, "bugprone-use-after-move") == 0, "gate PASSES an empty report when the scope has no baseline rows (a zero-row check)")
         check(gate(same, "bugprone-exception-escape", rc=put("rc1", "1\n")) == 2, "gate is an ERROR when clang-tidy's exit status is non-zero")
