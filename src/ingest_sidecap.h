@@ -2223,6 +2223,17 @@ inline CaptureFate languageFilterFate( const TagsFile& file, const TagsMatch& m 
     }
 }
 
+// An Elixir reference's arity and whether it is known: an operator reference is binary or unary by its node, always known; any
+// other reference counts its call's arguments (elixirCallArity).
+inline std::pair<std::uint16_t, bool> elixirReferenceArity( const TagsMatch& m, std::string_view src ) noexcept
+{
+    if( m.refCap == "reference.operator" )
+    {
+        return { static_cast<std::uint16_t>( elixirNodeIs( m.roleNode, "binary_operator" ) ? 2 : 1 ), true };
+    }
+    return elixirCallArity( m.roleNode, m.name.node, src );
+}
+
 // A capture inside an inert quote region ends here: call/operator/named-capture candidates are kept as declined facts, never edges
 // (Emitted); every other capture is dropped. Heads, special forms and non-call operators already failed their syntax filters. Bare
 // AST names remain variable-shaped syntax unless they explicitly name a function capture.
@@ -2244,8 +2255,7 @@ inline CaptureFate inertQuoteFate( const TagsFile& file, TagsSinks& sinks, const
     r.line      = m.name.row + 1;
     r.lang      = Lang::Elixir;
     r.role      = RefRole::Inert;
-    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, file.src );
-    if( m.refCap == "reference.operator" ) { count = elixirNodeIs( m.roleNode, "binary_operator" ) ? 2 : 1; known = true; }
+    const auto [ count, known ] = elixirReferenceArity( m, file.src );
     r.name = known ? elixirFunctionName( m.name.text, count ) : std::string( m.name.text );
     sinks.refs.push_back( std::move( r ) );
     return CaptureFate::Emitted;
@@ -2918,8 +2928,7 @@ inline CaptureFate qualifyElixirReference( const TagsFile& file, TagsSinks& sink
         r.recv = nodeTextOf( receiver, file.src ).starts_with( "__MODULE__" ) || file.elixir.selfRelativeAlias( receiver, m.roleNode )
                ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;
     }
-    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, file.src );
-    if( m.refCap == "reference.operator" ) { count = elixirNodeIs( m.roleNode, "binary_operator" ) ? 2 : 1; known = true; }
+    const auto [ count, known ] = elixirReferenceArity( m, file.src );
     if( !known ) { return CaptureFate::Drop; }
     r.argCount = count; r.argCountKnown = true;
     r.name = elixirFunctionName( m.name.text, count );
