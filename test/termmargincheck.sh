@@ -232,6 +232,22 @@ cmp -s "$TMP/a_on.xml" "$TMP/a_off.xml" \
     && no "(e) the armed and disarmed runs are byte-identical — the arm is inert, so every arm above is measuring nothing" \
     || ok "(e) armed and disarmed runs differ, so the arm is live"
 
+# ── (h) CR721 — the switch is 0 or 1: any other value is refused to the disarmed default with one stderr line ─────────
+#     RED before (rebased train tip 43be39fcd): RIPWIRE_TERMMARGIN=off ARMED the margin (every value not starting with '0'
+#     did), so its ranking was the armed one and stderr carried term-margin: traces, not a refusal.
+for v in off yes 2; do
+    runq "$v" "evict handler" "$TMP/h_$v.xml" "$TMP/h_$v.err"; hrc=$?
+    if [ "$hrc" = 0 ] && cmp -s "$TMP/h_$v.xml" "$TMP/a_off.xml" && grep -q "ignoring RIPWIRE_TERMMARGIN=\"$v\"" "$TMP/h_$v.err" \
+       && ! grep -q '^term-margin: ' "$TMP/h_$v.err"; then
+        ok "(h) RIPWIRE_TERMMARGIN=$v is refused: disarmed ranking, one stderr line, no margin trace"
+    else
+        no "(h) RIPWIRE_TERMMARGIN=$v: want rc 0, the disarmed ranking and a refusal line; got rc=$hrc, stderr: $( head -c 200 "$TMP/h_$v.err" )"
+    fi
+done
+runq "" "evict handler" "$TMP/h_empty.xml" "$TMP/h_empty.err"; hrc=$?
+if [ "$hrc" = 0 ] && cmp -s "$TMP/h_empty.xml" "$TMP/a_off.xml" && [ ! -s "$TMP/h_empty.err" ]; then ok "(h) an empty RIPWIRE_TERMMARGIN is the unset default, silently"
+else no "(h) an empty RIPWIRE_TERMMARGIN: want rc 0, the disarmed ranking and empty stderr; got rc=$hrc, stderr: $( head -c 200 "$TMP/h_empty.err" )"; fi
+
 # ── (f) determinism + scan/persisted-stats parity, with the arm ON ─────────────────────────────────
 runq 1 "evict handler" "$TMP/f_1.xml" "$TMP/f_1.err"
 runq 1 "evict handler" "$TMP/f_2.xml" "$TMP/f_2.err"

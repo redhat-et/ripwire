@@ -722,11 +722,20 @@ struct LexTermMargin
     bool armed() const noexcept { return bits > 0; }
 };
 
+// RIPWIRE_TERMMARGIN is a switch: unset, empty or "0" leaves the margin disarmed, "1" arms it. Any other value is refused to
+// the disarmed default with one stderr line (CR721: "off" used to ARM it, since every value not starting with '0' did).
 inline LexTermMargin termMarginFromEnv()
 {
-    const char* env = std::getenv( "RIPWIRE_TERMMARGIN" );
-    if( env == nullptr || *env == '0' )
+    const char* const env = std::getenv( "RIPWIRE_TERMMARGIN" );
+    if( env == nullptr || std::string_view( env ).empty() || std::string_view( env ) == "0" )
     {
+        return {};
+    }
+    if( !VALIDATE( std::string_view( env ) == "1", "RIPWIRE_TERMMARGIN is 0 or 1" ) )
+    {
+        rw::emitRaw( stderr, "ripwire: ignoring RIPWIRE_TERMMARGIN=\"" );
+        rw::emitRaw( stderr, env );
+        rw::emitRaw( stderr, "\" (want 0 or 1) — the margin stays disarmed\n" );
         return {};
     }
     const std::optional<int> bits = envKnob<int>( "RIPWIRE_TERMMARGIN_BITS" );
