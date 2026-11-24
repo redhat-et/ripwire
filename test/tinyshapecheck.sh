@@ -13,6 +13,12 @@
 #   (P)  PAGING CONTRACTS: under the knob, an explicit --page-bytes=N:2 and --page-bytes=0 are the knob-off answers byte for byte
 #   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
+#   (G)  SPREAD GUARD (lane THETA6-GUARD): a named symbol with a 1-hop caller in ANOTHER non-test file stays the full answer;
+#        non-vacuous: the knob-off answer's <callers> holds such a caller (counted, FAIL on 0) and the call IS tiny under force
+#   (G0) A TEST-FILE CALLER DOES NOT TRIP IT: a symbol whose only other-file callers are test files is tiny (the knob-off <callers>
+#        holds >= 1 test-file caller and 0 other non-test-file callers, counted, FAIL on 0)
+#   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
+#        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -29,6 +35,11 @@ F="$WORK/fx"; mkdir -p "$F/pkg" "$F/ev"
 printf 'def frobnicate_cache(widgets):\n    """Flush every widget in the cache."""\n    for w in widgets:\n        w.flush()\n    return len(widgets)\n\n\ndef warm_cache(widgets):\n    for w in widgets:\n        w.load()\n' >"$F/pkg/cache.py"
 printf 'from pkg.cache import frobnicate_cache, warm_cache\n\n\ndef render_page(widgets):\n    warm_cache(widgets)\n    return [w.draw() for w in widgets]\n\n\ndef refresh(widgets):\n    frobnicate_cache(widgets)\n    return render_page(widgets)\n' >"$F/pkg/render.py"
 printf 'def page_title(name):\n    return name.title()\n\n\ndef page_slug(name):\n    return name.lower().replace(" ", "-")\n' >"$F/pkg/util.py"
+mkdir -p "$F/pkg/tests" "$F/shapes"
+printf 'from pkg.util import page_title\n\n\ndef test_page_title():\n    assert page_title("a b") == "A B"\n' >"$F/pkg/tests/test_util.py"
+for i in $( seq 1 12 ); do
+    printf 'def area_of_shape(x):\n    return x * %d\n' "$i" >"$F/shapes/s$i.py"
+done
 for i in $( seq 1 40 ); do
     printf 'def on_event_%d(event):\n    """Handle the event and dispatch it."""\n    return dispatch_event(event, %d)\n\n\ndef dispatch_event(event, n):\n    return n\n' "$i" "$i" >"$F/ev/h$i.py"
 done
@@ -116,6 +127,40 @@ for pb in ("--page-bytes=400:2", "--page-bytes=0"):
 v_on = subprocess.run([BIN, "--version"], env=dict(os.environ, RIPWIRE_TINY_SHAPE="1"), capture_output=True, text=True).stdout
 v_off = subprocess.run([BIN, "--version"], env={k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}, capture_output=True, text=True).stdout
 (ok if "tiny=on, " in v_on and "tiny=" not in v_off else no)("(V) --version tiny=on only under the knob")
+
+# (G) / (G0): the spread guard, against what the knob-off answer's <callers> block holds
+def callers_files(t):
+    m = re.search(r"<callers [^>]*>(.*?)</callers>", t, re.S)
+    rows = re.findall(r"<s ([^>]*?)/?>", m.group(1)) if m else []
+    out = []
+    for a in rows:
+        a = dict(re.findall(r'(\w+)="([^"]*)"', a))
+        if a.get("d") != "2" and "p" in a: out.append(a["p"].rsplit(":", 1)[0])
+    return out
+SPREADQ = "Where is `frobnicate_cache` defined?"
+TESTQ = "Where is `page_title` defined?"
+s_off, s_on, s_force = run(BIN, ["--for=" + SPREADQ]), run(BIN, ["--for=" + SPREADQ], "1"), run(BIN, ["--for=" + SPREADQ], "force")
+xf = [f for f in callers_files(s_off) if f != "pkg/cache.py" and "/tests/" not in f]
+if not xf: no("(G) vacuous: the knob-off answer has 0 other-file callers of frobnicate_cache")
+elif 'shape="tiny"' not in s_force: no("(G) vacuous: the spread question is not tiny even under force")
+else: (ok if s_on == s_off and 'confidence="high"' in s_off else no)("(G) the spread question (%d other-file callers: %s) stays the full answer" % (len(xf), ",".join(xf)))
+t_off, t_on = run(BIN, ["--for=" + TESTQ]), run(BIN, ["--for=" + TESTQ], "1")
+cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f in cf if f != "pkg/util.py" and "/tests/" not in f]
+if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")
+elif nf: no("(G0) the fixture has %d non-test other-file callers: %s" % (len(nf), nf))
+else: (ok if 'shape="tiny"' in t_on.split(">", 1)[0] else no)("(G0) a symbol called only from a test file (%d) is tiny" % len(tf))
+# (S)
+SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
+a_off, a_on = run(BIN, ["--for=" + SAMEQ]), run(BIN, ["--for=" + SAMEQ], "1")
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]>", a_off, re.S)
+same_off = sum(1 for l in (m.group(1).split("\n") if m else []) if "area_of_shape" in l.split(" | ")[0])
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]></sigs>", a_on, re.S)
+lines = m.group(1).split("\n") if m else []
+if same_off < 9: no("(S) vacuous: the knob-off sigs hold %d same-name rows (< 9)" % same_off)
+elif 'shape="tiny"' not in a_on.split(">", 1)[0]: no("(S) the same-name question is not tiny (%s)" % (re.search(r'confidence="\w+"', a_off) or [""])[0])
+else:
+    good = len(lines) == min(same_off, 16) and all(l.endswith("area_of_shape") for l in lines) and xml_ok(a_on)
+    (ok if good else no)("(S) %d same-name rows in the full answer -> %d tiny lines, all area_of_shape" % (same_off, len(lines)))
 print("tinyshapecheck: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 sys.exit(1 if bad else 0)
 PY
