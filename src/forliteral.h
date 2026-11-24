@@ -118,7 +118,7 @@
 #include "taskroute.h"       // taskroute::identifierRunOf
 #include "siblift.h"         // siblift_detail::dirOf — a path's directory
 #include "forreadercallers.h"   // renderReaderCallers — READER-CALLERS: the callers of the shown rows' reader functions
-#include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
+#include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath (filter.h) — the answer's source-class anchors
 
 #include <algorithm>
 #include <array>
