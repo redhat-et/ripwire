@@ -31,3 +31,20 @@ sc_rel
 sc_twice() { (local SC_TWICE=1); local SC_TWICE; SC_TWICE=2; }
 sc_twice
 : "${SC_TWICE:?}"
+# #720 review: `local X &` is a child shell too; `declare -g` sets the global even when a later write sets the local.
+sc_bg() { local SC_BG=1 & SC_BG=2; wait; }
+sc_bg
+: "${SC_BG:?}"
+sc_glob2() { local SC_GLOB2; declare -g SC_GLOB2=1; SC_GLOB2=local; }
+sc_glob2
+: "${SC_GLOB2:?}"
+# Negatives: a { } group is no child shell; a child's later `local` ends before the function's; plain declare sets it.
+sc_grp() { { local SC_GRP; }; SC_GRP=2; }
+sc_grp
+: "${SC_GRP:?}"
+sc_outer() { local SC_OUTER; (local SC_OUTER); SC_OUTER=2; }
+sc_outer
+: "${SC_OUTER:?}"
+sc_decl() { local SC_DECL; declare SC_DECL=1; }
+sc_decl
+: "${SC_DECL:?}"
