@@ -1477,14 +1477,16 @@ inline void noteLineCommands( const ShellLine& cut, bool body, int lineNum, Shel
     }
 }
 
-inline ShellBindings collectShellBindings( const std::vector<std::string>& lines )
+// `exampleLines[i]` marks a line inside a fence the scan reads as documentation data (```text, ```example, …): like a
+// here-document body, its `NAME=` lines stay non-literal sites, so a shown sample never proves a host.
+inline ShellBindings collectShellBindings( const std::vector<std::string>& lines, const std::vector<bool>& exampleLines )
 {
     ShellBindings   bindings;
     ShellBlockState block;
     for( std::size_t i = 0; i < lines.size(); ++i )
     {
         const int      lineNum = int( i ) + 1;
-        const bool     body    = block.bodyLine( lines[i] );
+        const bool     body    = block.bodyLine( lines[i] ) || ( i < exampleLines.size() && exampleLines[i] );
         ShellLineSites at{ bindings.sites.size(), 0 };
         noteAssignmentSites( lines[i], lineNum, bindings.sites );
         at.rawEnd = bindings.sites.size();
@@ -2486,6 +2488,23 @@ private:
     SkillLineFence m_state;
 };
 
+// #353 flow: which lines sit inside an example-tagged fence, read with the same tracker and body bounds as the line scan
+// (never in a shell script, never in the frontmatter), so collectShellBindings promotes no binding the scan calls data.
+inline std::vector<bool> exampleFenceLines( const std::vector<std::string>& lines, int frontmatterEnd, bool wholeFileIsCode )
+{
+    std::vector<bool> out( lines.size(), false );
+    if( wholeFileIsCode )
+    {
+        return out;
+    }
+    SkillFenceTracker fences;
+    for( std::size_t i = std::size_t( std::max( frontmatterEnd, 0 ) ); i < lines.size(); ++i )
+    {
+        out[i] = fences.readLine( lines[i] ).inExampleFence;
+    }
+    return out;
+}
+
 // GE-SKILLSCAN: feed one body line to the whitespace-normalized joined-body INJECTION pass (A4-F12 §3). A phrase split across a
 // newline ("Ignore previous\ninstructions") matches nothing in the per-line scan; the line's content, whitespace runs collapsed
 // to one space and trimmed, joins `joinedBody` (space-separated), and `joinedLineOffsets` records where it starts so a cross-line
@@ -2765,7 +2784,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     SkillFindingSink sink{ findings, stackBytes };
     // #353 flow: where the document binds each variable, read once. Only a curl line's destination consults it
     // (curlLineHosts), so a document without one skips the pass.
-    const ShellBindings bindings = text.find( "curl" ) != std::string_view::npos ? collectShellBindings( lines ) : ShellBindings{};
+    const ShellBindings bindings = text.find( "curl" ) != std::string_view::npos ? collectShellBindings( lines, exampleFenceLines( lines, frontmatterEnd, wholeFileIsCode ) ) : ShellBindings{};
 
     // ── fenced-block injection suppression policy ─────────────────────────────────────────────────
     //
