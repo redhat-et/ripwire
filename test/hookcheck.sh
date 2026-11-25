@@ -344,6 +344,8 @@ if [ -x "$REALBIN" ]; then
     #   ABSENT                                                    -> byte-identical to the wrap block as SessionStart JSON (unchanged);
     #   PRESENT BUT STALE OR EDITED (CHOSEN, pinned here)        -> the CURRENT block is sent, byte-identical to ABSENT: an old or
     #     edited block is not this version's guidance, and the match is the exact text, never a heading grep.
+    #   NOT DELIVERED (CodeRabbit #744 round 1)                   -> byte-identical to ABSENT: the block only inside an HTML comment
+    #     (Claude Code strips those), or any settings file naming claudeMdExcludes (the hook keeps the primer, conservatively).
     # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
     # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
     SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
@@ -358,8 +360,17 @@ if [ -x "$REALBIN" ]; then
     }
     ssd_plant() # FILE TEXT: the text inside a CLAUDE.md that has other notes around it
     {
-        mkdir -p "${1%/*}"; printf '# Project notes\n\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
+        mkdir -p "${1%/*}"; printf '# Project notes\n<!-- team: keep this file short -->\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
     }
+    # The managed-policy memory files are read too and a gate cannot sandbox /etc or /Library: when one already holds the block
+    # on this machine, every case below is silent because of it, so the section reports why it cannot run instead of failing.
+    ssd_managed=""
+    for ssd_f in "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md"; do
+        [ -r "$ssd_f" ] && grep -q '^## ripwire' "$ssd_f" 2>/dev/null && ssd_managed="$ssd_f"
+    done
+  if [ -n "$ssd_managed" ]; then
+    echo "  SKIP  SessionStart dedup (3i6): the managed-policy file $ssd_managed holds a ripwire block on this machine"
+  else
     if command -v jq >/dev/null 2>&1; then
         SSD_WANT="$( jq -n --arg m "$SSD_BLURB" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
     else
@@ -415,6 +426,24 @@ if [ -x "$REALBIN" ]; then
     done
     [ "$ssd_stale" -eq 3 ] && ok "SessionStart dedup STALE: 3 of 3 edited blocks still get the current one" \
         || no "SessionStart dedup STALE: $ssd_stale of 3"
+    # NOT DELIVERED: the exact block is in the file but Claude Code would not inject it (or may not): the primer still speaks
+    ssd_kept=0
+    printf '# notes\n<!--\n%s\n-->\nBuild with make.\n' "$SSD_BLURB" > "$SSDCWD/CLAUDE.md"
+    ssd_n="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run comment )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (block only inside an HTML comment): the block is sent, byte-identical to ABSENT"
+    else no "SessionStart dedup NOT DELIVERED (HTML comment): planted=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+    for ssd_case in "project .claude/settings.json|$SSDCWD/.claude/settings.json" "project .claude/settings.local.json|$SSDREPO/.claude/settings.local.json" \
+                    "user-level settings.json|$CLAUDE_CONFIG_DIR/settings.json"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; mkdir -p "${ssd_file%/*}"
+        printf '{"claudeMdExcludes":["**/vendor/**/CLAUDE.md"]}\n' > "$ssd_file"
+        ssd_n="$( grep -c claudeMdExcludes "$ssd_file" )"; ssd_out="$( ssd_run "x$ssd_kept" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): seen=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$SSDCWD/CLAUDE.md"
+    done
+    if [ "$ssd_kept" -eq 4 ]; then ok "SessionStart dedup NOT DELIVERED: 4 of 4 keep the primer"
+    else no "SessionStart dedup NOT DELIVERED: $ssd_kept of 4"; fi
     # Codex: its primer is not deduped against CLAUDE.md, even when CLAUDE.md holds Codex's own block
     ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssd_out="$( ssd_run codex RIPWIRE_METER_AGENT=codex )"
     if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"
@@ -425,6 +454,7 @@ if [ -x "$REALBIN" ]; then
     ssd_wx="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | grep -c 'either one delivers it' )"
     [ "$ssd_wc" = 1 ] && [ "$ssd_wx" = 0 ] && ok "wrap claude says the paste block and the hook primer are alternatives (codex: not said)" \
         || no "wrap alternatives line: claude=$ssd_wc (want 1) codex=$ssd_wx (want 0)"
+  fi
     unset CLAUDE_CONFIG_DIR
 else
     echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"

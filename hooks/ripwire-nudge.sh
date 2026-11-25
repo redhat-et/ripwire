@@ -1277,27 +1277,46 @@ fi
 # `ripwire wrap <the running agent>` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
 # src/wrap.h (the single source of truth the wrap gate diffs across agents). If wrap refuses — e.g. a
 # CRITICAL skill-scan finding — the fence is absent, the blurb is empty, and this degrades to silence.
-# claudeMdHoldsBlurb DIR BLURB: true when a memory file Claude Code loads at session start already holds BLURB word for word
-# (carriage returns ignored), so the primer would only repeat it. The files: the user-level one, the managed-policy ones, and
-# CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md in DIR and each parent below `/`. An @import is not followed. EXACT, not a
-# heading grep: a stale or edited block is not this version's text, so the primer still sends the current one (pinned by
-# test/hookcheck.sh (3i6)). Builtins only, no fork: a few stats and reads of small files at each session start.
+# claudeMdHoldsBlurb DIR BLURB: true when a memory file Claude Code loads at session start already holds BLURB word for word,
+# so the primer would only repeat it. The files: the user-level one, the managed-policy ones, and CLAUDE.md, .claude/CLAUDE.md and
+# CLAUDE.local.md in DIR and each parent below `/`. Matched against what Claude Code injects: carriage returns ignored, HTML
+# comments removed (it strips them; a block inside one is not delivered). EXACT, not a heading grep: a stale or edited block is
+# not this version's text, so the primer still sends the current one. Kept CONSERVATIVE where loading is not modelled: an @import
+# is not followed, and any settings file that names claudeMdExcludes (which can stop a memory file from loading) keeps the primer.
+# test/hookcheck.sh (3i6) pins each case. Builtins only, no fork: a few stats and reads of small files at each session start.
+claudeMdRead() # FILE -> the caller's `text`; false when FILE is not a readable regular file
+{
+    [ -f "$1" ] && [ -r "$1" ] || return 1
+    text=""
+    IFS= read -r -d '' text < "$1"
+    return 0
+}
 claudeMdHoldsBlurb()
 {
-    local d="${1%/}" want="$2" f text
-    local -a files=( "${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}/CLAUDE.md"
-                     "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
+    local d="${1%/}" want="$2" f text rest cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
+    local -a files=( "$cfg/CLAUDE.md" "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
+    local -a settings=( "$cfg/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json"
+                        "/etc/claude-code/managed-settings.json" )
     while [ -n "$d" ]
     do
         files+=( "$d/CLAUDE.md" "$d/.claude/CLAUDE.md" "$d/CLAUDE.local.md" )
+        settings+=( "$d/.claude/settings.json" "$d/.claude/settings.local.json" )
         d="${d%/*}"
+    done
+    for f in "${settings[@]}"
+    do
+        claudeMdRead "$f" && [[ "$text" == *claudeMdExcludes* ]] && return 1
     done
     for f in "${files[@]}"
     do
-        [ -f "$f" ] && [ -r "$f" ] || continue
-        text=""
-        IFS= read -r -d '' text < "$f"
+        claudeMdRead "$f" || continue
         text="${text//$'\r'/}"
+        while [[ "$text" == *"<!--"* ]]
+        do
+            rest="${text#*"<!--"}"
+            text="${text%%"<!--"*}"
+            [[ "$rest" == *"-->"* ]] && text+="${rest#*"-->"}"   # an unclosed comment runs to the end of the file
+        done
         [[ "$text" == *"$want"* ]] && return 0
     done
     return 1
