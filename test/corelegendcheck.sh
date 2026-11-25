@@ -16,7 +16,7 @@
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
 #   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1, and its
 #        withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
-#   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte, but for the posture its next= names (C9)
+#   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte, but for the --legend=compact its next= names (C9)
 #        and the root's est_tokens= that prices it; --page-bytes=0 is unchanged by the core
 #   (C5) ROW IDENTITY under the core: following next= to the last page, every page's <d>/<t> rows joined equal the
 #        --page-bytes=0 answer's rows in order; (C5n) dropping one row makes it fail
@@ -26,7 +26,8 @@
 #        none — on the paged page 1 and on a one-page answer; (C8n) page 1 with its paging/act comment removed fails
 #   (C7) THE CUT IS FORM-INDEPENDENT: page 1 in the line form and in the element form (RIPWIRE_NO_ROWLINES) ends at the same row
 #        (equal withheld_bytes=), so the row form stays a lossless re-spelling (rowlinescheck (L1)) and next= needs no --rows=
-#   (C9) A SPELLED POSTURE KEEPS ITS PLAN (CR #740): page 1 of --legend=last|compact|dict names its posture in next= as typed (a
+#   (C9) A SPELLED POSTURE KEEPS ITS PLAN (CR #740): page 1 of --legend=last|compact|dict names the resolved posture in next=
+#        (--legend=compact: the three page the same answer, and dict stays byte-identical to compact, legenddefaultcheck D1; a
 #        continuation without it is cut under the core-legend refill, and the rows between the two cuts land on no page); the
 #        default next= names none; following the --legend=last chain to the last page delivers the --page-bytes=0 rows in order.
 #        COUNTS the next= calls it read and fails on zero
@@ -123,11 +124,11 @@ lc, ll = rd(W + "/lines_1.xml"), rd(W + "/lines_last_1.xml")
 cw, lw = root_int(lc, "withheld_bytes"), root_int(ll, "withheld_bytes")
 say(len(lc.encode()) <= len(ll.encode()) and cw is not None and lw is not None and cw <= lw,
     f"(C3) refill: page 1 as served {len(lc.encode())} B <= {len(ll.encode())} B; withheld_bytes {cw} <= {lw}")
-def unposture(t):   # --legend=last's page 1 less its spelled posture in next= and the est_tokens= digits that price those bytes
-    t = re.sub(r'(<ctx\b[^>]*?\snext="[^"]*?) --legend=last', r"\1", t, count=1)
+def unposture(t):   # --legend=last's page 1 less the posture its next= names and the est_tokens= digits that price those bytes
+    t = re.sub(r'(<ctx\b[^>]*?\snext="[^"]*?) --legend=compact', r"\1", t, count=1)
     return re.sub(r'(<ctx\b[^>]*?\sest_tokens=")\d+', r"\g<1>N", t, count=1)
 say(knob != last and unposture(knob) == unposture(last),
-    "(C4) RIPWIRE_NO_CORE_LEGEND=1 page 1 == --legend=last page 1, byte for byte but for next='s --legend=last and est_tokens=")
+    "(C4) RIPWIRE_NO_CORE_LEGEND=1 page 1 == --legend=last page 1, byte for byte but for next='s --legend=compact and est_tokens=")
 say(rd(W + "/whole.xml") == rd(W + "/whole_knob.xml"), "(C4) --page-bytes=0 is untouched by the core legend")
 ROW = re.compile(r"<d\b[^>]*>.*?</d>|<t\b[^>]*/>", re.S)
 def rows(t): return ROW.findall(re.sub(r"<!--.*?-->", "", t, flags=re.S))
@@ -162,8 +163,9 @@ for posture, files in (("last", [f"{W}/last_{k}.xml" for k in range(1, lpn + 1)]
         nx = next_of(rd(f))
         if nx is None: continue
         seen += 1
-        if f"--legend={posture}" not in shlex.split(nx): wrong.append(f"{f.rsplit('/',1)[1]}: {nx}")
-say(seen >= 3 and not wrong, f"(C9) {seen} spelled-posture next= call(s) read, each names its --legend as typed; missing: {wrong}")
+        if "--legend=compact" not in shlex.split(nx): wrong.append(f"{posture} {f.rsplit('/',1)[1]}: {nx}")
+say(seen >= 3 and not wrong, f"(C9) {seen} spelled-posture next= call(s) read, each names the resolved --legend=compact; missing: {wrong}")
+say(rd(W + "/dict_1.xml") == rd(W + "/compact_1.xml"), "(C9) --legend=dict page 1 == --legend=compact page 1, byte for byte (next= included)")
 dn = [next_of(rd(f"{W}/core_{k}.xml")) for k in range(1, pages + 1)]
 dn = [x for x in dn if x is not None]
 say(len(dn) >= 1 and not any("--legend" in x for x in dn), f"(C9) {len(dn)} default next= call(s) read, none names a --legend (the default call is unchanged)")
