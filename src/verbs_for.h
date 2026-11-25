@@ -5950,14 +5950,17 @@ inline bool forTinyShapeEligible( const rw::Config& cfg )
         && !cfg.packBudgetExplicit && rw::rowlines::rowLinesOn( cfg.rowsSpec );
 }
 
-// The tiny answer for the raw render `doc`, or nullopt (not eligible, or the detector did not fire).
+// The tiny answer for the raw render `doc`, or nullopt (not eligible, or the detector did not fire). Its <more next=> keeps the line
+// rows this call was answered in: an eligible call is in lines, so when the bare call would answer in elements (RIPWIRE_NO_ROWLINES
+// set, overridden by an explicit --rows=lines) the continuation names --rows=lines (CodeRabbit on #742); otherwise it adds nothing.
 inline std::optional<std::string> forTinyShape( const rw::Config& cfg, std::string_view doc )
 {
     if( !forTinyShapeEligible( cfg ) )
     {
         return std::nullopt;
     }
-    return rw::tinyshape::tinyAnswer( doc, cfg.forTask, forUnbudgetedCall( cfg ) + " --page-bytes=" + std::to_string( cfg.forPageBytes ) );
+    const std::string_view rows = rw::rowlines::rowLinesOn() ? "" : " --rows=lines";
+    return rw::tinyshape::tinyAnswer( doc, cfg.forTask, forUnbudgetedCall( cfg ) + std::string( rows ) + " --page-bytes=" + std::to_string( cfg.forPageBytes ) );
 }
 
 inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )

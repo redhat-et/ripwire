@@ -53,6 +53,9 @@
 #        that outranks the named one; the edges line names the caller in the TOP row's file and none in the named row's file;
 #        non-vacuous: the knob-off top row is not the named symbol, the named row is in another file, and the knob-off <callers>
 #        holds >= 1 caller in each of the two files (counted, FAIL on 0)
+#   (W)  THE CONTINUATION KEEPS THE ROW FORM (CodeRabbit on #742): under RIPWIRE_NO_ROWLINES=1 an explicit --rows=lines is tiny and
+#        its <more next=> call (same environment) returns the knob-off --rows=lines answer byte for byte; non-vacuous: the knob-off
+#        answer without --rows= is in elements there (its <sigs> holds <d> rows), and the --rows=lines one is in lines
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
@@ -117,8 +120,9 @@ bad = 0
 def ok(m): print("  ok   " + m)
 def no(m):
     global bad; bad += 1; print("  FAIL " + m)
-def run(b, args, knob=None, root=None):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}
+def run(b, args, knob=None, root=None, extra=None):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE") and k != "RIPWIRE_NO_ROWLINES"}
+    env.update(extra or {})
     if knob == "force": env["RIPWIRE_TINY_SHAPE_FORCE"] = "1"
     elif knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
     p = subprocess.run([b, root or F, "--no-cache"] + args, cwd=root or F, env=env, capture_output=True)
@@ -349,6 +353,16 @@ else:
     e = edges_text(a_on) or ""
     good = 'shape="tiny"' in a_on.split(">", 1)[0] and (top_f + ":") in e and (named_f + ":") not in e
     (ok if good else no)("(A) top row %s, named row %s: the edges line names %s, not %s: %s" % (arows[0][1], nrow[1], top_f, named_f, e))
+# (W) the continuation keeps an explicit --rows=lines over RIPWIRE_NO_ROWLINES
+NR = {"RIPWIRE_NO_ROWLINES": "1"}
+w_el, w_off, w_on = run(BIN, ["--for=" + NAMED], "0", None, NR), run(BIN, ["--for=" + NAMED, "--rows=lines"], "0", None, NR), run(BIN, ["--for=" + NAMED, "--rows=lines"], None, None, NR)
+m = re.search(r'<more next="([^"]+)"/>', w_on)
+elem = lambda t: bool(re.search(r"<sigs[^>]*><d ", t))
+if not elem(w_el) or elem(w_off): no("(W) vacuous: elements without --rows= %s, lines under --rows=lines %s" % (elem(w_el), not elem(w_off)))
+elif 'shape="tiny"' not in w_on.split(">", 1)[0] or not m: no("(W) --rows=lines under RIPWIRE_NO_ROWLINES=1 is not tiny with a more next=")
+else:
+    call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+    (ok if run(BIN, call, None, None, NR) == w_off else no)("(W) under RIPWIRE_NO_ROWLINES=1 the more next= (%s) returns the knob-off --rows=lines answer" % m.group(1))
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
 a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])
