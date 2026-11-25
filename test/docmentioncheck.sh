@@ -32,6 +32,7 @@ set -u
 export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): doc_mentions= and its header note live on the full page; the tiny answer names the code range only (14 of 205 default picks carry doc_mentions=, 0 items lost)
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0

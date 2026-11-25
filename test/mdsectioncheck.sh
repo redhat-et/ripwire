@@ -44,6 +44,7 @@ set -u
 export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): the first <d> row is read off the full page; the tiny lines are the same rows in the same order (tinyshapecheck (T))
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/mdsectionfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
