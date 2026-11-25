@@ -30,6 +30,7 @@
 // Gate: test/bodypointercheck.sh.
 
 #include "clones.h"            // readCloneSourceFile — a file's bytes by fileId through the one disk-path seam
+#include "foreditverb.h"      // isEditTask — does the --for task read as an edit (the edit-file form's gate)
 #include "foranswerfirst.h"    // rootBody — the root's open-tag end and its </ctx>
 #include "forbodiesform.h"     // bodyPointersOn — the switch
 #include "forpages.h"          // detail::pricePage — est_tokens= prices the page as served
@@ -39,6 +40,8 @@
 #include "serialize.h"         // lensRowPath (p= as every --for row prints it), defEndLine, lineBreaksOf, servedBodyStart, extractedTextOfUnit
 
 #include <algorithm>
+#include <charconv>
+#include <iterator>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -153,7 +156,8 @@ inline RowAttrs rowAttrs( const rowlines::OpenTag& t ) noexcept
 }
 
 // The pointer row for the element whose open tag is `t` (a <b> or a <skip>); `bodyBytes` sizes a row whose symbol is not found again.
-inline std::string pointerRow( Rewrite& job, const rowlines::OpenTag& t, std::size_t bodyBytes )
+// `lean` (the edit-file form): p= n= l= e= [follow_of=] only — its range is on the act line, which is how that form says to read it.
+inline std::string pointerRow( Rewrite& job, const rowlines::OpenTag& t, std::size_t bodyBytes, bool lean = false )
 {
     const RowAttrs a    = rowAttrs( t );
     std::uint32_t  line = 0;
@@ -174,8 +178,12 @@ inline std::string pointerRow( Rewrite& job, const rowlines::OpenTag& t, std::si
     job.applied.withoutEnd += span.last == 0 ? 1u : 0u;
     std::string x = "<skip p=\"" + std::string( a.p ) + "\" n=\"" + std::string( a.n ) + "\" l=\"" + std::to_string( span.first ) + "\"";
     x += span.last > 0 ? " e=\"" + std::to_string( span.last ) + "\"" : std::string();
-    x += " bytes=\"" + std::to_string( bytes ) + "\"";
+    x += lean ? std::string() : " bytes=\"" + std::to_string( bytes ) + "\"";
     x += a.follow.empty() ? std::string() : " follow_of=\"" + std::string( a.follow ) + "\"";
+    if( lean )
+    {
+        return x + "/>";
+    }
     x += " next=\"";
     appendNextValueXml( x, nextFlag( "--expand=", path + ":" + std::to_string( line ) + ":" + name ) );   // the selector the fold's skip row spells
     x += "\"/>";
@@ -271,36 +279,198 @@ inline std::optional<Element> nextElement( std::string_view v, std::size_t from,
 }
 }   // namespace detail
 
-// Rewrite `doc` — the bytes of a finished answer-first --for answer's first page — in place to the pointer form. Returns what it changed
-// (nothing: the page held no body, or it is not a first page of an answer-first answer, and it is served as it is).
-inline Applied pointBodies( std::string& doc, const IngestResult& ing, std::string_view rootArg )
+namespace detail
 {
-    const std::string_view                     view = doc;
-    const std::optional<answerfirst::RootBody> rb   = view.starts_with( "<ctx" ) ? answerfirst::rootBody( view ) : std::nullopt;
-    if( !rb || detail::continuationRoot( view.substr( 0, rb->openEnd ) ) )
-    {
-        return {};
-    }
-    detail::Rewrite job{ ing, rootArg, {}, {} };
-    std::string     out;
-    out.reserve( doc.size() );
+// One form's rewrite of a first page: which elements it points at, how its rows read, and how the page says so.
+struct Form
+{
+    bool             onlyBodies = false;   // false: every <b> and <skip> (the pointer form); true: only the <b> elements `file` holds
+    std::string_view file;                 // onlyBodies: the p= (as printed) whose bodies are pointed at
+    bool             lean = false;         // pointerRow's lean row (p= n= l= e=)
+    std::string_view attr, clause;         // the root's form attribute, the form's one legend comment
+};
+// THE ONE WALK both forms share: `view` (a first page whose root is `rb`) with every element the form picks replaced by its pointer row,
+// the clause before </ctx> and the attribute on the root; `rows` collects the rows written. nullopt: no body was picked (the page is then
+// served as it is: no attribute, no clause).
+inline std::optional<std::string> rewritePage( std::string_view view, const answerfirst::RootBody& rb, Rewrite& job, const Form& form,
+                                               std::vector<std::string>& rows )
+{
+    std::string out;
+    out.reserve( view.size() );
     std::size_t copied = 0;
-    for( std::optional<detail::Element> e = detail::nextElement( view, rb->openEnd + 1, rb->closeAt ); e; e = detail::nextElement( view, e->end, rb->closeAt ) )
+    for( std::optional<Element> e = nextElement( view, rb.openEnd + 1, rb.closeAt ); e; e = nextElement( view, e->end, rb.closeAt ) )
     {
+        if( form.onlyBodies && !( e->body && rowAttrs( e->tag ).p == form.file ) )
+        {
+            continue;
+        }
         out.append( view.substr( copied, e->at - copied ) );
-        out += detail::pointerRow( job, e->tag, e->end - e->at );
+        rows.push_back( pointerRow( job, e->tag, e->end - e->at, form.lean ) );
+        out += rows.back();
         ++( e->body ? job.applied.bodies : job.applied.skips );
         copied = e->end;
     }
     if( job.applied.bodies == 0 )
     {
+        return std::nullopt;
+    }
+    out.append( view.substr( copied, rb.closeAt - copied ) );
+    out.append( form.clause );
+    out.append( view.substr( rb.closeAt ) );
+    out.insert( rb.openEnd, form.attr );   // the root's open tag is untouched above: its '>' is still at openEnd
+    return out;
+}
+// The root of a first page a form may rewrite (an answer-first --for answer, not a continuation page); nullopt otherwise.
+[[nodiscard]] inline std::optional<answerfirst::RootBody> firstPageRoot( std::string_view view )
+{
+    const std::optional<answerfirst::RootBody> rb = view.starts_with( "<ctx" ) ? answerfirst::rootBody( view ) : std::nullopt;
+    return rb && !continuationRoot( view.substr( 0, rb->openEnd ) ) ? rb : std::nullopt;
+}
+}   // namespace detail
+
+// Rewrite `doc` — the bytes of a finished answer-first --for answer's first page — in place to the pointer form. Returns what it changed
+// (nothing: the page held no body, or it is not a first page of an answer-first answer, and it is served as it is).
+inline Applied pointBodies( std::string& doc, const IngestResult& ing, std::string_view rootArg )
+{
+    const std::optional<answerfirst::RootBody> rb = detail::firstPageRoot( doc );
+    if( !rb )
+    {
+        return {};
+    }
+    detail::Rewrite                  job{ ing, rootArg, {}, {} };
+    std::vector<std::string>         rows;
+    const detail::Form               form{ .attr = kBodyFormAttr, .clause = kBodyPointerClause };
+    std::optional<std::string>       out = detail::rewritePage( doc, *rb, job, form, rows );
+    if( !out )
+    {
         return {};   // no body on the page: nothing to point at, so the inline page is served as it is (no e= added, no clause)
     }
-    out.append( view.substr( copied, rb->closeAt - copied ) );
-    out.append( kBodyPointerClause );
-    out.append( view.substr( rb->closeAt ) );
-    out.insert( rb->openEnd, kBodyFormAttr );   // the root's open tag is untouched above: its '>' is still at openEnd
-    doc.swap( out );
+    doc.swap( *out );
+    forpages::detail::pricePage( doc );
+    return job.applied;
+}
+
+
+// ── THE EDIT-FILE FORM (lane θ17, owner 11-24 item; TD §4.2 rule 2 "a body only where it replaces a Read"; default OFF,
+// RIPWIRE_BODIES_EDIT, forbodiesform.h bodyEditFormOn). WHY. On the M5 calibration traces (141 Claude Code sessions, GA1 DEV edit tasks)
+// a body in the file the agent then edited was followed by a Read of that file 37 of 37 times, 27 of them covering the body's own lines,
+// so that text rode every later request twice; bodies in other files were re-read 4 of 22 times (tmp/orch-1124/theta17 carry_out.txt).
+// WHAT. On the same first page pointBodies rewrites, when the task reads as an edit (isEditTask), every <b> whose p= is the TOP FILE
+// — the act line's first range's path; a page without an act line is left as it is — becomes pointerRow's LEAN row (p= n= l= e=), and its P:L-E
+// joins <act read=> (unless a listed range of that path already holds it), so the Read the agent makes anyway carries it once. Bodies in
+// other files stay inline (there a body can replace a Read). Skip rows already on the page are left as they are. The page ends where it
+// ended (no refill), and the rewrite is kept only when the page comes out smaller. A changed page says body_form="edit" on its root and carries kBodyEditClause once before </ctx>. The clause asks for
+// ranged Reads: on the same traces 60 of the Reads of an edited file before its first edit were whole-file (theta17 ranged_out.txt).
+
+inline constexpr std::string_view kBodyEditFormAttr = " body_form=\"edit\"";
+inline constexpr std::string_view kBodyEditClause =
+    "<!-- body_form=edit: this edit task's top-file bodies are skip rows, l..e on act read=: Read those ranges, not the whole file, "
+    "before editing -->";
+
+namespace detail
+{
+// The page's top file as printed (escaped): the act line's first range's path; "" when the page has no act line (the ranges would have
+// nowhere to go).
+[[nodiscard]] inline std::string_view topFile( std::string_view doc, const std::vector<answerfirst::Block>& blocks )
+{
+    for( const answerfirst::Block& b : blocks )
+    {
+        if( !b.comment && b.name == "act" )
+        {
+            const std::string_view v     = rw::attrOf( doc.substr( b.begin, b.end - b.begin ), "read" );
+            const std::string_view first = v.substr( 0, v.find( ',' ) );
+            const std::size_t      colon = first.rfind( ':' );
+            if( colon != std::string_view::npos && colon > 0 ) { return first.substr( 0, colon ); }
+        }
+    }
+    return {};
+}
+// "P:L-E" of a pointer row pointerRow wrote, or "" when it has no e= (extent unknown: no range is guessed).
+[[nodiscard]] inline std::string rangeOfPointer( std::string_view row )
+{
+    const std::string_view p = rw::attrOf( row, "p" ), l = rw::attrOf( row, "l" ), e = rw::attrOf( row, "e" );
+    return e.empty() ? std::string() : std::string( p ) + ":" + std::string( l ) + "-" + std::string( e );
+}
+[[nodiscard]] inline unsigned lineNumber( std::string_view v ) noexcept
+{
+    unsigned n = 0;
+    (void)std::from_chars( v.data(), v.data() + v.size(), n );
+    return n;
+}
+// Does a range listed in `value` (P:L-E,…) already hold `range`?
+[[nodiscard]] inline bool listedRangeHolds( std::string_view value, std::string_view range )
+{
+    const std::size_t      c    = range.rfind( ':' );
+    const std::string_view path = range.substr( 0, c ), lines = range.substr( c + 1 );
+    const unsigned         l = lineNumber( lines.substr( 0, lines.find( '-' ) ) ), e = lineNumber( lines.substr( lines.find( '-' ) + 1 ) );
+    for( std::size_t at = 0; at <= value.size(); )
+    {
+        const std::size_t      next = std::min( value.find( ',', at ), value.size() );
+        const std::string_view item = value.substr( at, next - at );
+        const std::size_t      ic   = item.rfind( ':' );
+        if( ic != std::string_view::npos && item.substr( 0, ic ) == path )
+        {
+            const std::string_view il = item.substr( ic + 1 );
+            if( lineNumber( il.substr( 0, il.find( '-' ) ) ) <= l && lineNumber( il.substr( il.find( '-' ) + 1 ) ) >= e ) { return true; }
+        }
+        at = next + 1;
+    }
+    return false;
+}
+// Append the ranges the act line does not already hold to its read= value. False when the page keeps no act line (the act-line
+// producer omits it when a top row has no e=): no element can hold the ranges, so the caller keeps the bodies inline.
+[[nodiscard]] inline bool appendActRanges( std::string& doc, const std::vector<std::string>& ranges )
+{
+    constexpr std::string_view kOpen = "<act read=\"";
+    const std::optional<answerfirst::RootBody> rb = answerfirst::rootBody( doc );
+    if( !rb ) { return false; }
+    for( const answerfirst::Block& b : answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) )
+    {
+        if( b.comment || b.name != "act" || doc.compare( b.begin, kOpen.size(), kOpen ) != 0 ) { continue; }
+        const std::size_t valueAt = b.begin + kOpen.size(), valueEnd = doc.find( '"', valueAt );
+        std::string       value   = doc.substr( valueAt, valueEnd - valueAt );
+        for( const std::string& r : ranges )
+        {
+            if( !r.empty() && r.find( ',' ) == std::string::npos && !listedRangeHolds( value, r ) ) { value.append( "," ).append( r ); }
+        }
+        doc.replace( valueAt, valueEnd - valueAt, value );
+        return true;
+    }
+    return false;
+}
+}   // namespace detail
+
+// Rewrite `doc` (as pointBodies takes it) to the edit-file form for `task`. Returns what it changed (nothing: not an edit task, no top
+// file, no body in it, or not a first page; the page is then served as it is).
+inline Applied pointEditBodies( std::string& doc, const IngestResult& ing, std::string_view rootArg, std::string_view task )
+{
+    const std::optional<answerfirst::RootBody> rb  = isEditTask( task ) ? detail::firstPageRoot( doc ) : std::nullopt;
+    const std::string_view                     top = rb ? detail::topFile( doc, answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) ) : std::string_view();
+    if( top.empty() )
+    {
+        return {};
+    }
+    detail::Rewrite            job{ ing, rootArg, {}, {} };
+    std::vector<std::string>   rows;
+    const detail::Form         form{ .onlyBodies = true, .file = top, .lean = true, .attr = kBodyEditFormAttr, .clause = kBodyEditClause };
+    std::optional<std::string> out = detail::rewritePage( doc, *rb, job, form, rows );
+    if( !out )
+    {
+        return {};
+    }
+    std::vector<std::string> ranges;
+    std::ranges::transform( rows, std::back_inserter( ranges ), detail::rangeOfPointer );
+    if( std::ranges::any_of( ranges, []( const std::string& r ) { return r.empty(); } ) )
+    {
+        return {};   // a removed body whose end is unknown (file unreadable at serve time, or shorter than the indexed end) has no
+                     // range for the act line, and the legend promises every removed body's: the page stays inline (CR #745)
+    }
+    if( !detail::appendActRanges( *out, ranges ) || out->size() >= doc.size() )
+    {
+        return {};   // no act line to hold the ranges, or short bodies whose rows, ranges and clause cost more than the bodies (3 of 57
+                     // GA1 DEV pages): the page stays inline
+    }
+    doc.swap( *out );
     forpages::detail::pricePage( doc );
     return job.applied;
 }

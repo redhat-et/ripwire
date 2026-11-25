@@ -20,4 +20,11 @@ inline constexpr std::string_view kBodiesPointer = "pointer";
     return bodies.empty() ? std::getenv( "RIPWIRE_BODY_POINTERS" ) != nullptr : bodies == kBodiesPointer;
 }
 
+// THE EDIT-FILE FORM (lane θ17, default OFF): only the bodies in the file an edit task will edit become pointer rows (forbodyptr.h
+// pointEditBodies). An environment knob only, below both switches above: --bodies= typed, or RIPWIRE_BODY_POINTERS set, decides first.
+[[nodiscard]] inline bool bodyEditFormOn( std::string_view bodies = {} ) noexcept
+{
+    return bodies.empty() && std::getenv( "RIPWIRE_BODY_POINTERS" ) == nullptr && std::getenv( "RIPWIRE_BODIES_EDIT" ) != nullptr;
+}
+
 }   // namespace rw::bodyptr
