@@ -6285,13 +6285,15 @@ These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 `tangle` (QD-TANGLE, 2026-11-19) scores a long function's nesting past 3, deep share and steering locals amplified by
 length (AUC 0.986 on 44 hand labels; a long orchestrator of named steps scores 0). It was report-only until
 TANGLE-GATE-B / QD-RATCHET-BASE (2026-11-21): a row now gates when the function is new at 6.0 or more, crossed 6.0, or
-its score grew against the range base while over 6.0 (not a moved body, not test code); a row an input rose on while the
-score held stays `sev="minor"`, and the best-since-tag ratchet is a facet (`ratchet=`) on those rows, never a row of its
-own. Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only): main printed 3 minor rows and gated 0;
-the lane gates 9 rows over 5 PRs — #702 `runLsp` 2.1→11.0 (crossed) and the 8 growth rows the re-census found
-(#714 `serialize` 25.4→25.5 and `cc_walk` 9.1→9.7, #706 `runForLensPass` 16.4→16.5, #705 `buildGraph` 56.8→56.9,
-#702 `serialize` 25.2→25.4, #688 `ElixirContext::prepare` 12.2→12.3 and `captureTagsFacts` 28.8→29.2); the four
-tag-best rows on functions that did not grow in their PR (`buildGraph` #706/#714, `serialize` #705, `captureTagsFacts`
+its score grew against the range base while over 6.0 (not test code). A move is judged by what moved: a body moved
+unchanged keeps its identity and reports nothing, one moved with a small edit reads `origin="moved"` and never gates,
+and one moved and rewritten reads as new and gates as a new function does. A row an input rose on while the score held
+stays `sev="minor"`, and the best-since-tag ratchet is a facet (`ratchet=`) on those rows, never a row of its own.
+Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only; record and binary pins:
+`bench/qd/tangle_gate_replay20.tsv`): main printed 3 minor rows and gated 0; the lane gates 8 rows over 5 PRs — #702
+`runLsp` 2.1→11.0 (crossed) and 7 growth rows (#714 `serialize` 25.4→25.5 and `cc_walk` 9.1→9.7, #706 `runForLensPass`
+16.4→16.5, #705 `buildGraph` 56.8→56.9, #702 `serialize` 25.2→25.4, #688 `ElixirContext::prepare` 12.2→12.3 and
+`captureTagsFacts` 28.8→29.2); the four tag-best rows on functions that did not grow in their PR (`buildGraph` #706/#714, `serialize` #705, `captureTagsFacts`
 #714 29.2→29.1) print nothing. Expected effect: a PR that adds even a tenth to an over-bar function gates until it
 leaves the function no worse (or acks it).
 

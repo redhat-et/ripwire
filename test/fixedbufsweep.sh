@@ -217,7 +217,6 @@ TABLE = {
 # A NEW row here still fails the gate until someone adds it, which is the point. When you add one, say which
 # set it belongs in and why: a string argument makes it a TABLE row, with real prose.
 NUMERIC_ONLY = {
-    ( "src/serialize.h", "p" ): 1,   # GE-SERIALIZE (2026-11-21): the map row's copy of the snprintf( p, S, ... ) comment became BoundedAttrRun's; one comment mention left (the --for lens qbuf)
     ( "src/degradedscan.h", "hit.errRatio" ): 1,
     ( "src/dmm.h", "value" ): 1,
     ( "src/editcheck.h", "callersOpen" ): 1,
@@ -255,7 +254,6 @@ NUMERIC_ONLY = {
     ( "src/quality.h", "hex" ): 6,  # cli-perf-068: blobShardHex and ackMapKey now share hex16 (one buffer for two)
     ( "src/quality.h", "name" ): 1,
     ( "src/recall.h", "scoreText" ): 1,
-    ( "src/serialize.h", "...)" ): 1,
     ( "src/serialize.h", "callsHdr" ): 2,
     ( "src/serialize.h", "cb" ): 1,
     ( "src/serialize.h", "ccxAttr" ): 1,   # lane/lean-answers-068: sigRowTail's zero elision, " ccx=\"{}\"" of one count (<= 17 B of 23)
@@ -323,6 +321,10 @@ for rel in files:
     src = open( os.path.join( ROOT, rel ), "rb" ).read().decode( "utf-8", errors = "replace" )
     mentions += sum( 1 for L in src.split( "\n" ) if ( "snprintf" in L or "formatTo" in L ) )
     for m in re.finditer( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(", src ):
+        # CR721 r2: a call written inside a comment is prose, not a call site -- rewording it must not move a row.
+        # Such lines still count in `mentions` above.
+        lineStart = src.rfind( "\n", 0, m.start() ) + 1
+        if "//" in STRLIT.sub( '""', src[ lineStart : m.start() ] ): continue
         j = m.end() - 1
         depth = 0;  instr = False;  inchr = False;  esc = False
         while j < len( src ):

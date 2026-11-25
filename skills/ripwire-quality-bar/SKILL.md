@@ -33,11 +33,14 @@ anyway and stamps `baseline_absorbed="N"`).
 
 ## Read the exit code — it is narrower than it looks
 
-Exit 2 ONLY on a finding that is major AND unacked AND on code that already existed (`preexisting-worse`) —
-exactly the header's `gating="N"`. Read `gating=`, not `regressions=`. The new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling and a tangled new function
-(a format/argument mismatch is a defect, so it gates on new code too). **Exit 0 means "nothing that already existed got worse", NOT "clean"**: open the
-`origin="new-symbol"` rows — they are the debt you are adding. A renamed or moved symbol reads as new
-(`origin="moved"` never gates), so on a diff that moves code the exit code is weak evidence. Before an extract-method fix, read `ev=`
+Exit 2 when at least one row gates — exactly the header's `gating="N"`: a finding that is major, unacked and in scope, on
+code that already existed (`preexisting-worse`) or in one of three new-symbol exceptions: defect-shape format-arity (a
+format/argument mismatch is a defect, not debt), a new function at the ceiling, and a new function at tangle 6 or more. So
+a new production function can be the only gating row, with `preexisting-worse="0"`. Read `gating=`, not `regressions=`.
+**Exit 0 means no row gated, NOT "clean"**, and not proof that existing code did not get worse (a minor or acked row never
+gates): open the `origin="new-symbol"` rows — they are the debt you are adding. A move is judged by what moved: a body moved unchanged
+keeps its identity and reports nothing, one moved with a small edit reads `origin="moved"` and never gates, and one moved and
+rewritten reads as new — it gates only as a new function does, so on a diff that moves code the exit code is weak evidence. Before an extract-method fix, read `ev=`
 (essential complexity) on the `cx=` row: absent or `ev="1"` means the extraction is mechanical.
 
 ## Stop rule

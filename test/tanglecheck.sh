@@ -73,7 +73,9 @@ Q="$TMP/qd.xml"
 "$BIN" "$R" --quality-delta --no-cache >"$Q.2" 2>/dev/null; rc2=$?
 "$BIN" "$R" --quality-delta --json --no-cache >"$TMP/qd.json" 2>/dev/null; rcj=$?
 M="$( "$BIN" "$R" --metrics --page-bytes=0 --no-cache 2>/dev/null )"; rcm=$?   # the whole answer: main pages --metrics at 24 KB
-mkdir -p "$TMP/head" && "${G[@]}" -C "$R" archive HEAD | tar -x -C "$TMP/head"
+# CR721 r2: both ends of the pipe are checked, so a partial HEAD fixture stops the gate instead of feeding --metrics
+mkdir -p "$TMP/head" && ( set -o pipefail; "${G[@]}" -C "$R" archive HEAD | tar -x -C "$TMP/head" ) \
+    || { echo "HEAD fixture extraction failed (git archive | tar)"; exit 2; }
 MH="$( "$BIN" "$TMP/head" --metrics --page-bytes=0 --no-cache 2>/dev/null )"; rcmh=$?
 rc="$( cat "$Q.rc" )"
 case "$rc" in 0|2) ;; *) no "quality-delta exit status $rc (stderr: $( head -c 300 "$Q.err" ))";; esac

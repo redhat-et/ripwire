@@ -2175,8 +2175,18 @@ if printf '%s' "$LEG" | grep -q '<quality-delta '; then
     else no "$L: an 'EXIT 2 fires only on' sentence omits format-arity (or none found): ${EX:-<none>}"; fi
     # CR721: the exit-2 sentence states the whole predicate. A new function at the ceiling or tangle 6 can be the only gating
     # row, with preexisting-worse=0, so "fires only on preexisting-worse" is false. RED before (43be39fcd): that wording.
-    if printf '%s' "$LEG" | grep -q 'EXIT 2 fires only on preexisting-worse'; then no "$L: the legend says EXIT 2 fires only on preexisting-worse rows"
-    else ok "$L: the exit-2 sentence does not limit gating to preexisting-worse rows"; fi
+    # CR721 r2: checked on the extracted sentence itself (EX), so "only on major preexisting-worse rows" cannot pass on a
+    # format-arity mention elsewhere: it must name the gating-row predicate and all three new-symbol exceptions.
+    if [ -z "$EX" ]; then no "$L: no 'EXIT 2 fires only on' sentence to check the predicate of"
+    elif printf '%s\n' "$EX" | grep -qE 'only on (major |unacked |in-scope |, )*preexisting-worse'; then no "$L: the exit-2 sentence limits gating to preexisting-worse rows: $EX"
+    else
+        pmiss=""
+        for w in 'gating row' unacked in-scope major format-arity 'at the ceiling' 'tangled new function'; do
+            printf '%s\n' "$EX" | grep -q -- "$w" || pmiss="$pmiss '$w'"
+        done
+        if [ -z "$pmiss" ]; then ok "$L: the exit-2 sentence states the gating-row predicate and its three new-symbol exceptions"
+        else no "$L: the exit-2 sentence does not name:$pmiss ($EX)"; fi
+    fi
     if printf '%s' "$LEG" | grep -q 'report-only by facet, not by size'; then ok "$L: the legend says the report-only facets are sev=minor by facet, not by size (D3)"
     else no "$L: the legend does not say 'report-only by facet, not by size' — sev=minor is otherwise defined as a small numeric delta"; fi
     if printf '%s' "$LEG" | grep -q 'f-strings are not checked'; then ok "$L: the legend names the Python formats it does not check"

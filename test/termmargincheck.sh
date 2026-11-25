@@ -237,11 +237,14 @@ cmp -s "$TMP/a_on.xml" "$TMP/a_off.xml" \
 #     did), so its ranking was the armed one and stderr carried term-margin: traces, not a refusal.
 for v in off yes 2; do
     runq "$v" "evict handler" "$TMP/h_$v.xml" "$TMP/h_$v.err"; hrc=$?
+    # CR721 r2: exactly ONE refusal line. A debug build's VALIDATE adds its own once-per-site "[validate] " notice (the
+    # house's input-rejection trace; a release build prints none), so that notice is the only other line allowed.
+    hlines="$( grep -vc '^\[validate\] ' "$TMP/h_$v.err" )"
     if [ "$hrc" = 0 ] && cmp -s "$TMP/h_$v.xml" "$TMP/a_off.xml" && grep -q "ignoring RIPWIRE_TERMMARGIN=\"$v\"" "$TMP/h_$v.err" \
-       && ! grep -q '^term-margin: ' "$TMP/h_$v.err"; then
+       && [ "$hlines" = 1 ] && ! grep -q '^term-margin: ' "$TMP/h_$v.err"; then
         ok "(h) RIPWIRE_TERMMARGIN=$v is refused: disarmed ranking, one stderr line, no margin trace"
     else
-        no "(h) RIPWIRE_TERMMARGIN=$v: want rc 0, the disarmed ranking and a refusal line; got rc=$hrc, stderr: $( head -c 200 "$TMP/h_$v.err" )"
+        no "(h) RIPWIRE_TERMMARGIN=$v: want rc 0, the disarmed ranking and exactly one refusal line; got rc=$hrc, ${hlines:-?} line(s), stderr: $( head -c 200 "$TMP/h_$v.err" )"
     fi
 done
 runq "" "evict handler" "$TMP/h_empty.xml" "$TMP/h_empty.err"; hrc=$?
