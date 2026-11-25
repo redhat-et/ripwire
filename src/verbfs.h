@@ -64,6 +64,7 @@
 // are counts of this call, not estimates.
 
 #include "verbfs_seam.h"
+#include "clones.h"            // CloneGroup — the stored groups are the pass's own type
 #include "warmsnap.h"          // StatSig / statSig, Out / In, writePaths / readPaths, parallelFor, kRacySlackNs — reused, not re-rolled
 #include "quality.h"           // cacheDirLadder / resolveCacheBlobPath / atomicWriteFile — the cache directory every family shares
 #include "pathguard.h"         // readRegularFileNoFollow — a record is read only as a regular file, never through a link
@@ -263,6 +264,7 @@ inline bool worthWriting( std::size_t learned, std::size_t covered ) noexcept
 // The fault switches of the mutation arms (test/verbfscheck.sh; constexpr false under NDEBUG).
 struct FaultGrepSkipAll;
 struct FaultGrepNoStat;
+struct FaultCloneAnyDigest;
 inline const char* grepFaultName() noexcept
 {
     return rw::faultSwitchOnOnce<FaultGrepSkipAll>( "RIPWIRE_FAULT_VERBFS_GREP_SKIPALL" ) ? "skipall"
@@ -717,6 +719,202 @@ inline std::unique_ptr<GrepSieve> openGrepSieve( const IngestResult& ing, std::s
     return std::make_unique<RecordedGrepSieve>( ing, *armed, pats, regex, noPrefilter );
 }
 
+// ═══ (2) CLONES ══════════════════════════════════════════════════════════════════════════════════════════════════════
+inline constexpr std::size_t kCloneEntriesKept = 4;   // one per (threshold, index) a root's callers alternate between
+
+struct CloneEntry
+{
+    std::uint64_t                  digest    = 0;
+    std::int32_t                   minTokens = 0;
+    std::vector<std::uint32_t>     readFiles;   // file ids, ascending (stable under an equal digest: it covers the paths)
+    std::vector<warmsnap::StatSig> readSigs;
+    std::vector<CloneGroup>        groups;
+};
+
+struct CloneRecord
+{
+    std::vector<CloneEntry> entries;   // most recent first
+};
+
+inline void writeCloneRecord( warmsnap::Out& o, const CloneRecord& r )
+{
+    o.u64( r.entries.size() );
+    for( const CloneEntry& e : r.entries )
+    {
+        o.u64( e.digest );
+        o.u32( std::uint32_t( e.minTokens ) );
+        o.vec( e.readFiles );
+        o.vec( e.readSigs );
+        o.u64( e.groups.size() );
+        for( const CloneGroup& g : e.groups )
+        {
+            o.u32( g.tokens );
+            o.u8( g.type );
+            o.pod( g.similarity );
+            o.vec( g.members );
+        }
+    }
+}
+
+inline bool readCloneRecord( std::string_view payload, CloneRecord& r )
+{
+    warmsnap::In      in{ payload };
+    const std::size_t n = in.count( 36 );   // the fixed part of an entry
+    for( std::size_t i = 0; i < n && in.ok; ++i )
+    {
+        CloneEntry e;
+        e.digest    = in.u64();
+        e.minTokens = std::int32_t( in.u32() );
+        in.vec( e.readFiles );
+        in.vec( e.readSigs );
+        const std::size_t groups = in.count( 17 );   // the fixed part of a group
+        e.groups.reserve( groups );
+        for( std::size_t g = 0; g < groups && in.ok; ++g )
+        {
+            CloneGroup group;
+            group.tokens     = in.u32();
+            group.type       = in.u8();
+            group.similarity = in.pod<float>();
+            in.vec( group.members );
+            e.groups.push_back( std::move( group ) );
+        }
+        if( !VALIDATE( e.readFiles.size() == e.readSigs.size(), "verbfs: a clone entry's reads and signatures disagree" ) )
+        {
+            return false;
+        }
+        r.entries.push_back( std::move( e ) );
+    }
+    return VALIDATE( in.ok && in.left() == 0, "verbfs: the clone record does not parse" );
+}
+
+inline LoadedRecord<CloneRecord>& clonesLoaded() noexcept
+{
+    static LoadedRecord<CloneRecord> slot;
+    return slot;
+}
+
+// Every stored signature still matches its file (parallel above 2048 files; `fn` touches only its slot and the flag).
+inline bool signaturesHold( const IngestResult& ing, std::span<const std::uint32_t> files, std::span<const warmsnap::StatSig> sigs )
+{
+    std::atomic<bool> moved{ false };
+    warmsnap::parallelFor( files.size(), [ & ]( std::size_t i ) noexcept
+    {
+        if( files[ i ] >= ing.files.size() || !( warmsnap::statSig( diskPath( ing, files[ i ] ).c_str(), true ) == sigs[ i ] ) )
+        {
+            moved.store( true, std::memory_order_relaxed );
+        }
+    } );
+    return !moved.load();
+}
+
+inline CloneServe serveClones( const IngestResult& ing, int minTokens, std::uint64_t inputDigest, std::vector<CloneGroup>& out )
+{
+    CloneServe             r{ false, nowNs() };
+    const ArmedRoot* const armed = armedFor( ing );
+    if( armed == nullptr )
+    {
+        return r;
+    }
+    const bool        anyDigest = rw::faultSwitchOnOnce<FaultCloneAnyDigest>( "RIPWIRE_FAULT_VERBFS_CLONE_ANYDIGEST" );
+    Why               why       = Why::Absent;
+    const auto        record    = loadOnce( clonesLoaded(), Part::Clones, armed->rootKey, readCloneRecord, why );
+    const char*       miss      = record == nullptr ? kWhyNames[ std::size_t( why ) ] : "digest";
+    const CloneEntry* hit       = nullptr;
+    for( std::size_t i = 0; record != nullptr && hit == nullptr && i < record->entries.size(); ++i )
+    {
+        const CloneEntry& e = record->entries[ i ];
+        if( e.minTokens == minTokens && ( e.digest == inputDigest || anyDigest ) )
+        {
+            hit = &e;
+        }
+    }
+    if( hit != nullptr && !anyDigest && !signaturesHold( ing, hit->readFiles, hit->readSigs ) )
+    {
+        hit  = nullptr;
+        miss = "stat";
+    }
+    if( hit != nullptr )
+    {
+        const auto inRange = [ & ]( const CloneGroup& g ) { return std::ranges::all_of( g.members, [ & ]( NodeId m ) { return m < ing.symbols.size(); } ); };
+        if( !VALIDATE( anyDigest || std::ranges::all_of( hit->groups, inRange ), "verbfs: a stored clone group names a symbol this index does not hold" ) )
+        {
+            hit  = nullptr;
+            miss = "shape";
+        }
+    }
+    if( hit != nullptr )
+    {
+        out      = hit->groups;
+        r.served = true;
+    }
+    if( memstats::enabled() )
+    {
+        if( r.served )
+        {
+            rw::emitTo( stderr, "[verbfs] clones served=1 why=ok min_tokens={} files_statted={} groups={}{}\n", minTokens, hit->readFiles.size(), out.size(),
+                        anyDigest ? " fault=anydigest" : "" );
+        }
+        else
+        {
+            rw::emitTo( stderr, "[verbfs] clones served=0 why={} min_tokens={}{}\n", miss, minTokens, anyDigest ? " fault=anydigest" : "" );
+        }
+    }
+    return r;
+}
+
+inline void keepClones( const IngestResult& ing, int minTokens, std::uint64_t inputDigest, const std::vector<CloneGroup>& groups, std::span<const std::uint32_t> readFileIds,
+                        long long startNs )
+{
+    const ArmedRoot* const armed = armedFor( ing );
+    if( armed == nullptr )
+    {
+        return;
+    }
+    CloneEntry fresh;
+    fresh.digest    = inputDigest;
+    fresh.minTokens = minTokens;
+    fresh.readFiles.assign( readFileIds.begin(), readFileIds.end() );
+    fresh.readSigs.resize( fresh.readFiles.size() );
+    std::atomic<bool> young{ false };
+    warmsnap::parallelFor( fresh.readFiles.size(), [ & ]( std::size_t i ) noexcept
+    {
+        fresh.readSigs[ i ] = warmsnap::statSig( diskPath( ing, fresh.readFiles[ i ] ).c_str(), true );
+        if( !settled( fresh.readSigs[ i ], startNs ) )
+        {
+            young.store( true, std::memory_order_relaxed );
+        }
+    } );
+    bool wrote = false;
+    if( !young.load() )
+    {
+        fresh.groups = groups;
+        Why  why     = Why::Absent;
+        auto merged  = std::make_shared<CloneRecord>();
+        merged->entries.push_back( std::move( fresh ) );
+        if( const auto old = loadOnce( clonesLoaded(), Part::Clones, armed->rootKey, readCloneRecord, why ) )
+        {
+            for( const CloneEntry& e : old->entries )
+            {
+                if( merged->entries.size() < kCloneEntriesKept && !( e.digest == inputDigest && e.minTokens == minTokens ) )
+                {
+                    merged->entries.push_back( e );
+                }
+            }
+        }
+        warmsnap::Out o = beginRecord();
+        writeCloneRecord( o, *merged );
+        wrote = commitRecord( Part::Clones, armed->rootKey, o );
+        if( wrote )
+        {
+            replaceLoaded( clonesLoaded(), std::shared_ptr<const CloneRecord>( std::move( merged ) ) );
+        }
+    }
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[verbfs] clones kept={} files_read={} settled={} wrote={}\n", groups.size(), readFileIds.size(), young.load() ? 0 : 1, wrote ? 1 : 0 );
+    }
+}
+
 // ── arming ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Called by ingest() for the primary ingest of a cached single-root run (where it arms the warm snapshot), on the main
 // thread before any verb runs. Installs every seam this file implements; RIPWIRE_NO_VERBFS=1 leaves them null.
@@ -732,6 +930,8 @@ inline void arm( std::string_view rootDir, const std::string& rootKey )
     a.on         = true;
     Seams& s     = seams();
     s.grepSieve  = &openGrepSieve;
+    s.cloneServe = &serveClones;
+    s.cloneKeep  = &keepClones;
 }
 
 }   // namespace rw::verbfs
