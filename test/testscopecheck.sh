@@ -24,9 +24,8 @@
 #   · --ignore-tests            (filter.h applyIgnoreTests)  — the symbol is dropped
 #   · the §P4 retrieval tier    (filter.h rankTierSymbolMultipliers) — the symbol is de-prioritized
 #   · tested= / --seams reach   (graph.h testSeeds) — the symbol SEEDS coverage instead of receiving it
-# File-keyed consumers (--affected/--situ/--test-gate naming test FILES to run) are deliberately NOT
-# changed: an in-file test gives you no separate file to run, and listing a src/ file as "a test to
-# run" would be a wrong answer, not a better one.
+# --affected and --situ stay file-granular but recognise Rust test-only modules and exclude fixtures.
+# --test-gate additionally recognises inline Rust tests and lists the runnable reader of changed fixture data.
 #
 # PRECISION OVER RECALL is the contract — a mis-marked production symbol vanishes from --ignore-tests
 # output, which is strictly worse than missing a test. Arms 5-8 are the negative controls that pin it:
@@ -56,6 +55,9 @@
 #                   equals the plain map).
 #  12. HYGIENE   — two cold runs byte-identical (determinism), well-formed XML, warm == cold (the
 #                   extraction change rides kParserVer, so a stale blob must not survive).
+#  13. MOUNTS    — propagate test-only ownership through mod declarations; a production path wins.
+#  14. GATE      — out-of-line and inline Rust tests run; changing data names the runnable reader.
+#  15. FIXTURES  — fixture symbols never seed metrics coverage.
 #
 # Usage:
 #   bash test/testscopecheck.sh
@@ -317,10 +319,9 @@ case "$topfile" in
     *)                   no "arm10 tier: --for named no .rs file at all (cannot judge the tier): '$topfile'" ;;
 esac
 
-# ── arm 10b: the FILE-keyed verbs are deliberately NOT changed ───────────────────────────────────────
-# An in-file test gives an agent no separate file to run, so --affected must never answer "run src/a.rs"
-# just because that file happens to contain a `#[cfg(test)] mod`. This arm pins the scope decision in
-# both directions: the feature must not leak into the tests-to-run answer.
+# ── arm 10b: --affected stays file-granular ──────────────────────────────────────────────────────────
+# An inline #[cfg(test)] module on its own does not make its production file a runnable test file.
+# --test-gate separately reports inline Rust tests (arm 14).
 AFF="$( "$BIN" "$TMP/fix" --affected=src/a.rs 2>/dev/null )"
 if printf '%s' "$AFF" | tr '<' '\n' | grep -q 't p="src/a\.rs"'; then
     no "arm10b scope: --affected named the src file itself as a test to run (the in-file bit leaked into the file-keyed verbs)"
@@ -346,6 +347,108 @@ else no "arm12 well-formed: --ignore-tests output is not well-formed XML"; fi
 "$BIN" "$TMP/fix" --ignore-tests > "$TMP/warm.xml" 2>/dev/null
 if diff -q "$IGN" "$TMP/warm.xml" >/dev/null 2>&1; then ok "arm12 warm==cold: cached extraction agrees with the fresh parse"
 else no "arm12 warm==cold: a warm run disagrees with the cold run (cache key missed the extraction change)"; fi
+
+# Rust ownership: a cfg(test) mount propagates to an out-of-line helper, but a production mount wins.
+# Source-shaped data is never a test root; even a symbol-free input must name the test that reads it.
+RUST_MOUNTS="$TMP/rust-mounts"
+mkdir -p "$RUST_MOUNTS/src/checks" "$RUST_MOUNTS/src/testdata"
+cat > "$RUST_MOUNTS/Cargo.toml" <<'EOF'
+[package]
+name = "rust-mounts"
+version = "0.1.0"
+edition = "2021"
+EOF
+cat > "$RUST_MOUNTS/src/lib.rs" <<'EOF'
+mod anchor;
+mod fixture_anchor;
+mod shared;
+#[cfg(test)]
+mod checks;
+mod inline_anchor;
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn inline_regression() { crate::inline_anchor::inline_anchor(); }
+}
+EOF
+printf 'pub fn production_anchor() {}\n' > "$RUST_MOUNTS/src/anchor.rs"
+printf 'pub fn inline_anchor() {}\n' > "$RUST_MOUNTS/src/inline_anchor.rs"
+printf 'pub fn fixture_only_anchor() {}\n' > "$RUST_MOUNTS/src/fixture_anchor.rs"
+printf 'pub fn dual_mount_helper() {}\n' > "$RUST_MOUNTS/src/shared.rs"
+cat > "$RUST_MOUNTS/src/checks.rs" <<'EOF'
+mod nested;
+#[path = "shared.rs"]
+mod shared;
+use crate::anchor::production_anchor;
+use std::{fs, path::Path};
+#[test]
+fn checks_anchor() {
+    production_anchor();
+    // A comment argument and a join chain past the old twelve-call depth limit still name the fixture directory.
+    let _ = fs::read_dir(/* fixtures */ Path::new(env!("CARGO_MANIFEST_DIR")).join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join(".").join("src/testdata"));
+}
+EOF
+printf 'pub fn mounted_helper() {}\n' > "$RUST_MOUNTS/src/checks/nested.rs"
+printf 'use crate::fixture_anchor::fixture_only_anchor;\n#[test]\nfn not_a_runnable_case() { fixture_only_anchor(); }\n' > "$RUST_MOUNTS/src/testdata/golden.rs"
+printf '// Source-shaped fixture with no symbols.\n' > "$RUST_MOUNTS/src/testdata/empty.rs"
+if "$BIN" "$RUST_MOUNTS" --ignore-tests --no-cache > "$TMP/rust_mounts.xml" 2>/dev/null \
+    && grep -q 'n="dual_mount_helper"' "$TMP/rust_mounts.xml" \
+    && ! grep -Eq 'n="(mounted_helper|checks_anchor|not_a_runnable_case)"' "$TMP/rust_mounts.xml"; then
+    ok "arm13 Rust mounts: test-only modules and fixture definitions are filtered, dual mounts survive"
+else no "arm13 Rust mounts: bad production-only partition"; fi
+if python3 - "$BIN" "$RUST_MOUNTS" <<'PY'
+import json
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+binary, root = sys.argv[1:]
+for cold in (True, False, False):
+    for path, expected in (
+        ("src/anchor.rs", "src/checks.rs"),
+        ("src/inline_anchor.rs", "src/lib.rs"),
+        ("src/lib.rs", "src/lib.rs"),
+        ("src/testdata/golden.rs", "src/checks.rs"),
+        ("src/testdata/empty.rs", "src/checks.rs"),
+    ):
+        cmd = [binary, root, f"--test-gate={path}"]
+        if cold:
+            cmd.append("--no-cache")
+        p = subprocess.run([*cmd, "--json"], capture_output=True, text=True, timeout=15)
+        assert p.returncode == 4, (path, p.returncode, p.stdout, p.stderr)
+        gate = json.loads(p.stdout)
+        rows = gate["tests_to_run"]
+        paths = [name for row in rows for name in (row["p"] if isinstance(row["p"], list) else [row["p"]])]
+        if path == "src/lib.rs":
+            assert any(row["p"] == expected and row.get("changed") is True for row in rows), gate
+        else:
+            assert paths == [expected] and gate["untested"] == 0, (path, gate)
+        is_fixture = path.startswith("src/testdata/")
+        assert any(row.get("fixture_reader") is True for row in rows) == is_fixture, (path, gate)
+        if is_fixture:
+            xml = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            assert xml.returncode == 4, xml
+            report = ET.fromstring("<doc>" + xml.stdout + "</doc>").find("test-gate")
+            assert report.find("t[@fixture_reader='1']") is not None, xml.stdout
+# A fixture reader with no call path sorts after the hops=1 rows, so run_first= still marks the direct test.
+p = subprocess.run([binary, root, "--test-gate=src/testdata/empty.rs,src/inline_anchor.rs", "--json", "--no-cache"],
+                   capture_output=True, text=True, timeout=15)
+assert p.returncode == 4, (p.returncode, p.stdout, p.stderr)
+gate = json.loads(p.stdout)
+rows = gate["tests_to_run"]
+assert [row["p"] for row in rows] == ["src/lib.rs", "src/checks.rs"] and rows[1].get("fixture_reader") is True, gate
+assert gate.get("run_first") == 1, gate
+PY
+then ok "arm14 Rust gate: inline tests, test modules and fixture readers survive cache replay"
+else no "arm14 Rust gate: wrong test owner or evidence"; fi
+
+MET="$TMP/rust_mount_metrics.xml"
+"$BIN" "$RUST_MOUNTS" --metrics --no-cache > "$MET" 2>/dev/null
+fixture_row="$( testedrow fixture_only_anchor )"
+if [ -n "$fixture_row" ] && ! grep -q 'tested="1"' <<<"$fixture_row" \
+    && grep -q 'tested="1"' <<<"$( testedrow production_anchor )"; then
+    ok "arm15 Rust fixture syntax cannot seed metrics coverage; its runnable test still can"
+else no "arm15 Rust fixture coverage contaminated the tested partition: $fixture_row"; fi
 
 echo
 [ "$fail" -eq 0 ] && echo "testscopecheck: ALL PASS" || echo "testscopecheck: FAILURES"

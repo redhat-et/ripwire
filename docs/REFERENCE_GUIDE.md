@@ -564,9 +564,13 @@ worst-40 cut over a ranking whose population moves, so both re-shuffle on code t
 family that could not be measured on this tree reports UNAVAILABLE, never "did not fire".
 
 `--quality-delta` reports only the properties that the working tree made worse against a baseline.
-`--test-gate` names the tests that must run. `--edit-check` compares an edited symbol against git
-HEAD. `--safe-delete=SYM` composes the callers, the blast radius, the use sites, and the dead-code
-shape into one risk report.
+`--test-gate` names the tests that must run. For Rust, it recognizes inline tests and lists a test
+with `fixture_reader=1` if its `fs::read_dir` or `std::fs::read_dir` uses `Path::new(env!("CARGO_MANIFEST_DIR")).join(...)`
+with literal segments to read a `testdata` directory containing a changed indexed direct child.
+Possible trait-dispatch reach is reported as `<ur>` rows and is an obligation, not proven coverage.
+One `--limit`/`--offset` window pages the `<u>` rows, then the `<ur>` rows; test rows repeat in full.
+`--edit-check` compares an edited symbol against git HEAD. `--safe-delete=SYM` composes the callers,
+the blast radius, the use sites, and the dead-code shape into one risk report.
 
 ### 11. Agent integration
 

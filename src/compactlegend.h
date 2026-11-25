@@ -1152,6 +1152,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "script_gates_mapped", "script_gates_mapped=N: registered gates with exact dependency evidence (literal paths or RIPWIRE_TEST_DEPS)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_unresolved_dynamic", "script_gates_unresolved_dynamic=N: registered gates with no mappable deps; they may cover the change unlisted", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "evidence", "t evidence=script_literal|manifest_declared: why a shell gate joins tests=, its text names the changed path or its RIPWIRE_TEST_DEPS does", true, "t", MapHeaderRead::No, {}, "test-gate" },
+    { "fixture_reader", "fixture_reader=1: this test reads a changed fixture input", true, "t", MapHeaderRead::No, {}, "test-gate" },
+    { "fixture_reader", "fixture_reader=1: these tests read a changed fixture input", true, "g", MapHeaderRead::No, {}, "test-gate" },
+    { "unresolved_test_reach", "unresolved_test_reach=N: possible Rust trait-dispatch reach, not proven coverage; <ur sym= p= l= ccx=>; exit 4", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
+    { "shown_unresolved_test_reach", "shown_unresolved_test_reach=N: <ur> rows on this page", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
+    { "unresolved_test_reach_capped", "unresolved_test_reach_capped=1: not all possible-reach rows shown", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "ccx_bar", "ccx_bar=N: the cognitive-complexity bar a u row's ccx= is read against", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     // the symbol-granular change set (situ.h computeSymbolChangeSet / testGateGranularityAttrXml) — CONDITIONAL:
     // the attributes ride only when git-hunk evidence shaped the change set (testGateHunkShaped), and the

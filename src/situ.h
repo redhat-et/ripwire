@@ -1378,7 +1378,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     //     one NAMED after a changed file (the graph misses it when the test builds through a factory), then
     //     by hops ascending — the row to run first is the first row.
     const ChangedFileSplit     situSplit = splitChangedFiles( ing, changedFile );
-    const std::vector<TestRow> testRows  = rankTestRows( ing, reach, situDepth, nullptr, situSplit.src, situSplit.tests );
+    const std::vector<TestRow> testRows  = rankTestRows( ing, reach, situDepth, nullptr, { situSplit.src, situSplit.tests } );
     std::vector<std::uint32_t> tests;
     for( const TestRow& r : testRows )
     {
@@ -1593,7 +1593,7 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
 
     // H2H-Graft F1: evidence-ordered rows (changed test files in the diff, stem partners, then hops asc)
     const ChangedFileSplit factsSplit = splitChangedFiles( ing, changedFile );
-    facts.testRows                    = rankTestRows( ing, reach, factsDepth, nullptr, factsSplit.src, factsSplit.tests );
+    facts.testRows                    = rankTestRows( ing, reach, factsDepth, nullptr, { factsSplit.src, factsSplit.tests } );
     for( const TestRow& r : facts.testRows )
     {
         facts.tests.push_back( r.fileId );
@@ -1689,6 +1689,7 @@ struct TestGateResult
     std::vector<std::uint32_t> tests;                 // the same rows as file ids, same order — the --affected answer
     ShellGateIndex             shellGates;            // registered shell gates with exact dependency evidence
     std::vector<NodeId>        untested;              // impacted symbols reached by NO test (ccx desc, file asc, name asc)
+    std::vector<NodeId>        unresolvedTestReach;   // impacted, reachable only via declined Rust trait dispatch
     // rv-test-gate-tsjs F3: <file-scope> owners #324 excludes from `untested` above, counted rather than
     // silently dropped — a real obligation (a module scope no test reaches) must not read as exit 0 with
     // nothing to say why. Still counted in impactedSymbols; see writeTestGateReport's reconciliation note.
@@ -1703,7 +1704,7 @@ struct TestGateResult
     // attribute and legend clause. Default-constructed for the callers that do not narrow (--plan-lanes'
     // per-symbol claims), whose reports therefore carry none of it — a lane's claim set is not a git diff.
     SymbolChangeSet            changeSet;
-    bool                       hasObligations  = false; // !tests.empty() || !untested.empty()
+    bool                       hasObligations  = false;   // tests (including shell gates), untested or unresolved test reach
     // AF5 (owner ruling 2026-11-21, "answer, never pass"): --test-gate=FILES items that resolved to no indexed
     // file. Set by the CLI arm after the gate is computed; never part of hasObligations (exit 4 keeps its one
     // meaning) — the arm exits 6 (partial, never 0) when it is non-empty and nothing gates.
@@ -1723,17 +1724,157 @@ inline int testGateExitCode( const TestGateResult& r ) noexcept
     return r.unused.empty() ? 0 : 6;
 }
 
+// Keep non-Rust coverage file-based; Rust also has test-only code in ordinary production files.
+inline bool isGateTestSymbol( const IngestResult& ing, NodeId n ) noexcept
+{
+    const Symbol& s = ing.symbols[n];
+    return isRunnableTestFile( ing, s.fileId ) || isRunnableInlineTest( ing, n );
+}
+
 // The lane-independent half of computeTestGate: what the test files transitively call. A pure function of
 // (ing, g), so a caller running the gate N times over N different change sets (--plan-lanes, N up to 16 on
 // this repo's 5763 symbols) computes it ONCE and hands it in, instead of paying N redundant full forward
 // traversals. Every pre-existing call site keeps its own inline computation via the default argument below,
 // so their bytes are unchanged.
-// A6: the seed-collection loop lives in graph.h::seedForwardReachIf. testSymbolForwardReach seeds by isTestSymbol
-// instead — same traversal shape, deliberately different predicate (see that function's banner for why isTestPath,
-// not isTestSymbol, is the right one here).
+// A6: the seed-collection loop lives in graph.h::seedForwardReachIf. testSymbolForwardReach seeds by seedsTestCoverage
+// instead — same traversal shape, deliberately different predicate (see that function's banner for why a test FILE,
+// not isTestSymbol, is the right one here; isGateTestSymbol).
 inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Graph& g )
 {
-    return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestPath( rootRelPath( ing, ing.symbols[i].fileId ) ); } );
+    return seedForwardReachIf( ing, g, [&]( NodeId i ) { return isGateTestSymbol( ing, i ); } );
+}
+
+// Follow declined trait candidates without adding edges to the proven call graph.
+inline std::vector<char> unresolvedRustTestReach( const IngestResult& ing, const Graph& g, std::span<const char> proven )
+{
+    std::vector<std::pair<NodeId, NodeId>> edges;
+    for( std::size_t i = 0; i < g.declinedSiteKind.size(); ++i )
+    {
+        const auto list = g.declinedSiteList[i];
+        if( g.declinedSiteKind[i] != DeclinedSiteKind::Iface || list == kNoDeclinedList
+            || !langFacts( ing.references[g.declinedSiteRef[i]].lang ).traitImplBlocks )
+        {
+            continue;
+        }
+        for( auto e = g.declinedListOff[list]; e < g.declinedListOff[list + 1]; ++e )
+        {
+            edges.emplace_back( g.declinedSiteCaller[i], g.declinedListCand[e] );
+        }
+    }
+    if( edges.empty() )
+    {
+        return {};
+    }
+    std::ranges::sort( edges );
+    std::vector<char> reached( ing.symbols.size(), 0 );
+    std::vector<NodeId> work;
+    const auto enqueue = [ & ]( NodeId n )
+    {
+        if( proven[n] || reached[n] || rustTestFileRole( ing, ing.symbols[n].fileId ) == RustTestFileRole::Input )
+        {
+            return;
+        }
+        reached[n] = 1;
+        work.push_back( n );
+    };
+    for( const auto& [ caller, target ] : edges )
+    {
+        if( proven[caller] )
+        {
+            enqueue( target );
+        }
+    }
+    for( std::size_t i = 0; i < work.size(); ++i )
+    {
+        const NodeId n = work[i];
+        for( auto j = g.outOff[n]; j < g.outOff[n + 1]; ++j )
+        {
+            enqueue( g.outTargets[j] );
+        }
+        auto it = std::lower_bound( edges.begin(), edges.end(), std::pair( n, NodeId( 0 ) ) );
+        for( ; it != edges.end() && it->first == n; ++it )
+        {
+            enqueue( it->second );
+        }
+    }
+    return reached;
+}
+
+struct TestGateReach
+{
+    std::vector<char> proven, unresolved;
+};
+
+inline TestGateReach buildTestGateReach( const IngestResult& ing, const Graph& g )
+{
+    auto proven = testSeedForwardReach( ing, g );
+    auto unresolved = unresolvedRustTestReach( ing, g, proven );
+    return { std::move( proven ), std::move( unresolved ) };
+}
+
+inline std::vector<std::uint32_t> changedFixtureReaders( const IngestResult& ing, std::span<const char> changedFile )
+{
+    std::vector<std::uint32_t> readers;
+    for( const auto& reader : ing.rustTestInputReaders )
+    {
+        if( reader.inputFileId < changedFile.size() && changedFile[reader.inputFileId] )
+        {
+            readers.push_back( reader.readerFileId );
+        }
+    }
+    return readers;
+}
+
+inline ChangedFileSplit splitGateChangedFiles( const IngestResult& ing, std::span<const NodeId> changedSyms )
+{
+    ChangedFileSplit split = splitChangedFilesOfSymbols( ing, changedSyms );
+    // A changed inline test is an obligation even when its file is also a source for naming partners.
+    for( NodeId n : changedSyms )
+    {
+        if( n >= ing.symbols.size() )
+        {
+            continue;
+        }
+        const Symbol& s = ing.symbols[n];
+        if( isRunnableInlineTest( ing, n ) && !isRunnableTestFile( ing, s.fileId ) )
+        {
+            split.tests.push_back( s.fileId );
+        }
+    }
+    rw::sortutil::sortUnique( split.tests );
+    return split;
+}
+
+inline void collectGateImpact( const IngestResult& ing, std::span<const NodeId> reach, std::span<const char> isChangedSym,
+                               std::span<const char> testReach, std::span<const char> unresolved, TestGateResult& r )
+{
+    for( NodeId n : reach )
+    {
+        if( isChangedSym[n] )
+        {
+            continue; // the changed symbols are the change, not its radius
+        }
+        ++r.impactedSymbols;
+        const Symbol& s = ing.symbols[n];
+        if( testReach[n] || isTestCodeFile( ing, s.fileId ) )
+        {
+            continue;
+        }
+        // #324: a <file-scope> owner can be a real caller but cannot be named by a test.
+        // Count these owners in the radius without listing them as obligations.
+        if( isUntestableOwner( s.kind ) )
+        {
+            ++r.untestedModscope;
+        }
+        else if( !unresolved.empty() && unresolved[n] )
+        {
+            r.unresolvedTestReach.push_back( n );
+        }
+        else
+        {
+            r.untested.push_back( n );
+        }
+    }
 }
 
 // The gate's ONE computation, expressed over an explicit CHANGED-SYMBOL set rather than a changed-FILE mask.
@@ -1741,50 +1882,30 @@ inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Gr
 // every symbol of every changed file, which is exactly what the mask-driven loop did inline before, so that
 // path is byte-identical. A caller with per-SYMBOL claims (--plan-lanes) marks only its claims, so a lane that
 // owns one symbol in a 3000-line file is not charged that whole file's obligations (§7.4a).
-// `testReachIn` is the hoisted testSeedForwardReach result, or nullptr to compute it here.
+// `coverage` is the hoisted proven and unresolved test reach, or nullptr to compute both here.
 inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& g,
                                           const std::vector<NodeId>& changedSyms, const std::vector<char>& isChangedSym,
-                                          std::uint32_t changedFileCount, const std::vector<char>* testReachIn )
+                                          std::uint32_t changedFileCount, const TestGateReach* coverage,
+                                          std::span<const char> changedFile )
 {
     TestGateResult r;
     r.changedFiles = changedFileCount;
-    if( changedSyms.empty() )
-    {
-        return r; // no indexed symbols in the change set → no obligations
-    }
+    const std::vector<std::uint32_t> fixtureReaders = changedFixtureReaders( ing, changedFile );
+    if( changedSyms.empty() && fixtureReaders.empty() ) { return r; }
 
     // blast radius — the ONE traversal (reused, not re-implemented): everything that transitively reaches the
     // changed symbols. Coverage — the forward dual from every test-file symbol (what the tests transitively call).
     std::vector<std::uint32_t> gateDepth;   // H2H-Graft F1: hops per reached node, for the <t> rows
     const std::vector<NodeId>  reach = transitiveCallersDepth( g, changedSyms, &gateDepth );
 
-    const std::vector<char>  ownedReach = testReachIn ? std::vector<char>{} : testSeedForwardReach( ing, g );
-    const std::vector<char>& testReach  = testReachIn ? *testReachIn : ownedReach;
+    const auto owned = coverage ? TestGateReach{} : buildTestGateReach( ing, g );
+    const auto& testReach = coverage ? *coverage : owned;
 
     // tests to run — EVIDENCE order (F1, testmap.h::rankTestRows; a changed test file is an obligation on its own
     // evidence — it used to be skipped as "the change"). untested — impacted, non-changed, non-test, no test reaches.
-    const ChangedFileSplit gateSplit = splitChangedFilesOfSymbols( ing, changedSyms );
-    for( NodeId n : reach )
-    {
-        const std::uint32_t f = ing.symbols[n].fileId;
-        if( isChangedSym[n] )
-        {
-            continue; // the changed symbols are the change, not its radius
-        }
-        ++r.impactedSymbols;
-        // #324: a <file-scope> (ModuleScope) owner can be a real CALLER in the blast radius (a top-level
-        // statement or anonymous-callback body calling the changed symbol) — it still counts toward
-        // impacted= above — but it is never listed as an UNTESTED obligation: nothing in any language can
-        // name it, so no test can ever be written FOR it, and a row an agent can never discharge is not an
-        // obligation, it is a permanent false alarm. model.h::isUntestableOwner is the ONE predicate this and
-        // flipimpact.h's own untested-hosts loop both apply, so the exclusion cannot drift between the two.
-        if( !isTestPath( rootRelPath( ing, f ) ) && !testReach[n] )
-        {
-            // rv-test-gate-tsjs F3: counted, never silently dropped.
-            if( isUntestableOwner( ing.symbols[n].kind ) ) { ++r.untestedModscope; } else { r.untested.push_back( n ); }
-        }
-    }
-    r.testRows = rankTestRows( ing, reach, gateDepth, &isChangedSym, gateSplit.src, gateSplit.tests );
+    const ChangedFileSplit gateSplit = splitGateChangedFiles( ing, changedSyms );
+    collectGateImpact( ing, reach, isChangedSym, testReach.proven, testReach.unresolved, r );
+    r.testRows = rankTestRows( ing, reach, gateDepth, &isChangedSym, { gateSplit.src, gateSplit.tests, fixtureReaders }, true );
     {
         std::vector<NodeId> declineTargets( changedSyms.begin(), changedSyms.end() );   // the change and its radius, as --impact counts it
         declineTargets.insert( declineTargets.end(), reach.begin(), reach.end() );
@@ -1794,25 +1915,27 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
     {
         r.tests.push_back( row.fileId );
     }
-    std::sort( r.untested.begin(), r.untested.end(), [ & ]( NodeId a, NodeId b )
-               {
-                   if( ing.symbols[a].ccx != ing.symbols[b].ccx )
-                   {
-                       return ing.symbols[a].ccx > ing.symbols[b].ccx; // riskiest first
-                   }
-                   const std::string& fa = ing.files[ing.symbols[a].fileId];
-                   const std::string& fb = ing.files[ing.symbols[b].fileId];
-                   if( fa != fb )
-                   {
-                       return fa < fb;
-                   }
-                   if( ing.symbols[a].name != ing.symbols[b].name )
-                   {
-                       return ing.symbols[a].name < ing.symbols[b].name;
-                   }
-                   return a < b;                                                                                       // total order
-               } );
-    r.hasObligations = !r.tests.empty() || !r.untested.empty();
+    const auto rankRisk = [ & ]( NodeId a, NodeId b )
+    {
+        if( ing.symbols[a].ccx != ing.symbols[b].ccx )
+        {
+            return ing.symbols[a].ccx > ing.symbols[b].ccx; // riskiest first
+        }
+        const std::string& fa = ing.files[ing.symbols[a].fileId];
+        const std::string& fb = ing.files[ing.symbols[b].fileId];
+        if( fa != fb )
+        {
+            return fa < fb;
+        }
+        if( ing.symbols[a].name != ing.symbols[b].name )
+        {
+            return ing.symbols[a].name < ing.symbols[b].name;
+        }
+        return a < b;
+    };
+    std::sort( r.untested.begin(), r.untested.end(), rankRisk );
+    std::sort( r.unresolvedTestReach.begin(), r.unresolvedTestReach.end(), rankRisk );
+    r.hasObligations = !r.tests.empty() || !r.untested.empty() || !r.unresolvedTestReach.empty();
     return r;
 }
 
@@ -1841,7 +1964,7 @@ inline TestGateResult computeTestGate( const std::string& root, const IngestResu
 
     const SymbolChangeSet scs = computeSymbolChangeSet( root, ing, changedFile, UINT32_MAX, narrowByDiff );
 
-    TestGateResult result = computeTestGateFor( ing, g, scs.changedSyms, scs.symMask, changedFileCount, nullptr );
+    TestGateResult result = computeTestGateFor( ing, g, scs.changedSyms, scs.symMask, changedFileCount, nullptr, changedFile );
     result.changeSet  = scs;
     result.shellGates = buildShellGateIndex( ing, changedFile );
     result.hasObligations = result.hasObligations || !result.shellGates.obligations.empty();
@@ -1901,7 +2024,7 @@ inline std::string testGateGranularityJson( const TestGateResult& r )
 // The changed-SYMBOL form (§7.4a). `changedSyms` need not be sorted or unique; the mask is
 // derived from it here so a caller cannot hand in a mask that disagrees with its own symbol list.
 inline TestGateResult computeTestGateForSymbols( const IngestResult& ing, const Graph& g,
-                                                 const std::vector<NodeId>& changedSyms, const std::vector<char>* testReachIn = nullptr )
+                                                 const std::vector<NodeId>& changedSyms, const TestGateReach& coverage )
 {
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
     std::vector<char>   isChangedSym( N, 0 );
@@ -1917,7 +2040,7 @@ inline TestGateResult computeTestGateForSymbols( const IngestResult& ing, const 
         const std::uint32_t f = ing.symbols[n].fileId;
         if( f < fileSeen.size() && !fileSeen[f] ) { fileSeen[f] = 1; ++changedFileCount; }
     }
-    return computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, testReachIn );
+    return computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, &coverage, fileSeen );
 }
 
 // The untested-row display DEFAULT page size. ONE definition: the XML and JSON reports must never disagree
@@ -1943,13 +2066,53 @@ inline constexpr std::size_t kMaxUntestedRows = 25;
 // only the printf shape differs. `win` is computed ONCE by the caller (pageWindow() over effectiveRowCap()),
 // so XML and JSON can never disagree about which rows are "shown" for a given --limit/--offset.
 template<class EmitRow>
-inline void walkUntestedRows( const IngestResult& ing, const TestGateResult& r, PageWindow win, EmitRow emit )
+inline void walkGateSymbolRows( const IngestResult& ing, std::span<const NodeId> rows, PageWindow win, EmitRow emit )
 {
     for( std::size_t i = win.begin; i < win.end; ++i )
     {
-        const Symbol& s = ing.symbols[ r.untested[i] ];
+        const Symbol& s = ing.symbols[ rows[i] ];
         emit( i - win.begin, s, ing.files[ s.fileId ] );
     }
+}
+
+// ONE window over the <u> rows then the <ur> rows (limit/offset count both lists as one), split back per listing; <t> rows
+// are never windowed. total=/has_more=/next_offset= describe `shared`.
+struct TestGateWindows
+{
+    PageWindow shared, untested, unresolved;
+};
+inline TestGateWindows testGateWindows( const TestGateResult& r, int pageLimit, int pageOffset ) noexcept
+{
+    const std::size_t nu = r.untested.size();
+    const PageWindow  w  = pageWindow( nu + r.unresolvedTestReach.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
+    return { w, { std::min( w.begin, nu ), std::min( w.end, nu ) }, { std::max( w.begin, nu ) - nu, std::max( w.end, nu ) - nu } };
+}
+
+inline std::string unresolvedGateDisclosure( std::size_t total, PageWindow win, const PageSyntax& syn )
+{
+    if( !total )
+    {
+        return {};
+    }
+    auto attrs = syn.json ? std::format( ",\"unresolved_test_reach\":{}", total )
+                          : std::format( " unresolved_test_reach=\"{}\"", total );
+    attrs += secondaryCutAttrs( "unresolved_test_reach", win.end - win.begin, total, nullptr, syn );
+    return attrs;
+}
+
+inline constexpr char kUnresolvedGateLegend[] =
+    "unresolved_test_reach= counts <ur sym= p= l= ccx=> impacted symbols with only possible Rust trait-dispatch reach; "
+    "not proven coverage or tests to run; exit 4. shown_unresolved_test_reach= and unresolved_test_reach_capped= "
+    "disclose a cut; total=/has_more=/next_offset= page <u> then <ur> as one list. ";
+
+inline bool testGateHasRows( const TestGateResult& r, std::size_t testRows ) noexcept
+{
+    return testRows > 0 || !r.untested.empty() || !r.unresolvedTestReach.empty();
+}
+
+inline const char* testGateFixtureLegend( std::span<const TestRow> rows ) noexcept
+{
+    return std::any_of( rows.begin(), rows.end(), []( const TestRow& row ) { return row.fixtureReader; } ) ? kFixtureReaderGateLegend : "";
 }
 
 // The legend both --test-gate dialects print — one string, because a sentence that exists twice is a
@@ -2048,12 +2211,12 @@ inline constexpr std::string_view kTestGateRunLegend = rw::kRunHintLegendClause;
 // §B7.1: the row disclosure is the NOUN-PREFIXED form (pageview.h, THE TRUNCATION VOCABULARY rule 1 + the
 // rule-6 exception), not a bare shown=. The report emits 26 rows on a default page — one <t> plus 25 <u> —
 // and a single shown="25" claimed to describe all of them while measuring only the second listing. The two
-// counts are now separate names, and the paging half (pagingDisclosure) attaches to the <u> listing, which
-// is the only one --limit/--offset windows.
+// counts are now separate names, and the paging half (pagingDisclosure) attaches to the <u> then <ur> rows,
+// the only ones --limit/--offset windows (testGateWindows: one window over both).
 //
 // P3 (L7, nextverb.h): the test-gate root's one follow-up — the FIRST runnable test's command (the row's run=),
 // else the first registered shell gate's, else (an untested blast radius and no runner) the callers of its
-// worst untested symbol, else --situ. A shell line is what the gate exits 4 for; the agent pastes it.
+// worst untested, then unresolved, symbol, else --situ. A shell line is what the gate exits 4 for; the agent pastes it.
 // P8 (L7): the cognitive-complexity bar the <u> rows' ccx= is read against — a MIRROR of quality.h's kCcxBar
 // (quality.h is included after this header; the static_assert beside kCcxBar keeps the two in step).
 inline constexpr std::uint32_t kTestGateCcxBarMirror = 15;
@@ -2071,6 +2234,10 @@ inline std::string testGateNextInvocation( const IngestResult& ing, const TestGa
     if( !r.untested.empty() && r.untested[ 0 ] < ing.symbols.size() )
     {
         return nextFlag( "--callers=", ing.symbols[ r.untested[ 0 ] ].name );
+    }
+    if( !r.unresolvedTestReach.empty() )
+    {
+        return nextFlag( "--callers=", ing.symbols[r.unresolvedTestReach.front()].name );
     }
     return "--situ";
 }
@@ -2091,7 +2258,8 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
         return rw::sarif::rootRelativeUri( ing.files[ fileId ], tgRootPrefix );
     };
 
-    const PageWindow  uw        = pageWindow( r.untested.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
+    const TestGateWindows win       = testGateWindows( r, pageLimit, pageOffset );
+    const PageWindow      uw        = win.untested, urw = win.unresolved;
     const std::size_t shownRows = uw.end - uw.begin;
     char              uab[ kPageDisclosureCap ];
     // r26-stamp Task A: anchor tests/untested to the commit (+dirty state) the change set was diffed against
@@ -2102,7 +2270,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // nothing and costs bytes a zero-row report is the least able to afford (test/donelegendcheck.sh's
     // tg_empty ratchet). Attribute and clause are therefore gated together: root= never appears without the
     // sentence defining it, which is what test/legendcoveragecheck.sh asserts.
-    const bool        tgHasRows  = ( testRows > 0 || !r.untested.empty() );
+    const bool        tgHasRows  = testGateHasRows( r, testRows );
     const std::string tgRootAttr = ( root.empty() || !tgHasRows ) ? std::string() : ( " root=\"" + ex( root ) + "\"" );
     // H2H-Graft F1: the evidence clause (testmap.h's ONE wording) rides the rows-gated half, like the run= rule.
     // #324: a module-scope owner (<file-scope>) can no longer be one of the untested rows this report prints
@@ -2117,7 +2285,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     const TestRunnerIndex gateRunners( ing, root );
     const JoinedTestRows  tgRows = testRowsList( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t", {}, /*fold=*/true }, ex );
     const std::string tgUnused = unusedItemRowsXml( r.unused, ex );   // AF5: empty when every listed item resolved
-    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
+    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", std::string_view( kTestRowEvidenceLegend.data(), tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0 ),
                   runFirstLegend( !tgRunFirst.empty() ),   // exactly when the root carries run_first=
                   ( runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) )   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
@@ -2129,6 +2297,8 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                     + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) ).c_str(),   // the short form above makes no
                     // claim the standard-member gate's declines would contradict, so its clause stays off this budgeted legend
                   tgUnused.empty() ? std::string() : ( std::string( kTestGateUnusedLegend ) + std::string( kUnusedReasonsLegend ) ),
+                  r.unresolvedTestReach.empty() ? "" : kUnresolvedGateLegend,
+                  testGateFixtureLegend( r.testRows ),
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
     // shown_tests= / tests_capped= are DERIVED from the rows this document actually emits, not asserted.
     // tests_capped= was the string literal "0" — a disclosure that could never become "1", so if a <t> row
@@ -2140,18 +2310,19 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     rw::emitTo( out, "<test-gate changed=\"{}\" impacted=\"{}\" tests=\"{}\" untested=\"{}\" untested_modscope=\"{}\""
                        " shown_tests=\"{}\" tests_capped=\"{}\" shown_untested=\"{}\" untested_capped=\"{}\""
                        " script_gates_unmodelled=\"{}\" script_gates_registered=\"{}\" script_gates_mapped=\"{}\""
-                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}{}{}>",
+                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}{}{}{}>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                   shownTests, shownTests < testRows ? 1 : 0, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
                   r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,   // P8 (L7): ccx_bar=
                   tgRunFirst.c_str(),   // hono-20: where the run-first head of the <t> rows ends; absent unless it splits
                   graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
-                  pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
+                  pagingDisclosure( uab, sizeof( uab ), r.untested.size() + r.unresolvedTestReach.size(), win.shared.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
                   declinedCallsAttrXml( r.declinedCalls ).c_str(),   // callers the radius could not walk; absent at zero
                   r.unused.empty() ? std::string() : std::format( " unused=\"{}\"", r.unused.size() ),   // AF5: absent at zero
                   testGateGranularityAttrXml( r ).c_str(),   // the symbol-granular change set; absent without hunk evidence
+                  unresolvedGateDisclosure( r.unresolvedTestReach.size(), urw, kXmlPageSyntax ),
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str()  );   // P3 (L7)
     rw::emitRaw( out, tgRows.text.c_str() );   // E1: <g> where no runner is derivable; PATH-FOLD: pf= where the listing folds
     for( const ShellGateObligation& gate : r.shellGates.obligations )
@@ -2159,16 +2330,39 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
         rw::emitTo( out, "<t p=\"{}\" evidence=\"{}\" run=\"{}\"/>", ex( tgPathRel( gate.fileId ) ).c_str(), gate.evidence,
                       ex( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
-    walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& )
+    walkGateSymbolRows( ing, r.untested, uw, [ & ]( std::size_t, const Symbol& s, const std::string& )
     {
-        // M12: tgPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in — same gap as the <t> rows above.
+        // M12: tgPathRel( s.fileId ), not the raw `path` walkGateSymbolRows hands in — same gap as the <t> rows above.
         // M21(b): l= — the DEFINING line. Without it a row names a symbol to test and a file to open and
         // leaves the reader to find it; the sibling that prints the same row shape, --flags --flip's
         // <u sym= p= l= ccx=>, has carried the line since it was written. Same attribute, same position.
         rw::emitTo( out, "<u sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
     } );
+    walkGateSymbolRows( ing, r.unresolvedTestReach, urw, [&]( std::size_t, const Symbol& s, const std::string& )
+    {
+        rw::emitTo( out, "<ur sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
+    } );
     rw::emitRaw( out, tgUnused.c_str() );   // AF5: the listed items this gate could not use, list order
     rw::emitRaw( out, "</test-gate>" );
+}
+
+template<class PathRel>
+inline void writeTestGateBlastRadiusJson( std::FILE* out, const IngestResult& ing, const TestGateResult& r,
+                                           PageWindow untested, PageWindow unresolved, const PathRel& pathRel )
+{
+    const auto emitRow = [&]( std::size_t i, const Symbol& s, const std::string& )
+    {
+        rw::emitTo( out, "{}{{\"sym\":\"{}\",\"p\":\"{}\",\"l\":{},\"ccx\":{}}}", i == 0 ? "" : ",",
+                     jsonStr( s.name ).c_str(), jsonStr( pathRel( s.fileId ) ).c_str(), s.line, s.ccx );
+    };
+    rw::emitRaw( out, "],\"untested_blast_radius\":[" );
+    walkGateSymbolRows( ing, r.untested, untested, emitRow );
+    if( !r.unresolvedTestReach.empty() )
+    {
+        rw::emitRaw( out, "],\"unresolved_test_reach_symbols\":[" );
+        walkGateSymbolRows( ing, r.unresolvedTestReach, unresolved, emitRow );
+    }
+    rw::emitRaw( out, "]}" );
 }
 
 // L2: --json sibling of writeTestGateReport — same TestGateResult in (the ONE gate decision, computed once
@@ -2179,7 +2373,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
 // caller of situ.h (main.cpp).
 //
 // §B7.1/.3: the JSON dialect MIRRORS whatever the XML says — shown_tests/tests_capped/shown_untested/
-// untested_capped/script_gates_unmodelled, with the paging half attached to the untested listing alone
+// untested_capped/script_gates_unmodelled, with the paging half attached to the <u> then <ur> rows
 // (pagingDisclosure, kJsonPageSyntax). The legend a JSON caller cannot see is why the KEYS have to be
 // self-describing: `shown` next to two arrays was ambiguous in a way `shown_untested` cannot be.
 inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, const Graph& g, const TestGateResult& r,
@@ -2197,23 +2391,24 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
         return rw::sarif::rootRelativeUri( ing.files[ fileId ], tgJRootPrefix );
     };
 
-    const PageWindow   uw        = pageWindow( r.untested.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
+    const TestGateWindows win       = testGateWindows( r, pageLimit, pageOffset );
+    const PageWindow      uw        = win.untested, urw = win.unresolved;
     const std::size_t  shownRows = uw.end - uw.begin;
     char pageJson[ kPageDisclosureCap ];
-    pagingDisclosure( pageJson, sizeof( pageJson ), r.untested.size(), uw.end, pageLimit, pageOffset, kJsonPageSyntax );
+    pagingDisclosure( pageJson, sizeof( pageJson ), r.untested.size() + r.unresolvedTestReach.size(), win.shared.end, pageLimit, pageOffset, kJsonPageSyntax );
 
     const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
     // same rows-gate as the XML twin, so the two dialects disclose the SAME facts about the same run rather
     // than one carrying a root the other omits (test/mcpclidiffcheck.sh's parity question).
     const TestRunnerIndex gateRunnersJ( ing, root );   // P3 (L7): the root's next= needs the runner index before the rows
-    const bool         tgJHasRows  = ( testRows > 0 || !r.untested.empty() );
+    const bool         tgJHasRows  = testGateHasRows( r, testRows );
     const std::string  tgJRootJson = ( root.empty() || !tgJHasRows ) ? std::string() : ( ",\"root\":\"" + jsonStr( root ) + "\"" );
     // The XML twin's derived pair, mirrored key-for-key: "tests_capped":false was a literal here too.
     const std::size_t shownTestsJ = r.testRows.size() + r.shellGates.obligations.size();
     rw::emitTo( out, "{{\"changed\":{},\"impacted\":{},\"tests\":{},\"untested\":{},\"untested_modscope\":{}"
                        ",\"shown_tests\":{},\"tests_capped\":{},\"shown_untested\":{},\"untested_capped\":{}"
                        ",\"script_gates_unmodelled\":{},\"script_gates_registered\":{},\"script_gates_mapped\":{}"
-                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{}{},\"at\":{}{}{}{}{},\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{}{}{},\"at\":{}{}{}{}{},\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                  shownTestsJ, shownTestsJ < testRows ? "true" : "false", shownRows,
                  shownRows < r.untested.size() ? "true" : "false",
@@ -2222,6 +2417,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
                  graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
                  rw::cstr( pageJson ),
                  testGateGranularityJson( r ).c_str(),   // the XML twin's change_granularity= family, key-for-key
+                 unresolvedGateDisclosure( r.unresolvedTestReach.size(), urw, kJsonPageSyntax ),
                  atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
                  declinedCallsKeyJson( r.declinedCalls ).c_str(),                // the XML twin's declined_calls=
                  unusedItemsJsonField( r.unused, []( std::string_view v ) { return std::string( jsonStr( v ) ); } ).c_str(),   // AF5: the XML twin's <unused> rows
@@ -2236,14 +2432,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
                       r.tests.empty() && i == 0 ? "" : ",", jsonStr( tgJPathRel( gate.fileId ) ).c_str(), gate.evidence,
                       jsonStr( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
-    rw::emitRaw( out, "],\"untested_blast_radius\":[" );
-    walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& )
-    {
-        // M12: tgJPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in.
-        rw::emitTo( out, "{}{{\"sym\":\"{}\",\"p\":\"{}\",\"l\":{},\"ccx\":{}}}", i == 0 ? "" : ",",
-                     jsonStr( s.name ).c_str(), jsonStr( tgJPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
-    } );
-    rw::emitRaw( out, "]}" );
+    writeTestGateBlastRadiusJson( out, ing, r, uw, urw, tgJPathRel );
 }
 
 }   // namespace rw

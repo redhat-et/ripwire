@@ -1770,8 +1770,16 @@ struct Include
                                     //   narrow that read it as an include bound update! to Config#update!
                                     //   (19 of 20 sampled bindings wrong on discourse — PR #139 review).
                                     //   buildGraph's fileIncludes skips these; every other consumer keeps them.
+    bool          rustTestMount = false;   // a Rust mod: declaration inside test scope
     std::string   target;           // raw include path ("foo.h", <vector>), module name, or (isSymbolic)
                                     //   the constant AS WRITTEN (`Base`, `::App::User`, `ActiveRecord::Base`)
+};
+
+struct RawRustFixtureRead
+{
+    std::uint32_t fileId;
+    bool testScope;
+    std::string path;   // relative to CARGO_MANIFEST_DIR
 };
 
 // A Ruby class/module OPEN (parser version 82): `class X < Y … end` / `module M … end`, one record per open, with
@@ -2605,9 +2613,18 @@ struct MemoryStop
 
 struct RustCrateRoots;   // resolve.h — IngestResult::rustCrateRoots holds one
 
+enum class RustTestFileRole : std::uint8_t { Ordinary, Test, Input };
+struct RustTestInputReader
+{
+    std::uint32_t inputFileId, readerFileId;
+};
+
 struct IngestResult
 {
     std::vector<std::string> files;
+    // Whole-file Rust ownership is independent of the name and of any single extracted symbol.
+    std::vector<RustTestFileRole> rustTestFiles;
+    std::vector<RustTestInputReader> rustTestInputReaders;
 
     // §P0.4/§P0.5d: the otherwise-indexable files the crawl DROPPED for exceeding a per-file size
     // ceiling (--max-file-size / kDefaultMaxFileBytes, OR the .json lane's fixed kMaxJsonConfigBytes — §B13.1;

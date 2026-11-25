@@ -1905,6 +1905,7 @@ struct TagsSinks
     std::vector<RawRef>&  refs;
     std::vector<RawBind>& binds;
     std::vector<Include>& includes;
+    std::vector<RawRustFixtureRead>* rustFixtureReads;
     ExtractShortfall&     shortfall;   // a capture the pass could not read whole says so here
 };
 
@@ -3067,6 +3068,15 @@ inline void captureReference( const TagsFile& file, TagsSinks& sinks, const Tags
     sinks.refs.push_back( std::move( r ) );
 }
 
+// A Rust `fs::read_dir` of a CARGO_MANIFEST_DIR path, for a language whose tests read manifest-relative fixtures.
+inline void captureFixtureRead( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
+{
+    if( sinks.rustFixtureReads && m.isRef && m.name.text == "read_dir" && langFacts( file.le.lang ).manifestRelativeFixtureReads )
+    {
+        captureRustTestInput( m.roleNode, file.fileId, file.src, *sinks.rustFixtureReads );
+    }
+}
+
 // One match with a role and a name, through the capture-time rules, then into the definition or the reference arm. The ORDER is
 // load-bearing — each rule reads only facts decided before it, and an emitting step must stay on the same side of every drop:
 //   1. a C++ specialization header emits its base clause and ends the match; it reads the @name AS CAPTURED (before the C1 re-seat);
@@ -3080,6 +3090,7 @@ inline void captureReference( const TagsFile& file, TagsSinks& sinks, const Tags
 inline void captureTagsMatch( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
 {
     const Lang lang = file.le.lang;
+    captureFixtureRead( file, sinks, m );
     if( captureSpecializationHeader( m.isDef, lang, m.defCap, m.roleNode, m.name.node, file.fileId, file.src, sinks.refs ) )
     {
         return;   // a C++ specialization header: its base clause only, never a symbol
@@ -3170,7 +3181,8 @@ inline void captureRubyFilePasses( const TagsFile& file, TagsSinks& sinks )
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
-                       std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
+                       std::string_view fileStem = {},   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
+                       std::vector<RawRustFixtureRead>* rustFixtureReads = nullptr )
 {
     if( cursor == nullptr )
     {
@@ -3204,7 +3216,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
     const TagsFile file{ .le = le, .fileId = fileId, .src = src, .root = root, .elixir = elixir, .fileStem = fileStem,
                          .full = mode == TagsCapture::Full, .shape = mode != TagsCapture::DefinitionsOnly, .fileHasError = ts_node_has_error( root ) };
-    TagsSinks      sinks{ .defs = defs, .refs = refs, .binds = binds, .includes = includes, .shortfall = shortfall };
+    TagsSinks      sinks{ .defs = defs, .refs = refs, .binds = binds, .includes = includes, .rustFixtureReads = rustFixtureReads, .shortfall = shortfall };
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
         ts_query_cursor_exec( cursor, query, root );

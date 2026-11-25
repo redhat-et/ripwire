@@ -1359,6 +1359,8 @@ struct RustCrateRoots
     std::vector<std::uint32_t>          dirOf;     // file -> index into dirs; kNoFile = no crate root (crate:: degrades)
     std::vector<char>                   isRoot;    // file -> 1 when the file is itself a crate root (it owns its directory)
     std::vector<std::vector<InlineMod>> inlineOf;  // file -> its inline `mod { }` bodies, outermost first; empty when the tree has none
+    HashMap<std::string, std::uint32_t> manifestAt;   // directory with its trailing '/' -> manifest index
+    std::vector<std::uint32_t> manifestFiles;       // manifest index -> file id
 
     [[nodiscard]] bool empty() const noexcept { return dirOf.empty(); }
 
@@ -1456,7 +1458,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
         std::vector<std::string> roots;            // explicit root files: [lib] path, src/main.rs, [[bin]] path, build.rs
         bool                     unreadable = false;
     };
-    HashMap<std::string, std::uint32_t> manifestAt;   // directory with its trailing '/' ("" = the tree root) -> manifests index
+    auto&                               manifestAt = rr.manifestAt;   // directory with its trailing '/' ("" = the tree root) -> manifests index
     std::vector<Manifest>               manifests;
     bool                                anyRs = false;
     const auto has = [ & ]( const std::string& p ) { return fileIndex.contains( p ); };
@@ -1498,6 +1500,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
             add( build.empty() ? std::string_view( "build.rs" ) : std::string_view( build.front() ) );
         }
         manifestAt.try_emplace( mdir, std::uint32_t( manifests.size() ) );
+        rr.manifestFiles.push_back( f );
         manifests.push_back( std::move( m ) );
     }
     if( !anyRs )

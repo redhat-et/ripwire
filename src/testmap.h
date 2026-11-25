@@ -104,7 +104,7 @@ inline void partitionAffectedSeedsByTestPath( const IngestResult& ing, AffectedS
     for( NodeId n : sel.seeds )
     {
         const std::uint32_t fileId = ing.symbols[n].fileId;
-        if( isTestPath( rootRelPath( ing, fileId ) ) )
+        if( isRunnableTestFile( ing, fileId ) )
         {
             sel.seedTestFiles.push_back( fileId );
         }
@@ -221,6 +221,7 @@ struct TestRow
     std::uint32_t hops    = 0;   // 0 = not reached by the caller walk; never printed as a value
     bool          partner = false;
     bool          changed = false;
+    bool          fixtureReader = false;
 };
 
 inline bool isTestPartnerOf( std::string_view testPath, std::string_view srcPath ) noexcept
@@ -256,16 +257,29 @@ inline bool isTestPartnerOf( std::string_view testPath, std::string_view srcPath
     return t.size() > 5 && t.substr( 0, 5 ) == "test_" && t.substr( 5 ) == s;
 }
 
+inline bool isRunnableInlineTest( const IngestResult& ing, NodeId n ) noexcept
+{
+    const Symbol& s = ing.symbols[n];
+    return langFacts( s.lang ).attributeRegistersTests && s.testScope && seedsTestCoverage( ing, n );
+}
+
+// File-level evidence: sources that a test may be named after, tests changed directly, and tests that read a changed input.
+struct TestRowFileEvidence
+{
+    std::span<const std::uint32_t> partnerOf;
+    std::span<const std::uint32_t> changedTests;
+    std::span<const std::uint32_t> fixtureReaders = {};
+};
+
 // `reach`/`depth` are transitiveCallersDepth's outputs; `skipSym` (optional) drops nodes that are the change
-// itself rather than its radius (--test-gate's per-symbol claims); `partnerOf` are the changed SOURCE files a
-// test may be named after; `changedTests` are test files in the change set (rows on their own evidence).
+// itself rather than its radius (--test-gate's per-symbol claims).
 inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<const NodeId> reach, const std::vector<std::uint32_t>& depth,
-                                          const std::vector<char>* skipSym, std::span<const std::uint32_t> partnerOf,
-                                          std::span<const std::uint32_t> changedTests )
+                                          const std::vector<char>* skipSym, const TestRowFileEvidence& files, bool rustInline = false )
 {
     const std::uint32_t        F = std::uint32_t( ing.files.size() );
     std::vector<std::uint32_t> minHops( F, 0 );
-    std::vector<char>          isPartner( F, 0 ), isChanged( F, 0 );
+    enum FileEvidence : char { Changed = 1, FixtureReader = 2 };
+    std::vector<char>          isPartner( F, 0 ), fileEvidence( F, 0 );
     for( NodeId n : reach )
     {
         if( n >= ing.symbols.size() || ( skipSym && n < skipSym->size() && ( *skipSym )[n] ) )
@@ -273,22 +287,23 @@ inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<con
             continue;
         }
         const std::uint32_t f = ing.symbols[n].fileId;
-        if( f < F && isTestPath( rootRelPath( ing, f ) ) && ( minHops[f] == 0 || depth[n] < minHops[f] ) )
+        if( f < F && ( isRunnableTestFile( ing, f ) || ( rustInline && isRunnableInlineTest( ing, n ) ) )
+            && ( minHops[f] == 0 || depth[n] < minHops[f] ) )
         {
             minHops[f] = depth[n];
         }
     }
-    if( !partnerOf.empty() )
+    if( !files.partnerOf.empty() )
     {
         std::vector<std::uint32_t> testFiles;
         for( std::uint32_t f = 0; f < F; ++f )
         {
-            if( isTestPath( rootRelPath( ing, f ) ) )
+            if( isRunnableTestFile( ing, f ) )
             {
                 testFiles.push_back( f );
             }
         }
-        for( std::uint32_t src : partnerOf )
+        for( std::uint32_t src : files.partnerOf )
         {
             for( std::uint32_t t : testFiles )
             {
@@ -299,19 +314,27 @@ inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<con
             }
         }
     }
-    for( std::uint32_t f : changedTests )
+    for( std::uint32_t f : files.changedTests )
     {
         if( f < F )
         {
-            isChanged[f] = 1;
+            fileEvidence[f] |= Changed;
+        }
+    }
+    for( std::uint32_t f : files.fixtureReaders )
+    {
+        if( f < F )
+        {
+            fileEvidence[f] |= FixtureReader;
         }
     }
     std::vector<TestRow> rows;
     for( std::uint32_t f = 0; f < F; ++f )
     {
-        if( minHops[f] || isPartner[f] || isChanged[f] )
+        if( minHops[f] || isPartner[f] || fileEvidence[f] )
         {
-            rows.push_back( TestRow{ f, minHops[f], isPartner[f] != 0, isChanged[f] != 0 } );
+            rows.push_back( TestRow{ f, minHops[f], isPartner[f] != 0,
+                                     ( fileEvidence[f] & Changed ) != 0, ( fileEvidence[f] & FixtureReader ) != 0 } );
         }
     }
     std::sort( rows.begin(), rows.end(), [ & ]( const TestRow& a, const TestRow& b )
@@ -320,6 +343,7 @@ inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<con
                    if( a.partner != b.partner ) { return a.partner; }
                    const std::uint32_t ha = a.hops ? a.hops : UINT32_MAX, hb = b.hops ? b.hops : UINT32_MAX;
                    if( ha != hb ) { return ha < hb; }
+                   if( a.fixtureReader != b.fixtureReader ) { return a.fixtureReader; }
                    return ing.files[a.fileId] < ing.files[b.fileId];
                } );
     return rows;
@@ -344,7 +368,7 @@ inline std::string testRowEvidence( const TestRow& r, EvDialect d )
             case EvDialect::Text: rw::formatTo( buf, sizeof buf, " [{}]", name );       break;
         }
     };
-    for( const auto& [ name, on ] : { std::pair{ "changed", r.changed }, std::pair{ "partner", r.partner } } )
+    for( const auto& [ name, on ] : { std::pair{ "changed", r.changed }, std::pair{ "partner", r.partner }, std::pair{ "fixture_reader", r.fixtureReader } } )
     {
         if( on )
         {
@@ -376,9 +400,9 @@ inline ChangedFileSplit splitChangedFiles( const IngestResult& ing, const std::v
     ChangedFileSplit out;
     for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ) && f < changedFile.size(); ++f )
     {
-        if( changedFile[f] )
+        if( changedFile[f] && rustTestFileRole( ing, f ) != RustTestFileRole::Input )
         {
-            ( isTestPath( rootRelPath( ing, f ) ) ? out.tests : out.src ).push_back( f );
+            ( isRunnableTestFile( ing, f ) ? out.tests : out.src ).push_back( f );
         }
     }
     return out;
@@ -459,6 +483,9 @@ inline constexpr std::string_view kTestRowEvidenceLegend =
     "file — <stem>_test, test_<stem>, <Stem>Test — listed by convention, no hops=), then hops= ascending (caller-walk "
     "depth to a changed symbol; 1 = direct), then path. ";
 
+inline constexpr char kFixtureReaderGateLegend[] =
+    "fixture_reader=1 on a test row means the test file reads a changed fixture input. ";
+
 struct AffectedAnswer
 {
     std::vector<NodeId>        reach;           // symbols the caller walk found (the seeds are not in it)
@@ -480,7 +507,7 @@ inline AffectedAnswer affectedAnswer( const IngestResult& ing, const Graph& g, c
     }
     // partners are named after the files the walk seeds live in (both argument readings); a matched TEST file
     // is a row on its own evidence, exactly as it was before F1
-    out.rows = rankTestRows( ing, out.reach, depth, nullptr, splitChangedFilesOfSymbols( ing, sel.walkSeeds ).src, sel.seedTestFiles );
+    out.rows = rankTestRows( ing, out.reach, depth, nullptr, { splitChangedFilesOfSymbols( ing, sel.walkSeeds ).src, sel.seedTestFiles } );
     for( const TestRow& r : out.rows )
     {
         out.testFiles.push_back( r.fileId );

@@ -20189,7 +20189,7 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
 }
 
 // The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, read by situ.h's
-// testSeedForwardReach (isTestPath). testSymbolForwardReach below (isTestSymbol) collected its seeds here too
+// testSeedForwardReach (isGateTestSymbol). testSymbolForwardReach below (seedsTestCoverage) collected its seeds here too
 // until lane asserted-signal split them into asserting and other tests; the two predicates must still stay
 // different (the L8 comment on computeQMetrics's tested[] loop explains why).
 template<class Pred>
@@ -20289,7 +20289,7 @@ inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const 
     std::vector<char> isTest( S, 0 );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        isTest[i] = isTestSymbol( ing, i ) ? 1 : 0;
+        isTest[i] = seedsTestCoverage( ing, i ) ? 1 : 0;
     }
     const std::vector<char> asserts = assertingTestSymbols( ing, g, isTest );
     std::vector<NodeId>     asserting, rest;

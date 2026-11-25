@@ -19,7 +19,7 @@
 //   tested= and asserted= are one reach (graph.h testSymbolForwardReach); asserted= also reads which TEST symbols assert
 //   (graph.h assertingTestSymbols: their own Call/Macro sites, and the in-edges between test symbols), so those enter too.
 //     shape    S = ing.symbols.size(); ing.files.size(); g.wOutDeg.size() (forwardReach's N); g.inEdges.rows()
-//     files    ing.crawlRoot and every ing.files[ f ] text (isTestSymbol -> isTestPath( rootRelPath ); LCOM4's class key)
+//     files    ing.crawlRoot, file paths, and per-file Rust test roles (test seeds and LCOM4 class attribution)
 //     symbols  per symbol: id, fileId, kind, testScope, name, scope (isTestSymbol; LCOM4's class / method attribution)
 //     refs     per reference whose fromSymbol is a Method of this index and that is not an IX-1 slot record (exactly the
 //              references LCOM4's methodRefNames collects): the MULTISET of ( fromSymbol, calleeName TEXT ) pairs. A multiset
@@ -385,7 +385,11 @@ inline std::vector<std::uint64_t> qmetricsKey( const IngestResult& ing, const Gr
     absorbInto( shape, g.inEdges.rows() );
     key[ std::size_t( QmKey::Shape ) ] = shape;
 
-    key[ std::size_t( QmKey::Files ) ] = rowsDigest( ing.files.size(), textDigest( ing.crawlRoot ), [ & ]( std::size_t f, std::uint64_t& h ) noexcept { absorbInto( h, textDigest( ing.files[ f ] ) ); } );
+    key[ std::size_t( QmKey::Files ) ] = rowsDigest( ing.files.size(), textDigest( ing.crawlRoot ), [ & ]( std::size_t f, std::uint64_t& h ) noexcept
+    {
+        absorbInto( h, textDigest( ing.files[ f ] ) );
+        absorbInto( h, std::uint32_t( rustTestFileRole( ing, std::uint32_t( f ) ) ) );
+    } );
 
     key[ std::size_t( QmKey::Symbols ) ] = rowsDigest( S, 0x5359'4d42'4f4c'5321ull, [ & ]( std::size_t i, std::uint64_t& h ) noexcept
     {

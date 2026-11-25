@@ -1611,7 +1611,7 @@ Discloses: **none**
 
 ### `src/situ.h`
 
-Discloses: `partners_capped`, `tests_capped`, `untested_capped`
+Discloses: `partners_capped`, `tests_capped`, `unresolved_test_reach_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

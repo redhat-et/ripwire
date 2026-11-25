@@ -32,7 +32,7 @@ namespace rw::warmsnap
 // Not stored: files / crawlRoot / crawlRootPrefixes / skippedOversize (the TREE section's), reparsedFiles (0: nothing was
 // re-extracted), memoryStop (a stopped ingest is never recorded), rustCrateRoots (derived on first use), and the five
 // multi-root vectors (a multi-root merge does not use the snapshot).
-static_assert( sizeof( IngestResult ) == 1232 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
+static_assert( sizeof( IngestResult ) == 1280 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
                "the model changed shape: store and load the new field in writeModel / readModel below, bump warmsnap::kVersion, then re-pin these sizes" );
 #endif
 
@@ -380,7 +380,7 @@ inline void writeSideFamilies( Out& o, const IngestResult& ing )
     {
         o.u32( i.fileId );
         o.u32( i.byte );
-        o.u8( std::uint8_t( ( i.isAngle ? 1 : 0 ) | ( i.isLazy ? 2 : 0 ) | ( i.isSymbolic ? 4 : 0 ) | ( i.isValueUse ? 8 : 0 ) ) );
+        o.u8( std::uint8_t( ( i.isAngle ? 1 : 0 ) | ( i.isLazy ? 2 : 0 ) | ( i.isSymbolic ? 4 : 0 ) | ( i.isValueUse ? 8 : 0 ) | ( i.rustTestMount ? 16 : 0 ) ) );
         o.str( i.target );
     }
     o.u64( ing.constOpens.size() );
@@ -408,6 +408,8 @@ inline void writeSideFamilies( Out& o, const IngestResult& ing )
     o.vec( ing.lexTokenTfs );
     o.vec( ing.lexDocBodyDl );
     o.vec( ing.lexFileSig );
+    o.vec( ing.rustTestFiles );
+    o.vec( ing.rustTestInputReaders );
 }
 
 inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
@@ -649,6 +651,7 @@ inline void readSideFamilies( In& in, IngestResult& ing, std::size_t fileCount )
         inc.byte   = in.u32();
         const std::uint8_t flags = in.u8();
         inc.isAngle = ( flags & 1 ) != 0;  inc.isLazy = ( flags & 2 ) != 0;  inc.isSymbolic = ( flags & 4 ) != 0;  inc.isValueUse = ( flags & 8 ) != 0;
+        inc.rustTestMount = ( flags & 16 ) != 0;
         inc.target  = in.str();
         ing.includes.push_back( std::move( inc ) );
     }
@@ -703,6 +706,22 @@ inline void readSideFamilies( In& in, IngestResult& ing, std::size_t fileCount )
     in.vec( ing.lexTokenTfs );
     in.vec( ing.lexDocBodyDl );
     in.vec( ing.lexFileSig );
+    in.vec( ing.rustTestFiles );
+    in.vec( ing.rustTestInputReaders );
+}
+
+inline bool validRustTestFiles( const IngestResult& ing, std::size_t fileCount )
+{
+    const auto& roles = ing.rustTestFiles;
+    if( !roles.empty() && ( roles.size() != fileCount
+        || !std::ranges::all_of( roles, []( RustTestFileRole role ) { return role <= RustTestFileRole::Input; } ) ) )
+    {
+        return false;
+    }
+    return std::ranges::all_of( ing.rustTestInputReaders, [&]( const RustTestInputReader& row )
+    {
+        return row.inputFileId < roles.size() && row.readerFileId < fileCount && roles[row.inputFileId] == RustTestFileRole::Input;
+    } );
 }
 
 // Fill `ing` (whose crawl fields replayTree already set) from the section. False: nothing in `ing` may be used.
@@ -752,6 +771,7 @@ inline bool readModel( std::string_view section, IngestResult& ing, BlobFacts& b
                      && std::ranges::is_sorted( ing.tangleBlocks, {}, &TangleBlockFacts::id )
                      && std::ranges::all_of( ing.routeUses, [ & ]( const RouteUse& u ) { return symOk( u.fromSymbol ) && u.fileId < fileCount; } )
                      && std::ranges::all_of( ing.includes, [ & ]( const Include& i ) { return i.fileId < fileCount; } )
+                     && validRustTestFiles( ing, fileCount )
                      && ( !ing.hasLexStats || ( ing.lexTokenRowOffsets.size() == symbolCount + 1 && ing.lexDocBodyDl.size() == symbolCount
                                                 && ing.lexTokenHashes.size() == ing.lexTokenTfs.size() && ing.lexTokenRowOffsets.back() == ing.lexTokenHashes.size()
                                                 && std::ranges::is_sorted( ing.lexTokenRowOffsets ) ) );

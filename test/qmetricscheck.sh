@@ -29,6 +29,7 @@
 #   I7  an assertion added in a test (EXPECT_EQ: an external call, so no edge moves) why=asserts  mutant NOASSERTS
 #       asserted= moves while graph stays equal; read off the stats line's asserted= count, since no stdout surface prints
 #       QMetrics::asserted yet (the map rows are serialize.h's)
+#   I8  a Rust file ceases to be fixture data (only its file role moves)            why=files    mutant NOFILES
 #   I5  a record of another version, another layout, a flipped payload byte, a truncated file: refused (why=version,
 #       why=shape, why=checksum), answer unchanged, the next run writes a valid one; mutant NOSUM serves a damaged one
 #   H   a new commit that changes no file keeps both records served, and the answer identical (git history is NOT an
@@ -362,6 +363,48 @@ else no "K the kill switch: $( grep '^\[verbfs\]' "$TMP/k.err" | head -2 | tr '\
 # ── D: determinism ────────────────────────────────────────────────────────────────────────────────────────────────
 run d0 warm --for="$TASK"; run d1 warm --for="$TASK"; run d2 warm --for="$TASK"
 if same d1 d2 && cmp -s "$TMP/d1.err" "$TMP/d2.err" && same d0 d1; then ok "D a building and two served calls are byte-identical"; else no "D the served answer is not deterministic"; fi
+
+# ── I8: same files, symbols and edges; a fixture role changes ───────────────────────────────────────────────────────
+FIX="$TMP/rust-role"
+mkdir -p "$FIX/src/testdata"
+cat > "$FIX/Cargo.toml" <<'E'
+[package]
+name = "rust-role"
+version = "0.1.0"
+edition = "2021"
+E
+cat > "$FIX/src/lib.rs" <<'E'
+pub fn fixture_only_anchor() {}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn read_fixture() {
+        let _ = std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/testdata"));
+    }
+}
+E
+cat > "$FIX/src/testdata/golden.rs" <<'E'
+use crate::fixture_only_anchor;
+#[test]
+fn fixture_case() { fixture_only_anchor(); }
+E
+statrun i8pre --metrics
+statrun i8warm --metrics
+sed 's|src/testdata|tst/testdata|' "$FIX/src/lib.rs" > "$TMP/lib.rs" && cp "$TMP/lib.rs" "$FIX/src/lib.rs"
+run i8cold nocache --metrics
+if [ "$MUT" = 1 ]; then
+    mutrun RIPWIRE_FAULT_VERBFS_QMETRICS_NOFILES i8blind --metrics
+    if same i8blind i8warm && ! same i8blind i8cold; then ok "MUT I8 blinding the Files key serves stale coverage"
+    else no "MUT I8 the Files-key mutant did not reproduce the stale answer"; fi
+fi
+statrun i8mut --metrics
+anchorRow(){ grep 'n="fixture_only_anchor"' "$TMP/$1.out"; }
+if [ "$( field i8warm qmetrics served )" = 1 ] && same i8pre i8warm && [ -n "$( anchorRow i8warm )" ] \
+    && ! grep -q 'tested="1"' <<<"$( anchorRow i8warm )" \
+    && [ "$( field i8mut qmetrics served )" = 0 ] && [ "$( field i8mut qmetrics why )" = files ] \
+    && grep -q 'tested="1"' <<<"$( anchorRow i8mut )" && same i8mut i8cold; then
+    ok "I8 changed Rust fixture role invalidates tested= (why=files), identical to uncached"
+else no "I8 fixture role: '$( line i8warm qmetrics )' '$( line i8mut qmetrics )'"; fi
 
 [ "$fail" = 0 ] && echo "qmetricscheck: PASS" || echo "qmetricscheck: FAIL"
 exit "$fail"

@@ -413,6 +413,16 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             m.realPaths.push_back( f );
             m.fileRoot.push_back( std::uint32_t( r ) );
         }
+        if( !p.rustTestFiles.empty() || !m.rustTestFiles.empty() )
+        {
+            m.rustTestFiles.resize( fileOff, RustTestFileRole::Ordinary );
+            m.rustTestFiles.insert( m.rustTestFiles.end(), p.rustTestFiles.begin(), p.rustTestFiles.end() );
+            m.rustTestFiles.resize( m.files.size(), RustTestFileRole::Ordinary );
+        }
+        for( const RustTestInputReader& reader : p.rustTestInputReaders )
+        {
+            m.rustTestInputReaders.push_back( { fileOff + reader.inputFileId, fileOff + reader.readerFileId } );
+        }
 
         // §P0.5d: size-dropped files concatenate across roots, relabeled EXACTLY like files above so a
         // --skipped row speaks the same `<label>/<rel>` vocabulary as every other emitted path. Parts

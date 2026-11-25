@@ -2903,6 +2903,9 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     return { std::move( target ), isLazy, isSymbolic, isReceiver };
 }
 
+// Defined in ingest_names.h; both definitions and module declarations use this test-scope rule.
+inline bool rustInFileTestScope( TSNode defNode, std::string_view src ) noexcept;
+
 // Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
 // and the bodies of anything that WRAPS a directive, which tree-sitter does not flatten: preprocessor
 // conditionals in C# (the C family and TS/JS read `@import.path` instead, #358), and ordinary language
@@ -3060,7 +3063,8 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             // is strict at the start, so that byte reads as outside the class — the nesting Ruby actually uses.
             const bool          superclassSite = ( lang == Lang::Ruby && kindIs( t, "superclass" ) );
             const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( parentOf( n ) ) : ts_node_start_byte( n );
-            incs.push_back( { fileId, /*isAngle*/ false, lazy, symbolic, siteByte, valueUse, std::move( tgt ) } );
+            const bool rustTestMount = tgt.starts_with( "mod:" ) && kindIs( t, "mod_item" ) && rustInFileTestScope( n, src );
+            incs.push_back( { fileId, /*isAngle*/ false, lazy, symbolic, siteByte, valueUse, rustTestMount, std::move( tgt ) } );
         };
         // The constant-USE dedupe (parser version 83 for receivers; arguments and rescue classes joined at 93). Key =
         // innermost open + the name as written; the FIRST occurrence in source order carries the byte. The lazy bit is

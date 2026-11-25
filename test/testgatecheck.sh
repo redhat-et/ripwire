@@ -767,6 +767,105 @@ else
     printf '  SKIP  (n10) a file name with a backslash cannot be created on this filesystem\n'
 fi
 
+# Possible Rust trait reach is an obligation without inventing a proven edge. It becomes untested
+# when no test can reach the declined dispatch.
+RUST_MAY="$TMP/rust-may"; mkdir -p "$RUST_MAY/src/driver"
+cat > "$RUST_MAY/Cargo.toml" <<'EOF'
+[package]
+name = "rust-may"
+version = "0.1.0"
+edition = "2021"
+EOF
+printf 'pub fn changed() -> usize { 1 }\n' > "$RUST_MAY/src/anchor.rs"
+cat > "$RUST_MAY/src/lib.rs" <<'EOF'
+mod anchor;
+mod driver;
+use anchor::changed;
+
+trait Rule { fn analyze(&self) -> usize; }
+struct First;
+struct Second;
+impl Rule for First { fn analyze(&self) -> usize { first_helper() } }
+impl Rule for Second { fn analyze(&self) -> usize { second_helper() } }
+fn nested_helper() -> usize { changed() }
+fn first_helper() -> usize { changed() + nested_helper() }
+fn second_helper() -> usize { changed() }
+fn unrelated_helper() -> usize { changed() }
+
+#[cfg(test)]
+mod tests {
+    use super::{driver::drive, First, Second};
+    #[test]
+    fn regression() {
+        drive(&First);
+        drive(&Second);
+    }
+}
+EOF
+cat > "$RUST_MAY/src/driver/mod.rs" <<'EOF'
+use crate::Rule;
+pub(super) fn drive(rule: &dyn Rule) -> usize { rule.analyze() }
+EOF
+if python3 - "$BIN" "$RUST_MAY" <<'PY'
+import json
+import pathlib
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+binary, root = sys.argv[1:]
+def query(*args, status=4):
+    p = subprocess.run([binary, root, *args], capture_output=True, text=True, timeout=15)
+    assert p.returncode == status, (args, p.returncode, p.stdout, p.stderr)
+    return p.stdout
+
+def names(rows):
+    return {row["sym"].split("::")[-1] for row in rows}
+
+selector = "--test-gate=src/anchor.rs"
+for flags in (("--no-cache",), (), ()):
+    gate = json.loads(query(selector, "--json", *flags))
+    possible = gate["unresolved_test_reach_symbols"]
+    assert {"first_helper", "second_helper"} <= names(possible), gate
+    assert names(gate["untested_blast_radius"]) == {"unrelated_helper"}, gate
+    assert gate["tests"] == 0 and gate["unresolved_test_reach"] == len(possible), gate
+    assert "unresolved_test_reach_capped" not in gate, gate
+    untested = gate["untested_blast_radius"]
+    combined = [("u", row) for row in untested] + [("ur", row) for row in possible]
+    for offset in range(len(combined) + 1):   # one window over <u> then <ur>: --limit=1 is one obligation row per page
+        args = (selector, "--limit=1", f"--offset={offset}", *flags)
+        page = query(*args)
+        report = ET.fromstring("<doc>" + page + "</doc>").find("test-gate")
+        expect = combined[offset:offset + 1]
+        expect_ur = [row for kind, row in expect if kind == "ur"]
+        more = offset + 1 < len(combined)
+        shown = [(r.tag, r.attrib) for r in report if r.tag in ("u", "ur")]
+        assert shown == [(kind, {k: str(v) for k, v in row.items()}) for kind, row in expect], (offset, page)
+        assert report.get("shown_unresolved_test_reach") == str(len(expect_ur)), page
+        assert report.get("unresolved_test_reach_capped") == "1", page
+        assert report.get("total") == str(len(combined)) and report.get("has_more") == str(int(more)), page
+        assert report.get("next_offset") == str(offset + 1 if more else len(combined)), page
+        jpage = json.loads(query(*args, "--json"))
+        assert jpage["unresolved_test_reach_symbols"] == expect_ur, jpage
+        assert jpage["untested_blast_radius"] == [row for kind, row in expect if kind == "u"], jpage
+        assert jpage["shown_unresolved_test_reach"] == len(expect_ur) and jpage["unresolved_test_reach_capped"] is True, jpage
+        assert jpage["has_more"] is more and jpage["next_offset"] == int(report.get("next_offset")), jpage
+
+callees = ET.fromstring("<doc>" + query("--callees=drive", status=0) + "</doc>").find("callees")
+assert not callees.findall("s") and any(d.get("gate") == "iface" for d in callees.findall("dc")), ET.tostring(callees)
+source = pathlib.Path(root, "src/lib.rs")
+original = source.read_text()
+source.write_text(original.replace("fn unrelated_helper() -> usize { changed() }", ""))
+only = json.loads(query(selector, "--json", "--no-cache"))
+assert only["tests"] == only["untested"] == 0 and only["unresolved_test_reach"] > 0, only
+source.write_text(original.replace("drive(&First);", "").replace("drive(&Second);", ""))
+disconnected = json.loads(query(selector, "--json", "--no-cache"))
+assert "unresolved_test_reach" not in disconnected, disconnected
+assert {"first_helper", "second_helper"} <= names(disconnected["untested_blast_radius"]), disconnected
+PY
+then ok "(o) Rust trait dispatch stays distinct from proven and untested reach; paging is shared"
+else no "(o) Rust trait dispatch: uncertainty, graph, caching or paging contract failed"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
 
