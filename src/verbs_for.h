@@ -7,7 +7,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
-#include "forqsites.h"  // θ11 (RIPWIRE_THETA11=1): the question's own sites, inside page 1's root
+#include "forqsites.h"  // θ11 (default on, RIPWIRE_THETA11=0 off): the question's own sites, inside page 1's root
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
@@ -5561,7 +5561,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
         // reads the corpus for them too, and the block's own scans share one read; closed after the block (the held collections go with it)
-        // θ11 (forqsites.h, RIPWIRE_THETA11=1): the question's tokens are expected too, so the block below shares the batch's one read
+        // θ11 (forqsites.h; default on, RIPWIRE_THETA11=0 off): the question's tokens are expected too, so the block below shares the batch's one read
         const bool qsitesWanted = mode.ledger != nullptr && !cfg.json && !cfg.columnar && !cfg.candidates && rw::qsites::thetaElevenOn();
         auto [ qsSubstr, qsWords ] = qsitesWanted ? rw::qsites::batchExpectations( cfg.forTask ) : std::pair<std::vector<std::string>, std::vector<std::string>>{};
         std::vector<std::string> forExpected = literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{};

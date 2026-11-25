@@ -6,9 +6,10 @@
 // session cost, tmp/orch-1124/followon/RESULT.md). θ11 runs it first: one line per question token, every file:line where the token
 // occurs, in a block with its OWN 1,000 B budget at the end of page 1, inside the root (before </ctx>), outside est_tokens.
 //
-// STATUS: an experiment behind RIPWIRE_THETA11=1, default OFF (with it unset the answer is byte-identical). The offline proxy
-// (grep coverage of the 56 M5 sessions' recorded follow-on calls) is about −2.9 % of session cost, all of it in multi-file
-// sessions; a sealed live run decides the default.
+// STATUS: ON by default since lane THETA11-FLIP (owner 11-24, after the sealed NL4 and NL5-large runs both passed); RIPWIRE_THETA11=0
+// turns it off, and the answer is then byte-identical to the one served before the block existed (switch: forqsitesswitch.h, which
+// --version's qsites= reads too). The offline proxy (grep coverage of the 56 M5 sessions' recorded follow-on calls) is about −2.9 %
+// of session cost, most of it in multi-file sessions.
 //
 // THE RULE (pre-registered in cands.py `question_tokens` / `theta11`; this header is its product form):
 //   1. TOKENS, in this order: inside backticks every `--opt` / `-opt` and identifier (`a`, `a::b`, `a.b`, `a->b`); then over the
@@ -45,6 +46,7 @@
 #include "forliteral.h"  // lit_detail::trimAllWs — a backtick span is trimmed as Python str.strip does
 #include "infra/ownedfile.h" // openOwnedFile — an oversized file's head, read to tell text from binary
 #include "infra/Diagnostics.h" // DISCLOSE — a floored count
+#include "forqsitesswitch.h" // thetaElevenOn — the switch (default ON; RIPWIRE_THETA11=0 off)
 
 #include <algorithm>
 #include <array>
@@ -64,11 +66,6 @@ inline constexpr std::size_t kBlockBytes      = 1000;   // RESULT.md step 3: the
 inline constexpr std::size_t kMaxSitesPerTok  = 150;    // a token with more lines than this is not a lead
 inline constexpr std::size_t kRareWordSites   = 20;     // a plain word with more lines than this is prose (rule 3; the 41-task proxy's knee)
 
-[[nodiscard]] inline bool thetaElevenOn() noexcept
-{
-    const char* const v = std::getenv( "RIPWIRE_THETA11" );
-    return v != nullptr && v[0] == '1' && v[1] == '\0';
-}
 
 struct Token
 {

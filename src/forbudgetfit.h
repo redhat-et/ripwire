@@ -75,7 +75,7 @@ struct ForAnswerLedger
     std::vector<std::uint32_t> docsAfterCodeRanks;   // the r= of the <sigs> doc rows the docs reorder moved (docs_after_code=; lane DA1)
     std::vector<std::uint32_t> pastTargetRanks;      // the r= of the <sigs> rows past the default target (past_target=; lane HN1)
     std::vector<std::uint32_t> filesFirstRanks;      // the r= of the <sigs> rows the head round-robin moved (files_first=; lane HN1)
-    std::string questionSites;   // θ11 (forqsites.h, RIPWIRE_THETA11=1): the block the render computed inside its scan batch; page 1 gets it, unpriced
+    std::string questionSites;   // θ11 (forqsites.h; default on, RIPWIRE_THETA11=0 off): the block the render computed inside its scan batch; page 1 gets it, unpriced
 };
 
 // The budget asked: a soft target (--token-budget) and/or a ceiling (--max-tokens under --detail). 0 = not asked.

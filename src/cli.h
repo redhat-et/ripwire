@@ -23,6 +23,7 @@
 #include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 #include "forrowsform.h" // rw::rowlines::kRowsLines / defaultRowsName — --rows= and the rows= of --version
 #include "foractlineswitch.h" // rw::actline::defaultActName — the act= of --version
+#include "forqsitesswitch.h" // rw::qsites::defaultQsitesName — the qsites= of --version
 #include "forbodiesform.h" // rw::bodyptr::kBodiesInline / kBodiesPointer — --bodies='s closed set (NB1)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
@@ -6167,9 +6168,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // THIS environment (lines; elements under RIPWIRE_NO_ROWLINES), so an experiment records it without an answer byte.
             // act= (BR1, foractline.h) names whether a --for page carries its act line in THIS environment (off under RIPWIRE_NO_ACTLINE).
             // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
-                        kRipwireGitStamp );
+            // qsites= (θ11, forqsitesswitch.h) names whether page 1 of a --for answer carries the question-sites block in THIS
+            // environment: on by default, off under RIPWIRE_THETA11=0 (test/forqsitescheck.sh (V)).
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, qsites={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel,
+                        kRipwireBuildType, kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::qsites::defaultQsitesName(),
+                        rw::actline::defaultActName(), rw::rowlines::defaultRowsName(), kRipwireGitStamp );
             std::exit( 0 );
         }
 
