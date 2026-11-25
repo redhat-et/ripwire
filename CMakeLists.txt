@@ -748,6 +748,35 @@ target_include_directories(ripwire PRIVATE
   src)
 add_dependencies(ripwire ripwire_version_stamp ripwire_source_identity)
 
+# ---- the BUILD KEY: which compilation of the sources this binary is (src/buildkey.h) ----
+# The producer identity above names the SOURCES, and is the same for a dev and a Release build of one tree. The warm
+# snapshot (src/warmsnap.h) stores floats those builds compute — the ranks, the prior weights, the in-edge CSR values —
+# under -ffast-math everywhere but pagerank.cpp, and LTO and -O3 decide where a*b+c is contracted to an fma. Nothing
+# promises the two produce the same bits, so a snapshot one wrote must not be served to the other. The key digests
+# everything here that changes code generation: the compiler and its version, the target, the build type, LTO, PGO
+# (and the profile's bytes), and every compile, link and per-configuration flag. It is computed once, after every
+# add_compile_options above, and reaches only the two targets that read it. $<CONFIG> rides beside it for a
+# multi-config generator, where the configuration is picked at build time.
+set(_ripwire_build_profile_sha "")
+if(RIPWIRE_PGO_PROFILE AND EXISTS "${RIPWIRE_PGO_PROFILE}")
+  file(SHA256 "${RIPWIRE_PGO_PROFILE}" _ripwire_build_profile_sha)
+endif()
+get_directory_property(_ripwire_build_copts COMPILE_OPTIONS)
+get_directory_property(_ripwire_build_cdefs COMPILE_DEFINITIONS)
+get_directory_property(_ripwire_build_lopts LINK_OPTIONS)
+set(_ripwire_build_descriptor
+  "${CMAKE_CXX_COMPILER_ID}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_CXX_COMPILER_TARGET}|${CMAKE_SYSTEM_NAME}|${CMAKE_SYSTEM_PROCESSOR}"
+  "${CMAKE_OSX_ARCHITECTURES}|${CMAKE_OSX_DEPLOYMENT_TARGET}|${CMAKE_BUILD_TYPE}|lto=${RIPWIRE_LTO}|ipo=${CMAKE_INTERPROCEDURAL_OPTIMIZATION}"
+  "pgo=${RIPWIRE_PGO}|${_ripwire_build_profile_sha}|native=${RIPWIRE_NATIVE}|asan=${RIPWIRE_ASAN}|tsan=${RIPWIRE_TSAN}"
+  "copts=${_ripwire_build_copts}|cdefs=${_ripwire_build_cdefs}|lopts=${_ripwire_build_lopts}|${CMAKE_CXX_FLAGS}|${CMAKE_EXE_LINKER_FLAGS}"
+  "D=${CMAKE_CXX_FLAGS_DEBUG}|R=${CMAKE_CXX_FLAGS_RELEASE}|RD=${CMAKE_CXX_FLAGS_RELWITHDEBINFO}|MS=${CMAKE_CXX_FLAGS_MINSIZEREL}")
+string(SHA256 _ripwire_build_key "${_ripwire_build_descriptor}")
+string(SUBSTRING "${_ripwire_build_key}" 0 16 _ripwire_build_key)
+foreach(_ripwire_build_target ripwire ripwire_probe)
+  target_compile_definitions(${_ripwire_build_target} PRIVATE
+    "RIPWIRE_BUILD_KEY=\"${_ripwire_build_key}\"" "RIPWIRE_BUILD_CONFIG=\"$<CONFIG>\"")
+endforeach()
+
 # ---- small-vector A/B knobs (bench/svectorab.py drives both; see bench/SVECTORAB.md) ----
 # RIPWIRE_SMALLVEC selects which container src/smallvec.h's `rw::SmallVec` alias resolves to:
 #   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)
