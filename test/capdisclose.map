@@ -192,11 +192,13 @@ kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened t
 kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
 kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
 kMaxRestDepth	sink:noteCapped
+kMaxShellNest	sink:cut
 kMaxRestName	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxRestUnits	sink:noteCapped
 kMaxRoleBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxSkipRowsPerClass	pending:B43 disclosed elsewhere: the --skipped rows and grep unindexed_candidates_capped= state the row cap
 kMaxTrackedFiles	sink:truncated
+kMaxUnguardedSkips	none:an ASSUME bound on the shell skip trio's call graph (skipBrace -> skipQuote -> skipParen), not a cut: no frame past it is ever reached, and the nesting cut itself is kMaxShellNest's (shell_cut=)
 kMaxWorktreePaths	sink:DISCLOSE
 kMaxYamlNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kRadixThreshold	none:an algorithm switch (radix vs comparison sort), the bytes are identical

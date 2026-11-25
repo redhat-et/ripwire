@@ -3226,7 +3226,7 @@ stderr:
 
 ## `./build/ripwire . --whereis=rankGraphTeleport`
 
-*Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default renders two pages under the same 60-row cap, the definitions page (kind="def" rows and the kind="text" lines no parse read, the references counted in <refs count= next=>) and the whole list, and serves the definitions page when it shows more definitions, whatever its bytes, else only when it is strictly shorter. Here the branches' copies sit in blobs past the parse guard (<unparsed>, kind="text", never counted as definitions), so both pages show HEAD's one definition and the default serves the shorter whole list: that definition, then HEAD's references.*
+*Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default renders two pages under the same 60-row cap, the definitions page (kind="def" rows and the kind="text" lines no parse read, the references counted in <refs count= next=>) and the whole list, and serves the definitions page when it shows more definitions, whatever its bytes, else only when it is strictly shorter. Here it serves the definitions page (listing="defs"): HEAD's one definition, then the branches' lines in blobs past the parse guard (<unparsed>) as kind="text" rows, a line several refs hold printed once with refs=N (folded= counts the copies it stands for), and HEAD's references counted in <refs count= next=>.*
 
 **wall time: 5.48s**
 
@@ -3280,7 +3280,7 @@ ripwire: warning: --whereis left 252 branch blobs unparsed, their rows kind=text
 
 ## `./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all`
 
-*The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list before any branch row arrives, so it can show fewer definitions than the definitions page. The default serves this page only when both show the same definitions and the definitions page is not strictly shorter (a tie serves this page), as above: here it is the default's own page, HEAD's one definition and then its references.*
+*The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list before any branch row arrives, so it can show fewer definitions than the definitions page. The default serves this page only when both show the same definitions and the definitions page is not strictly shorter (a tie serves this page); here the default served the definitions page above, so this page is asked for by name: HEAD's one definition, then its references.*
 
 **wall time: 5.45s**
 
@@ -3339,7 +3339,7 @@ ripwire: warning: --whereis left 252 branch blobs unparsed, their rows kind=text
 
 ## `./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text`
 
-*The same page with every t= line whole: the page above previews each line over 300 B (200 B and t_bytes=, the <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.*
+*The --whereis-listing=all page with every t= line whole: that page previews each line over 300 B (200 B and t_bytes=, its <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.*
 
 **wall time: 6.11s**
 
@@ -6325,7 +6325,7 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 *The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines.*
 
 `````
-ripwire legend dictionary ripwire.dict/v1 dictv=3ffbbebeb885edbf entries=1324
+ripwire legend dictionary ripwire.dict/v1 dictv=1ec29c71b8526578 entries=1325
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -6355,7 +6355,7 @@ ripwire.pack-task/v1 <ctx>: one-call task bundle for task= under budget_tokens=:
 ripwire.from-trace/v1 <ctx>: trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included
 ripwire.exemplar/v1 <ctx>: the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate
 ripwire.pack-task/v1 <ctx-partitions>: N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_t … [line truncated: 503 more bytes on this line]
-… [1301 more display lines; full output is 169023 bytes on 1325 raw line(s)]
+… [1302 more display lines; full output is 169108 bytes on 1326 raw line(s)]
 `````
 
 ## `./build/ripwire . --lint --lint-select=cache-`

@@ -6,6 +6,8 @@
 # BURN-DOWN 2026-11-11 (same lane): 175 -> 50. The 125 lines gone are defined now (src/compactlegend.h kCompactAttributeReadings,
 # the LEGEND-G-BLIND block; the MCP for closure). The 50 left are the rarely used modifiers: --stray-content --plan,
 # --pack-task --partition, --cochange-groups, --slice-flow, --layout, --gateability, --field-affinity.
+# 2026-11-23 (train ge3 rebased on 326dec9f4, #721): --partition picks its rows from THIS tree, so the partition-default lines
+# follow the tree, not the binary (main 326dec9f4's own binary gives the same set on this tree): +bn@l, -b@n -b@t -c@n -d@n -s@n -s@t.
 cochange-groups-default | cochange@cover
 cochange-groups-default | cochange@groups
 cochange-groups-default | cochange@pairs_covered
@@ -21,15 +23,10 @@ gateability-default | gateability@projected_drift
 layout-default | caveat@k
 layout-default | def@l
 layout-default | f@n
+partition-default | bn@l
 partition-default | b@l
-partition-default | b@n
-partition-default | b@t
 partition-default | c@l
-partition-default | c@n
 partition-default | d@l
-partition-default | d@n
-partition-default | s@n
-partition-default | s@t
 slice-flow-default | s@f
 slice-flow-default | slice@flow
 slice-flow-default | slice@flow_redundant

@@ -287,9 +287,9 @@ JM="$( cd "$WORK/n4" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )
 if printf '%s' "$JM" | grep -q '"origin":"moved"'; then ok "J: --json carries \"origin\":\"moved\""; else no "J: --json lacks origin moved"; fi
 
 # ═══ L) LEGEND — the exception is stated wherever the rule is ═════════════════════════════════════════
-PHRASE='new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling'
+PHRASE='new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling'   # TANGLE-GATE-B added a third exception after it
 # compact spends fewer bytes (its prose has a stair-step target): the exception names the ceiling= row it defines
-CPHRASE='new-symbol rows never gate, except defect-shape format-arity or a ceiling= row'
+CPHRASE='new-symbol rows never gate, except defect-shape format-arity, ceiling='
 for leg in full compact; do
     T="$( cd "$WORK/p1" && "$BIN" . --quality-delta --no-cache --legend=$leg 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"   # status: output only — the L arm FAILs when the phrase count is 0
     a="$( printf '%s' "$T" | grep -o 'never gate, except defect-shape' | wc -l | tr -d ' ' )"

@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
+#   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
+#   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix
+#   that a cut shell tree yields no unhandled-arm site (only a tree the nesting budget cut). No kParserVer,
+#   kCacheVersion (54) or kQSnapCacheScheme (38) bump: the qsnap key carries the producer identity, so no blob from
+#   another build is read.
 # 2026-11-22, IN9 (the 0.7.0 train integration/070-cut-1121 merged with origin/main b576a95e3, which carries #715): RE-PINNED
 #   ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 340/337 -> 342 (rich 343): ONE
 #   number above BOTH sides' bumps (the train's 340, rich 341; main's 337, rich 338). kCacheVersion 54 and kQSnapCacheScheme 38
@@ -81,6 +87,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 # 2026-11-19, lane qual-ns-call-bind (stacked on lane/import-proved-splits 4787d1ed0): RE-PINNED with UPDATE_GOLDEN=1. kParserVer
 #   335 PLACEHOLDER (C++ using-declarations + namespace aliases recorded, ingest_binds.h kCppCallScopeFacts; mirrored in quality.h);
 #   the train renumbers and re-pins. kCacheVersion and kQSnapCacheScheme unchanged.
+# 2026-11-21, lane QD-LESSONS-2a (on main 8861b0d4d): RE-PINNED with UPDATE_GOLDEN=1 (hash 269831ba67…15a52a). defectSitesOf moved:
+#   it takes an optional shell-cut counter (CR712-SHSTATUS-DEPTH) and each site record also carries its two-bit value
+#   (legacySite, CR712-ACK-KEY-MASK), which computeSnapshot does not store. The blob shape is unchanged; the Bash scanners
+#   now stop at the one nesting budget (64) instead of crashing (subshell/group/if) or cutting $( ) at 40, which changes
+#   the site set only for a script nested that deep, and the producer identity keeps this build's blobs apart, so
+#   kQSnapCacheScheme stays 38 (the cr-qd-kinds-068 fix-round-1 precedent below).
 # 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
 #   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the

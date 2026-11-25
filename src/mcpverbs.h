@@ -5192,6 +5192,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
                     + oc.historyJson
                     + rw::quality::ratchetAttrsJson( oc.extras )
+                    + countFieldOrEmpty( "shell_cut", oc.extras.shellCut, /*json=*/true )   // CR712-SHSTATUS-DEPTH (QdRootFields::shellCut)
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )

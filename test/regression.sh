@@ -461,6 +461,7 @@ for _g in \
     decltodefcheck \
     deeptailcheck \
     defaultceilingcheck \
+    defectackschemecheck \
     defectshapecheck \
     defoverdeclcheck \
     defslookupcheck \
@@ -1089,6 +1090,7 @@ for _g in \
     shallowhistorycheck \
     shapingflagcheck \
     shellgateindexcheck \
+    shellnestcheck \
     showcasecapturecheck \
     shrinkpaircheck \
     sibliftcheck \

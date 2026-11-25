@@ -4060,14 +4060,32 @@ inline std::vector<Site> Script::sites() const
 
 }   // namespace va
 
-inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/ )
+// One shell parse for a Bash facet scan; `cut` (optional) is set when the nesting budget (shstatus kMaxShellNest) stopped it,
+// so the sites past that point were not judged.
+inline rw::shstatus::Tree parseShellScan( std::string_view src, bool* cut )
+{
+    rw::shstatus::Tree tree = rw::shstatus::parse( src );
+    if( cut != nullptr )
+    {
+        *cut = *cut || tree.cut;
+    }
+    return tree;
+}
+
+inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/, bool* cut = nullptr )
 {
     if( src.empty() )
     {
         return {};
     }
-    const rw::shstatus::Tree     tree = rw::shstatus::parse( src );
-    const rw::shstatus::Analysis an   = rw::shstatus::analyze( tree, src );
+    const rw::shstatus::Tree tree = parseShellScan( src, cut );
+    if( tree.cut )
+    {
+        // CR721: a guard PAST the cut (a presence test after the absence assertion it protects) is invisible to the prefix,
+        // so the prefix alone would call that assertion vacuous. A cut tree is not judged; shell_cut= already says so.
+        return {};
+    }
+    const rw::shstatus::Analysis an = rw::shstatus::analyze( tree, src );
     const va::Script             script( src, tree, an );
     return script.sites();
 }
@@ -5842,13 +5860,19 @@ inline void assignedCaseSites( std::string_view src, const sh::Tree& t, const st
 }   // namespace uash
 
 // Bash: a case with no *) arm whose result is read, in either form.
-inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out, bool* cut = nullptr )
 {
     if( src.find( "esac" ) == std::string_view::npos )
     {
         return;
     }
-    const rw::shstatus::Tree t = rw::shstatus::parse( src );
+    const rw::shstatus::Tree t = parseShellScan( src, cut );
+    if( t.cut )
+    {
+        // CR721: a cut inside a quoted substitution makes the rest of the file one word, so a *) arm and its esac past the
+        // cut are lost and the prefix reads as a case with no catch-all. A cut tree is not judged (as scanVacuousAssertBash).
+        return;
+    }
     uash::endingCaseSites( src, t, out );
     uash::assignedCaseSites( src, t, fnSpans, out );
 }
@@ -5945,10 +5969,11 @@ inline std::vector<Site> scanPython( std::string_view src, const std::vector<Spa
 }
 
 // Bash, for a test-script path only (the caller decides the path): `fnSpans` are the script's function
-// definitions, the scopes a capture and its guards are matched in.
-inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans )
+// definitions, the scopes a capture and its guards are matched in. `cut` (optional) is set when the shell nesting budget
+// (shstatus kMaxShellNest) stopped the parse.
+inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans, bool* cut = nullptr )
 {
-    return detail::scanVacuousAssertBash( src, fnSpans );
+    return detail::scanVacuousAssertBash( src, fnSpans, cut );
 }
 
 // Bash, any path: unhandled-arm (a case with no *) arm whose result is read), appended to `out`.
