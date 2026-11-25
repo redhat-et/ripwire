@@ -5120,6 +5120,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     rw::quality::countAckRescues( oc.regs, acks, heal.ackRemap, oc.ackedByRename, oc.ackedByContent );
     oc.identityJson     = rw::quality::identityDisclosure( heal ).second;   // H14: the CLI's own disclosure, verbatim
     oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
+    rw::quality::mergeOverlappingCloneRows( oc.regs, passes, g, ing, root );
 
     // L2 — same stale-ack disclosure the CLI's --quality-delta reports (see quality.h's computeStaleAcks):
     // checked against THIS working tree, never the baseline above, so it costs one more computeSnapshot pass

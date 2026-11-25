@@ -1092,9 +1092,8 @@ struct DeltaBasis
     // and never looks at it, which keeps the two runs' reported findings identical.
     std::vector<rw::quality::CloneIdiomFact> cloneIdioms;
     rw::quality::HistoryUnread               historyUnread;   // hwh-fix4 (N1): history a gating kind could not read (unread_history=, exit 6)
-    // QD-IDENTITY-ONCE: the working-tree form's pure passes over d.ing — the identity-basis snapshot, the delta and the
-    // --show-stale snapshot all read the same ingest, so the clone and construct passes run once between them. Unbound
-    // (never read) in the ref-pair form, whose two trees are other ingests.
+    // QD-IDENTITY-ONCE: pure passes over the judged ingest (d.ing or tree B), reused by the delta and overlap display.
+    // In the working-tree form the identity-basis and --show-stale snapshots share them too.
     rw::quality::TreePasses                  passes;
     // D4 best-since source (working-tree form only: the ref-pair form judges two committed trees and reads no ratchet) and what
     // computeDelta hands back beside the rows: the QD-CREDIT-ROW improvements and the ratchet's disclosure.
@@ -1127,7 +1126,7 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
     out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
-                                         quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread, nullptr, &out.extras );
+                                         quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread, &out.passes, &out.extras );
     out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( refs.target().ing );
 }
 
@@ -1824,9 +1823,9 @@ inline constexpr const char* kQdSimilarArgsLegend =
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
 // which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
 inline constexpr const char* kQdCloneLegend =
-    "CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its "
-    "shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a "
-    "RECOGNIZED BODY SHAPE every member spells, from a closed set of five (threshold-ladder, "
+    "CLONE ROWS name the whole group: members= its ids, tokens= its shared normalized tokens. Overlapping gating exact/near "
+    "groups merge: members= the union; tokens=, idiom= the representative's. idiom= is a RECOGNIZED BODY SHAPE all members "
+    "spell, from a closed set of five (threshold-ladder, "
     "switch-name-table, builder-chain, one-statement, call-sequence). idiom= alone changes nothing; a group that ALSO shares no "
     "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
     "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
@@ -2331,6 +2330,7 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
         quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, nullptr, nullptr, nullptr, nullptr, nullptr,
                                quality::KindScope{}, &verdict.historyUnread, &passes, &pinExtras );
     quality::applyAckRatchet( regs, acks );
+    quality::mergeOverlappingCloneRows( regs, passes, d.g, d.ing, cfg.rootPath );
 
     for( const quality::Regression& r : regs )
     {
@@ -2659,15 +2659,15 @@ struct QdPartition
     std::vector<rw::quality::StaleAck>   foreignAcks;
     std::size_t                          scopedOutGating = 0;   // out-of-scope rows that would have gated (would-gate=)
     std::size_t                          ackedCount      = 0;   // in-scope rows the ack ledger suppressed (acked=)
+    std::vector<char>                    ackOnlyMerged;         // --quality-ack: rows a merged clone row's --ack-only match selects
 };
 
 // SCOPE + RATCHET — split basis.regs by --scope, then suppress what the ack ledger already accepted. basis.regs keeps only
 // the in-scope, unsuppressed rows.
 // Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
 // reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
-// magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
-// into that file instead of printing the report (accepting what previous acks already hid would be
-// a silent blanket ack — only what the agent can see right now is what it can accept).
+// magnitude survives the filter and reappears. --quality-ack writes the surviving in-scope findings
+// by their original keys. Matching a merged display row selects all of its component findings.
 // R1 IDENTITY: the ledger was read and HEALED inside resolveDeltaBasis (it had to be — the baseline
 // half of the same healing has to precede computeDelta), so this step takes the already-current map
 // rather than re-reading the file and undoing it.
@@ -2698,13 +2698,14 @@ QdPartition applyScopeAndAcks( const rw::quality::Scope& scope, DeltaBasis& basi
 // P1: `inScope` is a parameter because the predicate is asked about BOTH halves of the partition — once to choose what to
 // write, once to detect an ack selection that NAMES a row belonging to someone else. It is also what keeps `gating` honest
 // under a scope: an out-of-scope row does not gate, so `gating` must not select it.
-bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r, bool inScope )
+bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r, bool inScope, std::string_view mergedSym = {} )
 {
     if( ackOnly.empty() )
     {
         return true;
     }
     const bool gates = rw::quality::rowGates( r ) && inScope;
+    const std::string_view sym = mergedSym.empty() ? std::string_view( r.sym ) : mergedSym;
     // "gating" is RESERVED: the exact token answers only "would this row exit 2", never a substring of a symbol such as
     // gatingHelper (CR721 — a substring hit acked a never-gating row, or refused the command on an out-of-scope one).
     const auto patternSelects = [ & ]( std::string_view pat )
@@ -2713,7 +2714,7 @@ bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r,
         {
             return gates;
         }
-        return !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos
+        return !pat.empty() && ( r.kind.find( pat ) != std::string::npos || sym.find( pat ) != std::string_view::npos
                                  || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) );
     };
     for( std::string_view rest = ackOnly; !rest.empty(); )
@@ -2876,6 +2877,21 @@ int writeAcceptedAcks( const std::string& acksFile, const gtl::btree_map<std::st
     return 0;
 }
 
+// --ack-only over merged clone rows: the original rows whose merged display row (mergeOverlappingCloneRows) it matches.
+// The rows themselves stay unmerged, so each is acked under its own key.
+std::vector<char> ackOnlyMergedRows( std::string_view ackOnly, DeltaBasis& basis, const rw::Graph& judgedGraph, const rw::IngestResult& judgedIndex )
+{
+    rw::quality::CloneOverlapSelection overlap{ .matches = [ & ]( const rw::quality::Regression& r, const std::string& sym )
+    {
+        return ackOnlySelects( ackOnly, r, /*inScope=*/true, rw::quality::displaySym( sym, basis.deltaRoot ) );
+    } };
+    if( !ackOnly.empty() )
+    {
+        rw::quality::mergeOverlappingCloneRows( basis.regs, basis.passes, judgedGraph, judgedIndex, basis.deltaRoot, rw::quality::kAllKinds, &overlap );
+    }
+    return std::move( overlap.rows );
+}
+
 // WRITE ACKS — the --quality-ack arm: fold the VISIBLE findings --ack-only selects into the ledger (basis.acks, then the
 // file) instead of printing the report. Returns the exit code.
 int runQualityAckWrite( const rw::Config& cfg, const rw::quality::Scope& scope, const QdPartition& part, DeltaBasis& basis,
@@ -2902,9 +2918,10 @@ int runQualityAckWrite( const rw::Config& cfg, const rw::quality::Scope& scope, 
 
     const std::string* const scopeSpec = scope.active() ? &scope.spec : nullptr;
     QdAckTally               tally{ .findings = basis.regs.size(), .alreadyAcked = part.ackedCount, .narrowed = !ackOnly.empty() };
-    for( const quality::Regression& r : basis.regs )
+    for( std::size_t i = 0; i < basis.regs.size(); ++i )
     {
-        if( !selected( r, /*inScope=*/true ) )
+        const quality::Regression& r = basis.regs[i];
+        if( ( part.ackOnlyMerged.empty() || !part.ackOnlyMerged[i] ) && !selected( r, /*inScope=*/true ) )
         {
             ++tally.skipped;
             continue;
@@ -3586,11 +3603,14 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
     {
         return refused;
     }
-    const QdPartition part = applyScopeAndAcks( scope, basis );
+    const Graph& judgedGraph = refPair ? refs.target().g : d.g;
+    QdPartition part = applyScopeAndAcks( scope, basis );
     if( cfg.qualityAck )
     {
+        part.ackOnlyMerged = ackOnlyMergedRows( cfg.qualityAckOnly, basis, judgedGraph, judgedIndex );
         return runQualityAckWrite( cfg, scope, part, basis, acksFile );
     }
+    quality::mergeOverlappingCloneRows( basis.regs, basis.passes, judgedGraph, judgedIndex, basis.deltaRoot, refs.kinds );
 
     // L2 — stale-ack disclosure (rationale: quality.h's computeStaleAcks). Checked against the CURRENT tree, not the baseline,
     // so it costs one more computeSnapshot; skipped when the ledger is empty. Reported, never gated — the exit code reads the
