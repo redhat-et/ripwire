@@ -119,7 +119,9 @@ its `settings.json`: a SessionStart primer that adds ripwire's when-to-use guida
 that suggests one ready-to-run command when it is confident, and a PreToolUse hook that suggests nothing and
 only records, on your machine, which tool calls ripwire could have answered. Adding `--codex --hook` does the
 same for Codex in `~/.codex/hooks.json`; open `/hooks` in Codex to review and trust them. The hooks never
-block a tool call, they need `jq`, and they are registered only when you pass `--hook`.
+block a tool call, they need `jq`, and they are registered only when you pass `--hook`. The primer sends the same
+block `ripwire wrap claude` asks you to paste into CLAUDE.md, and stays silent when a CLAUDE.md that Claude Code loads
+already holds it word for word, so pasting the block and the hook are alternatives for that guidance.
 
 ### MCP server (optional)
 

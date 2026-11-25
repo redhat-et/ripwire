@@ -253,6 +253,10 @@ REALBIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${REALBIN#/}" = "$REALBIN" ] && REALBIN="$ROOT/$REALBIN"
 if [ -x "$REALBIN" ]; then
     RBIN="$TMP/realbin"; mkdir -p "$RBIN"; ln -sf "$REALBIN" "$RBIN/ripwire"
+    # The primer stays silent when a CLAUDE.md Claude Code loads already holds the block (3i6); the user-level one is
+    # ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, and these arms keep the operator's HOME. A sandbox for the arms of this block only
+    # (unset after it: install.sh honours CLAUDE_CONFIG_DIR too), so an operator's own pasted block cannot silence one.
+    export CLAUDE_CONFIG_DIR="$TMP/claudeconfig"; mkdir -p "$CLAUDE_CONFIG_DIR"
     WITH_REAL="$RBIN:$PATH"
     T3I="$TMP/t3i"; mkdir -p "$T3I"
     SS_JSON='{"session_id":"sscase","cwd":"'"$REPO"'","source":"startup"}'
@@ -333,6 +337,95 @@ if [ -x "$REALBIN" ]; then
     [ "$RC3I4P" -eq 0 ] && printf '%s' "$OUT3I4P" | grep -q 'Do NOT open a file you have not located first' \
         && ok "SessionStart positive control: a real work tree still gets the primer" \
         || no "SessionStart positive control: exit=$RC3I4P out=[$( printf '%s' "$OUT3I4P" | head -c 160 )] — the bare/.git arms above prove nothing"
+    # ── (3i6) HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND the hook installed, the primer sent the same
+    # ~3.9 KB a second time, re-read on every request. It now stays silent when a CLAUDE.md that Claude Code loads holds the
+    # block word for word. Three cases, all from a subdirectory of a work tree:
+    #   PRESENT (each file Claude Code loads at start; CRLF too)  -> no output;
+    #   ABSENT                                                    -> byte-identical to the wrap block as SessionStart JSON (unchanged);
+    #   PRESENT BUT STALE OR EDITED (CHOSEN, pinned here)        -> the CURRENT block is sent, byte-identical to ABSENT: an old or
+    #     edited block is not this version's guidance, and the match is the exact text, never a heading grep.
+    # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
+    # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
+    SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_CODEX="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_LINES="$( printf '%s\n' "$SSD_BLURB" | grep -c . )"
+    SSDREPO="$TMP/ssdrepo"; SSDCWD="$SSDREPO/sub"; mkdir -p "$SSDCWD/.claude"; git -C "$SSDREPO" init -q
+    ssd_run() # SESSION [env args: -u NAME / VAR=value...] -> the primer's stdout for cwd $SSDCWD, treatment arm
+    {
+        local s="$1"; shift; mkdir -p "$TMP/ssd.$s"
+        printf '%s' '{"session_id":"ssd'"$s"'","cwd":"'"$SSDCWD"'","source":"startup"}' \
+            | env "$@" RIPWIRE_METER_ARM=treatment PATH="$WITH_REAL" TMPDIR="$TMP/ssd.$s" bash "$HOOK" --session-start
+    }
+    ssd_plant() # FILE TEXT: the text inside a CLAUDE.md that has other notes around it
+    {
+        mkdir -p "${1%/*}"; printf '# Project notes\n\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
+    }
+    if command -v jq >/dev/null 2>&1; then
+        SSD_WANT="$( jq -n --arg m "$SSD_BLURB" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
+    else
+        SSD_WANT="$( printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+            "$( printf '%s' "$SSD_BLURB" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{printf "%s\\n", $0}' )" )"
+    fi
+    if [ "${SSD_LINES:-0}" -ge 10 ] && printf '%s' "$SSD_BLURB" | grep -q '^## ripwire'; then
+        ok "SessionStart dedup: the wrap claude block to plant has $SSD_LINES lines"
+    else no "SessionStart dedup: the wrap claude block has ${SSD_LINES:-0} lines (expected >= 10 under a '## ripwire' heading); every arm below is vacuous"; fi
+    SSD_ABS="$( ssd_run absent )"
+    [ -n "$SSD_ABS" ] && [ "$SSD_ABS" = "$SSD_WANT" ] \
+        && ok "SessionStart dedup ABSENT: no CLAUDE.md holds the block -> the block is sent, byte-identical to before (${#SSD_ABS} B)" \
+        || no "SessionStart dedup ABSENT: ${#SSD_ABS} B, expected ${#SSD_WANT} B byte-identical to the wrap block as JSON"
+    # PRESENT: one file at a time, each a place Claude Code loads at session start
+    ssd_seen=0; ssd_silent=0
+    for ssd_case in "cwd CLAUDE.md|$SSDCWD/CLAUDE.md" "cwd .claude/CLAUDE.md|$SSDCWD/.claude/CLAUDE.md" \
+                    "cwd CLAUDE.local.md|$SSDCWD/CLAUDE.local.md" "parent dir CLAUDE.md|$SSDREPO/CLAUDE.md" \
+                    "user-level \$CLAUDE_CONFIG_DIR/CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"
+        ssd_planted="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        [ "${ssd_planted:-0}" -ge 1 ] && ssd_seen=$(( ssd_seen + 1 ))
+        ssd_out="$( ssd_run "p$ssd_seen" )"
+        if [ "${ssd_planted:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT ($ssd_name): silent"
+        else no "SessionStart dedup PRESENT ($ssd_name): planted=${ssd_planted:-0} out=${#ssd_out} B, expected silent"; fi
+        rm -f "$ssd_file"
+    done
+    # CRLF line endings (a block pasted on Windows) and the default user level ~/.claude when CLAUDE_CONFIG_DIR is unset
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; sed 's/$/\r/' "$SSDCWD/CLAUDE.md" > "$SSDCWD/CLAUDE.md.crlf"; mv "$SSDCWD/CLAUDE.md.crlf" "$SSDCWD/CLAUDE.md"
+    ssd_cr="$( grep -c $'\r$' "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run crlf )"
+    if [ "${ssd_cr:-0}" -ge "$SSD_LINES" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (CRLF, $ssd_cr CR lines): silent"
+    else no "SessionStart dedup PRESENT (CRLF): CR lines=${ssd_cr:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    SSDHOME="$TMP/ssdhome"; ssd_plant "$SSDHOME/.claude/CLAUDE.md" "$SSD_BLURB"
+    ssd_out="$( ssd_run home -u CLAUDE_CONFIG_DIR HOME="$SSDHOME" )"
+    if [ -s "$SSDHOME/.claude/CLAUDE.md" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (~/.claude/CLAUDE.md, no CLAUDE_CONFIG_DIR): silent"
+    else no "SessionStart dedup PRESENT (~/.claude/CLAUDE.md): out=${#ssd_out} B, expected silent"; fi
+    rm -rf "$SSDHOME"
+    [ "$ssd_seen" -eq 5 ] && [ "$ssd_silent" -eq 7 ] && ok "SessionStart dedup PRESENT: 7 of 7 placements silent (5 planted files seen)" \
+        || no "SessionStart dedup PRESENT: $ssd_silent of 7 silent, $ssd_seen of 5 planted files seen (0 seen = a vacuous arm)"
+    # STALE OR EDITED (chosen behaviour): the current block is sent, byte-identical to ABSENT
+    ssd_stale=0
+    for ssd_case in "last line dropped|$( printf '%s\n' "$SSD_BLURB" | sed '$d' )" \
+                    "one word edited|$( printf '%s\n' "$SSD_BLURB" | sed '2s/BEFORE/before/' )" \
+                    "heading line only|$( printf '%s\n' "$SSD_BLURB" | head -n1 )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_text="${ssd_case#*|}"
+        if [ -z "$ssd_text" ] || [ "$ssd_text" = "$SSD_BLURB" ]; then no "SessionStart dedup STALE ($ssd_name): the edit did not change the block"; continue; fi
+        ssd_plant "$SSDCWD/CLAUDE.md" "$ssd_text"
+        ssd_out="$( ssd_run "s$ssd_stale${#ssd_text}" )"
+        if [ "$ssd_out" = "$SSD_ABS" ] && [ -n "$ssd_out" ]; then ssd_stale=$(( ssd_stale + 1 )); ok "SessionStart dedup STALE ($ssd_name): the current block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup STALE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"; fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
+    [ "$ssd_stale" -eq 3 ] && ok "SessionStart dedup STALE: 3 of 3 edited blocks still get the current one" \
+        || no "SessionStart dedup STALE: $ssd_stale of 3"
+    # Codex: its primer is not deduped against CLAUDE.md, even when CLAUDE.md holds Codex's own block
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssd_out="$( ssd_run codex RIPWIRE_METER_AGENT=codex )"
+    if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"
+    else no "SessionStart dedup: the Codex primer (block ${#SSD_CODEX} B) went silent or changed (out=${#ssd_out} B)"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    # the recipe says the paste and the hook are alternatives, for Claude only
+    ssd_wc="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | grep -c 'either one delivers it' )"
+    ssd_wx="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | grep -c 'either one delivers it' )"
+    [ "$ssd_wc" = 1 ] && [ "$ssd_wx" = 0 ] && ok "wrap claude says the paste block and the hook primer are alternatives (codex: not said)" \
+        || no "wrap alternatives line: claude=$ssd_wc (want 1) codex=$ssd_wx (want 0)"
+    unset CLAUDE_CONFIG_DIR
 else
     echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"
 fi

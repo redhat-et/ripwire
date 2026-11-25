@@ -1277,6 +1277,32 @@ fi
 # `ripwire wrap <the running agent>` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
 # src/wrap.h (the single source of truth the wrap gate diffs across agents). If wrap refuses — e.g. a
 # CRITICAL skill-scan finding — the fence is absent, the blurb is empty, and this degrades to silence.
+# claudeMdHoldsBlurb DIR BLURB: true when a memory file Claude Code loads at session start already holds BLURB word for word
+# (carriage returns ignored), so the primer would only repeat it. The files: the user-level one, the managed-policy ones, and
+# CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md in DIR and each parent below `/`. An @import is not followed. EXACT, not a
+# heading grep: a stale or edited block is not this version's text, so the primer still sends the current one (pinned by
+# test/hookcheck.sh (3i6)). Builtins only, no fork: a few stats and reads of small files at each session start.
+claudeMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text
+    local -a files=( "${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}/CLAUDE.md"
+                     "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
+    while [ -n "$d" ]
+    do
+        files+=( "$d/CLAUDE.md" "$d/.claude/CLAUDE.md" "$d/CLAUDE.local.md" )
+        d="${d%/*}"
+    done
+    for f in "${files[@]}"
+    do
+        [ -f "$f" ] && [ -r "$f" ] || continue
+        text=""
+        IFS= read -r -d '' text < "$f"
+        text="${text//$'\r'/}"
+        [[ "$text" == *"$want"* ]] && return 0
+    done
+    return 1
+}
+
 if [ "${1:-}" = "--session-start" ]
 then
     input="$( cat )"
@@ -1328,6 +1354,9 @@ then
     [ -n "$blurb" ] || [ "$meter_agent" = claude ] || blurb=$( ripwire wrap claude 2>/dev/null \
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
+    # HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND this hook installed, the same ~3.9 KB arrived
+    # twice on every request. Only for Claude, whose memory files are the ones checked; Codex's AGENTS.md is not.
+    [ "$meter_agent" = claude ] && claudeMdHoldsBlurb "$dir" "$blurb" && exit 0
 
     if command -v jq >/dev/null 2>&1
     then
