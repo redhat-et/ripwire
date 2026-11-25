@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <cstring>    // std::strerror — the unreadable-folder WARN
 #include "skillscan.h"
+#include "subagentblock.h"   // kSubagentBriefBlock — the three-moment block (shared with --brief)
 #include "infra/tablelookup.h"   // findByField — shared with ingest's lookupLang
 #include "infra/jsonesc.h"       // escapeMcp — the stanza command is a path, and a path is bytes JSON must escape
 
@@ -143,17 +144,8 @@ struct AgentTarget
                                        // so a new agent row decides it and no code names the agent. test/agenttablecheck.sh (L) holds both ways.
 };
 
-// THE THREE-MOMENT BRIEF BLOCK (lane HK2, 2026-11-21): what an orchestrator pastes into a subagent's brief. Three moments,
-// each with its call, because lane RO1 measured (observational, stored sessions) that an implementer subagent's first source
-// action was ripwire in 5% of lanes whose brief said nothing (n=369) and 34-39% of lanes whose brief carried the routing
-// (n=38, n=66), that the same protocol sitting in CLAUDE.md moved it to 6% (13 of 215), and that a NAMED verification verb
-// was run in 90% of lanes against 47% unnamed. So the brief is the lever and each moment is named. No token saving is shown.
-// Every verb but --for carries --legend=compact, the blurb's own posture (test/wrapverbscheck.sh arm 7 holds every command the
-// blurb spells to it). One line, no newline: it rides on a blurb line, and hooks/ripwire-nudge.sh --agent-brief appends the same bytes to a
-// spawn prompt (test/subagentroutecheck.sh (M) holds the two byte-equal).
-inline constexpr std::string_view kSubagentBriefBlock =
-    "ripwire is on PATH — before reading source, `ripwire <dir> --for=\"<task>\"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; "
-    "before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.";
+// THE THREE-MOMENT BRIEF BLOCK (kSubagentBriefBlock, lane HK2): defined in subagentblock.h (included above), which `--brief` (brief.h) prints
+// as its last section too; the text and its gates (wrapverbscheck.sh arm 7, subagentroutecheck.sh (M)) are unchanged.
 // What introduces the block on the blurb line. "that reads source": a lane that only edits prose or counts stored results has
 // nothing to orient on, and a block it cannot follow teaches it to skip the next one.
 inline constexpr std::string_view kSubagentBriefLead = " When you delegate to subagents, paste this into every brief that reads source: ";
