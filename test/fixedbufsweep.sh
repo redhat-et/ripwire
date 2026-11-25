@@ -315,12 +315,13 @@ CONV   = re.compile( r'%%|%[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|j|z|
 #    by "`//` earlier on the line", which skipped a REAL call after a block comment holding a URL
 #    (CR721 r3). So the file is lexed once into its comment and literal spans -- `//`, `/* */` across lines,
 #    "..." and '...' with escapes, R"d(...)d" raw strings -- and a match counts only when it starts in code.
-#    A pp-number (`200'000`, `0x6162'7365`) is consumed whole so a digit separator never opens a char literal.
+#    A pp-number (`200'000`, `0x6162'7365`, `0x1.a'bp0`, `0x1p-4`) is consumed whole -- periods and an exponent's
+#    sign included (CR721 r4) -- so a digit separator never opens a char literal.
 CALL    = re.compile( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(" )
 NONCODE = re.compile( r'(?P<lit>(?:\b(?:u8|[uUL])?R"(?P<d>[^()\\\s"]{0,16})\(.*?\)(?P=d)")'
                       r'|"(?:[^"\\\n]|\\.)*"?|\'(?:[^\'\\\n]|\\.)*\'?)'
                       r'|(?P<cmt>//[^\n]*|/\*.*?(?:\*/|\Z))'
-                      r'|\d[\w\']*|[A-Za-z_]\w*', re.S )
+                      r'|\d(?:[eEpP][+-]|[\w.\'])*|[A-Za-z_]\w*', re.S )
 def code_calls( src ):
     spans  = [ t.span() for t in NONCODE.finditer( src ) if t.group( "lit" ) is not None or t.group( "cmt" ) is not None ]
     starts = [ a for a, _ in spans ]
@@ -333,6 +334,7 @@ def code_calls( src ):
 CONTROL = [ ( 1, '/* https://example.org */ rw::formatTo(buf, "[REDACTED]", value);' ),
             ( 1, 'const char* u = "http://x"; rw::formatTo(buf, "{}", u);' ),
             ( 1, 'n = 200\'000; snprintf(buf, sizeof buf, "%d", n);' ),
+            ( 1, 'auto n = 0x1.a\'bp0; rw::formatTo(buf, "{}", value);' ),
             ( 0, '// rw::formatTo(buf, "{}", value);' ),
             ( 0, 'x = 1;  // see formatTo( buf ) below' ),
             ( 0, '/* snprintf(buf, n, "%s", s) */' ),
