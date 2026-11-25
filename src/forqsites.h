@@ -363,6 +363,7 @@ struct TokenSites
         SkipRowsCapped,        // the crawl counted more skipped files than it kept rows for
         IndexScanIncomplete,   // the index scan stopped at its budget or skipped an unreadable file
         FileUnread,            // an unindexed text file could not be read, or is over the byte ceiling
+        OversizeUnread,        // the crawl dropped a file over its size ceiling (IngestResult::skippedOversize); this scan does not read it
     };
     void disclose( DisclosureWhy ) noexcept   // the DISCLOSE sink: formatLine prints n="N+"
     {
@@ -555,6 +556,13 @@ struct ScanPlan
         for( TokenSites& ts : out )
         {
             DISCLOSE( ts, TokenSites::DisclosureWhy::SkipRowsCapped, "qsites: the crawl kept fewer skip rows than it counted, so files past the cap were not read; n= is a floor" );
+        }
+    }
+    if( !ing.skippedOversize.empty() )   // CR #746: a dropped oversize file may hold a site, so no count here is a total
+    {
+        for( TokenSites& ts : out )
+        {
+            DISCLOSE( ts, TokenSites::DisclosureWhy::OversizeUnread, "qsites: the crawl dropped a file over its size ceiling and this scan does not read it; n= is a floor" );
         }
     }
     for( const std::vector<SkippedFile>* rows : { &cs.unsupported, &cs.extensionless } )

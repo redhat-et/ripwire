@@ -72,8 +72,15 @@ for i in $( seq 0 500 ); do printf 'note %s\n' "$i" >"$FL/notes/n$i"; done
 UR="$WORK/ur"; mkdir -p "$UR/src"
 printf 'int my_special_fn( int x ) { return x; }\n' >"$UR/src/a.c"
 printf '* my_special_fn\n' >"$UR/NEWS"; chmod 000 "$UR/NEWS"
+# CR #746: CAP_DAC_OVERRIDE (root on Linux) reads past chmod 000, so record whether the file is really unreadable
+cat "$UR/NEWS" >/dev/null 2>&1 && : >"$WORK/ur_readable"
 ( cd "$UR" && RIPWIRE_THETA11=1 "$BIN" "$UR" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_unread.xml"
 chmod 600 "$UR/NEWS"
+# Q12b (CR #746): a file the crawl drops over --max-file-size may hold a site -> every count a floor
+OV="$WORK/ov"; mkdir -p "$OV/src"
+printf 'int my_special_fn( int x ) { return x; }\n' >"$OV/src/a.c"
+python3 -c "import sys; open(sys.argv[1], 'w').write('int pad[] = {' + '0,' * 3000 + '};\nint g( void ) { return my_special_fn( 2 ); }\n')" "$OV/src/big.c"
+( cd "$OV" && RIPWIRE_THETA11=1 "$BIN" "$OV" --no-cache --max-file-size=4K '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_oversize.xml"
 # Q13: the match cap is spent on whole-word sites only
 CP="$WORK/cap"; mkdir -p "$CP/src"
 python3 -c "import sys; open(sys.argv[1], 'w').write('/* ' + 'z' * 4000003 + ' */\\nint zzz = 1;\\n')" "$CP/src/big.c"
@@ -178,9 +185,16 @@ FLR = re.compile(r'^<qs t="[^"]*" n="\d+\+">', re.M)
 fr_rows, fr_unread = rd('floor_rows.xml'), rd('floor_unread.xml')
 n_rows, n_unread = len(QS.findall(fr_rows)), len(QS.findall(fr_unread))
 plus_main = len(re.findall(r'^<qs t="[^"]*" n="\d+\+">', on, re.M))
-if n_rows and len(FLR.findall(fr_rows)) == n_rows and n_unread and len(FLR.findall(fr_unread)) == n_unread and rows and plus_main == 0:
+ur_readable = os.path.exists(os.path.join(W, 'ur_readable'))   # privileged reader: chmod 000 did not stop the read
+unread_ok = ur_readable or (n_unread and len(FLR.findall(fr_unread)) == n_unread)
+if ur_readable: print('  SKIP  (Q12) unreadable-NEWS arm: this user reads past chmod 000 (CAP_DAC_OVERRIDE), so the file is readable here')
+if n_rows and len(FLR.findall(fr_rows)) == n_rows and unread_ok and rows and plus_main == 0:
     P(f'(Q12) floors: 501 counted extensionless rows -> {n_rows}/{n_rows} lines n="N+"; unreadable NEWS -> {n_unread}/{n_unread}; main fixture 0 of {len(rows)}')
 else: F(f'(Q12) floors wrong: rows {len(FLR.findall(fr_rows))}/{n_rows}, unread {len(FLR.findall(fr_unread))}/{n_unread}, main + {plus_main} of {len(rows)}')
+fr_ov = rd('floor_oversize.xml'); n_ov = len(QS.findall(fr_ov))
+if n_ov and len(FLR.findall(fr_ov)) == n_ov:
+    P(f'(Q12b) a file dropped over --max-file-size -> {n_ov}/{n_ov} lines n="N+"')
+else: F(f'(Q12b) oversize drop not a floor: {len(FLR.findall(fr_ov))}/{n_ov} lines n="N+"')
 # Q13 word-bounded before the cap
 cr = rows_of(rd('cap.xml')).get('zzz')
 if cr and ('src/big.c', 2) in cr[1] and ('src/f.c', 1) in cr[1] and ('src/big.c', 1) not in cr[1]:
