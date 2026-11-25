@@ -329,9 +329,9 @@ else no "(#353 flow) negative set: only $want_neg of $want_neg_want rows stayed 
 # anywhere says why="cred-to-owner" (the withdrawn rule).
 nf_owner="$( grep -cE 'owner="[a-z]+"' < <( grep -oE '<f [^>]*>' "$TMP/nf_out.txt" ) )"
 nf_owner_crit="$( grep -cE 'sev="critical"[^>]* owner="[a-z]+"' < <( grep -oE '<f [^>]*>' "$TMP/nf_out.txt" ) )"
-if [ "$nf_owner" -ge 5 ] && [ "$nf_owner" = "$nf_owner_crit" ] && ! grep -q 'cred-to-owner' "$TMP/nf_out.txt"; then
+if [ "$nf_owner" -ge 2 ] && [ "$nf_owner" = "$nf_owner_crit" ] && ! grep -q 'cred-to-owner' "$TMP/nf_out.txt"; then
     ok "(#353 flow) $nf_owner owner= rows, all CRITICAL; no why=cred-to-owner anywhere (the owner downgrade stays withdrawn)"
-else no "(#353 flow) owner= rows $nf_owner, of them CRITICAL $nf_owner_crit (want >=5, all), or a cred-to-owner reading came back"; fi
+else no "(#353 flow) owner= rows $nf_owner, of them CRITICAL $nf_owner_crit (want >=2, all: the two literal owner URLs), or a cred-to-owner reading came back"; fi
 nf_findings="$( grep -c . < <( grep -oE '<f p="[^"]*netexfil_flow\.md:[0-9]+"' "$TMP/nf_out.txt" ) )"
 if [ "$nf_findings" = $(( want_pos_want + want_neg_want )) ]; then ok "(#353 flow) no row beyond the named ones ($nf_findings): the assignment lines and the continued line stay silent"
 else no "(#353 flow) $nf_findings rows on netexfil_flow.md, want $(( want_pos_want + want_neg_want )): $( grep -oE '<f p="[^"]*netexfil_flow\.md:[0-9]+"' "$TMP/nf_out.txt" | sed 's/.*://' | tr '\n' ' ' )"; fi
