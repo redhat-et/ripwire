@@ -593,6 +593,7 @@ for _g in \
     fornotesjsoncheck \
     foronesidecheck \
     forpagescheck \
+    forqsitescheck \
     forrankordercheck \
     forreadercallerscheck \
     forregrowcheck \

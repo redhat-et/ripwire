@@ -7,6 +7,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
+#include "forqsites.h"  // θ11 (RIPWIRE_THETA11=1): the question's own sites, inside page 1's root
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
@@ -5560,7 +5561,13 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
         // reads the corpus for them too, and the block's own scans share one read; closed after the block (the held collections go with it)
-        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{} );
+        // θ11 (forqsites.h, RIPWIRE_THETA11=1): the question's tokens are expected too, so the block below shares the batch's one read
+        const bool qsitesWanted = mode.ledger != nullptr && !cfg.json && !cfg.columnar && !cfg.candidates && rw::qsites::thetaElevenOn();
+        auto [ qsSubstr, qsWords ] = qsitesWanted ? rw::qsites::batchExpectations( cfg.forTask ) : std::pair<std::vector<std::string>, std::vector<std::string>>{};
+        std::vector<std::string> forExpected = literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{};
+        forExpected.insert( forExpected.end(), std::make_move_iterator( qsSubstr.begin() ), std::make_move_iterator( qsSubstr.end() ) );
+        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, std::move( forExpected ) );
+        forScans->expectWords( std::move( qsWords ) );
         // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder, and so does a task read
         // as words whose one code-shaped name resolved to no definition (SHORT-KEY-SENTENCE: from="sentence"); "" otherwise. Its own
         // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
@@ -5589,6 +5596,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         litAnswerIds.insert( litAnswerIds.end(), enrich.emitted.begin(), enrich.emitted.end() );   // the auto <bodies> printed
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml, litAnswerIds );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
+        if( qsitesWanted )   // θ11: computed here, inside the batch; the page it belongs on is cut later, so the ledger carries it there
+        {
+            mode.ledger->questionSites = rw::qsites::questionSitesBlock( ing, cfg.forTask, flRootArg );
+        }
         if( rw::memstats::enabled() )
         {
             rw::emitTo( stderr, "[scan] for literal_asks={} corpus_reads={} expected_unasked={}\n", forScans->asks(), forScans->reads(), forScans->unasked() );
@@ -5828,7 +5839,8 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string out = fittedAnswerFirst( d, u, fit, ask );   // `printed` is u's whole capture: checked non-null above
+    std::string out = fittedAnswerFirst( d, u, fit, ask );   // `printed` is u's whole capture: checked non-null above
+    rw::qsites::appendQuestionSites( out, u.ledger, 1 );      // θ11: its own 1,000 B beside the budget, as on the default path
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }
@@ -5908,6 +5920,7 @@ inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
     if( capturedWhole( r.out ) )
     {
         (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+        rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );   // θ11: the legend-first posture carries the same block
     }
     std::fwrite( doc.data(), 1, doc.size(), stdout );
     return r.rc;
@@ -5969,6 +5982,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             {
                 forBodyPointers( d, *early );
                 (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
+                rw::qsites::appendQuestionSites( *early, r.ledger, 1 );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
             }
@@ -5979,6 +5993,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             forBodyPointers( d, doc );
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             noteWholeAnswerOverCeiling( d.cfg, doc.size() );
+            rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
         }

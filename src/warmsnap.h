@@ -78,7 +78,8 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 5;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 6;                        // bump on ANY layout change in the three sections
+                                                                    // 6: lane theta11c — CrawlSkips gains the extensionless rows + count (θ11's grep population)
                                                                     // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
                                                                     // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
                                                                     // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
@@ -348,9 +349,9 @@ inline void writeCrawlSkips( Out& o, const CrawlSkips& s )
 {
     writeSkipRows( o, s.excluded );  writeSkipRows( o, s.unsupported );  writeSkipRows( o, s.prunedDirRows );  writeSkipRows( o, s.prunedPackageRows );
     writeSkipRows( o, s.ignored );   writeSkipRows( o, s.ignoredDirRows ); writeSkipRows( o, s.nestRefused );  writeSkipRows( o, s.extractPartial );
-    writeSkipRows( o, s.escaped );   writeSkipRows( o, s.untrackedBuild );
+    writeSkipRows( o, s.escaped );   writeSkipRows( o, s.untrackedBuild );  writeSkipRows( o, s.extensionless );
     for( const std::uint64_t n : { s.excludedFiles, s.unsupportedFiles, s.excludedDirs, s.prunedDirs, s.prunedPackages, s.ignoredFiles, s.ignoredDirs,
-                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles, s.untrackedBuildFiles } )
+                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles, s.untrackedBuildFiles, s.extensionlessFiles } )
     {
         o.u64( n );
     }
@@ -361,9 +362,9 @@ inline void readCrawlSkips( In& in, CrawlSkips& s )
 {
     readSkipRows( in, s.excluded );  readSkipRows( in, s.unsupported );  readSkipRows( in, s.prunedDirRows );  readSkipRows( in, s.prunedPackageRows );
     readSkipRows( in, s.ignored );   readSkipRows( in, s.ignoredDirRows ); readSkipRows( in, s.nestRefused );  readSkipRows( in, s.extractPartial );
-    readSkipRows( in, s.escaped );   readSkipRows( in, s.untrackedBuild );
+    readSkipRows( in, s.escaped );   readSkipRows( in, s.untrackedBuild );  readSkipRows( in, s.extensionless );
     for( std::uint64_t* n : { &s.excludedFiles, &s.unsupportedFiles, &s.excludedDirs, &s.prunedDirs, &s.prunedPackages, &s.ignoredFiles, &s.ignoredDirs,
-                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles, &s.untrackedBuildFiles } )
+                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles, &s.untrackedBuildFiles, &s.extensionlessFiles } )
     {
         *n = in.u64();
     }
