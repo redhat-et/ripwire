@@ -9,7 +9,8 @@
 #   (C0) PREMISE: the fixture answer is paged (>= 2 pages) and its full page-1 legend is over 1 KiB — without both, (C1)/(C3) are
 #        vacuous; the checker COUNTS the legend comments it read and fails on zero
 #   (C1) the default page 1's document legend (every comment after the last row block, less the row-line clauses
-#        forrowlines.h writes after paging) is <= 1024 B and contains the full-legend pointer
+#        forrowlines.h writes after paging) is the schema comment (<= 1024 B, carrying the full-legend pointer) plus at most one
+#        paging/act comment (<= 512 B)
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
@@ -19,6 +20,9 @@
 #   (C5) ROW IDENTITY under the core: following next= to the last page, every page's <d>/<t> rows joined equal the
 #        --page-bytes=0 answer's rows in order; (C5n) dropping one row makes it fail
 #   (C6) a one-page default answer carries the core legend too, and every default page is well-formed XML
+#   (C8) CORE + PAGING/ACT (owner 11-24, CLAUDE.md G4): every paging/act attribute page 1 carries is DEFINED on page 1 — the root's
+#        page= pages= withheld_bytes= continued= deferred= next= root= at=, the act line's read=, and demote's ptr= when a sigs <t> has
+#        none — on the paged page 1 and on a one-page answer; (C8n) page 1 with its paging/act comment removed fails
 #   (C7) THE CUT IS FORM-INDEPENDENT: page 1 in the line form and in the element form (RIPWIRE_NO_ROWLINES) ends at the same row
 #        (equal withheld_bytes=), so the row form stays a lossless re-spelling (rowlinescheck (L1)) and next= needs no --rows=
 set -u
@@ -73,7 +77,20 @@ def doc_legend(t):
     return "".join(kept), len(kept)
 def core_ok(t):
     leg, n = doc_legend(t)
-    return n > 0 and len(leg.encode()) <= 1024 and POINTER in leg, len(leg.encode()), n
+    cs = re.findall(r"<!--.*?-->", leg, re.S)
+    ok = 1 <= n <= 2 and len(cs[0].encode()) <= 1024 and POINTER in cs[0] and all(len(c.encode()) <= 512 for c in cs[1:])
+    return ok, len(leg.encode()), n
+PAGING = ("page", "pages", "withheld_bytes", "continued", "deferred", "next", "root", "at")
+def undefined(t):
+    """paging/act attributes page t carries with no `name=` spelled in its comments; -> (missing, how many it checked)"""
+    comments = " ".join(re.findall(r"<!--.*?-->", t, re.S))
+    root = t[: t.find(">") + 1]
+    need = [a for a in PAGING if re.search(r"\s" + a + r'="', root)]
+    m = re.search(r"<act\b[^>]*\sread=", t)
+    if m: need.append("read")
+    sg = re.search(r"<sigs\b.*?</sigs>", re.sub(r"<!--.*?-->", "", t, flags=re.S), re.S)
+    if sg and re.search(r"<t\b(?![^>]*\sptr=)[^>]*>", sg.group(0)): need.append("ptr")
+    return [a for a in need if not re.search(r"(?<![a-z_])" + a + "=", comments)], len(need)
 def root_int(t, a):
     m = re.match(r'<ctx\b[^>]*?\s' + a + r'="(\d+)"', t); return int(m.group(1)) if m else None
 core, last, knob = rd(W + "/core_1.xml"), rd(W + "/last_1.xml"), rd(W + "/knob_1.xml")
@@ -81,7 +98,8 @@ pages = int(open(W + "/pages.n").read())
 lleg, ln = doc_legend(last)
 say(pages >= 2 and len(lleg.encode()) > 1024 and ln > 0, f"(C0) premise: {pages} pages, full page-1 legend {len(lleg.encode())} B in {ln} comments (> 1 KiB)")
 okc, nb, nc = core_ok(core)
-say(okc, f"(C1) default page 1 legend {nb} B in {nc} comment(s), <= 1024 B, carries the full-legend pointer")
+cs = [len(c.encode()) for c in re.findall(r"<!--.*?-->", doc_legend(core)[0], re.S)]
+say(okc, f"(C1) default page 1 legend {nb} B in {nc} comment(s) {cs}: schema <= 1024 B with the full-legend pointer, paging/act <= 512 B")
 say(not core_ok(core.replace(POINTER, ""))[0], "(C1n) the checker fails page 1 with the pointer removed")
 say(not core_ok(last)[0], "(C1n) the checker fails the full-legend (--legend=last) page 1")
 say("<!-- page=K of pages=N:" in last and len(lleg.encode()) > 1024, "(C2) --legend=last page 1 carries the page clause and the full legend")
@@ -103,6 +121,11 @@ for p in sorted(glob.glob(W + "/core_*.xml")) + [W + "/onepage.xml"]:
     r = subprocess.run(["xmllint", "--noout", p], capture_output=True)
     if r.returncode: say(False, f"(C6) {p.rsplit('/',1)[1]} is not well-formed: {r.stderr[:200]!r}")
 say(True, "(C6) every default page parsed (xmllint)")
+for name, t in (("paged page 1", core), ("one-page answer", one)):
+    miss, n = undefined(t)
+    say(n >= 3 and not miss, f"(C8) {name}: {n} paging/act attributes carried, undefined: {miss}")
+pa = [c for c in re.findall(r"<!--.*?-->", doc_legend(core)[0], re.S) if "withheld_bytes=" in c]
+say(len(pa) == 1 and undefined(core.replace(pa[0], ""))[0] != [], "(C8n) page 1 with its paging/act comment removed fails (C8)")
 ew = root_int(core, "withheld_bytes")
 say(cw is not None and cw == ew, f"(C7) one cut in both row forms: withheld_bytes lines {cw} == elements {ew}")
 sys.exit(1 if bad else 0)

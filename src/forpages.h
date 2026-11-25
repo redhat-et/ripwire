@@ -213,8 +213,8 @@ struct PageAt
 // θ5 (PLAN_071 §1.5, lane THETA5 2026-11-24): THE CORE FIRST-CALL LEGEND. Page 1's document legend was 29 % of page 1 and never
 // came before a completing byte (offline, tmp/orch-1124/l1-harness theta5: 165/86/7 -> 168/83/7 complete/partial/wrong, page 1
 // -7.5 %, 0 rows lose an item). The default CLI page 1 keeps the FIRST (schema) comment of the document legend, cut at a "; "
-// clause boundary so it and the pointer to the full legend fit kCoreLegendBytes; the other document-legend comments and the page
-// clause leave page 1, and the bytes they held go to rows (coreEnds). The row-line clauses (forrowlines.h) are written after
+// clause boundary so it and the pointer to the full legend fit kCoreLegendBytes, plus one short paging/act comment (pagingActLegend);
+// the long forms of the other document-legend comments and the page clause leave page 1, and the bytes they held go to rows (coreEnds). The row-line clauses (forrowlines.h) are written after
 // paging and stay whole. The full legend is one call away, named in the core: the same call with --legend=last (an XML comment
 // cannot spell the dashes), which serves the same answer-first pages with today's legend. MCP and every spelled posture keep it.
 inline constexpr std::size_t      kCoreLegendBytes   = 1024;
@@ -227,7 +227,33 @@ inline constexpr std::string_view kFullLegendPointer = "; FULL LEGEND (every def
     return legendDefaulted && std::getenv( "RIPWIRE_NO_CORE_LEGEND" ) == nullptr;
 }
 
-[[nodiscard]] inline std::string coreLegend( std::string_view legend )
+// OWNER 11-24 ("core + paging/act", CLAUDE.md G4): the core also DEFINES what an agent needs to page and to act — page= pages=
+// withheld_bytes= continued= deferred= next= on a page, root= (and at=), the act line's read=, and demote when the answer carries
+// it — in one short comment after the schema cut. Each clause rides only when the full legend has its long form (an answer with no
+// act line defines none). Every other definition stays one pointer away.
+inline constexpr std::string_view kCorePageClause =
+    "page=K of pages=N: this answer-first page; withheld_bytes= row bytes on later pages; continued= the section going on, deferred="
+    " sections starting later; next= the next page (the same call); ";
+inline constexpr std::string_view kCoreRootClause   = "root= the crawl root, p= relative to it; at= this commit; ";
+inline constexpr std::string_view kCoreActClause    = "act read= P:L-E ranges of the top rows: Read ALL in ONE turn (parallel ranged Reads); ";
+inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no ptr= is a lower same-file sibling (p= sym= r=), not the answer; ";
+[[nodiscard]] inline std::string pagingActLegend( std::string_view legend, bool paged )
+{
+    std::string body;
+    body += paged ? kCorePageClause : std::string_view();
+    body += legend.find( "<!-- root= is the crawl root" ) != std::string_view::npos ? kCoreRootClause : std::string_view();
+    body += legend.find( "<!-- the act line:" ) != std::string_view::npos ? kCoreActClause : std::string_view();
+    body += legend.find( "<!-- demote:" ) != std::string_view::npos ? kCoreDemoteClause : std::string_view();
+    if( body.empty() )
+    {
+        return body;
+    }
+    body.resize( body.size() - 2 );   // the last "; "
+    return "<!-- " + body + " -->";
+}
+
+// The first (schema) comment cut at a "; " clause boundary so it and the full-legend pointer fit kCoreLegendBytes.
+[[nodiscard]] inline std::string coreSchema( std::string_view legend )
 {
     constexpr std::string_view open = "<!--", close = " -->";
     const std::size_t          end  = legend.find( "-->" );
@@ -243,6 +269,11 @@ inline constexpr std::string_view kFullLegendPointer = "; FULL LEGEND (every def
     std::string out( head );
     out.append( kFullLegendPointer ).append( close );
     return out;
+}
+
+[[nodiscard]] inline std::string coreLegend( std::string_view legend, bool paged )
+{
+    return coreSchema( legend ) + pagingActLegend( legend, paged );
 }
 // What a document's price is read from: where the root's est_tokens= attribute sits (the space before it through its closing
 // quote) and the bytes of its <bodies> section (priced at kBytesPerTokenBody; the rest is markup). nullopt: the <ctx> root's open
@@ -400,7 +431,7 @@ inline void markActLine( Stream& st )
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
     const std::string legend = scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone );   // less what travels
-    out += ask.coreLegend ? coreLegend( legend ) : legend + pageClause( ask.pageBytes );   // θ5: the core legend and no page clause
+    out += ask.coreLegend ? coreLegend( legend, true ) : legend + pageClause( ask.pageBytes );   // θ5: the core legend, its short page clause
     out.append( v.substr( st.closeAt ) );
     return out;
 }
@@ -504,7 +535,7 @@ inline void coreWhole( std::string& doc, const Stream& st )
 {
     const std::size_t legendAt = st.blocks[ st.streamBlocks - 1 ].end;
     std::string       out( doc, 0, legendAt );
-    out += coreLegend( std::string_view( doc ).substr( legendAt, st.closeAt - legendAt ) );
+    out += coreLegend( std::string_view( doc ).substr( legendAt, st.closeAt - legendAt ), false );
     out.append( doc, st.closeAt );
     if( out.size() < doc.size() )
     {
