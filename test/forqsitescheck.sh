@@ -67,7 +67,7 @@ rw "$POS" --page-bytes=1500:1 >"$WORK/page1.xml"
 rw "$POS" --page-bytes=1500:2 >"$WORK/page2.xml"
 # (V) the posture --version names; (I) the =0 answer against a binary from before the block existed
 "$BIN" --version >"$WORK/v_def.txt" 2>&1
-"$BIN" --version >"$WORK/v_on1.txt" 2>&1
+RIPWIRE_THETA11=1 "$BIN" --version >"$WORK/v_on1.txt" 2>&1
 RIPWIRE_THETA11=0 "$BIN" --version >"$WORK/v_off.txt" 2>&1
 if [ -n "${BASE_BIN:-}" ]; then
     ( cd "$FX" && "$BASE_BIN" "$FX" --no-cache "--for=$POS" 2>/dev/null ) >"$WORK/base_pos.xml"
@@ -167,7 +167,7 @@ else: P(f'(D) default on: a plain call carries {len(rows)} <qs> elements and equ
 vd, v1, v0 = rd('v_def.txt'), rd('v_on1.txt'), rd('v_off.txt')
 vok = [('default', vd, 'qsites=on'), ('=1', v1, 'qsites=on'), ('=0', v0, 'qsites=off')]
 vbad = [n for n, t, want in vok if not t.startswith('ripwire ') or len(re.findall(r'\bqsites=(on|off)\b', t)) != 1 or want not in t]
-if vbad: F(f'(V) --version posture wrong for {vbad}: {vd.strip()!r} / {v0.strip()!r}')
+if vbad: F(f'(V) --version posture wrong for {vbad}: {vd.strip()!r} / {v1.strip()!r} / {v0.strip()!r}')
 else: P(f'(V) --version: qsites=on (default, =1), qsites=off (=0): {len(vok)} of {len(vok)}')
 # I: =0 == a binary from before the block existed
 if not os.path.exists(os.path.join(W, 'base_pos.xml')): print('  SKIP  (I) BASE_BIN unset')
