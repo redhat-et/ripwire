@@ -48,6 +48,8 @@
 #       fenced `curl curl …` line scans in bounded time (the regex was quadratic: >60 s); (f3) an abandoned match
 #       fails CLOSED — a CRITICAL SCAN-INCOMPLETE:regex-abandoned finding at exit 2, never a clean exit 0 and never an
 #       abort inside wrap's noexcept scan.
+#       (f4) #353 flow: the document binding pass and the curl destination proof finish inside a 20 s time limit on
+#       hostile shapes (50,000 assignments, 40,000 destination words, a 3,000-fold expansion) and prove no host there.
 #   (g) THE STACK BOUND — std::regex compiles by recursion, and a 20,000-byte literal --regex died with SIGBUS in a
 #       512 KiB grep worker. A pattern over kRegexMaxPatternBytes (2,048) or nesting groups deeper than
 #       kRegexMaxGroupDepth (64) is refused by name; exactly at each limit it still compiles.
@@ -700,6 +702,36 @@ else no "(f2) the 200,000-byte curl-run line: exit $rc (TIMEOUT means the scan i
 rc="$( capRun 20 "$TMP/f2h.out" "$TMP/f2h.err" --scan-skill="$SK/dos_hit.md" )"
 if [ "$rc" = 2 ] && grep -q 'rule="EXFILTRATE:net-exfil"' "$TMP/f2h.out"; then ok "(f2) the same line ending in \$SECRET is still caught as net-exfil (exit 2), bounded"
 else no "(f2) the long net-exfil line: exit $rc, finding $( grep -o 'rule="[^"]*"' "$TMP/f2h.out" | head -1 )"; fi
+# (f4) #353 flow: the document signal pass and the curl destination proof finish inside a 20 s time limit (a limit, not
+# a proof of linear scaling). Three hostile shapes, each a bare CRITICAL row (no dest=, owner= or why=: nothing is
+# proved): 50,000 assignments on one line before a `$U` curl (the doc-wide signal pass cuts it; a $VAR destination is
+# never resolved), a curl line with 40,000 `$V` destination words, and one with 40,000 LITERAL http://127.0.0.1/ words
+# (past kFlowMaxDestinations; without that cap the row would prove 127.0.0.1 and grade WARN local-dest). The CRITICAL row
+# must be the curl on line 4 (the fence puts the assignment line on line 3), and no net-exfil row may grade WARN. A
+# control, flow_literal_ok, is the same literal shape with 16 words (at the cap): it must prove dest="127.0.0.1", so the
+# capped arm does reach the proof.
+python3 - "$SK" <<'PY2'
+import sys
+sk = sys.argv[1]
+fence = lambda body: "# probe\n```bash\n" + body + "\n```\n"
+open(f"{sk}/flow_sites.md", "w").write(fence("U=https://api.github.com; " * 50000 + "\n" + 'curl "$U/user" -H "Authorization: Bearer $GITHUB_TOKEN"'))
+open(f"{sk}/flow_dests.md", "w").write(fence('V=https://api.github.com\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" ' + "$V " * 40000))
+literal = lambda n: fence('L=1\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" ' + "http://127.0.0.1/ " * n)
+open(f"{sk}/flow_literal.md", "w").write(literal(40000))
+open(f"{sk}/flow_literal_ok.md", "w").write(literal(16))
+PY2
+for flowCase in flow_sites flow_dests flow_literal; do
+    rc="$( capRun 20 "$TMP/$flowCase.out" "$TMP/$flowCase.err" --scan-skill="$SK/$flowCase.md" )"
+    if [ "$rc" = 2 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="critical"/>' "$TMP/$flowCase.out" \
+       && ! grep -qE 'rule="EXFILTRATE:net-exfil" [^>]*(dest|owner|why)=' "$TMP/$flowCase.out" \
+       && ! grep -qE 'rule="EXFILTRATE:net-exfil" sev="warn"' "$TMP/$flowCase.out"; then
+        ok "(f4) #353 flow, $flowCase: a bare CRITICAL row (no dest=, owner=, why=) inside the 20 s limit"
+    else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = over the 20 s limit), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
+done
+rc="$( capRun 20 "$TMP/flow_literal_ok.out" "$TMP/flow_literal_ok.err" --scan-skill="$SK/flow_literal_ok.md" )"
+if [ "$rc" = 1 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="warn" why="local-dest" dest="127.0.0.1"/>' "$TMP/flow_literal_ok.out"; then
+    ok "(f4) #353 flow, flow_literal_ok: 16 literal local URLs (at the cap) prove dest=\"127.0.0.1\", WARN local-dest: the capped arm reaches the proof"
+else no "(f4) #353 flow, flow_literal_ok: exit $rc (want 1), $( grep -o '<f [^>]*>' "$TMP/flow_literal_ok.out" | head -1 | cut -c1-200 )"; fi
 printf '# probe\n\nplain prose line\n' >"$SK/clean.md"
 if [ "$FAULTS" -eq 1 ]; then
     rc="$( RIPWIRE_FAULT_REGEX_MATCH=1 capRun 20 "$TMP/f3.out" "$TMP/f3.err" --scan-skill="$SK/clean.md" )"
