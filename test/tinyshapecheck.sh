@@ -53,6 +53,7 @@
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # (O) builds a git repo: no inherited GIT_DIR/agent homes (gitenvhermeticcheck (D))
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; }
