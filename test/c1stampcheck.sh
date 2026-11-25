@@ -25,7 +25,7 @@
 #     C7 a worktree whose .git is a FILE: served from the second call, invalidated by a commit inside it
 #     C8 HOME moves (another global config): re-asked
 #     C9 GIT_DIR (with GIT_WORK_TREE) names another repository, a copy one commit ahead: the record is bypassed, git is
-#        asked, and at= is the other repository's HEAD, as in a cold run
+#        asked, and at= is the other repository's HEAD, as in a cold run; GIT_EDITOR / GIT_PAGER (inert) keep it served
 #     C10 a flipped byte, a truncation and another version in the record file: each refused cleanly
 #   D   a directory that is not a git repo: no git process at all, warm or cold, and no record written.
 #   E   the dirty bit is live: an untracked file appears (+dirty on the very next call) and disappears (gone on the next).
@@ -153,7 +153,9 @@ arm_gitdir()   { local r="$1" c="$2" t="$3"; shift 3; local o="$r-other"
                  cold "$r" "$t.gitdir.cold" GIT_DIR="$o/.git" GIT_WORK_TREE="$r" "$@"
                  chk "$( eqcold "$t.gitdir" "$t.gitdir.cold" )" "with GIT_DIR naming another repository the answer equals a cold run's"
                  chk "$( atOf "$TMP/$t.gitdir.out" | grep -q "^$want" && echo 1 || echo 0 )" "and at= is that repository's HEAD ($want: $( atOf "$TMP/$t.gitdir.out" ))"
-                 chk "$( [ "$LAST_STAMP" -gt 0 ] && echo 1 || echo 0 )" "the record was bypassed: git was asked ($LAST_STAMP)"; }
+                 chk "$( [ "$LAST_STAMP" -gt 0 ] && echo 1 || echo 0 )" "the record was bypassed: git was asked ($LAST_STAMP)"
+                 call "$r" "$c" "$t.inert" GIT_EDITOR=true GIT_PAGER=cat "$@"
+                 chk "$( [ "$LAST_STAMP" = 0 ] && echo 1 || echo 0 )" "an inert GIT_EDITOR / GIT_PAGER does not bypass the record ($LAST_STAMP)"; }
 arm_record()   { local r="$1" c="$2" t="$3"; shift 3; prime "$r" "$c" "$t" "$@"
                  local f; f="$( find "$c" -name 'ripwire-qstamp-*.bin' | head -1 )"
                  chk "$( [ -n "$f" ] && echo 1 || echo 0 )" "a STAMP record exists in the cache directory"

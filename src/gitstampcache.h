@@ -20,8 +20,9 @@
 //     worktree's config.worktree, the global and system files, the standard ones that do not exist yet); any of them
 //     that mentions `include` means no record, since an include can name a file that does not exist yet;
 //   * the environment — HOME, XDG_CONFIG_HOME, PATH, DEVELOPER_DIR and which git PATH finds; the process uid and the
-//     owners of the top level and the gitdir (git's safe.directory check). Any GIT_* variable but GIT_TRACE* means the
-//     record is neither read nor written: GIT_DIR, GIT_CEILING_DIRECTORIES and their kin redirect discovery itself.
+//     owners of the top level and the gitdir (git's safe.directory check). Any GIT_* variable outside a short inert list
+//     (tracing, editor, pager, prompt, transport: kInertGitVarPrefixes) means the record is neither read nor written:
+//     GIT_DIR, GIT_CEILING_DIRECTORIES and their kin redirect discovery itself.
 // The command line is the rest of the key: the hardened prefix, the filter pins, the root's spelling, the resolved window
 // and the walk budget are all in it (gitstampstore.h), so a question asked differently is a different question.
 //
@@ -108,7 +109,15 @@ enum class StampMutant : std::uint8_t
 inline constexpr std::string_view kStampMutantNames[] = { "trust", "gitenv" };   // the enum's order after None
 inline StampMutant stampMutant() { return StampMutant( envChoice( "RIPWIRE_TEST_GITSTAMP_MUTANT", kStampMutantNames ) ); }
 
-// Any GIT_* variable but the trace family redirects git's discovery or configuration: no record is read or written.
+// The GIT_* variables no answer here reads: tracing, and the programs git starts only for interactive commands (an editor,
+// a pager, a prompt, a transport) and the shell prompt's own switches. Agent hosts export some of them into every child
+// (GIT_EDITOR=true is common), and a bypass on them would leave the record unused exactly where it pays.
+inline constexpr std::string_view kInertGitVarPrefixes[] = { "GIT_TRACE", "GIT_EDITOR=", "GIT_SEQUENCE_EDITOR=", "GIT_PAGER=", "GIT_TERMINAL_PROMPT=",
+                                                             "GIT_ASKPASS=", "GIT_SSH=", "GIT_SSH_COMMAND=", "GIT_SSH_VARIANT=", "GIT_MERGE_AUTOEDIT=",
+                                                             "GIT_MERGE_VERBOSITY=", "GIT_PS1_" };
+
+// Every other GIT_* variable may redirect git's discovery or configuration (GIT_DIR, GIT_CEILING_DIRECTORIES, GIT_CONFIG_*,
+// GIT_REPLACE_REF_BASE and kin): no record is read or written.
 inline bool isBypassedByEnvironment()
 {
     if( std::getenv( "RIPWIRE_NO_GITSTAMP_CACHE" ) != nullptr )
@@ -122,7 +131,7 @@ inline bool isBypassedByEnvironment()
     for( char** env = os::environment(); env != nullptr && *env != nullptr; ++env )
     {
         const std::string_view var = *env;
-        if( var.starts_with( "GIT_" ) && !var.starts_with( "GIT_TRACE" ) )
+        if( var.starts_with( "GIT_" ) && std::ranges::none_of( kInertGitVarPrefixes, [ & ]( std::string_view p ) { return var.starts_with( p ); } ) )
         {
             return true;
         }
