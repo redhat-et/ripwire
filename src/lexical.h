@@ -20,6 +20,7 @@
 #include "infra/strkern.h"      // Byteset256 — the head set below is that type, not a second bitmap
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 #include "infra/namesplit.h"     // hasIdentifierShape — the ONE camel/snake predicate chooseForRanker shares with mention.h
+#include "forrouteswitch.h"       // routing::routingOn — the file-gap ground of confidence= (RIPWIRE_ROUTING=0 off)
 #include "infra/charconvcompat.h" // rw::parseFloating — envKnob's full-token finite parse of a RIPWIRE_* knob
 #include "infra/pctenc.h"        // appendPercentEncoded — a refused RIPWIRE_TERMMARGIN value echoed on one line
 
@@ -3145,6 +3146,40 @@ struct ForConfidence
     int         marginPct = 0;
 };
 
+// ── THE FILE-GAP GROUND (lane ROUTING, 11-25; switch forrouteswitch.h, RIPWIRE_ROUTING=0 off) ──────────────────────────────────
+// WHY. A many-term question (a commit message, a pasted paragraph) sums BM25 over many terms, so its head is smooth rank to rank:
+// on GA1 + GA3 DEV (181 --for rows) 122 heads had no 20 % ADJACENT step at all and read low, while 51 of them had the right file at
+// r=1. What does separate right from wrong there is how far the best row of ANOTHER file trails the top row: measured as a ranking
+// statistic over the head (AUC 0.71 for "the r=1 file is a gold file", against 0.64 for today's level), and as a ground beside the
+// cliff, "high" goes from 59 rows (73 % right) to 71 rows (73 % right), recall 0.46 -> 0.55 at the same precision. The threshold is
+// the cliff's own 20 % (kMinCliffDrop), not a tuned number: 0.15-0.25 move it by a few rows either way.
+// WHAT. The relative gap between the top score and the best score of a row in a different file, over the served head in rank order;
+// -1 when the head holds no second file (nothing to compare: no ground).
+inline constexpr int kForFileGapMinPct = 20;
+
+[[nodiscard]] inline int headFileGapPct( const std::vector<float>& rank, std::span<const NodeId> head, const std::vector<Symbol>& symbols ) noexcept
+{
+    if( head.empty() || head[0] >= rank.size() || head[0] >= symbols.size() || !( rank[ head[0] ] > 0.f ) )
+    {
+        return -1;
+    }
+    const double      top     = double( rank[ head[0] ] );
+    const std::uint32_t topFile = symbols[ head[0] ].fileId;
+    for( const NodeId id : head.subspan( 1 ) )
+    {
+        if( id < symbols.size() && id < rank.size() && symbols[id].fileId != topFile )
+        {
+            return int( 100.0 * ( top - double( std::max( rank[id], 0.f ) ) ) / top + 0.5 );
+        }
+    }
+    return -1;
+}
+
+// The legend clause of file_gap_pct= (present-only: the attribute rides only on a root the ground made high). No "--" (XML comment).
+inline constexpr std::string_view kForFileGapNote =
+    " [file_gap_pct= how far the best row of any other file trails r=1, %; at 20 or more it grounds confidence=high on its own]";
+inline constexpr std::string_view kForCompactFileGapClause = " [file_gap_pct=: other files trail r=1 by this %; >=20 grounds high]";
+
 // homonymDecline: true when isAdaptiveHomonymDecline fired on this same cut — confidence must not claim
 // "high" on a cliff driven by tie-break order rather than relevance (a decline plus a high-confidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
@@ -3153,12 +3188,16 @@ struct ForConfidence
 // anchorUnproven (subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file (CONFIDENCE-ANCHOR), or
 // whose ranked head is not the anchor (FRAME-HIGH-CONFIDENCE). The drop may be real, but it says the name matched, not that the answer
 // is here: low, and route= says why.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false )
+// fileGapPct (headFileGapPct; -1 = not measured): the FILE-GAP ground above — a head with no cliff is still high when the best row of
+// another file trails r=1 by kForFileGapMinPct or more. Never over a decline or an unproven anchor. Only when routing::routingOn().
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false,
+                                          int fileGapPct = -1 )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
     const bool sharpHead = !cut.hitCeiling || servedComplete;
-    out.level = ( homonymDecline || anchorUnproven || !sharpHead ) ? "low" : "high";
+    const bool fileGround = !sharpHead && fileGapPct >= kForFileGapMinPct && routing::routingOn();
+    out.level = ( homonymDecline || anchorUnproven || !( sharpHead || fileGround ) ) ? "low" : "high";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );
@@ -3167,6 +3206,13 @@ inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int served
     // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
     // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
     out.note = kForConfidenceNote;
+    if( fileGround && !homonymDecline && !anchorUnproven )
+    {
+        // present-only: a root the cliff made high (or that stayed low) is byte-identical to the pre-ground one
+        rw::formatTo( attrBuf, sizeof( attrBuf ), " file_gap_pct=\"{}\"", fileGapPct );
+        out.attrs += attrBuf;
+        out.note += kForFileGapNote;
+    }
     if( homonymDecline )
     {
         // present-only (fires only on the decline itself — byte-identical elsewhere): margin_pct above is

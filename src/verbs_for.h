@@ -1037,11 +1037,22 @@ inline bool forRouteAttrPresent( const ForLensHeaderParts& p, bool withRouteAttr
     return withRouteAttr && p.rootOpenStr.find( " route=\"" ) != std::string_view::npos;
 }
 
-// …and the THIN question, asked the same way: does this root carry L-W's coverage=? Four sites spelled the
-// same find() (two legend appends and two dropped-note selections), which is three chances to change it in two.
-inline bool forCoverageAttrPresent( const ForLensHeaderParts& p ) noexcept
+// …and the present-only confidence attributes, asked the same way: does this root carry L-W's coverage= (the THIN question) or
+// ROUTING's file_gap_pct= (lexical.h headFileGapPct)? Read off the built attributes, so a clause can only appear beside the
+// attribute it defines. `attrOpen` is the attribute's opening spelling, e.g. kForCoverageAttrOpen.
+inline constexpr std::string_view kForCoverageAttrOpen = " coverage=\"";
+inline constexpr std::string_view kForFileGapAttrOpen  = " file_gap_pct=\"";
+inline bool forConfidenceAttrPresent( const ForLensHeaderParts& p, std::string_view attrOpen ) noexcept
 {
-    return p.confidenceAttrs.find( " coverage=\"" ) != std::string_view::npos;
+    return p.confidenceAttrs.find( attrOpen ) != std::string_view::npos;
+}
+
+// The compact dialect's confidence clause bytes as appendCompactForLegend emits them: the clause, plus coverage='s and file_gap_pct='s
+// short clauses when the root carries them. runForLensPass subtracts exactly this from the confidence exemption (P1 / L7).
+[[nodiscard]] inline std::size_t compactConfidenceClauseBytes( bool coverageOn, std::string_view confidenceAttrs ) noexcept
+{
+    return kForCompactLegendConfidence.size() + ( coverageOn ? rw::kForCompactCoverageClause.size() : 0 )
+         + ( confidenceAttrs.find( kForFileGapAttrOpen ) != std::string_view::npos ? rw::kForCompactFileGapClause.size() : 0 );
 }
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, bool withRouteAttr, std::string_view extraNotes )
@@ -1061,9 +1072,13 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     if( !p.confidenceNote.empty() )
     {
         h += kForCompactLegendConfidence;
-        if( forCoverageAttrPresent( p ) )
+        if( forConfidenceAttrPresent( p, kForCoverageAttrOpen ) )
         {
             h += rw::kForCompactCoverageClause;   // L-W: defined where the root carries it, in this dialect's short form
+        }
+        if( forConfidenceAttrPresent( p, kForFileGapAttrOpen ) )
+        {
+            h += rw::kForCompactFileGapClause;   // ROUTING: the file-gap ground, where the root carries it
         }
     }
     if( p.compactBundle )
@@ -3852,7 +3867,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         rw::rowFeaturesSurface( { .rank = lensRank, .surface = lensSurfaceIds, .evidence = lr.evidence, .anchors = routeAnchorDefs, .rootArg = flRootArg } );   // ROW-FEATURE-DUMP
 
-        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource, rw::headFileGapPct( lensRank, lensSurfaceIds, ing.symbols ) );
         // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
         // Another head reads low, and route= names the row that heads instead (written before any consumer below reads route=).
         // The head is the row the answer prints as r=1 (rw::routeEmittedHead: code above docs moves Markdown rows below the code rows).
@@ -4466,7 +4481,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // (appendCompactForLegend), so the exemption must subtract what was emitted — the full constants left the
         // ledger 64 B short and the subtraction below underflowed (UBSan: "297 - 361 cannot be represented").
         const bool        compactLegendOn      = cfg.legend == "compact";
-        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
+        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : compactConfidenceClauseBytes( forCoverageOn, forConf.attrs ) )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )

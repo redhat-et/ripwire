@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <string_view>
 
+#include "forrouteswitch.h"   // routing::routingOn — the edit-file form's default (RIPWIRE_ROUTING=0 off)
+
 namespace rw::bodyptr
 {
 
@@ -20,11 +22,19 @@ inline constexpr std::string_view kBodiesPointer = "pointer";
     return bodies.empty() ? std::getenv( "RIPWIRE_BODY_POINTERS" ) != nullptr : bodies == kBodiesPointer;
 }
 
-// THE EDIT-FILE FORM (lane θ17, default OFF): only the bodies in the file an edit task will edit become pointer rows (forbodyptr.h
-// pointEditBodies). An environment knob only, below both switches above: --bodies= typed, or RIPWIRE_BODY_POINTERS set, decides first.
+// THE EDIT-FILE FORM (lane θ17): only the bodies in the file an edit task will edit become pointer rows (forbodyptr.h
+// pointEditBodies, which also asks isEditTask). Below both switches above: --bodies= typed, or RIPWIRE_BODY_POINTERS set, decides first.
+// ON by default since lane ROUTING (11-25, owner "ON in one PR"; GA1 DEV: 0 items lost, Reads-saved unchanged, page 1 −3 %); it follows
+// RIPWIRE_ROUTING (forrouteswitch.h: =0 off, byte-identical to the θ17 OFF answer). RIPWIRE_BODIES_EDIT, when set, overrides it: =0 off,
+// any other value on (the θ17 knob, kept for its A/B arms).
 [[nodiscard]] inline bool bodyEditFormOn( std::string_view bodies = {} ) noexcept
 {
-    return bodies.empty() && std::getenv( "RIPWIRE_BODY_POINTERS" ) == nullptr && std::getenv( "RIPWIRE_BODIES_EDIT" ) != nullptr;
+    if( !bodies.empty() || std::getenv( "RIPWIRE_BODY_POINTERS" ) != nullptr )
+    {
+        return false;
+    }
+    const EnvNumber knob = readEnvNumber( "RIPWIRE_BODIES_EDIT" );
+    return knob.set ? !( knob.parsed && knob.value == 0 ) : routing::routingOn();
 }
 
 }   // namespace rw::bodyptr
