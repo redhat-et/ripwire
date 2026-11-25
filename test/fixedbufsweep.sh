@@ -99,7 +99,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 # ── (S1)+(S2)+(S3)+(S4): the static sweep ───────────────────────────────────────────────────────────────
 python3 - "$ROOT" <<'PY'
-import os, re, subprocess, sys
+import bisect, os, re, subprocess, sys
 
 ROOT = sys.argv[1]
 bad  = 0
@@ -310,8 +310,44 @@ NUMERIC_ONLY = {
 STRLIT = re.compile( r'"(?:[^"\\]|\\.)*"' )
 CONV   = re.compile( r'%%|%[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|j|z|t|L)?(?P<conv>[diouxXeEfgGaAcsp])' )
 
+# ── which matches are CALLS: a call written inside a comment or a string literal is prose, not a call site,
+#    so rewording it must not move a row (CR721 r2; such lines still count in `mentions`). r2 decided that
+#    by "`//` earlier on the line", which skipped a REAL call after a block comment holding a URL
+#    (CR721 r3). So the file is lexed once into its comment and literal spans -- `//`, `/* */` across lines,
+#    "..." and '...' with escapes, R"d(...)d" raw strings -- and a match counts only when it starts in code.
+#    A pp-number (`200'000`, `0x6162'7365`) is consumed whole so a digit separator never opens a char literal.
+CALL    = re.compile( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(" )
+NONCODE = re.compile( r'(?P<lit>(?:\b(?:u8|[uUL])?R"(?P<d>[^()\\\s"]{0,16})\(.*?\)(?P=d)")'
+                      r'|"(?:[^"\\\n]|\\.)*"?|\'(?:[^\'\\\n]|\\.)*\'?)'
+                      r'|(?P<cmt>//[^\n]*|/\*.*?(?:\*/|\Z))'
+                      r'|\d[\w\']*|[A-Za-z_]\w*', re.S )
+def code_calls( src ):
+    spans  = [ t.span() for t in NONCODE.finditer( src ) if t.group( "lit" ) is not None or t.group( "cmt" ) is not None ]
+    starts = [ a for a, _ in spans ]
+    for m in CALL.finditer( src ):
+        k = bisect.bisect_right( starts, m.start() ) - 1
+        if k >= 0 and m.start() < spans[k][1]: continue
+        yield m
+
+# control arm: the r3 false negative must count, and the comment/literal-only rows must stay dropped.
+CONTROL = [ ( 1, '/* https://example.org */ rw::formatTo(buf, "[REDACTED]", value);' ),
+            ( 1, 'const char* u = "http://x"; rw::formatTo(buf, "{}", u);' ),
+            ( 1, 'n = 200\'000; snprintf(buf, sizeof buf, "%d", n);' ),
+            ( 0, '// rw::formatTo(buf, "{}", value);' ),
+            ( 0, 'x = 1;  // see formatTo( buf ) below' ),
+            ( 0, '/* snprintf(buf, n, "%s", s) */' ),
+            ( 0, '/* a block comment\n   naming rw::formatTo( buf, ... ) on its second line */' ),
+            ( 0, 'puts( "call formatTo( buf ) yourself" );' ) ]
+missed = [ ( n, s ) for n, s in CONTROL if sum( 1 for _ in code_calls( s ) ) != n ]
+if missed:
+    for n, s in missed:
+        no_( "(S1) control: %r must count %d call(s) -- the comment/literal lexer misjudges it" % ( s, n ) )
+else:
+    ok_( "(S1) control: a call after a closed /* */ or a \"//\" in a literal counts; %d comment/literal-only lines count 0"
+         % sum( 1 for n, _ in CONTROL if n == 0 ) )
+
 # ── re-derive every snprintf call in src/, balanced-paren, so a call broken across lines is one call ─────
-files = subprocess.run( [ "git", "ls-files", "src/" ], cwd = ROOT, capture_output = True, text = True ).stdout.split()
+files =subprocess.run( [ "git", "ls-files", "src/" ], cwd = ROOT, capture_output = True, text = True ).stdout.split()
 found    = {}
 formsAt  = {}
 mentions = 0
@@ -320,11 +356,7 @@ for rel in files:
     if rel == "src/infra/emit.h": continue   # defines the primitives; its buf is a parameter, not a call site
     src = open( os.path.join( ROOT, rel ), "rb" ).read().decode( "utf-8", errors = "replace" )
     mentions += sum( 1 for L in src.split( "\n" ) if ( "snprintf" in L or "formatTo" in L ) )
-    for m in re.finditer( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(", src ):
-        # CR721 r2: a call written inside a comment is prose, not a call site -- rewording it must not move a row.
-        # Such lines still count in `mentions` above.
-        lineStart = src.rfind( "\n", 0, m.start() ) + 1
-        if "//" in STRLIT.sub( '""', src[ lineStart : m.start() ] ): continue
+    for m in code_calls( src ):
         j = m.end() - 1
         depth = 0;  instr = False;  inchr = False;  esc = False
         while j < len( src ):
