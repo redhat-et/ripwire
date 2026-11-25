@@ -2773,15 +2773,15 @@ inline std::string gitOneLine( const std::string& root, const std::string& tail 
     return popenTrimmed( gitOneLineCmd( root, tail ) );
 }
 
-// C1-STAMP (gitstampstore.h): gitOneLine for a question a STAMP record may answer. The stored value is the trimmed output
-// exactly as popenTrimmed returned it, recorded only when `isRecordable` accepts it (popenTrimmed drops the exit status,
-// so the answer's own shape is the success test). Unarmed — every run but a one-shot --for — this is gitOneLine.
 // git's own spelling of a boolean answer (`rev-parse --is-shallow-repository`), the only shape worth recording for one.
 inline bool isGitBoolAnswer( std::string_view out ) noexcept
 {
     return out == "true" || out == "false";
 }
 
+// C1-STAMP (gitstampstore.h): gitOneLine for a question a STAMP record may answer. The stored value is the trimmed output
+// exactly as popenTrimmed returned it, recorded only when `isRecordable` accepts it (popenTrimmed drops the exit status,
+// so the answer's own shape is the success test). Unarmed — every run but a one-shot --for — this is gitOneLine.
 inline std::string gitOneLineStamped( const std::string& root, const std::string& tail, bool ( *isRecordable )( std::string_view ) )
 {
     const std::string cmd = gitOneLineCmd( root, tail );
