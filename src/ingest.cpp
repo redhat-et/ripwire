@@ -12,6 +12,7 @@
 #include "arch.h"              // T5: relForHash — root-relative path key, reused for cache portability
 #include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
 #include "warmsnap_model.h"    // the warm snapshot: ingest() replays the crawl from it, returns the stored model, and keys what main() stores
+#include "verbfs.h"            // VERB-FS: the index main() armed a snapshot for also arms the verb-time file-system record
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/tsparent.h"    // rw::parentOf - ts_node_parent answered from one cached root-descent path per file (parent-carry lane)
@@ -452,6 +453,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         snap->blobPath   = std::string( cacheFile );
         snap->startNs    = wallClockNs();
         snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
+        verbfs::arm( rootDir, snap->rootKey );                     // the same run, root and cache directory (src/verbfs.h)
         snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
                                                    kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits,
                                                    tlCrawlTreeAllTracked );
