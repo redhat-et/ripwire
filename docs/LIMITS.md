@@ -194,10 +194,12 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kDelegatesShown` | `2` | — | the files the leading main hands off to |
 | `kDocScanFiles` | `4000` | — | — |
 | `kHardCapBytes` | `8192` | — | — |
 | `kMinBudgetBytes` | `512` | — | — |
 | `kReachHops` | `12` | — | — |
+| `kRegistrationShown` | `3` | — | registry / metadata / build-config files beside the act |
 | `kUsersShown` | `3` | — | files that import the primary file (its registration / load points) |
 | `kWhereElseCap` | `6` | — | — |
 

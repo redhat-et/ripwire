@@ -82,6 +82,9 @@ inline constexpr std::size_t kManifestReadBytes = 256 * 1024;
 inline constexpr std::size_t kDocScanBytes    = 200 * 1024;
 inline constexpr int         kDocScanFiles    = 4000;
 inline constexpr int         kReachHops       = 12;
+inline constexpr std::size_t kDelegatesShown  = 2;     // the files the leading main hands off to
+inline constexpr std::size_t kRegistrationShown = 3;   // registry / metadata / build-config files beside the act
+inline constexpr int         kTestdataWalkDirs = 20000; // dirs the testdata walk reads under the act's subsystem
 
 inline const ClassCaps& capsFor( std::size_t fileCount ) noexcept
 {
@@ -559,6 +562,347 @@ inline std::vector<std::string> namedFiles( const Corpus& c, std::string_view ta
     return named;
 }
 
+// ── the exemplar anchor ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// A task often names the thing to imitate: "a new filter (like the buffer filter)", "a builtin (like abspath)". The phrase after
+// a whole-word `like` (articles dropped, up to 3 words, ended by punctuation or a clause word) names the exemplar. It is resolved
+// by symbol or path leaf, and accepted only when the index resolves it to ONE unit (a dir + file stem: x.h with x.cc). Accepted,
+// its file leads the named files (the existing slot, ≤ 2), so entries, edges, registration and tests start from it; ambiguous,
+// the candidates are disclosed and nothing is added. A task with no such phrase is untouched.
+inline constexpr std::size_t kExemplarWords      = 3;
+inline constexpr std::size_t kExemplarCandidates = 3;   // ambiguous candidates shown, the rest as +N
+
+struct Exemplar
+{
+    std::string              phrase;       // as the task words it, joined by spaces
+    std::string              file;         // the accepted unit's file, else empty
+    std::vector<std::string> candidates;   // ambiguous: one file per unit, path order (≤ kExemplarCandidates)
+    int                      more = 0;     // ambiguous units past kExemplarCandidates: shown as +N
+};
+
+// Words that end the exemplar phrase: a clause or a pronoun starts, the name is over.
+inline constexpr std::string_view kExemplarClauseWords[] = { "that", "which", "with", "and", "or", "but", "to", "in", "for", "so", "is", "it", "i",
+                                                             "we", "you", "this", "these", "those", "as", "of", "on", "from", "into", "when", "where" };
+
+// The words after the first whole-word `like` that starts a noun phrase; empty when none does.
+inline std::vector<std::string> exemplarWords( std::string_view task )
+{
+    const std::string lo = lower( task );
+    for( std::size_t at = lo.find( "like " ); at != std::string::npos; at = lo.find( "like ", at + 1 ) )
+    {
+        if( at > 0 && lo[at - 1] != ' ' && lo[at - 1] != '(' )
+        {
+            continue;
+        }
+        std::vector<std::string> words;
+        std::string              cur;
+        bool                     stop = false;
+        for( std::size_t i = at + 5; i <= task.size() && !stop && words.size() < kExemplarWords; ++i )
+        {
+            const char ch   = i < task.size() ? task[i] : ' ';
+            const bool last = i + 1 >= task.size() || task[i + 1] == ' ';
+            const bool end  = ch == ')' || ch == ',' || ch == ';' || ch == '?' || ch == '!' || ch == '\n' || ( ch == '.' && last );
+            if( ch == ' ' || end )
+            {
+                const std::string w = lower( cur );
+                if( !cur.empty() && words.empty() && ( w == "the" || w == "a" || w == "an" ) )
+                {
+                    cur.clear();
+                }
+                else if( !cur.empty() && std::ranges::contains( kExemplarClauseWords, w ) )
+                {
+                    stop = true;
+                }
+                else if( !cur.empty() )
+                {
+                    words.push_back( std::move( cur ) );
+                    cur.clear();
+                }
+                stop = stop || end;
+            }
+            else if( ch != '`' && ch != '"' && ch != '\'' && ch != '(' )
+            {
+                cur += ch;
+            }
+        }
+        if( !words.empty() )
+        {
+            return words;
+        }
+    }
+    return {};
+}
+
+// The last segment of a qualified name: editor::DuplicateLineDown -> DuplicateLineDown, str.removeprefix -> removeprefix.
+inline std::string_view nameLeaf( std::string_view n ) noexcept
+{
+    return namesplit::afterLast( namesplit::afterLast( n, "::" ), "." );
+}
+
+// The segment before the leaf of a qualified name: crate::mod::Name -> mod, str.removeprefix -> str; empty when unqualified.
+inline std::string_view qualifierOf( std::string_view n ) noexcept
+{
+    const std::string_view leaf = nameLeaf( n );
+    return leaf.size() == n.size() ? std::string_view() : nameLeaf( namesplit::trimTrailing( n.substr( 0, n.size() - leaf.size() ), ":." ) );
+}
+
+// The resolve of one probe: one file per unit (dir + stem), the unit's file with the most hits (ties: the smaller path); path order.
+inline std::vector<std::string> exemplarUnits( const std::vector<std::string>& hits )
+{
+    HashMap<std::string, int>         perFile;
+    HashMap<std::string, std::string> unitBest;   // unit key -> its file
+    for( const std::string& h : hits )
+    {
+        ++perFile[h];
+    }
+    for( const auto& [ f, n ] : perFile )
+    {
+        std::string& best = unitBest[std::string( dirName( f ) ) + "/" + std::string( stemOf( f ) )];
+        if( best.empty() || n > perFile[best] || ( n == perFile[best] && f < best ) )
+        {
+            best = f;
+        }
+    }
+    std::vector<std::string> out;
+    for( auto& [ key, f ] : unitBest )
+    {
+        out.push_back( std::move( f ) );
+    }
+    std::sort( out.begin(), out.end() );
+    return out;
+}
+
+inline bool exemplarFileOk( std::string_view rel ) noexcept
+{
+    return !isTestPath( rel ) && !isDocPath( rel ) && !isSkipRole( roleOfPath( rel ) );
+}
+
+// Whether `qual` (lower-cased) is a whole segment of a qualified name (a::b, a.b) or of a path (its dirs, stem and extension).
+inline bool hasSegment( std::string_view text, std::string_view qual )
+{
+    std::string       seg;
+    const std::string lo = lower( text );
+    for( std::size_t i = 0; i <= lo.size(); ++i )
+    {
+        const char ch = i < lo.size() ? lo[i] : '/';
+        if( ch == '/' || ch == ':' || ch == '.' )
+        {
+            if( seg == qual )
+            {
+                return true;
+            }
+            seg.clear();
+        }
+        else
+        {
+            seg += ch;
+        }
+    }
+    return false;
+}
+
+// Files defining a symbol whose name leaf equals `leaf` (case-blind when asked), one entry per definition. A qualified exemplar
+// (str.removeprefix, editor::DuplicateLineDown) keeps a definition only when its qualifier is a segment of the symbol's name or of
+// its file's path: UserString.removeprefix is not str.removeprefix.
+inline std::vector<std::string> symbolHits( const Corpus& c, std::string_view leaf, bool caseBlind, std::string_view qual )
+{
+    std::vector<std::string> hits;
+    const std::string        lo = lower( leaf );
+    const std::string        q  = lower( qual );
+    for( const Symbol& sym : c.ing.symbols )
+    {
+        const std::string_view n  = nameLeaf( sym.name );
+        const bool             eq = caseBlind ? n.size() == lo.size() && lower( n ) == lo : n == leaf;
+        if( !eq || sym.fileId >= c.rel.size() || !exemplarFileOk( c.rel[sym.fileId] ) )
+        {
+            continue;
+        }
+        if( q.empty() || hasSegment( sym.name, q ) || hasSegment( c.rel[sym.fileId], q ) )
+        {
+            hits.emplace_back( c.rel[sym.fileId] );
+        }
+    }
+    return hits;
+}
+
+// Files whose stem, or whose dir's name, equals `leaf` (case-blind), kept only when the path also holds every `kind` word
+// (singular: "filter" keeps filters/); a dir counts once, by its file whose stem holds the leaf, else its first file.
+inline std::vector<std::string> pathHits( const Corpus& c, std::string_view leaf, const std::vector<std::string>& kinds )
+{
+    const std::string                 lo = lower( leaf );
+    HashMap<std::string, std::string> byDir;
+    std::vector<std::string>          hits;
+    for( const std::string_view r : c.rel )
+    {
+        const std::string path = lower( r );
+        const bool        kind = std::all_of( kinds.begin(), kinds.end(), [ & ]( const std::string& k ) { return path.find( k ) != std::string::npos; } );
+        if( !kind || !exemplarFileOk( r ) )
+        {
+            continue;
+        }
+        if( lower( stemOf( r ) ) == lo )
+        {
+            hits.emplace_back( r );
+        }
+        else if( lower( baseName( dirName( r ) ) ) == lo )
+        {
+            std::string& pick = byDir[std::string( dirName( r ) )];
+            if( pick.empty() || ( lower( stemOf( r ) ).find( lo ) != std::string::npos && lower( stemOf( pick ) ).find( lo ) == std::string::npos ) )
+            {
+                pick = std::string( r );
+            }
+        }
+    }
+    for( auto& [ dir, f ] : byDir )
+    {
+        hits.push_back( std::move( f ) );
+    }
+    return hits;
+}
+
+inline std::string singular( std::string w )
+{
+    if( w.size() > 3 && w.ends_with( 's' ) && !w.ends_with( "ss" ) )
+    {
+        w.pop_back();
+    }
+    return w;
+}
+
+// The probes in order (one word: its name leaf exact, then case-blind, then as a path leaf; several: their CamelCase join
+// case-blind, the snake join, then the first word as a path leaf with the rest as kind words); the first probe that hits decides.
+inline Exemplar findExemplar( const Corpus& c, std::string_view task )
+{
+    Exemplar                       ex;
+    const std::vector<std::string> words = exemplarWords( task );
+    if( words.empty() )
+    {
+        return ex;
+    }
+    for( const std::string& w : words )
+    {
+        ex.phrase += ( ex.phrase.empty() ? "" : " " ) + w;
+    }
+    std::vector<std::vector<std::string>> probes;
+    if( words.size() == 1 )
+    {
+        const std::string_view leaf = nameLeaf( words[0] );
+        const std::string_view qual = qualifierOf( words[0] );
+        probes.push_back( symbolHits( c, leaf, false, qual ) );
+        probes.push_back( symbolHits( c, leaf, true, qual ) );
+        if( qual.empty() )
+        {
+            probes.push_back( pathHits( c, leaf, {} ) );
+        }
+    }
+    else
+    {
+        std::string camel, snake;
+        for( const std::string& w : words )
+        {
+            camel += w;
+            snake += ( snake.empty() ? "" : "_" ) + w;
+        }
+        probes.push_back( symbolHits( c, camel, true, {} ) );
+        probes.push_back( symbolHits( c, snake, true, {} ) );
+        std::vector<std::string> kinds;
+        for( std::size_t i = 1; i < words.size(); ++i )
+        {
+            kinds.push_back( singular( lower( words[i] ) ) );
+        }
+        probes.push_back( pathHits( c, nameLeaf( words[0] ), kinds ) );
+    }
+    for( const std::vector<std::string>& hits : probes )
+    {
+        std::vector<std::string> units = exemplarUnits( hits );
+        if( units.size() == 1 )
+        {
+            ex.file = std::move( units.front() );
+            return ex;
+        }
+        if( units.size() > 1 )
+        {
+            ex.more = int( units.size() ) - int( std::min( units.size(), kExemplarCandidates ) );
+            units.resize( std::min( units.size(), kExemplarCandidates ) );
+            ex.candidates = std::move( units );
+            return ex;
+        }
+    }
+    return ex;
+}
+
+// The accepted exemplar's dir under other roots: every dir that ends in the same last three path segments, its own dir excluded;
+// test mirrors first (source/x/y/z -> test/x/y/z, api/v1/x/y/z), then path order. A dir under four segments deep has none (a
+// shorter tail matches too much). From the index; where-else's cap discloses the rest as +N.
+inline std::vector<std::string> exemplarMirrors( const Corpus& c, const Exemplar& ex )
+{
+    std::vector<std::string> out;
+    const std::string_view   dir = dirName( ex.file );
+    std::size_t              cut = dir.size();
+    for( int seg = 0; seg < 3 && cut != std::string_view::npos && cut > 0; ++seg )
+    {
+        cut = dir.rfind( '/', cut - 1 );
+    }
+    if( ex.file.empty() || cut == std::string_view::npos || cut == 0 )
+    {
+        return out;   // under three segments deep: a two-segment tail would match too much
+    }
+    const std::string_view    tail = dir.substr( cut );   // "/x/y/z"
+    HashMap<std::string_view, bool> seen;
+    for( const std::string_view r : c.rel )
+    {
+        for( std::string_view d = dirName( r ); d.size() >= tail.size(); d = dirName( d ) )
+        {
+            if( d.ends_with( tail ) && d != dir && seen.emplace( d, true ).second )
+            {
+                out.emplace_back( std::string( d ) + "/" );
+            }
+        }
+    }
+    std::sort( out.begin(), out.end(), []( const std::string& a, const std::string& b )
+    {
+        const bool ta = isTestPath( a ), tb = isTestPath( b );
+        return ta != tb ? ta : a < b;
+    } );
+    return out;
+}
+
+// The named files with an accepted exemplar's file first, still at most 2.
+inline std::vector<std::string> anchoredNamed( std::vector<std::string> named, const Exemplar& ex )
+{
+    if( ex.file.empty() )
+    {
+        return named;
+    }
+    std::erase( named, ex.file );
+    named.insert( named.begin(), ex.file );
+    named.resize( std::min<std::size_t>( named.size(), 2 ) );
+    return named;
+}
+
+// The exemplar's disclosure inside <task> (it drops with qs): the accepted file, or the ambiguous candidates; nothing when the
+// phrase resolved to nothing.
+inline std::string renderExemplar( const Exemplar& ex )
+{
+    if( !ex.file.empty() )
+    {
+        return "<like t=\"" + xml( ex.phrase ) + "\">" + xml( ex.file ) + "</like>";
+    }
+    if( ex.candidates.empty() )
+    {
+        return {};
+    }
+    std::string out = "<like t=\"" + xml( ex.phrase ) + "\" ambiguous=\"" + std::to_string( ex.candidates.size() + std::size_t( ex.more ) ) + "\">";
+    for( std::size_t i = 0; i < ex.candidates.size(); ++i )
+    {
+        out += ( i > 0 ? " · " : "" ) + xml( ex.candidates[i] );
+    }
+    if( ex.more > 0 )
+    {
+        out += " · +" + std::to_string( ex.more );
+    }
+    return out + "</like>";
+}
+
 // The working file order: the named files, then the act files.
 inline std::vector<std::string> orderedFiles( const std::vector<std::string>& named, const std::vector<std::string>& act )
 {
@@ -976,7 +1320,8 @@ struct ManifestSink
     }
 };
 
-// CMake (ctest when the file enables testing) and autotools (make check when Makefile.am lists TESTS).
+// CMake (ctest when the file enables testing), autotools (make check when Makefile.am lists TESTS), and autoconf alone: a
+// configure.ac with a committed configure and no Makefile.am, whose makefile is a template (Makefile.in / Makefile.pre.in).
 inline void addConfigureCommands( const ManifestSink& m )
 {
     if( m.has( "CMakeLists.txt" ) )
@@ -992,12 +1337,17 @@ inline void addConfigureCommands( const ManifestSink& m )
         const bool                       check = t && ( t->find( "TESTS" ) != std::string::npos || t->find( "check_PROGRAMS" ) != std::string::npos );
         m.add( "configure.ac", std::string( m.has( "autogen.sh" ) ? "./autogen.sh" : "autoreconf -fi" ) + " && ./configure && make" + ( check ? " && make check" : "" ) );
     }
+    else if( m.has( "configure.ac" ) && m.has( "configure" ) )
+    {
+        m.add( "configure.ac", "./configure && make" );
+    }
 }
 
 // A Makefile's own targets, quoted by name.
 inline void addMakeCommands( const ManifestSink& m )
 {
-    for( const std::string_view mk : { std::string_view( "Makefile" ), std::string_view( "GNUmakefile" ) } )
+    // a committed Makefile first; else the template configure fills in, its targets quoted the same way
+    for( const std::string_view mk : { std::string_view( "Makefile" ), std::string_view( "GNUmakefile" ), std::string_view( "Makefile.pre.in" ), std::string_view( "Makefile.in" ) } )
     {
         if( !m.has( mk ) )
         {
@@ -1135,8 +1485,32 @@ inline void addManifestCommands( const Corpus& c, const std::vector<std::string>
     }
 }
 
+// The checkout's origin remote repo name (https://host/org/name.git -> name), lower-cased; "" without one. A workspace manifest
+// (a Cargo [workspace], a root package.json of a monorepo) names no project; the remote it was cloned from does.
+inline std::string originRepoName( const Corpus& c )
+{
+    const std::optional<std::string> cfg = readHead( joinPath( c.diskRoot, ".git/config" ), 64 * 1024 );
+    const std::size_t                at  = cfg ? cfg->find( "[remote \"origin\"]" ) : std::string::npos;
+    const std::size_t                url = at == std::string::npos ? at : cfg->find( "url = ", at );
+    if( url == std::string::npos )
+    {
+        return {};
+    }
+    std::string_view v = trim( std::string_view( *cfg ).substr( url + 6 ) );
+    v                  = v.substr( 0, v.find( '\n' ) );
+    while( v.ends_with( '/' ) )
+    {
+        v.remove_suffix( 1 );
+    }
+    if( v.ends_with( ".git" ) )
+    {
+        v.remove_suffix( 4 );
+    }
+    return lower( namesplit::afterLast( namesplit::afterLast( v, "/" ), ":" ) );
+}
+
 // The project's own name, quoted from its manifest (CMake project(), autoconf AC_INIT, package.json / Cargo / pyproject name, the
-// last go.mod module segment), lower-cased; "" when none names one. It ranks the header named after the project first and joins the
+// last go.mod module segment, else the origin remote's repo name), lower-cased; "" when none names one. It ranks the header named after the project first and joins the
 // test-file stems (tests/test_black.py, tests/jq.test).
 inline std::string projectName( const Corpus& c )
 {
@@ -1190,7 +1564,7 @@ inline std::string projectName( const Corpus& c )
         const std::string mod = between( *t, "module ", "\n " );
         return std::string( baseName( mod ) );
     }
-    return {};
+    return originRepoName( c );
 }
 
 // ── the test home of the act files (shared by build's registration line and where-else) ─────────────────────────────────────
@@ -1202,6 +1576,7 @@ struct TestHome
     std::string              runner;      // a test runner config above the test dir (lit.cfg.py)
     std::string              helper;      // the non-test file the test files import most (tests/util.py)
     std::string              dataDir;     // the test dir's biggest subdir of fixture files (tests/data/cases/)
+    std::string              fixtureDir;  // the act subsystem's biggest testdata corpus (pkg/x/testdata/cases/)
 };
 
 // Test files the index does not hold (tests/jq.test, tests/jqtest: data and shell drivers), listed from each top-level test dir.
@@ -1581,12 +1956,187 @@ inline std::string testRunner( const Corpus& c, std::string_view from )
     return runner;
 }
 
-inline TestHome findTestHome( const Corpus& c, const FileAdjacency& adj, const ForCore& core, const std::vector<std::string>& files, std::string_view project )
+// The test file named after an act file's own dir, beside it (builtins/builtins_test.go, parser/test_parser.py): a package's
+// dir-level test, which no act file's stem names.
+inline std::vector<std::string> dirNamedTests( const Corpus& c, const std::vector<std::string>& files )
+{
+    std::vector<std::string> out;
+    for( std::size_t i = 0; i < files.size() && i < 3; ++i )
+    {
+        const std::string_view dir = dirName( files[i] );
+        const std::string_view b   = baseName( files[i] );
+        const std::size_t      dot = b.rfind( '.' );
+        if( dir.empty() || dot == std::string_view::npos )
+        {
+            continue;
+        }
+        const std::string pkg( baseName( dir ) ), ext( b.substr( dot ) );
+        for( const std::string& name : { pkg + "_test" + ext, "test_" + pkg + ext } )
+        {
+            if( const std::string rel = underDir( dir, name ); c.exists( rel ) )
+            {
+                pattern::appendUnique( out, rel );
+            }
+        }
+    }
+    return out;
+}
+
+// The words of the task a test file may be named after: 3+ letters or digits, lower-cased, past the words every task uses.
+inline std::vector<std::string> taskWords( std::string_view task )
+{
+    static constexpr std::string_view kStop[] = { "the", "and", "add", "new", "for", "with", "that", "this", "which", "where", "what", "how", "does",
+                                                  "from", "into", "like", "want", "are", "its", "can", "should", "would", "every", "default", "built",
+                                                  "file", "files", "test", "tests", "code", "make", "run", "build", "write", "use", "using", "fix",
+                                                  "function", "method", "class", "type", "types", "go", "get", "set", "all", "one", "two", "not", "but" };
+    std::vector<std::string> words( 1 );
+    for( const char ch : lower( task ) )
+    {
+        if( ( ch >= 'a' && ch <= 'z' ) || ( ch >= '0' && ch <= '9' ) )
+        {
+            words.back() += ch;
+        }
+        else if( !words.back().empty() )
+        {
+            words.emplace_back();
+        }
+    }
+    std::vector<std::string> out;
+    for( std::string& w : words )
+    {
+        if( w.size() >= 3 && std::find( std::begin( kStop ), std::end( kStop ), w ) == std::end( kStop ) )
+        {
+            pattern::appendUnique( out, std::move( w ) );
+        }
+    }
+    return out;
+}
+
+// Test files named after a word of the task (test_str.py for "the built-in str type"): test_<w>, <w>_test, <w>_tests; task order, ≤ 2.
+inline std::vector<std::string> taskWordTests( const Corpus& c, std::string_view task )
+{
+    const std::vector<std::string> words = taskWords( task );
+    std::vector<std::string>       out;
+    for( const std::string& w : words )
+    {
+        for( const std::string_view r : c.rel )
+        {
+            const std::string stem = lower( stemOf( r ) );
+            if( out.size() < 2 && ( stem == "test_" + w || stem == w + "_test" || stem == w + "_tests" ) && isTestPath( r ) && !isSkipRole( roleOfPath( r ) ) )
+            {
+                pattern::appendUnique( out, std::string( r ) );
+            }
+        }
+    }
+    return out;
+}
+
+// A dir's entries plus its immediate subdirs' entries: how much fixture data it holds, two levels deep.
+inline int corpusSize( const std::filesystem::path& dir )
+{
+    int n = entryCount( dir );
+    for( const std::filesystem::path& kid : sortedSubdirs( dir ) )
+    {
+        n += entryCount( kid );
+    }
+    return n;
+}
+
+// A path's top two dirs (pkg/x for pkg/x/y/z.go), else its top dir; empty for a root-level file.
+inline std::string topTwoDirs( std::string_view f )
+{
+    const std::size_t first  = f.find( '/' );
+    const std::size_t second = first == std::string_view::npos ? first : f.find( '/', first + 1 );
+    if( first == std::string_view::npos )
+    {
+        return {};
+    }
+    return std::string( f.substr( 0, second != std::string_view::npos ? second : first ) );
+}
+
+// The act subsystems' biggest testdata corpus: a dir named testdata or test_data under the top two dirs of each of the first 3
+// act files (pkg/x/ for pkg/x/y/z.go; a named file can sit in another subsystem than the act), read from disk breadth-first, at
+// most kTestdataWalkDirs dirs in all; shown as its fullest subdir when that holds 20+ entries (testdata/cases/), else itself.
+// Ties go to the earlier file's subsystem, then the smaller path.
+inline std::string testdataDir( const Corpus& c, const std::vector<std::string>& files )
+{
+    std::vector<std::string> prefixes;
+    for( std::size_t i = 0; i < files.size() && i < 3; ++i )
+    {
+        if( std::string p = topTwoDirs( files[i] ); !p.empty() )
+        {
+            pattern::appendUnique( prefixes, std::move( p ) );
+        }
+    }
+    std::filesystem::path best;
+    std::string           bestPrefix;
+    int                   most = 0, seen = 0;
+    for( const std::string& prefix : prefixes )
+    {
+        std::vector<std::filesystem::path> level{ std::filesystem::path( joinPath( c.diskRoot, prefix ) ) };
+        for( int depth = 0; depth < 5 && !level.empty() && seen < kTestdataWalkDirs; ++depth )
+        {
+            std::vector<std::filesystem::path> next;
+            for( const std::filesystem::path& dir : level )
+            {
+                for( const std::filesystem::path& kid : sortedSubdirs( dir ) )
+                {
+                    const std::string name = kid.filename().string();
+                    if( ++seen > kTestdataWalkDirs || name.starts_with( "." ) )
+                    {
+                        continue;
+                    }
+                    if( name == "testdata" || name == "test_data" )
+                    {
+                        if( const int n = corpusSize( kid ); n > most )
+                        {
+                            most       = n;
+                            best       = kid;
+                            bestPrefix = prefix;
+                        }
+                        continue;
+                    }
+                    next.push_back( kid );
+                }
+            }
+            level = std::move( next );
+        }
+    }
+    if( best.empty() )
+    {
+        return {};
+    }
+    std::filesystem::path shown = best;
+    int                   fullest = 19;
+    for( const std::filesystem::path& kid : sortedSubdirs( best ) )
+    {
+        if( const int n = entryCount( kid ); n > fullest )
+        {
+            fullest = n;
+            shown   = kid;
+        }
+    }
+    std::error_code ec;
+    return bestPrefix + "/" + std::filesystem::relative( shown, joinPath( c.diskRoot, bestPrefix ), ec ).generic_string() + "/";
+}
+
+inline TestHome findTestHome( const Corpus& c, const FileAdjacency& adj, const ForCore& core, const std::vector<std::string>& files, std::string_view project,
+                              std::string_view task )
 {
     TestHome                       home;
     const std::vector<std::string> stems = taskStems( core, files, project );
-    const std::vector<std::string> tests = rankedTestFiles( c, core, files, project, stems );
+    // the dir-named test beside the act and a test named by a task word lead the stem-ranked ones
+    std::vector<std::string>       tests = dirNamedTests( c, files );
+    for( std::string& t : taskWordTests( c, task ) )
+    {
+        pattern::appendUnique( tests, std::move( t ) );
+    }
+    for( std::string& t : rankedTestFiles( c, core, files, project, stems ) )
+    {
+        pattern::appendUnique( tests, std::move( t ) );
+    }
     home.testFiles.assign( tests.begin(), tests.begin() + std::ptrdiff_t( std::min<std::size_t>( tests.size(), 3 ) ) );
+    home.fixtureDir = testdataDir( c, files );
     // the mirrored dir from disk, else a test-role dir named by a stem
     home.testDir = mirroredTestDir( c, files );
     for( std::size_t i = 0; home.testDir.empty() && i < tests.size(); ++i )
@@ -1643,6 +2193,7 @@ struct Entry
     int           prefix = 0;    // path words shared with the primary file (the tie-break)
     int           rankKey = 255; // EntryReach::of's key: primary hops, 64 + act hops, 255 unreached, 256 a generator; -1 = the manifest's own entry
     int           size   = 0;    // indexed files under the entry's dir: the bigger program leads among far entries
+    std::vector<std::string> delegates;   // the files the leading program's main hands off to (main -> Modules/main.c)
 };
 
 // Far reach is a weak signal: hops past 3 rank as one band, where program size and shared path words decide (kubelet before genman).
@@ -1971,6 +2522,92 @@ inline bool isGeneratorDir( std::string_view dir ) noexcept
     return b.starts_with( "gen" ) || b.ends_with( "-gen" ) || b.ends_with( "_gen" ) || b.ends_with( "codegen" ) || dir.find( "code-generator" ) != std::string_view::npos;
 }
 
+// The project's own program: its file stem, its dir, or its crate (crates/<p>/src/main.rs) is the project name.
+inline bool isProjectProgram( std::string_view rel, std::string_view project )
+{
+    if( project.size() < 2 )
+    {
+        return false;
+    }
+    const std::string_view dir   = dirName( rel );
+    const std::string_view crate = baseName( dir ) == "src" ? baseName( dirName( dir ) ) : std::string_view();
+    return lower( stemOf( rel ) ) == project || lower( baseName( dir ) ) == project || lower( crate ) == project;
+}
+
+// A Rust binary its crate's Cargo.toml declares: a [[bin]] whose path is this file (crates/x/src/main.rs, path = "src/main.rs").
+inline bool declaresBinary( const Corpus& c, std::string_view rel )
+{
+    for( std::string_view dir = dirName( rel ); !dir.empty(); dir = dirName( dir ) )
+    {
+        const std::string manifest = underDir( dir, "Cargo.toml" );
+        if( !c.exists( manifest ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> t    = c.read( manifest );
+        const std::string                path = "\"" + std::string( rel.substr( dir.size() + 1 ) ) + "\"";
+        return t && t->find( "[[bin]]" ) != std::string::npos && t->find( path ) != std::string::npos;
+    }
+    return false;
+}
+
+// The files a program's main hands off to: its cross-file callees outside tests and skip dirs, the main file's own dir first,
+// then the file it calls into most (≤ 2).
+inline std::vector<std::string> mainDelegates( const Corpus& c, const Entry& e )
+{
+    std::vector<std::string>           out;
+    std::vector<int>                   calls;   // per out[] row: the main's callees defined in that file
+    const std::optional<std::uint32_t> s = c.symbolAt( e.fileId, e.line );
+    const std::size_t                  n = c.ing.symbols.size();
+    if( !s || c.g.outOff.size() <= *s + 1 )
+    {
+        return out;
+    }
+    for( std::uint32_t k = c.g.outOff[*s]; k < c.g.outOff[*s + 1]; ++k )
+    {
+        const NodeId t = c.g.outTargets[k];
+        if( t < n && c.ing.symbols[t].fileId != e.fileId && c.ing.symbols[t].fileId < c.rel.size() )
+        {
+            const std::string_view r = c.rel[c.ing.symbols[t].fileId];
+            if( isTestPath( r ) || isSkipRole( roleOfPath( r ) ) )
+            {
+                continue;
+            }
+            const auto at = std::find( out.begin(), out.end(), r );
+            if( at == out.end() )
+            {
+                out.emplace_back( r );
+                calls.push_back( 1 );
+            }
+            else
+            {
+                ++calls[std::size_t( at - out.begin() )];
+            }
+        }
+    }
+    const std::string_view   home = c.rel[e.fileId];
+    std::vector<std::size_t> order( out.size() );
+    for( std::size_t i = 0; i < order.size(); ++i )
+    {
+        order[i] = i;
+    }
+    std::sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
+    {
+        const int pa = commonPrefixDirs( out[a], home ), pb = commonPrefixDirs( out[b], home );
+        if( pa != pb )
+        {
+            return pa > pb;
+        }
+        return calls[a] != calls[b] ? calls[a] > calls[b] : out[a] < out[b];
+    } );
+    std::vector<std::string> shown;
+    for( std::size_t i = 0; i < order.size() && i < kDelegatesShown; ++i )
+    {
+        shown.push_back( std::move( out[order[i]] ) );
+    }
+    return shown;
+}
+
 // Every program entry: main() definitions, __main__.py, JS/TS main files and package.json main/bin (always offered: it IS the entry).
 inline std::vector<Entry> entryCandidates( const Corpus& c, const EntryReach& reach, std::string_view primary, std::string_view project )
 {
@@ -1989,11 +2626,19 @@ inline std::vector<Entry> entryCandidates( const Corpus& c, const EntryReach& re
         const auto it            = dirFiles.find( dirName( c.rel[f] ) );
         const bool topLevel      = dirName( c.rel[f] ).find( '/' ) == std::string_view::npos;   // hack/x.py: the dir is a script bin, not a program
         cands.push_back( { f, line, std::move( what ), hops, sharedPathWords( c.rel[f], primary, project ), key, it == dirFiles.end() || topLevel ? 1 : it->second } );
-        // build tooling after every program: a code/doc generator's main (cmd/genman, validation-gen) or a script directly in a
-        // top-level tools dir (hack/verify-flags-underscore.py, scripts/generate_schema.py)
-        if( isGeneratorDir( dirName( c.rel[f] ) ) || ( topLevel && roleOfPath( c.rel[f] ) == "tools" ) )
+        // build tooling after every program: a code/doc generator's main (cmd/genman, validation-gen), a script directly in a
+        // top-level tools dir (hack/verify-flags-underscore.py, scripts/generate_schema.py) or a Cargo build script (build.rs)
+        if( isGeneratorDir( dirName( c.rel[f] ) ) || ( topLevel && roleOfPath( c.rel[f] ) == "tools" ) || baseName( c.rel[f] ) == "build.rs" )
         {
             cands.back().rankKey = 256;
+        }
+        else if( isProjectProgram( c.rel[f], project ) )
+        {
+            cands.back().rankKey = -1;   // the project's own program leads every reach band (cmd/<project>/, Programs/<project>.c)
+        }
+        else if( cands.back().rankKey == 255 && declaresBinary( c, c.rel[f] ) )
+        {
+            cands.back().rankKey = 64 + 3;   // a binary its manifest declares ([[bin]] path) before an undeclared unreached main
         }
     };
     for( const Symbol& sym : c.ing.symbols )
@@ -2071,6 +2716,10 @@ inline std::vector<Entry> findEntries( const Corpus& c, const FileAdjacency& adj
             out.push_back( e );
         }
     }
+    if( const auto lead = std::find_if( out.begin(), out.end(), []( const Entry& e ) { return e.what == "main"; } ); lead != out.end() )
+    {
+        lead->delegates = mainDelegates( c, *lead );
+    }
     for( const auto& [ file, what ] : { std::pair{ header, "public header" }, std::pair{ impl, "api impl" } } )
     {
         if( file )
@@ -2089,6 +2738,10 @@ inline std::string renderEntries( const Corpus& c, const std::vector<Entry>& ent
         const Entry& e = entries[std::size_t( i )];
         out += ( i > 0 ? " · " : "" ) + xml( c.rel[e.fileId] ) + ":" + std::to_string( e.line ) + " " + e.what
                + ( e.hops >= 0 ? " hops=" + std::to_string( e.hops ) : std::string() );
+        for( std::size_t k = 0; k < e.delegates.size(); ++k )
+        {
+            out += ( k == 0 ? " -> " : ", " ) + xml( e.delegates[k] );
+        }
     }
     if( entries.empty() )
     {
@@ -2462,9 +3115,82 @@ inline EdgeSet primaryImports( const Corpus& c, const FileAdjacency& adj, const 
     return set;
 }
 
-inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const EdgeSet& imports )
+// Registration beside the act: a file or dir whose name says registry / registration, a metadata manifest (*metadata*.yaml|yml|json)
+// or a build config that lists the units (*build_config*, all_*.bzl), in the first act files' own dirs and every dir above them
+// (never the root), nearest first. Read from disk: a registry dir or a yaml manifest is not always indexed.
+struct Registration
+{
+    std::vector<std::string> paths;
+    int                      more = 0;   // found past kRegistrationShown: shown as +N
+};
+
+inline bool namesRegistration( std::string_view name, bool isDir )
+{
+    const std::string lo   = lower( name );
+    const bool        meta = lo.find( "metadata" ) != std::string::npos && ( lo.ends_with( ".yaml" ) || lo.ends_with( ".yml" ) || lo.ends_with( ".json" ) );
+    const bool        conf = lo.find( "build_config" ) != std::string::npos || ( lo.starts_with( "all_" ) && lo.ends_with( ".bzl" ) );
+    return lo.find( "regist" ) != std::string::npos || ( !isDir && ( meta || conf ) );
+}
+
+inline Registration findRegistration( const Corpus& c, const std::vector<std::string>& files )
+{
+    Registration             reg;
+    std::vector<std::string> dirs;
+    for( std::size_t i = 0; i < files.size() && i < 3; ++i )
+    {
+        std::string_view d = dirName( files[i] );
+        for( ; !d.empty(); d = dirName( d ) )   // every ancestor below the root: a subsystem's list sits at its top
+        {
+            pattern::appendUnique( dirs, std::string( d ) );
+        }
+    }
+    std::sort( dirs.begin(), dirs.end(), []( const std::string& a, const std::string& b ) { return a.size() != b.size() ? a.size() > b.size() : a < b; } );
+    for( const std::string& d : dirs )
+    {
+        std::vector<std::string> here;
+        std::error_code          ec;
+        for( auto it = std::filesystem::directory_iterator( joinPath( c.diskRoot, d ), ec ); !ec && it != std::filesystem::directory_iterator(); it.increment( ec ) )
+        {
+            const std::string name = it->path().filename().string();
+            const bool        dir  = it->is_directory( ec );
+            const std::string rel  = d + "/" + name + ( dir ? "/" : "" );
+            if( namesRegistration( name, dir ) && !isTestPath( rel ) && !isSkipRole( roleOfPath( rel ) ) )
+            {
+                here.push_back( rel );
+            }
+        }
+        std::sort( here.begin(), here.end() );
+        for( std::string& r : here )
+        {
+            if( std::find( reg.paths.begin(), reg.paths.end(), r ) != reg.paths.end() )
+            {
+                continue;
+            }
+            if( reg.paths.size() < kRegistrationShown )
+            {
+                reg.paths.push_back( std::move( r ) );
+            }
+            else
+            {
+                ++reg.more;
+            }
+        }
+    }
+    return reg;
+}
+
+inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const EdgeSet& imports, const Registration& reg )
 {
     std::string out = "<edges>";
+    if( !reg.paths.empty() )
+    {
+        out += "<r>registration: ";
+        for( std::size_t k = 0; k < reg.paths.size(); ++k )
+        {
+            out += ( k > 0 ? " · " : "" ) + xml( reg.paths[k] );
+        }
+        out += ( reg.more > 0 ? " · +" + std::to_string( reg.more ) : std::string() ) + "</r>";
+    }
     if( !imports.callees.empty() || !imports.callers.empty() )
     {
         out += "<i f=\"" + xml( imports.symbol ) + "\">";
@@ -2502,7 +3228,7 @@ inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const
         list( "calls: ", s.callees );
         out += "</e>";
     }
-    if( sets.empty() && imports.callees.empty() && imports.callers.empty() )
+    if( sets.empty() && imports.callees.empty() && imports.callers.empty() && reg.paths.empty() )
     {
         out += "none found";
     }
@@ -2618,10 +3344,15 @@ inline bool isDistinctiveName( std::string_view n ) noexcept
     return n.size() >= 8;
 }
 
-inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std::vector<std::string>& files, const TestHome& home, bool history )
+inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std::vector<std::string>& files, const TestHome& home, bool history,
+                                const std::vector<std::string>& mirrors )
 {
     WhereElse w;
     w.hasHistory = history;
+    for( const std::string& m : mirrors )   // the exemplar's dir under the test and api roots: where the new unit's twins go
+    {
+        addItem( w, isTestPath( m ) ? "test" : "mirror", m, files );
+    }
     if( history && !files.empty() )
     {
         const std::vector<std::vector<std::uint32_t>> sets = gitCommitFileSets( c.diskRoot, c.ing, "18 months ago", 30 );
@@ -2640,6 +3371,7 @@ inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std:
     {
         addItem( w, "test", home.testDir, files );
     }
+    addItem( w, "test", home.fixtureDir, files );
     std::vector<std::string> names;
     for( std::size_t i = 0; i < core.act.size() && names.size() < 5; ++i )
     {
@@ -2838,7 +3570,8 @@ inline std::string composeBrief( const BriefInputs& in )
     const ClassCaps& caps   = capsFor( c.rel.size() );
     const std::size_t budget = in.budgetBytes > 0 ? std::clamp( in.budgetBytes, kMinBudgetBytes, kHardCapBytes ) : caps.budgetBytes;
     const ForCore    core   = readForPage( in.forPage );
-    const std::vector<std::string>   named   = namedFiles( c, in.task, actFiles( core ) );
+    const Exemplar                   ex      = findExemplar( c, in.task );
+    const std::vector<std::string>   named   = anchoredNamed( namedFiles( c, in.task, actFiles( core ) ), ex );
     const std::vector<std::string>   files   = orderedFiles( named, actFiles( core ) );
     const std::vector<std::uint32_t> actSyms = actSymbols( c, core, named );
     const bool       history = !gitstamp::isShallow( std::string( in.diskRoot ) ) && hasEnclosingGitRepo( std::string( in.diskRoot ) );
@@ -2866,7 +3599,7 @@ inline std::string composeBrief( const BriefInputs& in )
     // the include/import graph feeds the test home's helper, 3's reach and 5's imports line
     const FileAdjacency adj     = resolveIncludeAdj( in.ing );
     const std::string   project = projectName( c );
-    const TestHome      home    = findTestHome( c, adj, core, files, project );
+    const TestHome      home    = findTestHome( c, adj, core, files, project, in.task );
     // 3 entry
     const std::vector<Entry> entries = findEntries( c, adj, actSyms, files, named, caps.entries, project );
     // 4 task
@@ -2874,14 +3607,15 @@ inline std::string composeBrief( const BriefInputs& in )
     // 5 edges
     const std::vector<EdgeSet> edges   = findEdges( c, actSyms );
     const EdgeSet              imports = primaryImports( c, adj, named, files, caps.imports );
+    const Registration         reg     = findRegistration( c, files );
     // 6 where-else
-    const WhereElse where = findWhereElse( c, core, files, home, history );
+    const WhereElse where = findWhereElse( c, core, files, home, history, exemplarMirrors( c, ex ) );
     // 7 conventions
     const std::vector<ConventionDoc> conv = findConventions( c );
     // 8 next
     Sections s{ renderLayout( deep, caps.layoutEntries ), renderLayout( top, caps.layoutEntries ), renderBuild( buildLines, buildMore, home ),
-                      renderEntries( c, entries, caps.entries ), renderEntries( c, entries, 3 ), renderTask( core, qs.text( kQsBytes ) ), renderTask( core, "" ),
-                      renderEdges( edges, kEdgeSymbols, imports ), renderEdges( edges, 1, imports ), renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
+                      renderEntries( c, entries, caps.entries ), renderEntries( c, entries, 3 ), renderTask( core, renderExemplar( ex ) + qs.text( kQsBytes ) ), renderTask( core, "" ),
+                      renderEdges( edges, kEdgeSymbols, imports, reg ), renderEdges( edges, 1, imports, reg ), renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
                       renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>" };
 
     // the root, then the fit: drop in kDropOrder until the whole answer is within budget

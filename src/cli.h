@@ -4607,6 +4607,7 @@ struct ShapingVerb
 //                         interchangeable and the columns differ on exactly those two rows, which is the
 //                         reason this is a third column rather than an alias of the second.
 inline constexpr ShapingVerb kShapingVerbs[] = {
+    { "--brief",        nullptr, &Config::brief        },   // before --for (it sets forTask): the brief is sized by --brief-bytes, never a budget knob
     { "--for",          nullptr, &Config::forTask,      false, false, true },   // --detail=N carve-out below; --top-k: R12 residual
     { "--pack-task",    &Config::packTaskFlag, nullptr, false, false, true },
     { "--exemplar",     nullptr, &Config::exemplar     },
