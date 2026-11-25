@@ -227,17 +227,22 @@ kRoutedCarriedPageFloorBytes	none:RL1 a RESERVE, not a cut (verbs_forroute.h run
 kRoutedFitTries	none:RL1 a bound on how often the routed verb is re-rendered with a smaller row limit (fitRoutedVerb); when it is spent the question is NOT ROUTED and the --for answer is served byte for byte, so no row is cut by it
 kMcpCarriedFilePageFirstLimit	none:MR1 the FIRST row limit a routed MCP answer renders its carried file page at (mcpFittedFilePage), an upper start the fit scales DOWN by measured bytes; the cut it leads to is the file page's own window (has_more="1" next_offset=K, `for` limit=L offset=K), disclosed on the page root and proved lossless by mcpforroutepagecheck (L2)
 kActRows	legend
-# lane/brief-verb (2026-11-25): src/brief.h joined the answer-path scope (test/lib/capdisclose.py) with its 13 caps.
+# lane/brief-verb (2026-11-25): src/brief.h joined the answer-path scope (test/lib/capdisclose.py) with its 13 caps; round 2 added 5 (18).
 kActRanges	none:a work bound by spec (ACT-8): the brief's act is --for's shipped act plus its next lined rows up to 8; act_shipped= names the shipped part and --for itself serves every row
 kBuildLines	sink:buildMore
 kConventionBytes	sink:more
+kDelegatesShown	none:a pointer bound: the leading main names at most 2 files it hands off to (its own dir first, then the most-called); its callees stay one --callees= call away, and the entry row itself is never cut
 kDocScanFiles	none:a read bound on the docs where-else searches for the task's names; where-else is a pointer list ranked by kind, never a census, so a doc past it is unseen and never claimed absent
 kEdgeSymbols	none:edges are drawn for the first 3 act symbols by spec (named files first); every act symbol is still in <act>, and dropped=edges discloses the cut to 1
 kEdgesPerSide	sink:more
+kExemplarCandidates	sink:more
+kExemplarWords	none:a parse bound: the exemplar phrase is the first 3 words after `like`; a longer phrase is a sentence, not a name, and its first words still probe
 kHardCapBytes	none:the --brief-bytes band (512..8192): a value outside it is refused (refuseFlagValue / the MCP bytes field), never clamped
 kHeadingsPerDoc	sink:more
 kQsBytes	sink:dropped,droppedNames
 kReachHops	none:a BFS bound for ranking entry points: an entry past it is still listed, shown without hops=
+kRegistrationShown	sink:more
 kTaskEchoBytes	sink:taskCut
+kTestdataWalkDirs	none:a disk-walk bound on the testdata search under the act's subsystem; where-else is a pointer list, so a corpus past it is unseen and never claimed absent
 kUsersShown	sink:more
 kWhereElseCap	sink:more
