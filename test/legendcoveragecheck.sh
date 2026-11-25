@@ -609,7 +609,11 @@ def legendOf( doc, anyRoot = False ):
 # is in INNER too. An attribute is judged against the head legend plus EVERY block comment whose block contains it (a nested
 # <path> row inside <graph_verb> reads both). Before this the reader saw neither, so it reported shortkey's and the nested
 # verb's defined rows as gaps — and, the hole A19 came through, no roster row reached those states at all (rows above).
-TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask", b"shortkey" )
+# THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): <qs> is such a block too, written as a RUN of sibling elements (one
+# per question word) after one legend comment, with no wrapper: RUNS lists the tags whose block spans the run of adjacent
+# same-tag siblings (nothing else between them), so the comment defines every <qs> of the run and nothing after it (arm T12).
+TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask", b"shortkey", b"qs" )
+RUNS     = ( b"qs", )
 INNER    = re.compile( rb'<(bodies|graph_verb)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
 TRAIL    = re.compile( rb'(?:<!--(?:(?!-->).)*-->\s*)+(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
 def trailingBlocks( doc ):
@@ -620,6 +624,10 @@ def trailingBlocks( doc ):
         selfClosed = re.match( rb'<' + tag + rb'\b[^>]*/>', doc[ m.end(): ] )
         close = doc.find( b'</' + tag + b'>', m.end() )
         end  = m.end() + selfClosed.end() if selfClosed else ( len( doc ) if close < 0 else close + len( tag ) + 3 )
+        while tag in RUNS and close >= 0:   # a run of adjacent same-tag siblings is one block
+            nxt = re.match( rb'<' + tag + rb'\b[^>]*>[^<]*</' + tag + rb'>', doc[ end: ] )
+            if not nxt: break
+            end += nxt.end()
         out.append( ( m.end(), end, m.group( 0 ).decode( 'utf-8', 'replace' ) ) )
     # LEADING BLOCKS (LEGEND-G-BLIND): a block whose legend is the comment IMMEDIATELY AFTER its own open tag — the MCP `for` body
     # slot opens `<bodies …><!-- via="name" on a row: … -->` — is read the same way: that comment counts for the block's own
@@ -834,6 +842,15 @@ g = gapsOf( tdoc( SK ), True )[ 3 ]
 tarm( g == [], f"(T10) two adjacent comments before <shortkey> both count (gaps {g})" )
 g = gapsOf( tdoc( SK.replace( b'--><!-- shortkey gen', b'--><e/><!-- shortkey gen' ) ), True )[ 3 ]
 tarm( g == [ "shortkey@found" ], f"(T10b) mutant: an element between them cuts the run, found= is a gap (gaps {g})" )
+# (T12) THETA11-FLIP: a RUN of sibling <qs> elements after one comment is one block: the comment defines all of them, an
+# element between two of them ends the run, and it defines nothing after the run.
+QSR = b'<!-- qs: t= the word, n= its lines --><qs t="a" n="1">x.c:1</qs><qs t="b" n="2">x.c:2,3</qs>'
+g = gapsOf( tdoc( QSR ), True )[ 3 ]
+tarm( g == [], f"(T12) one comment before a run of <qs> siblings defines every element of the run (gaps {g})" )
+g = gapsOf( tdoc( QSR.replace( b'</qs><qs t="b"', b'</qs><e/><qs t="b"' ) ), True )[ 3 ]
+tarm( g == [ "qs@t" ], f"(T12b) mutant: an element between two <qs> ends the run, the second's t= is a gap (gaps {g})" )
+g = gapsOf( tdoc( QSR + b'<z t="1"/>' ), True )[ 3 ]
+tarm( g == [ "z@t" ], f"(T12c) the run's comment defines nothing after the run (gaps {g})" )
 # (T11) INT1: an answer-first DEFAULT document whose FIRST block is a trailing block. The comment right after the root's open tag
 # stands immediately before <graph_verb>, so it is that block's legend; the document legend is the trailing run before </ctx>.
 def fdoc( lead, tail ): return b'<ctx task="x">' + lead + b'<graph_verb a="1"><path hops="2"/></graph_verb><d n="x" q="1"/>' + tail + b'</ctx>'

@@ -47,6 +47,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): test/routefix/golden_for.xml pins the whole --for --no-route page to show routing does not leak into it; the question-sites block is not routing's and is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0

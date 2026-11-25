@@ -66,6 +66,7 @@ unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
 ranked(){ grep -oE '<d |<t [^>]* r="[0-9]+"' | wc -l | tr -d ' '; }
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (4)-(4e) pin the floored bundle's bytes and its twins; the question-sites block is outside every budget by design, capped at 1,000 B and pinned by test/forqsitescheck.sh (Q3)
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0

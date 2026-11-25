@@ -457,7 +457,9 @@ for row in "for|--for=geometry distance" "grep|--grep=distance --grep-in=any" "c
     pname="${row%%|*}"; pargs="${row#*|}"
     [ -f "$PIN_DIR/$pname.xml" ] || { no "(A-PIN) missing pin $PIN_DIR/$pname.xml"; continue; }
     if [ "$pname" = for ]; then
-        rrun "--for=geometry distance" --legend=full </dev/null >"$TMP/pin.raw"
+        # THETA11-FLIP (θ11 question-sites block on by default): this pin is the pre-L1 legend byte for byte; the question-sites
+        # block is not the legend's and is pinned by test/forqsitescheck.sh, so this one run is RIPWIRE_THETA11=0
+        RIPWIRE_THETA11=0 rrun "--for=geometry distance" --legend=full </dev/null >"$TMP/pin.raw"
     else
         # shellcheck disable=SC2086
         rrun $pargs --legend=full </dev/null >"$TMP/pin.raw"

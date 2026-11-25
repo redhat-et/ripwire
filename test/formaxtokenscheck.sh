@@ -137,6 +137,9 @@ raw  = open( path, 'rb' ).read()
 # the whole assertion, and a <shortkey> with no such declaration still stays in and fails (C). The adjacency
 # this now leans on is pinned independently by test/foranswerfirstcheck.sh (R8).
 raw  = re.sub( rb'<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>)', b'', raw, count = 1, flags = re.S )
+# THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites block DECLARES itself the same way ("outside
+# est_tokens and any budget" in its legend comment), so it is cut by the same rule; undeclared <qs> elements stay in and fail (C)
+raw  = re.sub( rb'<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*', b'', raw, count = 1, flags = re.S )
 bad  = []
 
 try:

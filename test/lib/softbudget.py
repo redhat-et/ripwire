@@ -13,10 +13,14 @@ import json, re
 # (comments only) before </ctx> — still the last ROW block.
 # TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>…</sigx>) ride after the last row block, so they may sit
 # between an appended <syms> and </ctx> like the trailing legend does; they are priced (inside est_tokens) and are not stripped.
+# THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites block (<!-- qs: … outside est_tokens … --> and its
+# run of <qs> elements) rides after the last row block on its own 1,000 B, outside est_tokens by its own legend's declaration, so it
+# is one of these blocks too (QSITES); it is cut first, so an appended <syms> before it is again followed only by the legend.
+QSITES   = re.compile( r"<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)", re.S )
 APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>)", re.S )
 def strip_appended( t ):
-    """The answer text less its appended, unpriced blocks (APPENDED)."""
-    return APPENDED.sub( "", t )
+    """The answer text less its appended, unpriced blocks (APPENDED, QSITES)."""
+    return APPENDED.sub( "", QSITES.sub( "", t ) )
 def strip_appended_bytes( b ):
     """strip_appended on a bytes answer, byte-exact for the rest (surrogateescape keeps any non-UTF-8 byte as it was)."""
     return strip_appended( b.decode( 'utf-8', 'surrogateescape' ) ).encode( 'utf-8', 'surrogateescape' )
