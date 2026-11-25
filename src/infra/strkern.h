@@ -404,6 +404,14 @@ inline bool lowerFoldedEquals( const char* a, const char* bLowered, std::size_t 
     return lowerFoldedEquals_scalar( a + k, bLowered + k, n - k );
 }
 
+// The string_view call-site form: `s` equals the all-lowercase `lowered` once s is A-Z-folded. An adapter that
+// adds the length test and forwards, not a kernel. `lowered` must already be lowercase: an upper-case byte in it
+// never matches.
+inline bool lowerFoldedEquals( std::string_view s, std::string_view lowered ) noexcept
+{
+    return s.size() == lowered.size() && lowerFoldedEquals( s.data(), lowered.data(), s.size() );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //  3. findByte / find3 / findByteset — first-occurrence scans
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <string_view>
 
-#include "arch.h"              // ciEqualAscii — the house ASCII case fold
+#include "infra/strkern.h"     // strkern::lowerFoldedEquals — the house A-Z case fold
 #include "infra/namesplit.h"   // namesplit::isIdentChar — the one identifier-character test
 
 namespace rw::bodyptr
@@ -30,10 +30,10 @@ inline constexpr std::string_view kEditShort[] = {
     "fix", "fixed", "add", "adds", "added", "use", "uses", "used", "set", "sets", "keep", "keeps", "pass", "passes", "cap", "pin", "run",
     "runs", "hide", "show", "feat", "perf", "chore", "do", "don't", "only", "problem" };
 
-// `w` starts with `stem` (lowercase), ASCII case folded: the house fold (arch.h ciEqualAscii) on the prefix.
+// `w` starts with `stem` (lowercase), ASCII case folded: the house fold (strkern::lowerFoldedEquals) on the prefix.
 [[nodiscard]] inline bool startsWithFolded( std::string_view w, std::string_view stem ) noexcept
 {
-    return w.size() >= stem.size() && rw::ciEqualAscii( w.substr( 0, stem.size() ), stem );
+    return w.size() >= stem.size() && rw::strkern::lowerFoldedEquals( w.substr( 0, stem.size() ), stem );
 }
 // The word at `at` is an edit verb and more words follow it.
 [[nodiscard]] inline bool editVerbAt( std::string_view t, std::size_t at ) noexcept

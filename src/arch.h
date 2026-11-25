@@ -36,6 +36,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/strkern.h"      // strkern::lowerFoldedEquals — the built-in layer names match a path component, A-Z folded
 #include "infra/fileSetStore.h" // rw::FileAdjacency: the file graph the metrics and the propagation walk read
 #include "memguard.h"           // guardedFileClosure: the propagation fold stops at the hard line
 #include "infra/stackthreads.h" // kCallerStackBytesFloor — path-rule matching runs on whatever thread --arch is on, never one it sized itself
@@ -75,22 +76,6 @@ inline constexpr std::array<BuiltinLayer, 18> kBuiltinLayers = {{
     { "test", "test" },   { "tests", "test" },           { "bench", "test" },
 }};
 
-inline bool ciEqualAscii( std::string_view a, std::string_view b ) noexcept
-{
-    if( a.size() != b.size() )
-    {
-        return false;
-    }
-    for( std::size_t i = 0; i < a.size(); ++i )
-    {
-        if( std::tolower( static_cast<unsigned char>( a[i] ) ) != static_cast<unsigned char>( b[i] ) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 // First built-in layer matching any DIRECTORY component of `path` (filename ignored), or "" if none.
 inline const char* builtinLayer( std::string_view path ) noexcept
 {
@@ -107,7 +92,7 @@ inline const char* builtinLayer( std::string_view path ) noexcept
         const std::string_view comp  = dirs.substr( start, ( slash == std::string_view::npos ? dirs.size() : slash ) - start );
         for( const BuiltinLayer& bl : kBuiltinLayers )
         {
-            if( ciEqualAscii( comp, bl.dir ) )
+            if( strkern::lowerFoldedEquals( comp, bl.dir ) )   // kBuiltinLayers dirs are lowercase
             {
                 return bl.layer;
             }

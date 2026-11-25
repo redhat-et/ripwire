@@ -49,7 +49,7 @@
 // asserted (CONTRIBUTING §2) — so nothing is claimed for hooks. Revisit when a git version is shown to run one on
 // a read-only call. The `ext::` transport is already refused at the one place a URL reaches git (main.cpp's clone).
 
-#include "arch.h"            // rw::ciEqualAscii — the case-insensitive ASCII compare the tree already has (reused, not re-rolled)
+#include "infra/strkern.h"   // strkern::lowerFoldedEquals — the house A-Z case fold (reused, not re-rolled)
 #include "pathguard.h"       // pathguard::readRegularFileNoFollow — config candidates are read non-blocking and regular-file-only
 #include "gitmine.h"         // rw::popenTrimmed — the one popen-and-trim shape in the tree (never a second)
 #include "infra/emit.h"      // rw::emitTo — the house emitter; no new printf-family site
@@ -99,11 +99,11 @@ inline FsmonitorForm classifyFsmonitorValue( std::string_view value ) noexcept
     }
     for( std::string_view t : { "true", "yes", "on", "1" } )
     {
-        if( ciEqualAscii( value, t ) ) { return FsmonitorForm::Builtin; }
+        if( strkern::lowerFoldedEquals( value, t ) ) { return FsmonitorForm::Builtin; }
     }
     for( std::string_view f : { "false", "no", "off", "0" } )
     {
-        if( ciEqualAscii( value, f ) ) { return FsmonitorForm::Off; }
+        if( strkern::lowerFoldedEquals( value, f ) ) { return FsmonitorForm::Off; }
     }
     return FsmonitorForm::Hook;
 }
