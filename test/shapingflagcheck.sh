@@ -127,10 +127,12 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
 # lane/rt2-route ES (2026-11-18, 26->27): ONE new read, --for's. `forEarlyStopPage` (src/verbs_forroute.h) reads cfg.maxTokens only to
 # STAND ASIDE: a budgeted --for page 1 never ends early. A re-pin, not a column change.
+# lane/theta6-tiny (2026-11-24, 27->28): ONE new read, --for's. `forTinyShapeEligible` (src/verbs_for.h) reads cfg.maxTokens only to
+# STAND ASIDE: a budgeted --for never takes the tiny shape (dev knob RIPWIRE_TINY_SHAPE, default off). A re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 27 ] && ok "(A) --max-tokens has 27 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 27 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 28 ] && ok "(A) --max-tokens has 28 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 28 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 15 ] && ok "(A) --top-k has 15 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 15 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.

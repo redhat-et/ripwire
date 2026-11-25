@@ -10,8 +10,9 @@
 #   (R)  A RELATIONAL QUESTION STAYS FULL: a call-path question naming the same symbol (RT3 keeps it on --for) is the knob-off answer
 #   (L)  A LOW-CONFIDENCE QUESTION STAYS FULL: confidence="low" with a code-shaped span -> the knob-off answer; non-vacuous: under
 #        RIPWIRE_TINY_SHAPE_FORCE=1 (the detector skipped) the same call IS tiny, so only the detector kept it full
-#   (P)  PAGING AND ROW-FORM CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0 and --rows=elements are the
-#        knob-off answers byte for byte (every call here must exit 0 with output: run() FAILs a call that does not)
+#   (P)  PAGING, ROW-FORM AND BUDGET CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0, --rows=elements and
+#        --max-tokens=N are the knob-off answers byte for byte (a budgeted --for stands the tiny shape aside, so the budget shapes
+#        the answer it always shaped) (every call here must exit 0 with output: run() FAILs a call that does not)
 #   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
 #   (G)  A CALLER IN ANOTHER FILE IS NAMED (lanes THETA6-GUARD, THETA6-FINISH): a named symbol with a 1-hop caller in ANOTHER
@@ -171,7 +172,7 @@ if 'confidence="low"' in off[LOWQ] and 'shape="tiny"' in forced and on[LOWQ] == 
 else: no("(L) low %s, forced tiny %s, on==off %s" % ('confidence="low"' in off[LOWQ], 'shape="tiny"' in forced, on[LOWQ] == off[LOWQ]))
 
 # (P)
-for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements"):
+for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements", "--max-tokens=400"):
     a = run(BIN, ["--for=" + NAMED, pb], "1"); b = run(BIN, ["--for=" + NAMED, pb])
     (ok if a == b and 'shape="tiny"' not in a else no)("(P) %s under the knob is the knob-off answer" % pb)
 
