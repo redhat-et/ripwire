@@ -36,8 +36,9 @@
 // <more next="--for=… --page-bytes=N"/>, the exact call for the full page 1 (an explicit --page-bytes turns the shape off, so the call
 // returns the page this question gets with the knob unset). One page: no page= / next= of a cut, so no continuation token can break.
 //
-// RIPWIRE_TINY_SHAPE (any value) turns it ON; RIPWIRE_TINY_SHAPE_FORCE skips the detector (measurement only). Unset, the answer is byte-identical to one served before this file existed
-// (test/tinyshapecheck.sh (I)). --version discloses tiny=on only when it is on (the default line is unchanged).
+// ON by default (owner decision 11-24, PR #742); RIPWIRE_TINY_SHAPE=0 turns it off, and the answer is then byte-identical to one served
+// before this file existed (test/tinyshapecheck.sh (I)). RIPWIRE_TINY_SHAPE_FORCE skips the detector (measurement only). The switch
+// lives in fortinyshapeswitch.h; --version discloses it as tiny=on|off.
 // Gate: test/tinyshapecheck.sh.
 #pragma once
 
@@ -57,16 +58,13 @@
 #include "filter.h"         // isTestPath — the one language-neutral test-path convention
 #include "infra/namesplit.h" // namesplit::isIdentChar — the ONE ASCII identifier-byte test (\b's word character)
 #include "forrowlines.h"    // readSection / unescaped — the one strict row reader
+#include "fortinyshapeswitch.h" // tinyShapeOn / tinyShapeForced — the switch (default ON; RIPWIRE_TINY_SHAPE=0 off)
 #include "nextverb.h"       // nextAttrXml — a continuation attribute
 #include "serialize.h"      // attrOf / pricedRootAttrTokens / kBytesPerTokenDefault
 
 namespace rw::tinyshape
 {
 
-// RIPWIRE_TINY_SHAPE_FORCE (any value): the shape on EVERY eligible call, the detector skipped: the measurement arm that labels which
-// questions the shape serves completely (lane THETA6 Step 0), never a product posture. It implies the knob.
-[[nodiscard]] inline bool tinyShapeForced() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE_FORCE" ) != nullptr; }
-[[nodiscard]] inline bool tinyShapeOn() noexcept { return std::getenv( "RIPWIRE_TINY_SHAPE" ) != nullptr || tinyShapeForced(); }
 
 inline constexpr std::size_t kTinyRows = 8;   // ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines
 // θ6b (lane THETA6-FINISH, 11-24): the edges line. A plain tiny answer names its first kEdgeCap cross-file edges (+K more); a named
