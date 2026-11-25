@@ -497,8 +497,10 @@ private:
 
 // The multi-root label → root path table, canonical order: `<root label= p=/>` per root, nothing under single-root. §P8
 // collision: this prologue spelled its LABEL `l=`, the two characters 22 other sites use for a LINE NUMBER — including the
-// map's <f p= …> rows. Renamed to label=.
-inline void writeRootLabelRows( XmlWriter& w, const IngestResult& ing, std::vector<char>& esc )
+// map's <f p= …> rows. Renamed to label=. ONE walk for both writers below: `row( label, path )` gets each root's two values
+// XML-escaped (the label copied out of `esc`, since escaping the path reuses that buffer).
+template<class Row>
+inline void forEachRootLabelRow( const IngestResult& ing, std::vector<char>& esc, Row&& row )
 {
     if( ing.rootLabels.size() < 2 )
     {
@@ -506,26 +508,38 @@ inline void writeRootLabelRows( XmlWriter& w, const IngestResult& ing, std::vect
     }
     for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
     {
-        w.write( "<root label=\"" );  w.write( escapeXml( ing.rootLabels[r], esc ) );
-        w.write( "\" p=\"" );     w.write( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
-        w.write( "\"/>" );
+        const std::string label( escapeXml( ing.rootLabels[r], esc ) );
+        row( std::string_view( label ), escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
     }
+}
+
+// The default map's prologue rows (serialize()'s writeMapChildren): the map is one XmlWriter byte stream.
+inline void writeRootLabelRows( XmlWriter& w, const IngestResult& ing, std::vector<char>& esc )
+{
+    forEachRootLabelRow( ing, esc, [ & ]( std::string_view label, std::string_view path )
+    {
+        w.write( "<root label=\"" );  w.write( label );
+        w.write( "\" p=\"" );         w.write( path );
+        w.write( "\"/>" );
+    } );
 }
 
 // M12 (capture-audit-2026-09-04, lane L9): under multi-root, every one of the graph-count verbs
 // (--callers/--callees/--uses) drops root= (correctly — there IS no single root=) but discloses NOTHING in
 // its place, so a reader of `ripwire src test --callers=SYM` has no way to learn what the `<label>/` prefix
-// on every p=/id= MEANS. The default map's own prologue prints exactly this table for exactly this reason
-// (serialize()'s writeMapChildren), and both write it with writeRootLabelRows. Lives here (not graphlegend.h,
-// which is included from ABOVE this point in this very file) because it needs escapeXml and XmlWriter, and
-// emits nothing at all under single-root (rootLabels.size() < 2) — this must never move a single byte of
-// single-root output.
+// on every p=/id= MEANS. The default map's own prologue prints exactly this table for exactly this reason, and
+// these are the same rows. They go through rw::emitTo, the console-aware path (std::print where the library has
+// it), as on main before this train, not XmlWriter's fwrite: a root PATH can be non-ASCII on a console (CR721 r4).
+// Lives here (not graphlegend.h, which is included from ABOVE this point in this very file) because it needs
+// escapeXml, and emits nothing at all under single-root (rootLabels.size() < 2) — this must never move a single
+// byte of single-root output.
 inline void writeMultiRootTable( std::FILE* out, const IngestResult& ing )
 {
     std::vector<char> esc;
-    XmlWriter         w( out );
-    writeRootLabelRows( w, ing, esc );
-    w.flush();
+    forEachRootLabelRow( ing, esc, [ & ]( std::string_view label, std::string_view path )
+    {
+        rw::emitTo( out, "<root label=\"{}\" p=\"{}\"/>", label, path );
+    } );
 }
 
 // L3 field-notes surfacing: attach `<note d="ISO-date"><![CDATA[text]]></note>` children for a symbol or file

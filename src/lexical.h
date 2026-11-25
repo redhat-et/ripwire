@@ -21,6 +21,7 @@
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 #include "infra/namesplit.h"     // hasIdentifierShape — the ONE camel/snake predicate chooseForRanker shares with mention.h
 #include "infra/charconvcompat.h" // rw::parseFloating — envKnob's full-token finite parse of a RIPWIRE_* knob
+#include "infra/pctenc.h"        // appendPercentEncoded — a refused RIPWIRE_TERMMARGIN value echoed on one line
 
 #include <algorithm>
 #include <atomic>
@@ -733,9 +734,10 @@ inline LexTermMargin termMarginFromEnv()
     }
     if( !VALIDATE( std::string_view( env ) == "1", "RIPWIRE_TERMMARGIN is 0 or 1" ) )
     {
-        rw::emitRaw( stderr, "ripwire: ignoring RIPWIRE_TERMMARGIN=\"" );
-        rw::emitRaw( stderr, env );
-        rw::emitRaw( stderr, "\" (want 0 or 1) — the margin stays disarmed\n" );
+        // CR721 r4: the refused value is percent-encoded (control bytes, DEL and '%' as %XX), so the refusal stays ONE line.
+        std::string shown;
+        appendPercentEncoded( shown, env, []( unsigned char ) { return false; } );
+        rw::emitTo( stderr, "ripwire: ignoring RIPWIRE_TERMMARGIN=\"{}\" (want 0 or 1) — the margin stays disarmed\n", shown );
         return {};
     }
     const std::optional<int> bits = envKnob<int>( "RIPWIRE_TERMMARGIN_BITS" );

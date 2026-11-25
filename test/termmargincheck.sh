@@ -247,6 +247,15 @@ for v in off yes 2; do
         no "(h) RIPWIRE_TERMMARGIN=$v: want rc 0, the disarmed ranking and exactly one refusal line; got rc=$hrc, ${hlines:-?} line(s), stderr: $( head -c 200 "$TMP/h_$v.err" )"
     fi
 done
+#     CR721 r4: the refused value is percent-encoded (a control byte as %XX), so "off<newline>" is still ONE refusal line.
+#     RED before (51011272d): the newline was echoed verbatim and the refusal spanned two lines.
+runq $'off\n' "evict handler" "$TMP/h_nl.xml" "$TMP/h_nl.err"; hrc=$?
+hlines="$( grep -vc '^\[validate\] ' "$TMP/h_nl.err" )"
+if [ "$hrc" = 0 ] && cmp -s "$TMP/h_nl.xml" "$TMP/a_off.xml" && grep -qF 'ignoring RIPWIRE_TERMMARGIN="off%0A"' "$TMP/h_nl.err" && [ "$hlines" = 1 ]; then
+    ok "(h) RIPWIRE_TERMMARGIN=off<newline> is refused on one stderr line, the newline spelled %0A"
+else
+    no "(h) RIPWIRE_TERMMARGIN=off<newline>: want rc 0, the disarmed ranking and one refusal line with %0A; got rc=$hrc, ${hlines:-?} line(s), stderr: $( head -c 200 "$TMP/h_nl.err" )"
+fi
 runq "" "evict handler" "$TMP/h_empty.xml" "$TMP/h_empty.err"; hrc=$?
 if [ "$hrc" = 0 ] && cmp -s "$TMP/h_empty.xml" "$TMP/a_off.xml" && [ ! -s "$TMP/h_empty.err" ]; then ok "(h) an empty RIPWIRE_TERMMARGIN is the unset default, silently"
 else no "(h) an empty RIPWIRE_TERMMARGIN: want rc 0, the disarmed ranking and empty stderr; got rc=$hrc, stderr: $( head -c 200 "$TMP/h_empty.err" )"; fi
