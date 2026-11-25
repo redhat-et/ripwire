@@ -311,8 +311,9 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
 // and they name neither the installer nor its flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
 //   HK2: the SubagentStart note, for the row with a subagentBrief (SubagentStart is a Claude Code event).
 //   HOOK-DEDUP (2026-11-24): the SessionStart primer sends the paste block below and stays silent when a CLAUDE.md Claude Code loads
-//   already holds it word for word (hooks/ripwire-nudge.sh claudeMdHoldsBlurb), so the two are alternatives: for the row whose
-//   context file is CLAUDE.md. test/hookcheck.sh (3i6) holds it.
+//   already holds it word for word (hooks/ripwire-nudge.sh claudeMdHoldsBlurb): for the row whose context file is CLAUDE.md. The
+//   note does not offer the hook as a substitute for the paste: the meter's control arm (arm=auto, the default, half the sessions
+//   by session-id hash) never gets the primer (CodeRabbit #744 round 3). test/hookcheck.sh (3i6) holds it.
 inline void wrapPrintHookNotes( std::FILE* out, const std::string_view agent )
 {
     const AgentTarget* row = agentTarget( agent );
@@ -329,7 +330,8 @@ inline void wrapPrintHookNotes( std::FILE* out, const std::string_view agent )
     if( row->contextFile == "CLAUDE.md" )
     {
         rw::emitRaw( out, "# The hook install above also sends the block below at session start, and skips it when a CLAUDE.md Claude Code\n"
-                          "#   loads already holds it word for word: paste it or rely on the hook, either one delivers it.\n" );
+                          "#   loads already holds it word for word. Pasting it is the reliable path: the hook sends it only in sessions where\n"
+                          "#   the primer is on, and by default about half of sessions are its control arm, which gets no primer.\n" );
     }
 }
 

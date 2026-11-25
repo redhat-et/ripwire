@@ -349,6 +349,8 @@ if [ -x "$REALBIN" ]; then
     #   INSTRUCTION MODE (CodeRabbit #744 round 2)                -> byte-identical to ABSENT: pluginConfigs[...].options.instructionFiles
     #     `managed-only` drops the project, local and user CLAUDE.md files, so a block there is never delivered; any value but the
     #     default keeps the primer (conservative), and the default written out explicitly still dedups (control).
+    #   OVER THE SIZE LIMIT (CodeRabbit #744 round 3)             -> byte-identical to ABSENT: Claude Code skips a CLAUDE.md over 4 MiB
+    #     and loads none of it (code.claude.com/docs/en/memory); a file of exactly 4 MiB still dedups (control).
     # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
     # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
     SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
@@ -455,6 +457,24 @@ if [ -x "$REALBIN" ]; then
     done
     if [ "$ssd_kept" -eq 4 ]; then ok "SessionStart dedup NOT DELIVERED: 4 of 4 keep the primer"
     else no "SessionStart dedup NOT DELIVERED: $ssd_kept of 4"; fi
+    # OVER THE SIZE LIMIT: the block, then filler to an exact byte size; RED on the hook that read the file whatever its size
+    for ssd_case in "4194305|over 4 MiB (4194305 B)" "4194304|exactly 4 MiB (4194304 B), control"; do
+        ssd_size="${ssd_case%%|*}"; ssd_name="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; yes 'Keep tests green.' | head -c "$(( ssd_size - ssd_n ))" >> "$SSDCWD/CLAUDE.md"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"
+        ssd_out="$( ssd_run "z$ssd_size" )"
+        if [ "$(( ssd_n ))" -ne "$ssd_size" ] || [ "${ssd_p:-0}" -lt 1 ]; then
+            no "SessionStart dedup SIZE ($ssd_name): planted $(( ssd_n )) B with ${ssd_p:-0} block heading(s), expected $ssd_size B with the block"
+        elif [ "$ssd_size" -gt 4194304 ]; then
+            [ "$ssd_out" = "$SSD_ABS" ] && ok "SessionStart dedup SIZE ($ssd_name): Claude Code skips the file, the block is sent, byte-identical to ABSENT" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"
+        else
+            [ -z "$ssd_out" ] && ok "SessionStart dedup SIZE ($ssd_name): silent" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected silent"
+        fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
     # INSTRUCTION MODE: the block is in a project or user CLAUDE.md and the user-level settings.json (where Claude Code reads the
     # mode, as in managed settings) sets it; RED on the hook that only knew claudeMdExcludes (every keep arm went silent)
     ssd_pc='{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n'
@@ -486,11 +506,14 @@ if [ -x "$REALBIN" ]; then
     if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"
     else no "SessionStart dedup: the Codex primer (block ${#SSD_CODEX} B) went silent or changed (out=${#ssd_out} B)"; fi
     rm -f "$SSDCWD/CLAUDE.md"
-    # the recipe says the paste and the hook are alternatives, for Claude only
-    ssd_wc="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | grep -c 'either one delivers it' )"
-    ssd_wx="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | grep -c 'either one delivers it' )"
-    [ "$ssd_wc" = 1 ] && [ "$ssd_wx" = 0 ] && ok "wrap claude says the paste block and the hook primer are alternatives (codex: not said)" \
-        || no "wrap alternatives line: claude=$ssd_wc (want 1) codex=$ssd_wx (want 0)"
+    # the recipe names the paste as the reliable path and says the hook skips the control arm, for Claude only; it never says
+    # the hook alone delivers the block (the control arm, half the sessions under the default arm=auto, gets no primer)
+    ssd_wcl="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null )"; ssd_wxl="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null )"
+    ssd_wc="$( printf '%s\n' "$ssd_wcl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wx="$( printf '%s\n' "$ssd_wxl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wo="$( printf '%s\n%s\n' "$ssd_wcl" "$ssd_wxl" | grep -c -i -e 'either one delivers' -e 'rely on the hook' )"
+    [ "$ssd_wc" = 2 ] && [ "$ssd_wx" = 0 ] && [ "$ssd_wo" = 0 ] && ok "wrap claude names the paste as the reliable path and the control arm the hook skips (codex: not said; no hook-alone promise)" \
+        || no "wrap paste/hook note: claude=$ssd_wc (want 2) codex=$ssd_wx (want 0) hook-alone wording=$ssd_wo (want 0)"
   fi
     unset CLAUDE_CONFIG_DIR
 else

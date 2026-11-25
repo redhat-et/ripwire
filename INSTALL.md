@@ -121,7 +121,8 @@ only records, on your machine, which tool calls ripwire could have answered. Add
 same for Codex in `~/.codex/hooks.json`; open `/hooks` in Codex to review and trust them. The hooks never
 block a tool call, they need `jq`, and they are registered only when you pass `--hook`. The primer sends the same
 block `ripwire wrap claude` asks you to paste into CLAUDE.md, and stays silent when a CLAUDE.md that Claude Code loads
-already holds it word for word, so pasting the block and the hook are alternatives for that guidance.
+already holds it word for word. Pasting the block is the reliable path: the hook's measurement keeps about half of
+sessions as a control arm by default, and those get no primer.
 
 ### MCP server (optional)
 

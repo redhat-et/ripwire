@@ -1283,12 +1283,14 @@ fi
 # comments removed (it strips them; a block inside one is not delivered). EXACT, not a heading grep: a stale or edited block is
 # not this version's text, so the primer still sends the current one. Kept CONSERVATIVE where loading is not modelled: an @import
 # is not followed, and claudeMdSettingsMayDrop (below) keeps the primer whenever a settings file may stop these files loading.
-# test/hookcheck.sh (3i6) pins each case. Builtins only, no fork: a few stats and reads of small files at each session start.
-claudeMdRead() # FILE -> the caller's `text`; false when FILE is not a readable regular file
+# A file over 4 MiB is not matched: Claude Code skips such a file and loads none of it (https://code.claude.com/docs/en/memory,
+# "as long as the file is 4 MiB or smaller"), so its block is never delivered. test/hookcheck.sh (3i6) pins each case.
+# Cost: per file that exists, one `$(< FILE)` and, for a memory file, one `wc -c` (BSD and GNU wc answer -c on a regular file from
+# its size, not by reading). bash 3.2's `read -d ''` takes one syscall per byte (9 s for 4 MiB); `$(<)` reads in blocks.
+claudeMdRead() # FILE -> the caller's `text` (trailing newlines dropped); false when FILE is not a readable regular file
 {
     [ -f "$1" ] && [ -r "$1" ] || return 1
-    text=""
-    IFS= read -r -d '' text < "$1"
+    text="$( < "$1" )"
     return 0
 }
 # claudeMdSettingsMayDrop SETTINGS...: true when a readable settings file may keep a memory file from loading, so a match
@@ -1315,7 +1317,7 @@ claudeMdSettingsMayDrop()
 }
 claudeMdHoldsBlurb()
 {
-    local d="${1%/}" want="$2" f text rest cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
+    local d="${1%/}" want="$2" f text rest size cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
     local -a files=( "$cfg/CLAUDE.md" "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
     local -a settings=( "$cfg/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json"
                         "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json
@@ -1329,8 +1331,11 @@ claudeMdHoldsBlurb()
     claudeMdSettingsMayDrop "${settings[@]}" && return 1
     for f in "${files[@]}"
     do
+        [ -f "$f" ] || continue
+        size="$( wc -c < "$f" 2>/dev/null )"
+        [ -n "$size" ] && [ "$(( size ))" -le 4194304 ] || continue   # over 4 MiB, or unknown: Claude Code may load none of it
         claudeMdRead "$f" || continue
-        text="${text//$'\r'/}"
+        [[ "$text" == *$'\r'* ]] && text="${text//$'\r'/}"   # only when present: bash 3.2 takes seconds on a MiB-sized text
         while [[ "$text" == *"<!--"* ]]
         do
             rest="${text#*"<!--"}"

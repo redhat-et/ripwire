@@ -8,6 +8,6 @@ block word for word. The match is exact; line endings are ignored, and HTML comm
 removes them. A block that is absent, older or edited still gets the current one, unchanged from before. So does a block
 behind an `@import`, which is not followed, and any session whose user, managed or project settings name `claudeMdExcludes`
 or set an instruction mode (`instructionFiles`) other than the default, since `managed-only` skips the project, local and
-user CLAUDE.md files.
-Codex's primer is unchanged. `ripwire wrap claude` now says the paste and the hook are alternatives. `test/hookcheck.sh`
-(3i6) holds each case.
+user CLAUDE.md files. A CLAUDE.md over 4 MiB, which Claude Code skips, does not count either.
+Codex's primer is unchanged. `ripwire wrap claude` now says pasting the block is the reliable path, since the hook sends
+it only in sessions where the primer is on (not the control arm). `test/hookcheck.sh` (3i6) holds each case.
