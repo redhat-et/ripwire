@@ -81,6 +81,7 @@
 #include <ctime>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -265,6 +266,8 @@ inline bool worthWriting( std::size_t learned, std::size_t covered ) noexcept
 struct FaultGrepSkipAll;
 struct FaultGrepNoStat;
 struct FaultCloneAnyDigest;
+struct FaultDirsNoStat;
+struct FaultDirsLinks;
 inline const char* grepFaultName() noexcept
 {
     return rw::faultSwitchOnOnce<FaultGrepSkipAll>( "RIPWIRE_FAULT_VERBFS_GREP_SKIPALL" ) ? "skipall"
@@ -915,6 +918,208 @@ inline void keepClones( const IngestResult& ing, int minTokens, std::uint64_t in
     }
 }
 
+// ═══ (3) DIRS ════════════════════════════════════════════════════════════════════════════════════════════════════════
+struct DirsRecord
+{
+    std::vector<std::string>       names;   // the probed names, in probe order: a record of another name list is not used
+    std::vector<std::string>       dirs;    // root-relative, sorted as readManifests sorts them (svLess), unique
+    std::vector<warmsnap::StatSig> sigs;    // each directory's own lstat signature, settled
+    std::vector<std::uint8_t>      kinds;   // dirs × names, dir-major: an EntryKind
+};
+
+inline void writeDirsRecord( warmsnap::Out& o, const DirsRecord& r )
+{
+    o.strs( r.names );
+    warmsnap::writePaths( o, r.dirs.size(), [ & ]( std::size_t i ) -> std::string_view { return r.dirs[ i ]; } );
+    o.vec( r.sigs );
+    o.vec( r.kinds );
+}
+
+inline bool readDirsRecord( std::string_view payload, DirsRecord& r )
+{
+    warmsnap::In in{ payload };
+    in.strs( r.names );
+    warmsnap::readPaths( in, r.dirs );
+    in.vec( r.sigs );
+    in.vec( r.kinds );
+    if( !VALIDATE( in.ok && in.left() == 0 && r.sigs.size() == r.dirs.size() && r.kinds.size() == r.dirs.size() * r.names.size(), "verbfs: the dirs record's arrays disagree" ) )
+    {
+        return false;
+    }
+    return VALIDATE( std::ranges::all_of( r.kinds, []( std::uint8_t k ) { return k <= std::uint8_t( EntryKind::Live ); } ), "verbfs: a stored entry kind is out of range" );
+}
+
+inline LoadedRecord<DirsRecord>& dirsLoaded() noexcept
+{
+    static LoadedRecord<DirsRecord> slot;
+    return slot;
+}
+
+// The kind formanifest.h's probedManifestReadable reads first: a link is Live (it is followed there, every time).
+inline EntryKind entryKindNow( const std::string& disk, bool storeLinkTarget ) noexcept
+{
+    std::error_code                    ec;
+    const std::filesystem::file_status st = std::filesystem::symlink_status( disk, ec );
+    if( std::filesystem::is_symlink( st ) )
+    {
+        if( storeLinkTarget )   // the RIPWIRE_FAULT_VERBFS_DIRS_LINKS mutant: what the link resolves to, as if it could not change
+        {
+            std::error_code fec;
+            return std::filesystem::is_regular_file( disk, fec ) ? EntryKind::Regular : EntryKind::NotRegular;
+        }
+        return EntryKind::Live;
+    }
+    return std::filesystem::is_regular_file( st ) ? EntryKind::Regular : EntryKind::NotRegular;
+}
+
+// What one call learned about its probed directories: the kind of each (dir, name), and per directory where that came from.
+struct DirProbes
+{
+    enum class From : std::uint8_t
+    {
+        Young,    // probed now, its signature not settled yet: probed again next time
+        Record,   // its signature is unchanged: the record's kinds
+        Now,      // probed now and settled: a fact to store
+    };
+    std::vector<EntryKind>         kinds;      // dirs × names, dir-major
+    std::vector<warmsnap::StatSig> freshSig;   // per directory, for From::Now
+    std::vector<From>              from;
+};
+
+// Each probed directory's record entry, or UINT32_MAX: both lists are sorted by the same order (svLess), so one merge walk pairs them.
+inline std::vector<std::uint32_t> dirEntriesOf( const DirsRecord& record, std::span<const std::string_view> dirs )
+{
+    std::vector<std::uint32_t> entryOf( dirs.size(), UINT32_MAX );
+    std::size_t                e = 0;
+    for( std::size_t i = 0; i < dirs.size(); ++i )
+    {
+        while( e < record.dirs.size() && sortutil::svLess( record.dirs[ e ], dirs[ i ] ) )
+        {
+            ++e;
+        }
+        if( e < record.dirs.size() && record.dirs[ e ] == dirs[ i ] )
+        {
+            entryOf[ i ] = std::uint32_t( e );
+        }
+    }
+    return entryOf;
+}
+
+// What every directory of one call is probed against.
+struct DirProbeRun
+{
+    std::string_view                  rootPrefix;
+    std::span<const std::string_view> names;
+    const DirsRecord*                 record    = nullptr;   // null: nothing stored for these names
+    long long                         startNs   = 0;
+    bool                              noStat    = false;     // RIPWIRE_FAULT_VERBFS_DIRS_NOSTAT
+    bool                              linkKinds = false;     // RIPWIRE_FAULT_VERBFS_DIRS_LINKS
+};
+
+// One directory: the record's kinds when its own signature is unchanged, else every name probed now (the spelling formanifest.h joins:
+// <rootPrefix><dir>/<name>, the root's names bare) and the directory's signature read after the probes, for the settle rule.
+inline void probeDirInto( DirProbes& out, std::size_t i, std::string_view dir, std::uint32_t entry, const DirProbeRun& run )
+{
+    const std::string_view                  rootPrefix = run.rootPrefix;
+    const std::span<const std::string_view> names      = run.names;
+    const DirsRecord* const                 record     = run.record;
+    const std::size_t                       nameCount  = names.size();
+    const std::string dirDisk   = dir.empty() ? ( rootPrefix.empty() ? std::string( "." ) : std::string( rootPrefix ) ) : std::string( rootPrefix ) + std::string( dir );
+    if( record != nullptr && entry != UINT32_MAX && ( run.noStat || warmsnap::statSig( dirDisk.c_str(), false ) == record->sigs[ entry ] ) )
+    {
+        for( std::size_t n = 0; n < nameCount; ++n )
+        {
+            out.kinds[ i * nameCount + n ] = EntryKind( record->kinds[ std::size_t( entry ) * nameCount + n ] );
+        }
+        out.from[ i ] = DirProbes::From::Record;
+        return;
+    }
+    for( std::size_t n = 0; n < nameCount; ++n )
+    {
+        const std::string rel          = dir.empty() ? std::string( names[ n ] ) : std::string( dir ) + "/" + std::string( names[ n ] );
+        out.kinds[ i * nameCount + n ] = entryKindNow( std::string( rootPrefix ) + rel, run.linkKinds );
+    }
+    out.freshSig[ i ] = warmsnap::statSig( dirDisk.c_str(), false );
+    out.from[ i ]     = settled( out.freshSig[ i ], run.startNs ) ? DirProbes::From::Now : DirProbes::From::Young;
+}
+
+// The record this call can stand behind: every directory served or settled now; a young one is left out (probed live next time).
+inline bool writeDirsMerged( const ArmedRoot& armed, std::span<const std::string_view> dirs, std::span<const std::string_view> names, const DirProbes& probes,
+                             const DirsRecord* record, const std::vector<std::uint32_t>& entryOf )
+{
+    auto merged = std::make_shared<DirsRecord>();
+    merged->names.assign( names.begin(), names.end() );
+    for( std::size_t i = 0; i < dirs.size(); ++i )
+    {
+        if( probes.from[ i ] == DirProbes::From::Young )
+        {
+            continue;
+        }
+        merged->dirs.emplace_back( dirs[ i ] );
+        merged->sigs.push_back( probes.from[ i ] == DirProbes::From::Now ? probes.freshSig[ i ] : record->sigs[ entryOf[ i ] ] );
+        for( std::size_t n = 0; n < names.size(); ++n )
+        {
+            merged->kinds.push_back( std::uint8_t( probes.kinds[ i * names.size() + n ] ) );
+        }
+    }
+    warmsnap::Out o = beginRecord();
+    writeDirsRecord( o, *merged );
+    if( !commitRecord( Part::Dirs, armed.rootKey, o ) )
+    {
+        return false;
+    }
+    replaceLoaded( dirsLoaded(), std::shared_ptr<const DirsRecord>( std::move( merged ) ) );
+    return true;
+}
+
+inline std::vector<EntryKind> entryKindsOf( const IngestResult& ing, std::string_view rootPrefix, std::span<const std::string_view> dirs, std::span<const std::string_view> names )
+{
+    const ArmedRoot* const armed = armedFor( ing );
+    if( armed == nullptr || names.empty() )
+    {
+        return {};
+    }
+    const bool      noStat    = rw::faultSwitchOnOnce<FaultDirsNoStat>( "RIPWIRE_FAULT_VERBFS_DIRS_NOSTAT" );
+    const bool      linkKinds = rw::faultSwitchOnOnce<FaultDirsLinks>( "RIPWIRE_FAULT_VERBFS_DIRS_LINKS" );
+    const long long startNs   = nowNs();
+    Why             why       = Why::Absent;
+    const auto      loaded    = loadOnce( dirsLoaded(), Part::Dirs, armed->rootKey, readDirsRecord, why );
+    const bool      sameNames = loaded != nullptr && std::ranges::equal( loaded->names, names, []( const std::string& a, std::string_view b ) { return a == b; } );
+    const DirsRecord* const          record  = sameNames ? loaded.get() : nullptr;
+    const std::vector<std::uint32_t> entryOf = record != nullptr ? dirEntriesOf( *record, dirs ) : std::vector<std::uint32_t>( dirs.size(), UINT32_MAX );
+
+    DirProbes probes{ std::vector<EntryKind>( dirs.size() * names.size(), EntryKind::Live ), std::vector<warmsnap::StatSig>( dirs.size() ),
+                      std::vector<DirProbes::From>( dirs.size(), DirProbes::From::Young ) };
+    const DirProbeRun run{ rootPrefix, names, record, startNs, noStat, linkKinds };
+    warmsnap::parallelFor( dirs.size(), [ & ]( std::size_t i ) noexcept
+    {
+        probeDirInto( probes, i, dirs[ i ], entryOf[ i ], run );
+    } );
+
+    const std::size_t learned    = std::size_t( std::ranges::count( probes.from, DirProbes::From::Now ) );
+    std::size_t       fromRecord = 0;   // names answered from the record with no syscall
+    for( std::size_t at = 0; at < probes.kinds.size(); ++at )
+    {
+        fromRecord += probes.from[ at / names.size() ] == DirProbes::From::Record && probes.kinds[ at ] != EntryKind::Live ? 1 : 0;
+    }
+    bool wrote = false;
+    try
+    {
+        wrote = worthWriting( learned, dirs.size() ) && writeDirsMerged( *armed, dirs, names, probes, record, entryOf );
+    }
+    catch( ... )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a dirs record that could not be assembled is not written: the next probe is live, as today" );
+    }
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[verbfs] dirs dirs={} probes={} served={} live={} learned={} why={} wrote={}{}\n", dirs.size(), probes.kinds.size(), fromRecord,
+                    probes.kinds.size() - fromRecord, learned, loaded == nullptr ? kWhyNames[ std::size_t( why ) ] : sameNames ? "ok" : "names", wrote ? 1 : 0,
+                    noStat ? " fault=nostat" : linkKinds ? " fault=links" : "" );
+    }
+    return std::move( probes.kinds );
+}
+
 // ── arming ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Called by ingest() for the primary ingest of a cached single-root run (where it arms the warm snapshot), on the main
 // thread before any verb runs. Installs every seam this file implements; RIPWIRE_NO_VERBFS=1 leaves them null.
@@ -932,6 +1137,7 @@ inline void arm( std::string_view rootDir, const std::string& rootKey )
     s.grepSieve  = &openGrepSieve;
     s.cloneServe = &serveClones;
     s.cloneKeep  = &keepClones;
+    s.entryKinds = &entryKindsOf;
 }
 
 }   // namespace rw::verbfs
