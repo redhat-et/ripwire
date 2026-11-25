@@ -6373,9 +6373,9 @@ and is not published here.
   reached through a helper's parameterized path. Precision 26/30 = 87 % (Wilson 95 % [0.70, 0.95]).
 - `count-drift` (Markdown and C/C++ string literals): a count word that introduces a list of names, wrong against the
   list or against the tree's string-literal array of those names (`why=` says which and names the missing members).
-  The #712 seed was `--kinds` help and COMMANDS.md saying "twelve" after `tangle` made thirteen in `kQualityKindNames`
+  The #712 seed was `--quality-kinds` help and COMMANDS.md saying "twelve" after `tangle` made thirteen in `kQualityKindNames`
   (80e60ca7d), and it is found at both sites. This tree at the PR head has 0 sites. `test/defectshapecheck.sh` §4f pins
-  the self, name-set and C++-literal positives, four premise-counted negatives and the quiet-on-fix arm. Precision
+  the self, name-set, C++-literal and wrapped-list positives, five premise-counted negatives and the quiet-on-fix arm. Precision
   beyond the fixture and the seed is not measured.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
