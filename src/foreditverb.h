@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <string_view>
 
-#include "arch.h"              // ciEqualAscii — the house ASCII case fold
+#include "infra/strkern.h"     // strkern::lowerFoldedEquals / lowerFoldedStartsWith — the house A-Z case fold
 #include "infra/namesplit.h"   // namesplit::isIdentChar — the one identifier-character test
 
 namespace rw::bodyptr
@@ -30,11 +30,6 @@ inline constexpr std::string_view kEditShort[] = {
     "fix", "fixed", "add", "adds", "added", "use", "uses", "used", "set", "sets", "keep", "keeps", "pass", "passes", "cap", "pin", "run",
     "runs", "hide", "show", "feat", "perf", "chore", "do", "don't", "only", "problem" };
 
-// `w` starts with `stem` (lowercase), ASCII case folded: the house fold (arch.h ciEqualAscii) on the prefix.
-[[nodiscard]] inline bool startsWithFolded( std::string_view w, std::string_view stem ) noexcept
-{
-    return w.size() >= stem.size() && rw::ciEqualAscii( w.substr( 0, stem.size() ), stem );
-}
 // The word at `at` is an edit verb and more words follow it.
 [[nodiscard]] inline bool editVerbAt( std::string_view t, std::size_t at ) noexcept
 {
@@ -43,8 +38,8 @@ inline constexpr std::string_view kEditShort[] = {
     const std::string_view w = t.substr( at, end - at );
     if( w.empty() || ( end < t.size() && ( namesplit::isIdentChar( t[ end ] ) || t[ end ] == '.' ) ) ) { return false; }
     const auto lowerRest = []( std::string_view rest ) { return std::ranges::all_of( rest, []( char c ) { return c >= 'a' && c <= 'z'; } ); };
-    const bool verb      = std::ranges::any_of( kEditShort, [ & ]( std::string_view s ) { return w.size() == s.size() && startsWithFolded( w, s ); } )
-                      || std::ranges::any_of( kEditStems, [ & ]( std::string_view s ) { return startsWithFolded( w, s ) && lowerRest( w.substr( s.size() ) ); } );
+    const bool verb      = std::ranges::any_of( kEditShort, [ & ]( std::string_view s ) { return strkern::lowerFoldedEquals( w, s ); } )
+                      || std::ranges::any_of( kEditStems, [ & ]( std::string_view s ) { return strkern::lowerFoldedStartsWith( w, s ) && lowerRest( w.substr( s.size() ) ); } );
     const std::size_t gap = t.find_first_of( " \t\n", end );
     return verb && gap != std::string_view::npos && t.find_first_not_of( " \t\n", gap ) != std::string_view::npos;
 }
