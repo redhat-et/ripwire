@@ -215,6 +215,7 @@ then ok "H3 the answer minus the marker (and the hold's own disclosure) is the o
 ask "$HB" >"$TMP/h4.xml"
 if grep -qF '<rx p="ts/m/index.ts"' "$TMP/h4.xml" && ! grep -qF 'held="budget"' "$TMP/h4.xml"; then ok "H4 twin: no budget, the rows print and no marker"; else no "H4 twin: no budget, the rows print and no marker"; fi
 ask --token-budget=100 "--for=add a new built-in filter command" >"$TMP/h5.xml" || no "H5: the budgeted run exited $?"
+[ -s "$TMP/h5.xml" ] || no "zero-evidence premise (reexportcheck.sh:218): the file the next arm judges is empty, so its verdict proves nothing"
 if grep -qF 'reexports' "$TMP/h5.xml"; then no "H5 twin: a task with no chain carries no marker under a budget"; else ok "H5 twin: a task with no chain carries no marker under a budget"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for f in f1 f3 f4 g1 n3deep t2a t2b t2c h1; do if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "xml well-formed $f"; else no "xml malformed $f"; fi; done
