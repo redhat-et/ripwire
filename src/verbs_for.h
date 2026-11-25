@@ -6007,8 +6007,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             forBodyPointers( d, doc );
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
+            rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );   // θ11: before the size line, so it names the bytes delivered
             noteWholeAnswerOverCeiling( d.cfg, doc.size() );
-            rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
         }

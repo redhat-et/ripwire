@@ -93,6 +93,7 @@ export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): B1 reads the page from <shortkey> to the end for the decoy path, and B9 reads <syms> as the last block before </ctx>; the question-sites block after them lists the question's word sites (the decoy among them) and is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="${KEEP_TMP:-$( mktemp -d )}"; [ -n "${KEEP_TMP:-}" ] || trap 'rm -rf "$TMP"' EXIT
 fail=0
