@@ -29,6 +29,10 @@
 //      docs; path within a tier; then the unindexed files by path), lines ascending.
 //   5. EMIT: `<qs t="TOK" n="N">path:l,l path2:l</qs>`, one line per token; a line goes in whole or not at all, and on overflow the
 //      next token is tried; 1,000 B of lines in all. One comment line before them says what they are. No token kept: no block.
+//   6. FLOORS: n="N+" when a file the token may occur in went unread — the crawl kept fewer skip rows than it counted (500 per
+//      class), the index scan stopped at its budget or skipped an unreadable file, or an unindexed text file could not be read or is
+//      over the crawl's byte ceiling (a binary one is not text and floors nothing). Rule 3's caps read N, so a floor is listed as a
+//      lower bound, never as a total (TokenSites is the DISCLOSE sink; the legend says what `+` means).
 #include "model.h"       // IngestResult
 #include "search.h"      // grepCollectEach / grepCollectAux — the index's literal scan
 #include "docparse.h"    // docparse::detail::readWholeFile — the unindexed files' one read
@@ -39,6 +43,8 @@
 #include "lexical.h"     // routeLower
 #include "forbudgetfit.h" // ForAnswerLedger::questionSites — the render hands its block to the page
 #include "forliteral.h"  // lit_detail::trimAllWs — a backtick span is trimmed as Python str.strip does
+#include "infra/ownedfile.h" // openOwnedFile — an oversized file's head, read to tell text from binary
+#include "infra/Diagnostics.h" // DISCLOSE — a floored count
 
 #include <algorithm>
 #include <array>
@@ -350,6 +356,18 @@ struct TokenSites
     const Token*                                       tok   = nullptr;
     std::vector<std::pair<std::string, std::uint32_t>> sites;
     bool                                               codeName = false;   // a plain word the index uses as a name (rule 3)
+    bool                                               floor    = false;   // a file it may occur in went unread: n= is a floor (rule 6)
+
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SkipRowsCapped,        // the crawl counted more skipped files than it kept rows for
+        IndexScanIncomplete,   // the index scan stopped at its budget or skipped an unreadable file
+        FileUnread,            // an unindexed text file could not be read, or is over the byte ceiling
+    };
+    void disclose( DisclosureWhy ) noexcept   // the DISCLOSE sink: formatLine prints n="N+"
+    {
+        floor = true;
+    }
 };
 
 // Rule 3's code vocabulary: the index defines a symbol named `w`, or a reference calls or names it (an exact id compare: a name no
@@ -376,6 +394,10 @@ namespace detail
 // one past the cap (the token is then skipped).
 inline void indexedSites( const IngestResult& ing, const GrepCollection& found, std::string_view rootPrefix, TokenSites& ts )
 {
+    if( !found.cleanScan() )
+    {
+        DISCLOSE( ts, TokenSites::DisclosureWhy::IndexScanIncomplete, "qsites: the index scan stopped at its budget or skipped an unreadable file; n= is a floor" );
+    }
     std::uint32_t lastFile = UINT32_MAX, lastLine = 0;
     for( const GrepRawHit& h : found.raw )
     {
@@ -393,15 +415,60 @@ inline void indexedSites( const IngestResult& ing, const GrepCollection& found, 
     }
 }
 
-// One file outside the index, read ONCE: every token still under its cap gets the lines it occurs on.
-inline void auxFileSites( const SkippedFile& row, std::span<TokenSites> out, std::string_view rootPrefix )
+// Where a skip row's file is on disk: its own path on a single root; in a workspace the row carries the labelled `<label>/<rel>`
+// (workspace.h relabel), so the longest label it starts with names the root whose path the rest is under.
+[[nodiscard]] inline std::string skipRowDiskPath( const IngestResult& ing, const std::string& rowPath )
 {
+    std::size_t best = SIZE_MAX, bestLen = 0;
+    for( std::size_t r = 0; r < ing.rootLabels.size() && r < ing.rootPaths.size(); ++r )
+    {
+        const std::string& label = ing.rootLabels[r];
+        if( label.size() >= bestLen && rowPath.size() > label.size() && rowPath.starts_with( label ) && rowPath[label.size()] == '/' )
+        {
+            best    = r;
+            bestLen = label.size();
+        }
+    }
+    return best == SIZE_MAX ? rowPath : ing.rootPaths[best] + rowPath.substr( bestLen );
+}
+
+// An oversized file's first bytes: binary there means no text line was skipped.
+[[nodiscard]] inline bool headLooksBinary( const std::string& diskPath )
+{
+    OwnedFile   fp = openOwnedFile( diskPath.c_str(), "rb" );
+    std::string head( kBinarySniffCap, '\0' );
+    head.resize( fp ? std::fread( head.data(), 1, head.size(), fp.file ) : 0 );
+    return fp && looksBinary( head );
+}
+
+// Rule 6 for a file every token may occur in: each count becomes a floor.
+inline void floorEvery( std::span<TokenSites> out ) noexcept
+{
+    for( TokenSites& ts : out )
+    {
+        DISCLOSE( ts, TokenSites::DisclosureWhy::FileUnread, "qsites: an unindexed text file was unreadable or over the byte ceiling; n= is a floor" );
+    }
+}
+
+// One file outside the index, read ONCE: every token still under its cap gets the lines it occurs on.
+inline void auxFileSites( const IngestResult& ing, const SkippedFile& row, std::span<TokenSites> out, std::string_view rootPrefix )
+{
+    const std::string disk = skipRowDiskPath( ing, row.path );
     if( row.sizeBytes > kDefaultMaxFileBytes )
     {
-        return;   // the crawl ceiling: what grep's aux scan would read in pieces, θ11 leaves (a lead is not in a 4 MB file)
+        if( !headLooksBinary( disk ) )
+        {
+            floorEvery( out );   // the crawl ceiling: a text file this big is left unread (a lead is not in a 4 MB file), and said so
+        }
+        return;
     }
-    const std::optional<std::string> bytes = docparse::detail::readWholeFile( row.path );
-    if( !bytes || looksBinary( *bytes ) )
+    const std::optional<std::string> bytes = docparse::detail::readWholeFile( disk );
+    if( !bytes )
+    {
+        floorEvery( out );
+        return;
+    }
+    if( looksBinary( *bytes ) )
     {
         return;
     }
@@ -482,11 +549,19 @@ struct ScanPlan
         out[k].tok   = &toks[k];
         detail::indexedSites( ing, found[k], rootPrefix, out[k] );
     }
-    for( const std::vector<SkippedFile>* rows : { &ing.crawlSkips.unsupported, &ing.crawlSkips.extensionless } )
+    const CrawlSkips& cs = ing.crawlSkips;
+    if( cs.unsupported.size() < cs.unsupportedFiles || cs.extensionless.size() < cs.extensionlessFiles )
+    {
+        for( TokenSites& ts : out )
+        {
+            DISCLOSE( ts, TokenSites::DisclosureWhy::SkipRowsCapped, "qsites: the crawl kept fewer skip rows than it counted, so files past the cap were not read; n= is a floor" );
+        }
+    }
+    for( const std::vector<SkippedFile>* rows : { &cs.unsupported, &cs.extensionless } )
     {
         for( const SkippedFile& row : *rows )
         {
-            detail::auxFileSites( row, out, rootPrefix );
+            detail::auxFileSites( ing, row, out, rootPrefix );
         }
     }
     for( TokenSites& t : out )   // rule 3: only a plain word past the rarity cap and within the name cap asks the index
@@ -499,7 +574,7 @@ struct ScanPlan
 // Rule 5's line for one token: `<qs t="TOK" n="N">path:l,l path2:l</qs>`, its files in first-site order.
 [[nodiscard]] inline std::string formatLine( const TokenSites& t, std::vector<char>& esc )
 {
-    std::string line = "<qs t=\"" + std::string( escapeXml( t.tok->text, esc ) ) + "\" n=\"" + std::to_string( t.sites.size() ) + "\">";
+    std::string line = "<qs t=\"" + std::string( escapeXml( t.tok->text, esc ) ) + "\" n=\"" + std::to_string( t.sites.size() ) + ( t.floor ? "+" : "" ) + "\">";
     std::vector<std::string_view> files;
     for( const auto& [ p, l ] : t.sites )
     {
@@ -551,7 +626,7 @@ struct ScanPlan
 
 inline constexpr std::string_view kLegend =
     "<!-- qs: where this question's own words occur, as a grep would list them (indexed, unindexed and extensionless text files): "
-    "t= the word, n= its lines, then path:line,line per file; whole-word for a name, substring for an option or a qualified name; "
+    "t= the word, n= its lines (N+ a floor: a file it may be in went unread), then path:line,line per file; whole-word for a name, substring for an option or a qualified name; "
     "a word only on 150 lines or fewer, a plain word on 20 lines or fewer unless the code names it; these lines are their own 1,000 B, "
     "outside est_tokens and any budget -->";
 static_assert( kBlockBytes == 1000 && kLegend.find( "their own 1,000 B" ) != std::string_view::npos, "the qs legend states the block's budget" );

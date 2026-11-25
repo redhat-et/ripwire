@@ -1180,8 +1180,11 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
     return line;
 }
 
+// `wordBounded` (literal only): a site an identifier byte flanks is not a site — tested before it is counted, so the cap is spent
+// on whole-word sites alone (a long run of a longer word cannot use the cap up and hide a real site after it).
 [[nodiscard]] inline GrepScanVerdict grepScanText( const std::string& text, const std::string& pat, const GuardedRegex* re,
-                                                   std::size_t hitCapCount, std::vector<GrepMatchSite>& out, RegexLinePolicy linePolicy = {} )
+                                                   std::size_t hitCapCount, std::vector<GrepMatchSite>& out, RegexLinePolicy linePolicy = {},
+                                                   bool wordBounded = false )
 {
     std::uint32_t line    = 1;
     std::size_t   scanned = 0;
@@ -1245,15 +1248,17 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
     }
     else
     {
-        std::size_t pos = text.find( pat );
-        while( pos != std::string::npos )
+        for( std::size_t pos = text.find( pat ); pos != std::string::npos; pos = text.find( pat, pos + 1 ) )
         {
+            if( wordBounded && !darkflags::wholeWordAt( text, pos, pat.size() ) )
+            {
+                continue;
+            }
             out.push_back( { lineAtOffset( text, pos, scanned, line ), std::uint32_t( pos ) } );
             if( out.size() >= hitCapCount )
             {
                 break;
             }
-            pos = text.find( pat, pos + 1 );
         }
     }
     return {};
@@ -1524,15 +1529,6 @@ inline GrepCollection rankGrepSites( const IngestResult& ing, std::vector<std::v
 // own ranking (rankGrepSites). The file-level facts — a file the read could not open, a worker that died — are facts of the one read,
 // so every result carries them, as each pattern's own scan of the same disk state would have. A --regex scan is one pattern.
 // `stackBytes` is the size the scan threads ask for; only a gate's fault switch or a caller testing the degrade passes less.
-// A word-bounded literal's sites (grepCollectEach `wordBounded`): those no identifier byte flanks, tested on the bytes in hand.
-inline void keepWordBoundedSites( std::vector<GrepMatchSite>& sites, std::string_view text, std::size_t len, bool wordBounded )
-{
-    if( wordBounded )
-    {
-        std::erase_if( sites, [ text, len ]( const GrepMatchSite& m ) { return !darkflags::wholeWordAt( text, m.byteOffset, len ); } );
-    }
-}
-
 // `wordBounded` (empty = none): wordBounded[k] != 0 makes literal pattern k WORD-BOUNDED — of its sites the scan keeps those no identifier
 // byte flanks (darkflags::wholeWordAt), tested on the bytes already read, so a whole-word scan costs no second read of a file.
 inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std::span<const std::string> pats, bool regex, bool noPrefilter,
@@ -1598,8 +1594,8 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
                 }
                 for( std::size_t k = 0; k < pats.size(); ++k )
                 {
-                    const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy );
-                    keepWordBoundedSites( perPatternSites[k][f], text, pats[k].size(), !wordBounded.empty() && wordBounded[k] != 0 );
+                    const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy,
+                                                                             !wordBounded.empty() && wordBounded[k] != 0 );
                     if( isAbandoned )
                     {
                         perFileAbandoned[f] = 1;

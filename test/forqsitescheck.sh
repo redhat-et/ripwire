@@ -16,6 +16,12 @@
 #        the code calls (gadgetize, a function) is — all three counted
 #   (Q9) MCP: the `for` tool's answer carries the same <qs> lines inside its root; knob off it carries none
 #   (Q10) BUDGETED + PAGED: --token-budget keeps the block inside the root; --page-bytes page 2 has none; --legend=first carries it
+#   (Q11) WORKSPACE: two roots run from a directory holding neither; an extensionless file's site is read from its root on disk and printed
+#         under its label (the crawl row carries the label, not the disk path)
+#   (Q12) FLOORS: a fixture whose crawl counted 501 extensionless files (rows keep 500) prints n="N+" on every line; an unreadable
+#         text file floors too; the main fixture, every file read, prints no `+` (counted against Q1's lines)
+#   (Q13) WORD-BOUNDED BEFORE THE CAP: a line of 4,000,003 `z` holds ~4 M substring matches of `zzz` (the scan's match cap) and no
+#         whole-word one; the whole-word site on the next line is still found (the cap counts only whole-word sites)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -52,6 +58,27 @@ RIPWIRE_THETA11=1 rw "$POS" --token-budget=600 >"$WORK/budget.xml"
 RIPWIRE_THETA11=1 rw "$POS" --legend=first >"$WORK/lfirst.xml"
 RIPWIRE_THETA11=1 rw "$POS" --page-bytes=1500:1 >"$WORK/page1.xml"
 RIPWIRE_THETA11=1 rw "$POS" --page-bytes=1500:2 >"$WORK/page2.xml"
+# Q11: a two-root workspace, run from $FX (a directory holding neither root, so a labelled path does not resolve against the cwd)
+mkdir -p "$WORK/wsa" "$WORK/wsb"
+printf 'int my_special_fn( int x ) { return x; }\n' >"$WORK/wsa/a.c"
+printf 'v2.0\n* my_special_fn is documented here\n' >"$WORK/wsa/NEWS"
+printf 'int caller( void ) { return my_special_fn( 1 ); }\n' >"$WORK/wsb/b.c"
+( cd "$FX" && RIPWIRE_THETA11=1 "$BIN" "$WORK/wsa" "$WORK/wsb" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/ws.xml"
+# Q12: 501 extensionless files (the crawl keeps 500 rows) -> every count a floor; an unreadable text file -> a floor
+FL="$WORK/fl"; mkdir -p "$FL/src" "$FL/notes"
+printf 'int my_special_fn( int x ) { return x; }\n' >"$FL/src/a.c"
+for i in $( seq 0 500 ); do printf 'note %s\n' "$i" >"$FL/notes/n$i"; done
+( cd "$FL" && RIPWIRE_THETA11=1 "$BIN" "$FL" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_rows.xml"
+UR="$WORK/ur"; mkdir -p "$UR/src"
+printf 'int my_special_fn( int x ) { return x; }\n' >"$UR/src/a.c"
+printf '* my_special_fn\n' >"$UR/NEWS"; chmod 000 "$UR/NEWS"
+( cd "$UR" && RIPWIRE_THETA11=1 "$BIN" "$UR" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_unread.xml"
+chmod 600 "$UR/NEWS"
+# Q13: the match cap is spent on whole-word sites only
+CP="$WORK/cap"; mkdir -p "$CP/src"
+python3 -c "import sys; open(sys.argv[1], 'w').write('/* ' + 'z' * 4000003 + ' */\\nint zzz = 1;\\n')" "$CP/src/big.c"
+printf 'int f( void ) { return zzz; }\n' >"$CP/src/f.c"
+( cd "$CP" && RIPWIRE_THETA11=1 "$BIN" "$CP" --no-cache '--for=why is `zzz` wrong' 2>/dev/null ) >"$WORK/cap.xml"
 python3 - "$WORK" "$FX" "$BIN" "$POS" <<'PY' || fail=1
 import json, os, re, subprocess, sys
 W, FX, BIN, POS = sys.argv[1:5]; bad = 0
@@ -60,7 +87,7 @@ def P(m): print('  PASS  ' + m)
 def F(m):
     global bad; bad = 1; print('  FAIL  ' + m)
 on, off, off0, neg_on, neg_off = rd('on.xml'), rd('off.xml'), rd('off0.xml'), rd('neg_on.xml'), rd('neg_off.xml')
-QS = re.compile(r'^<qs t="([^"]*)" n="(\d+)">(.*)</qs>$', re.M)
+QS = re.compile(r'^<qs t="([^"]*)" n="(\d+)\+?">(.*)</qs>$', re.M)
 LEG = '<!-- qs:'
 def strip(p): return p[len(FX) + 1:] if p.startswith(FX + '/') else p
 def sites(body): return {(strip(p), int(l)) for p, ls in re.findall(r'(.+?):(\d+(?:,\d+)*)(?: |$)', body) for l in ls.split(',')}
@@ -137,7 +164,28 @@ okb = rows_of(bud) == rows and inside_root(bud)
 okl = rows_of(lf) == rows and inside_root(lf)
 okp = rows_of(p1) == rows and inside_root(p1) and '</ctx>' in p2 and '<qs' not in p2 and LEG not in p2 and ' page="2"' in p2
 if okb and okl and okp: P(f'(Q10) --token-budget=600, --legend=first and --page-bytes page 1 carry the block inside the root; page 2 none')
-else: F(f'(Q10) budget={okb} legend-first={okl} paged={okp} (page2 has page="2": {" page=\"2\"" in p2})')
+else:
+    p2_paged = ' page="2"' in p2
+    F(f'(Q10) budget={okb} legend-first={okl} paged={okp} (page2 has page="2": {p2_paged})')
+# Q11 workspace
+ws = rd('ws.xml'); wr = rows_of(ws).get('my_special_fn')
+news = sorted(p for p in (wr[1] if wr else ()) if p[0].endswith('NEWS'))
+if wr and len(news) == 1 and news[0][1] == 2 and news[0][0] != 'NEWS' and inside_root(ws):
+    P(f'(Q11) workspace: the extensionless file is read from its root and printed under its label: {news[0][0]}:2')
+else: F(f'(Q11) workspace extensionless site wrong: {wr and wr[2]!r}')
+# Q12 floors
+FLR = re.compile(r'^<qs t="[^"]*" n="\d+\+">', re.M)
+fr_rows, fr_unread = rd('floor_rows.xml'), rd('floor_unread.xml')
+n_rows, n_unread = len(QS.findall(fr_rows)), len(QS.findall(fr_unread))
+plus_main = len(re.findall(r'^<qs t="[^"]*" n="\d+\+">', on, re.M))
+if n_rows and len(FLR.findall(fr_rows)) == n_rows and n_unread and len(FLR.findall(fr_unread)) == n_unread and rows and plus_main == 0:
+    P(f'(Q12) floors: 501 counted extensionless rows -> {n_rows}/{n_rows} lines n="N+"; unreadable NEWS -> {n_unread}/{n_unread}; main fixture 0 of {len(rows)}')
+else: F(f'(Q12) floors wrong: rows {len(FLR.findall(fr_rows))}/{n_rows}, unread {len(FLR.findall(fr_unread))}/{n_unread}, main + {plus_main} of {len(rows)}')
+# Q13 word-bounded before the cap
+cr = rows_of(rd('cap.xml')).get('zzz')
+if cr and ('src/big.c', 2) in cr[1] and ('src/f.c', 1) in cr[1] and ('src/big.c', 1) not in cr[1]:
+    P(f'(Q13) word-bounded before the cap: big.c:2 found past ~4 M non-word matches on line 1; f.c:1 too (n={cr[0]})')
+else: F(f'(Q13) the whole-word site past the cap was lost: {cr and cr[2]!r}')
 sys.exit(bad)
 PY
 [ "$fail" = 0 ] && echo "forqsitescheck: PASS" || echo "forqsitescheck: FAIL"
