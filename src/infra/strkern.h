@@ -412,6 +412,12 @@ inline bool lowerFoldedEquals( std::string_view s, std::string_view lowered ) no
     return s.size() == lowered.size() && lowerFoldedEquals( s.data(), lowered.data(), s.size() );
 }
 
+// `s` begins with the all-lowercase `loweredPrefix` once A-Z-folded (the same adapter, for a prefix).
+inline bool lowerFoldedStartsWith( std::string_view s, std::string_view loweredPrefix ) noexcept
+{
+    return s.size() >= loweredPrefix.size() && lowerFoldedEquals( s.data(), loweredPrefix.data(), loweredPrefix.size() );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //  3. findByte / find3 / findByteset — first-occurrence scans
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════

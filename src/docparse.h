@@ -21,6 +21,7 @@
 #include "infra/jsonesc.h"   // A4-F27 residual: rw::shSingleQuote — canonical shell single-quote, forwarded
                         // to below instead of carrying a local copy; STL-only, no coupling cost here.
 
+#include "infra/strkern.h"   // strkern::lowerFoldedStartsWith — the A-Z-folded tag and needle scans
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
 #include "infra/depwatch.h"  // readWholeFile reports each read to the warm snapshot's dependency log when one is armed
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
@@ -468,28 +469,6 @@ inline std::string extractIpynb( std::string_view json )
 
 // ── .html — strip script/style + tags, decode a few entities ────────────────────────────────────────
 
-namespace detail
-{
-
-// Case-insensitive: does s, at offset p, begin with the lowercase `lit` (e.g. "<script")?
-inline bool ciStartsWith( std::string_view s, std::size_t p, std::string_view lit ) noexcept
-{
-    if( p + lit.size() > s.size() )
-    {
-        return false;
-    }
-    for( std::size_t k = 0; k < lit.size(); ++k )
-    {
-        if( char( std::tolower( static_cast<unsigned char>( s[p + k] ) ) ) != lit[k] )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-}   // namespace detail
-
 // The page's line-preserving body text (htmldoc.h: content region, chrome stripped, line k = raw line k). The
 // units ride beside it in HtmlDoc::headings; the doc post-pass reads those through extractHtmlDoc directly.
 inline std::string extractHtml( std::string_view html )
@@ -511,11 +490,12 @@ inline std::string extractHtmlFlat( std::string_view html )
         if( html[i] == '<' )
         {
             // drop <script>…</script> and <style>…</style> wholesale (content is not prose)
-            if( detail::ciStartsWith( html, i, "<script" ) || detail::ciStartsWith( html, i, "<style" ) )
+            const std::string_view tag = html.substr( i );
+            if( strkern::lowerFoldedStartsWith( tag, "<script" ) || strkern::lowerFoldedStartsWith( tag, "<style" ) )
             {
-                const std::string_view close = detail::ciStartsWith( html, i, "<script" ) ? "</script" : "</style";
+                const std::string_view close = strkern::lowerFoldedStartsWith( tag, "<script" ) ? "</script" : "</style";
                 std::size_t            e     = i + 1;
-                while( e < html.size() && !detail::ciStartsWith( html, e, close ) )
+                while( e < html.size() && !strkern::lowerFoldedStartsWith( html.substr( e ), close ) )
                 {
                     ++e;
                 }
@@ -1034,7 +1014,7 @@ inline bool ciContains( std::string_view haystack, std::string_view needle ) noe
     }
     for( std::size_t at = 0; at + needle.size() <= haystack.size(); ++at )
     {
-        if( ciStartsWith( haystack, at, needle ) )
+        if( strkern::lowerFoldedStartsWith( haystack.substr( at ), needle ) )
         {
             return true;
         }
