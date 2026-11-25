@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # forqsitescheck.sh — θ11 (src/forqsites.h; switch src/forqsitesswitch.h): page 1 of a --for answer carries, inside its root right
-# before </ctx>, the question's own tokens with every file:line they occur on, one <qs> element each, 1,000 B of elements, one legend
+# before the comments that close it, the question's own tokens with every file:line they occur on, one <qs> element each, 1,000 B of elements, one legend
 # comment before them, no newline (G4). DEFAULT ON (owner 11-24, THETA11-FLIP): a plain call is the ON arm; RIPWIRE_THETA11=0 is the OFF arm.
 # ARMS (each counts what it saw and FAILS on zero)
 #   (Q1) knob on, a backticked name: <qs t="my_special_fn"> lists src/a.c:1 and src/b.c:3 — whole word, so the line holding only
-#        my_special_fnx is not a site; the block is INSIDE the root: the legend comment, the <qs> elements, then </ctx> ends the answer
+#        my_special_fnx is not a site; the block is INSIDE the root: the legend comment and the <qs> elements after the last element,
+#        then only the comments that close the root (document legend, ROWLINES clauses: they stay last) and </ctx>
 #   (Q2) an option is a substring site: --frob-level is found on its line in src/b.c
 #   (Q3) the caps: a token on 151 lines is not listed; every n= is <= 150 and the <qs> elements total <= 1,000 B (one separator byte each)
 #   (Q4) NEGATIVE: a question with no identifier-shaped token and no rare plain word emits no block — counted against Q1's emit
@@ -114,14 +115,14 @@ def strip(p): return p[len(FX) + 1:] if p.startswith(FX + '/') else p
 def sites(body): return {(strip(p), int(l)) for p, ls in re.findall(r'(.+?):(\d+(?:,\d+)*)(?: |$)', body) for l in ls.split(',')}
 def rows_of(doc): return {m.group(1): (int(m.group(2)), sites(m.group(3)), m.group(0)) for m in QS.finditer(doc)}
 def inside_root(doc):
-    """the block sits right before the answer's final </ctx>: the legend comment, then <qs> elements back to back, then </ctx>; no
-    newline anywhere in it (G4: no newline outside CDATA)"""
+    """the block is the answer's last element run inside the root: the legend comment, then <qs> elements back to back, then only
+    the comments that close the root (document legend, ROWLINES clauses) and </ctx>; no newline anywhere in it (G4)"""
     body = doc.rstrip('\n')
     if not body.endswith('</ctx>') or LEG not in body: return False
     tail = body[body.rfind(LEG):-len('</ctx>')]
     end = tail.find('-->') + 3
     if '\n' in tail or end < 3: return False
-    elems = tail[end:]
+    elems = re.sub(r'(?:<!--(?:(?!-->).)*-->)*$', '', tail[end:], flags=re.S)
     return bool(elems) and QS.sub('', elems) == ''
 def g4(doc):
     """no newline outside CDATA (the trailing newline after the root aside)"""
@@ -152,8 +153,10 @@ if '</ctx>' not in off: F('(Q5) the RIPWIRE_THETA11=0 answer has no </ctx> (vacu
 elif '<qs' in off or LEG in off: F('(Q5) RIPWIRE_THETA11=0 still carries the block')
 elif LEG not in on: F('(Q5) vacuous: the default answer carries no block to remove')
 else:
-    i = on.rfind(LEG); j = on.rfind('</ctx>')
-    if off == on[:i] + on[j:]: P(f'(Q5) =0 carries no block ({len(off)} B); the default = the =0 answer + {len(on) - len(off)} B block')
+    i = on.rfind(LEG)
+    k = on.find('-->', i) + 3
+    while QS.match(on, k): k += len(QS.match(on, k).group(0))
+    if off == on[:i] + on[k:]: P(f'(Q5) =0 carries no block ({len(off)} B); the default = the =0 answer + {len(on) - len(off)} B block')
     else: F('(Q5) the default answer less its block is not the RIPWIRE_THETA11=0 answer')
 # D: the default is on, and equals =1
 on1, neg_on1 = rd('on1.xml'), rd('neg_on1.xml')

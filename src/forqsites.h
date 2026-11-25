@@ -651,8 +651,9 @@ static_assert( kRareWordSites == 20 && kLegend.find( "20 lines or fewer" ) != st
     return lines.empty() ? std::string() : std::string( kLegend ) + lines;
 }
 
-// Inside the root: the block goes in right before the answer's closing </ctx> (a trailing newline after it stays after it). false:
-// no block, or the page does not end in </ctx> (a JSON or columnar answer) — nothing is inserted.
+// Inside the root: the block goes in after the answer's last element, ahead of the comments that close the root (the document legend
+// and the ROWLINES clauses, which stay last before </ctx>: forrowlines.h; test/rowlinescheck.sh (L2)); a trailing newline after </ctx>
+// stays after it. false: no block, or the page does not end in </ctx> (a JSON or columnar answer) — nothing is inserted.
 inline bool insertBlock( std::string& page, std::string_view block )
 {
     static constexpr std::string_view kClose = "</ctx>";
@@ -665,7 +666,16 @@ inline bool insertBlock( std::string& page, std::string_view block )
     {
         return false;
     }
-    const std::size_t at = end - kClose.size();
+    std::size_t at = end - kClose.size();
+    while( std::string_view( page ).substr( 0, at ).ends_with( "-->" ) )   // step back over the closing comment run
+    {
+        const std::size_t open = page.rfind( "<!--", at - 3 );
+        if( open == std::string::npos )
+        {
+            break;
+        }
+        at = open;
+    }
     page.insert( at, block );
     return true;
 }
