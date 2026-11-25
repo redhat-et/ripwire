@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # forqsitescheck.sh — θ11 (src/forqsites.h; switch src/forqsitesswitch.h): page 1 of a --for answer carries, inside its root right
-# before </ctx>, the question's own tokens with every file:line they occur on, one <qs> line each, 1,000 B of lines, one legend
-# comment line before them. DEFAULT ON (owner 11-24, THETA11-FLIP): a plain call is the ON arm; RIPWIRE_THETA11=0 is the OFF arm.
+# before </ctx>, the question's own tokens with every file:line they occur on, one <qs> element each, 1,000 B of elements, one legend
+# comment before them, no newline (G4). DEFAULT ON (owner 11-24, THETA11-FLIP): a plain call is the ON arm; RIPWIRE_THETA11=0 is the OFF arm.
 # ARMS (each counts what it saw and FAILS on zero)
 #   (Q1) knob on, a backticked name: <qs t="my_special_fn"> lists src/a.c:1 and src/b.c:3 — whole word, so the line holding only
-#        my_special_fnx is not a site; the block is INSIDE the root: the legend line, the <qs> lines, then </ctx> ends the answer
+#        my_special_fnx is not a site; the block is INSIDE the root: the legend comment, the <qs> elements, then </ctx> ends the answer
 #   (Q2) an option is a substring site: --frob-level is found on its line in src/b.c
-#   (Q3) the caps: a token on 151 lines is not listed; every n= is <= 150 and the <qs> lines total <= 1,000 B
+#   (Q3) the caps: a token on 151 lines is not listed; every n= is <= 150 and the <qs> elements total <= 1,000 B (one separator byte each)
 #   (Q4) NEGATIVE: a question with no identifier-shaped token and no rare plain word emits no block — counted against Q1's emit
 #   (Q5) off is byte-identical: RIPWIRE_THETA11=0 has no <qs>, and the default answer less its block is the =0 answer byte for
 #        byte (the block is purely additive)
 #   (D)  the DEFAULT is on: a plain call carries the block and equals RIPWIRE_THETA11=1 byte for byte (positive and negative question)
 #   (V)  --version names the posture: qsites=on for a plain call and under =1, qsites=off under RIPWIRE_THETA11=0
 #   (I)  with BASE_BIN (a binary from before the block existed) set: the =0 answer equals BASE_BIN's byte for byte (SKIP unset)
-#   (Q6) deterministic: two knob-on runs are byte-identical
+#   (Q6) deterministic: two default runs are byte-identical
+#   (G)  G4: no newline outside CDATA with the block on (default, =0, budgeted, legend-first, paged page 1); the block is one legend
+#        comment and its <qs> elements back to back
 #   (Q7) EXTENSIONLESS files are read: a Makefile and a NEWS (no extension, no grammar) list their my_special_fn lines
 #   (Q8) REPO RARITY: a plain word on 2 lines (frobnicator) is listed; one on 25 lines (widgetry, prose) is not; one on 26 lines
 #        the code calls (gadgetize, a function) is — all three counted
-#   (Q9) MCP: the `for` tool's answer carries the same <qs> lines inside its root by default; under =0 it carries none
+#   (Q9) MCP: the `for` tool's answer carries the same <qs> elements inside its root by default; under =0 it carries none
 #   (Q10) BUDGETED + PAGED: --token-budget keeps the block inside the root; --page-bytes page 2 has none; --legend=first carries it
 #   (Q11) WORKSPACE: two roots run from a directory holding neither; an extensionless file's site is read from its root on disk and printed
 #         under its label (the crawl row carries the label, not the disk path)
@@ -106,24 +108,30 @@ def P(m): print('  PASS  ' + m)
 def F(m):
     global bad; bad = 1; print('  FAIL  ' + m)
 on, off, neg_on, neg_off = rd('on.xml'), rd('off.xml'), rd('neg_on.xml'), rd('neg_off.xml')
-QS = re.compile(r'^<qs t="([^"]*)" n="(\d+)\+?">(.*)</qs>$', re.M)
+QS = re.compile(r'<qs t="([^"]*)" n="(\d+)\+?">([^<]*)</qs>')
 LEG = '<!-- qs:'
 def strip(p): return p[len(FX) + 1:] if p.startswith(FX + '/') else p
 def sites(body): return {(strip(p), int(l)) for p, ls in re.findall(r'(.+?):(\d+(?:,\d+)*)(?: |$)', body) for l in ls.split(',')}
 def rows_of(doc): return {m.group(1): (int(m.group(2)), sites(m.group(3)), m.group(0)) for m in QS.finditer(doc)}
 def inside_root(doc):
-    """the block sits right before the answer's final </ctx>: legend line, <qs> lines, </ctx>"""
+    """the block sits right before the answer's final </ctx>: the legend comment, then <qs> elements back to back, then </ctx>; no
+    newline anywhere in it (G4: no newline outside CDATA)"""
     body = doc.rstrip('\n')
     if not body.endswith('</ctx>') or LEG not in body: return False
     tail = body[body.rfind(LEG):-len('</ctx>')]
-    lines = tail.rstrip('\n').split('\n')
-    return lines[0].startswith(LEG) and lines[0].endswith('-->') and len(lines) > 1 and all(QS.match(l) for l in lines[1:])
+    end = tail.find('-->') + 3
+    if '\n' in tail or end < 3: return False
+    elems = tail[end:]
+    return bool(elems) and QS.sub('', elems) == ''
+def g4(doc):
+    """no newline outside CDATA (the trailing newline after the root aside)"""
+    return '\n' not in re.sub(r'<!\[CDATA\[.*?\]\]>', '', doc.rstrip('\n'), flags=re.S)
 rows = rows_of(on)
 # Q1
 r = rows.get('my_special_fn')
 if not rows: F('(Q1) the default emitted no <qs> line at all (every arm below would be vacuous)')
 elif r and {('src/a.c', 1), ('src/b.c', 3)} <= r[1] and ('src/b.c', 5) not in r[1] and inside_root(on):
-    P(f'(Q1) my_special_fn: src/a.c:1 src/b.c:3 (my_special_fnx not a site); the block is inside the root, before </ctx>; {len(rows)} <qs> lines')
+    P(f'(Q1) my_special_fn: src/a.c:1 src/b.c:3 (my_special_fnx not a site); the block is inside the root, before </ctx>; {len(rows)} <qs> elements')
 else: F(f'(Q1) my_special_fn row wrong or block not inside the root: {r and r[2]!r}; end {on[-200:]!r}')
 # Q2
 r = rows.get('--frob-level')
@@ -132,7 +140,7 @@ else: F(f'(Q2) --frob-level row wrong: {r and r[2]!r}')
 # Q3
 lb = sum(len(v[2].encode()) + 1 for v in rows.values())
 if rows and 'TOO_MANY_HITS' not in rows and all(v[0] <= 150 for v in rows.values()) and lb <= 1000:
-    P(f'(Q3) TOO_MANY_HITS (151 lines) not listed; max n={max(v[0] for v in rows.values())}; <qs> lines {lb} B <= 1000')
+    P(f'(Q3) TOO_MANY_HITS (151 lines) not listed; max n={max(v[0] for v in rows.values())}; <qs> elements {lb} B <= 1000')
 else: F(f'(Q3) caps broken: TOO_MANY_HITS listed={"TOO_MANY_HITS" in rows}, bytes={lb}')
 # Q4
 if not rows: F('(Q4) vacuous: the positive question emitted nothing, so an empty negative proves nothing')
@@ -145,14 +153,13 @@ elif '<qs' in off or LEG in off: F('(Q5) RIPWIRE_THETA11=0 still carries the blo
 elif LEG not in on: F('(Q5) vacuous: the default answer carries no block to remove')
 else:
     i = on.rfind(LEG); j = on.rfind('</ctx>')
-    cand = {on[:i] + on[j:], on[:i - 1] + on[j:] if i > 0 else None}
-    if off in cand: P(f'(Q5) =0 carries no block ({len(off)} B); the default = the =0 answer + {len(on) - len(off)} B block')
+    if off == on[:i] + on[j:]: P(f'(Q5) =0 carries no block ({len(off)} B); the default = the =0 answer + {len(on) - len(off)} B block')
     else: F('(Q5) the default answer less its block is not the RIPWIRE_THETA11=0 answer')
 # D: the default is on, and equals =1
 on1, neg_on1 = rd('on1.xml'), rd('neg_on1.xml')
 if not rows or LEG not in on: F('(D) the default answer carries no block (the default is not on)')
 elif on1 != on or neg_on1 != neg_on or '</ctx>' not in neg_on1: F(f'(D) the default differs from RIPWIRE_THETA11=1: pos same={on1 == on} neg same={neg_on1 == neg_on}')
-else: P(f'(D) default on: a plain call carries {len(rows)} <qs> lines and equals RIPWIRE_THETA11=1 byte for byte (2 questions)')
+else: P(f'(D) default on: a plain call carries {len(rows)} <qs> elements and equals RIPWIRE_THETA11=1 byte for byte (2 questions)')
 # V: --version
 vd, v1, v0 = rd('v_def.txt'), rd('v_on1.txt'), rd('v_off.txt')
 vok = [('default', vd, 'qsites=on'), ('=1', v1, 'qsites=on'), ('=0', v0, 'qsites=off')]
@@ -169,6 +176,12 @@ else:
 # Q6
 if rd('on.xml') == rd('on2.xml') and rows: P('(Q6) two knob-on runs byte-identical')
 else: F('(Q6) knob-on runs differ (or nothing emitted)')
+# G: G4 holds with the block on (it once printed one <qs> per line, outside CDATA; test/actlinecheck.sh (H) caught it at the flip)
+g4docs = [('default', on), ('=0', off), ('--token-budget', rd('budget.xml')), ('--legend=first', rd('lfirst.xml')), ('--page-bytes page 1', rd('page1.xml'))]
+g4bad = [n for n, d in g4docs if '</ctx>' not in d or not g4(d)]
+if not rows: F('(G) vacuous: the default answer carries no block')
+elif g4bad: F(f'(G) a newline outside CDATA (G4) in: {g4bad}')
+else: P(f'(G) no newline outside CDATA in {len(g4docs)} of {len(g4docs)} answers, {len(rows)} <qs> elements in the default one')
 # Q7
 r = rows.get('my_special_fn')
 got = sorted(p for p in (r[1] if r else ()) if p[0] in ('Makefile', 'NEWS'))
@@ -194,7 +207,7 @@ def mcp(env_on):
 m_on, m_off = mcp(True), mcp(False)
 mr = rows_of(m_on)
 if mr and mr == rows and inside_root(m_on) and '<qs' not in m_off and '</ctx>' in m_off:
-    P(f'(Q9) MCP `for`: the same {len(mr)} <qs> lines inside its root by default; RIPWIRE_THETA11=0 none')
+    P(f'(Q9) MCP `for`: the same {len(mr)} <qs> elements inside its root by default; RIPWIRE_THETA11=0 none')
 else: F(f'(Q9) MCP: {len(mr)} lines (CLI {len(rows)}), same={mr == rows}, inside={inside_root(m_on)}, off has <qs>={"<qs" in m_off}, off empty={not m_off}')
 # Q10
 bud, lf, p1, p2 = rd('budget.xml'), rd('lfirst.xml'), rd('page1.xml'), rd('page2.xml')
@@ -212,10 +225,10 @@ if wr and len(news) == 1 and news[0][1] == 2 and news[0][0] != 'NEWS' and inside
     P(f'(Q11) workspace: the extensionless file is read from its root and printed under its label: {news[0][0]}:2')
 else: F(f'(Q11) workspace extensionless site wrong: {wr and wr[2]!r}')
 # Q12 floors
-FLR = re.compile(r'^<qs t="[^"]*" n="\d+\+">', re.M)
+FLR = re.compile(r'<qs t="[^"]*" n="\d+\+">')
 fr_rows, fr_unread = rd('floor_rows.xml'), rd('floor_unread.xml')
 n_rows, n_unread = len(QS.findall(fr_rows)), len(QS.findall(fr_unread))
-plus_main = len(re.findall(r'^<qs t="[^"]*" n="\d+\+">', on, re.M))
+plus_main = len(FLR.findall(on))
 ur_readable = os.path.exists(os.path.join(W, 'ur_readable'))   # privileged reader: chmod 000 did not stop the read
 unread_ok = ur_readable or (n_unread and len(FLR.findall(fr_unread)) == n_unread)
 if ur_readable: print('  SKIP  (Q12) unreadable-NEWS arm: this user reads past chmod 000 (CAP_DAC_OVERRIDE), so the file is readable here')
