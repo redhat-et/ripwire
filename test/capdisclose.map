@@ -232,3 +232,17 @@ kTinyRows	sink:shown
 kEdgeCap	sink:shown
 kSpreadEdgeMax	none:a shape test, not a cut: a named symbol with more cross-file edges than this, a caller among them, gets the full page; under it every edge is listed (shown=total) (THETA6-FINISH)
 kMaxChainSegments	none:a lexical read bound on one ObjC++ call's `::` chain (ingest_names.h objcxxStdQualifierBefore): past 16 segments the chain is not read as std-rooted and the call keeps the unqualified reference it had before #778, so no answer row is cut
+# lane/brief-verb (2026-11-25): src/brief.h joined the answer-path scope (test/lib/capdisclose.py) with its 13 caps.
+kActRanges	none:a work bound by spec (ACT-8): the brief's act is --for's shipped act plus its next lined rows up to 8; act_shipped= names the shipped part and --for itself serves every row
+kBuildLines	sink:buildMore
+kConventionBytes	sink:more
+kDocScanFiles	none:a read bound on the docs where-else searches for the task's names; where-else is a pointer list ranked by kind, never a census, so a doc past it is unseen and never claimed absent
+kEdgeSymbols	none:edges are drawn for the first 3 act symbols by spec (named files first); every act symbol is still in <act>, and dropped=edges discloses the cut to 1
+kEdgesPerSide	sink:more
+kHardCapBytes	none:the --brief-bytes band (512..8192): a value outside it is refused (refuseFlagValue / the MCP bytes field), never clamped
+kHeadingsPerDoc	sink:more
+kQsBytes	sink:dropped,droppedNames
+kReachHops	none:a BFS bound for ranking entry points: an entry past it is still listed, shown without hops=
+kTaskEchoBytes	sink:taskCut
+kUsersShown	sink:more
+kWhereElseCap	sink:more

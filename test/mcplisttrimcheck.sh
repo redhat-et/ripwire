@@ -113,7 +113,12 @@ check( all( t.get( "description", "" ).strip() for t in tools ), "(1) every tool
 # verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
 # MR1 (2026-11-21, owner ruling 168): +73 B over the 40,073 B base 36a95d732 — `for` gains the `rows` string (the CLI --rows= twin):
 # schemas 20,391 -> 20,464 B, descriptions unchanged; measured 40,146 B. Ceiling = measured + 30 B (mcpmanifestcheck's figure).
-CEILING = 40176
+# BRIEF-VERB (2026-11-25, lane/brief-verb): +905 B over the 40,146 B base d847bd3f3, every byte attributed — ONE NEW ADVERTISED
+#   TOOL, `brief` (the CLI --brief= twin): description 339 B (routing sentence pinned in mcpmanifest_first_sentences.txt; trimmed
+#   from 485 B before landing) + schema 428 B (path, task, bytes, paths) + 131 B tool envelope and separator = 898 B; batch's
+#   description +7 B (", brief": the NOT-batchable list names every excluded verb, now 18). Descriptions 15,117 -> 15,463 B,
+#   schemas 20,464 -> 20,892 B, the other 33 stanzas unchanged. Measured 41,051 B; ceiling = measured + 30 B, the same margin.
+CEILING = 41081
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 print( "  INFO  manifest %d B (ensure_ascii metric), wire line %d B, descriptions %d B"
        % ( manifest, len( first.encode( "utf-8" ) ), sum( len( t[ "description" ].encode( "utf-8" ) ) for t in tools ) ) )

@@ -23,7 +23,7 @@ ripwire wrap --all       # → auto-detect installed agents, one config each
 `wrap` prints and never edits config; you review and run. It first security-scans `./skills` and `.agents/skills`: a
 CRITICAL finding blocks the recipe (exit 1) unless `--force`. Bare `ripwire wrap` lists every supported agent.
 
-The server exposes **33 MCP verbs**: 17 read verbs, 13 flagship-reflex verbs and 3 edit verbs —
+The server exposes **34 MCP verbs**: 18 read verbs, 13 flagship-reflex verbs and 3 edit verbs —
 `ripwire wrap codex --force` prints the live count.
 
 ## Choosing the verb mid-task

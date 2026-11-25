@@ -1446,7 +1446,7 @@ function storyCards(s, { kick, head, stories, footText }){
   s.addText("claude · cursor · codex · windsurf · gemini · aider · opencode · openclaw · hermes — or --all to detect every one you have installed",
     { x: 5.2, y: 1.95, w: 7.4, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
-    ["33 MCP verbs", "17 read verbs mirroring the CLI, 13 flagship reflexes (impact, uses, affected, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
+    ["34 MCP verbs", "18 read verbs mirroring the CLI, 13 flagship reflexes (impact, uses, affected, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
     ["lazy-body handles", "read verbs return signatures and a stable handle; the agent fetches a body only when it decides it needs one — names by default, bytes on request"],
     ["18 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …) — wrap prints the recipe, skills/install.sh installs them"],
     ["13 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
@@ -1468,7 +1468,7 @@ function storyCards(s, { kick, head, stories, footText }){
   notes(s, [
     "SOURCES (agent wiring)",
     "- The nine agents after `wrap`: src/wrap.h's agent table on main a5229aca — claude, codex, cursor, windsurf, gemini, opencode, openclaw, hermes, aider. This line named six until 2026-09-30. On the merged binary, `ripwire wrap --help`: names the same nine (CLI-first: claude, codex, opencode, openclaw, hermes; MCP config: cursor, windsurf, gemini; repo-map: aider).",
-    "- “33 MCP verbs … 17 read verbs … 13 flagship reflexes … 3 span-addressed edit verbs” — README.md, lane/t10-mcp-coverage: “One stdio server, 33 verbs — 17 read, 13 flagship-reflex, 3 span-addressed edit” (rank_by and affected joined the MCP surface, matching the CLI --rank-by / --affected twins).",
+    "- “34 MCP verbs … 18 read verbs … 13 flagship reflexes … 3 span-addressed edit verbs” — README.md, lane/t10-mcp-coverage: “One stdio server, 34 verbs — 18 read, 13 flagship-reflex, 3 span-addressed edit” (rank_by and affected joined the MCP surface, matching the CLI --rank-by / --affected twins; lane/brief-verb added brief, the --brief twin).",
     "- “18 agent skills” — README.md: “skills/ ships eighteen task-shaped skills”; skills/ holds 18 directories.",
     "- “13 orchestrator loops” — README.md on main cd04d477e: “prompts/ holds thirteen self-contained orchestrator prompts”, and prompts/ holds 13 .md files besides its own README.md. It read 12 until the 2026-11-13 refresh (11 until 2026-09-11); test/readmedriftcheck.sh arm (I1) gates the README against the directory.",
     "- The edit route (2026-11-13): CHANGELOG.md [0.6.10] “Changed — ripwire wrap claude routes edits through a ranged Read and Claude Code's native Edit”: Claude Code refuses a native Edit on a file it has not Read; “the line now says to take the symbol's line range from ripwire, Read only that range (offset/limit), then use the native Edit”, and the printed MCP command passes --mcp-tools=no-edit. The span-addressed edit verbs stay for every other agent.",

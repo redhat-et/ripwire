@@ -89,6 +89,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "owners",                  "symbol",    "an OPTIONAL symbol name — restricts the report to the file that defines it", "symbol=\"parseArgs\"",
       FieldRule::Optional, "or this tree has no git history (owners is mined from git)" },
     { "for",                     "task",      "the task in plain words",                                           "task=\"add a since filter\"" },
+    { "brief",                   "task",      "the subagent's task in plain words",                                "task=\"add retry to the http client\"" },
     { "lego",                    "type",      "an interface or base-type name (file:name disambiguates; @FILE:LINE line-seeds resolve)", "type=\"Shape\"" },
     // lane/t10-mcp-coverage: rank_by is OPTIONAL — an OMITTED value defaults to pagerank, which is the CLI's
     // own unbiased `--rank-by=pagerank` and NOT necessarily `analyze`'s map (train 10, CodeRabbit 4056211645:
@@ -312,6 +313,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "start_line",    "a positive integer, 1-based and body-relative (omit it to start at line 1)",  "start_line=1", "integer" },
     { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
     { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
+    { "bytes",         "an integer in 512..8192 (the brief's byte cap; omit it for the size class's own 2.5 / 4 / 6 KB)", "bytes=4096", "integer" },
     // ── string ──
     { "path",          "a STRING repo directory",                                                     "path=\".\"" },
     { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },
@@ -750,6 +752,7 @@ inline constexpr McpSingleRootVerb kMcpSingleRootVerbs[] = {
                                "tree; run it per root" },
     { "slice",                 "it re-parses the ONE on-disk file holding the definition, which a merged "
                                "multi-root graph cannot address unambiguously; run it per root" },
+    { "brief",                 "its layout, build commands and conventions are read from ONE repo's files; run it per root" },
 };
 
 // The reason `verb` is single-root, or "" when it is not (the caller then dispatches normally).
@@ -1114,6 +1117,8 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // — mcp.h's textResult applies compactlegend.h's rewrite; the JSON/text verbs (find_*/grep/cochange/mentions/
     // quality_delta/situational_awareness/memory_recall/fetch_body) do not declare it and refuse it as an unknown field.
     { "slice",                    "path symbol var flow depth legend" },
+    // lane/brief-verb: the CLI --brief / --brief-bytes twin; single-root (layout, build files and conventions are per repo).
+    { "brief",                    "path task bytes" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },
     { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Writes },

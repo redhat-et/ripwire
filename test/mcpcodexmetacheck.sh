@@ -29,7 +29,7 @@ missing = [word for word in required if word not in instructions[:512]]
 assert not missing, f"initialize instructions first 512 chars missing {missing}: {instructions[:512]!r}"
 
 tools = rows[1]["result"]["tools"]
-assert len(tools) == 33, f"expected 33 advertised tools, got {len(tools)}"
+assert len(tools) == 34, f"expected 34 advertised tools, got {len(tools)}"
 write_tools = {"quality_baseline", "replace_symbol_body", "insert_before_symbol", "insert_after_symbol"}
 destructive_tools = {"replace_symbol_body"}
 for tool in tools:

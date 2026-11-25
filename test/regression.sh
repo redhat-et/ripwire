@@ -357,6 +357,7 @@ for _g in \
     bodydialectcheck \
     bodyeditcheck \
     bodypointercheck \
+    briefcheck \
     budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \

@@ -54,6 +54,7 @@ count marked as a floor is not a total; `amb="K"` = K calls hit an ambiguous nam
 |---|---|
 | every rung in full: `--recall` rules, `--for` routing and selectors, widening a thin answer, budgets | `ladder.md` |
 | orienting N agents (`--partition=N`, `--plan-lanes`), or a big repo (`--zoom`, `--mermaid`, `--export`) | `partition-zoom.md` |
+| one page to paste into a fresh code-editing subagent: `--brief="TASK"` (layout, quoted build/test commands, entries, act ranges, edges; 2.5/4/6 KB) | `subagent-brief.md` |
 | the three-moment block to paste into a subagent brief | `subagent-brief.md` |
 | honesty signals, field notes, resuming, mid-task reads | `notes-resume.md` |
 | the map-before-you-read discipline for any read (`--expand`, symbol-range reads, edit verbs) | `map-before-you-read.md` |
