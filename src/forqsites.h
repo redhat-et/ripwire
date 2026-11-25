@@ -213,7 +213,7 @@ namespace detail
         }
     }
     const bool allCaps = x.size() >= 3 && isUpper( (unsigned char)x[0] )
-                         && std::all_of( x.begin() + 1, x.end(), []( char c ) { return isUpper( (unsigned char)c ) || isDigit( (unsigned char)c ); } );
+                         && std::all_of( x.begin() + 1, x.end(), []( char c ) { return isUpper( static_cast<unsigned char>( c ) ) || isDigit( static_cast<unsigned char>( c ) ); } );
     return allCaps;   // CamelCase (`[A-Z][a-z]+[A-Z]\w*`) always carries a lower→Upper seam, caught above
 }
 
