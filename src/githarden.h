@@ -90,7 +90,7 @@ inline const char* fsmonitorFormName( FsmonitorForm form ) noexcept
 }
 
 // git-config(1) "boolean": true/yes/on/1 and false/no/off/0, case-insensitive; a bare key (empty value) is true.
-// Every other string is the hook COMMAND form. ciEqualAscii lowercases the VALUE against these lowercase spellings.
+// Every other string is the hook COMMAND form. strkern::lowerFoldedEquals folds the VALUE against these lowercase spellings.
 inline FsmonitorForm classifyFsmonitorValue( std::string_view value ) noexcept
 {
     if( value.empty() )

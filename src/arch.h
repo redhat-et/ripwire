@@ -44,7 +44,6 @@
 #include <algorithm>
 #include <numeric>
 #include <array>
-#include <cctype>
 #include <cerrno>      // ELOOP — the one errno openArchBaselineSidecar re-words into its own symlink alert
 #include <cmath>
 #include <cstdint>

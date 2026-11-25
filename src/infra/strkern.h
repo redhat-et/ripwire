@@ -412,7 +412,8 @@ inline bool lowerFoldedEquals( std::string_view s, std::string_view lowered ) no
     return s.size() == lowered.size() && lowerFoldedEquals( s.data(), lowered.data(), s.size() );
 }
 
-// `s` begins with the all-lowercase `loweredPrefix` once A-Z-folded. substr clamps, so a shorter `s` fails the length test.
+// The same adapter for a prefix: `s` begins with the all-lowercase `loweredPrefix` once A-Z-folded. An upper-case
+// byte in `loweredPrefix` never matches. substr( 0, n ) clamps, so an `s` shorter than the prefix fails the length test.
 inline bool lowerFoldedStartsWith( std::string_view s, std::string_view loweredPrefix ) noexcept
 {
     return lowerFoldedEquals( s.substr( 0, loweredPrefix.size() ), loweredPrefix );

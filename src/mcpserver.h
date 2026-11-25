@@ -29,7 +29,6 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
-#include <cctype>
 #include <cerrno>
 
 #include "infra/strkern.h" // strkern::lowerFoldedEquals / lowerFoldedStartsWith — header names, the bearer scheme, media types
