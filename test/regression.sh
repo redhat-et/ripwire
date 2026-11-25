@@ -428,6 +428,7 @@ for _g in \
     constcheck \
     contextratiocheck \
     coplintcheck \
+    corelegendcheck \
     countfloorcheck \
     cppbenchcheck \
     cppextqualcheck \

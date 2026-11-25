@@ -21,6 +21,9 @@
 # Arm classes (LANE_CONSTRAINTS §17): [P] a NEW bar — RED on the parent a0c020bb6, that is its control; [C] holds on every
 # binary; [N] must NOT change; [M] a mutation control: the same check FAILS when one row is dropped or one page is inflated.
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

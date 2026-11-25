@@ -5876,8 +5876,17 @@ inline bool serveForPage( const rw::Config& cfg, std::string& doc )
     {
         return true;
     }
-    const std::string           call = forUnbudgetedCall( cfg );
-    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call };
+    // A SPELLED --legend rides each page's next= (θ5, CR #740): page 1 of a spelled posture keeps the whole legend and is cut there,
+    // so a continuation without it would be cut under the core-legend refill and skip the rows between the two cuts. It is named
+    // RESOLVED (cfg.legend: last, compact and dict page the same --for answer), so --legend=dict stays byte-identical to
+    // --legend=compact (legenddefaultcheck D1). A defaulted posture adds nothing, so the default next= is unchanged; a budget's shed
+    // next= re-asks a whole answer and keeps none.
+    std::string call = forUnbudgetedCall( cfg );
+    if( !cfg.legendDefaulted && !cfg.legend.empty() )
+    {
+        call += " " + rw::nextFlag( "--legend=", cfg.legend );
+    }
+    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ) };
     const rw::forpages::PageResult res = rw::forpages::pageAnswer( doc, ask );
     const bool exists = res.outcome == rw::forpages::PageResult::Outcome::Paged || cfg.forPage == 1;
     if( !exists )

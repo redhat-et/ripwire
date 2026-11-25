@@ -27,6 +27,9 @@
 #   (E8)  NEW. legend: the sigx legend names e= among the attributes a short row keeps; an element-form page 1 whose rows carry e=
 #         defines it (the "d e=" clause), and a line-form page 1 carries the lines clause that spells P:L-E
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
