@@ -86,11 +86,10 @@ echo "=== L: a long symbol of a named file keeps its rank ==="
 read -r r_on above_on n_on <<<"$( rankinfo "$TMP/long_on.xml" )"
 read -r r_flat above_flat n_flat <<<"$( rankinfo "$TMP/long_flat.xml" )"
 read -r r_off above_off n_off <<<"$( rankinfo "$TMP/long_off.xml" )"
-[ "$r_on" = 1 ] && ok "L1 default: render_all r=1 ($n_on rows)" || no "L1 default: render_all r=$r_on, $above_on short helpers above it"
-[ "$above_flat" -ge 1 ] 2>/dev/null \
-    && ok "L2 control (FLAT): $above_flat short helpers outrank render_all (r=$r_flat) on the flat field" \
-    || no "L2 control (FLAT): 0 helpers above render_all (r=$r_flat) — the fixture no longer shows the sink, L1 proves nothing"
-[ "$r_off" = 1 ] && ok "L3 control (W=0): render_all r=1 with the field off" || no "L3 control (W=0): render_all r=$r_off (ambient rank, not the field)"
+if [ "$r_on" = 1 ]; then ok "L1 default: render_all r=1 ($n_on rows)"; else no "L1 default: render_all r=$r_on, $above_on short helpers above it"; fi
+if [ "$above_flat" -ge 1 ] 2>/dev/null; then ok "L2 control (FLAT): $above_flat short helpers outrank render_all (r=$r_flat) on the flat field"
+else no "L2 control (FLAT): 0 helpers above render_all (r=$r_flat) — the fixture no longer shows the sink, L1 proves nothing"; fi
+if [ "$r_off" = 1 ]; then ok "L3 control (W=0): render_all r=1 with the field off"; else no "L3 control (W=0): render_all r=$r_off (ambient rank, not the field)"; fi
 
 echo "=== L4/L5: short symbols keep the flat lift; the field is still on ==="
 helpers "$TMP/file_on.xml" > "$TMP/h_on.txt"; helpers "$TMP/file_flat.xml" > "$TMP/h_flat.txt"
@@ -98,7 +97,7 @@ nh="$( wc -l < "$TMP/h_on.txt" | tr -d ' ' )"
 if [ "$nh" -ge 1 ] && cmp -s "$TMP/h_on.txt" "$TMP/h_flat.txt"; then ok "L4 $nh short helpers: s= identical default vs FLAT"
 else no "L4 helper scores differ default vs FLAT (or none listed: $nh)"; diff "$TMP/h_flat.txt" "$TMP/h_on.txt" | head -5; fi
 pos="$( awk '$2 > 0' "$TMP/h_on.txt" | wc -l | tr -d ' ' )"
-[ "$pos" -ge 1 ] && ok "L5 a file-only question: $pos widget.py helpers score > 0 on the basename word" || no "L5 no widget.py helper scores > 0 (the field is off)"
+if [ "$pos" -ge 1 ]; then ok "L5 a file-only question: $pos widget.py helpers score > 0 on the basename word"; else no "L5 no widget.py helper scores > 0 (the field is off)"; fi
 
 echo "=== F: only FLAT=1 selects the flat field ==="
 cli env RIPWIRE_BASENAME_FLAT=0 "$BIN" "$R" --no-cache --for="$Q_LONG" --format=candidates > "$TMP/long_flat0.xml"

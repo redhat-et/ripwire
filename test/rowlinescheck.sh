@@ -10,10 +10,10 @@
 #   (L1)  lossless: decode(answer) == twin, byte for byte — the whole answer (--page-bytes=0), the default page 1, page 2, a budget
 #         the answer fits, a budget that sheds, --signatures-only, and pages 1 and 2 at 3000 B (page 2 re-opens <sigs>)
 #   (L1n) MUTATION NEGATIVE CONTROL: the same comparison FAILS when one byte is dropped from a line, and when the r= a continuation
-#         page's first row must keep is elided (the decoder then numbers the rows from 1). The continuation page is page 2 at 2500 B,
-#         whose <sigs> opens on a DEFINITION line under both rankings (basename field on and RIPWIRE_BASENAME_W=0); at 3000 B the
-#         basename field (M2) made page 2 open on a VERBATIM row, the line-form regex found no target and the control went
-#         vacuous. It still fails closed: no definition line carrying r= first in a continuation page's <sigs> is a FAIL.
+#         page's first row must keep is elided (the decoder then numbers the rows from 1). The continuation page is page 2 at 2200 B,
+#         whose <sigs> opens on a DEFINITION line under all three rankings (the length-scaled basename field, RIPWIRE_BASENAME_FLAT=1
+#         and RIPWIRE_BASENAME_W=0); at 3000 B the basename field (M2) made page 2 open on a VERBATIM row, and at 2500 B the
+#         length-scaled field (θ10) did: the line-form regex found no target and the control went vacuous. It still fails closed: no definition line carrying r= first in a continuation page's <sigs> is a FAIL.
 #   (L2)  legend: each of the two clauses is present exactly once where its form is used, last before </ctx>, and absent from the twin;
 #         a continuation page carries neither (it re-sends no legend), and page 1 carries the clause of every section it names as
 #         continued= or deferred=, so the pages after it are defined
@@ -66,7 +66,7 @@ pair sheds  --token-budget=4000
 pair sigonly --signatures-only
 pair small1 --page-bytes=3000
 pair small2 --page-bytes=3000:2
-pair small3 --page-bytes=2500:2
+pair small3 --page-bytes=2200:2
 rw --page-bytes=0 >"$WORK/whole.on2"
 for arm in "--legend=first" "--json"; do
     tag="$( printf '%s' "$arm" | tr -c 'a-z0-9' '_' )"
@@ -172,7 +172,7 @@ def differs2(mutant):
     try: return R.decode(mutant) != off["small3"]
     except Exception: return True
 say(m is not None and differs2(s2[:m.start(0)] + m.group(1) + s2[m.end(0):]),
-    "(L1n) [mutation negative control] the r= a continuation page's first row must keep (2500 B pages, page 2, %s), elided: the decode no longer equals the twin"
+    "(L1n) [mutation negative control] the r= a continuation page's first row must keep (2200 B pages, page 2, %s), elided: the decode no longer equals the twin"
     % (m.group(0)[m.group(0).rfind(b"r="):].decode() if m else "NO definition line with r= opens <sigs>"))
 
 # (L2) the legend clauses
