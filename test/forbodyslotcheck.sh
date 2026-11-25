@@ -670,12 +670,16 @@ ok "(N5) every <b t=> on the fixture answers is fn/method (FAIL lines above othe
 # ── EP / DS / Q1: the runtime roots (each premise read off this binary's own answer, never assumed) ─────────────
 Q_FORGE="How does the forge assemble a kiln job: scheduling glaze batches, tracking firing queues and recording kiln results?"
 Q_RUN="How does the forge run a kiln job: scheduling glaze batches, tracking firing queues and recording kiln results?"
-for r in cpp rs py ts go deep other; do rrun "$r" --for="$Q_FORGE" >"$TMP/q1.$r.xml"; done
+# The OTHER root pins RIPWIRE_BASENAME_FLAT=1 (θ10, rule 4): its premise is "Smelter::Assemble outranks Forge::Assemble", two
+# near-zero rows (r38-r41) whose order the basename field decides — "forge" names forge.cc, and the length-scaled field (#728) lifts
+# the 90-line Forge::Assemble one place above Smelter's. The arm is about entity identity in the member pick, not that order.
+flat_for(){ [ "$1" = other ] && echo 1; }
+for r in cpp rs py ts go deep other; do RIPWIRE_BASENAME_FLAT="$( flat_for "$r" )" rrun "$r" --for="$Q_FORGE" >"$TMP/q1.$r.xml"; done
 rrun common --for="$Q_RUN" >"$TMP/q1.common.xml"
 # Q1 premises re-anchored (lane hrr, train 31; rule 4): each premise is a SCORE rank (the class in the head tier 1..24, the
 # member past it), which the head round-robin may display elsewhere (a distinct file's best row moves into r=1..8). The
 # premises read the RIPWIRE_NO_HEAD_RR=1 twin of the same answer; every body / no-body assertion still reads the answer as served.
-for r in cpp rs py ts go deep other; do RIPWIRE_NO_HEAD_RR=1 rrun "$r" --for="$Q_FORGE" >"$TMP/q1.$r.so.xml"; done
+for r in cpp rs py ts go deep other; do RIPWIRE_BASENAME_FLAT="$( flat_for "$r" )" RIPWIRE_NO_HEAD_RR=1 rrun "$r" --for="$Q_FORGE" >"$TMP/q1.$r.so.xml"; done
 RIPWIRE_NO_HEAD_RR=1 rrun common --for="$Q_RUN" >"$TMP/q1.common.so.xml"
 rrun cpp --for="$Q_FORGE" --legend=compact >"$TMP/q1.cpp.c.xml"
 if r="$( chk bodiesattr "$TMP/q1.cpp.c.xml" pick member )" && r2="$( chk legend "$TMP/q1.cpp.c.xml" "${R3_STRS[@]}" )"; then
