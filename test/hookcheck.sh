@@ -346,6 +346,9 @@ if [ -x "$REALBIN" ]; then
     #     edited block is not this version's guidance, and the match is the exact text, never a heading grep.
     #   NOT DELIVERED (CodeRabbit #744 round 1)                   -> byte-identical to ABSENT: the block only inside an HTML comment
     #     (Claude Code strips those), or any settings file naming claudeMdExcludes (the hook keeps the primer, conservatively).
+    #   INSTRUCTION MODE (CodeRabbit #744 round 2)                -> byte-identical to ABSENT: pluginConfigs[...].options.instructionFiles
+    #     `managed-only` drops the project, local and user CLAUDE.md files, so a block there is never delivered; any value but the
+    #     default keeps the primer (conservative), and the default written out explicitly still dedups (control).
     # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
     # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
     SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
@@ -362,14 +365,22 @@ if [ -x "$REALBIN" ]; then
     {
         mkdir -p "${1%/*}"; printf '# Project notes\n<!-- team: keep this file short -->\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
     }
-    # The managed-policy memory files are read too and a gate cannot sandbox /etc or /Library: when one already holds the block
-    # on this machine, every case below is silent because of it, so the section reports why it cannot run instead of failing.
+    # The managed-policy memory and settings files are read too and a gate cannot sandbox /etc or /Library: when one already
+    # holds the block (every case below silent) or a managed settings file names claudeMdExcludes or a non-default instruction
+    # mode (every PRESENT case keeps the primer), the section reports why it cannot run instead of failing.
     ssd_managed=""
     for ssd_f in "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md"; do
-        [ -r "$ssd_f" ] && grep -q '^## ripwire' "$ssd_f" 2>/dev/null && ssd_managed="$ssd_f"
+        [ -r "$ssd_f" ] && grep -q '^## ripwire' "$ssd_f" 2>/dev/null && ssd_managed="the managed-policy file $ssd_f holds a ripwire block"
+    done
+    for ssd_f in "/Library/Application Support/ClaudeCode/managed-settings.json" "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json \
+                 "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json; do
+        [ -r "$ssd_f" ] || continue
+        grep -q claudeMdExcludes "$ssd_f" 2>/dev/null && ssd_managed="the managed settings file $ssd_f names claudeMdExcludes"
+        sed -E 's/"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"//g' "$ssd_f" 2>/dev/null | grep -q instructionFiles \
+            && ssd_managed="the managed settings file $ssd_f sets a non-default instructionFiles mode"
     done
   if [ -n "$ssd_managed" ]; then
-    echo "  SKIP  SessionStart dedup (3i6): the managed-policy file $ssd_managed holds a ripwire block on this machine"
+    echo "  SKIP  SessionStart dedup (3i6): $ssd_managed on this machine"
   else
     if command -v jq >/dev/null 2>&1; then
         SSD_WANT="$( jq -n --arg m "$SSD_BLURB" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
@@ -444,6 +455,32 @@ if [ -x "$REALBIN" ]; then
     done
     if [ "$ssd_kept" -eq 4 ]; then ok "SessionStart dedup NOT DELIVERED: 4 of 4 keep the primer"
     else no "SessionStart dedup NOT DELIVERED: $ssd_kept of 4"; fi
+    # INSTRUCTION MODE: the block is in a project or user CLAUDE.md and the user-level settings.json (where Claude Code reads the
+    # mode, as in managed settings) sets it; RED on the hook that only knew claudeMdExcludes (every keep arm went silent)
+    ssd_pc='{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n'
+    ssd_mode=0
+    for ssd_case in "managed-only, block in the project CLAUDE.md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only, block in the user CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only under the pre-2.1.285 ID agents-md@builtin, pretty-printed|$SSDCWD/CLAUDE.md|$( printf '{\n  "pluginConfigs": {\n    "agents-md@builtin": {\n      "options": {\n        "instructionFiles" : "managed-only"\n      }\n    }\n  }\n}\n' )" \
+                    "non-default claude-md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" claude-md )" \
+                    "default under one ID, managed-only under the other|$SSDCWD/CLAUDE.md|$( printf '{"pluginConfigs":{"agents-md@builtin":{"options":{"instructionFiles":"claude-md-or-agents-md"}},"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"managed-only"}}}}\n' )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; ssd_set="${ssd_rest#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"; printf '%s\n' "$ssd_set" > "$CLAUDE_CONFIG_DIR/settings.json"
+        ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        ssd_out="$( ssd_run "m$ssd_mode${#ssd_name}" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "${ssd_p:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_mode=$(( ssd_mode + 1 )); ok "SessionStart dedup INSTRUCTION MODE ($ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup INSTRUCTION MODE ($ssd_name): seen=${ssd_n:-0} planted=${ssd_p:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$CLAUDE_CONFIG_DIR/settings.json"
+    done
+    [ "$ssd_mode" -eq 5 ] && ok "SessionStart dedup INSTRUCTION MODE: 5 of 5 non-default modes keep the primer" \
+        || no "SessionStart dedup INSTRUCTION MODE: $ssd_mode of 5"
+    # control: the default mode written out explicitly (with the other key in the file) still dedups
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+    printf '{"model":"x","pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles": "claude-md-or-agents-md"}}}}\n' > "$CLAUDE_CONFIG_DIR/settings.json"
+    ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_out="$( ssd_run mdefault )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ok "SessionStart dedup INSTRUCTION MODE (default claude-md-or-agents-md written out): silent"
+    else no "SessionStart dedup INSTRUCTION MODE (default written out): seen=${ssd_n:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md" "$CLAUDE_CONFIG_DIR/settings.json"
     # Codex: its primer is not deduped against CLAUDE.md, even when CLAUDE.md holds Codex's own block
     ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssd_out="$( ssd_run codex RIPWIRE_METER_AGENT=codex )"
     if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"

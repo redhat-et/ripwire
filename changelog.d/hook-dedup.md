@@ -6,6 +6,8 @@ throwaway install). The primer now stays silent when a CLAUDE.md that Claude Cod
 managed policy, or CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in the working directory and its parents) holds the
 block word for word. The match is exact; line endings are ignored, and HTML comments are removed first, as Claude Code
 removes them. A block that is absent, older or edited still gets the current one, unchanged from before. So does a block
-behind an `@import`, which is not followed, and any session whose user, managed or project settings name `claudeMdExcludes`.
+behind an `@import`, which is not followed, and any session whose user, managed or project settings name `claudeMdExcludes`
+or set an instruction mode (`instructionFiles`) other than the default, since `managed-only` skips the project, local and
+user CLAUDE.md files.
 Codex's primer is unchanged. `ripwire wrap claude` now says the paste and the hook are alternatives. `test/hookcheck.sh`
 (3i6) holds each case.

@@ -1282,7 +1282,7 @@ fi
 # CLAUDE.local.md in DIR and each parent below `/`. Matched against what Claude Code injects: carriage returns ignored, HTML
 # comments removed (it strips them; a block inside one is not delivered). EXACT, not a heading grep: a stale or edited block is
 # not this version's text, so the primer still sends the current one. Kept CONSERVATIVE where loading is not modelled: an @import
-# is not followed, and any settings file that names claudeMdExcludes (which can stop a memory file from loading) keeps the primer.
+# is not followed, and claudeMdSettingsMayDrop (below) keeps the primer whenever a settings file may stop these files loading.
 # test/hookcheck.sh (3i6) pins each case. Builtins only, no fork: a few stats and reads of small files at each session start.
 claudeMdRead() # FILE -> the caller's `text`; false when FILE is not a readable regular file
 {
@@ -1291,22 +1291,42 @@ claudeMdRead() # FILE -> the caller's `text`; false when FILE is not a readable 
     IFS= read -r -d '' text < "$1"
     return 0
 }
+# claudeMdSettingsMayDrop SETTINGS...: true when a readable settings file may keep a memory file from loading, so a match
+# cannot be trusted. Two keys (https://code.claude.com/docs/en/memory): claudeMdExcludes, which skips files by path or glob,
+# and the instruction mode pluginConfigs["cc-plugin-agents-md@builtin" or "agents-md@builtin"].options.instructionFiles, whose
+# `managed-only` value drops the project, local and user CLAUDE.md files. Any instructionFiles value except the default
+# "claude-md-or-agents-md", and any mention this text match cannot read as that default, counts. Files read: user, project,
+# local, and managed-settings.json plus managed-settings.d/*.json. Out of the hook's sight, so not honoured: a --settings file,
+# an MDM profile, server-managed settings.
+claudeMdSettingsMayDrop()
+{
+    local f text dflt='"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"'
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *claudeMdExcludes* ]] && return 0
+        while [[ "$text" =~ $dflt ]]
+        do
+            text="${text/"${BASH_REMATCH[0]}"/}"
+        done
+        [[ "$text" == *instructionFiles* ]] && return 0
+    done
+    return 1
+}
 claudeMdHoldsBlurb()
 {
     local d="${1%/}" want="$2" f text rest cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
     local -a files=( "$cfg/CLAUDE.md" "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
     local -a settings=( "$cfg/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json"
-                        "/etc/claude-code/managed-settings.json" )
+                        "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json
+                        "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json )
     while [ -n "$d" ]
     do
         files+=( "$d/CLAUDE.md" "$d/.claude/CLAUDE.md" "$d/CLAUDE.local.md" )
         settings+=( "$d/.claude/settings.json" "$d/.claude/settings.local.json" )
         d="${d%/*}"
     done
-    for f in "${settings[@]}"
-    do
-        claudeMdRead "$f" && [[ "$text" == *claudeMdExcludes* ]] && return 1
-    done
+    claudeMdSettingsMayDrop "${settings[@]}" && return 1
     for f in "${files[@]}"
     do
         claudeMdRead "$f" || continue
