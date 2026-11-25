@@ -393,7 +393,11 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 344;          // bump on any grammar/.scm/extraction change
+                                                      // 344 = 2026-11-25 (#548 arm 2, @IG-ABHINAV; above 342 and its rich 343): an anonymous function literal
+                                                      //   whose head is a symbol (`#(cube %)`, also under `^:meta`) is captured as a call of that head, and the
+                                                      //   C++ head filter (ingest_clojure.h clojureListHead) accepts anon_fn_lit; special-form heads stay
+                                                      //   excluded. Rich file tag 345. kCacheVersion unchanged.
                                                       // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
                                                       //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
                                                       //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.

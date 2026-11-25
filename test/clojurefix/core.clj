@@ -61,6 +61,26 @@
 (defn metadata-not-call []
   ^:private square)
 
+(defn fn-literal []
+  (map #(cube %) [1 2 3]))
+
+(defn fn-literal-two-arg []
+  (reduce #(+ (square %1) %2) 0 [1 2 3]))
+
+(defn meta-fn-literal []
+  (map ^:once #(cube %) [1 2 3]))
+
+(defn quoted-fn-literal []
+  '(#(cube %)))
+
+(defn special-form-literal []
+  (map #(if % 1 2) [true false])
+  (map #(doto %) [1 2]))
+
+(defn param-head-literal []
+  (map #(%) [cube])
+  (map #(%1 %2) [cube] [1]))
+
 (defn nested-quote [] ''(square 1) (secret 1))
 (defn nested-discard [] #_(do #_(square 1) (square 2)) (secret 1))
 (defn nested-comment [] (comment (comment (square 1)) (square 2)) (secret 1))

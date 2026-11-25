@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-25, #548 arm 2 (Clojure `#(f %)`: an anonymous function literal's symbol head is a call; on main 591ca4804):
+#   RE-PINNED with UPDATE_GOLDEN=1 (hash d1854a3461…22919883). Watched text: kParserVer 342 -> 344 (rich file tag 345, above
+#   342's rich 343): queries/clojure/tags.scm gains an anon_fn_lit call pattern and src/ingest_clojure.h clojureListHead accepts
+#   anon_fn_lit. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54 and kQSnapCacheScheme 38 stay: no record
+#   changes shape and no watched quality.h function moved.
 # 2026-11-22, IN9 (the 0.7.0 train integration/070-cut-1121 merged with origin/main b576a95e3, which carries #715): RE-PINNED
 #   ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 340/337 -> 342 (rich 343): ONE
 #   number above BOTH sides' bumps (the train's 340, rich 341; main's 337, rich 338). kCacheVersion 54 and kQSnapCacheScheme 38
