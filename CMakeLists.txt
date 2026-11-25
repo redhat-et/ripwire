@@ -760,6 +760,8 @@ add_dependencies(ripwire ripwire_version_stamp ripwire_source_identity)
 set(_ripwire_build_profile_sha "")
 if(RIPWIRE_PGO_PROFILE AND EXISTS "${RIPWIRE_PGO_PROFILE}")
   file(SHA256 "${RIPWIRE_PGO_PROFILE}" _ripwire_build_profile_sha)
+  # the compiler reads the profile at every compile; a profile rewritten in place must re-run this hash, not keep the old one
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RIPWIRE_PGO_PROFILE}")
 endif()
 get_directory_property(_ripwire_build_copts COMPILE_OPTIONS)
 get_directory_property(_ripwire_build_cdefs COMPILE_DEFINITIONS)
@@ -768,8 +770,18 @@ set(_ripwire_build_descriptor
   "${CMAKE_CXX_COMPILER_ID}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_CXX_COMPILER_TARGET}|${CMAKE_SYSTEM_NAME}|${CMAKE_SYSTEM_PROCESSOR}"
   "${CMAKE_OSX_ARCHITECTURES}|${CMAKE_OSX_DEPLOYMENT_TARGET}|${CMAKE_BUILD_TYPE}|lto=${RIPWIRE_LTO}|ipo=${CMAKE_INTERPROCEDURAL_OPTIMIZATION}"
   "pgo=${RIPWIRE_PGO}|${_ripwire_build_profile_sha}|native=${RIPWIRE_NATIVE}|asan=${RIPWIRE_ASAN}|tsan=${RIPWIRE_TSAN}"
-  "copts=${_ripwire_build_copts}|cdefs=${_ripwire_build_cdefs}|lopts=${_ripwire_build_lopts}|${CMAKE_CXX_FLAGS}|${CMAKE_EXE_LINKER_FLAGS}"
-  "D=${CMAKE_CXX_FLAGS_DEBUG}|R=${CMAKE_CXX_FLAGS_RELEASE}|RD=${CMAKE_CXX_FLAGS_RELWITHDEBINFO}|MS=${CMAKE_CXX_FLAGS_MINSIZEREL}")
+  "copts=${_ripwire_build_copts}|cdefs=${_ripwire_build_cdefs}|lopts=${_ripwire_build_lopts}|${CMAKE_CXX_FLAGS}|${CMAKE_EXE_LINKER_FLAGS}")
+# every configuration's own compile and executable-link flags, the four standard ones and any custom one named
+set(_ripwire_build_configs DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+foreach(_ripwire_build_cfg IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+  string(TOUPPER "${_ripwire_build_cfg}" _ripwire_build_cfg)
+  list(APPEND _ripwire_build_configs "${_ripwire_build_cfg}")
+endforeach()
+list(REMOVE_DUPLICATES _ripwire_build_configs)
+foreach(_ripwire_build_cfg IN LISTS _ripwire_build_configs)
+  list(APPEND _ripwire_build_descriptor
+    "${_ripwire_build_cfg}:cxx=${CMAKE_CXX_FLAGS_${_ripwire_build_cfg}}|exe=${CMAKE_EXE_LINKER_FLAGS_${_ripwire_build_cfg}}")
+endforeach()
 string(SHA256 _ripwire_build_key "${_ripwire_build_descriptor}")
 string(SUBSTRING "${_ripwire_build_key}" 0 16 _ripwire_build_key)
 foreach(_ripwire_build_target ripwire ripwire_probe)
