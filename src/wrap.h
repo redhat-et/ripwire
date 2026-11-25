@@ -307,19 +307,32 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
                 std::string_view( row->installerFlags ) );
 }
 
-// HK2: the hook install's SubagentStart registration, DISCLOSED in the recipe for the agent that has one (the row with a
-// subagentBrief; SubagentStart is a Claude Code event). A comment, never a command, and it names neither the installer nor its
-// flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
-inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view agent )
+// What the hook install registers beyond the nudge, DISCLOSED in the recipe for the row it applies to. Comments, never commands,
+// and they name neither the installer nor its flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
+//   HK2: the SubagentStart note, for the row with a subagentBrief (SubagentStart is a Claude Code event).
+//   HOOK-DEDUP (2026-11-24): the SessionStart primer sends the paste block below and stays silent when a CLAUDE.md Claude Code loads
+//   already holds it word for word (hooks/ripwire-nudge.sh claudeMdHoldsBlurb): for the row whose context file is CLAUDE.md. The
+//   note does not offer the hook as a substitute for the paste: the meter's control arm (arm=auto, the default, half the sessions
+//   by session-id hash) never gets the primer (CodeRabbit #744 round 3). test/hookcheck.sh (3i6) holds it.
+inline void wrapPrintHookNotes( std::FILE* out, const std::string_view agent )
 {
     const AgentTarget* row = agentTarget( agent );
-    if( row == nullptr || row->subagentBrief.empty() || !row->hookSlot )
+    if( row == nullptr || !row->hookSlot )
     {
         return;
     }
-    rw::emitRaw( out, "# The hook install above also registers a SubagentStart note: under 400 B of routing context for each new Explore\n"
-                      "#   or Plan subagent, the two built-in types that do not load CLAUDE.md. It is a floor, not the lever: what a subagent\n"
-                      "#   acts on is its BRIEF, so paste the block the CLAUDE.md text below gives. RIPWIRE_SUBAGENT_ROUTE=0 turns the note off.\n" );
+    if( !row->subagentBrief.empty() )
+    {
+        rw::emitRaw( out, "# The hook install above also registers a SubagentStart note: under 400 B of routing context for each new Explore\n"
+                          "#   or Plan subagent, the two built-in types that do not load CLAUDE.md. It is a floor, not the lever: what a subagent\n"
+                          "#   acts on is its BRIEF, so paste the block the CLAUDE.md text below gives. RIPWIRE_SUBAGENT_ROUTE=0 turns the note off.\n" );
+    }
+    if( row->contextFile == "CLAUDE.md" )
+    {
+        rw::emitRaw( out, "# The hook install above also sends the block below at session start, and skips it when a CLAUDE.md Claude Code\n"
+                          "#   loads already holds it word for word. Pasting it is the reliable path: the hook sends it only in sessions where\n"
+                          "#   the primer is on, and by default about half of sessions are its control arm, which gets no primer.\n" );
+    }
 }
 
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
@@ -977,7 +990,7 @@ inline void wrapEmitAgent( const std::string_view agent, const WrapListing& aske
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
     wrapPrintSkillsLine( stdout, agent, executablePath );
     wrapPrintLegendSeenLine( stdout, agent );
-    wrapPrintSubagentRouteLine( stdout, agent );
+    wrapPrintHookNotes( stdout, agent );
 
     // context wiring: every recipe ends with the pasteable use-when blurb for the client's rules file.
     wrapPrintBlurb( stdout, agent );
