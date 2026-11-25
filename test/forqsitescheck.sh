@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# forqsitescheck.sh — θ11 (src/forqsites.h, RIPWIRE_THETA11=1, default OFF): page 1 of a --for answer carries, inside its root right
+# forqsitescheck.sh — θ11 (src/forqsites.h; switch src/forqsitesswitch.h): page 1 of a --for answer carries, inside its root right
 # before </ctx>, the question's own tokens with every file:line they occur on, one <qs> line each, 1,000 B of lines, one legend
-# comment line before them.
+# comment line before them. DEFAULT ON (owner 11-24, THETA11-FLIP): a plain call is the ON arm; RIPWIRE_THETA11=0 is the OFF arm.
 # ARMS (each counts what it saw and FAILS on zero)
 #   (Q1) knob on, a backticked name: <qs t="my_special_fn"> lists src/a.c:1 and src/b.c:3 — whole word, so the line holding only
 #        my_special_fnx is not a site; the block is INSIDE the root: the legend line, the <qs> lines, then </ctx> ends the answer
 #   (Q2) an option is a substring site: --frob-level is found on its line in src/b.c
 #   (Q3) the caps: a token on 151 lines is not listed; every n= is <= 150 and the <qs> lines total <= 1,000 B
 #   (Q4) NEGATIVE: a question with no identifier-shaped token and no rare plain word emits no block — counted against Q1's emit
-#   (Q5) knob off is byte-identical: unset == RIPWIRE_THETA11=0, neither has <qs>, and the knob-on answer less its block is the
-#        knob-off answer byte for byte (the block is purely additive)
+#   (Q5) off is byte-identical: RIPWIRE_THETA11=0 has no <qs>, and the default answer less its block is the =0 answer byte for
+#        byte (the block is purely additive)
+#   (D)  the DEFAULT is on: a plain call carries the block and equals RIPWIRE_THETA11=1 byte for byte (positive and negative question)
+#   (V)  --version names the posture: qsites=on for a plain call and under =1, qsites=off under RIPWIRE_THETA11=0
+#   (I)  with BASE_BIN (a binary from before the block existed) set: the =0 answer equals BASE_BIN's byte for byte (SKIP unset)
 #   (Q6) deterministic: two knob-on runs are byte-identical
 #   (Q7) EXTENSIONLESS files are read: a Makefile and a NEWS (no extension, no grammar) list their my_special_fn lines
 #   (Q8) REPO RARITY: a plain word on 2 lines (frobnicator) is listed; one on 25 lines (widgetry, prose) is not; one on 26 lines
 #        the code calls (gadgetize, a function) is — all three counted
-#   (Q9) MCP: the `for` tool's answer carries the same <qs> lines inside its root; knob off it carries none
+#   (Q9) MCP: the `for` tool's answer carries the same <qs> lines inside its root by default; under =0 it carries none
 #   (Q10) BUDGETED + PAGED: --token-budget keeps the block inside the root; --page-bytes page 2 has none; --legend=first carries it
 #   (Q11) WORKSPACE: two roots run from a directory holding neither; an extensionless file's site is read from its root on disk and printed
 #         under its label (the crawl row carries the label, not the disk path)
@@ -48,44 +51,53 @@ PY
 POS='why does `my_special_fn` return the wrong value with --frob-level and TOO_MANY_HITS, see the frobnicator, the widgetry and gadgetize'
 NEG='why is it slow when it starts up'
 rw(){ ( cd "$FX" && "$BIN" "$FX" --no-cache "--for=$1" "${@:2}" 2>/dev/null ); }
-RIPWIRE_THETA11=1 rw "$POS" >"$WORK/on.xml"
-RIPWIRE_THETA11=1 rw "$POS" >"$WORK/on2.xml"
-rw "$POS" >"$WORK/off.xml"
-RIPWIRE_THETA11=0 rw "$POS" >"$WORK/off0.xml"
-RIPWIRE_THETA11=1 rw "$NEG" >"$WORK/neg_on.xml"
-rw "$NEG" >"$WORK/neg_off.xml"
-RIPWIRE_THETA11=1 rw "$POS" --token-budget=600 >"$WORK/budget.xml"
-RIPWIRE_THETA11=1 rw "$POS" --legend=first >"$WORK/lfirst.xml"
-RIPWIRE_THETA11=1 rw "$POS" --page-bytes=1500:1 >"$WORK/page1.xml"
-RIPWIRE_THETA11=1 rw "$POS" --page-bytes=1500:2 >"$WORK/page2.xml"
+rw "$POS" >"$WORK/on.xml"
+rw "$POS" >"$WORK/on2.xml"
+RIPWIRE_THETA11=1 rw "$POS" >"$WORK/on1.xml"
+RIPWIRE_THETA11=0 rw "$POS" >"$WORK/off.xml"
+rw "$NEG" >"$WORK/neg_on.xml"
+RIPWIRE_THETA11=1 rw "$NEG" >"$WORK/neg_on1.xml"
+RIPWIRE_THETA11=0 rw "$NEG" >"$WORK/neg_off.xml"
+rw "$POS" --token-budget=600 >"$WORK/budget.xml"
+rw "$POS" --legend=first >"$WORK/lfirst.xml"
+rw "$POS" --page-bytes=1500:1 >"$WORK/page1.xml"
+rw "$POS" --page-bytes=1500:2 >"$WORK/page2.xml"
+# (V) the posture --version names; (I) the =0 answer against a binary from before the block existed
+"$BIN" --version >"$WORK/v_def.txt" 2>&1
+"$BIN" --version >"$WORK/v_on1.txt" 2>&1
+RIPWIRE_THETA11=0 "$BIN" --version >"$WORK/v_off.txt" 2>&1
+if [ -n "${BASE_BIN:-}" ]; then
+    ( cd "$FX" && "$BASE_BIN" "$FX" --no-cache "--for=$POS" 2>/dev/null ) >"$WORK/base_pos.xml"
+    ( cd "$FX" && "$BASE_BIN" "$FX" --no-cache "--for=$NEG" 2>/dev/null ) >"$WORK/base_neg.xml"
+fi
 # Q11: a two-root workspace, run from $FX (a directory holding neither root, so a labelled path does not resolve against the cwd)
 mkdir -p "$WORK/wsa" "$WORK/wsb"
 printf 'int my_special_fn( int x ) { return x; }\n' >"$WORK/wsa/a.c"
 printf 'v2.0\n* my_special_fn is documented here\n' >"$WORK/wsa/NEWS"
 printf 'int caller( void ) { return my_special_fn( 1 ); }\n' >"$WORK/wsb/b.c"
-( cd "$FX" && RIPWIRE_THETA11=1 "$BIN" "$WORK/wsa" "$WORK/wsb" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/ws.xml"
+( cd "$FX" && "$BIN" "$WORK/wsa" "$WORK/wsb" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/ws.xml"
 # Q12: 501 extensionless files (the crawl keeps 500 rows) -> every count a floor; an unreadable text file -> a floor
 FL="$WORK/fl"; mkdir -p "$FL/src" "$FL/notes"
 printf 'int my_special_fn( int x ) { return x; }\n' >"$FL/src/a.c"
 for i in $( seq 0 500 ); do printf 'note %s\n' "$i" >"$FL/notes/n$i"; done
-( cd "$FL" && RIPWIRE_THETA11=1 "$BIN" "$FL" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_rows.xml"
+( cd "$FL" && "$BIN" "$FL" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_rows.xml"
 UR="$WORK/ur"; mkdir -p "$UR/src"
 printf 'int my_special_fn( int x ) { return x; }\n' >"$UR/src/a.c"
 printf '* my_special_fn\n' >"$UR/NEWS"; chmod 000 "$UR/NEWS"
 # CR #746: CAP_DAC_OVERRIDE (root on Linux) reads past chmod 000, so record whether the file is really unreadable
 cat "$UR/NEWS" >/dev/null 2>&1 && : >"$WORK/ur_readable"
-( cd "$UR" && RIPWIRE_THETA11=1 "$BIN" "$UR" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_unread.xml"
+( cd "$UR" && "$BIN" "$UR" --no-cache '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_unread.xml"
 chmod 600 "$UR/NEWS"
 # Q12b (CR #746): a file the crawl drops over --max-file-size may hold a site -> every count a floor
 OV="$WORK/ov"; mkdir -p "$OV/src"
 printf 'int my_special_fn( int x ) { return x; }\n' >"$OV/src/a.c"
 python3 -c "import sys; open(sys.argv[1], 'w').write('int pad[] = {' + '0,' * 3000 + '};\nint g( void ) { return my_special_fn( 2 ); }\n')" "$OV/src/big.c"
-( cd "$OV" && RIPWIRE_THETA11=1 "$BIN" "$OV" --no-cache --max-file-size=4K '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_oversize.xml"
+( cd "$OV" && "$BIN" "$OV" --no-cache --max-file-size=4K '--for=why does `my_special_fn` return the wrong value' 2>/dev/null ) >"$WORK/floor_oversize.xml"
 # Q13: the match cap is spent on whole-word sites only
 CP="$WORK/cap"; mkdir -p "$CP/src"
 python3 -c "import sys; open(sys.argv[1], 'w').write('/* ' + 'z' * 4000003 + ' */\\nint zzz = 1;\\n')" "$CP/src/big.c"
 printf 'int f( void ) { return zzz; }\n' >"$CP/src/f.c"
-( cd "$CP" && RIPWIRE_THETA11=1 "$BIN" "$CP" --no-cache '--for=why is `zzz` wrong' 2>/dev/null ) >"$WORK/cap.xml"
+( cd "$CP" && "$BIN" "$CP" --no-cache '--for=why is `zzz` wrong' 2>/dev/null ) >"$WORK/cap.xml"
 python3 - "$WORK" "$FX" "$BIN" "$POS" <<'PY' || fail=1
 import json, os, re, subprocess, sys
 W, FX, BIN, POS = sys.argv[1:5]; bad = 0
@@ -93,7 +105,7 @@ rd = lambda n: open(os.path.join(W, n), encoding='utf-8', errors='replace').read
 def P(m): print('  PASS  ' + m)
 def F(m):
     global bad; bad = 1; print('  FAIL  ' + m)
-on, off, off0, neg_on, neg_off = rd('on.xml'), rd('off.xml'), rd('off0.xml'), rd('neg_on.xml'), rd('neg_off.xml')
+on, off, neg_on, neg_off = rd('on.xml'), rd('off.xml'), rd('neg_on.xml'), rd('neg_off.xml')
 QS = re.compile(r'^<qs t="([^"]*)" n="(\d+)\+?">(.*)</qs>$', re.M)
 LEG = '<!-- qs:'
 def strip(p): return p[len(FX) + 1:] if p.startswith(FX + '/') else p
@@ -109,7 +121,7 @@ def inside_root(doc):
 rows = rows_of(on)
 # Q1
 r = rows.get('my_special_fn')
-if not rows: F('(Q1) knob on emitted no <qs> line at all (every arm below would be vacuous)')
+if not rows: F('(Q1) the default emitted no <qs> line at all (every arm below would be vacuous)')
 elif r and {('src/a.c', 1), ('src/b.c', 3)} <= r[1] and ('src/b.c', 5) not in r[1] and inside_root(on):
     P(f'(Q1) my_special_fn: src/a.c:1 src/b.c:3 (my_special_fnx not a site); the block is inside the root, before </ctx>; {len(rows)} <qs> lines')
 else: F(f'(Q1) my_special_fn row wrong or block not inside the root: {r and r[2]!r}; end {on[-200:]!r}')
@@ -125,16 +137,35 @@ else: F(f'(Q3) caps broken: TOO_MANY_HITS listed={"TOO_MANY_HITS" in rows}, byte
 # Q4
 if not rows: F('(Q4) vacuous: the positive question emitted nothing, so an empty negative proves nothing')
 elif '<qs' in neg_on or LEG in neg_on: F('(Q4) a question with no identifier-shaped token or rare word emitted a block')
-elif neg_on != neg_off or '</ctx>' not in neg_on: F('(Q4) the negative answer differs from its knob-off twin, or has no </ctx>')
-else: P('(Q4) negative: no token kept -> no block; the knob-on answer equals the knob-off one byte for byte')
+elif neg_on != neg_off or '</ctx>' not in neg_on: F('(Q4) the negative answer differs from its RIPWIRE_THETA11=0 twin, or has no </ctx>')
+else: P('(Q4) negative: no token kept -> no block; the default answer equals the =0 one byte for byte')
 # Q5
-if '</ctx>' not in off: F('(Q5) knob-off answer has no </ctx> (vacuous)')
-elif off != off0 or '<qs' in off or LEG in off: F('(Q5) knob off: unset and RIPWIRE_THETA11=0 differ, or carry the block')
+if '</ctx>' not in off: F('(Q5) the RIPWIRE_THETA11=0 answer has no </ctx> (vacuous)')
+elif '<qs' in off or LEG in off: F('(Q5) RIPWIRE_THETA11=0 still carries the block')
+elif LEG not in on: F('(Q5) vacuous: the default answer carries no block to remove')
 else:
     i = on.rfind(LEG); j = on.rfind('</ctx>')
     cand = {on[:i] + on[j:], on[:i - 1] + on[j:] if i > 0 else None}
-    if off in cand: P(f'(Q5) knob off byte-identical (unset == =0, {len(off)} B); knob on = knob off + {len(on) - len(off)} B block')
-    else: F('(Q5) the knob-on answer less its block is not the knob-off answer')
+    if off in cand: P(f'(Q5) =0 carries no block ({len(off)} B); the default = the =0 answer + {len(on) - len(off)} B block')
+    else: F('(Q5) the default answer less its block is not the RIPWIRE_THETA11=0 answer')
+# D: the default is on, and equals =1
+on1, neg_on1 = rd('on1.xml'), rd('neg_on1.xml')
+if not rows or LEG not in on: F('(D) the default answer carries no block (the default is not on)')
+elif on1 != on or neg_on1 != neg_on or '</ctx>' not in neg_on1: F(f'(D) the default differs from RIPWIRE_THETA11=1: pos same={on1 == on} neg same={neg_on1 == neg_on}')
+else: P(f'(D) default on: a plain call carries {len(rows)} <qs> lines and equals RIPWIRE_THETA11=1 byte for byte (2 questions)')
+# V: --version
+vd, v1, v0 = rd('v_def.txt'), rd('v_on1.txt'), rd('v_off.txt')
+vok = [('default', vd, 'qsites=on'), ('=1', v1, 'qsites=on'), ('=0', v0, 'qsites=off')]
+vbad = [n for n, t, want in vok if not t.startswith('ripwire ') or len(re.findall(r'\bqsites=(on|off)\b', t)) != 1 or want not in t]
+if vbad: F(f'(V) --version posture wrong for {vbad}: {vd.strip()!r} / {v0.strip()!r}')
+else: P(f'(V) --version: qsites=on (default, =1), qsites=off (=0): {len(vok)} of {len(vok)}')
+# I: =0 == a binary from before the block existed
+if not os.path.exists(os.path.join(W, 'base_pos.xml')): print('  SKIP  (I) BASE_BIN unset')
+else:
+    bp, bn = rd('base_pos.xml'), rd('base_neg.xml')
+    if '</ctx>' not in bp or '</ctx>' not in bn: F('(I) the BASE_BIN answers have no </ctx> (vacuous)')
+    elif bp == off and bn == neg_off: P(f'(I) RIPWIRE_THETA11=0 == BASE_BIN byte for byte (2 of 2 questions, {len(bp)} + {len(bn)} B)')
+    else: F(f'(I) RIPWIRE_THETA11=0 differs from BASE_BIN: pos same={bp == off} neg same={bn == neg_off}')
 # Q6
 if rd('on.xml') == rd('on2.xml') and rows: P('(Q6) two knob-on runs byte-identical')
 else: F('(Q6) knob-on runs differ (or nothing emitted)')
@@ -151,7 +182,7 @@ else: F(f'(Q8) rarity wrong: frobnicator={fr and fr[2]!r} widgetry={wd and wd[2]
 # Q9 MCP
 def mcp(env_on):
     env = {k: v for k, v in os.environ.items() if k != 'RIPWIRE_THETA11'}
-    if env_on: env['RIPWIRE_THETA11'] = '1'
+    if not env_on: env['RIPWIRE_THETA11'] = '0'
     req = [{"jsonrpc": "2.0", "id": 0, "method": "initialize"},
            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "for", "arguments": {"task": POS}}}]
     p = subprocess.run([BIN, FX, "--mcp"], input="".join(json.dumps(x) + "\n" for x in req).encode(), capture_output=True, env=env, cwd=FX)
@@ -163,7 +194,7 @@ def mcp(env_on):
 m_on, m_off = mcp(True), mcp(False)
 mr = rows_of(m_on)
 if mr and mr == rows and inside_root(m_on) and '<qs' not in m_off and '</ctx>' in m_off:
-    P(f'(Q9) MCP `for`: the same {len(mr)} <qs> lines inside its root; knob off none')
+    P(f'(Q9) MCP `for`: the same {len(mr)} <qs> lines inside its root by default; RIPWIRE_THETA11=0 none')
 else: F(f'(Q9) MCP: {len(mr)} lines (CLI {len(rows)}), same={mr == rows}, inside={inside_root(m_on)}, off has <qs>={"<qs" in m_off}, off empty={not m_off}')
 # Q10
 bud, lf, p1, p2 = rd('budget.xml'), rd('lfirst.xml'), rd('page1.xml'), rd('page2.xml')
