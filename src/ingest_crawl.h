@@ -1269,6 +1269,35 @@ void recordCrawlDrop( std::vector<SkippedFile>& rows, std::uint64_t& exactCount,
     rows.push_back( { path, ec ? 0ull : std::uint64_t( sz ), std::string( ext ) } );
 }
 
+// θ11 (CrawlSkips::extensionless): an extensionless text candidate. The rows keep the kMaxSkipRowsPerClass shallowest paths (depth,
+// then path) whatever order the walk meets them in: a max-heap on that order, its top replaced by a shallower path once full.
+inline bool extensionlessRowBefore( const SkippedFile& a, const SkippedFile& b ) noexcept
+{
+    const auto depth = []( const std::string& p ) { return std::count( p.begin(), p.end(), '/' ); };
+    const auto da = depth( a.path ), db = depth( b.path );
+    return da != db ? da < db : a.path < b.path;
+}
+void recordExtensionless( CrawlSkips& skips, std::string path, const fs::directory_entry& entry )
+{
+    ++skips.extensionlessFiles;
+    std::vector<SkippedFile>& rows = skips.extensionless;
+    SkippedFile row{ std::move( path ), 0ull, std::string() };
+    if( rows.size() >= kMaxSkipRowsPerClass )
+    {
+        if( !extensionlessRowBefore( row, rows.front() ) )
+        {
+            return;
+        }
+        std::pop_heap( rows.begin(), rows.end(), extensionlessRowBefore );
+        rows.pop_back();
+    }
+    std::error_code      ec;
+    const std::uintmax_t sz = entry.file_size( ec );
+    row.sizeBytes           = ec ? 0ull : std::uint64_t( sz );
+    rows.push_back( std::move( row ) );
+    std::push_heap( rows.begin(), rows.end(), extensionlessRowBefore );
+}
+
 // §SEC1 — a file the crawl REFUSED because its link left the root. Its own recorder rather than
 // recordCrawlDrop, and the difference is the point: recordCrawlDrop pays `entry.file_size()`, which FOLLOWS
 // the link and would therefore measure the very out-of-root file the refusal exists to leave unread. bytes=0
@@ -1327,6 +1356,10 @@ bool recordPreSizeDrop( CrawlSkips& skips, HashMap<std::string, std::uint64_t>& 
         {
             ++extTally[ ext ];
             recordCrawlDrop( skips.unsupported, skips.unsupportedFiles, fullPath(), ext, entry );
+        }
+        else if( ext.empty() && !excluded && !ignored() )
+        {
+            recordExtensionless( skips, fullPath(), entry );   // θ11: no class rows it, so no count above moves
         }
         return true;
     }
@@ -1975,6 +2008,7 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     std::sort( skips.prunedPackageRows.begin(), skips.prunedPackageRows.end(), byPath );
     std::sort( skips.escaped.begin(), skips.escaped.end(), byPath );               // §SEC1, same contract
     std::sort( skips.untrackedBuild.begin(), skips.untrackedBuild.end(), byPath ); // M1, same contract
+    std::sort( skips.extensionless.begin(), skips.extensionless.end(), byPath );   // θ11: was a heap on (depth, path)
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
     {

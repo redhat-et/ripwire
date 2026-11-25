@@ -698,6 +698,14 @@ Discloses: `capped`
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
 | `kForThinMinFiles` | `3` | — | a ranked head over fewer files than this ⇒ thin |
 
+### `src/forqsites.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxSitesPerTok` | `150` | — | a token with more lines than this is not a lead |
+
 ### `src/forreadercallers.h`
 
 Discloses: **none**

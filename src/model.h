@@ -2470,6 +2470,12 @@ struct CrawlSkips
     // hide, i.e. files that would OTHERWISE HAVE BEEN INDEXED — one of the accounting invariant's drop classes.
     std::vector<SkippedFile>  untrackedBuild;       // capped rows, path-sorted
     std::uint64_t             untrackedBuildFiles = 0;  // EXACT count (rows may be fewer)
+    // θ11 (forqsites.h): the text-candidate files with NO extension (NEWS, Gemfile, Dockerfile, Makefile, ...), which no other class
+    // rows (kNonTextExts: an extensionless file has no extension to report). Not a drop disclosure and read by nothing else: only the
+    // --for question-sites block greps them, as rg would. The rows are the kMaxSkipRowsPerClass SHALLOWEST (path depth, then path) —
+    // a walk-order-free pick that keeps a root's Makefile ahead of a deep testdata tree — sorted by path; not --exclude'd, not ignored.
+    std::vector<SkippedFile>  extensionless;        // capped rows, path-sorted
+    std::uint64_t             extensionlessFiles = 0;   // EXACT count (rows may be fewer)
     // The DISCLOSE sink for a file the crawl refused because its link left the root: the exact count escaped_root= prints.
     enum class DisclosureWhy : std::uint8_t
     {

@@ -30,6 +30,7 @@
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
+#include "darkflags.h"          // wholeWordAt — a word-bounded literal pattern (FOR θ11) keeps its whole-word sites in the read
 #include "regexguard.h"         // THE owner of a user's regex: the screens, the compile, and the guarded match
 
 #include <algorithm>
@@ -1523,10 +1524,22 @@ inline GrepCollection rankGrepSites( const IngestResult& ing, std::vector<std::v
 // own ranking (rankGrepSites). The file-level facts — a file the read could not open, a worker that died — are facts of the one read,
 // so every result carries them, as each pattern's own scan of the same disk state would have. A --regex scan is one pattern.
 // `stackBytes` is the size the scan threads ask for; only a gate's fault switch or a caller testing the degrade passes less.
+// A word-bounded literal's sites (grepCollectEach `wordBounded`): those no identifier byte flanks, tested on the bytes in hand.
+inline void keepWordBoundedSites( std::vector<GrepMatchSite>& sites, std::string_view text, std::size_t len, bool wordBounded )
+{
+    if( wordBounded )
+    {
+        std::erase_if( sites, [ text, len ]( const GrepMatchSite& m ) { return !darkflags::wholeWordAt( text, m.byteOffset, len ); } );
+    }
+}
+
+// `wordBounded` (empty = none): wordBounded[k] != 0 makes literal pattern k WORD-BOUNDED — of its sites the scan keeps those no identifier
+// byte flanks (darkflags::wholeWordAt), tested on the bytes already read, so a whole-word scan costs no second read of a file.
 inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std::span<const std::string> pats, bool regex, bool noPrefilter,
-                                                    std::size_t stackBytes = kGrepScanStackBytes )
+                                                    std::size_t stackBytes = kGrepScanStackBytes, std::span<const char> wordBounded = {} )
 {
     EXPECTS( !regex || pats.size() == 1, "a --regex scan is one pattern" );
+    EXPECTS( wordBounded.empty() || ( !regex && wordBounded.size() == pats.size() ), "a word-bounded flag per literal pattern" );
     const std::uint32_t fileCount   = std::uint32_t( ing.files.size() );
     const std::size_t   budgetCount = kGrepCollectionBudget;
     if( fileCount == 0 || pats.empty() )
@@ -1586,6 +1599,7 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
                 for( std::size_t k = 0; k < pats.size(); ++k )
                 {
                     const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy );
+                    keepWordBoundedSites( perPatternSites[k][f], text, pats[k].size(), !wordBounded.empty() && wordBounded[k] != 0 );
                     if( isAbandoned )
                     {
                         perFileAbandoned[f] = 1;
@@ -1655,6 +1669,9 @@ public:
     GrepScanBatch( const GrepScanBatch& )            = delete;
     GrepScanBatch& operator=( const GrepScanBatch& ) = delete;
 
+    // word-bounded scans (grepCollectEach `wordBounded`) expected too: FOR θ11's question tokens share the batch's one read
+    void expectWords( std::vector<std::string> expected ) { expectKeys( std::move( expected ), true ); }
+
     // the RIPWIRE_STATS counts: literal scans asked, corpus reads made, expectations read but never asked (their search was the cost)
     std::size_t asks() const noexcept { return asks_; }
     std::size_t reads() const noexcept { return reads_; }
@@ -1672,11 +1689,12 @@ public:
         return tlOpen != nullptr && &tlOpen->ing_ == &ing ? tlOpen : nullptr;
     }
 
-    // the literal scan of `pat`: a held collection (no read), or one read for `pat` and every pending expectation
-    GrepCollection collect( const std::string& pat, std::size_t stackBytes )
+    // the literal scan of `pat` (`word`: word-bounded): a held collection (no read), or one read for it and every pending expectation
+    GrepCollection collect( const std::string& pat, std::size_t stackBytes, bool word = false )
     {
         ++asks_;
-        const auto held = std::find_if( held_.begin(), held_.end(), [ & ]( const HeldScan& e ) { return e.pattern == pat; } );
+        const ScanKey key{ pat, word };
+        const auto held = std::find_if( held_.begin(), held_.end(), [ & ]( const HeldScan& e ) { return e.key == key; } );
         if( held != held_.end() )
         {
             unasked_ -= held->asked ? 0 : 1;
@@ -1684,26 +1702,30 @@ public:
             return keepOrHandOver( held );
         }
         std::vector<std::string> todo{ pat };
-        for( std::string& p : pending_ )
+        std::vector<char>        todoWord{ char( word ) };
+        for( ScanKey& p : pending_ )
         {
-            if( p != pat )
+            if( !( p == key ) )
             {
-                todo.push_back( std::move( p ) );
+                todo.push_back( std::move( p.pattern ) );
+                todoWord.push_back( char( p.word ) );
             }
         }
         pending_.clear();
-        if( std::find( known_.begin(), known_.end(), pat ) == known_.end() )
+        if( std::find( known_.begin(), known_.end(), key ) == known_.end() )
         {
-            known_.push_back( pat );
+            known_.push_back( key );
         }
-        std::vector<GrepCollection> got = grepCollectEach( ing_, todo, /*regex=*/false, /*noPrefilter=*/false, stackBytes );
+        const bool anyWord = std::find( todoWord.begin(), todoWord.end(), char( 1 ) ) != todoWord.end();   // none: the scan it always was
+        std::vector<GrepCollection> got = grepCollectEach( ing_, todo, /*regex=*/false, /*noPrefilter=*/false, stackBytes,
+                                                           anyWord ? std::span<const char>( todoWord ) : std::span<const char>() );
         ++reads_;
         unasked_ += todo.size() - 1;
         for( std::size_t k = 1; k < todo.size(); ++k )
         {
-            held_.push_back( HeldScan{ std::move( todo[k] ), std::move( got[k] ), false } );
+            held_.push_back( HeldScan{ ScanKey{ std::move( todo[k] ), todoWord[k] != 0 }, std::move( got[k] ), false } );
         }
-        held_.push_back( HeldScan{ pat, std::move( got[0] ), true } );
+        held_.push_back( HeldScan{ key, std::move( got[0] ), true } );
         return keepOrHandOver( held_.end() - 1 );
     }
 
@@ -1711,9 +1733,15 @@ private:
     // A collection read here. One the block asked for may be asked again (a candidate and then a table anchor of the same text), so a
     // small one stays held: a copy goes out. A large one is handed over (moved): holding it would cost the memory column more than a
     // second read of the corpus costs time.
+    struct ScanKey
+    {
+        std::string pattern;
+        bool        word = false;   // word-bounded (grepCollectEach `wordBounded`)
+        bool operator==( const ScanKey& ) const = default;
+    };
     struct HeldScan
     {
-        std::string    pattern;
+        ScanKey        key;
         GrepCollection collection;
         bool           asked = false;
     };
@@ -1731,14 +1759,16 @@ private:
     }
 
     // an expectation already scanned, held or pending is not added twice (an empty one is never scanned: no caller asks for it)
-    void expect( std::vector<std::string> expected )
+    void expect( std::vector<std::string> expected ) { expectKeys( std::move( expected ), false ); }
+    void expectKeys( std::vector<std::string> expected, bool word )
     {
         for( std::string& p : expected )
         {
-            if( !p.empty() && std::find( known_.begin(), known_.end(), p ) == known_.end() )
+            ScanKey key{ std::move( p ), word };
+            if( !key.pattern.empty() && std::find( known_.begin(), known_.end(), key ) == known_.end() )
             {
-                known_.push_back( p );
-                pending_.push_back( std::move( p ) );
+                known_.push_back( key );
+                pending_.push_back( std::move( key ) );
             }
         }
     }
@@ -1746,8 +1776,8 @@ private:
     inline static thread_local GrepScanBatch* tlOpen = nullptr;
     const IngestResult&                                 ing_;
     GrepScanBatch*                                      outer_;
-    std::vector<std::string>                            known_;     // every pattern expected or asked so far
-    std::vector<std::string>                            pending_;   // expected, not read yet
+    std::vector<ScanKey>                                known_;     // every pattern expected or asked so far
+    std::vector<ScanKey>                                pending_;   // expected, not read yet
     std::vector<HeldScan>                               held_;      // read: expected and not asked yet, or asked and small
     std::size_t                                         asks_ = 0, reads_ = 0, unasked_ = 0;
 };
