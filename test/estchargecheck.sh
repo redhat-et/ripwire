@@ -169,7 +169,11 @@ a11_charged(){
     eg="$( grep -aoE 'est_tokens="[0-9]+"' "$2" | head -1 | tr -dc '0-9' )"
     printf '%s B / est %s -> %s B / est %s' "$b" "${eb:-<none>}" "$g" "${eg:-<none>}"
     [ -n "$eb" ] && [ -n "$eg" ] || return 1
-    awk -v b="$b" -v g="$g" -v eb="$eb" -v eg="$eg" 'BEGIN{ d = (g - b) / 2.36 - (eg - eb); if (d < 0) d = -d; exit !( g > b && d <= 2 ) }'
+    # The block may ADD bytes, or (under the unbudgeted default budget, a hard one) DISPLACE rows and leave the answer
+    # smaller: on this repo's own src/ the graph answer came out 95 B under the bare one after a src/ edit (#721 r4). Either
+    # way est_tokens must move by the delivered-byte change; |g - b| >= 5 keeps the uncharged twin refusable (a 0 B change
+    # would pass any est_tokens and prove nothing).
+    awk -v b="$b" -v g="$g" -v eb="$eb" -v eg="$eg" 'BEGIN{ m = g - b; if (m < 0) m = -m; d = (g - b) / 2.36 - (eg - eb); if (d < 0) d = -d; exit !( m >= 5 && d <= 2 ) }'
 }
 # NEGATIVE CONTROL: the same graph answer with est_tokens reverted to the bare bundle's value — the block's bytes are in,
 # its charge is not. The predicate must REFUSE it, or a pass above means nothing.

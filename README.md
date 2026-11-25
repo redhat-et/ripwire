@@ -963,7 +963,8 @@ because a format/argument mismatch is a defect, not debt, and a new function at 
 is how a 1,000-line function starts; the thirteenth, `tangle`, scores a long function's nesting, deep share and
 steering locals, with length only amplifying them, so a long orchestrator of named steps stays quiet, and gates an
 unacknowledged, non-test function that is new at tangle 6 or more, crossed 6, or grew while over it; a moved body that keeps
-70% clone-sketch similarity to the body it vacated never gates, one rewritten below that gates as a new function does), and it reports **only what your
+70% clone-sketch similarity to the body it vacated, as each other's unique best match, never gates; one rewritten below that, or
+tied with another candidate, gates as a new function does), and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 
