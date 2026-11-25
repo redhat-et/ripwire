@@ -490,9 +490,11 @@ inline std::string extractHtmlFlat( std::string_view html )
         if( html[i] == '<' )
         {
             // drop <script>…</script> and <style>…</style> wholesale (content is not prose)
-            if( const std::string_view tag = html.substr( i ); strkern::lowerFoldedStartsWith( tag, "<script" ) || strkern::lowerFoldedStartsWith( tag, "<style" ) )
+            const std::string_view tag    = html.substr( i );
+            const bool             script = strkern::lowerFoldedStartsWith( tag, "<script" );
+            if( script || strkern::lowerFoldedStartsWith( tag, "<style" ) )
             {
-                const std::string_view close = strkern::lowerFoldedStartsWith( tag, "<script" ) ? "</script" : "</style";
+                const std::string_view close = script ? "</script" : "</style";
                 std::size_t            e     = i + 1;
                 while( e < html.size() && !strkern::lowerFoldedStartsWith( html.substr( e ), close ) )
                 {
