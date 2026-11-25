@@ -2763,9 +2763,35 @@ using rw::gitResolveCommitSha;
 // Run one short git query against `root` and return its whitespace-trimmed output (expected single-line), or
 // "" on any failure. The shared shape behind gitHeadSha / gitWindowRefSha — `tail` is everything after
 // `git -C <root>` INCLUDING redirects (so a caller can pipe, e.g. "rev-list HEAD 2>/dev/null | tail -1").
+inline std::string gitOneLineCmd( const std::string& root, const std::string& tail )
+{
+    return gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " " + tail;
+}
+
 inline std::string gitOneLine( const std::string& root, const std::string& tail )
 {
-    return popenTrimmed( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " " + tail );
+    return popenTrimmed( gitOneLineCmd( root, tail ) );
+}
+
+// C1-STAMP (gitstampstore.h): gitOneLine for a question a STAMP record may answer. The stored value is the trimmed output
+// exactly as popenTrimmed returned it, recorded only when `isRecordable` accepts it (popenTrimmed drops the exit status,
+// so the answer's own shape is the success test). Unarmed — every run but a one-shot --for — this is gitOneLine.
+// git's own spelling of a boolean answer (`rev-parse --is-shallow-repository`), the only shape worth recording for one.
+inline bool isGitBoolAnswer( std::string_view out ) noexcept
+{
+    return out == "true" || out == "false";
+}
+
+inline std::string gitOneLineStamped( const std::string& root, const std::string& tail, bool ( *isRecordable )( std::string_view ) )
+{
+    const std::string cmd = gitOneLineCmd( root, tail );
+    if( std::optional<gitstampstore::Answer> hit = gitstampstore::lookup( root, cmd ) )
+    {
+        return hit->lines.empty() ? std::string() : std::move( hit->lines.front() );
+    }
+    std::string out = popenTrimmed( cmd );
+    gitstampstore::offer( root, cmd, isRecordable( out ), 0, { out } );
+    return out;
 }
 
 // ─── R1 IDENTITY: the GIT-RECORDED RENAME MAP ──────────────────────────────────────────────────────────
@@ -2962,7 +2988,7 @@ inline RenameMap gitUncommittedRenameMap( const std::string& root )
 // --quality-delta report a wall of false regressions.
 inline std::string gitHeadSha( const std::string& root )
 {
-    return gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" );
+    return gitOneLineStamped( root, "rev-parse --verify --quiet HEAD 2>/dev/null", isBareCommitSha );   // C1-STAMP: recorded only when it names a commit
 }
 
 // HEAD's committer date in ISO short form (YYYY-MM-DD) — the deterministic clock the L3 field-notes writer
@@ -3079,7 +3105,9 @@ inline bool gitRepoHasHistory( const std::string& root )
 // Not memoized: the MCP server is long-lived, and a `git fetch --unshallow` mid-session must be seen.
 inline bool gitIsShallow( const std::string& root )
 {
-    return gitOneLine( root, "rev-parse --is-shallow-repository 2>/dev/null" ) == "true";
+    // C1-STAMP: per-call liveness is the record's job now — a one-shot --for serves it only while the shallow file it was
+    // recorded against is unchanged (gitstampcache.h); the MCP server is never armed, so it still asks git every time.
+    return gitOneLineStamped( root, "rev-parse --is-shallow-repository 2>/dev/null", isGitBoolAnswer ) == "true";
 }
 
 // Is `sha` a shallow BOUNDARY — a commit whose object records a parent the clone never fetched? The raw
