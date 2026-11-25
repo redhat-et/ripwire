@@ -169,6 +169,9 @@ a11_charged(){
     eg="$( grep -aoE 'est_tokens="[0-9]+"' "$2" | head -1 | tr -dc '0-9' )"
     printf '%s B / est %s -> %s B / est %s' "$b" "${eb:-<none>}" "$g" "${eg:-<none>}"
     [ -n "$eb" ] && [ -n "$eg" ] || return 1
+    # The graph answer must carry the block and the bare one must not (CodeRabbit #721): a displaced-rows answer with no
+    # <graph> would otherwise pass on its byte change alone.
+    grep -aq '<graph' "$2" && ! grep -aq '<graph' "$1" || { printf ' (no <graph> block in the graph answer, or one in the bare answer)'; return 1; }
     # The block may ADD bytes, or (under the unbudgeted default budget, a hard one) DISPLACE rows and leave the answer
     # smaller: on this repo's own src/ the graph answer came out 95 B under the bare one after a src/ edit (#721 r4). Either
     # way est_tokens must move by the delivered-byte change; |g - b| >= 5 keeps the uncharged twin refusable (a 0 B change
@@ -1585,6 +1588,16 @@ a11u_msg="$( a11_charged "$TMP/ptu_bare.out" "$TMP/ptu_graph.out" )" \
     && ok "#11 A11U unbudgeted --pack-task --with-graph: the block is charged — $a11u_msg" \
     || no "#11 A11U unbudgeted --pack-task --with-graph: est_tokens does not price the block ($a11u_msg)"
 a11_refuses_twin "#11 A11U" "$TMP/ptu_bare.out" "$TMP/ptu_graph.out"
+# A11U NEGATIVE CONTROL 2 (CodeRabbit #721): the graph answer with its <graph> element stripped (est_tokens kept) carries no
+# block, so the predicate must refuse it even though its bytes differ from the bare answer's.
+python3 -c 'import re, sys
+t = open( sys.argv[ 1 ], encoding="utf-8", errors="surrogateescape" ).read()
+out = re.sub( r"<graph\b.*?</graph>", "", t, count = 1, flags = re.S )
+assert out != t, "no <graph> element to strip"
+open( sys.argv[ 2 ], "w", encoding="utf-8", errors="surrogateescape" ).write( out )' "$TMP/ptu_graph.out" "$TMP/ptu_graph.nograph" \
+    && ! a11_charged "$TMP/ptu_bare.out" "$TMP/ptu_graph.nograph" >/dev/null \
+    && ok "#11 A11U negative control: the graph answer with <graph> stripped is refused (no block, nothing to charge)" \
+    || no "#11 A11U negative control: an answer without the <graph> block was accepted as charged — the presence check cannot fail"
 # control: the bare form at the same budget must NOT be labelled, or the label means nothing
 { [ "$PTB" -le "$PT_ALLOW" ] && ! grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_bare.out"; } 2>/dev/null \
     && ok "#11 A11 control: the bare --pack-task at the same budget is conformant AND unlabelled" \
