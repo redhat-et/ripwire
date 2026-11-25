@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# tinyshapecheck.sh — THETA6, the named-location tiny shape (src/fortinyshape.h; dev knob RIPWIRE_TINY_SHAPE, default OFF).
+# tinyshapecheck.sh — THETA6, the named-location tiny shape (src/fortinyshape.h; ON by default since THETA6-FLIP, owner 11-24;
+# RIPWIRE_TINY_SHAPE=0 turns it off, src/fortinyshapeswitch.h). "knob ON" below = the default (RIPWIRE_TINY_SHAPE unset); "knob OFF" =
+# RIPWIRE_TINY_SHAPE=0.
 #
-#   (I)  KNOB OFF IS THE BASE: with RIPWIRE_TINY_SHAPE unset no answer carries shape="tiny"; with BASE_BIN= given, the knob-off answer
-#        is BASE_BIN's answer byte for byte on 3 questions (the named-location one, the call-path one, the low-confidence one)
+#   (I)  KNOB OFF IS THE BASE: under RIPWIRE_TINY_SHAPE=0 no answer carries shape="tiny"; with BASE_BIN= given (a binary from before
+#        the shape, run with no RIPWIRE_TINY_SHAPE*), the knob-off answer is BASE_BIN's answer byte for byte on 3 questions (the
+#        named-location one, the call-path one, the low-confidence one)
+#   (D)  ON BY DEFAULT: with RIPWIRE_TINY_SHAPE unset the named-location question IS tiny, and RIPWIRE_TINY_SHAPE=1 is the default
+#        answer byte for byte
 #   (T)  KNOB ON, A NAMED LOCATION: a backticked symbol that resolves, confidence="high", no relational cue -> shape="tiny", <= 2048 B,
 #        the act line, >= 1 sigs line "P:L-E N" whose N is the symbol, the tiny clause, one <more next=>, no <bodies>/<tail>/<fold>/
 #        <hops>, no page= / pages= (one page: no continuation token to break), xmllint clean, no newline outside CDATA
@@ -13,7 +18,7 @@
 #   (P)  PAGING, ROW-FORM AND BUDGET CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0, --rows=elements and
 #        --max-tokens=N are the knob-off answers byte for byte (a budgeted --for stands the tiny shape aside, so the budget shapes
 #        the answer it always shaped) (every call here must exit 0 with output: run() FAILs a call that does not)
-#   (V)  --version says tiny=on only under the knob, and its knob-off line has no tiny=
+#   (V)  --version says tiny=on by default (and under RIPWIRE_TINY_SHAPE=1, and under _FORCE even with =0), tiny=off under =0
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
 #   (G)  A CALLER IN ANOTHER FILE IS NAMED (lanes THETA6-GUARD, THETA6-FINISH): a named symbol with a 1-hop caller in ANOTHER
 #        non-test file is tiny and its <edges> line says "called by <that file>:L <caller>"; non-vacuous: the knob-off answer's
@@ -119,8 +124,8 @@ NAMED = "Where is `page_slug` defined?"
 PATHQ = "the call path from `refresh` to `frobnicate_cache`"
 LOWQ  = "how is an event handled and dispatched by `dispatch_event`"
 Q = [NAMED, PATHQ, LOWQ]
-off = {q: run(BIN, ["--for=" + q]) for q in Q}
-on  = {q: run(BIN, ["--for=" + q], "1") for q in Q}
+off = {q: run(BIN, ["--for=" + q], "0") for q in Q}
+on  = {q: run(BIN, ["--for=" + q]) for q in Q}
 
 # (I)
 if any('shape="tiny"' in off[q] for q in Q): no("(I) a knob-off answer carries shape=\"tiny\"")
@@ -130,6 +135,10 @@ if BASE:
     (ok if same == len(Q) else no)("(I) knob-off == BASE_BIN byte for byte on %d/%d questions" % (same, len(Q)))
 else:
     print("  skip (I) BASE_BIN not given: the byte-for-byte base comparison is not run")
+
+# (D)
+explicit = run(BIN, ["--for=" + NAMED], "1")
+(ok if 'shape="tiny"' in on[NAMED].split(">", 1)[0] and explicit == on[NAMED] else no)("(D) the default answer is tiny, and RIPWIRE_TINY_SHAPE=1 is it byte for byte")
 
 # (T)
 def tiny_problems(t, sym):
@@ -158,7 +167,7 @@ m = re.search(r'<more next="([^"]+)"/>', on[NAMED])
 if not m: no("(M) no more next=")
 else:
     call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
-    (ok if run(BIN, call, "1") == off[NAMED] else no)("(M) the more next= call (knob ON) returns the knob-off default answer byte for byte")
+    (ok if run(BIN, call) == off[NAMED] else no)("(M) the more next= call (knob ON) returns the knob-off default answer byte for byte")
 
 # (R)
 if 'shape="tiny"' in run(BIN, ["--for=" + PATHQ], "force") and on[PATHQ] == off[PATHQ] and 'confidence="high"' in off[PATHQ]:
@@ -173,13 +182,16 @@ else: no("(L) low %s, forced tiny %s, on==off %s" % ('confidence="low"' in off[L
 
 # (P)
 for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements", "--max-tokens=400"):
-    a = run(BIN, ["--for=" + NAMED, pb], "1"); b = run(BIN, ["--for=" + NAMED, pb])
+    a = run(BIN, ["--for=" + NAMED, pb]); b = run(BIN, ["--for=" + NAMED, pb], "0")
     (ok if a == b and 'shape="tiny"' not in a else no)("(P) %s under the knob is the knob-off answer" % pb)
 
 # (V)
-v_on = subprocess.run([BIN, "--version"], env=dict(os.environ, RIPWIRE_TINY_SHAPE="1"), capture_output=True, text=True).stdout
-v_off = subprocess.run([BIN, "--version"], env={k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}, capture_output=True, text=True).stdout
-(ok if "tiny=on, " in v_on and "tiny=" not in v_off else no)("(V) --version tiny=on only under the knob")
+def version(**kv):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}; env.update(kv)
+    return subprocess.run([BIN, "--version"], env=env, capture_output=True, text=True).stdout
+v_def, v_one, v_off, v_force = version(), version(RIPWIRE_TINY_SHAPE="1"), version(RIPWIRE_TINY_SHAPE="0"), version(RIPWIRE_TINY_SHAPE="0", RIPWIRE_TINY_SHAPE_FORCE="1")
+good = all(", tiny=on, " in v for v in (v_def, v_one, v_force)) and ", tiny=off, " in v_off
+(ok if good else no)("(V) --version tiny=on by default, under =1 and under _FORCE; tiny=off under RIPWIRE_TINY_SHAPE=0")
 
 # (G) / (G0): the spread guard, against what the knob-off answer's <callers> block holds
 def callers_files(t):
@@ -192,7 +204,7 @@ def callers_files(t):
     return out
 SPREADQ = "Where is `frobnicate_cache` defined?"
 TESTQ = "Where is `page_title` defined?"
-s_off, s_on = run(BIN, ["--for=" + SPREADQ]), run(BIN, ["--for=" + SPREADQ], "1")
+s_off, s_on = run(BIN, ["--for=" + SPREADQ], "0"), run(BIN, ["--for=" + SPREADQ])
 xf = [f for f in callers_files(s_off) if f != "pkg/cache.py" and "/tests/" not in f]
 def edges_text(t):
     m = re.search(r'<edges shown="\d+" total="\d+"><!\[CDATA\[(.*?)\]\]></edges>', t)
@@ -204,7 +216,7 @@ else:
     (ok if good else no)("(G) %d other-file caller(s) (%s) -> tiny, named on the edges line: %s" % (len(xf), ",".join(xf), e))
 # (G7)
 HUBQ = "Where is `notify_hub` defined?"
-h_off, h_on, h_force = run(BIN, ["--for=" + HUBQ]), run(BIN, ["--for=" + HUBQ], "1"), run(BIN, ["--for=" + HUBQ], "force")
+h_off, h_on, h_force = run(BIN, ["--for=" + HUBQ], "0"), run(BIN, ["--for=" + HUBQ]), run(BIN, ["--for=" + HUBQ], "force")
 hx = [f for f in callers_files(h_off) if f != "pkg/hub.py" and "/tests/" not in f]
 if len(hx) < 7: no("(G7) vacuous: the knob-off answer shows %d other-file callers of notify_hub (< 7)" % len(hx))
 elif 'shape="tiny"' not in h_force: no("(G7) vacuous: the too-spread question is not tiny even under force")
@@ -213,21 +225,21 @@ else: (ok if h_on == h_off and 'confidence="high"' in h_off else no)("(G7) %d ot
 def callees(t):
     return [dict(re.findall(r'(\w+)="([^"]*)"', c)) for c in re.findall(r"<c ([^>]*)>", re.sub(r"<!\[CDATA\[.*?\]\]>", "", t, flags=re.S))]
 EDGEQ, SAMEFQ = "Where is `build_report` defined?", "Where is `fmt_all` defined?"
-e_off, e_on = run(BIN, ["--for=" + EDGEQ]), run(BIN, ["--for=" + EDGEQ], "1")
+e_off, e_on = run(BIN, ["--for=" + EDGEQ], "0"), run(BIN, ["--for=" + EDGEQ])
 xc = [c for c in callees(e_off) if c.get("p", "pkg/report.py") != "pkg/report.py"]
 if not xc: no("(E) vacuous: the knob-off body of build_report calls 0 other-file functions")
 else:
     e = edges_text(e_on)
     good = 'shape="tiny"' in e_on.split(">", 1)[0] and e is not None and "calls pkg/fmt.py:1 fmt_line" in e and len(e_on.encode()) <= 2048 and xml_ok(e_on) and not outside_cdata_newline(e_on)
     (ok if good else no)("(E) %d other-file callee(s) -> tiny, named on the edges line: %s" % (len(xc), e))
-f_off, f_on = run(BIN, ["--for=" + SAMEFQ]), run(BIN, ["--for=" + SAMEFQ], "1")
+f_off, f_on = run(BIN, ["--for=" + SAMEFQ], "0"), run(BIN, ["--for=" + SAMEFQ])
 cs = callees(f_off); same_f = [c for c in cs if "p" not in c]; other_f = [c for c in cs if "p" in c]
 if not same_f: no("(E0) vacuous: the knob-off body of fmt_all calls 0 same-file functions")
 elif other_f: no("(E0) the fixture's fmt_all calls %d other-file functions" % len(other_f))
 else: (ok if 'shape="tiny"' in f_on.split(">", 1)[0] and "<edges" not in f_on else no)("(E0) %d same-file callee(s), 0 other-file -> tiny with no <edges>" % len(same_f))
 # (E4)
 CAPQ = "Where is `fan_out` defined?"
-c_off, c_on = run(BIN, ["--for=" + CAPQ]), run(BIN, ["--for=" + CAPQ], "1")
+c_off, c_on = run(BIN, ["--for=" + CAPQ], "0"), run(BIN, ["--for=" + CAPQ])
 cx = [c for c in callees(c_off) if c.get("p", "pkg/fan.py") != "pkg/fan.py"]
 if len(cx) < 5: no("(E4) vacuous: the knob-off body of fan_out calls %d other-file functions (< 5)" % len(cx))
 else:
@@ -236,7 +248,7 @@ else:
     (ok if good else no)("(E4) %d other-file callees -> 4 listed: %s" % (len(cx), m.group(0) if m else None))
 # (N)
 NQ = "Where is `run_job` defined?"
-n_off, n_on = run(BIN, ["--for=" + NQ]), run(BIN, ["--for=" + NQ], "1")
+n_off, n_on = run(BIN, ["--for=" + NQ], "0"), run(BIN, ["--for=" + NQ])
 nc = [c for c in callees(n_off) if c.get("p", "pkg/job.py") != "pkg/job.py"]
 first_name = next((j for j, c in enumerate(nc) if c.get("via") == "name"), None)
 first_exact = next((j for j, c in enumerate(nc) if c.get("via") != "name"), None)
@@ -248,10 +260,10 @@ else:
     (ok if good else no)("(N) the exact callee is listed before the name-only one: %s" % e)
 # (B) / (C)
 for arm, q in (("(B)", "How does `build_report` work?"), ("(C)", "MAX_ROWS_PER_PAGE")):
-    q_off, q_on, q_force = run(BIN, ["--for=" + q]), run(BIN, ["--for=" + q], "1"), run(BIN, ["--for=" + q], "force")
+    q_off, q_on, q_force = run(BIN, ["--for=" + q], "0"), run(BIN, ["--for=" + q]), run(BIN, ["--for=" + q], "force")
     if 'confidence="high"' not in q_off or 'shape="tiny"' not in q_force: no("%s vacuous: confidence high %s, tiny under force %s" % (arm, 'confidence="high"' in q_off, 'shape="tiny"' in q_force))
     else: (ok if q_on == q_off else no)("%s %r stays the full answer (high confidence, tiny under force)" % (arm, q))
-t_off, t_on = run(BIN, ["--for=" + TESTQ]), run(BIN, ["--for=" + TESTQ], "1")
+t_off, t_on = run(BIN, ["--for=" + TESTQ], "0"), run(BIN, ["--for=" + TESTQ])
 cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f in cf if f != "pkg/util.py" and "/tests/" not in f]
 if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")
 elif nf: no("(G0) the fixture has %d non-test other-file callers: %s" % (len(nf), nf))
@@ -260,26 +272,26 @@ else: (ok if 'shape="tiny"' in t_on.split(">", 1)[0] else no)("(G0) a symbol cal
 def callers_cut(t):
     m = re.search(r"<callers [^>]*>", t)
     return bool(m) and ('capped="1"' in m.group(0) or 'd2_capped="1"' in m.group(0))
-d_off, d_on = run(BIN, ["--for=Where is `deep_leaf` defined?"]), run(BIN, ["--for=Where is `deep_leaf` defined?"], "1")
+d_off, d_on = run(BIN, ["--for=Where is `deep_leaf` defined?"], "0"), run(BIN, ["--for=Where is `deep_leaf` defined?"])
 if not callers_cut(d_off): no("(F) vacuous: the knob-off <callers> of deep_leaf is not cut")
 else:
     m = re.search(r'<edges shown="\d+" total="\d+" floor="1"><!\[CDATA\[(.*?)\]\]></edges>', d_on)
     good = 'shape="tiny"' in d_on.split(">", 1)[0] and bool(m) and "pkg/mid.py" in m.group(1) and xml_ok(d_on)
     (ok if good else no)("(F) a cut callers block -> tiny, edges floor=\"1\": %s" % (m.group(0) if m else None))
 SOLOQ = "Where is `solo_leaf` defined?"
-o_off, o_on, o_force = run(BIN, ["--for=" + SOLOQ]), run(BIN, ["--for=" + SOLOQ], "1"), run(BIN, ["--for=" + SOLOQ], "force")
+o_off, o_on, o_force = run(BIN, ["--for=" + SOLOQ], "0"), run(BIN, ["--for=" + SOLOQ]), run(BIN, ["--for=" + SOLOQ], "force")
 if not callers_cut(o_off) or 'confidence="high"' not in o_off or 'shape="tiny"' not in o_force:
     no("(F0) vacuous: cut %s, confidence high %s, tiny under force %s" % (callers_cut(o_off), 'confidence="high"' in o_off, 'shape="tiny"' in o_force))
 else: (ok if o_on == o_off else no)("(F0) a cut callers block with no cross-file edge stays the full answer")
 # (Q)
 QQ = "Where is `quote_leaf` defined?"
-q_off, q_on = run(BIN, ["--for=" + QQ]), run(BIN, ["--for=" + QQ], "1")
+q_off, q_on = run(BIN, ["--for=" + QQ], "0"), run(BIN, ["--for=" + QQ])
 qx = [f for f in callers_files(q_off) if "]]&gt;" in f or "]]>" in f]
 if not qx or 'confidence="high"' not in q_off: no("(Q) vacuous: %d callers under a ]]> directory, confidence high %s" % (len(qx), 'confidence="high"' in q_off))
 else: (ok if q_on == q_off else no)("(Q) a caller path holding ]]> (%s) -> the full answer" % qx[0])
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
-a_off, a_on = run(BIN, ["--for=" + SAMEQ]), run(BIN, ["--for=" + SAMEQ], "1")
+a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])
 m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]>", a_off, re.S)
 same_off = sum(1 for l in (m.group(1).split("\n") if m else []) if "area_of_shape" in l.split(" | ")[0])
 m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]></sigs>", a_on, re.S)

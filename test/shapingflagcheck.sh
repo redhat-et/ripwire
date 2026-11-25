@@ -128,7 +128,7 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # lane/rt2-route ES (2026-11-18, 26->27): ONE new read, --for's. `forEarlyStopPage` (src/verbs_forroute.h) reads cfg.maxTokens only to
 # STAND ASIDE: a budgeted --for page 1 never ends early. A re-pin, not a column change.
 # lane/theta6-tiny (2026-11-24, 27->28): ONE new read, --for's. `forTinyShapeEligible` (src/verbs_for.h) reads cfg.maxTokens only to
-# STAND ASIDE: a budgeted --for never takes the tiny shape (dev knob RIPWIRE_TINY_SHAPE, default off). A re-pin, not a column change.
+# STAND ASIDE: a budgeted --for never takes the tiny shape (on by default since THETA6-FLIP; RIPWIRE_TINY_SHAPE=0 off). A re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 [ "$MAXSITES" = 28 ] && ok "(A) --max-tokens has 28 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
