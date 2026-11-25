@@ -1,6 +1,6 @@
 #pragma once
 
-// defectshape.h — the scanners behind --quality-delta's defect-shape kind: six shapes of a REAL defect that
+// defectshape.h — the scanners behind --quality-delta's defect-shape kind: eight shapes of a REAL defect that
 // review keeps finding by hand and that a deterministic syntactic check finds at write time.
 //
 //   format-arity    C++: a literal std::format / format_to / format_to_n / print / println, fmt::format /
@@ -31,6 +31,11 @@
 //                   with no default: over an in-tree enum that leaves an enumerator out, a shell case with no *) arm
 //                   whose result is read, a Python if/elif chain or match that ends a value-returning function with
 //                   no else (an unmatched value returns None). The site's why= names what is left out.
+//   zero-evidence   Bash test scripts: an arm that passes when every run it reads exits 0 and prints nothing (an
+//                   absence grep, a cmp of two answers) and that no twin arm on the same evidence can fail. Its
+//                   runs' status may be read: exit 0 with an empty answer passes the status check too.
+//   count-drift     Markdown and C/C++ string literals (countdrift.h): a count word that introduces a list of
+//                   names, wrong against the list or against the tree's string-literal array of those names.
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -76,10 +81,12 @@ enum class Facet : std::uint8_t
     VacuousAssert   = 3,
     UncheckedStatus = 4,
     UnhandledArm    = 5,
+    ZeroEvidence    = 6,
+    CountDrift      = 7,
 };
-inline constexpr std::size_t kFacetCount = 6;
+inline constexpr std::size_t kFacetCount = 8;
 inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status",
-                                                                           "unhandled-arm" };
+                                                                           "unhandled-arm", "zero-evidence", "count-drift" };
 
 inline constexpr std::string_view facetName( Facet f ) noexcept
 {
@@ -96,7 +103,8 @@ inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 
 // The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition: one bit
 // per facet.
-inline constexpr unsigned kSiteFacetBits = ( 1u << static_cast<unsigned>( Facet::UncheckedStatus ) ) | ( 1u << static_cast<unsigned>( Facet::UnhandledArm ) );
+inline constexpr unsigned kSiteFacetBits = ( 1u << static_cast<unsigned>( Facet::UncheckedStatus ) ) | ( 1u << static_cast<unsigned>( Facet::UnhandledArm ) )
+                                         | ( 1u << static_cast<unsigned>( Facet::CountDrift ) );
 inline constexpr bool facetNamesSite( Facet f ) noexcept
 {
     return ( ( kSiteFacetBits >> static_cast<unsigned>( f ) ) & 1u ) != 0;
@@ -863,13 +871,20 @@ inline const FormatFamily* formatFamilyAt( std::string_view src, const std::vect
     return nullptr;
 }
 
+// The case of a word the scanners read as a name: Upper (A-Z first, then A-Z 0-9 _: a macro name) or Lower (a-z first,
+// then a-z 0-9 - _: count-drift's name word), Other for anything else.
+enum class WordCase : std::uint8_t { Other, Upper, Lower };
+inline WordCase wordCaseOf( std::string_view w ) noexcept
+{
+    const bool upper = !w.empty() && w[0] >= 'A' && w[0] <= 'Z';
+    const bool lower = !w.empty() && w[0] >= 'a' && w[0] <= 'z';
+    const auto fits  = [ & ]( char c ) { return isDigit( c ) || c == '_' || ( upper ? c >= 'A' && c <= 'Z' : ( c >= 'a' && c <= 'z' ) || c == '-' ); };
+    return ( upper || lower ) && std::all_of( w.begin(), w.end(), fits ) ? ( upper ? WordCase::Upper : WordCase::Lower ) : WordCase::Other;
+}
+
 inline bool isAllCapsIdent( std::string_view w ) noexcept
 {
-    if( w.size() < 2 || !( w[0] >= 'A' && w[0] <= 'Z' ) )
-    {
-        return false;
-    }
-    return std::all_of( w.begin(), w.end(), []( char c ) { return ( c >= 'A' && c <= 'Z' ) || isDigit( c ) || c == '_'; } );
+    return w.size() >= 2 && wordCaseOf( w ) == WordCase::Upper;
 }
 
 inline bool inSortedNames( const std::vector<std::string>* names, std::string_view w )
@@ -2040,6 +2055,7 @@ private:
     void unreadRcSites( std::vector<std::uint32_t>& at ) const;
     void unreadRcFileSites( std::vector<std::uint32_t>& at ) const;
     void deadFallbackSites( std::vector<std::uint32_t>& at ) const;
+    void zeroEvidenceSites( std::vector<std::uint32_t>& at ) const;
 
 private:
     std::string_view                              src_;
@@ -2057,7 +2073,8 @@ private:
     std::vector<std::pair<std::uint32_t, std::uint32_t>> subCalls_;   // ( host simple, a call inside one of its $( ) )
     std::vector<const sh::AndOr*>                 andOrs_;     // every statement, for the fallback shape
     std::vector<std::uint32_t>                    andOrScope_;
-    mutable bool                                  inReachCheck_ = false;   // provVar's reach check does not nest
+    mutable bool                                  inReachCheck_ = false;    // provVar's reach check does not nest
+    mutable bool                                  everyRunEmpty_ = false;   // zero-evidence: a run whose status is read may still print nothing
 
     const sh::Node& node( std::uint32_t n ) const
     {
@@ -2811,7 +2828,7 @@ private:
         if( isRun( c ) )
         {
             Prov p;
-            if( silentFailable( c ) || ( j + 1 < it.cmds.size() ) )
+            if( silentFailable( c ) || ( j + 1 < it.cmds.size() ) || everyRunEmpty_ )
             {
                 p.leaves.push_back( c );
             }
@@ -3590,6 +3607,230 @@ private:
         }
         return false;
     }
+    // ── zero-evidence: an arm that passes on an empty answer, with no positive twin ───────────────────────────────────
+    // The vacuous-assert model asks what a run that FAILED leaves behind. This one asks what a run that SUCCEEDED and
+    // printed nothing (or an answer without the section the arm reads) leaves behind: under S = every run the judgment
+    // reads, empty, the judgment only passes, and no other judgment that names the same evidence can fail then. A status
+    // check does not help, an exit 0 with an empty answer passes it; a twin is a judgment that reads the same run, a file
+    // that run's stdout or stderr went to, or a variable captured from them, and that can go red.
+    struct ZeroEvidenceFacts   // per judgment, computed once with every run's text allowed to be empty
+    {
+        std::vector<std::uint32_t> leaves;   // the runs it reads, sorted
+        std::string                text;     // its statement's text, targets normalized
+        std::vector<std::string>   refs;     // the variables that text names
+    };
+    struct Evidence   // what a twin of one judgment may name
+    {
+        std::vector<std::string> files;   // a file one of its runs wrote, by stdout or stderr
+        std::vector<std::string> vars;    // a variable a capture set, read whole by the judgment or derived from those files
+    };
+    class EveryRunEmpty   // the provenance walk's mode switch, for one scope
+    {
+    public:
+        explicit EveryRunEmpty( bool& flag ) : flag_( flag ) { flag_ = true; }
+        ~EveryRunEmpty() { flag_ = false; }
+        EveryRunEmpty( const EveryRunEmpty& )            = delete;
+        EveryRunEmpty& operator=( const EveryRunEmpty& ) = delete;
+
+    private:
+        bool& flag_;
+    };
+    std::vector<ZeroEvidenceFacts> zeroEvidenceFacts() const
+    {
+        std::vector<ZeroEvidenceFacts> facts( judgments_.size() );
+        for( std::size_t ji = 0; ji < judgments_.size(); ++ji )
+        {
+            facts[ji].leaves = runLeavesOf( judgments_[ji] );
+            facts[ji].text   = normTarget( shSiteLine( src_, judgments_[ji].pos ).text );
+            sh::detail::vrefs( facts[ji].text, facts[ji].refs );
+        }
+        return facts;
+    }
+    bool zeroEvidence( std::size_t ji, const std::vector<ZeroEvidenceFacts>& facts ) const
+    {
+        const Judgment&                   j      = judgments_[ji];
+        const std::vector<std::uint32_t>& leaves = facts[ji].leaves;
+        if( leaves.empty() || claimsEmptiness( j ) )
+        {
+            return false;
+        }
+        const std::vector<std::uint32_t> none;
+        Eval                             base;
+        base.s = &none;
+        if( outcomes( j, base ).onlyPass() )
+        {
+            return false;   // it passes whatever its runs print: not a judgment of them
+        }
+        Eval ev;
+        ev.s = &leaves;
+        if( !reachable( j, ev ) || !outcomes( j, ev ).onlyPass() )
+        {
+            return false;
+        }
+        return !hasTwin( ji, facts, evidenceOf( facts[ji] ), ev );
+    }
+    Evidence evidenceOf( const ZeroEvidenceFacts& jf ) const
+    {
+        Evidence e;
+        for( std::uint32_t l : jf.leaves )
+        {
+            for( const sh::Redir& r : node( l ).fredirs )
+            {
+                if( ( r.fd == 2 || isStdoutRedir( r ) ) && !r.target.empty() && r.target != "/dev/null" && r.target[0] != '&' )
+                {
+                    e.files.push_back( normTarget( r.target ) );
+                }
+            }
+        }
+        for( const std::string& v : jf.refs )
+        {
+            if( readsWhole( jf.text, v ) && capturedVar( v ) )
+            {
+                e.vars.push_back( v );
+            }
+        }
+        // a variable a capture derives from one of those files (GA="$( grep -o … "$TMP/after.xml" )") is that text too
+        for( const Assign& a : assigns_ )
+        {
+            const std::string tx = normTarget( assignText( a ) );
+            if( tx.find( "$(" ) != std::string::npos && mentionsAny( tx, e.files ) )
+            {
+                e.vars.push_back( a.name );
+            }
+        }
+        return e;
+    }
+    bool hasTwin( std::size_t ji, const std::vector<ZeroEvidenceFacts>& facts, const Evidence& e, const Eval& ev ) const
+    {
+        const std::vector<std::uint32_t>& leaves = facts[ji].leaves;
+        for( std::size_t ki = 0; ki < judgments_.size(); ++ki )
+        {
+            if( ki == ji )
+            {
+                continue;
+            }
+            const ZeroEvidenceFacts& kf     = facts[ki];
+            const bool               shares = std::any_of( kf.leaves.begin(), kf.leaves.end(), [ & ]( std::uint32_t l ) { return std::binary_search( leaves.begin(), leaves.end(), l ); } );
+            const bool               names  = mentionsAny( kf.text, e.files )
+                              || std::any_of( e.vars.begin(), e.vars.end(), [ & ]( const std::string& v ) { return std::find( kf.refs.begin(), kf.refs.end(), v ) != kf.refs.end(); } );
+            // a statement that runs the producer itself reads its status, not its text (`RUN >F || no`)
+            if( ( shares || ( names && !runsIn( judgments_[ki], leaves ) ) ) && outcomes( judgments_[ki], ev ).fail )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool mentionsAny( const std::string& text, const std::vector<std::string>& needles )
+    {
+        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f ) { return text.find( f ) != std::string::npos; } );
+    }
+    // Does `text` read "$V" as a whole text, not only as a directory prefix ("$V/f") or a longer name's head ("$VX")?
+    static bool readsWhole( const std::string& text, const std::string& v )
+    {
+        const auto bounds = []( char c ) { return c == '/' || isIdentChar( c ); };
+        return rw::namesplit::containsWordBoundedBy( text, "$" + v, bounds ) || rw::namesplit::containsWordBoundedBy( text, "${" + v + "}", bounds );
+    }
+    // Does the judgment's condition run one of `leaves` itself (`RUN >F || no`, `if ! RUN; then`)?
+    bool runsIn( const Judgment& k, const std::vector<std::uint32_t>& leaves ) const
+    {
+        bool       hit = false;
+        const auto see = [ & ]( std::uint32_t c ) { hit = hit || std::binary_search( leaves.begin(), leaves.end(), c ); };
+        if( k.kind == Judgment::Kind::AndOr )
+        {
+            for( const sh::Item& it : *k.ao )
+            {
+                std::for_each( it.cmds.begin(), it.cmds.end(), see );
+            }
+        }
+        else if( k.kind == Judgment::Kind::If )
+        {
+            for( std::uint32_t cl : node( k.node ).conds )
+            {
+                forEachSimple( cl, see );
+            }
+        }
+        return hit;
+    }
+    std::string assignText( const Assign& a ) const   // the word an assignment binds; empty for an opaque binding (read, for)
+    {
+        if( a.node == kNone || a.word == INT32_MIN )
+        {
+            return {};
+        }
+        const sh::Node& n = node( a.node );
+        return a.word >= 0 ? n.words[static_cast<std::size_t>( a.word )].text : n.assigns[static_cast<std::size_t>( -1 - a.word )].text;
+    }
+    bool capturedVar( const std::string& name ) const   // some assignment sets `name` from a $( ) or ` ` capture
+    {
+        return std::any_of( assigns_.begin(), assigns_.end(), [ & ]( const Assign& a )
+                            {
+                                const std::string tx = a.name == name ? assignText( a ) : std::string();
+                                return tx.find( "$(" ) != std::string::npos || tx.find( '`' ) != std::string::npos;
+                            } );
+    }
+    std::vector<std::uint32_t> runLeavesOf( const Judgment& j ) const
+    {
+        std::vector<std::uint32_t> leaves;
+        Eval                       col;
+        col.collect = &leaves;
+        (void)outcomes( j, col );
+        rw::sortutil::sortUnique( leaves );
+        leaves.erase( std::remove_if( leaves.begin(), leaves.end(), [ & ]( std::uint32_t l ) { return !isRun( l ); } ), leaves.end() );
+        return leaves;
+    }
+    // The judgment's condition tests only that a text is empty or not ([ -z ], [ -n ], [ -s ]) and compares no text
+    // (grep, cmp, diff, [ A = B ]): an empty answer IS what it claims (a refusal prints nothing), not missing evidence.
+    bool claimsEmptiness( const Judgment& j ) const
+    {
+        bool       emptiness = false;
+        bool       compares  = false;
+        const auto see       = [ & ]( std::uint32_t c )
+        {
+            const sh::Node&   n = node( c );
+            const std::size_t k = cmdIdx( n );
+            if( n.kind != sh::NodeKind::Simple || k == std::string::npos )
+            {
+                return;
+            }
+            const std::string w = sh::detail::unq( n.words[k].text );
+            if( w == "grep" || w == "egrep" || w == "fgrep" || w == "cmp" || w == "diff" )
+            {
+                compares = true;
+                return;
+            }
+            if( w != "[" && w != "test" && w != "[[" )
+            {
+                return;
+            }
+            for( std::size_t a = k + 1; a < n.words.size(); ++a )
+            {
+                const std::string u = sh::detail::unq( n.words[a].text );
+                emptiness           = emptiness || u == "-z" || u == "-n" || u == "-s";
+                compares            = compares || u == "=" || u == "==" || u == "!=";
+            }
+        };
+        if( j.kind == Judgment::Kind::AndOr )
+        {
+            std::size_t r = 0;
+            if( !splitAndOr( *j.ao, r ) )
+            {
+                return false;
+            }
+            for( std::size_t q = 0; q < r; ++q )
+            {
+                std::for_each( ( *j.ao )[q].cmds.begin(), ( *j.ao )[q].cmds.end(), see );
+            }
+        }
+        else if( j.kind == Judgment::Kind::If )
+        {
+            for( std::uint32_t cl : node( j.node ).conds )
+            {
+                forEachSimple( cl, see );
+            }
+        }
+        return emptiness && !compares;
+    }
     bool inOwnPipeline( const Judgment& j, std::uint32_t l ) const
     {
         const auto inAo = [ & ]( const sh::AndOr& ao )
@@ -3886,6 +4127,23 @@ inline void Script::vacuousJudgmentSites( std::vector<std::uint32_t>& at ) const
     }
 }
 
+inline void Script::zeroEvidenceSites( std::vector<std::uint32_t>& at ) const
+{
+    // (5) an arm that passes on a SUCCESSFUL run's empty answer, with no twin that reads the same evidence; a statement the
+    // shapes above already name is theirs
+    std::vector<std::uint32_t> named = at;
+    rw::sortutil::sortUnique( named );
+    const EveryRunEmpty                  mode( everyRunEmpty_ );
+    const std::vector<ZeroEvidenceFacts> facts = zeroEvidenceFacts();
+    for( std::size_t ji = 0; ji < judgments_.size(); ++ji )
+    {
+        if( !std::binary_search( named.begin(), named.end(), judgments_[ji].pos ) && zeroEvidence( ji, facts ) )
+        {
+            at.push_back( judgments_[ji].pos );
+        }
+    }
+}
+
 inline void Script::lostReporterSites( std::vector<std::uint32_t>& at ) const
 {
     // (2) a FAIL reporter that sets the failure flag, called inside a $( ) whose status nothing reads
@@ -4043,18 +4301,20 @@ inline std::vector<Site> Script::sites() const
     unreadRcSites( at );
     unreadRcFileSites( at );
     deadFallbackSites( at );
+    const std::size_t vaCount = at.size();
+    zeroEvidenceSites( at );
     std::vector<Site> out;
-    for( const std::uint32_t pos : at )
+    for( std::size_t i = 0; i < at.size(); ++i )
     {
-        const ShLine l    = shSiteLine( src_, pos );
+        const ShLine l    = shSiteLine( src_, at[i] );
         std::string  text = collapseSpaces( l.text );
         if( !text.empty() )
         {
-            out.push_back( { Facet::VacuousAssert, l.startByte, std::move( text ) } );
+            out.push_back( { i < vaCount ? Facet::VacuousAssert : Facet::ZeroEvidence, l.startByte, std::move( text ) } );
         }
     }
     std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
-    out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte == b.startByte && a.text == b.text; } ), out.end() );
+    out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ), out.end() );
     return out;
 }
 

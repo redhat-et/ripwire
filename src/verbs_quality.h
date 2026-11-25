@@ -1731,6 +1731,29 @@ inline constexpr const char* kQdUnhandledArmLegend =
     "over an int, a comment in the switch that states the omission, a Python enum from another module, TypeScript (no "
     "never-check reading) and Rust (the compiler checks match): no row there is no verdict. ";
 
+// Emitted only when a defect-shape zero-evidence row is in the document (beside kQdDefectShapeLegend): the shape, its
+// twin rule, and the floors.
+inline constexpr const char* kQdZeroEvidenceLegend =
+    "zero-evidence: a Bash test script's arm that PASSES when every run it reads exits 0 and prints nothing - an "
+    "absence grep, a cmp/diff/= of two answers (a determinism or warm==cold arm) - and that no TWIN can catch: no other "
+    "arm that reads the same run, the file its stdout or stderr went to, or a variable captured from them can go red "
+    "on that empty answer. A checked exit status does not help: exit 0 with an empty answer passes it. Not a row: an arm "
+    "whose claim IS emptiness ([ -z ], [ ! -s ] and no text compared), a statement a vacuous-assert shape already names. "
+    "Fix: add the positive twin - assert the answer holds the row or root the absence is judged in. Not checked: a twin "
+    "reached only through a helper's parameterized path ($TMP/$1.out), a verdict echoed by a helper (say $(hasnt ...)): no row "
+    "there is no verdict. ";
+
+// Emitted only when a defect-shape count-drift row is in the document (beside kQdDefectShapeLegend): the two checks and
+// the floors.
+inline constexpr const char* kQdCountDriftLegend =
+    "count-drift: a count word that introduces a list of names (\"the six facets: a, b, ...\", \"three verbs (a, b, c)\") in "
+    "Markdown or a C/C++ string literal, and the count is wrong: the list holds another number of names, or every name is "
+    "in one of the tree's string-literal name arrays (a kind table, a facet table) and that array holds another number - "
+    "why= says which, and names the members the list leaves out. Fix: correct the count or the list (a new member of the "
+    "array is usually what the text missed). Not checked: a count with no list after it, a list of prose or of glosses "
+    "that list (memguardcheck (B6b, B21)), a set held in an enum or a switch rather than a string array, a Markdown "
+    "file's own tables: no row there is no verdict. ";
+
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
 inline constexpr const char* kQdPlaceholderLegend =
@@ -1995,6 +2018,10 @@ inline constexpr QdRowReadingLegend kQdRowReadings[] = {
     { []( const rw::quality::Regression& r ) { return !r.call.empty(); },                               kQdUncheckedStatusLegend },
     { []( const rw::quality::Regression& r )
       { return r.kind == "defect-shape" && r.facet == rw::defectshape::facetName( rw::defectshape::Facet::UnhandledArm ); }, kQdUnhandledArmLegend },
+    { []( const rw::quality::Regression& r )
+      { return r.kind == "defect-shape" && r.facet == rw::defectshape::facetName( rw::defectshape::Facet::ZeroEvidence ); }, kQdZeroEvidenceLegend },
+    { []( const rw::quality::Regression& r )
+      { return r.kind == "defect-shape" && r.facet == rw::defectshape::facetName( rw::defectshape::Facet::CountDrift ); }, kQdCountDriftLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); },    kQdMonsterLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); },        kQdSimilarArgsLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "tangle"; },                            kQdTangleLegend },

@@ -6298,8 +6298,9 @@ Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only; record
 leaves the function no worse (or acks it).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six
-facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`), shapes this project's own
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries eight
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`,
+`zero-evidence`, `count-drift`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity, a new function at the ceiling (QD-ENTRY-CEILING) and a tangled new function (TANGLE-GATE-B)). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6355,6 +6356,35 @@ shell/Python commits of this tree, 4,000 tmux C commits and 3,000 textual commit
 to a result-giving switch/case/chain. Recall is therefore the synthetic replay in `test/defectshapecheck.sh` (C++, Python and
 shell fixes reversed give 3 of 3 rows, and an appended enumerator gives the row on an untouched switch). A row costs 200-226 B
 (mean 212). The compact legend adds 16 B to every --quality-delta answer (the facet name), and 195 B when a row is present.
+
+CR-QD-3 (2026-11-25) asked which CodeRabbit classes a deterministic check can take over. It harvested 791 CodeRabbit
+items on PRs #623-#747 (563 inline threads, 228 review-body items) into `tmp/cr-refresh/corpus.tsv`. Over #501-#747
+(1,240 items) the structurally reachable share is 13.8 % weighted and 7.7 % at the "yes" grade. It prototyped five
+candidates on the 10-07 method: recall on the CodeRabbit true positives' pre-fix trees, quiet on the fix, false
+positives on this tree and three dev corpora (ansible, dgl, meson), and hand-labelled precision. Two shipped, both
+`sev="minor"`:
+
+- `zero-evidence` (Bash test scripts): an arm that passes when every run it reads exits 0 and prints nothing, with no
+  twin arm that can fail on that empty answer. A twin reads the same run, the file its stdout or stderr went to, or a
+  variable captured or derived from them. It extends vacuous-assert to checked runs, where the status check does not
+  help. On this tree's 2026-11-25 `test/*.sh` it finds 29 sites, 26 true on a hand read (90 %, Wilson 95 % [0.74,
+  0.96]). Most are determinism and warm-equals-cold `cmp` arms, and absence arms with no presence check. The three
+  false ones are a past-the-end page whose emptiness is the claim (2) and a twin reached through a helper's
+  parameterized path (1). The 246 test scripts of the dev corpora give 0 sites. Recall on the 36 CodeRabbit
+  twin-arm seeds is 0 strict: those seeds are semantic, or the verdict is echoed by a helper (`say "$(hasnt ...)"`).
+- `count-drift` (Markdown and C/C++ string literals): a count word that introduces a list of names, wrong against the
+  list or against the tree's string-literal array of those names (`why=` says which and names the missing members).
+  It finds the #712 seed (`--kinds` help and COMMANDS.md said "twelve" after `tangle` made thirteen) at both sites, and
+  1 of the 9 count seeds (the other 8 are prose counts no list follows). It finds 0 sites on this tree (every Markdown
+  file and C/C++ string, checked against 229 name arrays). The dev corpora give 0 too: their Markdown in the product
+  scanner, and 492 Markdown and reST files in the prototype. Precision is measured on the
+  fixture and the seed only, so there is no Wilson bound yet. The quiet-on-fix arm is in `test/defectshapecheck.sh`.
+
+Three did not ship. Silent cap, labelled against `test/capdisclose.map`, reached 40 % loose and 55 % strict precision
+and recall 3 of 43 on the cap seeds; `test/capdisclose.py` stays the mechanism. COSTLY-REACH (a read, regex build or
+spawn reached from a loop with invariant inputs) gives 150-190 loose rows per pre-fix tree and recall 0 of 6 replayed
+hoist seeds. Those seeds rescan in-memory data per item, which is not an I/O, regex or spawn reach. The 11-11 hand
+read of its 14 strict sites stays at about 50 %. Derived cache has 0 firm seeds of 5, all semantic cache-key choices.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
