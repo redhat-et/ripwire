@@ -5942,11 +5942,12 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
 // THETA6 (fortinyshape.h): whether this call may take the tiny shape at all — the shape on (the default; RIPWIRE_TINY_SHAPE=0 off), page 1 of the default page, and nothing
 // else asked for a shape. An explicit --page-bytes turns it off: that is how the shape's <more next=> returns the full page 1. The
 // shape's rows are lines, so the element row form (--rows=elements, or RIPWIRE_NO_ROWLINES) keeps the full answer (CodeRabbit on #742).
+// An explicit --pack-budget-bytes= asks for a body budget, a shape of its own: the full answer it shapes (bodiesshowncheck arm 1).
 inline bool forTinyShapeEligible( const rw::Config& cfg )
 {
     return rw::tinyshape::tinyShapeOn() && cfg.pageBytesSpec.empty() && cfg.forPage == 1 && cfg.tokenBudget == 0 && cfg.maxTokens == 0
         && cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && cfg.sections.empty() && !cfg.compress && !cfg.withGraph
-        && rw::rowlines::rowLinesOn( cfg.rowsSpec );
+        && !cfg.packBudgetExplicit && rw::rowlines::rowLinesOn( cfg.rowsSpec );
 }
 
 // The tiny answer for the raw render `doc`, or nullopt (not eligible, or the detector did not fire).

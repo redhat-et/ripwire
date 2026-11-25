@@ -27,7 +27,7 @@
 // SAME-NAME COMPLETION: when ranked <d> rows past the top kTinyRows carry the named symbol's name (overloads, one method per class),
 // up to kTinyRows more of them follow the top rows, so a multi-definition answer is not cut at row 8 without a word.
 // And only where nothing else asked for a shape: page 1, no explicit --page-bytes (an explicit one is how "more" escapes the shape),
-// no --token-budget / --max-tokens / --detail / --signatures-only / --auto-bodies / --sections / --compress / --with-graph.
+// no --token-budget / --max-tokens / --detail / --signatures-only / --auto-bodies / --sections / --compress / --with-graph / --pack-budget-bytes.
 //
 // THE SHAPE. The root's identity attributes (task route root confidence margin_pct at schema) plus shape="tiny" and est_tokens= priced
 // for the bytes served; the root= clause when the render had one; one tiny clause (the row grammar + "more"); the act line and its
@@ -84,10 +84,12 @@ inline constexpr std::string_view kKeptRootAttrs[] = { "task", "route", "root", 
 
 namespace detail
 {
-// One ranked <d> row of the raw <sigs>: its printed (escaped) p= l= e= n= values.
+// One ranked <d> row of the raw <sigs>: its printed (escaped) p= l= e= n= values, and whether it carries what a "P:L-E N" line cannot:
+// an extent_suspect= hedge, or a saved <note> (--note-add).
 struct RangeRow
 {
     std::string_view p, l, e, n;
+    bool             unlineable = false;
 };
 
 // Every ranked <d> row of the raw <sigs>, in rank order (the caller lists the top kTinyRows and the same-name rows past them).
@@ -101,7 +103,8 @@ struct RangeRow
     {
         if( !row.tag || row.tag->name != "d" ) { continue; }
         const std::string_view tag = actline::detail::openTagText( row );
-        rows.push_back( { rw::attrOf( tag, "p" ), rw::attrOf( tag, "l" ), rw::attrOf( tag, "e" ), rw::attrOf( tag, "n" ) } );
+        rows.push_back( { rw::attrOf( tag, "p" ), rw::attrOf( tag, "l" ), rw::attrOf( tag, "e" ), rw::attrOf( tag, "n" ),
+                          !rw::attrOf( tag, "extent_suspect" ).empty() || row.xml.contains( "<note " ) } );
     }
     return rows;
 }
@@ -492,6 +495,21 @@ inline constexpr WindowedPhrase kWindowedPhrases[] = {
 }
 }   // namespace detail
 
+namespace detail
+{
+// THE BLOCKS THE TINY SHAPE SUMMARIZES (lane THETA6-FLIP, 11-25): <sigs> (its lines), <bodies> (Read the ranges), <callers> and the
+// bodies' <calls> (the edges line), and the lower-ranked context one <more next=> away (<tail> <fold> <syms> <lego> <compose>). Any
+// other block on the page is evidence of its own (literal sites, a hop chain, dotted strings, declaration twins, aliases, a short-key
+// ladder, entry points, an exemplar family, ...) that a "P:L-E N" line cannot carry, so the page keeps the full answer. An allow list,
+// so a block added later is kept, never silently dropped. Measured on the 205 default-on picks (618 questions): lit, hops and
+// dotted_strings named a file the tiny answer did not (mf1-ninja-04's one lost item sat in its <hops>).
+inline constexpr std::string_view kSummarizedBlocks[] = { "sigs", "bodies", "callers", "act", "tail", "fold", "syms", "lego", "compose" };
+[[nodiscard]] inline bool onlySummarizedBlocks( const std::vector<answerfirst::Block>& blocks )
+{
+    return std::ranges::all_of( blocks, []( const answerfirst::Block& b ) { return b.comment || std::ranges::contains( kSummarizedBlocks, b.name ); } );
+}
+}   // namespace detail
+
 // The tiny answer for `doc` (a RAW --for render, the act line already in), or nullopt when the detector does not fire. `task` is the
 // question; `moreCall` the call that returns the full page 1.
 [[nodiscard]] inline std::optional<std::string> tinyAnswer( std::string_view doc, std::string_view task, std::string_view moreCall )
@@ -502,6 +520,7 @@ inline constexpr WindowedPhrase kWindowedPhrases[] = {
     const bool             forced   = tinyShapeForced();
     if( !forced && ( rw::attrOf( rootOpen, "confidence" ) != "high" || detail::asksBeyondOneLocation( task ) ) ) { return std::nullopt; }
     const std::vector<answerfirst::Block> blocks = answerfirst::topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
+    if( !forced && !detail::onlySummarizedBlocks( blocks ) ) { return std::nullopt; }
     const std::vector<detail::RangeRow>   ranked = detail::rankedRanges( doc, blocks );
     const std::vector<detail::RangeRow>   top( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
     const std::vector<std::string>        syms = forced ? std::vector<std::string>{} : detail::namedSymbols( task );
@@ -514,6 +533,9 @@ inline constexpr WindowedPhrase kWindowedPhrases[] = {
     const std::string edgesLine = detail::edgesElement( edges, spread == detail::Spread::Callers );
     if( edgesLine.empty() && !edges.list.empty() ) { return std::nullopt; }   // an edge the line cannot carry ("]]>" in a path)
     const std::vector<detail::RangeRow> rows = detail::listedRows( ranked, syms );
+    // A listed row the line cannot carry keeps the full page, which says it: an extent that failed its containment checks (EXTENT
+    // HONESTY, extentcheck (D)) or a saved note on the symbol (notecanoncheck R1).
+    if( !forced && std::ranges::any_of( rows, []( const detail::RangeRow& r ) { return r.unlineable; } ) ) { return std::nullopt; }
 
     std::string lines;
     for( const detail::RangeRow& r : rows )
@@ -536,10 +558,14 @@ inline constexpr WindowedPhrase kWindowedPhrases[] = {
     out.append( detail::leadComment( doc, blocks, "<!-- root= " ) ).append( kTinyClause );
     const auto act = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment && b.name == "act"; } );
     if( act != blocks.end() ) { out.append( actline::kActClause ); }
-    const std::string_view total = rw::attrOf( doc.substr( doc.find( "<sigs" ) ), "total" );
+    // total= is the full page's own <sigs total=> (read from that open tag only: attrOf scans to the end of what it is given, and the
+    // rest of the page holds other total= attributes), else the ranked rows the full page lists, so shown <= total always.
+    const auto sigs = std::ranges::find_if( blocks, []( const answerfirst::Block& b ) { return !b.comment && b.name == "sigs"; } );
+    const std::string_view sigsOpen = sigs == blocks.end() ? std::string_view() : doc.substr( sigs->begin, doc.find( '>', sigs->begin ) - sigs->begin );
+    const std::string_view pageTotal = rw::attrOf( sigsOpen, "total" );
+    const std::string      total     = pageTotal.empty() ? std::to_string( ranked.size() ) : std::string( pageTotal );
     const auto shown = std::ranges::count( lines, '\n' ) + 1;   // the listed rows: kTinyRows plus the same-name rows, of total=
-    out.append( "<sigs shown=\"" ).append( std::to_string( shown ) ).append( "\"" );
-    if( !total.empty() ) { out.append( " total=\"" ).append( total ).append( "\"" ); }
+    out.append( "<sigs shown=\"" ).append( std::to_string( shown ) ).append( "\" total=\"" ).append( total ).append( "\"" );
     out.append( "><![CDATA[" ).append( lines ).append( "]]></sigs>" );
     if( act != blocks.end() ) { out.append( doc.substr( act->begin, act->end - act->begin ) ); }
     out.append( edgesLine );

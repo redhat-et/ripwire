@@ -16,7 +16,7 @@
 #   (L)  A LOW-CONFIDENCE QUESTION STAYS FULL: confidence="low" with a code-shaped span -> the knob-off answer; non-vacuous: under
 #        RIPWIRE_TINY_SHAPE_FORCE=1 (the detector skipped) the same call IS tiny, so only the detector kept it full
 #   (P)  PAGING, ROW-FORM AND BUDGET CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0, --rows=elements and
-#        --max-tokens=N are the knob-off answers byte for byte (a budgeted --for stands the tiny shape aside, so the budget shapes
+#        --max-tokens=N, --pack-budget-bytes=N are the knob-off answers byte for byte (a budgeted --for stands the tiny shape aside, so the budget shapes
 #        the answer it always shaped) (every call here must exit 0 with output: run() FAILs a call that does not)
 #   (V)  --version says tiny=on by default (and under RIPWIRE_TINY_SHAPE=1, and under _FORCE even with =0), tiny=off under =0
 #   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
@@ -44,6 +44,11 @@
 #        non-vacuous: the knob-off <callers> is cut, confidence="high", and the call IS tiny under force
 #   (Q)  AN EDGE THE LINE CANNOT CARRY STAYS FULL: a caller in a directory named with "]]>" -> the full answer; non-vacuous: the
 #        knob-off <callers> holds that caller (FAIL on 0) and confidence="high"
+#   (U)  TOTAL HONESTY (THETA6-FLIP): the tiny <sigs shown=K total=T> has K <= T and T = the full page's <sigs total=>, else its ranked rows
+#   (K)  AN UNSUMMARIZED BLOCK STAYS FULL (THETA6-FLIP): a page whose top-level blocks fall outside kSummarizedBlocks (here a literal
+#        <ld> row) is the full answer; non-vacuous: confidence="high" and tiny under force
+#   (O)  A SAVED NOTE STAYS FULL (THETA6-FLIP): a named symbol with a --note-add note is the full answer, which serves the note;
+#        non-vacuous: the knob-off page carries the <note> and the call is tiny under force
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
@@ -107,11 +112,11 @@ bad = 0
 def ok(m): print("  ok   " + m)
 def no(m):
     global bad; bad += 1; print("  FAIL " + m)
-def run(b, args, knob=None):
+def run(b, args, knob=None, root=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}
     if knob == "force": env["RIPWIRE_TINY_SHAPE_FORCE"] = "1"
     elif knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
-    p = subprocess.run([b, F, "--no-cache"] + args, cwd=F, env=env, capture_output=True)
+    p = subprocess.run([b, root or F, "--no-cache"] + args, cwd=root or F, env=env, capture_output=True)
     if p.returncode != 0 or not p.stdout:   # a failed call must not compare equal to another failed call (CodeRabbit on #742)
         no("ripwire %s (knob %s) exited %d with %d B of output: %s" % (" ".join(args), knob, p.returncode, len(p.stdout), p.stderr.decode("utf-8", "replace").strip()[:300]))
     return p.stdout.decode("utf-8", "replace")
@@ -181,7 +186,7 @@ if 'confidence="low"' in off[LOWQ] and 'shape="tiny"' in forced and on[LOWQ] == 
 else: no("(L) low %s, forced tiny %s, on==off %s" % ('confidence="low"' in off[LOWQ], 'shape="tiny"' in forced, on[LOWQ] == off[LOWQ]))
 
 # (P)
-for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements", "--max-tokens=400"):
+for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements", "--max-tokens=400", "--pack-budget-bytes=64"):
     a = run(BIN, ["--for=" + NAMED, pb]); b = run(BIN, ["--for=" + NAMED, pb], "0")
     (ok if a == b and 'shape="tiny"' not in a else no)("(P) %s under the knob is the knob-off answer" % pb)
 
@@ -289,6 +294,37 @@ q_off, q_on = run(BIN, ["--for=" + QQ], "0"), run(BIN, ["--for=" + QQ])
 qx = [f for f in callers_files(q_off) if "]]&gt;" in f or "]]>" in f]
 if not qx or 'confidence="high"' not in q_off: no("(Q) vacuous: %d callers under a ]]> directory, confidence high %s" % (len(qx), 'confidence="high"' in q_off))
 else: (ok if q_on == q_off else no)("(Q) a caller path holding ]]> (%s) -> the full answer" % qx[0])
+# (U) the tiny <sigs total=> is the full page's: its own <sigs total=>, else the count of its ranked <d> rows (THETA6-FLIP: total= had been
+# read past the <sigs> open tag, off another element)
+m = re.search(r'<sigs shown="(\d+)" total="(\d+)">', on[NAMED]); so = re.search(r"<sigs[^>]*>", off[NAMED])
+want = (re.search(r' total="(\d+)"', so.group(0)) or [None, None])[1] if so else None
+if want is None:
+    sec = re.search(r"<sigs[^>]*>(.*?)</sigs>", off[NAMED], re.S); body = sec.group(1) if sec else ""
+    cd = re.search(r"<!\[CDATA\[(.*?)\]\]>", body, re.S)
+    want = str(len([l for l in cd.group(1).split("\n") if l.strip()]) if cd else len(re.findall(r"<d ", body)))
+good = bool(m) and int(m.group(1)) <= int(m.group(2)) and m.group(2) == want
+(ok if good else no)("(U) tiny <sigs shown=%s total=%s>: shown <= total, total = the full page's %s" % (m.group(1) if m else "?", m.group(2) if m else "?", want))
+# (K) a block the tiny shape does not summarize keeps the full page (THETA6-FLIP allow list kSummarizedBlocks): a class-scope alias
+# whose defs lookup is empty is answered by the full page's literal <ld> row
+K = W + "/fxk"; os.makedirs(K + "/cpp", exist_ok=True)
+open(K + "/cpp/h.h", "w").write("template <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nstruct Holder {\n    using WidgetRef = Ptr<Widget>;\n};\nint getWidgetRefCount();\n")
+KQ = "what does WidgetRef expand to? the defs lookup is empty"
+k_off, k_on, k_force = run(BIN, ["--for=" + KQ], "0", K), run(BIN, ["--for=" + KQ], None, K), run(BIN, ["--for=" + KQ], "force", K)
+if "<ld " not in k_off or 'confidence="high"' not in k_off or 'shape="tiny"' not in k_force:
+    no("(K) vacuous: <ld> on the full page %s, confidence high %s, tiny under force %s" % ("<ld " in k_off, 'confidence="high"' in k_off, 'shape="tiny"' in k_force))
+else: (ok if k_on == k_off else no)("(K) a page with an <ld> block (not summarized) stays the full answer")
+m = re.search(r'<sigs shown="(\d+)" total="(\d+)">', k_force)   # (U) where the stray total= showed (shown=4 total=1 before the fix)
+(ok if m and int(m.group(1)) <= int(m.group(2)) else no)("(U) forced tiny on the <ld> page: shown=%s <= total=%s" % (m.group(1) if m else "?", m.group(2) if m else "?"))
+# (O) a saved note on the named symbol keeps the full page, which carries it
+O = W + "/fxo"; os.makedirs(O, exist_ok=True)
+open(O + "/notes.py", "w").write("def watch_bound(n):\n    return n + 1\n")
+subprocess.run("git init -q && git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -qm i", shell=True, cwd=O, check=True)
+subprocess.run([BIN, O, "--no-cache", "--note-add=watch_bound: the loop bound is inclusive"], cwd=O, capture_output=True)
+OQ = "Where is `watch_bound` defined?"
+o_off, o_on, o_force = run(BIN, ["--for=" + OQ], "0", O), run(BIN, ["--for=" + OQ], None, O), run(BIN, ["--for=" + OQ], "force", O)
+if "<note " not in o_off or 'shape="tiny"' not in o_force:
+    no("(O) vacuous: note on the full page %s, tiny under force %s" % ("<note " in o_off, 'shape="tiny"' in o_force))
+else: (ok if o_on == o_off else no)("(O) a named symbol with a saved note stays the full answer (the note is served)")
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
 a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])
