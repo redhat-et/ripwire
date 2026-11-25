@@ -460,6 +460,11 @@ inline Applied pointEditBodies( std::string& doc, const IngestResult& ing, std::
     }
     std::vector<std::string> ranges;
     std::ranges::transform( rows, std::back_inserter( ranges ), detail::rangeOfPointer );
+    if( std::ranges::any_of( ranges, []( const std::string& r ) { return r.empty(); } ) )
+    {
+        return {};   // a removed body whose end is unknown (file unreadable at serve time, or shorter than the indexed end) has no
+                     // range for the act line, and the legend promises every removed body's: the page stays inline (CR #745)
+    }
     if( !detail::appendActRanges( *out, ranges ) || out->size() >= doc.size() )
     {
         return {};   // no act line to hold the ranges, or short bodies whose rows, ranges and clause cost more than the bodies (3 of 57
