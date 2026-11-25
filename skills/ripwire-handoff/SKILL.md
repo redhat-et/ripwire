@@ -22,6 +22,10 @@ a `<verified>` section (branch, HEAD sha with `+dirty`, changed files and their 
 run) that is disk truth, and a `<heuristic>` section (co-change partners, notes, design-doc pointers) labelled as
 suggestion. Paste it to the next agent as-is. Single-root.
 
+**A fresh code-editing subagent** (a task, not a subsystem)? One call: `ripwire <dir> --brief="TASK" --legend=compact` — one 2.5/4/6 KB page
+(layout with `(skip)` dirs, build/test commands quoted from manifests, entries, the task's act ranges, edges, where-else,
+conventions, the three-moment block). Paste it into the subagent's prompt as-is. Single-root.
+
 **A subsystem brief** — four calls, in order:
 
 1. `ripwire <dir> --for="SUBSYSTEM" --signatures-only` — the top 10 symbols the recipient most needs.

@@ -188,6 +188,19 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kMaxTrackedFiles` | `20000` | — | — |
 
+### `src/brief.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDocScanFiles` | `4000` | — | — |
+| `kHardCapBytes` | `8192` | — | — |
+| `kMinBudgetBytes` | `512` | — | — |
+| `kReachHops` | `12` | — | — |
+| `kUsersShown` | `3` | — | files that import the primary file (its registration / load points) |
+| `kWhereElseCap` | `6` | — | — |
+
 ### `src/cachelint.h`
 
 Discloses: **none**

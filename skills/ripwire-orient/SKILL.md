@@ -63,6 +63,7 @@ on a symbol means K of its calls hit an ambiguous name — read the source if th
 |---|---|
 | every rung in full: `--recall` dump rules, `--for` routing and selectors, thin-answer widening, budgets | `ladder.md` |
 | orienting N agents at once (`--partition=N`, `--plan-lanes`), or a big repo (`--zoom`, `--mermaid`, `--export`) | `partition-zoom.md` |
+| one page to paste into a fresh code-editing subagent: `--brief="TASK"` (layout, quoted build/test commands, entries, act ranges, edges; 2.5/4/6 KB) | `subagent-brief.md` |
 | writing a brief for a subagent: the three-moment block to paste (`--for` before reading source; `--expand`/`--callers`/`--impact` before the first edit; `--quality-delta` then `--test-gate` before done) | `subagent-brief.md` |
 | honesty signals in full, field notes, resuming, mid-task reads | `notes-resume.md` |
 | the map-before-you-read discipline for any read, mid-task (`--expand`, symbol-range reads, edit verbs) | `map-before-you-read.md` |

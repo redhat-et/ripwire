@@ -43,3 +43,8 @@ that do not load CLAUDE.md (`RIPWIRE_SUBAGENT_ROUTE=0` turns it off). `skills/in
 registers the opt-in primer (`hooks/ripwire-subagent-primer.sh`): two steps, orient and check, for every subagent
 type; `RIPWIRE_SUBAGENT_PRIMER=0` turns it off and `auto` randomizes per subagent for its registered A/B. Write the
 block into the brief either way.
+
+**One page instead of the block alone:** `ripwire <dir> --brief="TASK" --legend=compact` prints a size-capped brief (2.5 / 4 / 6 KB by repo
+size; `--brief-bytes=N` overrides) whose last section IS this block, after layout (`(skip)` marks vendored and generated
+dirs), build and test commands quoted from manifests and docs (`none found` when there are none; never guessed), entry
+points, the task's `--for` act ranges, edges, where-else and convention headings. Paste it under the task line. MCP: `brief`.
