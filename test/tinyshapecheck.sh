@@ -49,6 +49,10 @@
 #        <ld> row) is the full answer; non-vacuous: confidence="high" and tiny under force
 #   (O)  A SAVED NOTE STAYS FULL (THETA6-FLIP): a named symbol with a --note-add note is the full answer, which serves the note;
 #        non-vacuous: the knob-off page carries the <note> and the call is tiny under force
+#   (A)  THE NAMED FILE ANCHORS THE EDGES (CodeRabbit on #742): the top sigs row is another definition (a case twin in another file)
+#        that outranks the named one; the edges line names the caller in the TOP row's file and none in the named row's file;
+#        non-vacuous: the knob-off top row is not the named symbol, the named row is in another file, and the knob-off <callers>
+#        holds >= 1 caller in each of the two files (counted, FAIL on 0)
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
@@ -326,6 +330,25 @@ o_off, o_on, o_force = run(BIN, ["--for=" + OQ], "0", O), run(BIN, ["--for=" + O
 if "<note " not in o_off or 'shape="tiny"' not in o_force:
     no("(O) vacuous: note on the full page %s, tiny under force %s" % ("<note " in o_off, 'shape="tiny"' in o_force))
 else: (ok if o_on == o_off else no)("(O) a named symbol with a saved note stays the full answer (the note is served)")
+# (A) the named row's file, not the top row's, anchors the spread guard and the edges line
+A = W + "/fxa"; os.makedirs(A + "/pkg", exist_ok=True)
+open(A + "/pkg/expander.py", "w").write('class Expander:\n    def moduleInstances(self, x):\n        """Expand the module instances."""\n        if x:\n            return [x]\n        return []\n\n\ndef expander_driver():\n    return Expander().moduleInstances(1)\n')
+open(A + "/pkg/state.py", "w").write('from pkg.expander import Expander\n\n\nclass State:\n    def ModuleInstances(self, x):\n        return x\n\n\ndef state_walk():\n    return Expander().moduleInstances(2)\n')
+AQ = "ModuleInstances"
+a_off, a_on = run(BIN, ["--for=" + AQ], "0", A), run(BIN, ["--for=" + AQ], None, A)
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]>", a_off, re.S)
+arows = [(l.split(":", 1)[0], l.split(" ")[1]) for l in (m.group(1).split("\n") if m else []) if " " in l]
+lastseg = lambda n: re.split(r"\.|::|#", n)[-1]
+nrow = next((r for r in arows if lastseg(r[1]) == AQ), None)
+acf = callers_files(a_off)
+top_f = arows[0][0] if arows else None; named_f = nrow[0] if nrow else None
+in_top, in_named = sum(f == top_f for f in acf), sum(f == named_f for f in acf)
+if not arows or lastseg(arows[0][1]) == AQ or not nrow or named_f == top_f or not in_top or not in_named:
+    no("(A) vacuous: top row %s, named row %s, callers in the top file %d, in the named file %d" % (arows[0] if arows else None, nrow, in_top, in_named))
+else:
+    e = edges_text(a_on) or ""
+    good = 'shape="tiny"' in a_on.split(">", 1)[0] and (top_f + ":") in e and (named_f + ":") not in e
+    (ok if good else no)("(A) top row %s, named row %s: the edges line names %s, not %s: %s" % (arows[0][1], nrow[1], top_f, named_f, e))
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
 a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])

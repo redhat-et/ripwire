@@ -23,7 +23,8 @@
 // THE EDGES LINE (θ6b): the named symbol's cross-file non-test edges the render already computed — the callees in its served bodies
 // (<calls><c p=>), then its callers (1-hop, then d="2") — as one <edges> CDATA line "calls P:L N, ..; called by P:L N, .. (+K more)",
 // distinct files first. In NL2's three silent misses the second gold was a callee in another file the full page named only as an
-// attribute; the line names it at ~40 B an edge.
+// attribute; the line names it at ~40 B an edge. "Cross-file" and guard 4's "another file" are relative to the NAMED FILE: the file of
+// the highest-ranked top row the named symbol matched (detail::namedFileOf), not the top row's, which can be another definition.
 // SAME-NAME COMPLETION: when ranked <d> rows past the top kTinyRows carry the named symbol's name (overloads, one method per class),
 // up to kTinyRows more of them follow the top rows, so a multi-definition answer is not cut at row 8 without a word.
 // And only where nothing else asked for a shape: page 1, no explicit --page-bytes (an explicit one is how "more" escapes the shape),
@@ -46,6 +47,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -141,7 +143,7 @@ template <class Fn> inline void forEachChildTag( std::string_view doc, const ans
     } );
 }
 
-// How far the render's relational blocks point past the named file `topFile` (escaped, as the rows print it): guard 4.
+// How far the render's relational blocks point past `namedFile` (the named file, escaped as the rows print it; namedFileOf): guard 4.
 enum class Spread
 {
     None,      // nothing past the named file but what the edges line can name
@@ -149,15 +151,15 @@ enum class Spread
     Opaque,    // a <dispatch> (dynamic call candidates) or a <reexports> hop outside the <def> files: always the full page
 };
 
-// A 1-hop <callers> row (no d="2") in a file other than `topFile` that is not a test file.
-[[nodiscard]] inline bool hasOtherFileCaller( std::string_view doc, const answerfirst::Block& callers, std::string_view topFile )
+// A 1-hop <callers> row (no d="2") in a file other than `namedFile` that is not a test file.
+[[nodiscard]] inline bool hasOtherFileCaller( std::string_view doc, const answerfirst::Block& callers, std::string_view namedFile )
 {
     bool found = false;
     forEachChildTag( doc, callers, "s", [ & ]( std::string_view tag )
     {
         const std::string_view at   = rw::attrOf( tag, "p" );
         const std::string_view file = at.substr( 0, std::min( at.rfind( ':' ), at.size() ) );
-        found = found || ( rw::attrOf( tag, "d" ).empty() && !file.empty() && file != topFile && !isTestPath( rowlines::unescaped( file ) ) );
+        found = found || ( rw::attrOf( tag, "d" ).empty() && !file.empty() && file != namedFile && !isTestPath( rowlines::unescaped( file ) ) );
     } );
     return found;
 }
@@ -172,14 +174,14 @@ enum class Spread
     return found;
 }
 
-[[nodiscard]] inline Spread spreadOf( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile )
+[[nodiscard]] inline Spread spreadOf( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view namedFile )
 {
     Spread s = Spread::None;
     for( const answerfirst::Block& b : blocks )
     {
         if( b.comment ) { continue; }
         if( b.name == "dispatch" || ( b.name == "reexports" && reexportsElsewhere( doc, b ) ) ) { return Spread::Opaque; }
-        if( b.name == "callers" && hasOtherFileCaller( doc, b, topFile ) ) { s = Spread::Callers; }
+        if( b.name == "callers" && hasOtherFileCaller( doc, b, namedFile ) ) { s = Spread::Callers; }
     }
     return s;
 }
@@ -192,7 +194,7 @@ struct Edge
     std::string file, line, name;
 };
 
-// Whether a <b> body's n= is one of the named symbols (by last name segment), as resolves() matches a row.
+// Whether a <b> body's or a <d> row's n= is one of the named symbols (by last name segment): namedFileOf's match too.
 [[nodiscard]] inline bool namesASymbol( std::string_view nEsc, const std::vector<std::string>& syms )
 {
     const std::string      name = rowlines::unescaped( nEsc );
@@ -203,7 +205,7 @@ struct Edge
 // The callees the named symbol's served bodies call (<bodies><b><calls><c>), in page order; when no body is a named symbol's, the
 // bodies defined in the named file. A <c> without p= is in its body's file. Returns whether a picked body's <calls> was cut (capped="1"):
 // its callees past the cut are not on the page.
-[[nodiscard]] inline bool bodyCallees( std::string_view doc, const answerfirst::Block& bodies, std::string_view topFile, const std::vector<std::string>& syms,
+[[nodiscard]] inline bool bodyCallees( std::string_view doc, const answerfirst::Block& bodies, std::string_view namedFile, const std::vector<std::string>& syms,
                          std::vector<Edge>& out )
 {
     bool anyNamed = false;
@@ -216,7 +218,7 @@ struct Edge
         if( tag.starts_with( "<b " ) )
         {
             bodyFile = rw::attrOf( tag, "p" );
-            inPicked = anyNamed ? namesASymbol( rw::attrOf( tag, "n" ), syms ) : bodyFile == topFile;
+            inPicked = anyNamed ? namesASymbol( rw::attrOf( tag, "n" ), syms ) : bodyFile == namedFile;
         }
         else if( tag.starts_with( "</b" ) ) { inPicked = false; }
         else if( inPicked && tag.starts_with( "<calls " ) ) { cut = cut || rw::attrOf( tag, "capped" ) == "1"; }
@@ -259,22 +261,22 @@ struct EdgeSet
 // callees, then its callers — de-duplicated by file:line; the exact-resolved edges first, then the name-only (via="name") ones (θ6e),
 // each tier ordered distinct files first (a file's second edge after every file's first), so a capped line names as many files as
 // it can with the edges most likely to be real. A file:line reached both ways keeps its exact record (sorted before the de-duplication).
-// `topFile` is the top row's p= (escaped, as the rows print it).
-[[nodiscard]] inline EdgeSet crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view topFile,
+// `namedFile` is the named row's p= (escaped, as the rows print it; namedFileOf).
+[[nodiscard]] inline EdgeSet crossFileEdges( std::string_view doc, const std::vector<answerfirst::Block>& blocks, std::string_view namedFile,
                                                        const std::vector<std::string>& syms )
 {
     std::vector<Edge> all;
     bool              cut = false;
     for( const answerfirst::Block& b : blocks )
     {
-        if( !b.comment && b.name == "bodies" ) { cut = bodyCallees( doc, b, topFile, syms, all ) || cut; }
+        if( !b.comment && b.name == "bodies" ) { cut = bodyCallees( doc, b, namedFile, syms, all ) || cut; }
     }
     for( const answerfirst::Block& b : blocks )
     {
         if( !b.comment && b.name == "callers" ) { cut = blockCallers( doc, b, all ) || cut; }
     }
     std::ranges::stable_sort( all, {}, &Edge::nameOnly );   // exact records first, so a file:line reached both ways keeps the exact one
-    const std::string                          named = rowlines::unescaped( topFile );
+    const std::string                          named = rowlines::unescaped( namedFile );
     std::vector<std::pair<std::size_t, Edge>>  ranked;   // (how many earlier kept edges of its tier share its file, the edge)
     for( Edge& e : all )
     {
@@ -469,17 +471,14 @@ inline constexpr WindowedPhrase kWindowedPhrases[] = {
     return relational( q ) || asksBreadthOrIndirection( q ) || loneConstant( q );
 }
 
-[[nodiscard]] inline bool resolves( const std::vector<std::string>& syms, const std::vector<RangeRow>& rows )
+// THE NAMED FILE: the p= (escaped) of the highest-ranked of `rows` whose n= is a named symbol (by last name segment), or nullopt when
+// none is. The spread guard and the edges line are anchored on it (CodeRabbit on #742: the top row may be another definition that
+// outranks the named one, e.g. a case twin). Several rows match (overloads, one method per class): the highest-ranked one anchors,
+// and an edge into another matched row's file stays on the edges line, so a second matched file is named twice, never dropped.
+[[nodiscard]] inline std::optional<std::string_view> namedFileOf( const std::vector<std::string>& syms, const std::vector<RangeRow>& rows )
 {
-    for( const std::string& s : syms )
-    {
-        const std::string_view seg = forroute::lastSegment( s );
-        for( const RangeRow& r : rows )
-        {
-            if( !seg.empty() && forroute::lastSegment( rowlines::unescaped( r.n ) ) == seg ) { return true; }
-        }
-    }
-    return false;
+    auto named = rows | std::views::filter( [ & ]( const RangeRow& r ) { return namesASymbol( r.n, syms ); } );
+    return named.empty() ? std::nullopt : std::optional( named.front().p );
 }
 
 // The leading-legend comment whose text starts with `lead`, or empty.
@@ -524,9 +523,11 @@ inline constexpr std::string_view kSummarizedBlocks[] = { "sigs", "bodies", "cal
     const std::vector<detail::RangeRow>   ranked = detail::rankedRanges( doc, blocks );
     const std::vector<detail::RangeRow>   top( ranked.begin(), ranked.begin() + std::min( ranked.size(), kTinyRows ) );
     const std::vector<std::string>        syms = forced ? std::vector<std::string>{} : detail::namedSymbols( task );
-    if( top.empty() || ( !forced && !detail::resolves( syms, top ) ) ) { return std::nullopt; }
-    const detail::Spread  spread = forced ? detail::Spread::None : detail::spreadOf( doc, blocks, top.front().p );
-    const detail::EdgeSet edges  = detail::crossFileEdges( doc, blocks, top.front().p, syms );
+    // The forced shape matches no symbol: its named file is the top row's.
+    const std::optional<std::string_view> namedFile = top.empty() ? std::nullopt : forced ? std::optional( top.front().p ) : detail::namedFileOf( syms, top );
+    if( !namedFile ) { return std::nullopt; }
+    const detail::Spread  spread = forced ? detail::Spread::None : detail::spreadOf( doc, blocks, *namedFile );
+    const detail::EdgeSet edges  = detail::crossFileEdges( doc, blocks, *namedFile, syms );
     if( !detail::edgesCoverSpread( spread, edges.list.size() ) ) { return std::nullopt; }
     // A cut block with no cross-file edge on the page: the edges past the cut are unknown and there is no line to say so (CodeRabbit on #742).
     if( !forced && edges.floor && edges.list.empty() ) { return std::nullopt; }
