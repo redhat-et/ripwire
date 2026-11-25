@@ -3641,10 +3641,26 @@ private:
         for( std::size_t ji = 0; ji < judgments_.size(); ++ji )
         {
             facts[ji].leaves = runLeavesOf( judgments_[ji] );
-            facts[ji].text   = normTarget( shSiteLine( src_, judgments_[ji].pos ).text );
+            facts[ji].text   = normTarget( conditionText( judgments_[ji] ) );
             sh::detail::vrefs( facts[ji].text, facts[ji].refs );
         }
         return facts;
+    }
+    // The text a judgment reads: an and-or list's condition, up to its first reporter, so a file named in a reporter's
+    // message (ok "status for $TMP/out") is not a read of it; the statement's line for an if or a case.
+    std::string conditionText( const Judgment& j ) const
+    {
+        std::size_t r = 0;
+        if( j.kind == Judgment::Kind::AndOr && splitAndOr( *j.ao, r ) && !( *j.ao )[0].cmds.empty() && !( *j.ao )[r].cmds.empty() )
+        {
+            const std::uint32_t from = node( ( *j.ao )[0].cmds.front() ).pos;
+            const std::uint32_t to   = node( ( *j.ao )[r].cmds.front() ).pos;
+            if( from < to && to <= src_.size() )
+            {
+                return std::string( src_.substr( from, to - from ) );
+            }
+        }
+        return shSiteLine( src_, j.pos ).text;
     }
     bool zeroEvidence( std::size_t ji, const std::vector<ZeroEvidenceFacts>& facts ) const
     {
@@ -3714,7 +3730,8 @@ private:
             const bool               names  = mentionsAny( kf.text, e.files )
                               || std::any_of( e.vars.begin(), e.vars.end(), [ & ]( const std::string& v ) { return std::find( kf.refs.begin(), kf.refs.end(), v ) != kf.refs.end(); } );
             // a statement that runs the producer itself reads its status, not its text (`RUN >F || no`)
-            if( ( shares || ( names && !runsIn( judgments_[ki], leaves ) ) ) && outcomes( judgments_[ki], ev ).fail )
+            // and a twin that cannot run on the empty answer (inside `if [ -n "$OUT" ]`) catches nothing
+            if( ( shares || ( names && !runsIn( judgments_[ki], leaves ) ) ) && reachable( judgments_[ki], ev ) && outcomes( judgments_[ki], ev ).fail )
             {
                 return true;
             }

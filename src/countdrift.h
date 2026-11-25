@@ -88,7 +88,15 @@ inline void appendNameSetsOfCpp( std::string_view src, std::vector<NameSet>& out
             }
             nameAt = nameAt > 0 ? nameAt - 1 : 0;
         }
-        if( toks[nameAt].kind != TokKind::Ident )
+        // an array: the C declarator `NAME[ N ]`, or a `std::array<…>` type in the same declaration (an aggregate
+        // `Labels labels = { … }` holds fields, not a set of names)
+        const bool cArray = tokIs( src, toks[k - 1], "]" );
+        bool       stdArray = false;
+        for( std::size_t b = nameAt; !cArray && !stdArray && b-- > 0 && !tokIs( src, toks[b], ";" ) && !tokIs( src, toks[b], "{" ) && !tokIs( src, toks[b], "}" ); )
+        {
+            stdArray = tokIs( src, toks[b], "array" ) && b + 1 < nameAt && tokIs( src, toks[b + 1], "<" );
+        }
+        if( toks[nameAt].kind != TokKind::Ident || !( cArray || stdArray ) )
         {
             continue;
         }
@@ -322,7 +330,9 @@ inline std::string unwrapParagraphs( std::string_view s )
             continue;
         }
         const char n = out[i + 1];
-        const bool block = isSpace( n ) || n == '#' || n == '*' || n == '-' || n == '|' || n == '`' || n == '>' || ( n >= '0' && n <= '9' );
+        // a fence opens with three backticks or tildes; a line that starts with one backticked name continues the paragraph
+        const bool fence = out.compare( i + 1, 3, "```" ) == 0 || out.compare( i + 1, 3, "~~~" ) == 0;
+        const bool block = isSpace( n ) || n == '#' || n == '*' || n == '-' || n == '|' || fence || n == '>' || ( n >= '0' && n <= '9' );
         if( !block )
         {
             out[i] = ' ';
@@ -395,10 +405,15 @@ inline std::vector<Site> scanCountDriftCpp( std::string_view src, const NameSetT
     {
         if( t.kind != detail::TokKind::String )
         {
+            if( text.empty() )
+            {
+                continue;   // no paragraph pending: nothing to end, so no newline to look for
+            }
             if( !detail::tokIs( src, t, "," ) || std::count( src.begin() + lastEnd, src.begin() + t.begin, '\n' ) > 0 )
             {
                 flush();
             }
+            lastEnd = t.end;   // the next look starts after this comma: each byte is scanned once
             continue;
         }
         if( !text.empty() && std::count( src.begin() + lastEnd, src.begin() + t.begin, '\n' ) > 1 )

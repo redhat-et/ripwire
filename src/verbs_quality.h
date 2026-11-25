@@ -1740,8 +1740,8 @@ inline constexpr const char* kQdZeroEvidenceLegend =
     "on that empty answer. A checked exit status does not help: exit 0 with an empty answer passes it. Not a row: an arm "
     "whose claim IS emptiness ([ -z ], [ ! -s ] and no text compared), a statement a vacuous-assert shape already names. "
     "Fix: add the positive twin - assert the answer holds the row or root the absence is judged in. Not checked: a twin "
-    "reached only through a helper's parameterized path ($TMP/$1.out), a verdict echoed by a helper (say $(hasnt ...)): no row "
-    "there is no verdict. ";
+    "reached only through a helper's parameterized path ($TMP/$1.out), a verdict echoed by a helper (say $(hasnt ...)), and a "
+    "file two runs write in turn (a twin on the first write counts for the second): no row there is no verdict. ";
 
 // Emitted only when a defect-shape count-drift row is in the document (beside kQdDefectShapeLegend): the two checks and
 // the floors.
@@ -1751,8 +1751,9 @@ inline constexpr const char* kQdCountDriftLegend =
     "in one of the tree's string-literal name arrays (a kind table, a facet table) and that array holds another number - "
     "why= says which, and names the members the list leaves out. Fix: correct the count or the list (a new member of the "
     "array is usually what the text missed). Not checked: a count with no list after it, a list of prose or of glosses "
-    "that list (memguardcheck (B6b, B21)), a set held in an enum or a switch rather than a string array, a Markdown "
-    "file's own tables: no row there is no verdict. ";
+    "that list (memguardcheck (B6b, B21)), a set held in an enum, a switch or a struct rather than a string array, a "
+    "Markdown file's own tables, and in an ingest_scope=\"changed-files\" answer an array in an unchanged file: no row "
+    "there is no verdict. ";
 
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.

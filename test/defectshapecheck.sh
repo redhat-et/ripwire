@@ -2218,8 +2218,9 @@ gating_split "$L" 0
 # ── 4f) COUNT-DRIFT (CR-QD-3): a count word whose list disagrees with itself or with the tree's name array ──────────
 #   Baseline: a C++ name array kShapeNames (circle, square, triangle), a doc and a help string that say "three shapes"
 #   and list them. The edit adds hexagon to the array, so the unchanged doc and help string now drift (the 712 case: a
-#   kind added, the docs' count not); a new doc says "two modes" and lists three (self). Negatives: a correct new list,
-#   prose after a count, a gloss that itself lists, a count with no list. Then the fix (both texts say four and add
+#   kind added, the docs' count not); a new doc says "two modes" and lists three (self), another wraps its list before a
+#   backticked name. Negatives: a correct new list, prose after a count, a gloss that itself lists, a count with no
+#   list, a list that matches a struct aggregate's four strings (not an array, so no name set). Then the fix (both texts say four and add
 #   hexagon) prints no count-drift row.
 fx_init cdr
 mkdir -p "$WORK/cdr/src" "$WORK/cdr/docs"
@@ -2234,7 +2235,12 @@ cat >"$WORK/cdr/docs/shapes.md" <<'EOF'
 
 The three shapes: circle, square and triangle.
 EOF
-for f in modes ok prose gloss bare; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
+cat >"$WORK/cdr/src/labels.h" <<'EOF'
+#pragma once
+struct Labels { const char* a; const char* b; const char* c; const char* d; };
+inline constexpr Labels kLabels = { "alpha", "beta", "gamma", "delta" };
+EOF
+for f in modes wrap ok prose gloss bare agg; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
 fx_commit cdr
 sed -i.bak 's/"triangle" }/"triangle", "hexagon" }/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
 printf 'The two modes: fast, slow and safe.\n' >>"$WORK/cdr/docs/modes.md"
@@ -2242,11 +2248,14 @@ printf 'The four shapes: circle, square, triangle and hexagon.\n' >>"$WORK/cdr/d
 printf 'Three changes carry it: the walk, the cap and the legend.\n' >>"$WORK/cdr/docs/prose.md"
 printf 'The three flaky arms: memguard (B6b, B21) and pargates.\n' >>"$WORK/cdr/docs/gloss.md"
 printf 'Two passes run before the scan.\n' >>"$WORK/cdr/docs/bare.md"
+printf 'The four kinds: alpha,\n`beta`, gamma.\n' >>"$WORK/cdr/docs/wrap.md"
+printf 'The three options: alpha, beta, gamma.\n' >>"$WORK/cdr/docs/agg.md"
 fx_run cdr
 L="count-drift"
 ds_has_p "$L" count-drift docs/shapes.md minor
 ds_has_p "$L" count-drift src/shapes.h minor
 ds_has_p "$L" count-drift docs/modes.md minor
+ds_has_p "$L" count-drift docs/wrap.md minor   # a soft line break before a backticked name is not a fence
 row="$( ds_row_p count-drift docs/shapes.md )"
 printf '%s' "$row" | grep -q 'why="says 3, kShapeNames holds 4; missing hexagon"' && ok "$L: the name-set row says which array and names the missing member" \
     || no "$L: the name-set row should carry why=\"says 3, kShapeNames holds 4; missing hexagon\": ${row:-<no row>}"
@@ -2254,18 +2263,19 @@ row="$( ds_row_p count-drift docs/modes.md )"
 printf '%s' "$row" | grep -q 'why="says 2, lists 3"' && ok "$L: the self row says the count and the list's length" \
     || no "$L: the self row should carry why=\"says 2, lists 3\": ${row:-<no row>}"
 cpairs=0
-for nf in ok prose gloss bare; do
+for nf in ok prose gloss bare agg; do
     if [ "$QD_OK" = 1 ] && [ -n "$( ds_row_p count-drift docs/modes.md )" ]; then
         row="$( ds_row_p count-drift "docs/$nf.md" )"
         if [ -z "$row" ]; then ok "$L: no count-drift row in docs/$nf.md (twin docs/modes.md fires)"; cpairs=$(( cpairs + 1 )); else no "$L: false positive in docs/$nf.md: $row"; fi
     fi
 done
-[ "$cpairs" = 4 ] && ok "$L: all $cpairs negative docs print 0 count-drift rows beside a firing twin" \
-    || no "$L: $cpairs of 4 negative docs passed beside a firing twin (want all; zero means nothing was judged)"
+[ "$cpairs" = 5 ] && ok "$L: all $cpairs negative docs print 0 count-drift rows beside a firing twin (agg: a struct aggregate is no name set)" \
+    || no "$L: $cpairs of 5 negative docs passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 sed -i.bak 's/the three shapes: circle, square and triangle/the four shapes: circle, square, triangle and hexagon/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
 printf '# Shapes\n\nThe four shapes: circle, square, triangle and hexagon.\n' >"$WORK/cdr/docs/shapes.md"
 printf '# modes\n\nThe three modes: fast, slow and safe.\n' >"$WORK/cdr/docs/modes.md"
+printf '# wrap\n\nThe three kinds: alpha,\n`beta`, gamma.\n' >"$WORK/cdr/docs/wrap.md"
 fx_run cdr
 if [ "$QD_OK" = 1 ]; then
     n="$( ds_rows | grep -c 'defect="count-drift"' )"
