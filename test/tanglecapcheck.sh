@@ -13,6 +13,10 @@
 #        it after, no row.
 #   (f2) TEST CODE: the REAL statethread body under test/ (a harness main, an integration *_test.cc, a test_data file): over the
 #        bar in --metrics (the premise), no tangle row. (f3) BENCH IS SOURCE: the same body under bench/ keeps its gating row.
+#   (f4) RUST IN-FILE TEST CODE (CodeRabbit #721 r8): src/rustlib.rs, not a test path, holds one deep body three times. The #[test]
+#        fn and the fn inside #[cfg(test)] mod tests are over the bar in --metrics (premise: both seen, FAIL on zero) and get no
+#        row (isTestSymbol: testScope); the production twin in the same file gets a gating row (premise: the file is judged).
+#        Red on #721's binary (a5d3ad3ae: the test gate read only isTestPath).
 #   (k1) REAL KEPT: statethread (pathReachingPairs: shallow, state threaded), deepmono (captureTagsFacts: deep throughout),
 #        hdrparse (envoy parseHeader, the thin margin), refheader (parseHeader's reference local `T& header` threading the
 #        guard blocks into the scanner: kept only because that slot counts): tangle >= 6 in --metrics and a gating new-symbol row
@@ -33,6 +37,10 @@
 #              differently; premise: exactly one line rewritten): no row, no <improved> entry — credit only for a real code
 #              change (the body-identity guard). Red on an ablation without the guard.
 #        (q4c) ruleflat (a constant edited: the body changed, every input the same) gets no row and no credit; ruleworse still gates.
+#   (v1) SMALL BODY MOVED (CodeRabbit #721 r8): smallmove is tangled (>= 6) but under both move-input bars (ccx <= 15, <= 60 code
+#        lines: premise, read from --metrics and the file). wt moves it to another file and edits one literal: the row reads
+#        origin="moved" and does not gate. Red before the move record keyed on the tangle bar (no sketch below both bars: a gating
+#        new-function row).
 #   (m1) MUST KEEP, main's sources: the 6 #721 parents (captureTagsFacts, lexicalScoresTiered, serialize, runQualityDelta,
 #        compressBody, serializeJson) plus buildGraph and dispatchMcpLine stay over the bar on ripwire main 696d57a67 (the
 #        labelled commit). Premise: the commit is reachable (CI clones with fetch-depth 0) and each name has a tangle= row.
@@ -92,6 +100,19 @@ done
 r="$( trow "$Q" benchmain )"
 if [ -n "$r" ] && [ "$( attr "$r" gating )" = 1 ] && attr "$r" p | grep -q '^bench/'; then ok "(f3) benchmain under bench/ (source): a gating row: $r"
 else no "(f3) benchmain under bench/: want a gating tangle row (bench is not test), got '${r:-none}'"; fi
+# (f4) Rust in-file test code: #[test] and #[cfg(test)] in src/
+seen=0
+for f in rust_tangle_test rust_tangle_helper; do
+    m="$( mrow "$f" )"; t="$( attr "$m" tangle )"
+    if [ -z "$m" ] || ! over "$t"; then no "(f4) PREMISE: $f (Rust in-file test code) should be over the bar in --metrics, got '${m:-none}'"; continue; fi
+    seen=$(( seen + 1 ))
+    if [ -n "$( trow "$Q" "$f" )" ]; then no "(f4) $f (Rust in-file test code, tangle=$t): want no tangle row, got $( trow "$Q" "$f" )"
+    else ok "(f4) $f (Rust in-file test code in src/, tangle=$t): no row"; fi
+done
+[ "$seen" = 0 ] && no "(f4) PREMISE: no Rust in-file test function seen over the bar (want 2)"
+r="$( trow "$Q" rust_tangle_prod )"
+if [ -n "$r" ] && [ "$( attr "$r" gating )" = 1 ]; then ok "(f4) rust_tangle_prod (production twin in the same file): a gating row"
+else no "(f4) PREMISE: rust_tangle_prod (production twin in src/rustlib.rs) should get a gating row, got '${r:-none}'"; fi
 # (k1) REAL kept
 for f in statethread deepmono hdrparse refheader; do
     m="$( mrow "$f" )"; t="$( attr "$m" tangle )"; r="$( trow "$Q" "$f" )"
@@ -120,6 +141,16 @@ m="$( mrow ruleonly )"
 if [ -z "$m" ] || ! over "$( attr "$m" tangle_raw )"; then no "(q3) PREMISE: ruleonly over the bar before the cap, got '${m:-none}'"
 elif [ -z "$( trow "$Q" ruleonly )" ] && [ -z "$( irow "$Q" ruleonly )" ]; then ok "(q3) ruleonly (unchanged): no row, no <improved> entry"
 else no "(q3) ruleonly: want no row and no credit, got '$( trow "$Q" ruleonly )' / '$( irow "$Q" ruleonly )'"; fi
+# (v1) a small tangled body, moved with a literal edit
+m="$( mrow smallmove )"; t="$( attr "$m" tangle )"; cx="$( attr "$m" ccx )"
+code="$( grep -cvE '^[[:space:]]*(//.*|#include.*)?$' "$R/src/smallmoved.cpp" 2>/dev/null )"; code="${code:-0}"
+if [ -z "$m" ] || ! over "$t" || [ -z "$cx" ] || [ "$cx" -gt 15 ] || [ "$code" -gt 60 ] || [ "$code" -lt 1 ] || [ -f "$R/src/smallmove.cpp" ]; then
+    no "(v1) PREMISE: smallmove moved, tangle >= 6 under both move bars (ccx <= 15, <= 60 code lines), got '${m:-none}', $code code lines"
+else
+    r="$( trow "$Q" smallmove )"
+    if [ -n "$r" ] && [ "$( attr "$r" origin )" = moved ] && [ -z "$( attr "$r" gating )" ]; then ok "(v1) smallmove (tangle=$t, ccx $cx, $code code lines) moved with a literal edit: origin=\"moved\", no gate"
+    else no "(v1) smallmove (tangle=$t, ccx $cx, $code code lines) moved with a literal edit: want origin=\"moved\" and no gating=, got '${r:-none}'"; fi
+fi
 
 # (q4) the old floor: pin v1 with --quality-baseline, strip its block facts, judge the working tree
 O="$TMP/old"; mkdir -p "$O"; "${G[@]}" -C "$O" init -q

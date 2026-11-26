@@ -36,6 +36,9 @@ REAL controls the rule must keep over the bar:
 KNOWN residual false positives (out of scope; report-only, so a later rule can see them move):
   solelambda  — envoy forEachHostMetric: a callback lambda that is the whole body.
   initable    — envoy getKnownStreamInfoFormatterProviders: one initializer of name -> lambda entries.
+RUST IN-FILE TEST CODE (CodeRabbit #721 r8: the test exemption reads isTestSymbol, not only the path):
+  rustlib.rs  — one non-test file (src/) with the same deep Rust body three times: rust_tangle_prod (production: a gating row),
+                rust_tangle_test (a #[test] fn) and rust_tangle_helper (a fn inside #[cfg(test)] mod tests): over the bar, no row.
 HISTORY (v1 -> wt), the rise and ratchet arms:
   crossgrow   — REAL, over the bar with the cap not binding; wt threads one more local across blocks by editing an existing
                 line (no line added): the score is unchanged, crossLocals +1 is the rise (a minor row, why= names cross).
@@ -47,6 +50,10 @@ HISTORY (v1 -> wt), the rise and ratchet arms:
   ruleworse   — a REAL over-bar shape; wt adds 6 deep lines: a regression that must gate under any baseline.
   capworse    — the FP shape twoarms under another name; wt adds 6 deep lines to one arm. Capped, it stays under the bar (no row
                 against a floor with block facts); against a floor WITHOUT them both sides are scored uncapped, and it grew.
+  smallmove   — a tangled body under BOTH move-input bars (ccx 10 <= 15, 47 code lines <= 60: its comment lines count toward the
+                tangle's physical length, not toward the line bar). wt moves it to src/smallmoved.cpp and edits one literal, so
+                the exact identity breaks and only the sketch match can call it moved (CodeRabbit #721 r8: no sketch was recorded
+                below both bars, so it gated as a new function).
 """
 import os
 import sys
@@ -243,6 +250,29 @@ def crossgrowgo(stage, name="crossgrowgo"):
             + "".join(f"\ttotal = total*9 + {k}\n" for k in range(6)) + tail_last + "\treturn total\n}\n")
 
 
+# ── Rust in-file test code ──────────────────────────────────────────────────────────────────────────────────────────────────
+def rustdeep(name, pad=0, vis="pub "):
+    body = (f"{vis}fn {name}(xs: &[i32]) -> i32 {{\n    let mut total = 0;\n"
+            "    for &x in xs {\n        if x > 0 {\n            for y in 0..x {\n                if y % 3 != 0 {\n"
+            + lines(40, 20, "total += y * {k} + " + str(len(name)) + ";") +
+            "                }\n            }\n        }\n" + lines(30, 8, "total = total * 7 + {k};") + "    }\n    total\n}\n")
+    return "".join((" " * pad + ln if ln else ln) + "\n" for ln in body.split("\n")[:-1])
+
+
+def rustlib():
+    return (rustdeep("rust_tangle_prod") + "\n#[test]\n" + rustdeep("rust_tangle_test", vis="")
+            + "\n#[cfg(test)]\nmod tests {\n" + rustdeep("rust_tangle_helper", pad=4, vis="") + "}\n")
+
+
+# ── a small tangled body, moved ─────────────────────────────────────────────────────────────────────────────────────────────
+def smallmove(name="smallmove", lit=1):
+    return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = {lit};\n"
+            "    for( int x : xs )\n    {\n        if( x > 0 )\n        {\n            for( int y = 0; y < x; ++y )\n            {\n"
+            "                if( y % 3 )\n                {\n"
+            + "".join(f"                    // step {k}: fold the next term\n                    total += y * {k};\n" for k in range(30)) +
+            "                }\n            }\n        }\n    }\n    return total;\n}\n")
+
+
 def main():
     stage, d = sys.argv[1], sys.argv[2]
     hdr = ("#include <string>\n#include <vector>\n"
@@ -254,7 +284,13 @@ def main():
     write(d, "src/ruleworse.cpp", hdr + deepmono("ruleworse", deep=46 if stage == "wt" else 40))
     write(d, "src/capworse.cpp", hdr + twoarms("capworse", deepx=7 if stage == "wt" else 1))
     if stage != "wt":
+        write(d, "src/smallmove.cpp", "#include <vector>\n" + smallmove())
         return
+    old = os.path.join(d, "src/smallmove.cpp")
+    if os.path.exists(old):
+        os.remove(old)
+    write(d, "src/smallmoved.cpp", "#include <vector>\n" + smallmove(lit=2))
+    write(d, "src/rustlib.rs", rustlib())
     write(d, "src/famswitch.cpp", hdr + famswitch())
     write(d, "src/twoarms.cpp", hdr + twoarms())
     write(d, "src/addressarms.cpp", hdr + addressarms())

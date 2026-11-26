@@ -338,7 +338,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> failureDefaultBySym; // the failure-default part of maskBySym's count (handlershape.h): a row whose count of it grew carries facet="failure-default"; absent = 0
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholderBySym; // the placeholder kind — hash(canonId) → COUNT of stub / TODO constructs in the symbol (SUM over overloads, like maskBySym)
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
-    gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
+    gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar or able to reach the tangle bar (tangleCanReachBar): the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyCidBySym;  // QD-RENAME-IDENTITY — qualityKey → moveCidOf of EVERY function or method (the MAX over overloads, read only where defsBySym is 1): the baseline half of "this new key is a vacated key's body under a new name or file" (ContentMoves). A sidecar or blob without it matches no rename
     // QD-TANGLE — qualityKey → packTangle( tangleInputsOf ) of the overload with the highest score: recorded for a function or method over
     // 50 lines, reaching the nesting bar, or with a steering local (tangleRecorded) — every other one scores 0 and reads as absent. A
@@ -1913,8 +1913,18 @@ struct MoveIdentities
     std::vector<std::uint64_t>                       body;   // QD-RENAME-IDENTITY: moveCidOf of EVERY callable, under the bars too (0 = not a callable)
 };
 
-// `moveOut` (MOVED-BODY): when given, also each callable's moveCidOf and its sketch — only for a body over the ccx or the line bar, the only
-// bodies a new-function row (and so a move) can be about; 0 elsewhere. Same pass, so the corpus is read once. QD-RENAME-IDENTITY: and
+// A callable the tangle kind can rate at or over its bar: the uncapped score, never under the capped one, so a compare that scores both
+// sides uncapped (tangleSidesOf, an old floor) finds the same bodies. A tangled body can sit under both the ccx and the line bar (S counts
+// physical lines past 50 and the nesting; the line bar counts code lines past 60), so the move record keys on this as a third bar.
+inline bool tangleCanReachBar( const Symbol& s ) noexcept
+{
+    return ( s.kind == SymKind::Function || s.kind == SymKind::Method )
+        && tangleScore10( tangleInputsFrom( s.loc, s.maxNest, s.deepLoc, s.steer, s.dispatchShare ) ) >= kTangleBar10;
+}
+
+// `moveOut` (MOVED-BODY): when given, also each callable's moveCidOf and its sketch — only for a body over the ccx or the line bar, or one
+// the tangle kind can rate over its bar (tangleCanReachBar: CR #721 r8), the only bodies a new-function row (and so a move) can be about; 0
+// elsewhere. Same pass, so the corpus is read once. QD-RENAME-IDENTITY: and
 // moveCidOf of every callable in `body`, the identity a rename or move keeps (ContentMoves).
 inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveIdentities* moveOut = nullptr )
 {
@@ -1949,7 +1959,7 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
         {
             return;
         }
-        if( s.ccx > kCcxBar || out[i] > kLocBar )
+        if( s.ccx > kCcxBar || out[i] > kLocBar || tangleCanReachBar( s ) )
         {
             moveOut->cid[i] = moveOut->body[i];
             moveOut->sketch.emplace_back( i, moveSketchOf( s, body ) );
@@ -1963,7 +1973,8 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
 // would gate as a "new 1,000-line function" on the commit that only relocated it. A current callable is a move when its move
 // identity (moveCidOf) equals the identity of a VACATED baseline body (MOVES below), and no other current
 // callable carries that identity (a body that is both kept and copied, or copied twice, is a copy: refuse, floors not guesses).
-// A rewrite is not a move: one changed statement changes the identity. Only bodies over the ccx or the line bar are recorded.
+// A rewrite is not a move: one changed statement changes the identity. Only bodies over the ccx or the line bar, or able to reach the
+// tangle bar (tangleCanReachBar), are recorded.
 // MOVES (2026-11-13, owner "fix moves in-lane first"): the exact identity missed the 30-PR replay's one false ceiling row,
 // extractHtmlFlat (#572) — the old extractHtml body under a new name with a 4-line edit, the old name kept as a 3-line wrapper. Two
 // changes: (1) a baseline body is VACATED when its key no longer carries a body over a bar (gone, or shrunk under the bars: the
