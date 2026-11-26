@@ -127,7 +127,7 @@ first-hit MRR. The corrected evaluator additionally enforces:
 - a **frozen repository-disjoint train/held-out split** (salted SHA-256 over repository names,
   committed in `bench/locbench/dataset.lock`): train 254 instances / 77 repositories, held-out 306 /
   88 under the current salt `ripwire-a7-v2`. The 2026-07-31 rename changed the salt from
-  `ctxpack-a7-v2`, which gave train 317 / 87 and held-out 243 / 78; every held-out result in §4.1 and
+  `<pre-release name>-a7-v2`, which gave train 317 / 87 and held-out 243 / 78; every held-out result in §4.1 and
   §6.2 was measured on that earlier split;
 - **zero silent skips** — a checkout, index, or localizer failure aborts the run loudly;
 - **paired repository-clustered bootstrap** for every before/after comparison

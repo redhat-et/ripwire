@@ -440,7 +440,7 @@ instances across 77 repositories; held-out 306 across 88.** Recount it with `fro
 `run_locbench.py` over the 560 rows of `bench/locbench/full560.json`.
 
 **The split changed on 2026-07-31, and the headline below predates the change.** The salt is part of
-the hashed string, so the ctxpack → ripwire rename (`3315fb19d`) moved it from `ctxpack-a7-v2` to
+the hashed string, so the rename from the pre-release name to ripwire (`3315fb19d`) moved it from `<pre-release name>-a7-v2` to
 `ripwire-a7-v2` and re-dealt the repositories. The old salt gave train 317 across 87 and held-out 243
 across 78. The held-out results below were measured before the rename, on that held-out 243. They have
 not been re-run on the current held-out 306, and the pinned `dataset.lock` no longer selects their

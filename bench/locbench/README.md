@@ -24,7 +24,7 @@ frozen repository-disjoint train/held-out split (`dataset.lock`, salted SHA-256;
 samples, one cold, one index rebuild per instance), separately from the scored candidate export.
 
 **This result predates the current split.** The salt is part of the hashed string, and the 2026-07-31
-ctxpack → ripwire rename (`3315fb19d`) changed it from `ctxpack-a7-v2` to `ripwire-a7-v2`. The old salt
+rename from the pre-release name to ripwire (`3315fb19d`) changed it from `<pre-release name>-a7-v2` to `ripwire-a7-v2`. The old salt
 gave train 317 / 87 repos and held-out 243 / 78; the acceptance run below was measured on that held-out
 243 and has not been re-run on the current 306. Recount either split with `frozen_partition()` over
 `full560.json`.
