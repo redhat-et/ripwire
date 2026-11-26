@@ -22,6 +22,7 @@
 #   I2  a side-effecting call added to a helper a const method calls (impure only)  why=refs     mutant NOREFS
 #   I3  a file renamed into the test partition (only a path text moves)            why=files    mutant NOFILES
 #   I4  a changed flag (--exclude=tests: the index loses its test file)             why=shape/…  mutant ANYDIGEST
+#   I6  a symbol leaves the in-file test convention (def test_probe -> check_probe)  why=symbols  mutant NOSYMS
 #   I5  a record of another version, another layout, a flipped payload byte, a truncated file: refused (why=version,
 #       why=shape, why=checksum), answer unchanged, the next run writes a valid one; mutant NOSUM serves a damaged one
 #   H   a new commit that changes no file keeps both records served, and the answer identical (git history is NOT an
@@ -85,6 +86,14 @@ E
 cat >"$FIX/tests/widget_test.cpp" <<'E'
 #include "../src/widget.hpp"
 void test_arrange() { Widget w; w.arrange(); }
+E
+cat >"$FIX/src/util.py" <<'E'
+def helper():
+    return 1
+
+
+def test_probe():
+    return helper()
 E
 gitq(){ git -C "$FIX" -c user.email=gate@example.invalid -c user.name=gate -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
 gitq init -q && gitq add -A && gitq commit -qm init
@@ -239,6 +248,15 @@ if ident "I4 --metrics --exclude=tests" --metrics --exclude=tests && ident "I4 -
 else no "I4: '$( line i4s qmetrics )'"; fi
 statrun i4b --metrics
 if identAll "I4b back without the flag" && [ "$( field i4b qmetrics served )" = 0 ]; then ok "I4b and back without it: recomputed again (why=$( field i4b qmetrics why )), identical"; else no "I4b: '$( line i4b qmetrics )'"; fi
+
+# ── I6: a symbol's fields only — a function leaves the in-file test convention ──────────────────────────────────────
+run pre6 warm --metrics
+sed 's/def test_probe/def check_probe/' "$FIX/src/util.py" >"$TMP/util.py" && cat "$TMP/util.py" >"$FIX/src/util.py"
+mut "I6 a symbol leaves the test convention" RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS
+statrun i6s --metrics
+if identAll "I6" && [ "$( field i6s qmetrics served )" = 0 ] && [ "$( field i6s qmetrics why )" = symbols ]; then
+    ok "I6 a function leaves the in-file test convention: recomputed (why=symbols), identical"
+else no "I6: '$( line i6s qmetrics )'"; fi
 
 # ── H: a new commit that changes no file ──────────────────────────────────────────────────────────────────────────
 gitq add -A && gitq commit -qm 'the edits so far'
