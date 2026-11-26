@@ -2844,8 +2844,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::optional<std::string> forPage = forTaskText( path, task, redactPtr );
                     const McpIndex&                  ix      = getIndex( path );
                     resp = !forPage ? errResult( -32603, "internal error: the brief's for page lost bytes — no brief served" )
-                                    : textResult( rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = ix.ing, .g = ix.g, .diskRoot = path, .task = task, .forPage = *forPage,
-                                                                                                    .budgetBytes = briefBytesArg.isPresent ? std::size_t( briefBytesArg.value ) : 0 } ) );
+                                    : textResult( [&]
+                                      {
+                                          std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = ix.ing, .g = ix.g, .diskRoot = path, .task = task, .forPage = *forPage,
+                                                                                                               .budgetBytes = briefBytesArg.isPresent ? std::size_t( briefBytesArg.value ) : 0 } );
+                                          redactInPlace( brief, redactPtr );   // the composer quotes doc fences and manifests: same redaction as the for page
+                                          return brief;
+                                      }() );
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).

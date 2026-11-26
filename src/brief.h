@@ -3852,7 +3852,7 @@ inline std::vector<ConventionDoc> findConventions( const Corpus& c )
     std::vector<ConventionDoc> out;
     for( const std::string_view doc : kConventionDocs )
     {
-        const std::optional<std::string> text = c.read( doc );
+        const std::optional<std::string> text = c.exists( doc ) ? c.read( doc ) : std::nullopt;   // a FIFO candidate must not block the brief in fopen
         if( !text )
         {
             continue;
