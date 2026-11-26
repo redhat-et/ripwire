@@ -1599,6 +1599,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
          + ",\"window\":\"" + rw::defaultWindowLabel( root, "18mo" ) + "\",\"sub_windows\":" + std::to_string( subWindows )
          + ",\"partners\":" + std::to_string( ps.size() )
+         + ",\"floor\":" + std::to_string( kCoSupportFloor )   // the CLI root's floor=
          + pageDisclosure( ccPab, sizeof( ccPab ), ccPw.end - ccPw.begin, ps.size(), ccPw.end,
                            page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
          + ( gitstamp::isShallow( root ) ? ",\"shallow\":true" : "" )   // 0.6.6: the CLI root's shallow="1", present-only
@@ -1692,6 +1693,7 @@ inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn 
     }
     return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
          + std::to_string( facts.coCommits )
+         + ",\"cochange_floor\":" + std::to_string( kCoSupportFloor )   // the CLI [3] line's floor=
          + ( facts.shallow ? ",\"shallow\":true" : "" );   // 0.6.7: the CLI [3] line's shallow="1" — present-only, the cochange twin's spelling
 }
 
@@ -1902,7 +1904,8 @@ inline std::string situationDiffJson( const std::string& root, const std::string
             }
             first = false;
             char d[ 16 ];  rw::formatTo( d, sizeof( d ), "{:.2f}", deg );
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"cochange_degree\":" + d + "}";
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"cochange_degree\":" + d
+                 + ",\"together\":" + std::to_string( facts.forgottenTogether[i] ) + "}";   // the CLI [3] row's together=
         }
     }
 

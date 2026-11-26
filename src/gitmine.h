@@ -3819,6 +3819,11 @@ inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
     return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
 }
 
+// THE SUPPORT FLOOR — the shared commits a partner needs before it is reported. Every partner list says it (floor="3":
+// --cochange=FILE's root, --situ's [3] header, <partners>, and their JSON twins), beside each row's own count (together=):
+// a row's percentage alone cannot tell 2 of 3 commits from 200 of 300 (bench/cochange; owner ruling 2026-11-26).
+inline constexpr std::uint32_t kCoSupportFloor = 3;
+
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:
 // a one-hop-indirect include like A.cpp→A.h→B.h counts as a dependency, so is NOT surprising). Shared by the
@@ -3889,10 +3894,9 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     // Built at most once per ingest when the caller passes `couplingCache`; a one-off local cache otherwise.
     std::optional<CoCouplingCache> localCache;
     CoCouplingCache&               cache = couplingCache ? *couplingCache : localCache.emplace( ing );
-    constexpr std::uint32_t kSupport = 3;
     for( const auto& [other, n] : together )
     {
-        if( n >= kSupport )
+        if( n >= kCoSupportFloor )
         {
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
@@ -3995,7 +3999,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
 inline constexpr std::uint32_t kCoBoostCommitWindow      = 500;    // last-N-commits mining window (matches the eval's --history-depth=500 deepening)
 inline constexpr std::size_t   kCoBoostMaxFilesPerCommit = 30;     // same bulk-commit cap as the other co-change miners here
 inline constexpr std::uint32_t kCoBoostSeedCount         = 3;      // seeds = the top-3 positively-scored symbols' files
-inline constexpr std::uint32_t kCoBoostSupport           = 3;      // a partner must share >= 3 commits with a seed file (cochangePartners' kSupport)
+inline constexpr std::uint32_t kCoBoostSupport           = kCoSupportFloor;   // a partner must share >= 3 commits with a seed file (cochangePartners' floor)
 inline constexpr std::size_t   kCoBoostMaxPartnerFiles   = 8;      // strongest partners only, by (deg desc, path asc)
 inline constexpr std::size_t   kCoBoostMaxSymbolsPerFile = 3;      // per partner file: its top-3 symbols by (lens score desc, id asc)
 inline constexpr float         kCoBoostFrac              = 0.25f;  // boost = frac · deg · seedFloor — scale-free (relative to the rank's own scores)

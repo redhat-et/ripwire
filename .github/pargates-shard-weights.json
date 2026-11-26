@@ -74,6 +74,7 @@
  "clsrecvcheck.sh": 0.5,
  "cochangeboostcheck.sh": 8.2,
  "cochangecliocheck.sh": 8.3,
+ "cochangefloorcheck.sh": 4.8,
  "cochangesurprisecheck.sh": 11.4,
  "codexdoctorcheck.sh": 23.9,
  "codexinstallhonestycheck.sh": 2.3,

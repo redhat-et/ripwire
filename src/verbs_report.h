@@ -1204,7 +1204,8 @@ inline constexpr const char* kCochangeRepoLegend =
 
 inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
-    "together= is the number of commits in window= that touched BOTH this file and the partner (3 or more, or the partner is not reported); "
+    "together= is the number of commits in window= that touched BOTH this file and the partner (floor= or more, or the partner is not reported); "
+    "floor= is that support floor, 3 shared commits; "
     "deg= is that count over commits=, THIS file's own commit count — a different denominator from the repo-wide pair form, which divides by the less-changed side. "
     "deg= is therefore already DIRECTIONAL here (this file => partner: of your commits, the fraction that also touched the partner); conf_rev= is the other direction, "
     "that same count over the PARTNER's own commit count. deg=1.00 means you never touch this file alone; conf_rev=1.00 means the partner never moves without you. "
@@ -1747,9 +1748,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
             // verb already calls, placed LAST on the element to match --hotspots' existing attribute order.
-            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\"{}{}{}{}>",
+            // floor=: the shared commits a partner needed (gitmine.h kCoSupportFloor)
+            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\" floor=\"{}\"{}{}{}{}>",
                          ex( mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[fid], mvRootPrefix ) : std::string_view( ing.files[fid] ) ).c_str(),
-                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(),
+                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(), kCoSupportFloor,
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          mvRootAttr.c_str(),                // R-E fix: root= before at= — at= stays LAST (r26)

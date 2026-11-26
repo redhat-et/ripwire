@@ -1936,8 +1936,8 @@ inline PackTaskSection packTaskPartnersSection( const PackPartners& pp, const st
     {
         return {};
     }
-    char extra[ 224 ];
-    rw::formatTo( extra, sizeof( extra ), " window=\"{} commits\" commits=\"{}\" seeds=\"{}\"{}{}{}", kCoBoostCommitWindow, pp.commits, pp.seeds,
+    char extra[ 240 ];
+    rw::formatTo( extra, sizeof( extra ), " window=\"{} commits\" commits=\"{}\" seeds=\"{}\" floor=\"{}\"{}{}{}", kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor,
                   pp.bulkSkipped > 0 ? " bulk_skipped=\"" + std::to_string( pp.bulkSkipped ) + "\"" : std::string(),
                   packTaskPartnersPolicyAttrs( pp.history, "=\"", "\"" ), gitstamp::shallowAttr( pp.shallow ) );
     const std::string cutAttr   = " partners_cut=\"" + std::to_string( rows.size() ) + "\"";
@@ -1969,8 +1969,8 @@ inline std::string packTaskPartnersJson( const IngestResult& ing, const PackPart
         return pp.none.empty() ? std::string() : ",\"partners_none\":\"" + std::string( pp.none ) + "\"";
     }
     std::string j;
-    { char b[ 240 ];  rw::formatTo( b, sizeof( b ), ",\"partners_window\":\"{} commits\",\"partners_commits\":{},\"partners_seeds\":{},\"partners_total\":{},\"partners_kept\":{}{}{}",
-                                    kCoBoostCommitWindow, pp.commits, pp.seeds, pp.rows.size(), kept,
+    { char b[ 264 ];  rw::formatTo( b, sizeof( b ), ",\"partners_window\":\"{} commits\",\"partners_commits\":{},\"partners_seeds\":{},\"partners_floor\":{},\"partners_total\":{},\"partners_kept\":{}{}{}",
+                                    kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor, pp.rows.size(), kept,
                                     pp.bulkSkipped > 0 ? ",\"partners_bulk_skipped\":" + std::to_string( pp.bulkSkipped ) : std::string(),
                                     pp.shallow ? ",\"partners_shallow\":true" : "" );  j += b; }
     j += packTaskPartnersPolicyAttrs( pp.history, "\":", "" );
@@ -2041,7 +2041,7 @@ inline void notePackPartners( const PackPartnersBlock& b, std::string& report, s
 inline constexpr std::string_view kPackPartnersLegend =
     " partners (after tests, before the tail): files that changed in the same commits as the ranking's first seeds= distinct "
     "files (not the seeds), the ones a change there usually also edits; <f p= together=>: together= commits it shares with its "
-    "best seed (3 or more), rows by that seed's share of commits; window= commits= the history read; bulk_skipped=N commits left out "
+    "best seed (floor= or more, 3), rows by that seed's share of commits; window= commits= the history read; bulk_skipped=N commits left out "
     "for touching over 30 indexed files; bots_skipped=N (bots_included= under include-bots) bot-authored commits left out, "
     "agent_commits=N kept commits a coding agent co-authored, renames= the exact file moves followed (each present when nonzero); shallow=1 a depth-limited clone, so a floor; up to 3 pct of the budget, out of what the sections above left, then the tail's; "
     "partners_cut=N rows the budget cut. ";

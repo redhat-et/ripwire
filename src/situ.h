@@ -389,7 +389,7 @@ struct SeedPartner
 {
     std::uint32_t fileId   = 0;
     double        deg      = 0.0;   // the best seed's degree: the fraction of that seed's commits the partner is also in
-    std::uint32_t together = 0;     // commits that seed and the partner share (3 or more: cochangePartners' support floor)
+    std::uint32_t together = 0;     // commits that seed and the partner share (kCoSupportFloor or more)
 };
 struct SeedPartners
 {
@@ -1284,12 +1284,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
     const SeedPartners  merged = mergeSeedPartners( ing, changedFile, coSets, kSituCochangeProbeFiles, coCoupling );
     const std::uint32_t probed = merged.probed;
-    std::vector<std::pair<std::uint32_t, double>> partners;
-    partners.reserve( merged.rows.size() );
-    for( const SeedPartner& p : merged.rows )
-    {
-        partners.emplace_back( p.fileId, p.deg );
-    }
+    const std::vector<SeedPartner>& partners = merged.rows;   // each row prints its own together=: a percentage alone hides the count
     // §H6 (W3FIX): same undisclosed cap as [2] — 18 partners, 8 rows on this repo's own src/graph.h probe.
     // F2: window=/commits= ride on the header, so the count below is readable as a measurement — or as the
     // absence of one. --cochange, the component this composes, already emits both.
@@ -1303,8 +1298,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         : std::string();
     // 0.6.7 shallow tail: the window was mined from THIS root's fetched history; on a depth-limited clone the line carries the
     // shallow="1" the cochange verb's root carries (the at: line's +shallow suffix names the state, this names the measurement).
-    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}{}:\n",
-                  partners.size(), coWindow.c_str(), coCommits, gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
+    // floor=: the shared commits a partner needed (gitmine.h kCoSupportFloor) — the reason a 2-commit partner is not here
+    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\" floor=\"{}\"{}{}{}:\n",
+                  partners.size(), coWindow.c_str(), coCommits, kCoSupportFloor, gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
                   situShowingNote( partnerShown, partners.size(), "files",
                                    situNextInvocation( page.selector, partners.size() ) ).c_str() );
     if( partners.empty() )
@@ -1313,8 +1309,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
     for( std::size_t i = partnerPage.begin; i < partnerPage.end; ++i )
     {
-        const std::string_view rp = situPathRel( partners[i].first );
-        rw::emitTo( out, "        {}  (co-edited in {:.0f}% of commits)\n", std::string_view( rp.data(), rp.size() ), partners[i].second * 100.0 );
+        const std::string_view rp = situPathRel( partners[i].fileId );
+        rw::emitTo( out, "        {}  (co-edited in {:.0f}% of commits, together={})\n", std::string_view( rp.data(), rp.size() ), partners[i].deg * 100.0,
+                      partners[i].together );
     }
     // P3 (L7): the one follow-up — the gate that turns [2] into an exit code (4 while tests or the untested blast
     // radius are non-empty), on the same tree.
@@ -1338,6 +1335,7 @@ struct SituationFacts
     std::vector<TestRow>                          testRows;       // H2H-Graft F1: the tests to run, EVIDENCE order, with why
     std::vector<std::uint32_t>                    tests;          // the same rows as file ids, same order (pre-F1 consumers)
     std::vector<std::pair<std::uint32_t, double>> forgotten;     // (file, co-change degree) usually edited together but NOT in the diff (deg desc, path asc)
+    std::vector<std::uint32_t>                    forgottenTogether;   // PARALLEL to forgotten (SoA): the shared-commit count behind each degree
     // F2 (round C): the WINDOW `forgotten` was mined in, and how many commits it actually saw. `forgotten`
     // is a COMPOSED number — --cochange, the component verb, refuses loudly (`commits="0" window="18mo@HEAD"`,
     // exit 1) on a tree whose window is empty, while every composing surface rendered a bare `(0)` and, in the
@@ -1461,9 +1459,11 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
         }
     }
     facts.forgotten.reserve( merged.rows.size() );
+    facts.forgottenTogether.reserve( merged.rows.size() );
     for( const SeedPartner& p : merged.rows )
     {
         facts.forgotten.emplace_back( p.fileId, p.deg );
+        facts.forgottenTogether.push_back( p.together );
     }
     std::sort( facts.hotspots.begin(), facts.hotspots.end(), [ & ]( const auto& a, const auto& b )
                { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
