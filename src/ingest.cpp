@@ -387,11 +387,16 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
 static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result, const CacheLoadStats& cacheStats )
 {
     const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale;
-    if( !snap.treeKeyValid || result.reparsedFiles != 0 || result.memoryStop.isSet() || stored )
+    if( !snap.treeKeyValid || !warmsnap::recordsWhatItBuilt( snap, result.reparsedFiles ) || result.memoryStop.isSet() || stored )   // the edit rule: warmsnap.h
     {
+        if( !stored && !result.memoryStop.isSet() ) { snap.unsaved( snap.treeKeyValid ? warmsnap::Why::Reparsed : warmsnap::Why::Racy ); }
         return;
     }
     warmsnap::BlobFacts facts{ cacheStats.recordsRead, cacheStats.blobEntries, {} };
+    if( snap.coldBlob )   // the blob this run just published holds one record per crawled file: what the next run's load would report
+    {
+        facts.cachedRecords = facts.blobEntries = result.files.size();
+    }
     for( std::uint32_t f = 0; f < result.files.size(); ++f )
     {
         if( docparse::docKindOf( lowerExtensionOf( result.files[ f ] ) ) != docparse::DocKind::Markitdown )

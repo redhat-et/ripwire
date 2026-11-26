@@ -13,9 +13,10 @@
 # (warmsnap.h optionsKeyOf), so a one-worker recording and an every-core one name and key the same snapshot.
 #
 # Each configuration records in a FRESH cache directory at ONE path (the path is part of the options key, so two
-# directories could never compare equal): run 1 parses and records the tree, run 2 replays it from the parse cache
-# blob and records the model and graph. The 8-byte write stamp (header offset 40) and the checksum that covers it
-# (offset 104) are masked; nothing else is.
+# directories could never compare equal): run 1 parses with the knob's worker count and, having opened with no blob,
+# records the tree, the model and the graph (warmsnap.h recordsWhatItBuilt); a later run is only made when a racy window
+# held a section back (the corpus is copied moments before), and is then a run that replays the parse cache blob.
+# The 8-byte write stamp (header offset 40) and the checksum that covers it (offset 104) are masked; nothing else is.
 #
 # ARMS
 #   P   premise: the recording runs reported parse_threads=1 and parse_threads=8 (a binary without the knob runs every
@@ -66,12 +67,13 @@ record()
     local tag="$1"; shift
     rm -rf "$H"; mkdir -p "$H/tmp" "$H/xdg"
     local k s; : >"$TMP/$tag.err"
-    for k in 1 2 3; do   # run 1 records the tree, run 2 the model; run 3 only when a racy window held a section back
+    for k in 1 2 3; do   # run 1 records the tree, the model and the graph; runs 2-3 only when a racy window held a section back
         ( cd "$W" && env "$@" HOME="$H" TMPDIR="$H/tmp/" XDG_CACHE_HOME="$H/xdg" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 \
             "$BIN" . ${VERB[@]+"${VERB[@]}"} >"$TMP/$tag.out$k" 2>"$TMP/$tag.err$k" </dev/null )
         cat "$TMP/$tag.err$k" >>"$TMP/$tag.err"
         s="$( find "$H" -name 'ripwire-warmsnap-*.bin' 2>/dev/null | head -1 )"
-        [ "$k" -ge 2 ] && [ -n "$s" ] && [ -s "$( section "$s" 1 >"$TMP/$tag.probe"; echo "$TMP/$tag.probe" )" ] && break
+        [ -n "$s" ] && [ -s "$( section "$s" 0 >"$TMP/$tag.probe"; echo "$TMP/$tag.probe" )" ] \
+            && [ -s "$( section "$s" 1 >"$TMP/$tag.probe"; echo "$TMP/$tag.probe" )" ] && break   # the tree AND the model: D3 compares whole files
     done
     if [ -n "$s" ]; then
         python3 -I -c 'import sys; b = bytearray( open( sys.argv[ 1 ], "rb" ).read() ); b[ 40:48 ] = bytes( 8 ); b[ 104:112 ] = bytes( 8 ); sys.stdout.buffer.write( b )' "$s" >"$TMP/$tag.snap"

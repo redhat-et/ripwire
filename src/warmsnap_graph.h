@@ -582,8 +582,12 @@ inline Graph buildGraphRecorded( Session& s, const IngestResult& ing )
         const depwatch::Armed armed( &log );
         return buildGraph( ing, nullptr, false );
     }();
-    if( !s.on() || !s.treeKeyValid || ing.memoryStop.isSet() || ing.reparsedFiles != 0 )   // a run that parsed stores nothing: see recordWarmModel
+    if( !s.on() || !s.treeKeyValid || ing.memoryStop.isSet() || !recordsWhatItBuilt( s, ing.reparsedFiles ) )   // the edit rule: warmsnap.h
     {
+        if( s.on() && !ing.memoryStop.isSet() )   // a memory stop is disclosed on its own line
+        {
+            s.unsaved( s.treeKeyValid ? Why::Reparsed : Why::Racy );   // !treeKeyValid: keyWarmSnapshot found a file too young to pin
+        }
         return g;
     }
     std::vector<depwatch::Dep> deps;
