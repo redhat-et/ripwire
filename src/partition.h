@@ -113,6 +113,7 @@ struct PartitionPlan
     std::uint32_t                    moduleCount    = 0; // distinct groups on the assignable surface (community, or FILE
                                                          // for the call-graph-edgeless — see groupKeyFor)
     std::uint32_t                    splitCount     = 0; // community cuts forced by K < N (0 = none)
+    std::uint32_t                    disconnected   = 0; // communities of the WHOLE graph that are not one connected piece
 };
 
 // the assignable surface grouped by community, each group in rank order, the GROUPS themselves in best-rank
@@ -284,13 +285,15 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
     const std::size_t coreCount = std::min( kPackTaskBodyCandidates, surface.size() );
     plan.coreIds.assign( surface.begin(), surface.begin() + std::ptrdiff_t( coreCount ) );
     const std::vector<NodeId> assignable( surface.begin() + std::ptrdiff_t( coreCount ), surface.end() );
+    // the partition is computed before the empty-remainder return so disconnected= is measured on every answer, not 0 by default
+    const Communities cm = communities( g );
+    plan.disconnected    = cm.disconnected;
     if( assignable.empty() )                       // nothing beyond the core to carve — 0 partitions, honestly reported
     {
         return plan;   // not a degrade: partitions="0" beside requested= is the honest, whole answer (no trace needed)
     }
 
     // ── decision 3 — communities → partitions ─────────────────────────────────────────────────────────────
-    const Communities cm  = communities( g );
     CommunityGroups   grp = groupSurfaceByCommunity( ing, g, assignable, cm );
     plan.moduleCount      = std::uint32_t( grp.members.size() );
     plan.splitCount       = splitGroupsUpTo( grp, partitionCount );          // no-op when K >= N
@@ -466,10 +469,10 @@ inline std::string partitionSummaryAttrs( const PartitionPlan& plan, const Parti
 {
     char b[ 640 ];
     rw::formatTo( b, sizeof( b ),
-                   " partitions=\"{}\" requested=\"{}\" core_symbols=\"{}\" surface=\"{}\" modules=\"{}\" split=\"{}\""
+                   " partitions=\"{}\" requested=\"{}\" core_symbols=\"{}\" surface=\"{}\" modules=\"{}\" split=\"{}\" disconnected=\"{}\""
                    " budget_per_agent_tokens=\"{}\" core_budget_tokens=\"{}\" partition_budget_tokens=\"{}\" total_bytes=\"{}\""
                    " overlap_mean=\"{:.3f}\" overlap_max=\"{:.3f}\" shared_symbols=\"{}\" union_symbols=\"{}\" core_overlap=\"{:.3f}\"",
-                   sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount,
+                   sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount, plan.disconnected,
                    sum.agentTokens, sum.coreTokens, sum.partitionTokens, sum.totalBytes,
                    ov.mean, ov.worst, ov.sharedCount, ov.unionCount, ov.coreLeak );
     return b;
@@ -488,7 +491,7 @@ inline constexpr const char* kPartitionLegend =
     // ("their ", "of its own") — every attribute still defined; measured 2158 <= 2173.6.
     "<!-- ripwire partitioned task bundle: ONE shared core plus N minimally overlapping slices along call-graph communities; each "
     "<bundle> is one agent's ctx. requested=N asked, partitions= carved; modules=/split= groups found / cuts forced; core_symbols= the "
-    "shared core, surface= core plus the assignable remainder; budget_per_agent_tokens= core plus ONE partition (= core_budget_tokens + "
+    "shared core, surface= core plus the assignable remainder; disconnected= communities not one connected piece of the call graph (0 unless the split failed); budget_per_agent_tokens= core plus ONE partition (= core_budget_tokens + "
     "partition_budget_tokens), total_bytes= all bundles; overlap_mean=/overlap_max= pairwise Jaccard over the ids partitions name, "
     "pre-trim; shared_symbols= the ids TWO OR MORE partitions name, union_symbols= ids any names (ratio and overlap_mean COINCIDE at "
     "partitions=2 only); core_overlap= the core surface a partition reaches anyway; tokens= = est_tokens= (bytes / 2.36). Each ctx "
@@ -640,10 +643,10 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
         std::string& j = *jsonOut;
         char         nb[ 640 ];
         rw::formatTo( nb, sizeof( nb ),
-                       "{{\"partitions\":{},\"requested\":{},\"core_symbols\":{},\"surface\":{},\"modules\":{},\"split\":{},"
+                       "{{\"partitions\":{},\"requested\":{},\"core_symbols\":{},\"surface\":{},\"modules\":{},\"split\":{},\"disconnected\":{},"
                        "\"budget_per_agent_tokens\":{},\"core_budget_tokens\":{},\"partition_budget_tokens\":{},\"total_bytes\":{},"
                        "\"overlap_mean\":{:.3f},\"overlap_max\":{:.3f},\"shared_symbols\":{},\"union_symbols\":{},\"core_overlap\":{:.3f}",
-                       sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount,
+                       sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount, plan.disconnected,
                        sum.agentTokens, sum.coreTokens, sum.partitionTokens, sum.totalBytes,
                        ov.mean, ov.worst, ov.sharedCount, ov.unionCount, ov.coreLeak );
         j  = nb;

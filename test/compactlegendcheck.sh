@@ -787,6 +787,11 @@ probeFor()
 # alternative is exactly this one-line re-pin. What the 57 B buys: under the tiering posture the DICTIONARY is the
 # authority -- a reader holding core plus a pack never receives a verb-legend string -- so a definition that lived
 # only in the zoom verb row was unresolvable for precisely the readers the 0.7.0 posture work is for.
+# RE-PINNED 2026-11-26 (lane leiden-refine, connected communities): ripwire.communities/v1 820 -> 910 (measured 900, was
+# 816) and ripwire.zoom/v1 480 -> 580 (measured 566, was 480). Every --communities and --zoom root now carries disconnected=
+# (modules that are not one connected piece of the call graph; the local-moving core splits them, so it reads 0 unless that
+# step failed), and each verb row defines it: +84 B and +86 B on every answer. Like shown_levels= above, it rides EVERY answer,
+# so a test/legend_over_target.tsv row (present-only clauses) would assert something false; this re-pin is the honest form.
 PIN_TABLE='
 ripwire.abi/v1                   2020  2003
 ripwire.arch/v1                  1490  1477
@@ -807,8 +812,8 @@ ripwire.naming-calibration/v1    1180  1162
 ripwire.naming-consistency/v1     630   620
 ripwire.comment-coherence/v1      460   445
 ripwire.cochange/v1               540   521
-ripwire.communities/v1           820   807
-ripwire.zoom/v1                  480   467
+ripwire.communities/v1           910   900
+ripwire.zoom/v1                  580   566
 ripwire.tree/v1                  310   300
 ripwire.seams/v1                  720   703
 ripwire.handoff/v1                600   589

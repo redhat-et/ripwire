@@ -741,6 +741,7 @@ for _g in \
     legocheck \
     legotransitivecheck \
     legounreadlangcheck \
+    leidencheck \
     lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \

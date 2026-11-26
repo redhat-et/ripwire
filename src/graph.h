@@ -21030,12 +21030,37 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
 
 // ---- community detection (--communities): one level of Louvain local-moving on the UNDIRECTED projection
 //      of the call graph (unit edge weights). Deterministic: nodes processed in id order; on a (near-)tie
-//      the move resolves to the LOWER community id; fixed pass cap; ankerl insertion-ordered maps. Returns
+//      the move resolves to the LOWER community id; fixed pass cap; ankerl insertion-ordered maps; each community
+//      then split into its connected pieces (see the CONNECTIVITY REFINEMENT in louvainLocalMoving). Returns
 //      node→community with ids compacted to 0..count-1 in first-seen-by-node-id order. -------------------
-struct Communities { std::vector<std::uint32_t> comm; std::uint32_t count = 0; };
+// `disconnected` = how many of the `count` communities have an induced subgraph that is NOT connected (Traag, Waltman & van
+// Eck, Sci Rep 2019: Louvain's local moving can pull a bridge node out of a community and leave the rest in two pieces).
+// Set by communities() over the symbol graph; louvainLocalMoving() alone leaves it 0 (its input may be a contracted level).
+struct Communities { std::vector<std::uint32_t> comm; std::uint32_t count = 0; std::uint32_t disconnected = 0; };
 
 // A weighted undirected neighbour: target node + edge weight. Self-loops are excluded by the builders.
 struct WEdge { NodeId to; double w; };
+
+// The connected pieces of every group of the node→group map `comm` over `adj`: a union-find joined across each intra-group
+// edge, so two nodes share a root exactly when one group's own edges connect them. UnionFind keeps a piece's root at its
+// LOWEST node id. Shared by the connectivity refinement and the count that reports it (disconnectedCommunityCount), so
+// the check independent of both is test/leidencheck.sh, which recounts connectivity from its fixture's own source.
+inline UnionFind intraGroupPieces( const std::vector<std::vector<WEdge>>& adj, const std::vector<std::uint32_t>& comm )
+{
+    const std::uint32_t N = std::uint32_t( adj.size() );
+    UnionFind           pieces( N );
+    for( NodeId u = 0; u < N; ++u )
+    {
+        for( const WEdge& e : adj[u] )
+        {
+            if( e.to > u && comm[u] == comm[e.to] )
+            {
+                pieces.unite( u, e.to );
+            }
+        }
+    }
+    return pieces;
+}
 
 // The deterministic Louvain local-moving core, shared by the symbol graph (unit weights, --communities) and
 // every CONTRACTED super-node level (summed weights, --zoom). `adj[i]` = i's weighted neighbours (no self-
@@ -21108,6 +21133,24 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
         }
     }
 
+    // CONNECTIVITY REFINEMENT. Local moving can pull a bridge node out of a community and leave the rest of it in two
+    // pieces that share no edge (Traag, Waltman & van Eck, Sci Rep 2019: up to 16% of Louvain communities disconnected).
+    // Each community is split into its connected pieces: a union-find over the intra-community edges, then every node is
+    // labelled by its piece's root, which UnionFind keeps at the piece's LOWEST node id. Splitting a community whose
+    // pieces share no edge always raises modularity (the pieces' expected-edge term drops, their observed edges do not),
+    // so this never trades quality for the guarantee. A connected community's label becomes its lowest node id, which is
+    // also the node the compaction below meets it at first, so when nothing is split the result is identical to the
+    // unrefined one. The contracted --zoom levels run through here too, and a group of super-nodes that is connected in
+    // the contracted graph is connected over symbols, because every super-node below it already is.
+    //
+    // NOT Leiden's full refinement: Leiden merges each community's nodes back up from singletons, which also repairs
+    // BADLY connected communities (the paper's other 25%); this step only guarantees connected ones.
+    UnionFind pieces = intraGroupPieces( adj, comm );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        comm[i] = pieces.find( i );
+    }
+
     // compact community ids to 0..K-1 in first-seen (node-id) order
     HashMap<std::uint32_t, std::uint32_t> remap;
     for( NodeId i = 0; i < N; ++i )
@@ -21159,9 +21202,40 @@ inline std::vector<std::vector<WEdge>> symbolAdjacency( const Graph& g )
     return adj;
 }
 
+// How many of `count` groups of the node→group map `comm` induce a subgraph of `adj` that is NOT connected: each group's
+// members must share one intraGroupPieces root. Integer-only and order-independent: the
+// count is a property of the partition, not of the walk that produced it.
+inline std::uint32_t disconnectedCommunityCount( const std::vector<std::vector<WEdge>>& adj, const std::vector<std::uint32_t>& comm,
+                                                 std::uint32_t count )
+{
+    const std::uint32_t N  = std::uint32_t( adj.size() );
+    UnionFind           uf = intraGroupPieces( adj, comm );
+    std::vector<NodeId>       rootOf( count, kNoNode );
+    std::vector<std::uint8_t> isSplit( count, 0u );
+    std::uint32_t             splitCount = 0;
+    for( NodeId i = 0; i < N; ++i )
+    {
+        const std::uint32_t c = comm[i];
+        const NodeId        r = uf.find( i );
+        if( rootOf[c] == kNoNode )
+        {
+            rootOf[c] = r;
+        }
+        else if( rootOf[c] != r && isSplit[c] == 0u )
+        {
+            isSplit[c] = 1u;
+            ++splitCount;
+        }
+    }
+    return splitCount;
+}
+
 inline Communities communities( const Graph& g )
 {
-    return louvainLocalMoving( symbolAdjacency( g ) );
+    const std::vector<std::vector<WEdge>> adj = symbolAdjacency( g );
+    Communities                           out = louvainLocalMoving( adj );
+    out.disconnected                          = disconnectedCommunityCount( adj, out.comm, out.count );
+    return out;
 }
 
 // ---- multi-level community zoom (--zoom): iteratively CONTRACT each community into a super-node and re-run
@@ -21181,6 +21255,10 @@ struct ZoomHierarchy
     // parentOf[L][child] = the level-(L+1) group that level-L group `child` belongs to (size counts[L]).
     // Empty for the top level. Lets the renderer nest a level directly under its parent with no recompute.
     std::vector<std::vector<std::uint32_t>> parentOf;
+    // disconnected[L] = how many of level L's counts[L] groups induce a NOT-connected subgraph of the SYMBOL graph (see
+    // Communities::disconnected). Measured over symbols, not super-nodes, so it checks the refinement's claim that a
+    // connected group of connected super-nodes is connected over symbols rather than restating it.
+    std::vector<std::uint32_t>              disconnected;
 };
 
 // contract a weighted graph `adj` (over `K` nodes) under a node→group map `comm` (`groups` groups): sum the
@@ -21232,6 +21310,7 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
     const Communities                     lvl0   = louvainLocalMoving( symAdj );
     h.levels.push_back( lvl0.comm );
     h.counts.push_back( lvl0.count );
+    h.disconnected.push_back( disconnectedCommunityCount( symAdj, lvl0.comm, lvl0.count ) );
     if( N == 0 )
     {
         return h;
@@ -21264,6 +21343,7 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
         h.parentOf.push_back( parent.comm );               // this level's super-node → the coarser level's group
         h.levels.push_back( symGroup );
         h.counts.push_back( parent.count );
+        h.disconnected.push_back( disconnectedCommunityCount( symAdj, symGroup, parent.count ) );
 
         adj = contractGraph( adj, parent.comm, parent.count );   // coarsen the current super-node graph one step
         for( NodeId i = 0; i < N; ++i )

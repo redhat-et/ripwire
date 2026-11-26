@@ -2885,7 +2885,8 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     // SAME module id emits shown=/capped= for the identical listing, so the two views of one module
     // disagreed about whether a cut had happened. Per rule 2, size= IS this element's total, so the pair is
     // the bare shown=/capped= form the drill verb uses, not a noun-prefixed one.
-    rw::emitTo( stdout, "<!-- ripwire communities: cohesive call-graph modules (Louvain); bridge=cross-module edges; isolated=call-graph-edgeless symbols; "
+    rw::emitTo( stdout, "<!-- ripwire communities: cohesive call-graph modules (Louvain, each split into its connected pieces); bridge=cross-module edges; isolated=call-graph-edgeless symbols; "
+                 "disconnected= modules whose members are not one connected piece of the call graph, 0 unless that split failed; "
                  "drill= names the verb that takes an id= from a row below. On each module row size= is its TRUE member count while "
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
@@ -2895,10 +2896,10 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
     // read a literal "&#45;&#45;". As an attribute value the flag is exact, parseable and pasteable.
-    rw::emitTo( stdout, "<communities drill=\"--community=ID\" modules=\"{}\" shown_modules=\"{}\" modules_capped=\"{}\" bridges=\"{}\" shown_bridges=\"{}\" bridges_capped=\"{}\" isolated=\"{}\" isolated_decl=\"{}\" isolated_header=\"{}\" isolated_source=\"{}\" isolated_doc=\"{}\" connected_singletons=\"{}\" symbols=\"{}\"{}{}{}>",
+    rw::emitTo( stdout, "<communities drill=\"--community=ID\" modules=\"{}\" shown_modules=\"{}\" modules_capped=\"{}\" bridges=\"{}\" shown_bridges=\"{}\" bridges_capped=\"{}\" isolated=\"{}\" isolated_decl=\"{}\" isolated_header=\"{}\" isolated_source=\"{}\" isolated_doc=\"{}\" connected_singletons=\"{}\" disconnected=\"{}\" symbols=\"{}\"{}{}{}>",
                  modules, shownModules, isModulesCapped,
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
-                 isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
+                 isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, cm.disconnected, N,
                  ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                  cmRootAttr.c_str(),
@@ -3112,6 +3113,11 @@ std::optional<int> runZoom( const MainDispatch& d )
         const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
 
         const std::size_t        L    = h.levels.size();                // ≥1 always (level 0 present)
+        std::uint32_t zoomDisconnected = 0;   // modules at ANY level whose members are not one connected piece of the call graph
+        for( std::uint32_t levelDisconnected : h.disconnected )
+        {
+            zoomDisconnected += levelDisconnected;
+        }
 
         // per-level, per-group: member symbol ids (for size, dominant dir, and leaf top-symbols). members[l][gid].
         std::vector<CommunityMembers> members( L );
@@ -3203,6 +3209,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             rw::emitTo( stdout, "{}", rw::renderDisclosure( prD, rw::DiscloseAs::MermaidNote ).c_str() );
             rw::emitTo( stdout, "%% ripwire --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
             rw::emitTo( stdout, "flowchart TB\n" );
+            rw::emitTo( stdout, "%% disconnected={} (modules at any level whose members are not one connected piece of the call graph)\n", zoomDisconnected );
             std::vector<char> esc;
             const auto ex = [ & ]( std::string_view s ) -> std::string { std::string r( s ); for( char& ch : r ) { if( ch == '"' ) { ch = '\''; } } return r; };
             // cut-fix E: the diagram's three fixed caps (10 top modules, 8 child modules, 5 symbols a subgraph) cut
@@ -3285,7 +3292,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             inHierarchy += members[topL][gid].size();
         }
         const std::uint32_t isolatedCount = N - std::uint32_t( inHierarchy );
-        rw::emitTo( stdout, "<!-- ripwire zoom: NESTED module hierarchy (multi-level Louvain); indent = one level deeper; module = dominant-dir(symbol-count); leaf lists top-ranked symbols; bridge = cross-top-module call traffic{}. "
+        rw::emitTo( stdout, "<!-- ripwire zoom: NESTED module hierarchy (multi-level Louvain, every level split into connected pieces); disconnected= modules at any level whose members are not one connected piece of the call graph, 0 unless that split failed; indent = one level deeper; module = dominant-dir(symbol-count); leaf lists top-ranked symbols; bridge = cross-top-module call traffic{}. "
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
@@ -3320,7 +3327,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // the lightest pairs), and the cut was silent: no total, no flag. secondaryCutAttrs is the pair plus the
         // total, present only on a cut (an uncut answer is byte-identical); no call pages it, so there is no next=.
         const std::size_t zoomBridgesShown = std::min<std::size_t>( kZoomBridgeCap, bridge.size() );
-        rw::emitTo( stdout, "<zoom levels=\"{}\" shown_levels=\"{}\" levels_capped=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, ( levelsShown < L ? 1 : 0 ), topOrder.size(), N, isolatedCount,
+        rw::emitTo( stdout, "<zoom levels=\"{}\" shown_levels=\"{}\" levels_capped=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\" disconnected=\"{}\"{}{}{}{}>", L, levelsShown, ( levelsShown < L ? 1 : 0 ), topOrder.size(), N, isolatedCount, zoomDisconnected,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, zoomCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
