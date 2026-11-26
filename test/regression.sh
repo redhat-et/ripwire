@@ -1099,6 +1099,7 @@ for _g in \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \
+    shardapartcheck \
     shellgateindexcheck \
     shellnestcheck \
     showcasecapturecheck \
