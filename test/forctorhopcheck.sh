@@ -31,6 +31,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_CTOR_HOP RIPWIRE_NO_INIT_SLOTS RIPWIRE_NO_MEMBER_NAMES RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): L1 reads the document's first comment (t.split("-->")[0]) as the legend that defines ctor_calls_more=; the question-sites legend comment now comes first; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forctorhopcheck: BIN=$BIN"
 fail=0

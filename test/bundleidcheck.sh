@@ -291,7 +291,7 @@ d = open( '$TMP/for.xml', 'rb' ).read()
 # θ11 (default on since THETA11-FLIP): the question-sites block (<!-- qs: --> + its <qs> elements, ahead of the trailing legend) is
 # outside est_tokens by design (its legend says so); the estimate is checked against the rest of the document
 import re
-d = re.sub( rb'<!-- qs:(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*', b'', d, flags = re.S ); b = len( d )
+d = re.sub( rb'<!-- qs:(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*(?=(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z)', b'', d, count = 1, flags = re.S ); b = len( d )
 a2 = d.find( b'<bodies ' ); b2 = d.find( b'</bodies>' )
 span = ( b2 + 9 ) - a2 if a2 >= 0 and b2 >= 0 else 0
 expected = ( b - span ) / 2.50 + span / 3.80

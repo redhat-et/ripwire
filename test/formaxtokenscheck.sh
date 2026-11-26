@@ -139,7 +139,7 @@ raw  = open( path, 'rb' ).read()
 raw  = re.sub( rb'<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>)', b'', raw, count = 1, flags = re.S )
 # THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites block DECLARES itself the same way ("outside
 # est_tokens and any budget" in its legend comment), so it is cut by the same rule; undeclared <qs> elements stay in and fail (C)
-raw  = re.sub( rb'<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*', b'', raw, count = 1, flags = re.S )
+raw  = re.sub( rb'<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*(?=(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z)', b'', raw, count = 1, flags = re.S )   # anchored to the answer's end: a copy quoted in a body stays
 bad  = []
 
 try:

@@ -16,7 +16,9 @@ import json, re
 # THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites block (<!-- qs: … outside est_tokens … --> and its
 # run of <qs> elements) rides after the last row block on its own 1,000 B, outside est_tokens by its own legend's declaration, so it
 # is one of these blocks too (QSITES); it is cut first, so an appended <syms> before it is again followed only by the legend.
-QSITES   = re.compile( r"<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)", re.S )
+# It is anchored to the END of the answer (only comments, then the root's own </ctx>), so a quoted copy inside a body CDATA, followed
+# by more body bytes, is never cut (CR 4701836519; strip_selftest "qs quoted").
+QSITES   = re.compile( r"<!-- qs:(?:(?!-->).)*?outside est_tokens(?:(?!-->).)*-->(?:<qs [^>]*>[^<]*</qs>)*(?=(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z)", re.S )
 APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>)", re.S )
 def strip_appended( t ):
     """The answer text less its appended, unpriced blocks (APPENDED, QSITES)."""
@@ -187,6 +189,12 @@ def strip_selftest():
               ( "held stub", '<ctx>' + body + held + '</ctx>', '<ctx>' + body + '</ctx>' ),
               ( "before <graph>", '<ctx>' + body + real + graph + '</ctx>', '<ctx>' + body + graph + '</ctx>' ),
               ( "twin: no block", '<ctx>' + body + '</ctx>', '<ctx>' + body + '</ctx>' ) ]
+    # THETA11-FLIP: a question-sites block quoted inside a body CDATA stays; the real trailing one (before the legend) is cut
+    qbody = '<b><![CDATA[<!-- qs: outside est_tokens --><qs t="x" n="1">a.c:1</qs></ctx>]]></b>'
+    qreal = '<!-- qs: t= the word, outside est_tokens and any budget --><qs t="y" n="1">b.c:2</qs><qs t="z" n="2">c.c:3,4</qs>'
+    cases += [ ( "qs quoted", '<ctx>' + qbody + '</ctx>', '<ctx>' + qbody + '</ctx>' ),
+               ( "qs quoted + real", '<ctx>' + qbody + qreal + '<!-- legend --></ctx>', '<ctx>' + qbody + '<!-- legend --></ctx>' ),
+               ( "qs after syms", '<ctx>' + body + real + qreal + '<!-- legend --></ctx>', '<ctx>' + body + '<!-- legend --></ctx>' ) ]
     bad = [ "%s: got %r" % ( name, strip_appended( src ) ) for name, src, want in cases if strip_appended( src ) != want ]
     # the bytes form (estchargecheck's A9/A10 readers): the same strip, and a non-UTF-8 byte outside the block survives it untouched
     raw = b'<ctx>\xff' + real.encode() + b'</ctx>'
