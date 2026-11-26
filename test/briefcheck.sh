@@ -43,6 +43,7 @@
 # usage: test/briefcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -389,15 +390,16 @@ if [ "$nh" = 11 ]; then ok "(H) co-change roles: catalog, corpus dir, docs, chan
 mkdir -p "$TMP/sec/src"
 printf 'cmake_minimum_required(VERSION 3.10)\nproject(sec C)\nadd_executable(sec src/a.c)\n' > "$TMP/sec/CMakeLists.txt"
 printf 'int a(void){return 1;}\nint b(void){return a();}\n' > "$TMP/sec/src/a.c"
-printf '# Agents\n\n## Build\n\n```\nmake test GITHUB_TOKEN=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789\n```\n' > "$TMP/sec/AGENTS.md"
+cp "$ROOT/test/redactfix/brief_agents.md" "$TMP/sec/AGENTS.md"   # the sanctioned credential-shaped fixture dir (ripwirepubliccheck arm 4)
 sec_cli() { ( cd "$TMP/sec" && "$BIN" . --no-cache "$@" "--brief=change a" 2>/dev/null ); }
 sec_mcp() { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"brief","arguments":{"path":".","task":"change a"}}}' | ( cd "$TMP/sec" && "$BIN" --mcp "$@" 2>/dev/null ) | tail -1; }
+SECRET="$( grep -o 'ghp_[A-Za-z0-9]*' "$ROOT/test/redactfix/brief_agents.md" )"
 ni=0
 sec_cli > "$TMP/i1.out"; sec_cli --no-redact > "$TMP/i2.out"; sec_mcp > "$TMP/i3.out"; sec_mcp --no-redact > "$TMP/i4.out"
-grep -qF 'make test' "$TMP/i2.out" && grep -qF 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' "$TMP/i2.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact CLI brief must quote the doc command raw: $( head -c 300 "$TMP/i2.out" )"
-grep -qF 'make test' "$TMP/i1.out" && ! grep -qF 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' "$TMP/i1.out" && ni=$(( ni + 1 )) || no "(I) the CLI brief leaks the doc fence's secret"
-grep -qF 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' "$TMP/i4.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact MCP brief must quote the doc command raw"
-grep -qF 'make test' "$TMP/i3.out" && ! grep -qF 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789' "$TMP/i3.out" && ni=$(( ni + 1 )) || no "(I) the MCP brief leaks the doc fence's secret"
+grep -qF 'make test' "$TMP/i2.out" && grep -qF "$SECRET" "$TMP/i2.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact CLI brief must quote the doc command raw: $( head -c 300 "$TMP/i2.out" )"
+grep -qF 'make test' "$TMP/i1.out" && ! grep -qF "$SECRET" "$TMP/i1.out" && ni=$(( ni + 1 )) || no "(I) the CLI brief leaks the doc fence's secret"
+grep -qF "$SECRET" "$TMP/i4.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact MCP brief must quote the doc command raw"
+grep -qF 'make test' "$TMP/i3.out" && ! grep -qF "$SECRET" "$TMP/i3.out" && ni=$(( ni + 1 )) || no "(I) the MCP brief leaks the doc fence's secret"
 rm -f "$TMP/sec/AGENTS.md"; mkfifo "$TMP/sec/AGENTS.md"
 ( sec_cli > "$TMP/i5.out" 2>/dev/null & bp=$!; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; kill -0 "$bp" 2>/dev/null || exit 0; done; kill -9 "$bp" 2>/dev/null; exit 1 ) && grep -q '^<brief ' "$TMP/i5.out" && ni=$(( ni + 1 )) || no "(I) a FIFO AGENTS.md blocked the brief or it printed nothing"
 if [ "$ni" = 5 ]; then ok "(I) file-derived text redacted on CLI and MCP (raw under --no-redact), FIFO convention doc skipped (5 of 5)"; else no "(I) quoted-text safety $ni of 5"; fi

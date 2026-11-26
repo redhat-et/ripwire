@@ -338,7 +338,7 @@ refuses "bare flag"         "--brief=FILE" "$CORPUS" --plan-lanes
 refuses "task AND brief"    "never both"   "$CORPUS" --plan-lanes=3 --task=x --brief="$COLL/brief.txt"
 refuses "unreadable brief"  "cannot read"  "$CORPUS" --plan-lanes   --brief="$TMP/definitely-not-here.txt"
 refuses "task without verb" "--plan-lanes" "$CORPUS" --task=x
-refuses "brief without verb" "--plan-lanes" "$CORPUS" --brief="$COLL/brief.txt"
+# (--brief=TEXT alone is the subagent brief verb since lane/brief-verb; it is no longer a refusal)
 refuses "count with brief"  "contradiction" "$CORPUS" --plan-lanes=3 --brief="$COLL/brief.txt"
 refuses "multi-root"        "single-root"  "$CORPUS" "$COLL" --plan-lanes=2 --task=x
 

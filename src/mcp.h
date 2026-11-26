@@ -1153,6 +1153,17 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
+// The MCP `brief` page: the CLI's composer over the warm index, then the run's secret redaction (null under --no-redact). The composer
+// quotes doc fences and manifests, text no other redacted seam has seen.
+inline std::string briefPageRedacted( const McpIndex& ix, std::string_view path, std::string_view task, std::string_view forPage,
+                                      std::size_t budgetBytes, RedactCounts* redact )
+{
+    std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = ix.ing, .g = ix.g, .diskRoot = path, .task = task, .forPage = forPage,
+                                                                         .budgetBytes = budgetBytes } );
+    redactInPlace( brief, redact );
+    return brief;
+}
+
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the
@@ -2812,13 +2823,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::optional<std::string> forPage = forTaskText( path, task, redactPtr );
                     const McpIndex&                  ix      = getIndex( path );
                     resp = !forPage ? errResult( -32603, "internal error: the brief's for page lost bytes — no brief served" )
-                                    : textResult( [&]
-                                      {
-                                          std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = ix.ing, .g = ix.g, .diskRoot = path, .task = task, .forPage = *forPage,
-                                                                                                               .budgetBytes = briefBytesArg.isPresent ? std::size_t( briefBytesArg.value ) : 0 } );
-                                          redactInPlace( brief, redactPtr );   // the composer quotes doc fences and manifests: same redaction as the for page
-                                          return brief;
-                                      }() );
+                                    : textResult( briefPageRedacted( ix, path, task, *forPage, briefBytesArg.isPresent ? std::size_t( briefBytesArg.value ) : 0, redactPtr ) );
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
