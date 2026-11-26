@@ -674,6 +674,7 @@ for _g in \
     helpbudgetcheck \
     helptaskdeadlinecheck \
     hermesinstallcheck \
+    historyhonestycheck \
     historyoraclecheck \
     historywalkcheck \
     honestlexcheck \

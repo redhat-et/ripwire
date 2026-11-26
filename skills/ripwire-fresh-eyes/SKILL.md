@@ -25,7 +25,7 @@ cheapest fact there is.
 | Question | Run |
 |---|---|
 | "what's gnarly here?" — the whole picture in one ranked report (six evidence families; a lens, not a gate) | `ripwire <dir> --quality-panel --legend=compact` |
-| where developers keep working AND the code is hard (`score = churn × ccx`, `top=` names the worst fn) | `ripwire <dir> --hotspots --legend=compact` (`--since="2 weeks ago"` for recent) |
+| where developers keep working AND the code is hard (`score = churn × ccx`, `top=` names the worst fn) | `ripwire <dir> --hotspots --legend=compact` (`--since="2 weeks ago"` for recent) — bot commits are left out (`bots_skipped=` after the answer); `--include-bots` keeps them |
 | what the repository has been moving lately | `ripwire <dir> --rank-by=churn-decay --legend=compact` |
 | what is built but DARK (compiled or flagged off) — "why don't I see feature X" | `ripwire <dir> --flags --legend=compact` · `--flip=NAME` for the blast radius of turning one on |
 | can I trust the docs? | `ripwire <dir> --doc-drift --legend=compact` |

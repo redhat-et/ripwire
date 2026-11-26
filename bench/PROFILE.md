@@ -174,6 +174,8 @@ change) — flagged here as the next perf target, likely batching into fewer git
 single `git log --name-status` walk shared across files (the same trick `gitCommitFileSets` already
 uses for co-change/churn).
 
+**2026-11-26 (lane/history-honesty), the shared history walk:** asking `git log -c` for ANY rename detection, even exact (`-M100%`), costs ~10x on merge-heavy history — kubernetes, 12-month window, git 2.50.1: 0.64 s → 6.13 s of git, `--hotspots` ~3 s → 8–11 s (n=3) — because it sets combine-diff.c's `need_generic_pathscan` and disables `find_paths_multitree` for every merge. The walk uses `--no-renames --raw --no-abbrev` and pairs exact moves itself instead (0.47 / 0.47 / 0.52 s of git; `--hotspots` 2.89 / 2.58 / 2.46 s); `src/gitmine.h` kGitLogRecordWalkArgs carries the numbers and `test/historyhonestycheck.sh` arm 12 refuses the flags.
+
 ### The drift alarm — `bench/perfgate.sh`
 New script: builds nothing, times a fixed corpus (this repo's own root — `src/` + `third_party/` +
 whatever the denylist keeps; ripwire takes one positional `<dir>` so `$ROOT` stands in for "src +

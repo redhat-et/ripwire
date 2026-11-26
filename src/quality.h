@@ -6368,7 +6368,11 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // SCHEME 5 (2026-11-01, HISTORY-WALK-HANG): the COMMAND changed under an unchanged key again (--no-renames, gitLogRecordsCmd:
 // a rename now lists its old path too), the scheme 2 case. The blob also carries the walk's budget cut, so a cached prefix
 // still says it is one.
-constexpr std::uint32_t kQChurnCacheScheme = 5;
+// SCHEME 6 (2026-11-26, lane/history-honesty): the command changed again (--raw --no-abbrev: an exact move is no path
+// and its file's older history is followed to the new path) and so did the policy applied to the stream (a bot-authored
+// commit carries no path unless --include-bots). The bot policy is now IN the key (gitRawCommitStreamCached) — a blob read under
+// one policy never answers the other — and the blob carries the walk's census, so a warm hit discloses what a cold one would.
+constexpr std::uint32_t kQChurnCacheScheme = 6;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )
@@ -6378,6 +6382,9 @@ inline std::string serializeRawCommitStream( const RawCommitStream& raw, const s
     qsnapPut( buf, kQChurnCacheScheme );
     qsnapPut( buf, fnv1a64( keyMat ) );
     qsnapPut( buf, std::uint32_t( raw.cut ) );
+    qsnapPut( buf, raw.census.botCommits );
+    qsnapPut( buf, raw.census.agentCommits );
+    qsnapPut( buf, raw.census.exactMoves );
     qsnapPut( buf, std::uint32_t( raw.commits.size() ) );
     for( const RawCommitStream::Commit& c : raw.commits )
     {
@@ -6436,13 +6443,17 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     {
         return false;
     }
+    RawCommitStream r;
+    r.cut = GitWalkCut( cutCode );
+    if( !qsnapGet( p, end, r.census.botCommits ) || !qsnapGet( p, end, r.census.agentCommits ) || !qsnapGet( p, end, r.census.exactMoves ) )
+    {
+        return false;
+    }
     std::uint32_t nCommits = 0;
     if( !qsnapGet( p, end, nCommits ) || !qsnapCountFits( p, end, nCommits, kMinCommitRecordBytes ) )
     {
         return false;
     }
-    RawCommitStream r;
-    r.cut = GitWalkCut( cutCode );
     r.commits.reserve( nCommits );
     for( std::uint32_t i = 0; i < nCommits; ++i )
     {
@@ -6523,12 +6534,15 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     // The budget is in the key: a prefix cut under one budget must not answer a run that raised it.
     keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxCommits() );
     keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxSeconds() );
+    // The bot policy is in the key: a stream read with bot commits left out must not answer --include-bots, nor the reverse.
+    keyMat.push_back( '\x1f' ); keyMat += gitBotPolicyKey();
     const std::string cachePath = shaKeyedCachePath( "qchurn", repoHex, std::string{}, keyMat );
 
     RawCommitStream                  raw;
     const std::optional<std::string> blob = readQSnapBlob( cachePath );
     if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) && !( noCache && raw.cut != GitWalkCut::None ) )
     {
+        noteGitHistoryCensus( raw.census );                                        // a warm hit discloses what the cold walk did
         return raw;                                                                // warm hit — no walk
     }
     raw = RawCommitStream{};   // a stored cut that --no-cache refused to read is walked again
