@@ -228,6 +228,31 @@ else
     fail=1
 fi
 
+# ── 2c: ONLY A CONSTANT LITERAL IS A LITERAL NEEDLE (compile-fail arms) ─────────────────────────────────
+# strkern::find( hay, "lit" ) takes strkern::Literal, whose constructor is consteval: its length N - 1 is a compile-time constant,
+# so an array that is NOT a constant must be refused by the compiler rather than searched as an N - 1 byte needle whatever it
+# holds. CAN GO RED: make Literal's constructor constexpr (or let the runtime overload accept arrays) and the two fail TUs
+# compile. The control TU (a literal, a std::string, a string_view, a const char*) must compile, so the arm is not vacuous.
+lit_tu(){ printf '#include "infra/strkern.h"\n#include <string>\nint main( int argc, char** argv )\n{\n    (void)argc; (void)argv;\n    %s\n}\n' "$2" > "$WORK/lit_$1.cpp"
+          "$CXX" "$CXXSTD" -fsyntax-only -I"$ROOT/src/infra" -I"$ROOT/src" "$WORK/lit_$1.cpp" > "$WORK/lit_$1.log" 2>&1; }
+LIT_OK=1
+if ! lit_tu control 'const std::string s( argv[ 0 ] ); const char* p = argv[ 0 ]; return int( rw::strkern::find( s, "ab" ) + rw::strkern::find( s, s ) + rw::strkern::find( s, std::string_view( p ) ) + rw::strkern::find( s, p ) );'; then
+    echo "  FAIL  literal needle: the control TU (literal / std::string / string_view / const char* needles) does not compile:"
+    sed 's/^/        /' "$WORK/lit_control.log" | head -10
+    LIT_OK=0; fail=1
+fi
+if lit_tu mutable 'char buf[ 8 ] = "ab"; buf[ 0 ] = char( argc ); return int( rw::strkern::find( argv[ 0 ], buf ) );'; then
+    echo "  FAIL  literal needle: a mutable char buf[ 8 ] compiled as a needle (it would be searched as 7 bytes)"
+    LIT_OK=0; fail=1
+fi
+if lit_tu runtime_const 'const char c[ 3 ] = { char( argc ), argv[ 0 ][ 0 ], 0 }; return int( rw::strkern::find( argv[ 0 ], c ) );'; then
+    echo "  FAIL  literal needle: a const char array with runtime contents compiled as a needle"
+    LIT_OK=0; fail=1
+fi
+if [ "$LIT_OK" = 1 ]; then
+    printf '  PASS  literal needle: a literal / std::string / string_view / const char* compile; char buf[ 8 ] and a runtime const array are refused\n'
+fi
+
 # A cross-arch slice that Rosetta 2 cannot run fails at EXEC (rc 126, "Bad CPU type in executable",
 # "cannot execute binary file", "Exec format error"); that — and only that — is the environment saying
 # no. A slice that RAN and exited nonzero (a doctest assertion, an abort) is a red, never a SKIP

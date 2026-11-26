@@ -1395,6 +1395,99 @@ TEST_CASE( "strkern: D2 find == std::string_view::find, both paths, exact-size b
     CHECK( fail.empty() );
 }
 
+// D2's literal rows: find( hay, "literal", from ) takes the Literal overload (a compile-time length), which must agree with
+// std::string_view::find( "literal", from ) for every start, at every literal length 1..16. The literals are spelled over D2's dense
+// alphabet so they occur. (The other half of the Literal contract, that a RUNTIME char array does not compile as a needle, is a
+// compile-fail arm in test/strkerncheck.sh: a TU that passes `char buf[ 8 ]` must be refused by the compiler.)
+std::uint32_t literalLengthsSeen = 0;   // bit m set once a row of literal length m ran: D2b asserts exactly 1..16
+
+template<class Probe>
+std::string literalVsStd( std::string_view hay, std::size_t literalLength, Probe&& probe )
+{
+    literalLengthsSeen |= std::uint32_t( 1 ) << literalLength;
+    const std::unique_ptr<char[]> exact( new char[ hay.size() ] );
+    std::memcpy( exact.get(), hay.data(), hay.size() );
+    const std::string_view view( exact.get(), hay.size() );
+    for( std::size_t from = 0; from <= hay.size() + 1; ++from )
+    {
+        const auto [ got, want ] = probe( view, from );
+        if( got != want )
+        {
+            return "literal m=" + std::to_string( literalLength ) + " n=" + std::to_string( hay.size() ) + " from=" + std::to_string( from )
+                 + " got=" + std::to_string( got ) + " want=" + std::to_string( want );
+        }
+    }
+    return {};
+}
+
+#define STRKERN_LITERAL_ROW( LIT )                                                                                                     \
+    literalVsStd( hay, sizeof( LIT ) - 1, []( std::string_view h, std::size_t from ) {                                                 \
+        return std::pair<std::size_t, std::size_t>{ sk::find( h, LIT, from ), h.find( LIT, from ) };                                    \
+    } )
+
+TEST_CASE( "strkern: D2b find( hay, literal ) == std::string_view::find for literal lengths 1..16, every start, exact-size buffers" )
+{
+    DeterministicRng gen{ 0xD2B11EEDull };
+    std::string      fail;
+    std::size_t      rows = 0;
+    for( int iter = 0; iter < 600; ++iter )
+    {
+        const std::string hay = drawNeedleText( gen, std::size_t( gen.next() % 97u ), true );
+        const std::string why[] = {
+            STRKERN_LITERAL_ROW( "a" ),         STRKERN_LITERAL_ROW( "ab" ),         STRKERN_LITERAL_ROW( "a\nb" ),
+            STRKERN_LITERAL_ROW( "abba" ),      STRKERN_LITERAL_ROW( "ab\nab" ),     STRKERN_LITERAL_ROW( "aabbaa" ),
+            STRKERN_LITERAL_ROW( "ab\nb\nab" ), STRKERN_LITERAL_ROW( "abababab" ),   STRKERN_LITERAL_ROW( "a\naa\nbb\na" ),
+            STRKERN_LITERAL_ROW( "abaabbaaab" ), STRKERN_LITERAL_ROW( "ab\nab\nab\nab" ), STRKERN_LITERAL_ROW( "aaaaaaaaaaaa" ),
+            STRKERN_LITERAL_ROW( "abab\nbaba\naba" ), STRKERN_LITERAL_ROW( "a\nb\na\nb\na\nb\nab" ), STRKERN_LITERAL_ROW( "abbaabbaabbaabb" ),
+            STRKERN_LITERAL_ROW( "ab\nab\nab\nab\nab\na" ),
+        };
+        for( const std::string& w : why )
+        {
+            ++rows;
+            if( fail.empty() ) { fail = w; }
+        }
+    }
+    INFO( "rows: ", rows, "  lengths mask: ", literalLengthsSeen, "  first divergence: ", fail );
+    CHECK( rows == 600u * 16u );
+    CHECK( literalLengthsSeen == 0x1FFFEu );   // every literal length 1..16, and no other
+    CHECK( fail.empty() );
+}
+
+// D2c — find's dispatch boundaries, each one -1 / at / +1: the one-byte memchr cutoff, one and two vector blocks of starts (the literal
+// cutoff, the final overlapped block), the four-block loop's 64 starts and the blocks after it; with a first byte find hands to the
+// block kernel ('a' 'b' '\n' are in kCommonLeadBytes) and one it hands to std ('#' ']' '<' are not). Every start is walked, so every
+// "bytes left" up to n is reached, on both paths, in exact-size buffers.
+TEST_CASE( "strkern: D2c find == std::string_view::find at every dispatch boundary -1/0/+1, common and rare first byte, both paths" )
+{
+    std::string      fail;
+    std::size_t      caseCount = 0;
+    DeterministicRng gen{ 0xD2C0FFEEull };
+    for( const std::size_t m : { 1u, 2u, 3u, 4u, 5u, 8u, 15u, 16u, 17u, 31u, 32u, 33u } )
+    {
+        const std::size_t b = sk::kFindBlockStarts;
+        for( const std::size_t cut : { sk::kFindMemchrCutoff, m + b - 1, m + 2 * b - 1, m + 63, m + 64 + b - 1, m + 127, m + 128 } )
+        {
+            for( const std::size_t n : { cut - 1, cut, cut + 1 } )
+            {
+                for( const char* alphabet : { "ab\n", "#]<" } )
+                {
+                    std::string hay( n, '\0' );
+                    for( char& c : hay ) { c = alphabet[ gen.next() % 3u ]; }
+                    std::string needle( m, '\0' );
+                    for( char& c : needle ) { c = alphabet[ gen.next() % 3u ]; }
+                    if( m <= n && ( gen.next() & 1 ) ) { needle.assign( hay, std::size_t( gen.next() % ( n - m + 1 ) ), m ); }
+                    ++caseCount;
+                    if( fail.empty() ) { fail = needleVsStd( hay, needle ); }
+                }
+            }
+        }
+    }
+    INFO( "cases: ", caseCount, "  path: ", sk::kPathName, "  first divergence: ", fail );
+    CHECK( caseCount == 12u * 7u * 3u * 2u );
+    CHECK( fail.empty() );
+}
+#undef STRKERN_LITERAL_ROW
+
 // D3's text: mixed-case letters next to the fold's edges ('@' = 'A' - 1, '[' = 'Z' + 1, '`', '{'), the high-bit images of A-Z and a-z
 // (0xC1, 0xDA, 0xE1, 0xFA: a byte >= 0x80 must never fold, and the SWAR fold must not borrow across one), 0x80, 0xFF and '\n'.
 std::string drawCiText( DeterministicRng& gen, std::size_t n )

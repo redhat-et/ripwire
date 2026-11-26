@@ -66,6 +66,7 @@
 #include <cstring>
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
 #include <string_view>
+#include <type_traits>     // std::is_array_v / is_convertible_v — find's literal vs runtime-needle overloads
 
 #if defined( __ARM_NEON )
     #include <arm_neon.h>
@@ -594,6 +595,27 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
         }
         k += 8;
     }
+    const std::size_t starts = n - span + 1;
+    if( k < starts && starts >= 8 )            // the last 1..7 starts: one more word ending at the last start, its already-tested
+    {                                          // starts (below k) masked off — no byte loop once there are eight starts. The mask
+                                               // clears the LOW bits ( ~( 2^s - 1 ) ), never shifts set bits out: G1's integer
+                                               // sanitizer rejects an unsigned shift that loses bits
+        const std::size_t at0 = starts - 8;
+        std::uint64_t     a = 0, b = 0;
+        std::memcpy( &a, p + at0, 8 );
+        std::memcpy( &b, p + at0 + span - 1, 8 );
+        std::uint64_t mask = swarZeroByteMask( Fold::swar8( a ) ^ n0 ) & swarZeroByteMask( Fold::swar8( b ) ^ nl ) & ~( ( 1ull << ( 8 * ( k - at0 ) ) ) - 1 );
+        while( mask != 0 )
+        {
+            const std::size_t at = at0 + ( std::size_t( std::countr_zero( mask ) ) >> 3 );
+            if( verify( at ) )
+            {
+                return at;
+            }
+            mask &= mask - 1;
+        }
+        return n;
+    }
     for( ; k + span <= n; ++k )
     {
         if( Fold::one( p[ k ] ) == first && Fold::one( p[ k + span - 1 ] ) == last && verify( k ) )
@@ -616,44 +638,125 @@ inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends
 #if defined( __ARM_NEON )
     const uint8x16_t s0 = vdupq_n_u8( static_cast<std::uint8_t>( first ) );
     const uint8x16_t sl = vdupq_n_u8( static_cast<std::uint8_t>( last ) );
-    while( k + span + 15 <= n )                // sixteen starts, each with the whole needle in range
+    const auto block = [ & ]( std::size_t at0 ) noexcept   // the candidates of the sixteen starts at0..at0+15
     {
-        const uint8x16_t v0   = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) ) );
-        const uint8x16_t vl   = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k + span - 1 ) ) );
-        std::uint64_t    mask = neonNibbleMask( vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( vl, sl ) ) );
+        const uint8x16_t v0 = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + at0 ) ) );
+        const uint8x16_t vl = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + at0 + span - 1 ) ) );
+        return vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( vl, sl ) );
+    };
+    const auto verifyEach = [ & ]( std::size_t at0, std::uint64_t mask ) noexcept
+    {
         while( mask != 0 )
         {
             // one NIBBLE per input byte, so the lowest set bit sits at 4 * byteIndex and clearing the
             // candidate means clearing its whole nibble — `mask &= mask - 1` (the bit-per-byte idiom) would
             // spin on the other three bits of the same byte.
             const int         lowBit = std::countr_zero( mask );
-            const std::size_t at     = k + ( std::size_t( lowBit ) >> 2 );
+            const std::size_t at     = at0 + ( std::size_t( lowBit ) >> 2 );
             if( verify( at ) )
             {
                 return at;
             }
             mask &= ~( 0xFull << ( lowBit & ~3 ) );
         }
+        return n;
+    };
+    // Four blocks per test: sixty-four starts, one OR-reduced mask, so a stretch with no candidate costs one branch per 64 B (the
+    // one-block loop below measured 0.6x libc's memchr-led std find on a rare first byte; this one is its equal or better).
+    while( k + span + 63 <= n )
+    {
+        const uint8x16_t c0 = block( k ), c1 = block( k + 16 ), c2 = block( k + 32 ), c3 = block( k + 48 );
+        if( neonNibbleMask( vorrq_u8( vorrq_u8( c0, c1 ), vorrq_u8( c2, c3 ) ) ) != 0 )
+        {
+            const uint8x16_t cs[ 4 ] = { c0, c1, c2, c3 };
+            for( std::size_t b = 0; b < 4; ++b )
+            {
+                const std::size_t at = verifyEach( k + 16 * b, neonNibbleMask( cs[ b ] ) );
+                if( at != n )
+                {
+                    return at;
+                }
+            }
+        }
+        k += 64;
+    }
+    while( k + span + 15 <= n )                // sixteen starts, each with the whole needle in range
+    {
+        const std::size_t at = verifyEach( k, neonNibbleMask( block( k ) ) );
+        if( at != n )
+        {
+            return at;
+        }
         k += 16;
     }
+    const std::size_t starts = n - span + 1;
+    if( starts >= 16 )                         // the last 0..15 starts: one block ending at the last start, the starts below k (tested
+    {                                          // already) masked off, so a haystack of sixteen starts or more never reaches the scalar tail
+        if( k == starts )
+        {
+            return n;
+        }
+        const std::size_t at0 = starts - 16;
+        return verifyEach( at0, neonNibbleMask( block( at0 ) ) & ~( ( 1ull << ( 4 * ( k - at0 ) ) ) - 1 ) );
+    }
 #elif defined( __AVX2__ )
-    const __m256i s0 = _mm256_set1_epi8( first );
-    const __m256i sl = _mm256_set1_epi8( last );
-    while( k + span + 31 <= n )                // thirty-two starts, each with the whole needle in range
+    const __m256i s0    = _mm256_set1_epi8( first );
+    const __m256i sl    = _mm256_set1_epi8( last );
+    const auto    block = [ & ]( std::size_t at0 ) noexcept   // the candidates of the thirty-two starts at0..at0+31
     {
-        const __m256i v0   = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) ) );
-        const __m256i vl   = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k + span - 1 ) ) );
-        std::uint32_t mask = std::uint32_t( _mm256_movemask_epi8( _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( vl, sl ) ) ) );
+        const __m256i v0 = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + at0 ) ) );
+        const __m256i vl = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + at0 + span - 1 ) ) );
+        return _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( vl, sl ) );
+    };
+    const auto verifyEach = [ & ]( std::size_t at0, std::uint32_t mask ) noexcept
+    {
         while( mask != 0 )
         {
-            const std::size_t at = k + std::size_t( std::countr_zero( mask ) );
+            const std::size_t at = at0 + std::size_t( std::countr_zero( mask ) );
             if( verify( at ) )
             {
                 return at;
             }
             mask &= mask - 1;
         }
+        return n;
+    };
+    // Two blocks per test (sixty-four starts), the NEON loop's shape: one OR-reduced test per 64 B.
+    while( k + span + 63 <= n )
+    {
+        const __m256i c0 = block( k ), c1 = block( k + 32 );
+        if( !_mm256_testz_si256( _mm256_or_si256( c0, c1 ), _mm256_or_si256( c0, c1 ) ) )
+        {
+            std::size_t at = verifyEach( k, std::uint32_t( _mm256_movemask_epi8( c0 ) ) );
+            if( at == n )
+            {
+                at = verifyEach( k + 32, std::uint32_t( _mm256_movemask_epi8( c1 ) ) );
+            }
+            if( at != n )
+            {
+                return at;
+            }
+        }
+        k += 64;
+    }
+    while( k + span + 31 <= n )                // thirty-two starts, each with the whole needle in range
+    {
+        const std::size_t at = verifyEach( k, std::uint32_t( _mm256_movemask_epi8( block( k ) ) ) );
+        if( at != n )
+        {
+            return at;
+        }
         k += 32;
+    }
+    const std::size_t starts = n - span + 1;
+    if( starts >= 32 )                         // the last 0..31 starts: one block ending at the last start, as on NEON
+    {
+        if( k == starts )
+        {
+            return n;
+        }
+        const std::size_t at0 = starts - 32;
+        return verifyEach( at0, std::uint32_t( _mm256_movemask_epi8( block( at0 ) ) ) & ~( ( 1u << ( k - at0 ) ) - 1 ) );
     }
 #endif
     const std::size_t tail = findByEndBytes_scalar<Fold>( p + k, n - k, ends, [ &verify, k ]( std::size_t at ) { return verify( k + at ); } );
@@ -715,21 +818,105 @@ inline std::size_t findNeedle( const char* p, std::size_t n, const char* needle,
     return m == 0 ? 0 : findByEndBytesOn( path, p, n, { needle[ 0 ], needle[ m - 1 ], m }, WholeNeedleMatches{ p, needle, m } );
 }
 
+// find's dispatch, from bench/bench_strkern_find.cpp (arm64 M2, cache-hot cuts of src/ + docs/, best of 9 rounds of thread CPU
+// time, ns per find call; the tables and how to re-run them are in bench/STRKERN_FIND.md). Which find is fastest depends on
+// three things, so find asks all three, cheapest first:
+//   * the LENGTHS: a needle longer than what is left is npos with no byte read — std's answer, inlined here, never a call.
+//   * the needle's FIRST BYTE: std's search is memchr for the first byte, then a compare. When that byte is rare, memchr strides
+//     through the text faster than the two-byte block filter (one compare per byte, not two), so a needle whose first byte is not in
+//     kCommonLeadBytes goes to std — "]]>" over 1 KB: std 34 ns, the block kernel 46 ns. When it is common, memchr stops at every
+//     occurrence and the block kernel wins at every size: 0.4x std at 16 B, 0.2x at 32-64 B, 0.1-0.2x from 256 B up.
+//   * a ONE-byte needle is memchr from kFindMemchrCutoff bytes up (the kernel's equal there); below it the kernel (0.76-0.97x).
+// A LITERAL needle (the Literal overload) has a constant length, which lets the compiler specialize std's search for it; below a
+// block of start positions that inlined std is the faster (2-5 ns against the kernel's 6-7), so a literal goes to the kernel only from
+// kFindBlockStarts start positions up, and only with a common first byte.
+inline constexpr std::size_t kFindMemchrCutoff = 16;
+inline constexpr std::size_t kFindBlockStarts  = kBlockBytes;   // one vector block of start positions (16 NEON, 32 AVX2)
+
+// The bytes that are COMMON at the start of a needle: every byte at >= 0.5 % of the text in each of three corpora (this repo's
+// src/ + docs/, VS Code's src/, Envoy's source/; 2026-11-26, 20 MB each). A byte outside it is rare enough that std's memchr-led
+// search is the faster find (see the dispatch note above). A wrong guess costs speed near the break-even, never an answer.
+struct LeadByteTable
+{
+    bool common[ 256 ] = {};
+};
+consteval LeadByteTable leadByteTableOf( std::string_view bytes )
+{
+    LeadByteTable t;
+    for( const char c : bytes ) { t.common[ static_cast<unsigned char>( c ) ] = true; }
+    return t;
+}
+inline constexpr LeadByteTable kCommonLeadBytes = leadByteTableOf( "\n (),.:=abcdefghilmnoprstuvy" );
+
+// find's dispatch is INLINED into every caller: its early outs (from past the end, empty needle, needle longer than the rest) are
+// then a compare or two where std's are, instead of a call. The measured cost of a call was 1.5 ns on a 1.3 ns std answer.
+#if defined( _MSC_VER ) && !defined( __clang__ )
+    #define RW_STRKERN_ALWAYS_INLINE __forceinline
+#else
+    #define RW_STRKERN_ALWAYS_INLINE [[gnu::always_inline]] inline
+#endif
+
 // THE string-find utility (CONTRIBUTING.md §3 "String search"): the first occurrence of `needle` in `hay` at or after `from`, or
 // std::string_view::npos. Contract: byte-identical to `hay.find( needle, from )` for EVERY input — npos when `from > hay.size()`
 // or there is no occurrence, `from` for an empty needle — so a call site swaps one for the other with no other change, and walking from
 // `hit + 1` yields every occurrence, overlapping ones included, in order. The proof is D2 in test/verify_strkern.cpp, a property
-// test against std::string_view::find over every `from` of chosen and random inputs, on both paths, in exact-size heap buffers
-// under ASan + UBSan (test/strkerncheck.sh). The scalar/NEON/AVX2 choice is made inside; `path` exists for that test alone.
-// Use it in hot loops over file text; a one-off probe of a short string gains nothing over std::string_view::find.
-[[nodiscard]] inline std::size_t find( std::string_view hay, std::string_view needle, std::size_t from = 0,
-                                       KernelPath path = KernelPath::Vector ) noexcept
+// test against std::string_view::find over every `from` of chosen and random inputs, on every path and either side of each cutoff,
+// in exact-size heap buffers under ASan + UBSan (test/strkerncheck.sh). The scalar/NEON/AVX2 choice is made inside; `path`
+// exists for that test alone (KernelPath::Scalar runs the scalar twin with no dispatch). It is the fastest find at every measured
+// size — never slower than std in any cell of bench/bench_strkern_find.cpp, which fails red if it ever is — so it is the one to
+// use everywhere (see the dispatch note above).
+[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t findIn( std::string_view hay, std::string_view needle, std::size_t from, KernelPath path ) noexcept
 {
     if( from > hay.size() ) { return std::string_view::npos; }
-    if( needle.empty() ) { return from; }
-    const std::size_t left = hay.size() - from;
-    const std::size_t at   = findNeedle( hay.data() + from, left, needle.data(), needle.size(), path );
+    const std::size_t left = hay.size() - from, m = needle.size();
+    if( m == 0 ) { return from; }
+    if( m > left ) { return std::string_view::npos; }
+    if( path == KernelPath::Vector )
+    {
+        if( m == 1 && left >= kFindMemchrCutoff ) { return hay.find( needle[ 0 ], from ); }
+        if( m > 1 && !kCommonLeadBytes.common[ static_cast<unsigned char>( needle[ 0 ] ) ] ) { return hay.find( needle, from ); }
+    }
+    const std::size_t at = findNeedle( hay.data() + from, left, needle.data(), m, path );
     return at == left ? std::string_view::npos : from + at;
+}
+
+// A string LITERAL needle, checked at compile time: the constructor is consteval, so only a constant array binds (a runtime
+// `char buf[ 64 ]` is a compile error, never a 63-byte needle), it must end in its NUL, and it may hold no other NUL (std's
+// `hay.find( "a\0b" )` stops at the first one; refusing it keeps the two spellings from meaning different needles). Its length is
+// a constant where find inlines, so the one-byte and long-needle branches fold away.
+struct Literal
+{
+    const char* text       = nullptr;
+    std::size_t size       = 0;
+    bool        commonLead = false;   // kCommonLeadBytes holds text[ 0 ]: decided at compile time
+    template<std::size_t N>
+    consteval Literal( const char ( &s )[ N ] )   // NOLINT(google-explicit-constructor): the implicit conversion IS the feature
+        : text( s ), size( N - 1 ), commonLead( N > 1 && kCommonLeadBytes.common[ static_cast<unsigned char>( s[ 0 ] ) ] )
+    {
+        if( s[ N - 1 ] != '\0' ) { throw "strkern::Literal: the array does not end in its NUL"; }   // a throw in consteval = compile error
+        for( std::size_t i = 0; i + 1 < N; ++i )
+        {
+            if( s[ i ] == '\0' ) { throw "strkern::Literal: an embedded NUL would end std's needle early"; }
+        }
+    }
+};
+
+// find( hay, "literal", from ): the literal overload (a string literal reaches only this one).
+[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t find( std::string_view hay, Literal needle, std::size_t from = 0 ) noexcept
+{
+    const std::string_view n( needle.text, needle.size );
+    if( !needle.commonLead || from > hay.size() || hay.size() - from < needle.size + kFindBlockStarts - 1 ) { return hay.find( n, from ); }
+    return findIn( hay, n, from, KernelPath::Vector );
+}
+
+// find( hay, needle, from ): any runtime needle that converts to std::string_view — a std::string, a string_view, a const char*.
+// An ARRAY needle is left to the Literal overload above, so a literal takes the checked, constant-length path and a runtime char
+// array does not compile (spell it std::string_view( buf ) to search its strlen bytes, as std does).
+template<class Needle>
+    requires( std::is_convertible_v<const Needle&, std::string_view> && !std::is_array_v<Needle> )
+[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t find( std::string_view hay, const Needle& needle, std::size_t from = 0, KernelPath path = KernelPath::Vector ) noexcept
+{
+    return findIn( hay, std::string_view( needle ), from, path );
 }
 
 // The ASCII case-insensitive twin of find: the first start at or after `from` where `hay`, A-Z-folded, equals `needleLowered`, or
@@ -742,8 +929,9 @@ inline std::size_t findNeedle( const char* p, std::size_t n, const char* needle,
     if( from > hay.size() ) { return std::string_view::npos; }
     const std::size_t m = needleLowered.size();
     if( m == 0 ) { return from; }
-    const char* const p    = hay.data() + from;
     const std::size_t left = hay.size() - from;
+    if( m > left ) { return std::string_view::npos; }   // from the lengths alone, as find answers it
+    const char* const p = hay.data() + from;
     const std::size_t at   = findByEndBytesOn<AsciiLowerBytes>( path, p, left, { needleLowered[ 0 ], needleLowered[ m - 1 ], m },
                                                                 LowerFoldedNeedleMatches{ p, needleLowered.data(), m } );
     return at == left ? std::string_view::npos : from + at;
