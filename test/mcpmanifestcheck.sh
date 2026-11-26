@@ -476,6 +476,16 @@ for n in drift[ :5 ]:
            % ( n, pins[ n ][ :180 ], live[ n ][ :180 ] ) )
 check( not drift, "(2) every routing sentence is byte-identical to its pin (%d checked)" % len( pins ) )
 
+# (2c) audit 2026-11-26 item 9: the routing sentence opens with the MOMENT to use the tool, not its mechanism. Past 10K
+# tokens Claude Code defers the tool definitions and tool search scores names and descriptions, so the first words a
+# deferred search reads should be the agent's situation: a question it has ("Who calls X directly?"), a moment
+# ("Before renaming", "At the start of non-trivial work"), or, for the write verbs, the action itself.
+MOMENT_OPENERS = ( "Before ", "BEFORE ", "After ", "At the start", "When ", "Just ", "Paste ", "Your ", "ONE-", "ONE ", "PIN ",
+                   "WHAT ", "WHICH ", "WHERE ", "IS IT ", "Does ", "Replace ", "Insert " )
+mechanismLed = [ n for n, f in sorted( live.items() ) if not ( "?" in f[ :60 ] or f.startswith( MOMENT_OPENERS ) ) ]
+check( not mechanismLed, "(2c) every routing sentence opens with the moment to use the tool (%d lead with mechanism: %s)"
+       % ( len( mechanismLed ), ",".join( mechanismLed ) ) )
+
 # A description that is ONLY its first sentence has nothing left to say about its arguments; a description
 # whose first sentence is most of its bytes has not been trimmed, it has been truncated. Both are shapes a
 # size ceiling alone would reward, so the ceiling is paired with a floor.
