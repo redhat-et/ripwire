@@ -3312,10 +3312,11 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     return prec;
 }
 
-// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only) and nothing
+// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only), or --whereis
+// (WHEREIS-NO-GRAPH: the ingest and git, test/whereisnographcheck.sh), and nothing
 // that runs between the graph build and dispatch reads the graph: --pin-census writes g.pinCensus; --metrics, --for and
 // --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
-// those keeps the build, so a combination answers exactly as before. Everything else that outranks --deps/--arch is a verb
+// those keeps the build, so a combination answers exactly as before. Everything else that outranks the three is a verb
 // row above them in the precedence table, so it would have been the winner.
 // The graph for a run with a warm snapshot armed: the stored one when every guard in warmsnap.h holds, else a build whose
 // outcome becomes the next run's stored one.
@@ -3353,7 +3354,10 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
 
 bool graphUnreadByWinner( const rw::Config& c, const char* winner )
 {
-    const bool archWins = winner != nullptr && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 );
+    // WHEREIS-NO-GRAPH: --whereis joins them — runCrossRef's arm reads d.ing (seed, def sites, near-miss), the redaction
+    // tally and the repo's refs (crossref::computeWhereis), never d.g. Its MCP twin answers from getIndex(), not from here.
+    const bool archWins = winner != nullptr
+                          && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 || std::strcmp( winner, "--whereis" ) == 0 );
     const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
                                     || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
     return archWins && !modifierReadsGraph;
@@ -6316,9 +6320,10 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), so when one of
-    // them is the dispatch WINNER (§B11.4's own scan, not cfg.deps: `--deps --callers` still answers --deps, but a graph verb
-    // that outranks it would not) and no modifier reads the graph before dispatch, the build is skipped and `g` stays empty.
+    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), and --whereis from
+    // the ingest and git (WHEREIS-NO-GRAPH), so when one of them is the dispatch WINNER (§B11.4's own scan, not cfg.deps:
+    // `--deps --callers` still answers --deps, but a graph verb that outranks it would not) and no modifier reads the graph
+    // before dispatch, the build is skipped and `g` stays empty.
     const bool graphUnread = graphUnreadByWinner( cfg, verbPrec.winner );
     const Graph       g               = [ & ]
     {
@@ -6335,9 +6340,9 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         }
     }();
     finishWarmSnapshot( warmSnap );
-    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
+    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch/--whereis, the ingest) and the verbs
     {
-        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );
+        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (a verb that reads no graph: after the ingest) — exit 5, one stderr line" );
         rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( graphUnread ? "ingest" : "graph build" ) );
         rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
