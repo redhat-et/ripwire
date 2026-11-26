@@ -169,7 +169,7 @@ def run_ripwire( binary, crawl, files ):
 
 
 def parse_situ_partners( text ):
-    """Rows of section [3]: '        <path>  (co-edited in N% of commits)'."""
+    """Rows of section [3]: '        <path>  (co-edited in N% of commits[, together=K[, why=W]])'."""
     rows = []
     inside = False
     for line in text.splitlines():
@@ -179,7 +179,7 @@ def parse_situ_partners( text ):
         if inside:
             if not line.startswith( "        " ):
                 break
-            m = re.match( r"^\s+(\S.*?)  \(co-edited in \d+% of commits\)$", line )
+            m = re.match( r"^\s+(\S.*?)  \(co-edited in \d+% of commits(?:, [^()]*)?\)$", line )
             if m:
                 rows.append( m.group( 1 ) )
     return rows
@@ -373,8 +373,9 @@ def self_test():
     situ = ( "  [3] co-change — usually edited with these but NOT in your diff (2) window=\"18mo@HEAD\" commits=\"5\":\n"
              "        src/b.c  (co-edited in 80% of commits)\n"
              "        lib/x y.c  (co-edited in 7% of commits)\n"
+             "        t/z.c  (co-edited in 67% of commits, together=2, why=link)\n"
              "  next: --test-gate\n" )
-    check( "parse situ partners", parse_situ_partners( situ ), [ "src/b.c", "lib/x y.c" ] )
+    check( "parse situ partners", parse_situ_partners( situ ), [ "src/b.c", "lib/x y.c", "t/z.c" ] )
     check( "pin bare date", pin_date( "2026-09-30" ), "2026-09-30 00:00:00 +0000" )
     check( "pin leaves a timestamp", pin_date( "2026-09-30 12:00:00 +0000" ), "2026-09-30 12:00:00 +0000" )
     check( "parse situ unused", parse_situ_unused( "unused: 1 listed item(s) not used\n  unused item=t/x y.tsv reason=not_indexed\n" ), [ "t/x y.tsv" ] )
