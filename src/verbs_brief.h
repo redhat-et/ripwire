@@ -52,9 +52,11 @@ std::optional<int> runBrief( const MainDispatch& d )
         }
         forPage = page->bytes;
     }
-    const std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = d.ing, .g = d.g, .diskRoot = d.root, .task = d.cfg.brief,
+    std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = d.ing, .g = d.g, .diskRoot = d.root, .task = d.cfg.brief,
                                                                                 .forPage = forPage, .budgetBytes = std::size_t( d.cfg.briefBytes ),
                                                                                 .noCache = d.cfg.noCache } );
+    rw::redactInPlace( brief, d.redactPtr );   // the brief quotes doc fences and manifests: same secret redaction as every body seam (--no-redact: null)
+    reportRedactions( stderr, d.redactCounts );
     std::fwrite( brief.data(), 1, brief.size(), stdout );
     std::fputc( '\n', stdout );
     return 0;
