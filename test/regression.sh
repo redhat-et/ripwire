@@ -511,6 +511,7 @@ for _g in \
     editplanrecheckcheck \
     editplanrollbackmsgcheck \
     editpreviewcheck \
+    editpreviewwarmcheck \
     editroundtripcheck \
     edittargetfileabscheck \
     eliximportcheck \

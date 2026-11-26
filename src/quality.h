@@ -4272,37 +4272,11 @@ inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>&
     return kept;
 }
 
-// Hygiene: within one (repo, excludes) FAMILY, keep at most `keep` HEAD-snapshot cache files (newest by mtime);
-// delete older ones so HEAD-sha churn (a new file per commit) cannot grow the cache dir without bound. Scoping
-// per family (repoHex-exclHex prefix) — not per bare repo — means alternating --exclude configs do not evict
-// one another (the lean/rich lesson). `keepPath` (the file we are about to use) is always retained regardless of
-// mtime granularity. Degrade-only: any filesystem error is swallowed via the error_code overloads — eviction is
-// best-effort hygiene, never a correctness or crash risk.
-// The prefix-generic body: keep the `keep` newest ".bin"/".cache" files whose name begins with `prefix`, delete older
-// ones, always retain `keepPath`. Both the qheadsnap (ingest) and qsnap (Snapshot) cache families share this
-// (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
-//
-// A5 (cache-dir hygiene) generalization: a THIRD shape of sweep showed up (see sweepStaleCacheBlobsOnce below) —
-// age-then-size across the WHOLE "ripwire-*" family rather than a keep-N-newest cap on one sub-family — so this
-// is the rule-of-three consolidation the paragraph above already anticipated, not a second copy-pasted sweeper.
-// Two independent, optional passes run BEFORE the original count cap (each a no-op at its zero default, so the
-// qheadsnap/qsnap call sites below are byte-for-byte unaffected):
-//   maxAgeDays > 0     — delete any matching blob older than that many days outright.
-//   maxTotalBytes > 0  — if the family's surviving total still exceeds it, delete oldest-first until under.
-// `keepPath` is never deleted by any pass, in every case.
-//
-// Y4: covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
-// sharded one `resolveCacheBlobPath`/blobShardHex now write into (matching entries under `dir`'s 2-hex-char
-// subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
-// layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
-// bounded set (never an open-ended recursive walk of a shared $TMPDIR that may hold unrelated large trees).
-//
-// P1-1: the byte-budget pass additionally PINS the root `keepPath` belongs to (see evictBySizeBudget). That
-// needs no new parameter and no plumbing — the pin key is a function of `keepPath`, which every call site
-// already passes — and it cannot reach the keep-N call sites below, which run with maxTotalBytes == 0.
-inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
-                                 const std::string& keepPath, std::size_t keep,
-                                 double maxAgeDays = 0.0, std::uintmax_t maxTotalBytes = 0 )
+// Every ".bin"/".cache" file under `dir` whose name begins with `prefix`, in BOTH blob layouts — the legacy flat one
+// (directly under `dir`) and the sharded one resolveCacheBlobPath writes (`dir`'s 2-hex-char subdirectories, an exact
+// bounded set, never an open-ended recursive walk). Best-effort: an unreadable dir or shard contributes nothing.
+// Shared by evictOldCacheFamily and seedHeadSnapCache, so the family the seed reads is the family the evictor caps.
+inline std::vector<CacheBlobStat> listCacheFamily( const std::string& dir, const std::string& prefix )
 {
     namespace fs = std::filesystem;
 
@@ -4357,13 +4331,13 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     fs::directory_iterator it( fs::path( dir ), ec ), end;
     if( ec )
     {
-        return; // unreadable cache dir → nothing to evict, no crash
+        return {}; // unreadable cache dir → an empty family, no crash
     }
     for( ; it != end; it.increment( ec ) )
     {
         if( ec )
         {
-            return;
+            return {};   // a listing cut short is no listing: the evictor must never act on part of a family
         }
         const std::string name = it->path().filename().string();
         if( name.size() == 2 && std::isxdigit( static_cast<unsigned char>( name[0] ) ) && std::isxdigit( static_cast<unsigned char>( name[1] ) ) )
@@ -4393,6 +4367,44 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     {
         scanOneDir( sd );
     }
+    return mine;
+}
+
+// Hygiene: within one (repo, excludes) FAMILY, keep at most `keep` HEAD-snapshot cache files (newest by mtime);
+// delete older ones so HEAD-sha churn (a new file per commit) cannot grow the cache dir without bound. Scoping
+// per family (repoHex-exclHex prefix) — not per bare repo — means alternating --exclude configs do not evict
+// one another (the lean/rich lesson). `keepPath` (the file we are about to use) is always retained regardless of
+// mtime granularity. Degrade-only: any filesystem error is swallowed via the error_code overloads — eviction is
+// best-effort hygiene, never a correctness or crash risk.
+// The prefix-generic body: keep the `keep` newest ".bin"/".cache" files whose name begins with `prefix`, delete older
+// ones, always retain `keepPath`. Both the qheadsnap (ingest) and qsnap (Snapshot) cache families share this
+// (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
+//
+// A5 (cache-dir hygiene) generalization: a THIRD shape of sweep showed up (see sweepStaleCacheBlobsOnce below) —
+// age-then-size across the WHOLE "ripwire-*" family rather than a keep-N-newest cap on one sub-family — so this
+// is the rule-of-three consolidation the paragraph above already anticipated, not a second copy-pasted sweeper.
+// Two independent, optional passes run BEFORE the original count cap (each a no-op at its zero default, so the
+// qheadsnap/qsnap call sites below are byte-for-byte unaffected):
+//   maxAgeDays > 0     — delete any matching blob older than that many days outright.
+//   maxTotalBytes > 0  — if the family's surviving total still exceeds it, delete oldest-first until under.
+// `keepPath` is never deleted by any pass, in every case.
+//
+// Y4: covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
+// sharded one `resolveCacheBlobPath`/blobShardHex now write into (matching entries under `dir`'s 2-hex-char
+// subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
+// layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
+// bounded set (never an open-ended recursive walk of a shared $TMPDIR that may hold unrelated large trees).
+//
+// P1-1: the byte-budget pass additionally PINS the root `keepPath` belongs to (see evictBySizeBudget). That
+// needs no new parameter and no plumbing — the pin key is a function of `keepPath`, which every call site
+// already passes — and it cannot reach the keep-N call sites below, which run with maxTotalBytes == 0.
+inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
+                                 const std::string& keepPath, std::size_t keep,
+                                 double maxAgeDays = 0.0, std::uintmax_t maxTotalBytes = 0 )
+{
+    namespace fs = std::filesystem;
+
+    std::vector<CacheBlobStat> mine = listCacheFamily( dir, prefix );
 
     // age pass: outright delete anything past the cutoff (disabled when maxAgeDays == 0).
     if( maxAgeDays > 0.0 )
@@ -4536,6 +4548,52 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
                                     const std::string& keepPath, std::size_t keep = 2 )
 {
     evictOldCacheFamily( dir, "ripwire-qheadsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
+}
+
+// EDITCHECK-PREVIEW-FAST — a NEW HEAD starts from the previous HEAD's parse, not from nothing.
+//
+// The qheadsnap ingest cache is named by HEAD sha, so the first --edit-check, --edit-check --dry-run preview or
+// --quality-delta after ANY commit found no blob and re-parsed the whole committed tree: on this repo (4,996 files),
+// after a one-file commit, `cache-stats reparsed=4991 reused=5`. The first-edit hook measured the first plain
+// --edit-check after a new HEAD at 10.11 s on a warm cache; once the blob exists it answers in 0.25 s. Nothing about a
+// record is tied to the sha it was written under: every record is validated per file on load (parser identity, content hash, and the stat gate's
+// ctime, which an extraction cannot forge — ingest_cache.h), and the blob is root-relative. So a record whose file the
+// commit did not change is exactly the record a cold parse of this commit would write, and one whose file did change
+// simply misses. When this HEAD's blob is absent, the newest blob of the SAME (repo, excludes) family is copied to its
+// name first, and the ingest reparses only what the commit changed. Copied (tmp + rename), never renamed or linked:
+// the older blob is still the right one for its own sha, and a concurrent run reading it must not see it move.
+// Best-effort — a filesystem failure leaves the target absent, which is the cold parse this replaces.
+inline void seedHeadSnapCache( const std::string& dir, const std::string& repoHex, const std::string& exclHex, const std::string& targetPath )
+{
+    namespace fs = std::filesystem;
+    std::error_code existsEc;
+    if( targetPath.empty() || fs::exists( fs::path( targetPath ), existsEc ) || existsEc )
+    {
+        return;
+    }
+    std::vector<CacheBlobStat> family = listCacheFamily( dir, "ripwire-qheadsnap-" + repoHex + "-" + exclHex + "-" );
+    std::erase_if( family, [ & ]( const CacheBlobStat& b ) { return b.path == targetPath; } );   // a `.seed.<pid>` temp never ends in .bin: not listed
+    if( family.empty() )
+    {
+        return;
+    }
+    // newest first; the path breaks an mtime tie so two runs pick the same seed
+    const auto newest = std::ranges::min_element( family, []( const CacheBlobStat& a, const CacheBlobStat& b )
+                                                  { return a.mtime != b.mtime ? a.mtime > b.mtime : a.path < b.path; } );
+    const std::string tmp = targetPath + ".seed." + std::to_string( os::getpid() );
+    std::error_code   copyEc, renameEc;
+    fs::copy_file( fs::path( newest->path ), fs::path( tmp ), fs::copy_options::overwrite_existing, copyEc );
+    if( !copyEc )
+    {
+        fs::rename( fs::path( tmp ), fs::path( targetPath ), renameEc );
+    }
+    if( copyEc || renameEc )
+    {
+        std::error_code rmEc;
+        fs::remove( fs::path( tmp ), rmEc );
+        DISCLOSE( Diagnostics::answerUnchanged, "the new HEAD's ingest starts cold instead of from the previous HEAD's records: same answer, slower",
+                  "quality: could not seed the HEAD-snapshot ingest cache" );
+    }
 }
 
 // A4-P1 (round 2) — the HEAD-snapshot *Snapshot* cache. The qheadsnap INGEST cache above only skips the parse;
@@ -5627,6 +5685,10 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     //    parse — byte-identical output either way. The working-tree side's excludes are applied here too
     //    (A4-F5) so both trees see the same file set. (Keys were computed once in step 1.)
     const std::string cachePath  = useCache ? headSnapCachePath( repoHex, exclHex, headSha ) : std::string{};
+    if( useCache )
+    {
+        seedHeadSnapCache( cacheDirLadder(), repoHex, exclHex, cachePath );   // a new HEAD reparses what the commit changed, not the tree
+    }
     IngestResult headIng = ingestTrackedTree( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
 
     // Hygiene: cap each (repo, excludes) family to the 2 newest files (delete older sha's). Done AFTER the

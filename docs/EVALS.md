@@ -11773,10 +11773,30 @@ preview; both surfaces route through one `editpreview::run`.
 
 **Cost, reported as a ledger and never as a gate.** On `src/` (130 files), warm: the post-hoc
 `--edit-check` is ~92 ms and the preview ~280 ms (three runs each, same machine, same warm caches). The
-delta is two single-file ingests — the spliced file and, for the honest error-node baseline, the original —
-plus one `buildGraph()` over the merged tree. Deliberate: reading the "before" error count off
-`ing.fileHealth` instead would cost nothing, but `fileBytes == 0` there means NOT MEASURED, which on a
-cache-served parse becomes a silent zero baseline that refuses every payload.
+delta was two single-file ingests — the spliced file and, for the honest error-node baseline, the original —
+plus one `buildGraph()` over the merged tree. The baseline parse was deliberate, because `fileBytes == 0` in
+`ing.fileHealth` means NOT MEASURED, and a silent zero baseline would refuse every payload.
+
+**2026-11-26 (EDITCHECK-PREVIEW-FAST): the baseline is read off the index when the index measured it.** The
+content cache has carried `FileHealth` since v13 and the warm snapshot carries it too, so on a warm run the
+count is the run's own measurement. `editpreview::errNodesOnDisk` reads it when `fileBytes` is non-zero and
+equals the length of the bytes on disk now, and parses the original exactly as before otherwise, so the
+zero-baseline trap above cannot be reached. `test/editpreviewwarmcheck.sh` (C) counts parses across the
+run (`RIPWIRE_CACHE_STATS`: 1, was 2) and (K) holds the refusal on the warm path. Release, medians, on a
+loaded machine (load average ~40 on 18 cores, not quiet): on this repo with `src/graph.h:rankGraphTeleport`
+(1.2 MB file), n=10, the warm preview went 0.945 s → 0.78 s wall and 1.335 s → 0.995 s CPU, against
+0.32–0.37 s for the post-hoc verb. Of what the preview still adds (~0.56 s CPU), about 0.33 s is the one
+remaining parse and about 0.22 s is the merged `buildGraph()`. On envoy (n=5) the preview is 7.14 s against
+a 2.12 s plain run, and on llvm (n=5) 37.56 s against 4.62 s. Those gaps are the merged `buildGraph()`,
+which this round does not change.
+
+The same lane measured the first-run-after-a-commit cost the agent hook reported (10.11 s for a plain
+`--edit-check` against a new HEAD, warm cache; its 15.36 s preview was a cold-cache run). The cost is the
+HEAD baseline: the qheadsnap ingest cache is named by HEAD sha, so the first edit-check of any kind after a commit
+re-parsed the whole committed tree (this repo: `reparsed=4991 reused=5`). `quality::seedHeadSnapCache`
+copies the newest blob of the same (repo, excludes) family to the new sha's name first. Its records are
+validated per file on load, so only what the commit changed is reparsed. Gate arm (H) checks this. The
+first preview after a one-file commit on this repo went 11.63 s → 8.20 s wall (n=5, same loaded machine).
 
 **Clean:** ASan/UBSan (`-fno-sanitize-recover=all`, committed LSan suppressions) over the whole 37-payload
 sweep and over the whole-repo map; three byte-identical preview runs; `xmllint --noout` on the preview
