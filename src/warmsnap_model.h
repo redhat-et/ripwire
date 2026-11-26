@@ -32,7 +32,7 @@ namespace rw::warmsnap
 // Not stored: files / crawlRoot / crawlRootPrefixes / skippedOversize (the TREE section's), reparsedFiles (0: nothing was
 // re-extracted), memoryStop (a stopped ingest is never recorded), rustCrateRoots (derived on first use), and the five
 // multi-root vectors (a multi-root merge does not use the snapshot).
-static_assert( sizeof( IngestResult ) == 1208 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
+static_assert( sizeof( IngestResult ) == 1232 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
                "the model changed shape: store and load the new field in writeModel / readModel below, bump warmsnap::kVersion, then re-pin these sizes" );
 #endif
 
@@ -420,6 +420,7 @@ inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
     writeSymbolFamily( o, ing.fields );
     o.vec( ing.aliasTargets );
     o.vec( ing.fnLocalScopes );
+    o.vec( ing.tangleBlocks );   // QD-TANGLE BLOCK FACTS (model.h TangleBlockFacts)
     o.vec( ing.cloneKeys );
 
     const RowNameIds names = numberNames( o, ing );
@@ -724,6 +725,7 @@ inline bool readModel( std::string_view section, IngestResult& ing, BlobFacts& b
     }
     in.vec( ing.aliasTargets );
     in.vec( ing.fnLocalScopes );
+    in.vec( ing.tangleBlocks );   // QD-TANGLE BLOCK FACTS (model.h TangleBlockFacts)
     in.vec( ing.cloneKeys );
 
     if( !readRowStreams( in, ing, fileCount ) )
@@ -739,6 +741,8 @@ inline bool readModel( std::string_view section, IngestResult& ing, BlobFacts& b
                      && ( ing.cloneKeys.empty() || ing.cloneKeys.size() == symbolCount )
                      && std::ranges::all_of( ing.aliasTargets, [ & ]( const AliasTarget& t ) { return t.id < symbolCount; } )
                      && std::ranges::all_of( ing.fnLocalScopes, [ & ]( const FnLocalScope& f ) { return f.id < symbolCount; } )
+                     && std::ranges::all_of( ing.tangleBlocks, [ & ]( const TangleBlockFacts& f ) { return f.id < symbolCount; } )
+                     && std::ranges::is_sorted( ing.tangleBlocks, {}, &TangleBlockFacts::id )
                      && std::ranges::all_of( ing.routeUses, [ & ]( const RouteUse& u ) { return symOk( u.fromSymbol ) && u.fileId < fileCount; } )
                      && std::ranges::all_of( ing.includes, [ & ]( const Include& i ) { return i.fileId < fileCount; } )
                      && ( !ing.hasLexStats || ( ing.lexTokenRowOffsets.size() == symbolCount + 1 && ing.lexDocBodyDl.size() == symbolCount

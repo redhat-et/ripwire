@@ -377,7 +377,7 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
     snap.treeKeyValid = true;
     if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )   // the parse pool's line, for the run it did not have to make
     {
-        rw::emitTo( stderr, "ripwire: cache-stats reparsed=0 reused={} files={} cached_records={} blob_entries={} warm_growths=0\n", result.files.size(), result.files.size(),
+        rw::emitTo( stderr, "ripwire: cache-stats reparsed=0 reused={} files={} cached_records={} blob_entries={} warm_growths=0 parse_threads=0\n", result.files.size(), result.files.size(),
                     blob.cachedRecords, blob.blobEntries );
     }
     return true;

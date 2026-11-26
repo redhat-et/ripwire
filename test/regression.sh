@@ -1037,6 +1037,7 @@ for _g in \
     routeedgecheck \
     routehookcheck \
     routeoncecheck \
+    routingcheck \
     routingreportcheck \
     rowlinescheck \
     rubyargcheck \
@@ -1121,6 +1122,7 @@ for _g in \
     sliceflowsenscheck \
     slotjoincheck \
     slotregcheck \
+    snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \
     statgatecheck \
@@ -1141,6 +1143,7 @@ for _g in \
     swiftshapecheck \
     tagspredicatecheck \
     tailsymtermscheck \
+    tanglecapcheck \
     tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \

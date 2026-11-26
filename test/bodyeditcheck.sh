@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# bodyeditcheck.sh — THE EDIT-FILE FORM of a `--for` answer's first page (src/forbodyptr.h pointEditBodies; lane θ17, default OFF):
-# with RIPWIRE_BODIES_EDIT set, an EDIT task's bodies in its top file (the act line's first path; a page without an act line is left as it is) become lean
+# bodyeditcheck.sh — THE EDIT-FILE FORM of a `--for` answer's first page (src/forbodyptr.h pointEditBodies; lane θ17, default ON since lane ROUTING):
+# by default, an EDIT task's bodies in its top file (the act line's first path; a page without an act line is left as it is) become lean
 # skip rows <skip p= n= l= e=/>, their P:L-E join <act read=>, and every other body stays inline.
 # ARMS (every one NEW: on a binary without the knob the ON files equal the OFF files, so E2/E3/E6 fail)
 #   (E0)  not vacuous: the OFF edit answer holds a <b> in its top file AND a <b> in another file
-#   (E1)  DEFAULT UNCHANGED: the variable unset is the default; with RIPWIRE_PARENT_BIN set, the default is also the parent's answer
-#         byte for byte (edit task, non-edit task, whole answer, page 2)
+#   (E1)  OFF SWITCH: RIPWIRE_ROUTING=0 is the OFF answer; with RIPWIRE_PARENT_BIN set (a binary from before the switch), the OFF
+#         answer is the parent's default byte for byte (edit task, non-edit task, whole answer, page 2). RIPWIRE_BODIES_EDIT=0 alone
+#         is the OFF edit page; RIPWIRE_BODIES_EDIT=1 under RIPWIRE_ROUTING=0 is the ON edit page (the knob overrides the switch)
 #   (E2)  ON, edit task: no <b> with the top file's p= left on page 1; one lean skip row per such body, in its place, with the body's
 #         p= n= and an e=; the root says body_form="edit" and the clause is there exactly once
 #   (E3)  each pointed range is on <act read=> (listed, or inside a listed range of that path)
 #   (E4)  other-file bodies unchanged: every <b> element of the OFF page outside the top file is on the ON page byte for byte, in order
 #   (E5)  NOT APPLIED: a non-edit task ("rank symbols ..."), page 2, --bodies=inline, and RIPWIRE_BODY_POINTERS=1 (the pointer form
-#         decides) are byte-identical with and without the variable
+#         decides) are byte-identical with the form on (default) and off (RIPWIRE_BODIES_EDIT=0)
 #   (E6)  est_tokens= below the OFF page's; page smaller
 #   (E7)  well formed (xmllint), no newline outside CDATA is checked by xmllint's parse of the minified root, deterministic (two runs)
 #   (E8)  MUTATION NEGATIVE CONTROLS: E2's detector FAILS on the OFF page; E4's FAILS on an ON page with one other-file body removed
@@ -29,17 +30,23 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "bodyeditcheck: BIN=$BIN${PARENT:+ PARENT=$PARENT}"
 cd "$ROOT" || exit 2
-unset RIPWIRE_BODY_POINTERS RIPWIRE_BODIES_EDIT
+unset RIPWIRE_BODY_POINTERS RIPWIRE_BODIES_EDIT RIPWIRE_ROUTING
 EDIT="fix the act line insertion in a for answer"   # its OFF page 1 folds bodies from verbs_for.h (the top file) and two other files
 PLAIN="rank symbols by pagerank and serialize the map"
-rw(){ "$BIN" src --no-cache "$@" 2>/dev/null; }
-on(){ RIPWIRE_BODIES_EDIT=1 "$BIN" src --no-cache "$@" 2>/dev/null; }
+rw(){ RIPWIRE_ROUTING=0 "$BIN" src --no-cache "$@" 2>/dev/null; }   # the OFF switch
+on(){ "$BIN" src --no-cache "$@" 2>/dev/null; }                      # the default
 rw --for="$EDIT" >"$WORK/edit.off";  on --for="$EDIT" >"$WORK/edit.on";  on --for="$EDIT" >"$WORK/edit.on2"
 rw --for="$PLAIN" >"$WORK/plain.off"; on --for="$PLAIN" >"$WORK/plain.on"
 rw --for="$EDIT" --page-bytes=12000:2 >"$WORK/p2.off"; on --for="$EDIT" --page-bytes=12000:2 >"$WORK/p2.on"
 rw --for="$EDIT" --bodies=inline >"$WORK/il.off"; on --for="$EDIT" --bodies=inline >"$WORK/il.on"
 RIPWIRE_BODY_POINTERS=1 rw --for="$EDIT" >"$WORK/pt.off"; RIPWIRE_BODY_POINTERS=1 on --for="$EDIT" >"$WORK/pt.on"
+# E5 isolates the edit form from the switch's other default (the file-gap confidence ground): RIPWIRE_BODIES_EDIT=0, routing on
+k0(){ RIPWIRE_BODIES_EDIT=0 "$BIN" src --no-cache "$@" 2>/dev/null; }
+k0 --for="$PLAIN" >"$WORK/plain.k0"; k0 --for="$EDIT" --page-bytes=12000:2 >"$WORK/p2.k0"; k0 --for="$EDIT" --bodies=inline >"$WORK/il.k0"
+RIPWIRE_BODY_POINTERS=1 k0 --for="$EDIT" >"$WORK/pt.k0"
 rw --for="$EDIT" --page-bytes=0 >"$WORK/whole.off"
+RIPWIRE_ROUTING=0 RIPWIRE_BODIES_EDIT=1 "$BIN" src --no-cache --for="$EDIT" 2>/dev/null >"$WORK/edit.knob1"
+RIPWIRE_ROUTING=0 RIPWIRE_BODIES_EDIT=0 "$BIN" src --no-cache --for="$EDIT" 2>/dev/null >"$WORK/edit.knob0"
 if [ -n "$PARENT" ]; then
     pa(){ "$PARENT" src --no-cache "$@" 2>/dev/null; }
     pa --for="$EDIT" >"$WORK/edit.pa"; pa --for="$PLAIN" >"$WORK/plain.pa"
@@ -86,13 +93,15 @@ J="$( judge "$WORK/edit.off" "$WORK/edit.on" )"; echo "  judge: $J"
 arm(){ case " $J " in *" $1=1 "*) ok "$2";; *) no "$3";; esac; }
 arm E0 "(E0) the OFF edit answer holds a body in its top file and one in another file" "(E0) vacuous: no top-file body or no other-file body on the OFF page"
 if [ -n "$PARENT" ]; then
-    for n in edit plain p2 whole; do if same "$WORK/$n.off" "$WORK/$n.pa"; then ok "(E1) $n: the default is the parent's answer byte for byte"; else no "(E1) $n: the default moved against the parent"; fi; done
+    for n in edit plain p2 whole; do if same "$WORK/$n.off" "$WORK/$n.pa"; then ok "(E1) $n: RIPWIRE_ROUTING=0 is the parent's default byte for byte"; else no "(E1) $n: the OFF answer moved against the parent"; fi; done
 else ok "(E1) no RIPWIRE_PARENT_BIN: parent comparison skipped (the lane runs it)"; fi
+if same "$WORK/edit.knob1" "$WORK/edit.on"; then ok "(E1) RIPWIRE_BODIES_EDIT=1 under RIPWIRE_ROUTING=0 is the ON edit page"; else no "(E1) RIPWIRE_BODIES_EDIT=1 did not override RIPWIRE_ROUTING=0"; fi
+if same "$WORK/edit.knob0" "$WORK/edit.off"; then ok "(E1) RIPWIRE_BODIES_EDIT=0 under RIPWIRE_ROUTING=0 is the OFF edit page"; else no "(E1) RIPWIRE_BODIES_EDIT=0 is not the OFF edit page"; fi
 arm E2 "(E2) top-file bodies are lean skip rows in place; body_form=\"edit\"; one clause" "(E2) a top-file body is left, a skip row is wrong, or the root/clause is missing"
 arm E3 "(E3) every pointed range is on act read=" "(E3) a pointed range is not on act read="
 arm E4 "(E4) other-file bodies are unchanged, in order" "(E4) an other-file body moved or changed"
-for n in plain p2 il; do if same "$WORK/$n.off" "$WORK/$n.on"; then ok "(E5) $n: byte-identical with the variable"; else no "(E5) $n: the variable changed it"; fi; done
-if same "$WORK/pt.off" "$WORK/pt.on"; then ok "(E5) RIPWIRE_BODY_POINTERS=1 decides over RIPWIRE_BODIES_EDIT"; else no "(E5) the edit form overrode the pointer form"; fi
+for n in plain p2 il; do if same "$WORK/$n.k0" "$WORK/$n.on"; then ok "(E5) $n: byte-identical with the form off"; else no "(E5) $n: the variable changed it"; fi; done
+if same "$WORK/pt.k0" "$WORK/pt.on"; then ok "(E5) RIPWIRE_BODY_POINTERS=1 decides over RIPWIRE_BODIES_EDIT"; else no "(E5) the edit form overrode the pointer form"; fi
 if [ -s "$WORK/pt.on" ] && grep -q 'body_form="pointer"' "$WORK/pt.on"; then ok "(E5) the pointer form is served under both variables"; else no "(E5) no pointer form under both variables"; fi
 arm E6 "(E6) est_tokens= and the page are smaller than OFF" "(E6) est_tokens= or the page did not shrink"
 if xmllint --noout "$WORK/edit.on" 2>/dev/null; then ok "(E7) well formed"; else no "(E7) xmllint rejects the ON page"; fi

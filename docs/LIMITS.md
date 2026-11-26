@@ -1002,6 +1002,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCapPerThread` | `256` | — | — |
+| `kMaxParseWorkers` | `256` | — | — |
 | `kMaxPendingParsedFiles` | `4` | — | — |
 
 ### `src/ingest_relations.h`

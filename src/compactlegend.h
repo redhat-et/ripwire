@@ -1876,7 +1876,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "humps", "humps=/deep=: regions reaching the nesting bar / lines inside them; absent when nest= is under the bar", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines deep=
     { "deep_floor", "deep_floor=1: deep= is a FLOOR; a line two humps share is billed once, so deep below humps is legal", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "steer", "steer=N: primitive locals rewritten, then read in a branch condition 10+ statements later; absent at 0", true, "s", MapHeaderRead::No, {}, "metrics" },
-    { "tangle", "tangle=S: quality-delta's tangle score, (nest past 3 + deep%/5 + steer/100 lines) x log2(loc/50); bar 6", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "tangle", "tangle=S: quality-delta's tangle score, (nest past 3 + deep%/5 + steer/100 lines) x log2(loc/50), capped at its worst top-level block's S + 2 per local crossing blocks; bar 6", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "tangle_raw", "tangle_raw=S: tangle before that cap; only when the cap lowered a score at or over the bar", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ev", "ev=/ev_why=: essential complexity (2+: jumps block extract-method; absent: 1) / the jumps behind it, tag:count", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines ev_why=
     { "ev_floor", "ev_floor=1: ev= is a FLOOR; noreturn calls, macro-hidden exits and unresolved gotos are unseen", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ppalt", "ppalt=N: #else/#elif branches in the body; metrics sum ALL branches, no one build compiles them all", true, "s", MapHeaderRead::No, {}, "metrics" },
