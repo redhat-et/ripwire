@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, lane rust-turbofish-callers (on main 5f4b50415): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 344 (PLACEHOLDER, rich 345): a Rust turbofish on a path function or a method is a call
+#   (queries/rust/tags.scm), and a transcriber's `f::<T>(` is read as a call (ingest_names.h readCallPath). kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 366b3fa9c3…9030201c.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

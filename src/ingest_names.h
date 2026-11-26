@@ -1339,8 +1339,48 @@ inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint
     }
     return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
 }
+// RUST-TURBOFISH: the end of the generic-argument list whose `<` sits at `open` — one past its matching `>` — or `open` itself
+// when the list does not close inside [open, end) or meets a byte no type list holds (`;`, `{`, `}`). `->` (a `Fn(u8) -> u8`
+// argument) is not a closing `>`.
+inline std::uint32_t pastGenericArgs( std::string_view src, std::uint32_t open, std::uint32_t end ) noexcept
+{
+    std::uint32_t depth = 0;
+    for( std::uint32_t k = open; k < end; ++k )
+    {
+        const char c = src[ k ];
+        if( c == ';' || c == '{' || c == '}' )
+        {
+            return open;
+        }
+        if( c == '<' )
+        {
+            ++depth;
+        }
+        else if( c == '>' && src[ k - 1 ] != '-' && --depth == 0 )
+        {
+            return k + 1;
+        }
+    }
+    return open;
+}
+// A path segment `seg::` followed at `at` by something other than an identifier: true when it is a turbofish that ENDS the path —
+// `f::<T>` with no `::` after its `>` — and then `at` sits past the `>`. False (`at` unmoved) for an unclosed `::<`, a metavariable
+// `x::$m` and anything else; false with `at` past the `>` for a turbofish on a TYPE segment (`Vec::<T>::new`), which reads no call.
+inline bool endsAtTurbofish( std::string_view src, std::uint32_t& at, std::uint32_t end ) noexcept
+{
+    const std::uint32_t past = at < end && src[ at ] == '<' ? pastGenericArgs( src, at, end ) : at;
+    if( past == at )
+    {
+        return false;
+    }
+    at                        = past;
+    const std::uint32_t after = skipBlanks( src, at, end );
+    return !( after + 1 < end && src[ after ] == ':' && src[ after + 1 ] == ':' );
+}
 // One path `seg ( :: seg )*` starting at `at` (an identifier or `$crate`): moves `at` past it, the last segment's bytes into
-// [nameAt, nameEnd). False when a segment is not an identifier (a metavariable, a turbofish `::<`): `at` then sits past what was read.
+// [nameAt, nameEnd). A turbofish on the LAST segment (`f::<T>`, `a::f::<Vec<T>>`) is read past, so the `(` after it makes the
+// path a call of `f` (RUST-TURBOFISH). False when a segment is not an identifier (a metavariable, a turbofish on a TYPE segment
+// `Vec::<T>::new`, an unclosed `::<`): `at` then sits past what was read.
 inline bool readCallPath( std::string_view src, std::uint32_t& at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
 {
     for( bool first = true;; first = false )
@@ -1372,7 +1412,7 @@ inline bool readCallPath( std::string_view src, std::uint32_t& at, std::uint32_t
         at = skipBlanks( src, sep + 2, end );
         if( at >= end || !namesplit::isIdentChar( src[ at ] ) )
         {
-            return false;   // `Vec::<T>`, `x::$m`: not a plain path
+            return endsAtTurbofish( src, at, end );   // `f::<T>` ends the path; `x::$m`, `Vec::<T>::new`: not a plain path
         }
     }
 }

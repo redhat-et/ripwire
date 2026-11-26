@@ -1069,6 +1069,7 @@ for _g in \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
+    rustturbofishcheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
