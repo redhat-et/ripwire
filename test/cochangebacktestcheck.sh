@@ -55,8 +55,12 @@ for k in 1 2 3; do printf '// ab %s\n' "$k" >>"$REPO/src/a.c"; printf '// ab %s\
 printf '// H\n' >>"$REPO/src/a.c"; printf '// H\n' >>"$REPO/src/b.c"; commit "H"
 printf '// E\n' >>"$REPO/src/a.c"; printf '// E\n' >>"$REPO/lib/f.c"; commit "E"
 for k in 1 2 3 4; do printf '// af %s\n' "$k" >>"$REPO/src/a.c"; printf '// af %s\n' "$k" >>"$REPO/lib/f.c"; commit "af $k"; done
+# U: an indexed file and one ripwire does not index (.hash). The probe must say which, from --situ's `unused:` block.
+printf 'deadbeef\n' >"$REPO/src/data.hash"; commit "add hash"
+printf '// U\n' >>"$REPO/src/a.c"; printf 'cafef00d\n' >>"$REPO/src/data.hash"; commit "U"
 H="$( git -C "$REPO" log --format='%H %s' | awk '$2=="H"{print $1}' )"
 E="$( git -C "$REPO" log --format='%H %s' | awk '$2=="E"{print $1}' )"
+U="$( git -C "$REPO" log --format='%H %s' | awk '$2=="U"{print $1}' )"
 
 python3 "$SCRIPT" --repo "$REPO" --since 2026-01-01 --n 100 --ripwire "$BIN" --work "$TMP/w" --out "$TMP/ok.jsonl" >"$TMP/ok.log" 2>&1
 okRc=$?
@@ -68,9 +72,9 @@ if [ "$okRc" != 0 ] || [ "$leakRc" != 0 ]; then
 fi
 
 # One python reader for every assertion; it prints "PASS <arm>" or "FAIL <arm>: why" lines.
-python3 - "$TMP/ok.jsonl" "$TMP/leak.jsonl" "$H" "$E" >"$TMP/verdict" 2>&1 <<'PY'
+python3 - "$TMP/ok.jsonl" "$TMP/leak.jsonl" "$H" "$E" "$U" >"$TMP/verdict" 2>&1 <<'PY'
 import json, sys
-okp, leakp, H, E = sys.argv[1:5]
+okp, leakp, H, E, U = sys.argv[1:6]
 def load( p ):
     recs = [ json.loads( l ) for l in open( p ) if l.strip() ]
     return recs[0][ "meta" ], [ r for r in recs if "protocol" in r ]
@@ -82,9 +86,9 @@ def row( rs, sha, proto ):
 out = []
 def arm( name, cond, why ):
     out.append( ( "PASS " if cond else "FAIL " ) + name + ( "" if cond else ": " + why ) )
-# 9 eligible commits (3x ab, H, E, 4x af) — the 5 single-file add commits are not; 18 rows = 2 protocols each
-arm( "(3) eligibility: 9 commits, 18 rows, the single-file adds excluded",
-     meta[ "eligible" ] == 9 and len( rows ) == 18, "eligible=%s rows=%d" % ( meta[ "eligible" ], len( rows ) ) )
+# 10 eligible commits (3x ab, H, E, 4x af, U) — the 6 single-file add commits are not; 20 rows = 2 protocols each
+arm( "(3) eligibility: 10 commits, 20 rows, the single-file adds excluded",
+     meta[ "eligible" ] == 10 and len( rows ) == 20, "eligible=%s rows=%d" % ( meta[ "eligible" ], len( rows ) ) )
 for proto in ( "L1O", "SEED1" ):
     h, e = row( rows, H, proto ), row( rows, E, proto )
     if not h or not e:
@@ -106,8 +110,17 @@ for proto in ( "L1O", "SEED1" ):
     for a in ( "ripwire", "cofreq" ):
         arm( "(7) %s E %s under --leak-future: the same task becomes a hit (the fixture can see a leak)" % ( proto, a ),
              le is not None and le[ "scores" ][ a ][ "hit@10" ] == 1, "ranked=%r" % ( le and le[ "ranked" ][ a ] ) )
-    arm( "(7) %s E under --leak-future reads 14 commits" % proto, le is not None and le[ "history_commits" ] == 14,
+    arm( "(7) %s E under --leak-future reads 16 commits" % proto, le is not None and le[ "history_commits" ] == 16,
          "history=%s" % ( le and le[ "history_commits" ] ) )
+for proto in ( "L1O", "SEED1" ):
+    u = row( rows, U, proto )
+    if not u:
+        arm( "(10) %s U row present" % proto, False, "missing" )
+        continue
+    hs = "src/data.hash" in u[ "seeds" ]
+    arm( "(10) %s U: the unindexed .hash file is %s" % ( proto, "dropped from ripwire's seeds" if hs else "kept out of the indexed population" ),
+         ( u[ "seeds_dropped" ] == 1 and not u[ "indexed" ] ) if hs else ( u[ "seeds_dropped" ] == 0 and not u[ "indexed" ] ),
+         "seeds=%r dropped=%s indexed=%s" % ( u[ "seeds" ], u[ "seeds_dropped" ], u[ "indexed" ] ) )
 arm( "(8) no ripwire errors on the fixture", not any( r[ "error" ] for r in rows ), "%r" % [ r[ "error" ] for r in rows if r[ "error" ] ][:2] )
 print( "\n".join( out ) )
 PY

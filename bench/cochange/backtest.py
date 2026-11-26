@@ -177,18 +177,25 @@ def parse_situ_partners( text ):
     return rows
 
 
+UNUSED_RE = re.compile( r"^  unused item=(.+?) reason=" )
+
+
+def parse_situ_unused( text ):
+    """Items of --situ's `unused:` block: listed files that resolved to no indexed file (AF5, situ.h)."""
+    return [ m.group( 1 ) for m in ( UNUSED_RE.match( l ) for l in text.splitlines() ) if m ]
+
+
 def probe_indexed( binary, crawl, files ):
-    """Drop each file ripwire refuses as unindexed until --situ over the rest succeeds."""
-    left = list( files )
-    while left:
-        rc, _, err = run_ripwire( binary, crawl, left )
-        if rc == 0:
-            return left, None
-        m = REFUSE_RE.search( err )
-        if not m or m.group( 1 ) not in left:
-            return left, "unparsed refusal rc=%d: %s" % ( rc, err.strip()[:200] )
-        left.remove( m.group( 1 ) )
-    return left, None
+    """The files ripwire indexes. A mixed list answers and names the rest in `unused:`; an all-unindexed list refuses."""
+    if not files:
+        return [], None
+    rc, out, err = run_ripwire( binary, crawl, files )
+    if rc == 0:
+        unused = set( parse_situ_unused( out ) )
+        return [ f for f in files if f not in unused ], None
+    if REFUSE_RE.search( err ):
+        return [], None
+    return [], "unparsed probe failure rc=%d: %s" % ( rc, err.strip()[:200] )
 
 
 def arm_ripwire( binary, crawl, seeds, root ):
@@ -343,6 +350,7 @@ def self_test():
              "        lib/x y.c  (co-edited in 7% of commits)\n"
              "  next: --test-gate\n" )
     check( "parse situ partners", parse_situ_partners( situ ), [ "src/b.c", "lib/x y.c" ] )
+    check( "parse situ unused", parse_situ_unused( "unused: 1 listed item(s) not used\n  unused item=t/x y.tsv reason=not_indexed\n" ), [ "t/x y.tsv" ] )
     check( "parse situ empty", parse_situ_partners( "  [3] co-change (0):\n        (none, or no git history)\n" ), [] )
     try:
         recall_at( ranked, [], 10 )
