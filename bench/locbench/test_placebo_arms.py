@@ -33,12 +33,15 @@ def doc( rows, route="subtoken+body", total=None ):
 
 FILES = [ f"pkg/mod{i}.py" for i in range( 8 ) ] + [ "pkg/config_parser.py", "pkg/net/http_client.py" ]
 
-def universe_rows():
+def long_sig( fi, j ):
+    name = f"func_{fi}_{j}"
+    return f"def {name}( self, value: int, other: 'Thing & co' ) -> List[<str>]:  # helper {fi}.{j} " + "x" * ( 20 + 7 * j ), name
+
+def universe_rows( files=FILES, per_file=6, sig_of=long_sig ):
     rows, r = [], 1
-    for fi, f in enumerate( FILES ):
-        for j in range( 6 ):
-            name = f"func_{fi}_{j}"
-            sig = f"def {name}( self, value: int, other: 'Thing & co' ) -> List[<str>]:  # helper {fi}.{j} " + "x" * ( 20 + 7 * j )
+    for fi, f in enumerate( files ):
+        for j in range( per_file ):
+            sig, name = sig_of( fi, j )
             rows.append( cand( r, f"{1.0 / r:.6f}", name, f, 10 + j * 12, sig ) ); r += 1
     return rows
 
@@ -151,7 +154,8 @@ def test_unbuildable_fails_closed():
         check( True, "an undersized pool raises PlaceboUnbuildable instead of returning a wrong-size placebo" )
 
 def test_builders_are_gold_blind():
-    builders = ( rl.build_placebo_unrelated, rl.build_placebo_shuffle, rl.build_for_matched, rl.build_lexical, rl.build_derived_arms )
+    builders = ( rl.build_placebo_unrelated, rl.build_placebo_shuffle, rl.build_for_matched, rl.unrelated_pool, rl.lexical_pool,
+                 rl.common_budget, rl.build_derived_arms )
     names = [ p for f in builders for p in inspect.signature( f ).parameters ]
     check( not any( "gold" in p or "primary" in p for p in names ), "no control-arm builder takes gold as an argument" )
 
@@ -207,7 +211,62 @@ def test_real_ripwire( bin_path ):
            "real ripwire: placebo is format-identical to the --for export" )
     check( not ( set( files_of( p ) ) & set( files_of( for_xml ) ) ), "real ripwire: placebo names none of the --for answer's files" )
 
-def run_main_offline( bin_path, arms, work ):
+# ── realistic SHORT signatures (16-95 chars), the shape real LocBench rows have ──────────────────────────────
+# The long-sig fixture above leaves every tail row tens of bytes of trim slack, so the ordered arms always
+# closed. Real rows carry long attribute heads (paths, ids) and short sigs: the gap left after the greedy
+# prefix is often smaller than the next row's MINIMUM size, and trimming one sig cannot close it. On 24 pilot
+# train instances the original builder failed for-matched on 9 and lexical on 17 (ADDENDUM 2026-11-26).
+SHORT_FILES = [ f"src/project_core/subsystem_{i:02d}/module_handlers_{i:02d}.py" for i in range( 24 ) ]
+
+def short_sig( fi, j ):
+    name = ( "handle_" + "request_payload_value"[: ( fi * 7 + j * 5 ) % 21 + 1 ] + f"_{j}" )
+    args = ", ".join( [ "self", "value", "config", "options", "context", "timeout: float = 1.0" ][: ( fi + j ) % 6 + 1 ] )
+    sig = f"def {name}({args})"
+    if len( sig ) < 16: sig += "  # short helper"
+    return sig[:95], name
+
+def short_for_rows():
+    uni = universe_rows( SHORT_FILES, 8, short_sig )
+    pick = [ x for x in uni if any( f'p="{f}"' in x for f in SHORT_FILES[:6] ) ][:48]
+    return [ rl.set_attr( rl.set_attr( x, "r", str( i + 1 ) ), "s", f"{0.95 - 0.01 * i:.6f}" ) for i, x in enumerate( pick ) ]
+
+SHORT_UNI = doc( universe_rows( SHORT_FILES, 8, short_sig ), route="query-personalized" )
+SHORT_FOR = doc( short_for_rows() )
+
+def test_short_signature_closure():
+    lens = [ len( rl.row_sig_text( r ) ) for r in rows_of( SHORT_UNI ) ]
+    check( min( lens ) >= 16 and max( lens ) <= 95, f"fixture sigs are realistic: {min( lens )}-{max( lens )} chars" )
+    real_files = set( files_of( SHORT_FOR ) )
+    full = rows_of( SHORT_FOR )
+    targets = list( range( 1800, rl.nbytes( SHORT_FOR ) + 1, 41 ) )
+    raised = unequal = over = badmeta = leaked = order = 0
+    shortfalls = []
+    with tempfile.TemporaryDirectory() as d:
+        for f in SHORT_FILES:
+            p = pathlib.Path( d ) / f; p.parent.mkdir( parents=True, exist_ok=True ); p.write_text( f"def handle_request(): pass  # {f}\n" )
+        for t in targets:
+            try:
+                docs, b, meta = rl.build_derived_arms( SHORT_FOR, SHORT_UNI, t, "inst-S", d, "handle request payload value", SHORT_FILES )
+            except rl.PlaceboUnbuildable:
+                raised += 1; continue
+            sizes = { rl.nbytes( x ) for x in docs.values() }
+            unequal += set( docs ) != set( rl.DERIVED_ARMS ) or sizes != { b }
+            over += b > t
+            badmeta += meta.get( "requested_bytes" ) != t or meta.get( "budget_shortfall" ) != t - b
+            shortfalls.append( t - b )
+            leaked += bool( set( files_of( docs["placebo"] ) ) & real_files )
+            got = rows_of( docs["for-matched"] )
+            order += [ rl.row_attr( r, "id" ) for r in got ] != [ rl.row_attr( r, "id" ) for r in full[:len( got )] ]
+            order += sum( rl.row_sig_text( r ).endswith( rl.ELLIPSIS ) for r in got ) > 2
+    n = len( targets )
+    check( raised == 0, f"short sigs: every arm builds at all {n} requested budgets ({raised} raised PlaceboUnbuildable)" )
+    check( raised == 0 and unequal == 0, f"short sigs: all four arms are EXACTLY one common size B* at every budget ({unequal} off)" )
+    check( raised == 0 and over == 0 and badmeta == 0, "B* <= the requested budget, and requested_bytes / budget_shortfall are disclosed" )
+    check( raised == 0 and leaked == 0 and order == 0, "short sigs: placebo still excludes the answer's files; for-matched keeps ripwire order, <=2 trimmed rows" )
+    check( bool( shortfalls ) and max( shortfalls ) > 0, f"the common-budget rule is exercised (max shortfall {max( shortfalls ) if shortfalls else None} B)" )
+    check( raised == 0 and bool( shortfalls ) and max( shortfalls ) <= 600, f"the shortfall stays bounded (max {max( shortfalls ) if shortfalls else None} B <= 600 over {n} budgets)" )
+
+def run_main_offline( bin_path, arms, work, extra=() ):
     # Drive run_locbench.main() end to end with NO network: one fabricated instance (not a Loc-Bench row) whose
     # "repo" is test/fixture, served by a stubbed checkout(). Returns (exit message or None, results JSON).
     import contextlib, io
@@ -222,7 +281,7 @@ def run_main_offline( bin_path, arms, work ):
     rl.CTX = bin_path
     out = pathlib.Path( work ) / "out.json"
     sys.argv = [ "run_locbench.py", "--n", "1", "--work-dir", work, "--arms", arms, "--json-out", str( out ),
-                 "--emit-payloads", str( pathlib.Path( work ) / "payloads" ) ]
+                 "--emit-payloads", str( pathlib.Path( work ) / "payloads" ), *extra ]
     msg = None
     try:
         with contextlib.redirect_stdout( io.StringIO() ), contextlib.redirect_stderr( io.StringIO() ):
@@ -235,13 +294,16 @@ def run_main_offline( bin_path, arms, work ):
 
 def test_main_integration( bin_path ):
     with tempfile.TemporaryDirectory() as w:
-        msg, res = run_main_offline( bin_path, "for,for-matched,placebo-shuffle,lexical", w )
+        # --top-k=2: the answer names few enough of test/fixture's files that an unrelated pool exists (every
+        # derived arm, placebo included, is built at the common budget whatever --arms requests)
+        msg, res = run_main_offline( bin_path, "for,for-matched,placebo-shuffle,lexical", w, ( "--top-k", "2" ) )
         arms = ( res or {} ).get( "arms", {} )
         ok = msg is None and all( arms.get( a, {} ).get( "n" ) == 1 for a in ( "for", "for-matched", "placebo-shuffle", "lexical" ) )
         check( ok, f"main() scores the shipped + derived arms offline on a fixture instance ({msg})" )
         sizes = { arms[a]["output_bytes"] for a in ( "for-matched", "placebo-shuffle", "lexical" ) } if ok else set()
         want = min( arms["for"]["output_bytes"], arms["for"]["candidate_bytes"] ) if ok else None
-        check( ok and sizes == { want }, f"derived arms are scored at min(production --for bytes, --for export bytes) = {want} ({sizes})" )
+        got = next( iter( sizes ) ) if len( sizes ) == 1 else None
+        check( ok and got is not None and got <= want, f"derived arms are scored at ONE common size B* <= min(production, export) = {want} ({sizes})" )
         man = pathlib.Path( w ) / "payloads" / "fixture__geom-1" / "manifest.json"
         check( man.exists() and "for-production" in json.loads( man.read_text() ), "--emit-payloads sealed the instance's payloads" )
     with tempfile.TemporaryDirectory() as w:

@@ -43,7 +43,7 @@
 #   python3 bench/locbench/run_locbench.py --dataset swebench-lite --n 25 --work-dir /tmp/locbench
 #
 # Deterministic given (dataset, slice, ripwire binary): no LLM, no RNG, stable instance order.
-import argparse, hashlib, json, math, os, re, statistics, subprocess, sys, time, urllib.request, urllib.error, urllib.parse, pathlib
+import argparse, functools, hashlib, json, math, os, re, statistics, subprocess, sys, time, urllib.request, urllib.error, urllib.parse, pathlib
 import xml.etree.ElementTree as ET
 
 CTX = os.environ.get("RIPWIRE", "ripwire")
@@ -385,10 +385,19 @@ def ranked_row( row, i, scores ):
     s = scores[min( i, len( scores ) - 1 )] if scores else row_attr( row, "s" )
     return set_attr( set_attr( row, "r", str( i + 1 ) ), "s", s )
 
+@functools.lru_cache( maxsize=1 << 16 )
+def trim_bounds( row ):
+    # The byte sizes of `row` with its sig cut to just the ellipsis and to the full text + ellipsis: no trim of
+    # this row can land outside them. Cached by row text, since common_budget asks about the same rows at
+    # many candidate budgets.
+    return nbytes( row_with_sig( row, ELLIPSIS ) ), nbytes( row_with_sig( row, row_sig_text( row ) + ELLIPSIS ) )
+
 def trimmed_to( row, need ):
     # The prefix of `row`'s sig text (closed by an ellipsis, as ripwire's own truncations are) whose row is
     # exactly `need` bytes, or None. Byte length is non-decreasing in the prefix length, so bisect.
     if nbytes( row ) == need: return row
+    low, high = trim_bounds( row )
+    if need < low or need > high: return None
     full = row_sig_text( row )
     lo, hi = 0, len( full )
     while lo <= hi:
@@ -408,12 +417,13 @@ def fit_to_bytes( head, root_open, tail, pool, scores, target, tries=1 ):
     # Raises PlaceboUnbuildable rather than return a document of any other size.
     if not pool: raise PlaceboUnbuildable( "empty row pool" )
     fixed = lambda n: nbytes( head ) + nbytes( set_attr( root_open, "count", str( n ) ) ) + nbytes( tail )
-    rendered = [ ranked_row( r, i, scores ) for i, r in enumerate( pool ) ]
-    prefix = [ 0 ]
-    for r in rendered: prefix.append( prefix[-1] + nbytes( r ) )
+    rendered, prefix = [], [ 0 ]       # rendered lazily: nothing past the first row that overflows is ever read
+    for i, r in enumerate( pool ):
+        rendered.append( ranked_row( r, i, scores ) ); prefix.append( prefix[-1] + nbytes( rendered[-1] ) )
+        if fixed( i + 1 ) + prefix[-1] > target: break
     finish = lambda rows: render_candidates( head, root_open, tail, rows, scores )
     k = 0
-    while k < len( pool ) and fixed( k + 1 ) + prefix[k + 1] <= target: k += 1
+    while k < len( rendered ) and fixed( k + 1 ) + prefix[k + 1] <= target: k += 1
     if k and fixed( k ) + prefix[k] == target: return finish( pool[:k] )
     def close( base, base_bytes, start ):
         need = target - fixed( len( base ) + 1 ) - base_bytes
@@ -444,14 +454,19 @@ def build_for_matched( for_xml, target ):
     head, root, rows, tail = split_candidates_doc( for_xml )
     return fit_to_bytes( head, root, tail, rows, [ row_attr( r, "s" ) for r in rows ], target )
 
-def build_placebo_unrelated( for_xml, universe_xml, instance_id, target ):
+def unrelated_pool( for_xml, universe_xml, instance_id ):
     # Bellam's "random entities": ripwire-rendered rows drawn uniformly (seeded) from files the real answer
     # does NOT name. Score strings are the real answer's, in order — the score column carries no signal.
-    head, root, real, tail = split_candidates_doc( for_xml )
+    _, _, real, _ = split_candidates_doc( for_xml )
     named = { row_attr( r, "p" ) for r in real }
     _, _, uni, _ = split_candidates_doc( universe_xml )
     pool = seeded_order( [ r for r in uni if row_attr( r, "p" ) not in named ], instance_id, "unrelated" )
-    return fit_to_bytes( head, root, tail, pool, [ row_attr( r, "s" ) for r in real ], target, tries=64 )
+    return pool, [ row_attr( r, "s" ) for r in real ]
+
+def build_placebo_unrelated( for_xml, universe_xml, instance_id, target ):
+    head, root, _, tail = split_candidates_doc( for_xml )
+    pool, scores = unrelated_pool( for_xml, universe_xml, instance_id )
+    return fit_to_bytes( head, root, tail, pool, scores, target, tries=64 )
 
 def build_placebo_shuffle( matched_xml, instance_id ):
     # The real matched answer with its rows permuted and r=/s= re-dealt in position order: the same bytes
@@ -501,10 +516,9 @@ def bm25_rank_files( repo_path, files, query, k1=1.2, b=0.75, max_bytes=2_000_00
     scored.sort( key=lambda x: ( -x[1], x[0] ) )
     return scored, oversize
 
-def build_lexical( for_xml, universe_xml, ranked_files, target ):
+def lexical_pool( universe_xml, ranked_files ):
     # A3: files in BM25 order; within a file, its symbols in the universe export's own order. Rows are
     # ripwire-rendered universe rows, so the format is identical; s= is the file's BM25 score.
-    head, root, _, tail = split_candidates_doc( for_xml )
     _, _, uni, _ = split_candidates_doc( universe_xml )
     by_file = {}
     for r in uni: by_file.setdefault( row_attr( r, "p" ), [] ).append( r )
@@ -512,7 +526,7 @@ def build_lexical( for_xml, universe_xml, ranked_files, target ):
     for f, s in ranked_files:
         for r in by_file.get( f, [] ):
             pool.append( r ); scores.append( f"{s:.6f}" )
-    return fit_to_bytes( head, root, tail, pool, scores, target )
+    return pool, scores
 
 def format_signature( xml ):
     # What "format-identical" means, as a value two documents can be compared on: the legend bytes, the
@@ -526,19 +540,44 @@ def format_signature( xml ):
         shapes.add( ( el.tag, tuple( el.attrib ), tuple( c.tag for c in el ) ) )
     return dict( head=head, root=tuple( k for k, _ in ATTR_RE.findall( root_open ) ), tail=tail, shapes=frozenset( shapes ) )
 
+def common_budget( fit, requested ):
+    # PREREG_PLACEBO.md ADDENDUM 2026-11-26. B* = the LARGEST size <= the requested budget at which EVERY arm
+    # closes exactly. One number for all arms, chosen from row lengths only (no gold, no score, no model), so it
+    # cannot favour an arm: every arm pays the same shortfall. -> (B*, {arm: doc}); raises PlaceboUnbuildable
+    # only when no common size exists at all. The arm order below is a speed choice (cheapest pool first);
+    # the result is the maximum of an intersection, so it does not depend on that order.
+    for b in range( requested, 0, -1 ):
+        docs = {}
+        for arm in ( "for-matched", "lexical", "placebo" ):
+            try:
+                docs[arm] = fit[arm]( b )
+            except PlaceboUnbuildable:
+                break
+        else:
+            return b, docs
+    raise PlaceboUnbuildable( f"no common exact size at or below {requested} B" )
+
 def build_derived_arms( for_xml, universe_xml, production_bytes, instance_id, repo_path, query, universe_files, wanted=DERIVED_ARMS ):
-    # -> {arm: xml}, target, meta. target = min(production --for bytes, the full --for candidates export):
-    # the matched budget is what the shipped answer COSTS, never more than ripwire can fill. for-matched is
-    # always built (it is the reference the others are checked against); the rest only when `wanted`.
-    target = min( production_bytes, nbytes( for_xml ) )
-    matched = build_for_matched( for_xml, target )
-    docs, meta = { "for-matched": matched }, dict( target_bytes=target )
-    if "placebo" in wanted: docs["placebo"] = build_placebo_unrelated( for_xml, universe_xml, instance_id, target )
-    if "placebo-shuffle" in wanted: docs["placebo-shuffle"] = build_placebo_shuffle( matched, instance_id )
-    if "lexical" in wanted:
-        ranked, meta["bm25_oversize_files"] = bm25_rank_files( repo_path, universe_files, query )
-        docs["lexical"] = build_lexical( for_xml, universe_xml, ranked, target )
-    ref = format_signature( matched )
+    # -> {arm: xml}, B*, meta. The requested budget = min(production --for bytes, the full --for candidates
+    # export): what the shipped answer COSTS, never more than ripwire can fill. Every derived arm is built at
+    # the one common size B* <= that budget (common_budget), and ALL four are always built, so a payload never
+    # depends on which arms a run requested (`wanted` is kept for callers; it no longer narrows the build).
+    # meta discloses requested_bytes and budget_shortfall = requested - B*.
+    requested = min( production_bytes, nbytes( for_xml ) )
+    head, root, real, tail = split_candidates_doc( for_xml )
+    ranked, oversize = bm25_rank_files( repo_path, universe_files, query )
+    unrel, unrel_scores = unrelated_pool( for_xml, universe_xml, instance_id )
+    lex, lex_scores = lexical_pool( universe_xml, ranked )
+    if not unrel or not lex:
+        raise PlaceboUnbuildable( f"empty row pool (placebo={len( unrel )}, lexical={len( lex )})" )
+    real_scores = [ row_attr( r, "s" ) for r in real ]
+    fit = { "for-matched": lambda b: fit_to_bytes( head, root, tail, real, real_scores, b ),
+            "lexical":     lambda b: fit_to_bytes( head, root, tail, lex, lex_scores, b ),
+            "placebo":     lambda b: fit_to_bytes( head, root, tail, unrel, unrel_scores, b, tries=64 ) }
+    target, docs = common_budget( fit, requested )
+    docs["placebo-shuffle"] = build_placebo_shuffle( docs["for-matched"], instance_id )
+    meta = dict( target_bytes=target, requested_bytes=requested, budget_shortfall=requested - target, bm25_oversize_files=oversize )
+    ref = format_signature( docs["for-matched"] )
     for arm, doc in docs.items():
         sig = format_signature( doc )
         if nbytes( doc ) != target or sig["head"] != ref["head"] or sig["root"] != ref["root"] or sig["tail"] != ref["tail"]:

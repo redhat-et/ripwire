@@ -12,6 +12,8 @@
 #   * the unrelated placebo names none of the real answer's files, on a fixture whose universe DOES
 #     contain them (the exclusion is live, not vacuous); builders take no gold argument;
 #   * an undersized pool fails closed (PlaceboUnbuildable), never a near-miss size;
+#   * on REALISTIC short signatures (16-95 chars) every arm still builds, at ONE common size B* <= the requested
+#     budget with the shortfall disclosed (PREREG_PLACEBO.md ADDENDUM 2026-11-26; red on the original builder);
 #   * the lexical baseline is FILE-level BM25 with identifier splitting, and counts oversize files;
 #   * one arm on REAL ripwire output (test/fixture) when a binary is present.
 # Red on the base commit by construction: the builders did not exist there (AttributeError -> exit 1).
