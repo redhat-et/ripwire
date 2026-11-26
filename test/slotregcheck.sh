@@ -300,12 +300,18 @@ for q in "$QR" "$QS"; do
     if [ -z "$VMUT" ]; then grep -q 'fault=stalerows' "$TMP/v.p.err" "$TMP/v.r.err" "$TMP/v.err" && VMUT=1 || VMUT=0; fi
     if [ "$VMUT" = 0 ]; then printf '  INFO  V this binary compiles fault switches out (NDEBUG): the served-vs-fresh check is a plain-build check\n'; break; fi
     run v.h warm --for="$q"   # the same served call, honest: it answers (the check passes on an index that matches)
-    # 133 = 128 + SIGTRAP: the DASSERT's trap (its banner goes to the render's captured stream, so the status is the signal)
-    if [ "$( cat "$TMP/v.rc" )" = 133 ] && [ "$( cat "$TMP/v.h.rc" )" = 0 ]; then ok "V stale served rows trap the plain build (rc=133), the honest served call answers (rc=0)"
-    else no "V a served index that differs from the model was not caught (mutant rc=$( cat "$TMP/v.rc" ), honest rc=$( cat "$TMP/v.h.rc" ))"; fi
+    # The DASSERT's trap is __builtin_trap: `brk` on arm64 (SIGTRAP, 128+5=133), `ud2` on x86-64 (SIGILL, 128+4=132). Its banner
+    # goes to the render's captured stream, so the status is the signal; any other status (a crash, an exit) is not this check.
+    vrc="$( cat "$TMP/v.rc" )"
+    if { [ "$vrc" = 133 ] || [ "$vrc" = 132 ]; } && [ "$( cat "$TMP/v.h.rc" )" = 0 ]; then ok "V stale served rows trap the plain build (rc=$vrc), the honest served call answers (rc=0)"
+    else no "V a served index that differs from the model was not caught (mutant rc=$vrc, honest rc=$( cat "$TMP/v.h.rc" ))"; fi
 done
 
 # ── D, X ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+# One honest call first. Every RIPWIRE_* variable is in the options key, so V's fault-switch calls recorded entries of their
+# own and (a record keeps two) pushed the honest one out; a Release build, where V stops after them, then met a cold key
+# here. D is about two SERVED calls, so it re-records the honest entry before its premise call.
+run d_rec warm --for="$QR"
 statrun d0 --for="$QR"; run d1 warm --for="$QR"; run d2 warm --for="$QR"   # RIPWIRE_STATS prints memory readings: the pair runs without it
 if [ "$( field d0 regindex served )" = 1 ] && same d1 d2 && cmp -s "$TMP/d1.err" "$TMP/d2.err"; then ok "D two served calls are byte-identical (stdout and stderr)"; else no "D served calls differ (or were not served: '$( line d0 regindex )')"; fi
 if command -v xmllint >/dev/null 2>&1; then
