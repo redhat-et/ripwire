@@ -819,13 +819,13 @@ struct LeadByteTable
 {
     bool common[ 256 ] = {};
 };
-consteval LeadByteTable leadByteTableOf( std::string_view bytes )
+inline constexpr LeadByteTable kCommonLeadBytes = []
 {
-    LeadByteTable t;
-    for( const char c : bytes ) { t.common[ static_cast<unsigned char>( c ) ] = true; }
-    return t;
-}
-inline constexpr LeadByteTable kCommonLeadBytes = leadByteTableOf( "\n (),.:=abcdefghilmnoprstuvy" );
+    constexpr std::string_view kCommon = "\n (),.:=abcdefghilmnoprstuvy";
+    LeadByteTable              table;
+    for( std::size_t b = 0; b < 256; ++b ) { table.common[ b ] = kCommon.find( char( b ) ) != std::string_view::npos; }
+    return table;
+}();
 
 // find's dispatch is INLINED into every caller: its early outs (from past the end, empty needle, needle longer than the rest) are
 // then a compare or two where std's are, instead of a call. The measured cost of a call was 1.5 ns on a 1.3 ns std answer.
@@ -1326,26 +1326,30 @@ inline constexpr Byteset256 kAsciiDigit = bytesetOf( "0123456789" );    // std::
 inline constexpr Byteset256 kAsciiAlnum = bytesetOf( "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" );   // std::isalnum
 inline constexpr Byteset256 kAsciiIdent = bytesetOf( "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" );  // isalnum || '_'
 
+// findAnyOf and findNotAnyOf: the first position at or after `from` whose byte is (kOutside: is NOT) in `set`, or npos.
+template<bool kOutside>
+[[nodiscard]] inline std::size_t findBytesetFrom( std::string_view hay, const Byteset256& set, std::size_t from, KernelPath path ) noexcept
+{
+    if( from >= hay.size() ) { return std::string_view::npos; }
+    const std::size_t left = hay.size() - from;
+    const std::size_t at   = path == KernelPath::Scalar ? findByteset_scalar<kOutside>( hay.data() + from, left, set )
+                                                        : findByteset<kOutside>( hay.data() + from, left, set );
+    return at == left ? std::string_view::npos : from + at;
+}
+
 // The first position at or after `from` whose byte is in `set`, or npos. Contract: == hay.find_first_of( chars, from ) for the
 // `chars` the set was built from, for every input (npos when from >= hay.size()). D6 in test/verify_strkern.cpp.
 [[nodiscard]] inline std::size_t findAnyOf( std::string_view hay, const Byteset256& set, std::size_t from = 0,
                                             KernelPath path = KernelPath::Vector ) noexcept
 {
-    if( from >= hay.size() ) { return std::string_view::npos; }
-    const std::size_t left = hay.size() - from;
-    const std::size_t at   = path == KernelPath::Scalar ? findByteset_scalar( hay.data() + from, left, set ) : findByteset( hay.data() + from, left, set );
-    return at == left ? std::string_view::npos : from + at;
+    return findBytesetFrom<false>( hay, set, from, path );
 }
 
 // The first position at or after `from` whose byte is NOT in `set`, or npos. Contract: == hay.find_first_not_of( chars, from ).
 [[nodiscard]] inline std::size_t findNotAnyOf( std::string_view hay, const Byteset256& set, std::size_t from = 0,
                                                KernelPath path = KernelPath::Vector ) noexcept
 {
-    if( from >= hay.size() ) { return std::string_view::npos; }
-    const std::size_t left = hay.size() - from;
-    const std::size_t at   = path == KernelPath::Scalar ? findByteset_scalar<true>( hay.data() + from, left, set )
-                                                        : findByteset<true>( hay.data() + from, left, set );
-    return at == left ? std::string_view::npos : from + at;
+    return findBytesetFrom<true>( hay, set, from, path );
 }
 
 // The run loop `while( i < hay.size() && in( hay[ i ] ) ) ++i;` as one call: the first position at or after `from` whose byte is not
