@@ -131,12 +131,14 @@ recordOf(){ find "$TMP/t/ripwire" -name "ripwire-verbfs-*-$1-*.bin" 2>/dev/null 
 identAll(){ ident "$1 --for" --for="$TASK" && ident "$1 --metrics" --metrics; }
 # mut LABEL FAULT : a binary blinded by FAULT, served from the record of the state before the edit, must differ from --no-cache
 MUT=0
+# mutrun FAULT TAG ARGS... : a served run under one fault switch (exported for that run only), through run's own rc file
+mutrun(){ local fault="$1"; shift; export "$fault=1"; run "$1" warm "${@:2}"; unset "$fault"; }
 mut(){
     [ "$MUT" = 1 ] || return 0
     local label="$1" fault="$2" diffs=0
-    run mu.c nocache --for="$TASK"; ( cd "$FIX" && env "$fault=1" "$BIN" "$FIX" --cache="$TMP/c.bin" --for="$TASK" </dev/null >"$TMP/mu.w.out" 2>/dev/null ); echo $? >"$TMP/mu.w.rc"
+    run mu.c nocache --for="$TASK"; mutrun "$fault" mu.w --for="$TASK"
     same mu.w mu.c || diffs=1
-    run mu.c nocache --metrics; ( cd "$FIX" && env "$fault=1" "$BIN" "$FIX" --cache="$TMP/c.bin" --metrics </dev/null >"$TMP/mu.w.out" 2>/dev/null ); echo $? >"$TMP/mu.w.rc"
+    run mu.c nocache --metrics; mutrun "$fault" mu.w --metrics
     same mu.w mu.c || diffs=1
     if [ "$diffs" = 1 ]; then ok "MUT $label: $fault turns the identity red"; else no "MUT $label: the $fault mutant matched the reference: the arm cannot see a stale record"; fi
 }
@@ -239,7 +241,7 @@ else no "I3: '$( line i3s qmetrics )'"; fi
 run pre4 warm --for="$TASK"
 if [ "$MUT" = 1 ]; then
     run mu.c nocache --metrics --exclude=tests
-    ( cd "$FIX" && RIPWIRE_FAULT_VERBFS_QMETRICS_ANYDIGEST=1 "$BIN" "$FIX" --cache="$TMP/c.bin" --metrics --exclude=tests </dev/null >"$TMP/mu.w.out" 2>/dev/null ); echo $? >"$TMP/mu.w.rc"
+    mutrun RIPWIRE_FAULT_VERBFS_QMETRICS_ANYDIGEST mu.w --metrics --exclude=tests
     if ! same mu.w mu.c; then ok "MUT I4 a changed flag: RIPWIRE_FAULT_VERBFS_QMETRICS_ANYDIGEST turns the identity red"; else no "MUT I4: the any-digest mutant matched the reference"; fi
 fi
 statrun i4s --metrics --exclude=tests
@@ -305,7 +307,7 @@ if [ -n "$QREC" ]; then
     if [ "$MUT" = 1 ]; then
         cp "$TMP/qrec.good" "$QREC"; damage "$QREC" tested
         run mu.c nocache --metrics
-        ( cd "$FIX" && RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM=1 "$BIN" "$FIX" --cache="$TMP/c.bin" --metrics </dev/null >"$TMP/mu.w.out" 2>/dev/null ); echo $? >"$TMP/mu.w.rc"
+        mutrun RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM mu.w --metrics
         if ! same mu.w mu.c; then ok "MUT I5 a damaged record: RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM (no checksum) turns the identity red"; else no "MUT I5: the no-checksum mutant matched the reference"; fi
         cp "$TMP/qrec.good" "$QREC"
     fi

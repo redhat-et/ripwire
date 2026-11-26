@@ -1670,6 +1670,14 @@ Discloses: `capped`, `value_refs_depth_capped`
 | `kSlotTargetCap` | `16` | — | — |
 | `kValueRefRowCap` | `64` | — | — |
 
+### `src/verbfs_qmetrics.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDigestThreadCap` | `16` | — | — |
+
 ### `src/verbs_change.h`
 
 Discloses: `capped`, `seed_files_capped`
