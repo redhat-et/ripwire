@@ -1,5 +1,12 @@
 # Help wanted: make `--uses` answer a `::` selector instead of a silent zero
 
+> **Solved (2026-11-26).** `--uses` now narrows a `::` selector (the canonical id `path::scope::name`, or
+> `Scope::name`) through the resolver `--callers` uses and answers the real count, with the narrowing disclosed, in
+> [#231](https://github.com/redhat-et/ripwire/pull/231) by @aniruddhaadak80, closing [#164](https://github.com/redhat-et/ripwire/issues/164); the dot-qualified twin
+> (`Type.member`) followed in [#657](https://github.com/redhat-et/ripwire/pull/657). `test/usesselectorcheck.sh` arm (d) now asserts
+> its FIXED lines: the canonical id answers 1 ≤ `count=` ≤ the bare-name count and lists the same rows as the
+> `file:name` spelling. This kit stays as a worked example; nothing in it remains open.
+
 **Good first issue · size M · no prerequisite · one comparison, three CLI verbs and one MCP twin downstream**
 
 You are fixing **one comparison**. Every symbol-taking verb accepts the two `::` spellings the tool

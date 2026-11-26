@@ -1,5 +1,12 @@
 # Struct-layout doctor — catch the binary that cannot exist from any single commit
 
+> **Solved (2026-11-26).** `--doctor` now prints a `layout` row (`state="agree"`, `"disagree"`, `"not-checked"` or
+> `"no-records"`) built from the `sizeof`/`alignof` facts each translation unit records through `src/structlayout.h`, in
+> [#224](https://github.com/redhat-et/ripwire/pull/224) by @lennix1337, closing [#162](https://github.com/redhat-et/ripwire/issues/162). `test/structlayoutcheck.sh` compiles two
+> units that disagree on one struct and proves the row says `state="disagree"` and names both; `test/doctorcheck.sh`
+> pins the row on the real binary. This kit stays as a worked example; by design the row cannot see a field reorder
+> that keeps both size and alignment, which `CLAUDE.md` states next to the `layout` row.
+
 You are teaching `ripwire --doctor` to detect a **mixed-layout binary**: one whose translation units
 were compiled against different versions of the same struct. Each translation unit records the layout
 facts it was compiled with, in a way that survives Release builds, and `--doctor` compares the records
