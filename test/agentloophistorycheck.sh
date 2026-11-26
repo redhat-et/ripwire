@@ -31,11 +31,17 @@
 #   (6) WIRED    run_one() calls checkout_leak_error() (which runs history_leak_findings()) before the
 #                harness, and it refuses the leaky control and passes the clean checkout.
 #
-# Usage: bash test/agentloophistorycheck.sh [ripwire-binary]   (accepted for regression.sh's uniform call
-# shape and unused: the subject is a python runner and git.)
+# Usage: bash test/agentloophistorycheck.sh [ripwire-binary]   (named and version-checked, then unused:
+# the subject is a python runner and git.)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+# The gate binary seam (lane rules 11-26): the binary is named and its version printed on the first line, so a
+# run cannot silently test some other build. The subject here is python, but a binary that does not run
+# fails the gate rather than being ignored.
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+echo "BIN=$BIN $( "$BIN" --version 2>&1 | head -n 1 )"
+"$BIN" --version >/dev/null 2>&1 || { echo "agentloophistorycheck: BIN=$BIN does not run"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "agentloophistorycheck: python3 required"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "agentloophistorycheck: git required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
