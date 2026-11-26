@@ -463,6 +463,11 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             f.id += symOff;
             m.fnLocalScopes.push_back( f );
         }
+        for( TangleBlockFacts f : p.tangleBlocks )   // QD-TANGLE BLOCK FACTS: the same id offset
+        {
+            f.id += symOff;
+            m.tangleBlocks.push_back( f );
+        }
         const std::uint32_t fieldOff = std::uint32_t( m.fields.size() );   // member-variable round: the field side table merges alike
         for( Symbol& f : p.fields )
         {

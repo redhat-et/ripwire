@@ -78,6 +78,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
 #include "gitstamp.h"
+#include "gitstampcache.h"   // C1-STAMP: the record behind a served --for's six small git answers
 #include "githarden.h"      // harvest 2026-09-09: the git-config trust boundary — one call in main(), before any thread              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
@@ -4157,6 +4158,13 @@ static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( con
     return walks;
 }
 
+// C1-STAMP: the run whose at= stamp and history key may come from the STAMP record and whose status probe starts early —
+// a one-shot --for over one root (dispatchMainBody; gitstamp.h, gitstampcache.h).
+static bool isOneShotStampedFor( const rw::Config& cfg, bool multiRoot, const char* winner )
+{
+    return !multiRoot && cfg.roots.size() == 1 && cfg.helpTask.empty() && winner != nullptr && std::string_view( winner ) == "--for";
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 static int dispatchMainBody( const rw::Config& cfg, char** argv );
 
@@ -6132,6 +6140,14 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
+    // C1-STAMP: a one-shot --for over one git root asks six small git questions and one big one. The record answers the six
+    // while the files they depend on read the same (gitstampcache.h), and `git status` starts here, beside the snapshot load,
+    // to be joined where stampAt consumes it (gitstamp.h DirtyPrefetch). Both are declared before the walks, so the walks
+    // join first, the probe next, and the record is written last, once every answer of this run is in.
+    const bool                 isStampedFor = isOneShotStampedFor( cfg, multiRoot, verbPrec.winner );
+    rw::gitstampcache::Session gitStampSession;
+    gitStampSession.arm( root, isStampedFor && !cfg.noCache );
+    const rw::gitstamp::DirtyPrefetch dirtyPrefetch( root, isStampedFor && rw::gitstamp::writesStayOutsideWorkTree( root, cfg.cacheFile ) );
     std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
     // Declared after the futures, so it runs before they join: FileGraphStopped unwinds this function, and a join here would
     // hold the refusal until the log ends (the same wait the refusals below abandon; memguardcheck B21b).
@@ -6262,6 +6278,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         family( "fields", ing.fields );
         family( "aliasTargets", ing.aliasTargets );
         family( "fnLocalScopes", ing.fnLocalScopes );
+        family( "tangleBlocks", ing.tangleBlocks );
         family( "cloneKeys", ing.cloneKeys );
         family( "references", ing.references );
         family( "includes", ing.includes );

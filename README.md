@@ -105,9 +105,9 @@ measurements are in [docs/EVALS.md](docs/EVALS.md).*
 </details>
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 79 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 85 papers folded — McCabe (1976) through to <b>two published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
 
-Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
+Beside those sits a labelled survey of **240 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
 counted twice.
 
@@ -116,8 +116,8 @@ make the quality lens trustworthy: McCabe on complexity (1976), Halstead on volu
 Jones on term specificity (1972), Nagappan & Ball on churn. Fifty years of replication means those
 are not opinions, and a tool that measures your code should be built on the ones that survived.
 
-The recent work is what makes it *current*: **seventeen of the folded papers are from 2026, seven
-published in the last two months and three in the last thirty days** (dates as of 2026-09-08; every
+The recent work is what makes it *current*: **nineteen of the folded papers are from 2026, two
+published in the last two months and none in the last thirty days** (dates as of 2026-11-26; every
 row carries its arXiv id, so the claim is checkable rather than atmospheric). Retrieval for coding
 agents, context-compression cost, placebo-controlled localization — that literature is months old,
 not decades, and several rows were folded within weeks of the paper appearing.
@@ -1666,11 +1666,11 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>49 repositories, 79 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>49 repositories, 85 papers and a 240-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**49 repositories and 79 papers** into one deterministic executable, alongside a labelled
-survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
+**49 repositories and 85 papers** into one deterministic executable, alongside a labelled
+survey of 240 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
 by `test/readmedriftcheck.sh`, which fails if this sentence and those tables disagree.
@@ -1823,9 +1823,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>922 gate scripts</b> (counts snapshot 2026-11-26), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>927 gate scripts</b> (counts snapshot 2026-11-26), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **922 gate scripts** at the counts snapshot 2026-11-26 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **927 gate scripts** at the counts snapshot 2026-11-26 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1834,7 +1834,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-26 the tool had 477 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-26 the tool had 479 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names
