@@ -39,6 +39,12 @@ KNOWN residual false positives (out of scope; report-only, so a later rule can s
 RUST IN-FILE TEST CODE (CodeRabbit #721 r8: the test exemption reads isTestSymbol, not only the path):
   rustlib.rs  — one non-test file (src/) with the same deep Rust body three times: rust_tangle_prod (production: a gating row),
                 rust_tangle_test (a #[test] fn) and rust_tangle_helper (a fn inside #[cfg(test)] mod tests): over the bar, no row.
+CROSS-LOCAL WRITES CodeRabbit #743 round 2 named (each a twin pair: the form under test and a control the rule always counted;
+both twins must report the same cross count):
+  deepchain / shallowchain — C++: a local written through 20 member accesses (`r.m0.….m19.v = 1;`) vs 3. A 16-hop cap on the root
+                walk dropped the deep one's root.
+  gostep / goassign        — Go: `r.n++` (an inc_statement on a selector) vs `r.n = r.n + 1`.
+  csstep / csassign        — C#: `r.Value++` (a postfix unary on a member access) vs `r.Value = r.Value + 1`.
 HISTORY (v1 -> wt), the rise and ratchet arms:
   crossgrow   — REAL, over the bar with the cap not binding; wt threads one more local across blocks by editing an existing
                 line (no line added): the score is unchanged, crossLocals +1 is the rise (a minor row, why= names cross).
@@ -264,6 +270,35 @@ def rustlib():
             + "\n#[cfg(test)]\nmod tests {\n" + rustdeep("rust_tangle_helper", pad=4, vis="") + "}\n")
 
 
+# ── cross-local write forms (twins) ─────────────────────────────────────────────────────────────────────────────────────────
+def chainwrite(name, hops):
+    target = "r" + "".join(f".m{k}" for k in range(hops)) + ".v"
+    return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = 0;\n    Chain r;\n"
+            f"    if( !xs.empty() )\n    {{\n        {target} = 1;\n    }}\n"
+            "    for( int x : xs )\n    {\n        if( x > 0 )\n        {\n            for( int y = 0; y < x; ++y )\n            {\n"
+            "                if( y % 3 )\n                {\n" + lines(40, 20, "total += y * {k};") +
+            "                }\n            }\n        }\n" + lines(30, 8, "total = total * 7 + {k};") +
+            "    }\n    return total + r.v;\n}\n")
+
+
+def gostep(name, step, typedef=False):
+    return ("package main\n\n" + ("type Rec struct{ n int }\n\n" if typedef else "")
+            + f"func {name}(xs []int) int {{\n\ttotal := 0\n\tvar r Rec\n"
+            "\tfor _, x := range xs {\n\t\tif x > 0 {\n\t\t\tfor y := 0; y < x; y++ {\n\t\t\t\tif y%3 != 0 {\n"
+            + "".join(f"\t\t\t\t\ttotal += y * {k}\n" for k in range(40)) +
+            f"\t\t\t\t\t{step}\n\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n"
+            + "".join(f"\t\ttotal = total*7 + {k}\n" for k in range(30)) + "\t}\n"
+            + "".join(f"\ttotal = total*9 + {k}\n" for k in range(6)) + "\ttotal = total*9 + r.n\n\treturn total\n}\n")
+
+
+def csstep(name, step):
+    return (f"class {name.capitalize()}Host\n{{\n    int {name}( int[] xs )\n    {{\n        var total = 0;\n        var r = new Rec();\n"
+            "        foreach( var x in xs )\n        {\n            if( x > 0 )\n            {\n                for( var y = 0; y < x; y++ )\n"
+            "                {\n                    if( y % 3 != 0 )\n                    {\n" + lines(40, 24, "total += y * {k};") +
+            f"                        {step}\n                    }}\n                }}\n            }}\n" + lines(30, 12, "total = total * 7 + {k};")
+            + "        }\n" + lines(6, 8, "total = total * 9 + {k};") + "        total = total * 9 + r.Value;\n        return total;\n    }\n}\n")
+
+
 # ── a small tangled body, moved ─────────────────────────────────────────────────────────────────────────────────────────────
 def smallmove(name="smallmove", lit=1):
     return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = {lit};\n"
@@ -291,6 +326,13 @@ def main():
         os.remove(old)
     write(d, "src/smallmoved.cpp", "#include <vector>\n" + smallmove(lit=2))
     write(d, "src/rustlib.rs", rustlib())
+    chdr = hdr + "struct Chain;\n"
+    write(d, "src/deepchain.cpp", chdr + chainwrite("deepchain", 20))
+    write(d, "src/shallowchain.cpp", chdr + chainwrite("shallowchain", 3))
+    write(d, "src/gostep.go", gostep("gostep", "r.n++", typedef=True))
+    write(d, "src/goassign.go", gostep("goassign", "r.n = r.n + 1"))
+    write(d, "src/csstep.cs", csstep("csstep", "r.Value++;"))
+    write(d, "src/csassign.cs", csstep("csassign", "r.Value = r.Value + 1;"))
     write(d, "src/famswitch.cpp", hdr + famswitch())
     write(d, "src/twoarms.cpp", hdr + twoarms())
     write(d, "src/addressarms.cpp", hdr + addressarms())

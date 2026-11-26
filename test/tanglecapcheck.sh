@@ -41,6 +41,9 @@
 #        lines: premise, read from --metrics and the file). wt moves it to another file and edits one literal: the row reads
 #        origin="moved" and does not gate. Red before the move record keyed on the tangle bar (no sketch below both bars: a gating
 #        new-function row).
+#   (c1) CROSS-LOCAL WRITE FORMS (CodeRabbit #743 round 2): each twin pair reports the same cross count in its row's why=, the
+#        control at least 1 (premise): deepchain (a 20-access member target) = shallowchain (3), gostep (Go `r.n++`) = goassign,
+#        csstep (C# `r.Value++`) = csassign. Red on e3b7c3145 (one cross local fewer on each form under test).
 #   (m1) MUST KEEP, main's sources: the 6 #721 parents (captureTagsFacts, lexicalScoresTiered, serialize, runQualityDelta,
 #        compressBody, serializeJson) plus buildGraph and dispatchMcpLine stay over the bar on ripwire main 696d57a67 (the
 #        labelled commit). Premise: the commit is reachable (CI clones with fetch-depth 0) and each name has a tangle= row.
@@ -151,6 +154,14 @@ else
     if [ -n "$r" ] && [ "$( attr "$r" origin )" = moved ] && [ -z "$( attr "$r" gating )" ]; then ok "(v1) smallmove (tangle=$t, ccx $cx, $code code lines) moved with a literal edit: origin=\"moved\", no gate"
     else no "(v1) smallmove (tangle=$t, ccx $cx, $code code lines) moved with a literal edit: want origin=\"moved\" and no gating=, got '${r:-none}'"; fi
 fi
+# (c1) cross-local write forms: each twin pair counts the same cross locals
+crossof(){ attr "$( trow "$Q" "$1" )" why | grep -oE 'cross [0-9]+' | grep -oE '[0-9]+'; }
+for pair in deepchain:shallowchain gostep:goassign csstep:csassign; do
+    f="${pair%%:*}"; c="${pair##*:}"; fc="$( crossof "$f" )"; cc="$( crossof "$c" )"
+    if [ -z "$cc" ] || [ "$cc" -lt 1 ]; then no "(c1) PREMISE: $c (control) should have a tangle row whose why= names cross >= 1, got '$( trow "$Q" "$c" )'"
+    elif [ "$fc" = "$cc" ]; then ok "(c1) $f: cross $fc, the same as its control $c"
+    else no "(c1) $f: cross ${fc:-none}, want $cc as its control $c (a write form the cross count missed)"; fi
+done
 
 # (q4) the old floor: pin v1 with --quality-baseline, strip its block facts, judge the working tree
 O="$TMP/old"; mkdir -p "$O"; "${G[@]}" -C "$O" init -q

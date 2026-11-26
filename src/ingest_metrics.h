@@ -982,6 +982,22 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
 }
 
 // A write to a bare name, in any steered grammar: assignment (plain and compound) and increment/decrement.
+// C#'s `x++` / `--x`: a postfix or prefix unary expression writes only when its operator is a step (`-x`, `!x` read).
+inline bool steer_isCSharpStep( TSNode n, const char* t, std::string_view src ) noexcept
+{
+    if( !kindIs( t, "postfix_unary_expression" ) && !kindIs( t, "prefix_unary_expression" ) )
+    {
+        return false;
+    }
+    const std::string_view text = nodeTextOf( n, src );
+    return text.starts_with( "++" ) || text.starts_with( "--" ) || text.ends_with( "++" ) || text.ends_with( "--" );
+}
+// The operand a step writes: the `argument` field (C, C++, JS, TS), else the first named child (Go inc/dec, C# unary).
+inline TSNode steer_stepOperand( TSNode n ) noexcept
+{
+    const TSNode arg = fieldChild( n, NodeField::Argument );
+    return ts_node_is_null( arg ) ? ts_node_named_child( n, 0 ) : arg;
+}
 inline void steer_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_view src )
 {
     if( kindIs( t, "assignment_expression" ) || kindIs( t, "augmented_assignment_expression" ) || kindIs( t, "compound_assignment_expr" ) )
@@ -999,16 +1015,11 @@ inline void steer_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_
     }
     else if( kindIs( t, "update_expression" ) || kindIs( t, "inc_statement" ) || kindIs( t, "dec_statement" ) )
     {
-        const TSNode arg = fieldChild( n, NodeField::Argument );
-        steer_write( acc, ts_node_is_null( arg ) ? ts_node_named_child( n, 0 ) : arg, src );
+        steer_write( acc, steer_stepOperand( n ), src );
     }
-    else if( kindIs( t, "postfix_unary_expression" ) || kindIs( t, "prefix_unary_expression" ) )   // C#: only ++ / -- write
+    else if( steer_isCSharpStep( n, t, src ) )
     {
-        const std::string_view text = nodeTextOf( n, src );
-        if( text.starts_with( "++" ) || text.starts_with( "--" ) || text.ends_with( "++" ) || text.ends_with( "--" ) )
-        {
-            steer_write( acc, ts_node_named_child( n, 0 ), src );
-        }
+        steer_write( acc, ts_node_named_child( n, 0 ), src );
     }
 }
 
@@ -1025,9 +1036,11 @@ inline bool cross_isAccess( const char* t ) noexcept
     return std::ranges::contains( kCrossAccessKinds, std::string_view( t ) ) || tangleKindOf( t ) == TangleKind::Subscript;
 }
 // The local a member or element access lands on: `x` of `x.f`, `x->f`, `x[i]`, `x.f[i].g` (every grammar puts the object first).
+// No hop cap: each step goes to the first named child, so the walk ends at a leaf of a finite tree, and a chain of any length
+// reaches its root (CodeRabbit #743: a 16-hop cap dropped the root of a 16-access target, a cross local lost without a word).
 inline TSNode cross_rootName( TSNode n ) noexcept
 {
-    for( std::uint32_t hop = 0; hop < 16u && !ts_node_is_null( n ); ++hop )
+    while( !ts_node_is_null( n ) )
     {
         const char* t = ts_node_type( n );
         if( kindIs( t, "identifier" ) )
@@ -1128,9 +1141,11 @@ inline void cross_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_
         }
         return;
     }
-    if( kindIs( t, "update_expression" ) )   // `x.n++`, `x[i]--` (a bare name is steer_write's)
+    // `x.n++`, `x[i]--`, Go's `x.n++` statement and C#'s `x.Value++` (a bare name is steer_write's; CodeRabbit #743: the Go and C#
+    // forms were steer's only)
+    if( kindIs( t, "update_expression" ) || kindIs( t, "inc_statement" ) || kindIs( t, "dec_statement" ) || steer_isCSharpStep( n, t, src ) )
     {
-        const TSNode arg = fieldChild( n, NodeField::Argument );
+        const TSNode arg = steer_stepOperand( n );
         if( !ts_node_is_null( arg ) && !kindIs( ts_node_type( arg ), "identifier" ) )
         {
             cross_markWrite( acc, cross_rootName( arg ), src );
