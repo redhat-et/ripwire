@@ -501,10 +501,15 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
   newline / line-start / byte count, as you would reach for the faster containers. A hand-rolled byte loop over text is a
   review comment.** Each routine returns exactly what its std equivalent returns for every input (a property test in
   `test/verify_strkern.cpp` holds it to that, under ASan + UBSan) and picks NEON, AVX2 or the portable scalar twin inside,
-  so it swaps in with no other change. A one-off probe of a short string (a name, a path, a token) gains nothing; leave
-  that one as `std::string_view`.
+  so it swaps in with no other change.
+- **`rw::strkern::find` is the fastest find at every size; use it instead of `std::string_view::find`** — a 4-byte token
+  as well as a whole file. It dispatches inside (needle length, first byte, bytes left), and
+  `bench/bench_strkern_find.cpp` holds it to "never slower than std" in every measured cell: 4 B to whole files, needles
+  of 1 to 16 bytes, runtime and literal (bench/STRKERN_FIND.md). A literal needle, `find( hay, "::" )`, binds the
+  `Literal` overload, whose length is a compile-time constant; a runtime `char` array does not compile there (spell it
+  `std::string_view( buf )`).
 - The catalog, one routine per line, with the std (or hand-loop) spelling it replaces:
-  - `find( hay, needle, from )` — `hay.find( needle, from )`, the substring find (D2).
+  - `find( hay, needle, from )` — `hay.find( needle, from )`, the substring find (D2; literal needles D2b).
   - `ciFindLiteral( hay, needleLowered, from )` — fold A-Z of `hay` to lower case, then `find`; ASCII only (D3).
   - `lowerFoldedEquals( s, lowered )` / `lowerFoldedStartsWith( s, loweredPrefix )` — an ASCII case-insensitive
     `==` / `starts_with` against an already lowered string.
