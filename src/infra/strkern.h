@@ -827,10 +827,13 @@ inline std::size_t findNeedle( const char* p, std::size_t n, const char* needle,
 //     kCommonLeadBytes goes to std — "]]>" over 1 KB: std 34 ns, the block kernel 46 ns. When it is common, memchr stops at every
 //     occurrence and the block kernel wins at every size: 0.4x std at 16 B, 0.2x at 32-64 B, 0.1-0.2x from 256 B up.
 //   * a ONE-byte needle is memchr from kFindMemchrCutoff bytes up (the kernel's equal there); below it the kernel (0.76-0.97x).
+// The cutoffs are counted in vector BLOCKS, not bytes, so AVX2 (32-byte blocks) runs the same dispatch as NEON (16-byte blocks):
+// one block of bytes for the memchr cutoff, one block of start positions for literals, and the same kCommonLeadBytes. The numbers
+// above are NEON's; the AVX2 cutoffs are this analogue until a native x86 table tunes them (CI prints it, report-only).
 // A LITERAL needle (the Literal overload) has a constant length, which lets the compiler specialize std's search for it; below a
 // block of start positions that inlined std is the faster (2-5 ns against the kernel's 6-7), so a literal goes to the kernel only from
 // kFindBlockStarts start positions up, and only with a common first byte.
-inline constexpr std::size_t kFindMemchrCutoff = 16;
+inline constexpr std::size_t kFindMemchrCutoff = kBlockBytes;   // one vector block of bytes (16 NEON, 32 AVX2)
 inline constexpr std::size_t kFindBlockStarts  = kBlockBytes;   // one vector block of start positions (16 NEON, 32 AVX2)
 
 // The bytes that are COMMON at the start of a needle: every byte at >= 0.5 % of the text in each of three corpora (this repo's

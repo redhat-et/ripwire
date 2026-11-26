@@ -30,8 +30,8 @@ The setup:
 
 1. **The lengths.** If the needle is longer than what is left, the answer is npos without reading a byte. The check is inlined, as std's is.
 2. **A one-byte needle.**
-   - From `kFindMemchrCutoff` (16 B) up, `find` uses memchr, which is std's own path.
-   - Below 16 B, it uses the block kernel.
+   - From `kFindMemchrCutoff` (one vector block: 16 B on NEON, 32 B on AVX2) up, `find` uses memchr, which is std's own path.
+   - Below that, it uses the block kernel.
 3. **The first byte.** std's search is memchr on the first byte, then a compare.
    - **Rare first byte.** If the first byte is not in `kCommonLeadBytes`, memchr strides faster than a two-byte filter, so `find` is std.
      - `kCommonLeadBytes` holds the bytes at 0.5 % or more of the text in each of three corpora: this repo, VS Code `src/` and Envoy `source/`.
@@ -82,41 +82,40 @@ M2, macOS, AppleClang. The machine was loaded with other builds, which is why th
 
 | hay | m=1 std ns | find/std | m=2 std ns | find/std | m=3 std ns | find/std | m=4 std ns | find/std | m=8 std ns | find/std | m=16 std ns | find/std |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 4 | 31.48 | 0.72 | 30.90 | 0.66 | 17.55 | 1.09 | 16.55 | 1.06 | 1.76 | 1.47 **SLOWER** | 1.73 | 1.49 **SLOWER** |
-| 8 | 19.36 | 1.16 **SLOWER** | 25.54 | 0.88 | 24.35 | 0.92 | 23.17 | 0.90 | 15.78 | 1.13 **SLOWER** | 1.73 | 1.49 **SLOWER** |
-| 16 | 20.49 | 1.08 | 43.54 | 0.47 | 36.36 | 0.57 | 32.93 | 0.63 | 35.31 | 0.59 | 16.18 | 1.08 |
-| 32 | 19.08 | 1.05 | 45.44 | 0.52 | 43.25 | 0.56 | 46.88 | 0.51 | 36.44 | 0.61 | 39.36 | 0.56 |
-| 64 | 18.19 | 1.04 | 60.02 | 0.41 | 74.92 | 0.37 | 82.70 | 0.30 | 74.94 | 0.32 | 68.54 | 0.37 |
-| 128 | 16.64 | 1.02 | 87.38 | 0.41 | 115.24 | 0.35 | 127.45 | 0.31 | 120.04 | 0.32 | 128.78 | 0.33 |
-| 256 | 17.20 | 0.98 | 113.93 | 0.40 | 210.74 | 0.31 | 215.46 | 0.28 | 238.04 | 0.27 | 247.44 | 0.27 |
-| 512 | 16.43 | 0.98 | 161.30 | 0.32 | 299.11 | 0.29 | 455.37 | 0.23 | 443.90 | 0.25 | 435.82 | 0.23 |
-| 1024 | 16.45 | 0.97 | 178.89 | 0.32 | 532.38 | 0.26 | 773.01 | 0.26 | 973.28 | 0.20 | 925.57 | 0.21 |
-| 2048 | 15.19 | 0.97 | 178.68 | 0.36 | 798.44 | 0.24 | 1137.15 | 0.23 | 1654.72 | 0.23 | 1845.00 | 0.21 |
-| 4096 | 24.95 | 0.62 | 222.50 | 0.29 | 906.66 | 0.22 | 1369.31 | 0.24 | 3432.50 | 0.21 | 8934.96 | 0.08 |
-| file | 32.59 | 0.65 | 144.08 | 0.33 | 884.81 | 0.20 | 789.64 | 0.15 | 18911.36 | 0.17 | 8147.55 | 0.15 |
+| 4 | 16.86 | 1.70 **SLOWER** | 19.29 | 1.35 **SLOWER** | 17.22 | 1.54 **SLOWER** | 15.69 | 1.58 **SLOWER** | 1.68 | 1.51 **SLOWER** | 1.73 | 1.52 **SLOWER** |
+| 8 | 18.86 | 1.53 **SLOWER** | 25.90 | 1.06 | 22.45 | 1.17 **SLOWER** | 21.69 | 1.17 **SLOWER** | 15.26 | 1.53 **SLOWER** | 1.65 | 1.52 **SLOWER** |
+| 16 | 18.96 | 1.64 **SLOWER** | 35.84 | 0.73 | 34.75 | 0.82 | 33.61 | 0.83 | 26.93 | 1.02 | 16.04 | 1.57 **SLOWER** |
+| 32 | 19.08 | 1.37 **SLOWER** | 45.40 | 0.71 | 43.34 | 0.74 | 46.40 | 0.74 | 36.18 | 0.77 | 39.21 | 0.76 |
+| 64 | 18.74 | 1.36 **SLOWER** | 60.22 | 0.42 | 75.15 | 0.37 | 85.55 | 0.29 | 72.83 | 0.33 | 68.45 | 0.36 |
+| 128 | 16.11 | 1.19 **SLOWER** | 88.72 | 0.40 | 116.18 | 0.35 | 126.18 | 0.32 | 116.81 | 0.33 | 124.33 | 0.33 |
+| 256 | 16.37 | 1.07 | 110.08 | 0.39 | 203.40 | 0.30 | 209.23 | 0.28 | 228.79 | 0.27 | 240.48 | 0.27 |
+| 512 | 15.83 | 1.01 | 155.96 | 0.32 | 316.92 | 0.28 | 457.63 | 0.23 | 445.12 | 0.25 | 434.36 | 0.23 |
+| 1024 | 16.64 | 0.97 | 171.96 | 0.31 | 512.77 | 0.26 | 769.20 | 0.25 | 945.32 | 0.20 | 898.85 | 0.20 |
+| 2048 | 15.08 | 0.97 | 174.70 | 0.35 | 782.36 | 0.23 | 1091.38 | 0.23 | 1585.67 | 0.23 | 1818.75 | 0.20 |
+| 4096 | 15.49 | 0.98 | 219.05 | 0.27 | 589.34 | 0.28 | 1274.27 | 0.25 | 3370.18 | 0.20 | 3182.22 | 0.21 |
+| file | 14.31 | 0.97 | 112.75 | 0.37 | 454.35 | 0.25 | 838.27 | 0.17 | 36316.17 | 0.09 | 16224.18 | 0.08 |
 
 #### AVX2 (x86-64-v3 slice under Rosetta 2 — indicative only): literal needles
 
 | hay | `(` std ns | find/std | `::` std ns | find/std | `]]>` std ns | find/std | `<!--` std ns | find/std | `#include` std ns | find/std | `std::string_view` std ns | find/std |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 4 | 6.34 | 1.00 | 5.91 | 1.04 | 5.11 | 0.98 | 4.96 | 0.98 | 0.61 | 1.00 | 0.61 | 1.32 **SLOWER** |
-| 8 | 7.35 | 1.01 | 7.00 | 1.04 | 5.84 | 1.00 | 5.71 | 1.00 | 4.98 | 1.00 | 0.61 | 1.31 **SLOWER** |
-| 16 | 9.08 | 1.00 | 8.91 | 1.03 | 7.55 | 1.00 | 7.42 | 1.00 | 6.84 | 1.00 | 11.80 | 1.03 |
-| 32 | 8.40 | 0.98 | 8.50 | 1.04 | 6.56 | 1.00 | 6.80 | 1.00 | 7.87 | 1.00 | 28.32 | 1.01 |
-| 64 | 10.44 | 1.01 | 11.21 | 1.44 **SLOWER** | 7.87 | 1.00 | 8.38 | 1.00 | 10.10 | 1.00 | 54.35 | 0.31 |
-| 128 | 13.08 | 1.00 | 16.38 | 1.30 **SLOWER** | 10.25 | 1.01 | 11.03 | 1.00 | 14.10 | 1.00 | 108.09 | 0.22 |
-| 256 | 17.04 | 1.00 | 26.80 | 1.19 **SLOWER** | 15.62 | 0.99 | 16.20 | 1.01 | 21.73 | 1.00 | 207.15 | 0.17 |
-| 512 | 21.01 | 0.99 | 46.09 | 1.16 **SLOWER** | 26.12 | 1.00 | 26.42 | 1.00 | 38.09 | 1.00 | 396.73 | 0.15 |
-| 1024 | 24.04 | 1.00 | 81.78 | 1.13 **SLOWER** | 46.75 | 0.99 | 49.84 | 1.06 | 71.45 | 0.99 | 786.25 | 0.15 |
-| 4096 | 23.02 | 0.99 | 193.52 | 1.30 **SLOWER** | 167.50 | 1.00 | 166.79 | 0.99 | 243.08 | 1.00 | 2999.00 | 0.14 |
-| file | 28.67 | 0.83 | 132.87 | 0.55 | 587.96 | 0.96 | 418.64 | 1.00 | 484.97 | 1.01 | 4012.80 | 0.09 |
+| 4 | 6.39 | 1.01 | 5.92 | 1.02 | 5.11 | 1.00 | 4.86 | 1.00 | 0.61 | 1.00 | 0.61 | 1.31 **SLOWER** |
+| 8 | 7.35 | 1.01 | 6.91 | 1.02 | 5.91 | 0.99 | 5.71 | 1.00 | 4.99 | 1.00 | 0.61 | 1.31 **SLOWER** |
+| 16 | 9.06 | 1.00 | 8.99 | 1.01 | 7.60 | 1.00 | 7.48 | 1.00 | 6.87 | 1.01 | 11.76 | 1.03 |
+| 32 | 8.46 | 0.99 | 8.54 | 1.02 | 6.55 | 1.00 | 6.80 | 1.00 | 7.92 | 1.00 | 28.24 | 1.02 |
+| 64 | 10.37 | 1.03 | 11.24 | 1.44 **SLOWER** | 7.97 | 0.99 | 8.35 | 1.00 | 10.07 | 1.00 | 54.41 | 0.31 |
+| 128 | 13.04 | 1.01 | 16.38 | 1.30 **SLOWER** | 10.62 | 0.97 | 11.15 | 0.99 | 14.16 | 1.00 | 108.58 | 0.22 |
+| 256 | 16.98 | 1.02 | 26.56 | 1.19 **SLOWER** | 15.75 | 0.98 | 16.44 | 0.99 | 22.09 | 1.00 | 207.64 | 0.17 |
+| 512 | 21.01 | 1.00 | 45.40 | 1.18 **SLOWER** | 26.61 | 0.99 | 26.90 | 0.99 | 38.33 | 0.99 | 397.22 | 0.16 |
+| 1024 | 23.98 | 0.99 | 80.89 | 1.15 **SLOWER** | 46.75 | 0.99 | 49.84 | 1.00 | 71.70 | 0.99 | 1071.00 | 0.11 |
+| 4096 | 23.12 | 1.08 | 189.67 | 1.28 **SLOWER** | 166.25 | 0.98 | 162.97 | 0.99 | 234.60 | 1.01 | 2970.00 | 0.14 |
+| file | 24.38 | 0.96 | 77.00 | 0.88 | 548.27 | 1.00 | 407.95 | 1.01 | 491.89 | 1.00 | 2569.22 | 0.15 |
 
-The AVX2 rows come from Rosetta 2, which emulates the 256-bit compares and `pmovmskb` on arm64 and also translates libc's memchr. A
-translated run prints its SLOWER cells but exits 0. The gate is a native run: NEON on arm64, or AVX2 on an x86-64-v3 machine.
-The Rosetta SLOWER cells are:
+The AVX2 rows come from Rosetta 2 on the same loaded M2, with wall-clock timing. Rosetta emulates the 256-bit compares and
+`pmovmskb` on arm64 and also translates libc's memchr, so these rows are not an x86 core's numbers, and they move from run to run
+(24 cells over the bar in this run, 13 in the run before it). The AVX2 dispatch is NEON's carried over block for block: a 32 B
+memchr cutoff and a 32-start literal cutoff, with the same `kCommonLeadBytes`. It is deliberately not tuned from Rosetta.
 
-- the needle-longer-than-haystack early out (about 0.8 ns);
-- one-byte needles at 8 B;
-- the `"::"` literal from 64 B up.
-
-These are left for a native x86 run to confirm or refute before anything is tuned for them.
+On x86-64 the bench prints its table and exits 0. CI runs it natively, report-only, on both ubuntu Release legs (gcc and clang),
+shard 1. STRKERN-X86-TUNE will tune the AVX2 cutoffs and the lead-byte handling from that native table, then make the x86 check a
+gate once every cell passes.
