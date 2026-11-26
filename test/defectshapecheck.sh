@@ -2240,6 +2240,10 @@ cat >"$WORK/cdr/src/labels.h" <<'EOF'
 struct Labels { const char* a; const char* b; const char* c; const char* d; };
 inline constexpr Labels kLabels = { "alpha", "beta", "gamma", "delta" };
 EOF
+# A brace list that opens the file (no `;`, `{` or `}` before it): the array-type look-back ran out at token 0, and its
+# `b-- > 0` wrapped the unsigned (G1 -fsanitize=integer abort; editcheckcheck (g) hit it on this repo's own
+# test/falseedgefix/c/copy.c). No name set. The asan CI job runs this gate on the instrumented binary.
+printf '#pragma once\nauto kCompass = { "north", "south", "east" };\n' >"$WORK/cdr/src/first.h"
 for f in modes wrap ok prose gloss bare agg; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
 fx_commit cdr
 sed -i.bak 's/"triangle" }/"triangle", "hexagon" }/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"

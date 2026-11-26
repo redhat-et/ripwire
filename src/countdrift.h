@@ -92,8 +92,15 @@ inline void appendNameSetsOfCpp( std::string_view src, std::vector<NameSet>& out
         // `Labels labels = { … }` holds fields, not a set of names)
         const bool cArray = tokIs( src, toks[k - 1], "]" );
         bool       stdArray = false;
-        for( std::size_t b = nameAt; !cArray && !stdArray && b-- > 0 && !tokIs( src, toks[b], ";" ) && !tokIs( src, toks[b], "{" ) && !tokIs( src, toks[b], "}" ); )
+        // Cursor counts down to 1, index = cursor - 1: `b-- > 0` wrapped the unsigned past token 0 when the declaration
+        // opens the file (`auto k = { … }` with no `;`, `{` or `}` before it), which G1's -fsanitize=integer aborts on.
+        for( std::size_t cursor = nameAt; !cArray && !stdArray && cursor > 0; --cursor )
         {
+            const std::size_t b = cursor - 1;
+            if( tokIs( src, toks[b], ";" ) || tokIs( src, toks[b], "{" ) || tokIs( src, toks[b], "}" ) )
+            {
+                break;
+            }
             stdArray = tokIs( src, toks[b], "array" ) && b + 1 < nameAt && tokIs( src, toks[b + 1], "<" );
         }
         if( toks[nameAt].kind != TokKind::Ident || !( cArray || stdArray ) )
