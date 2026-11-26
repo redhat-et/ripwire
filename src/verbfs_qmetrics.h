@@ -64,10 +64,8 @@
 #include "infra/platform.h"       // addWithCarry64 — the multiset sum, modulo 2^64 without a wrap the sanitizer reports
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <format>
 #include <functional>   // std::greater_equal — the stored lcom4 rows are strictly ascending
 #include <memory>
 #include <mutex>
@@ -75,16 +73,25 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
+#include <utility>
+#include <ranges>      // views::iota — the first moved component
 #include <vector>
 
 namespace rw::verbfs
 {
 
 // ── the record file ─────────────────────────────────────────────────────────────────────────────────────────────────
-inline constexpr std::uint32_t kQmRecordVersion = 1;      // bump on ANY payload layout change of either part below
-inline constexpr std::uint32_t kPartQMetrics    = 0x51;   // 'Q': outside verbfs::Part (1..), so no other part's reader takes it
-inline constexpr std::uint32_t kPartImpure      = 0x49;   // 'I'
+inline constexpr std::uint32_t kQmRecordVersion = 1;   // bump on ANY payload layout change of either part below
+
+// A part of this file: its number in the header (outside verbfs::Part's 1.., so no other part's reader takes it) and its name in
+// the record's file name and on the stats line.
+struct QmPart
+{
+    std::uint32_t    number;
+    std::string_view name;
+};
+inline constexpr QmPart kQMetricsPart{ 0x51, "qmetrics" };   // 'Q'
+inline constexpr QmPart kImpurePart{ 0x49, "impure" };       // 'I'
 
 // The key's components, in the order a miss reports the first that moved.
 enum class QmKey : std::uint8_t
@@ -109,24 +116,28 @@ enum class ImKey : std::uint8_t
 inline constexpr const char* kImKeyNames[] = { "shape", "refs", "graph" };
 static_assert( std::size( kImKeyNames ) == std::size_t( ImKey::Count ), "every key component needs its name on the stats line" );
 
+inline void absorbInto( std::uint64_t& h, std::uint64_t v ) noexcept
+{
+    h = hashutil::hashMix( h ^ v );
+}
+
 // The code is an input: a record another build (other source, other layout) wrote is refused, never misread.
 inline std::uint64_t qmLayoutKey()
 {
-    return depwatch::digest64( std::format( "verbfs-qmetrics v={} producer={:016x} base={:016x} nodeid={} lcom4na={:08x}", kQmRecordVersion,
-                                            quality::producerIdentityHash(), layoutKey(), sizeof( NodeId ), kLcom4NA ) );
+    std::uint64_t key = layoutKey();   // 5b's: the stat signature's size, the byte order, the trigram shape
+    absorbInto( key, kQmRecordVersion );
+    absorbInto( key, quality::producerIdentityHash() );
+    absorbInto( key, sizeof( NodeId ) );
+    absorbInto( key, kLcom4NA );
+    return key;
 }
 
-inline std::string qmRecordPath( std::string_view partName, std::string_view rootKey )
-{
-    return quality::shaKeyedCachePath( "verbfs", std::string( rootKey ), std::string( partName ), "" );
-}
-
-// 5b's readRecord, for a part number outside verbfs::Part (verbfs.h's readRecord / commitRecord take that closed enum).
+// 5b's readRecord, for a part outside verbfs::Part (verbfs.h's readRecord, commitRecord and loadOnce take that closed enum).
 // `noSum`: the RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM mutant, which trusts a payload whose checksum fails.
-inline RecordFile readQmRecord( std::uint32_t partNo, std::string_view partName, std::string_view rootKey, bool noSum )
+inline RecordFile readQmRecord( const QmPart& part, std::string_view rootKey, bool noSum )
 {
     RecordFile                 out;
-    std::optional<std::string> file = pathguard::readRegularFileNoFollow( qmRecordPath( partName, rootKey ) );
+    std::optional<std::string> file = pathguard::readRegularFileNoFollow( quality::shaKeyedCachePath( "verbfs", std::string( rootKey ), std::string( part.name ), "" ) );
     if( !file )
     {
         return out;   // Absent: the ordinary first run
@@ -135,7 +146,7 @@ inline RecordFile readQmRecord( std::uint32_t partNo, std::string_view partName,
     warmsnap::In        in{ std::string_view( out.bytes ) };
     const std::uint64_t magic   = in.u64();
     const std::uint32_t version = in.u32();
-    const std::uint32_t part    = in.u32();
+    const std::uint32_t partNo  = in.u32();
     const std::uint64_t layout  = in.u64();
     const std::uint64_t length  = in.u64();
     const std::uint64_t sum     = in.u64();
@@ -147,7 +158,7 @@ inline RecordFile readQmRecord( std::uint32_t partNo, std::string_view partName,
     {
         out.why = Why::Version;
     }
-    else if( !VALIDATE( part == partNo && layout == qmLayoutKey(), "verbfs qmetrics: a record of another part, layout or build" ) )
+    else if( !VALIDATE( partNo == part.number && layout == qmLayoutKey(), "verbfs qmetrics: a record of another part, layout or build" ) )
     {
         out.why = Why::Shape;
     }
@@ -166,20 +177,20 @@ inline RecordFile readQmRecord( std::uint32_t partNo, std::string_view partName,
 }
 
 // 5b's commitRecord, for the same reason.
-inline bool commitQmRecord( std::uint32_t partNo, std::string_view partName, std::string_view rootKey, warmsnap::Out& o )
+inline bool commitQmRecord( const QmPart& part, std::string_view rootKey, warmsnap::Out& o )
 {
     EXPECTS( o.bytes.size() >= kHeaderBytes, "the payload was written behind beginRecord's header" );
     const std::string_view payload = std::string_view( o.bytes ).substr( kHeaderBytes );
     warmsnap::Out          head;
     head.u64( kMagic );
     head.u32( kQmRecordVersion );
-    head.u32( partNo );
+    head.u32( part.number );
     head.u64( qmLayoutKey() );
     head.u64( payload.size() );
     head.u64( depwatch::digest64( payload ) );
     ENSURES( head.bytes.size() == kHeaderBytes, "the header is the fixed 40 bytes readQmRecord takes" );
     std::memcpy( o.bytes.data(), head.bytes.data(), kHeaderBytes );
-    if( !quality::atomicWriteFile( qmRecordPath( partName, rootKey ), o.bytes ) )
+    if( !quality::atomicWriteFile( quality::shaKeyedCachePath( "verbfs", std::string( rootKey ), std::string( part.name ), "" ), o.bytes ) )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's VERB-FS QMETRICS record is not there, and it computes in full" );
         return false;
@@ -202,9 +213,14 @@ struct QmFaults
     bool noFiles   = false;   // ... only in the files component
     bool noSyms    = false;   // ... only in the symbols component
     bool noSum     = false;   // a payload whose checksum fails is read
+
+    // the first switch that is on, for the stats line (null: none)
     const char* name() const noexcept
     {
-        return anyDigest ? "anydigest" : noGraph ? "nograph" : noRefs ? "norefs" : noFiles ? "nofiles" : noSyms ? "nosyms" : noSum ? "nosum" : nullptr;
+        const std::pair<bool, const char*> named[] = { { anyDigest, "anydigest" }, { noGraph, "nograph" }, { noRefs, "norefs" },
+                                                       { noFiles, "nofiles" },     { noSyms, "nosyms" },   { noSum, "nosum" } };
+        const auto on = std::ranges::find_if( named, []( const std::pair<bool, const char*>& n ) { return n.first; } );
+        return on != std::end( named ) ? on->second : nullptr;
     }
     bool blinds( std::string_view component ) const noexcept
     {
@@ -215,68 +231,42 @@ inline QmFaults qmFaults() noexcept
 {
     return { rw::faultSwitchOnOnce<FaultQmAnyDigest>( "RIPWIRE_FAULT_VERBFS_QMETRICS_ANYDIGEST" ), rw::faultSwitchOnOnce<FaultQmNoGraph>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOGRAPH" ),
              rw::faultSwitchOnOnce<FaultQmNoRefs>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOREFS" ), rw::faultSwitchOnOnce<FaultQmNoFiles>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOFILES" ),
-             rw::faultSwitchOnOnce<FaultQmNoSyms>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS" ),
-             rw::faultSwitchOnOnce<FaultQmNoSum>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM" ) };
+             rw::faultSwitchOnOnce<FaultQmNoSyms>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS" ), rw::faultSwitchOnOnce<FaultQmNoSum>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM" ) };
 }
 
 // ── the digest: fixed blocks, folded in block order ──────────────────────────────────────────────────────────────────
-inline constexpr std::size_t kDigestItemsPerBlock = std::size_t( 1 ) << 14;   // rows per block: the partition is the items', not the threads'
-inline constexpr std::size_t kDigestBytesPerBlock = std::size_t( 1 ) << 20;   // bytes per block of a raw array
-inline constexpr std::size_t kDigestThreadCap     = 16;
+// The blocks are fixed by the items, never by the threads: warmsnap::parallelFor hands each block to one worker, and the
+// workers write only their block's slot.
+inline constexpr std::size_t kDigestRowsPerBlock  = 256;
+inline constexpr std::size_t kDigestBytesPerBlock = std::size_t( 1 ) << 14;
 
-// fn( b ) for every block b in [0, blockCount), on up to kDigestThreadCap threads; fn touches only block b's slot.
-template <class Fn>
-inline void forEachDigestBlock( std::size_t blockCount, Fn&& fn )
+inline std::uint64_t foldBlocks( std::uint64_t seed, std::uint64_t total, std::span<const std::uint64_t> part ) noexcept
 {
-    const std::size_t workers = std::min( { std::size_t( std::max( std::thread::hardware_concurrency(), 1u ) ), blockCount, kDigestThreadCap } );
-    std::atomic<std::size_t> next{ 0 };
-    const auto body = [ & ]() noexcept
+    std::uint64_t h = hashutil::hashMix( seed ^ total );
+    for( const std::uint64_t p : part )
     {
-        for( std::size_t b = next.fetch_add( 1, std::memory_order_relaxed ); b < blockCount; b = next.fetch_add( 1, std::memory_order_relaxed ) )
-        {
-            fn( b );
-        }
-    };
-    if( workers <= 1 )
-    {
-        body();
-        return;
+        absorbInto( h, p );
     }
-    std::vector<std::thread> pool;
-    pool.reserve( workers - 1 );
-    for( std::size_t t = 1; t < workers; ++t )
-    {
-        pool.emplace_back( body );
-    }
-    body();
-    for( std::thread& th : pool )
-    {
-        th.join();
-    }
+    return h;
 }
 
 // The digest of rows [0, rowCount): absorb( i, h ) folds row i into its block's running digest h, in row order within the block.
 template <class Absorb>
 inline std::uint64_t rowsDigest( std::size_t rowCount, std::uint64_t seed, Absorb&& absorb )
 {
-    const std::size_t          blocks = ( rowCount + kDigestItemsPerBlock - 1 ) / kDigestItemsPerBlock;
+    const std::size_t          blocks = ( rowCount + kDigestRowsPerBlock - 1 ) / kDigestRowsPerBlock;
     std::vector<std::uint64_t> part( blocks, 0 );
-    forEachDigestBlock( blocks, [ & ]( std::size_t b ) noexcept
+    warmsnap::parallelFor( blocks, [ & ]( std::size_t b ) noexcept
     {
         std::uint64_t     h   = hashutil::hashMix( seed ^ hashutil::hashMix( b ) );
-        const std::size_t end = std::min( rowCount, ( b + 1 ) * kDigestItemsPerBlock );
-        for( std::size_t i = b * kDigestItemsPerBlock; i < end; ++i )
+        const std::size_t end = std::min( rowCount, ( b + 1 ) * kDigestRowsPerBlock );
+        for( std::size_t i = b * kDigestRowsPerBlock; i < end; ++i )
         {
             absorb( i, h );
         }
         part[ b ] = h;
     } );
-    std::uint64_t h = hashutil::hashMix( seed ^ std::uint64_t( rowCount ) );
-    for( const std::uint64_t p : part )
-    {
-        h = hashutil::hashMix( h ^ p );
-    }
-    return h;
+    return foldBlocks( seed, rowCount, part );
 }
 
 // The digest of the MULTISET of items: item( i, out ) sets out to row i's item digest and returns true when row i holds an item.
@@ -284,13 +274,13 @@ inline std::uint64_t rowsDigest( std::size_t rowCount, std::uint64_t seed, Absor
 template <class Item>
 inline std::uint64_t multisetDigest( std::size_t rowCount, std::uint64_t seed, Item&& item )
 {
-    const std::size_t          blocks = ( rowCount + kDigestItemsPerBlock - 1 ) / kDigestItemsPerBlock;
+    const std::size_t          blocks = ( rowCount + kDigestRowsPerBlock - 1 ) / kDigestRowsPerBlock;
     std::vector<std::uint64_t> sum( blocks, 0 ), count( blocks, 0 );
-    forEachDigestBlock( blocks, [ & ]( std::size_t b ) noexcept
+    warmsnap::parallelFor( blocks, [ & ]( std::size_t b ) noexcept
     {
         std::uint64_t     s = 0, n = 0, d = 0, carry = 0;
-        const std::size_t end = std::min( rowCount, ( b + 1 ) * kDigestItemsPerBlock );
-        for( std::size_t i = b * kDigestItemsPerBlock; i < end; ++i )
+        const std::size_t end = std::min( rowCount, ( b + 1 ) * kDigestRowsPerBlock );
+        for( std::size_t i = b * kDigestRowsPerBlock; i < end; ++i )
         {
             if( item( i, d ) )
             {
@@ -316,27 +306,18 @@ inline std::uint64_t multisetDigest( std::size_t rowCount, std::uint64_t seed, I
 template <class T>
 inline std::uint64_t bytesDigest( const T* rows, std::size_t rowCount, std::uint64_t seed )
 {
-    const std::size_t byteCount = rowCount * sizeof( T );
-    const char* const bytes     = reinterpret_cast<const char*>( rows );
-    const std::size_t blocks    = ( byteCount + kDigestBytesPerBlock - 1 ) / kDigestBytesPerBlock;
+    const std::size_t          byteCount = rowCount * sizeof( T );
+    const char* const          bytes     = reinterpret_cast<const char*>( rows );
+    const std::size_t          blocks    = ( byteCount + kDigestBytesPerBlock - 1 ) / kDigestBytesPerBlock;
     std::vector<std::uint64_t> part( blocks, 0 );
-    forEachDigestBlock( blocks, [ & ]( std::size_t b ) noexcept
+    warmsnap::parallelFor( blocks, [ & ]( std::size_t b ) noexcept
     {
         const std::size_t from = b * kDigestBytesPerBlock;
         part[ b ]              = depwatch::digest64( std::string_view( bytes + from, std::min( kDigestBytesPerBlock, byteCount - from ) ) );
     } );
-    std::uint64_t h = hashutil::hashMix( seed ^ std::uint64_t( byteCount ) );
-    for( const std::uint64_t p : part )
-    {
-        h = hashutil::hashMix( h ^ p );
-    }
-    return h;
+    return foldBlocks( seed, byteCount, part );
 }
 
-inline void absorbInto( std::uint64_t& h, std::uint64_t v ) noexcept
-{
-    h = hashutil::hashMix( h ^ v );
-}
 inline std::uint64_t textDigest( std::string_view text ) noexcept
 {
     return TextPool::hashOf( text );   // the bytes, never the pool id
@@ -411,56 +392,117 @@ inline std::vector<std::uint64_t> impureKey( const IngestResult& ing, const Grap
         return isImpureSeed( r, S );
     } );
 
-    const std::size_t    rows = g.inEdges.rows();
-    const std::uint32_t* ro   = g.inEdges.rowOffsets();
-    const std::size_t    nnz  = rows != 0 && ro != nullptr ? ro[ rows ] : 0;
+    const std::size_t    rows  = g.inEdges.rows();
+    const std::uint32_t* ro    = g.inEdges.rowOffsets();
+    const std::size_t    nnz   = rows != 0 && ro != nullptr ? ro[ rows ] : 0;
     std::uint64_t        graph = bytesDigest( ro, ro != nullptr ? rows + 1 : 0, 0x494d'5052'4f57'4f46ull );
     absorbInto( graph, bytesDigest( g.inEdges.colIndices(), nnz, 0x494d'5043'4f4c'5321ull ) );
     key[ std::size_t( ImKey::Graph ) ] = graph;
     return key;
 }
 
-// The first component the two keys disagree on that the faults do not blind, or null when they agree.
-inline const char* firstMovedComponent( std::span<const std::uint64_t> stored, std::span<const std::uint64_t> now, std::span<const char* const> names, const QmFaults& faults )
-{
-    if( stored.size() != now.size() )
-    {
-        return "shape";
-    }
-    for( std::size_t c = 0; c < now.size(); ++c )
-    {
-        if( stored[ c ] != now[ c ] && !faults.blinds( names[ c ] ) )
-        {
-            return names[ c ];
-        }
-    }
-    return nullptr;
-}
-
-// ── (4) QMETRICS ═════════════════════════════════════════════════════════════════════════════════════════════════════
-struct QmRecord
+// ── loading, and the verdict on a loaded record ─────────────────────────────────────────────────────────────────────
+// What every record of this file starts with: the key it was stored under and the symbol count of its index.
+struct QmKeyed
 {
     std::vector<std::uint64_t> key;
     std::uint64_t              symbolCount = 0;
+};
+
+inline void writeKeyed( warmsnap::Out& o, const QmKeyed& r )
+{
+    o.vec( r.key );
+    o.u64( r.symbolCount );
+}
+
+inline void readKeyed( warmsnap::In& in, QmKeyed& r )
+{
+    in.vec( r.key );
+    r.symbolCount = in.u64();
+}
+
+template <class Rec>
+struct QmLoaded
+{
+    std::shared_ptr<const Rec> record;
+    Why                        why = Why::Absent;
+};
+
+// The record, once per process (re-read only when this process wrote a newer one).
+template <class Rec, class Parse>
+inline QmLoaded<Rec> loadQmOnce( LoadedRecord<Rec>& slot, const QmPart& part, std::string_view rootKey, bool noSum, Parse&& parse )
+{
+    const std::lock_guard<std::mutex> hold( slot.guard );
+    if( !slot.loaded )
+    {
+        slot.loaded           = true;
+        const RecordFile file = readQmRecord( part, rootKey, noSum );
+        slot.why              = file.why;
+        if( file.why == Why::Ok )
+        {
+            auto rec = std::make_shared<Rec>();
+            if( parse( file.payload(), *rec ) )
+            {
+                slot.record = std::move( rec );
+            }
+            else
+            {
+                DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS QMETRICS record whose payload does not parse is not read: the computation runs in full" );
+                slot.why = Why::Shape;
+            }
+        }
+    }
+    return { slot.record, slot.why };
+}
+
+// Why the loaded record cannot answer for this key (null: it can). The first component the two keys disagree on that the faults do
+// not blind; then the symbol count, which the shape component already covers and which is said again where the arrays are sized.
+inline const char* missOf( const QmKeyed* record, Why recordWhy, std::span<const std::uint64_t> now, std::span<const char* const> names, std::size_t symbolCount,
+                           const QmFaults& faults )
+{
+    if( record == nullptr )
+    {
+        return recordWhy == Why::Ok ? "absent" : kWhyNames[ std::size_t( recordWhy ) ];
+    }
+    if( faults.anyDigest )
+    {
+        return nullptr;
+    }
+    if( record->key.size() != now.size() )
+    {
+        return "shape";
+    }
+    const auto moved = std::ranges::find_if( std::views::iota( std::size_t( 0 ), now.size() ),
+                                             [ & ]( std::size_t c ) { return record->key[ c ] != now[ c ] && !faults.blinds( names[ c ] ); } );
+    if( moved != std::ranges::end( std::views::iota( std::size_t( 0 ), now.size() ) ) )
+    {
+        return names[ *moved ];
+    }
+    return record->symbolCount == symbolCount ? nullptr : "shape";
+}
+
+inline void emitPartStats( const QmPart& part, bool served, const char* why, std::size_t symbolCount, bool wrote, const QmFaults& faults )
+{
+    if( memstats::enabled() )
+    {
+        const char* const fault = faults.name();
+        rw::emitTo( stderr, "[verbfs] {} served={} why={} symbols={} wrote={}{}{}\n", part.name, served ? 1 : 0, why, symbolCount, wrote ? 1 : 0, fault != nullptr ? " fault=" : "",
+                    fault != nullptr ? fault : "" );
+    }
+}
+
+// ── (4) QMETRICS ═════════════════════════════════════════════════════════════════════════════════════════════════════
+struct QmRecord : QmKeyed
+{
     std::vector<std::uint8_t>  tested;       // one per symbol: 0 / 1
     std::vector<std::uint32_t> lcom4At;      // the symbols whose lcom4 is not kLcom4NA, ascending
     std::vector<std::uint32_t> lcom4Value;   // parallel to lcom4At
 };
 
-inline void writeQmRecord( warmsnap::Out& o, const QmRecord& r )
-{
-    o.vec( r.key );
-    o.u64( r.symbolCount );
-    o.vec( r.tested );
-    o.vec( r.lcom4At );
-    o.vec( r.lcom4Value );
-}
-
 inline bool readQmPayload( std::string_view payload, QmRecord& r )
 {
     warmsnap::In in{ payload };
-    in.vec( r.key );
-    r.symbolCount = in.u64();
+    readKeyed( in, r );
     in.vec( r.tested );
     in.vec( r.lcom4At );
     in.vec( r.lcom4Value );
@@ -481,40 +523,14 @@ inline LoadedRecord<QmRecord>& qmetricsLoaded() noexcept
     return slot;
 }
 
-// The record, once per process (re-read only when this process wrote a newer one).
-template <class Rec, class Parse>
-inline std::shared_ptr<const Rec> loadQmOnce( LoadedRecord<Rec>& slot, std::uint32_t partNo, std::string_view partName, std::string_view rootKey, bool noSum, Parse&& parse,
-                                              Why& why )
-{
-    const std::lock_guard<std::mutex> hold( slot.guard );
-    if( !slot.loaded )
-    {
-        slot.loaded           = true;
-        const RecordFile file = readQmRecord( partNo, partName, rootKey, noSum );
-        slot.why              = file.why;
-        if( file.why == Why::Ok )
-        {
-            auto rec = std::make_shared<Rec>();
-            if( parse( file.payload(), *rec ) )
-            {
-                slot.record = std::move( rec );
-            }
-            else
-            {
-                DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS QMETRICS record whose payload does not parse is not read: the computation runs in full" );
-                slot.why = Why::Shape;
-            }
-        }
-    }
-    why = slot.why;
-    return slot.record;
-}
-
 // The shapes the derived columns' reads assume: a CSR with one row per symbol. A graph of any other shape is computed, never stored.
 inline bool graphFitsIndex( const IngestResult& ing, const Graph& g ) noexcept
 {
-    const std::size_t S = ing.symbols.size();
-    return g.wOutDeg.size() == S && g.outOff.size() == S + 1 && g.outOff.back() <= g.outTargets.size();
+    if( g.outOff.size() != ing.symbols.size() + 1 )
+    {
+        return false;
+    }
+    return g.wOutDeg.size() == ing.symbols.size() && g.outOff.back() <= g.outTargets.size();
 }
 
 inline bool keepQMetrics( const ArmedRoot& armed, std::vector<std::uint64_t> key, const QMetrics& q )
@@ -532,8 +548,11 @@ inline bool keepQMetrics( const ArmedRoot& armed, std::vector<std::uint64_t> key
         }
     }
     warmsnap::Out o = beginRecord();
-    writeQmRecord( o, *rec );
-    if( !commitQmRecord( kPartQMetrics, "qmetrics", armed.rootKey, o ) )
+    writeKeyed( o, *rec );
+    o.vec( rec->tested );
+    o.vec( rec->lcom4At );
+    o.vec( rec->lcom4Value );
+    if( !commitQmRecord( kQMetricsPart, armed.rootKey, o ) )
     {
         return false;
     }
@@ -541,10 +560,12 @@ inline bool keepQMetrics( const ArmedRoot& armed, std::vector<std::uint64_t> key
     return true;
 }
 
-// The stored derived columns, onto a QMetrics whose direct columns are already filled for this index.
-inline void applyStoredQMetrics( const QmRecord& rec, QMetrics& q )
+// The stored derived columns over the live direct ones (fillQMetricsDirect), for this index.
+inline QMetrics storedQMetrics( const IngestResult& ing, const Graph& g, const QmRecord& rec )
 {
-    const std::size_t S = q.tested.size();
+    const std::size_t S = ing.symbols.size();
+    QMetrics          q = sizedQMetrics( S );
+    fillQMetricsDirect( ing, g, q );
     std::copy_n( rec.tested.begin(), std::min( S, rec.tested.size() ), q.tested.begin() );   // equal sizes unless the any-digest mutant
     for( std::size_t k = 0; k < rec.lcom4At.size(); ++k )
     {
@@ -553,91 +574,52 @@ inline void applyStoredQMetrics( const QmRecord& rec, QMetrics& q )
             q.lcom4[ rec.lcom4At[ k ] ] = rec.lcom4Value[ k ];
         }
     }
+    return q;
 }
 
 inline QMetrics serveQMetrics( const IngestResult& ing, const Graph& g )
 {
     const ArmedRoot* const armed = armedFor( ing );
-    if( armed == nullptr )
+    if( armed == nullptr || !graphFitsIndex( ing, g ) )
     {
         return computeQMetricsComputed( ing, g );
     }
-    const QmFaults    faults = qmFaults();
-    const std::size_t S      = ing.symbols.size();
-    const char*       why    = "fit";
-    bool              served = false, wrote = false;
-    QMetrics          q;
-    if( graphFitsIndex( ing, g ) )
+    const QmFaults             faults = qmFaults();
+    std::vector<std::uint64_t> key    = qmetricsKey( ing, g );
+    const QmLoaded<QmRecord>   loaded = loadQmOnce( qmetricsLoaded(), kQMetricsPart, armed->rootKey, faults.noSum, readQmPayload );
+    const char* const          miss   = missOf( loaded.record.get(), loaded.why, key, kQmKeyNames, ing.symbols.size(), faults );
+    if( miss == nullptr )
     {
-        std::vector<std::uint64_t> key       = qmetricsKey( ing, g );
-        Why                        recordWhy = Why::Absent;
-        const auto                 record    = loadQmOnce( qmetricsLoaded(), kPartQMetrics, "qmetrics", armed->rootKey, faults.noSum, readQmPayload, recordWhy );
-        why = record == nullptr ? ( recordWhy == Why::Ok ? "absent" : kWhyNames[ std::size_t( recordWhy ) ] )
-            : faults.anyDigest  ? nullptr
-                                : firstMovedComponent( record->key, key, kQmKeyNames, faults );
-        if( why == nullptr && record->symbolCount != S && !faults.anyDigest )
-        {
-            why = "shape";   // a symbol-count change moves the shape component first; said again where the arrays are sized
-        }
-        if( record != nullptr && why == nullptr )
-        {
-            q = sizedQMetrics( S );
-            fillQMetricsDirect( ing, g, q );
-            applyStoredQMetrics( *record, q );
-            served = true;
-            why    = "ok";
-        }
-        else
-        {
-            q = computeQMetricsComputed( ing, g );
-            try
-            {
-                wrote = keepQMetrics( *armed, std::move( key ), q );
-            }
-            catch( ... )
-            {
-                DISCLOSE( Diagnostics::answerUnchanged, "a qmetrics record that could not be assembled is not written: the next run computes in full, as today" );
-            }
-        }
+        emitPartStats( kQMetricsPart, true, "ok", ing.symbols.size(), false, faults );
+        return storedQMetrics( ing, g, *loaded.record );
     }
-    else
+    QMetrics q     = computeQMetricsComputed( ing, g );
+    bool     wrote = false;
+    try
     {
-        q = computeQMetricsComputed( ing, g );
+        wrote = keepQMetrics( *armed, std::move( key ), q );
     }
-    if( memstats::enabled() )
+    catch( ... )
     {
-        rw::emitTo( stderr, "[verbfs] qmetrics served={} why={} symbols={} wrote={}{}{}\n", served ? 1 : 0, why, S, wrote ? 1 : 0, faults.name() != nullptr ? " fault=" : "",
-                    faults.name() != nullptr ? faults.name() : "" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a qmetrics record that could not be assembled is not written: the next run computes in full, as today" );
     }
+    emitPartStats( kQMetricsPart, false, miss, ing.symbols.size(), wrote, faults );
     return q;
 }
 
 // ── (5) IMPURE ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-struct ImRecord
+struct ImRecord : QmKeyed
 {
-    std::vector<std::uint64_t> key;
-    std::uint64_t              symbolCount = 0;
-    std::vector<char>          impure;   // one per symbol: 0 / 1
+    std::vector<char> impure;   // one per symbol: 0 / 1
 };
-
-inline void writeImRecord( warmsnap::Out& o, const ImRecord& r )
-{
-    o.vec( r.key );
-    o.u64( r.symbolCount );
-    o.vec( r.impure );
-}
 
 inline bool readImPayload( std::string_view payload, ImRecord& r )
 {
     warmsnap::In in{ payload };
-    in.vec( r.key );
-    r.symbolCount = in.u64();
+    readKeyed( in, r );
     in.vec( r.impure );
-    if( !VALIDATE( in.ok && in.left() == 0 && r.key.size() == std::size_t( ImKey::Count ) && r.impure.size() == r.symbolCount, "verbfs impure: the record's arrays disagree" ) )
-    {
-        return false;
-    }
-    return VALIDATE( std::ranges::all_of( r.impure, []( char c ) { return c == 0 || c == 1; } ), "verbfs impure: a stored flag is out of range" );
+    const bool fits = in.ok && in.left() == 0 && r.key.size() == std::size_t( ImKey::Count ) && r.impure.size() == r.symbolCount;
+    return VALIDATE( fits && std::ranges::all_of( r.impure, []( char c ) { return c == 0 || c == 1; } ), "verbfs impure: the record does not parse, or a flag is out of range" );
 }
 
 inline LoadedRecord<ImRecord>& impureLoaded() noexcept
@@ -653,8 +635,9 @@ inline bool keepImpure( const ArmedRoot& armed, std::vector<std::uint64_t> key, 
     rec->symbolCount = impure.size();
     rec->impure      = impure;
     warmsnap::Out o  = beginRecord();
-    writeImRecord( o, *rec );
-    if( !commitQmRecord( kPartImpure, "impure", armed.rootKey, o ) )
+    writeKeyed( o, *rec );
+    o.vec( rec->impure );
+    if( !commitQmRecord( kImpurePart, armed.rootKey, o ) )
     {
         return false;
     }
@@ -669,44 +652,29 @@ inline std::vector<char> serveImpure( const IngestResult& ing, const Graph& g )
     {
         return computeImpureComputed( ing, g );
     }
-    const QmFaults             faults    = qmFaults();
-    const std::size_t          S         = ing.symbols.size();
-    std::vector<std::uint64_t> key       = impureKey( ing, g );
-    Why                        recordWhy = Why::Absent;
-    const auto                 record    = loadQmOnce( impureLoaded(), kPartImpure, "impure", armed->rootKey, faults.noSum, readImPayload, recordWhy );
-    const char* why = record == nullptr ? ( recordWhy == Why::Ok ? "absent" : kWhyNames[ std::size_t( recordWhy ) ] )
-                    : faults.anyDigest  ? nullptr
-                                        : firstMovedComponent( record->key, key, kImKeyNames, faults );
-    if( why == nullptr && record->symbolCount != S && !faults.anyDigest )
+    const QmFaults             faults = qmFaults();
+    const std::size_t          S      = ing.symbols.size();
+    std::vector<std::uint64_t> key    = impureKey( ing, g );
+    const QmLoaded<ImRecord>   loaded = loadQmOnce( impureLoaded(), kImpurePart, armed->rootKey, faults.noSum, readImPayload );
+    const char* const          miss   = missOf( loaded.record.get(), loaded.why, key, kImKeyNames, S, faults );
+    if( miss == nullptr )
     {
-        why = "shape";
+        std::vector<char> impure( S, 0 );
+        std::copy_n( loaded.record->impure.begin(), std::min( S, loaded.record->impure.size() ), impure.begin() );   // equal sizes unless the any-digest mutant
+        emitPartStats( kImpurePart, true, "ok", S, false, faults );
+        return impure;
     }
-    bool              served = false, wrote = false;
-    std::vector<char> impure;
-    if( record != nullptr && why == nullptr )
+    std::vector<char> impure = computeImpureComputed( ing, g );
+    bool              wrote  = false;
+    try
     {
-        impure.assign( S, 0 );
-        std::copy_n( record->impure.begin(), std::min( S, record->impure.size() ), impure.begin() );   // equal sizes unless the any-digest mutant
-        served = true;
-        why    = "ok";
+        wrote = keepImpure( *armed, std::move( key ), impure );
     }
-    else
+    catch( ... )
     {
-        impure = computeImpureComputed( ing, g );
-        try
-        {
-            wrote = keepImpure( *armed, std::move( key ), impure );
-        }
-        catch( ... )
-        {
-            DISCLOSE( Diagnostics::answerUnchanged, "an impure record that could not be assembled is not written: the next run computes in full, as today" );
-        }
+        DISCLOSE( Diagnostics::answerUnchanged, "an impure record that could not be assembled is not written: the next run computes in full, as today" );
     }
-    if( memstats::enabled() )
-    {
-        rw::emitTo( stderr, "[verbfs] impure served={} why={} symbols={} wrote={}{}{}\n", served ? 1 : 0, why, S, wrote ? 1 : 0, faults.name() != nullptr ? " fault=" : "",
-                    faults.name() != nullptr ? faults.name() : "" );
-    }
+    emitPartStats( kImpurePart, false, miss, S, wrote, faults );
     return impure;
 }
 

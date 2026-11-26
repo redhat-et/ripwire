@@ -1676,7 +1676,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kDigestThreadCap` | `16` | — | — |
+| `kDigestRowsPerBlock` | `256` | — | — |
 
 ### `src/verbs_change.h`
 

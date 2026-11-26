@@ -18296,8 +18296,7 @@ inline std::vector<char> computeImpureComputed( const IngestResult& ing, const G
 // digests every input above (src/verbfs_qmetrics.h); everywhere else, and on any miss, it is computed as it always was.
 inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g )
 {
-    const auto served = verbfs::derivedSeams().impure;
-    return served != nullptr ? served( ing, g ) : computeImpureComputed( ing, g );
+    return verbfs::servedOrComputed( verbfs::derivedSeams().impure, &computeImpureComputed, ing, g );
 }
 
 // ── Q-compute: evidence-validated per-symbol metrics, surfaced on --metrics ONLY (descriptive facts,
@@ -18687,8 +18686,7 @@ inline QMetrics computeQMetricsComputed( const IngestResult& ing, const Graph& g
 // columns are filled as here; everywhere else, and on any miss, the whole computation runs as it always did.
 inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 {
-    const auto served = verbfs::derivedSeams().qmetrics;
-    return served != nullptr ? served( ing, g ) : computeQMetricsComputed( ing, g );
+    return verbfs::servedOrComputed( verbfs::derivedSeams().qmetrics, &computeQMetricsComputed, ing, g );
 }
 
 // resolve #include/import targets to repo file ids → the DIRECT (1-hop) file→file dependency graph

@@ -33,4 +33,12 @@ inline DerivedSeams& derivedSeams() noexcept
     return installed;
 }
 
+// The one dispatch both graph.h functions make: the installed seam's answer, else the computation itself.
+template <class Answer>
+inline Answer servedOrComputed( Answer ( *served )( const IngestResult&, const Graph& ), Answer ( *computed )( const IngestResult&, const Graph& ), const IngestResult& ing,
+                                const Graph& g )
+{
+    return served != nullptr ? served( ing, g ) : computed( ing, g );
+}
+
 }   // namespace rw::verbfs
