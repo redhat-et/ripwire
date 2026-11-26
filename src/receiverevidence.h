@@ -285,6 +285,7 @@ struct CallResultTypes
     };
     static constexpr std::uint32_t                        kNoCrate = 0xFFFFFFFFu;
     mutable RustLayout                                    rust;
+    mutable const RustCrateRoots*                         manifestRoots = nullptr;   // RUST-PATH-KEYWORD: resolve.h's manifest crate roots, on first ask
     mutable std::string                                   nameKey;    // classesNamed's lookup buffer
     mutable std::string                                   aliasKey;   // importPathOf's / the TS pin lookup's
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
@@ -1800,6 +1801,146 @@ struct CallResultTypes
         std::string         targetModule;
         rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
         return tf < rust.crateOf.size() && rust.crateOf[ tf ] == crate && targetModule == module;
+    }
+    // RUST-PATH-KEYWORD: does a Rust call whose written path starts at a module keyword — `crate::f()`, `self::f()`, `super::f()`,
+    // `super::super::f()`, `crate::a::f()` — name the module holding `target` as one of its FREE items (a top-level item, or a member of
+    // the inline `mod` that module is), in the caller's own crate? Read against the module layout (rustModuleOf); for a caller the layout
+    // gives no crate — it knows a crate only by a lib.rs / main.rs, so a `[lib] path = "src/x.rs"` crate (every zed crate) has none —
+    // against the manifest's own crate root (resolve.h RustCrateRoots, rustManifestModuleAt). graph.h keepRustQualifiedCandidates' keyword
+    // half: no def's scope or file module is spelled `crate`/`self`/`super`, so without it every such call read as qualified-external.
+    bool rustKeywordPathHolds( const Reference& r, NodeId target ) const
+    {
+        const KeywordPathSite& site = keywordPathSite( r );
+        const Symbol&          t    = ing.symbols[ target ];
+        if( !site.named || t.fileId >= rust.crateOf.size() )
+        {
+            return false;
+        }
+        std::string   targetModule;
+        std::uint32_t targetCrate = kNoFile;
+        if( site.byLayout )
+        {
+            targetCrate = rust.crateOf[ t.fileId ];
+            if( targetCrate == site.crate )
+            {
+                rustModuleAt( t.fileId, t.sigStartByte, targetModule );
+            }
+        }
+        else if( rust.crateOf[ t.fileId ] != kNoCrate || !rustManifestModuleAt( t.fileId, t.sigStartByte, targetCrate, targetModule ) )
+        {
+            return false;
+        }
+        // a free item: a top-level one (no scope) or the inline `mod`'s own member (its scope is the module's last segment); a type's method never
+        const std::size_t      cut  = targetModule.rfind( "::" );
+        const std::string_view last = cut == std::string::npos ? std::string_view( targetModule ) : std::string_view( targetModule ).substr( cut + 2 );
+        return targetCrate == site.crate && targetModule == site.module && ( t.scope.empty() || ( !last.empty() && t.scope == last ) );
+    }
+    // RUST-PATH-KEYWORD: the module a keyword-rooted call names, read once per call site (the guard asks once per candidate): `crate`
+    // the layout's crate index (byLayout) or the manifest's crate-root directory index; named=false when the path names no module.
+    struct KeywordPathSite
+    {
+        const Reference* ref       = nullptr;
+        std::uint32_t    fileId    = kNoFile;
+        std::uint32_t    startByte = 0;
+        bool             named     = false;
+        bool             byLayout  = false;
+        std::uint32_t    crate     = kNoFile;
+        std::string      module;
+    };
+    mutable KeywordPathSite keywordSite;
+    const KeywordPathSite& keywordPathSite( const Reference& r ) const
+    {
+        KeywordPathSite& site = keywordSite;
+        if( site.ref == &r && site.fileId == r.fileId && site.startByte == r.startByte )   // a rebuilt local (graph.h subscriptCall) moves its site
+        {
+            return site;
+        }
+        site                           = KeywordPathSite{ &r, r.fileId, r.startByte };
+        const std::string_view written = rustWrittenQualifierOf( r );
+        const std::string_view root    = written.substr( 0, written.find( "::" ) );
+        if( callResultFamilyOf( r.lang ) != CallResultFamily::Rust || ( root != "crate" && root != "self" && root != "super" ) )
+        {
+            return site;
+        }
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        if( r.fileId >= rust.crateOf.size() )
+        {
+            return site;
+        }
+        site.byLayout = rust.crateOf[ r.fileId ] != kNoCrate;
+        site.named    = site.byLayout ? rustModuleOf( r.fileId, r.startByte, written, site.crate, site.module, 0 )
+                                      : rustManifestModuleAt( r.fileId, r.startByte, site.crate, site.module ) && rustApplyKeywordPath( written, site.module );
+        return site;
+    }
+    // RUST-PATH-KEYWORD: the (crate root directory, module) byte `at` of file `f` sits in, by the manifest's crate roots (resolve.h
+    // RustCrateRoots: the nearest Cargo.toml's target, `[lib] path` honoured) and Rust's module-file rule read from that directory — the
+    // root file is "", `src/a/b.rs` and `src/a/b/mod.rs` are `a::b` — then each inline `mod` holding `at`. false: no locatable crate root.
+    bool rustManifestModuleAt( std::uint32_t f, std::uint32_t at, std::uint32_t& crateDir, std::string& module ) const
+    {
+        if( manifestRoots == nullptr )
+        {
+            LazyFileIndex index( ing );
+            manifestRoots = &rustCrateRootsOf( ing, index );
+        }
+        if( f >= manifestRoots->dirOf.size() || manifestRoots->dirOf[ f ] == kNoFile )
+        {
+            return false;
+        }
+        crateDir = manifestRoots->dirOf[ f ];
+        module.clear();
+        if( manifestRoots->isRoot[ f ] == 0 )
+        {
+            const std::string_view dir  = manifestRoots->dirs[ crateDir ];
+            std::string_view       path = rootRelPath( ing, f );
+            path.remove_prefix( dir.empty() ? 0 : std::min( path.size(), dir.size() + 1 ) );
+            path.remove_suffix( path.ends_with( ".rs" ) ? 3 : 0 );
+            path = path == "mod" ? std::string_view{} : path;
+            path.remove_suffix( path.ends_with( "/mod" ) ? 4 : 0 );
+            module.assign( path );
+            for( std::size_t slash = module.find( '/' ); slash != std::string::npos; slash = module.find( '/', slash + 2 ) )
+            {
+                module.replace( slash, 1, "::" );
+            }
+        }
+        std::string inlineMods;
+        rustModuleAt( f, at, inlineMods );   // the layout gives this file no module, so what it reads is the inline `mod`s alone
+        if( !inlineMods.empty() )
+        {
+            module = joinModule( module, inlineMods );
+        }
+        return true;
+    }
+    // RUST-PATH-KEYWORD: the caller's `module` moved along a written path from its keyword root: a leading `crate` the crate root (""), a
+    // leading `self` itself, each leading `super` one module up (false above the root), then every later segment a child module.
+    static bool rustApplyKeywordPath( std::string_view written, std::string& module )
+    {
+        const std::vector<std::string_view> segs = rustPathSegments( written );
+        std::size_t                         i    = segs[ 0 ] == "crate" || segs[ 0 ] == "self" ? 1 : 0;
+        if( segs[ 0 ] == "crate" )
+        {
+            module.clear();
+        }
+        for( ; i < segs.size() && segs[ i ] == "super"; ++i )   // `crate::super` climbs above the root, so it names nothing
+        {
+            if( module.empty() )
+            {
+                return false;
+            }
+            const std::size_t up = module.rfind( "::" );
+            module.resize( up == std::string::npos ? 0 : up );
+        }
+        for( ; i < segs.size(); ++i )
+        {
+            if( segs[ i ].empty() || segs[ i ] == "super" || segs[ i ] == "self" || segs[ i ] == "crate" )
+            {
+                return false;
+            }
+            module = joinModule( module, segs[ i ] );
+        }
+        return true;
     }
     // RULE3-MEMBER-GUARD: what written binding proves `target` for a Rust call Rule 3 narrowed to it, an allowlist. A bare call: a `use`
     // of the name written into the target's crate that does not provably leave the tree (the item it names in that crate is not compared),

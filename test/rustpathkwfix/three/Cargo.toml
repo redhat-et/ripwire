@@ -1,0 +1,5 @@
+[package]
+name = "three"
+
+[lib]
+path = "src/three.rs"
