@@ -408,7 +408,9 @@ for _g in \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
+    cochangefloorcheck \
     cochangesurprisecheck \
+    cochangetailcheck \
     codexinstallhonestycheck \
     codexplugincheck \
     codexwrapcheck \

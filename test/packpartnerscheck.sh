@@ -75,7 +75,7 @@ partners_of(){ python3 - "$1" <<'PY_EOF'
 import re, sys
 doc = re.sub( r'<!--.*?-->', '', open( sys.argv[1], encoding = 'utf-8', errors = 'replace' ).read(), flags = re.S )
 m = re.search( r'<partners\b[^>]*>(.*?)</partners>', doc, re.S )
-print( ' '.join( '%s:%s' % ( p, n ) for p, n in re.findall( r'<f p="([^"]*)" together="(\d+)"/>', m.group( 1 ) ) ) if m else 'NONE' )
+print( ' '.join( '%s:%s' % ( p, n ) for p, n in re.findall( r'<f p="([^"]*)" together="(\d+)"(?: why="[a-z]+")?/>', m.group( 1 ) ) ) if m else 'NONE' )
 PY_EOF
 }
 # the PAYLOAD's elements only: a legend comment spells `<partners seeds= …>` in prose, and that is not the element
@@ -99,7 +99,8 @@ if python3 - "$TMP/a.json" <<'PY_EOF'
 import json, sys
 d = json.load( open( sys.argv[1], encoding = 'utf-8' ) )
 rows = d.get( 'partners' )
-sys.exit( 0 if isinstance( rows, list ) and { 'p': 'b.c', 'together': 4 } in rows and d.get( 'partners_total' ) == len( rows ) else 1 )
+# COCHANGE-TAIL 2026-11-26: a one-seed block's rows also carry "why" (test/cochangetailcheck.sh), so compare p/together only
+sys.exit( 0 if isinstance( rows, list ) and { 'p': 'b.c', 'together': 4 } in [ { k: r.get( k ) for k in ( 'p', 'together' ) } for r in rows ] and d.get( 'partners_total' ) == len( rows ) else 1 )
 PY_EOF
 then ok "3. the JSON twin carries {\"p\":\"b.c\",\"together\":4}"; else no "3. the JSON twin lacks b.c's row: $( grep -o '"partners[^]]*' "$TMP/a.json" | head -c 300 )"; fi
 # 4
@@ -135,7 +136,7 @@ for g in 1 2 3 4; do for rep in 1 2 3; do
     for k in $( seq $(( 10 * g )) $(( 10 * g + 9 )) ); do printf '// r%s\n' "$rep" >> "$WIDE/partner_with_a_long_descriptive_name_$k.c"; done
     C "$WIDE" "group $g rep $rep"
 done; done
-run "$WIDE" "$TASK" --token-budget=1500 > "$TMP/w.xml"     # MEASURED: 13 of the 40 rows fit here (0 at 1000, 40 at 2500)
+run "$WIDE" "$TASK" --token-budget=1500 > "$TMP/w.xml"     # MEASURED: 13 of the 40 rows fit here (0 at 1000, 40 at 2500); 10 since each one-seed row carries why= (COCHANGE-TAIL)
 run "$WIDE" "$TASK" --token-budget=60000 > "$TMP/wbig.xml"
 WT="$( attr_of "$TMP/w.xml" partners total )"; WS="$( attr_of "$TMP/w.xml" partners shown )"; WC="$( attr_of "$TMP/w.xml" partners partners_cut )"
 WCAP="$( attr_of "$TMP/w.xml" partners capped )"

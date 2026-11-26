@@ -3554,6 +3554,21 @@ public:
         return a < fb.size() && fb[a];
     }
 
+    // a DIRECT edge either way (no closure, no bare-name fallback): the corroborated tail's include/import link
+    bool hasDirectEdge( std::uint32_t a, std::uint32_t b ) const
+    {
+        const auto has = [ & ]( std::uint32_t from, std::uint32_t to )
+        {
+            if( from >= adj_.size() )
+            {
+                return false;
+            }
+            const auto row = adj_[from];
+            return std::find( row.begin(), row.end(), to ) != row.end();
+        };
+        return has( a, b ) || has( b, a );
+    }
+
 private:
     // §P9.1 residue — the cross-directory-`-I` fallback the class header explains. SUPPRESS-only.
     bool namesBaseNameOf( std::uint32_t includer, std::uint32_t other ) const
@@ -3818,8 +3833,15 @@ inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, s
 //   degRev  = conf(partner => probed): the other direction, over the PARTNER's own commit count.
 //             The pair form's symmetric deg= is max(deg, degRev) — see coConfidence above.
 //   recur   = how many of `subWindows` sub-windows contain a joint commit (Clio recurrence).
+// Why a partner is listed (why=): support = kCoSupportFloor or more shared commits; confidence / link = a 2-commit partner of a
+// ONE-seed question that the corroborated tail admitted (situ.h coCorroboratedTail), and on which evidence.
+enum class CoWhy : std::uint8_t { Support, Confidence, Link };
+inline constexpr std::string_view coWhyName( CoWhy w ) noexcept
+{
+    return w == CoWhy::Confidence ? "confidence" : w == CoWhy::Link ? "link" : "support";
+}
 struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable;
-                   std::uint32_t noEdgeLangs = 0; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
+                   std::uint32_t noEdgeLangs = 0; CoWhy why = CoWhy::Support; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
 
 // The row's verdict attribute, rendered ONCE for all four emitters (--cochange repo-wide `<pair>`, its
 // per-file `<f>`, --pr-context's `<partner>`, and — via the JSON pair below — the MCP verb). Three states,
@@ -3861,6 +3883,11 @@ inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
     return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
 }
 
+// THE SUPPORT FLOOR — the shared commits a partner needs before it is reported. Every partner list says it (floor="3":
+// --cochange=FILE's root, --situ's [3] header, <partners>, and their JSON twins), beside each row's own count (together=):
+// a row's percentage alone cannot tell 2 of 3 commits from 200 of 300 (bench/cochange; owner ruling 2026-11-26).
+inline constexpr std::uint32_t kCoSupportFloor = 3;
+
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:
 // a one-hop-indirect include like A.cpp→A.h→B.h counts as a dependency, so is NOT surprising). Shared by the
@@ -3874,9 +3901,11 @@ inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
 // git, no I/O. Callers that probe one file (the CLI --cochange / MCP verb) use the git-driven wrapper below.
 // `outSubWindows` (optional): the recurrence denominator this call actually used, for the emitter's
 // `sub_windows=` disclosure. Nobody may publish recur= without it — see kCoRecurSubWindows above.
+// `minSupport`: kCoSupportFloor, or kCoTailSupport when a one-seed caller collects the tail's candidates (situ.h).
 inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits,
                                                 const std::vector<std::vector<std::uint32_t>>& sets, std::uint32_t* outSubWindows = nullptr,
-                                                CoCouplingCache* couplingCache = nullptr )   // multi-probe callers share one (see CoCouplingCache)
+                                                CoCouplingCache* couplingCache = nullptr,   // multi-probe callers share one (see CoCouplingCache)
+                                                std::uint32_t minSupport = kCoSupportFloor )
 {
     outCommits = 0;
     if( outSubWindows )
@@ -3931,10 +3960,9 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     // Built at most once per ingest when the caller passes `couplingCache`; a one-off local cache otherwise.
     std::optional<CoCouplingCache> localCache;
     CoCouplingCache&               cache = couplingCache ? *couplingCache : localCache.emplace( ing );
-    constexpr std::uint32_t kSupport = 3;
     for( const auto& [other, n] : together )
     {
-        if( n >= kSupport )
+        if( n >= minSupport )
         {
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
@@ -3950,13 +3978,27 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     return res;
 }
 
+// ── THE CORROBORATED TAIL — a ONE-seed question's list, filled to kCoTailFillTo with 2-commit partners something corroborates ──
+// MEASURED (bench/cochange; decision_rule_4repo, 2026-11-26): lowering the floor to 2 for one seed raised Hit@10 on ripwire,
+// kubernetes, django and fastify, and cut the share of listed partners that were real on three of them — a bare 2-commit
+// partner is mostly noise. So the floor stays kCoSupportFloor and a 2-commit partner joins only when (C) it moved in at least
+// kCoTailMinConfidence of the seed's commits, or (S) the code links the files (CoSeedLinks). The tail ranks below every
+// support row (confidence desc, path asc) and only FILLS: it never displaces a support row, and adds nothing once the list
+// holds kCoTailFillTo rows. Several seeds get no tail: their merge already supplies the corroboration. Each row says why=.
+// The tail itself (CoSeedLinks, coCorroboratedTail) is in situ.h: its test-of rule is testmap.h's, and testmap.h includes this file.
+inline constexpr std::uint32_t kCoTailSupport         = 2;
+inline constexpr double        kCoTailMinConfidence   = 0.5;
+inline constexpr std::size_t   kCoTailFillTo          = 10;
+inline constexpr std::size_t   kCoTailSameDirMaxFiles = 20;
+
 // git-driven form: mine the co-change file-sets for THIS one probe, then delegate to the precomputed overload.
 // The single-probe callers (CLI --cochange, MCP `cochange`) keep this signature. Multi-probe callers
 // (--situ / --pr-context) must hoist gitCommitFileSets("18 months ago", 30, scope) out of their loop and use
 // the overload above instead — see A4-P10.
+// `minSupport`: --cochange=FILE and the MCP verb pass kCoTailSupport and hand the result to situ.h coCorroboratedTail.
 inline std::vector<CoPartner> cochangePartners( const std::string& root, const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits, const SinceScope* scope = nullptr,
                                                 std::uint32_t onlyRoot = UINT32_MAX,   // multi-root §5: mine ONLY within that root
-                                                std::uint32_t* outSubWindows = nullptr )
+                                                std::uint32_t* outSubWindows = nullptr, std::uint32_t minSupport = kCoSupportFloor )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: cochangePartners (--cochange)" );
     outCommits = 0;
@@ -3969,7 +4011,7 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
         return {}; // unknown file → no git call, as before
     }
     const auto sets = gitCommitFileSets( root, ing, "18 months ago", 30, scope, onlyRoot );
-    return cochangePartners( ing, fileSubstr, outCommits, sets, outSubWindows );
+    return cochangePartners( ing, fileSubstr, outCommits, sets, outSubWindows, nullptr, minSupport );
 }
 
 // B3: cheap "could there be ANY git history above this root?" pre-check — a stat() walk up the directory
@@ -4043,7 +4085,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
 inline constexpr std::uint32_t kCoBoostCommitWindow      = 500;    // last-N-commits mining window (matches the eval's --history-depth=500 deepening)
 inline constexpr std::size_t   kCoBoostMaxFilesPerCommit = 30;     // same bulk-commit cap as the other co-change miners here
 inline constexpr std::uint32_t kCoBoostSeedCount         = 3;      // seeds = the top-3 positively-scored symbols' files
-inline constexpr std::uint32_t kCoBoostSupport           = 3;      // a partner must share >= 3 commits with a seed file (cochangePartners' kSupport)
+inline constexpr std::uint32_t kCoBoostSupport           = kCoSupportFloor;   // a partner must share >= 3 commits with a seed file (cochangePartners' floor)
 inline constexpr std::size_t   kCoBoostMaxPartnerFiles   = 8;      // strongest partners only, by (deg desc, path asc)
 inline constexpr std::size_t   kCoBoostMaxSymbolsPerFile = 3;      // per partner file: its top-3 symbols by (lens score desc, id asc)
 inline constexpr float         kCoBoostFrac              = 0.25f;  // boost = frac · deg · seedFloor — scale-free (relative to the rank's own scores)

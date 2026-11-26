@@ -1180,6 +1180,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // cochange-file: src/verbs_report.h runMaintenanceViews, the cfg.cochangeFile branch (<cochange of=> + <f>); sub_windows= row above covers it
     { "commits", "commits=N: this file's own commits in window=; the denominator of deg=", false, "cochange", MapHeaderRead::No, {}, "cochange" },
     { "partners", "partners=N: partner files with 3+ shared commits (after min_recur); the total, rows paged", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "floor", "floor=N: shared commits a partner needed", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "floor_tail", "floor_tail=corroborated: filled to 10 with 2-commit partners, each why=", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "why", "why=support (floor+)|confidence (half the commits)|link (code edge, test, small dir)", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "recur", "recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "dep_capable", "dep_capable=0: a side cannot carry a static dependency (md, json, sh vs C++), so surprising= is undefined", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "no_file_edges", "no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown, not 0", true, "f", MapHeaderRead::No, {}, "cochange" },
@@ -1346,8 +1349,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // pack-task: src/serialize.h pureFromSig + the impure lens (pureSig at the <d> row emitters)
     { "pure", "pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "pack-task" },
     // pack-task <partners>: src/packtask.h packTaskPartnersSection / packTaskPartners (the co-change partners of the ranking's top files)
-    { "seeds", "<partners>: files sharing 3+ commits in window= (commits= read) with one of the ranking's first seeds= files, not those; partners_cut=N rows the budget cut", true, "partners", MapHeaderRead::No, {}, "pack-task" },   // also defines window= commits= partners_cut=
+    { "seeds", "<partners>: files sharing 3+ commits (floor=) in window= (commits= read) with one of the ranking's first seeds= files, not those; partners_cut=N rows the budget cut", true, "partners", MapHeaderRead::No, {}, "pack-task" },   // also defines window= commits= partners_cut= floor=
     { "together", "f together=N: commits shared with its best seed", true, "f", MapHeaderRead::No, {}, "pack-task" },
+    { "floor_tail", "partners floor_tail=corroborated: one seed, filled to 10 with 2-commit partners, each why=", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "why", "f why=support (floor+)|confidence (half the commits)|link (code edge, test, small dir)", true, "f", MapHeaderRead::No, {}, "pack-task" },
     { "shallow", "partners shallow=1: a depth-limited clone, so a floor", true, "partners", MapHeaderRead::No, {}, "pack-task" },
     { "bulk_skipped", "partners bulk_skipped=N: commits over 30 indexed files, left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
     { "bots_skipped", "partners bots_skipped=N: bot commits left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
