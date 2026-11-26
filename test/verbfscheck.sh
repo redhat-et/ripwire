@@ -300,8 +300,10 @@ mstep(){   # LABEL EXPECT : identity after a kind change; EXPECT a string the an
 mmut(){   # LABEL FAULT : the mutant (served under FAULT) must differ from --no-cache in the state that now holds
     [ "$DIRSMUT" = 1 ] || return 0
     run mm.c nocache --for="$MT"
-    ( cd "$FIX" && env "$2=1" "$BIN" "$FIX" --cache="$TMP/c.bin" --for="$MT" </dev/null >"$TMP/mm.w.out" 2>/dev/null ); echo $? >"$TMP/mm.w.rc"
-    if ! same mm.w mm.c; then ok "MM $1: $2 turns the identity red"; else no "MM $1: the $2 mutant matched the reference"; fi
+    ( cd "$FIX" && env "$2=1" "$BIN" "$FIX" --cache="$TMP/c.bin" --for="$MT" </dev/null >"$TMP/mm.w.out" 2>/dev/null ); mmrc=$?
+    # The mutant must RUN to an answer: a crash or refusal would also "differ", and the arm would pass on nothing.
+    if [ "$mmrc" != 0 ]; then no "MM $1: the $2 mutant exited $mmrc, so its difference proves nothing"
+    elif ! same mm.w mm.c; then ok "MM $1: $2 turns the identity red"; else no "MM $1: the $2 mutant matched the reference"; fi
 }
 mv "$FIX/pkg/go.mod" "$TMP/go.mod.saved"
 mmut "M2 go.mod deleted" RIPWIRE_FAULT_VERBFS_DIRS_NOSTAT   # before the honest run: the record still says pkg/go.mod is a regular file
