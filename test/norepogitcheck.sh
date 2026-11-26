@@ -18,10 +18,14 @@
 #   (P) PRECONDITION. The gate's own temp dir must sit on a real path with no `.git` and no `HEAD` in any ancestor,
 #       and GIT_DIR must be unset (clean-env.sh), or (A) cannot conclude: git would discover the enclosing repo and
 #       spawning would be CORRECT. Exit 2, never a vacuous pass.
-#   (A) SPAWNS. One long-lived stdio server; three edits on one non-git root, then one edit on each of two fresh
-#       non-git roots (arm K's shape). Every edit must APPLY and report edit_check status "no-baseline" (so the
-#       contract-vs-HEAD check really ran), and every edit after the first must start at most ONE git child.
-#       Red on main: 4 and 8.
+#   (A0) POSITIVE CONTROL, same server, same root path shape: one edit on a sibling corpus that IS a committed
+#       repository must start at least one git child, and the shim log must name that root. Without it, a shim
+#       that never sees the server's children (PATH not reaching it, a git resolved some other way) would make
+#       every count in (A) read 0 and the arm pass on unfixed code.
+#   (A) SPAWNS. Then three edits on one non-git root, and one edit on each of two fresh non-git roots (arm K's
+#       shape). Every edit must APPLY and report edit_check status "no-baseline" (so the contract-vs-HEAD check
+#       really ran), and EVERY edit, the first included, must start at most ONE git child. Red on main 5fa8f5ec0:
+#       8 / 4 / 4 / 8 / 8, all five FAIL.
 #   (B) git init MID-SESSION is noticed on the NEXT call, in the same server, on a root already served as non-git:
 #       after `git init` alone (a repo with no HEAD) the next edit must ask git (>= 1 child) and still say
 #       "no-baseline"; after a commit the next edit must ask git and report a HEAD baseline (status not
@@ -31,13 +35,14 @@
 #       C3 a worktree-style root whose `.git` is a FILE (`gitdir: …`). C4: GIT_DIR exported to the server and pointed
 #       at a committed repo, the root a plain directory — git must still be asked (>= 1 child).
 #
-# Usage: bash test/norepogitcheck.sh [ripwire-binary]
+# Usage: bash test/norepogitcheck.sh [ripwire-binary]   (or RIPWIRE_BIN=…; the positional argument wins)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-BIN="${1:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional arg and RIPWIRE_BIN=
 [ -x "$BIN" ] || { echo "norepogitcheck: no binary at $BIN"; exit 2; }
+echo "norepogitcheck: BIN=$BIN ($( "$BIN" --version 2>/dev/null | head -1 ))"
 command -v git >/dev/null 2>&1 || { echo "norepogitcheck: git missing (gate cannot run)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "norepogitcheck: python3 missing (gate cannot run)"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -137,15 +142,20 @@ def spawns():
 
 # ═══ (A) spawns per edit on non-git roots ═══════════════════════════════════════════════════════════════════
 srv = Server()
+ctl = corpus(); commitRepo( ctl )
+before = spawns()
+nCtl, sCtl = srv.edit( ctl, 1 )
+with open( LOG ) if os.path.exists( LOG ) else open( os.devnull ) as fh:
+    namedCtl = any( ctl in line for line in list( fh )[ before: ] )
+check( nCtl >= 1 and namedCtl,
+       "(A0) positive control: an edit on a committed sibling repo started %d git child(ren) the shim saw, naming that root: %s "
+       "(0 means this shim cannot observe the server's git, and every count below would be vacuous)" % ( nCtl, namedCtl ) )
 r1 = corpus()
 rows = [ ( "root 1, edit 1", srv.edit( r1, 2 ) ), ( "root 1, edit 2", srv.edit( r1, 3 ) ), ( "root 1, edit 3", srv.edit( r1, 4 ) ),
          ( "fresh root 2",   srv.edit( corpus(), 5 ) ), ( "fresh root 3", srv.edit( corpus(), 6 ) ) ]
 for i, ( label, ( n, status ) ) in enumerate( rows ):
     check( status == "no-baseline", "(A) %s applied and edit_check said no-baseline (got %s)" % ( label, status ) )
-    if i == 0:
-        print( "  INFO  (A) %s started %d git child(ren)" % ( label, n ) )
-    else:
-        check( n <= 1, "(A) %s started %d git child(ren) on a root git cannot see (at most 1)" % ( label, n ) )
+    check( n <= 1, "(A) %s started %d git child(ren) on a root git cannot see (at most 1)" % ( label, n ) )
 
 # ═══ (B) git init mid-session, same server, same root ════════════════════════════════════════════════════════
 r4 = corpus()
