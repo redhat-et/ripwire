@@ -125,8 +125,10 @@ first-hit MRR. The corrected evaluator additionally enforces:
 - **method identity** = file + scope + name; one flat global candidate rank (no grouped-source
   credit);
 - a **frozen repository-disjoint train/held-out split** (salted SHA-256 over repository names,
-  committed in `bench/locbench/dataset.lock`): train 317 instances / 87 repositories, held-out 243 /
-  78;
+  committed in `bench/locbench/dataset.lock`): train 254 instances / 77 repositories, held-out 306 /
+  88 under the current salt `ripwire-a7-v2`. The 2026-07-31 rename changed the salt from
+  `ctxpack-a7-v2`, which gave train 317 / 87 and held-out 243 / 78; every held-out result in §4.1 and
+  §6.2 was measured on that earlier split;
 - **zero silent skips** — a checkout, index, or localizer failure aborts the run loudly;
 - **paired repository-clustered bootstrap** for every before/after comparison
   (`bench/locbench/compare_runs.py`; 10,000 deterministic seeded resamples, clusters =
@@ -227,7 +229,7 @@ is 0.00pp is treated as unproven, whatever the mean says. §6 shows this bar doi
 All ripwire numbers in this section are from the committed artifacts named under each table, at the
 binary versions those artifacts pin. "Strict" always means LocAgent's ALL-gold-in-top-k.
 
-### 4.1 Python LocBench, held-out n=243 — the shipping ranker
+### 4.1 Python LocBench, held-out n=243 (pre-rename split) — the shipping ranker
 
 | arm | file@1 | file@3 | file@5 | file@10 | lenient@10 | func-any@10 | fn-MRR | single-file strict | multi-file strict |
 |---|---|---|---|---|---|---|---|---|---|

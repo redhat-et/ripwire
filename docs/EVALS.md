@@ -435,7 +435,17 @@ Treat them as reported, not yet reproducible from this checkout, until the harne
 
 **Dataset.** `czlll/Loc-Bench_V1`, test split, **560 rows**, JSON SHA-256 pinned in `dataset.lock`.
 The split is **repo-disjoint and salted** (a per-repository hash decides the side), so a repository
-never appears in both halves: **train 317 instances across 87 repositories; held-out 243 across 78.**
+never appears in both halves. Under the salt `dataset.lock` pins today, `ripwire-a7-v2`: **train 254
+instances across 77 repositories; held-out 306 across 88.** Recount it with `frozen_partition()` in
+`run_locbench.py` over the 560 rows of `bench/locbench/full560.json`.
+
+**The split changed on 2026-07-31, and the headline below predates the change.** The salt is part of
+the hashed string, so the ctxpack → ripwire rename (`3315fb19d`) moved it from `ctxpack-a7-v2` to
+`ripwire-a7-v2` and re-dealt the repositories. The old salt gave train 317 across 87 and held-out 243
+across 78. The held-out results below were measured before the rename, on that held-out 243. They have
+not been re-run on the current held-out 306, and the pinned `dataset.lock` no longer selects their
+slice. Every LocBench round after the rename runs on the current split; the `r3_pathtok` verdict's note
+that "the current evaluator scores 306" of the held-out partition is this change, not an evaluator one.
 
 **Metric.** Strict Acc@k as defined by LocAgent — an instance scores only if **all** gold locations
 fall within the top k. Gold files are the files the fix patch touches; gold functions are the
@@ -443,7 +453,7 @@ dataset's own edit-function list, with added functions excluded from the denomin
 separately. Parse-coverage misses count as automatic misses. A lenient any-gold-in-top-10 and a
 first-hit MRR are reported alongside, always labelled as the lenient variants.
 
-### Held-out results (N = 243, zero exclusions, 564/564 scoped gold functions covered)
+### Held-out results (N = 243 on the pre-rename split, zero exclusions, 564/564 scoped gold functions covered)
 
 | Arm | file@1 | file@3 | file@5 | **file@10** | lenient@10 | fn-MRR |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -6916,7 +6926,8 @@ The pre-registered accept criterion, per that round's own amendments to the r3/r
 PRIMARY is the **multi-file stratum** strict file@10 on train (aggregate reported, never switched
 to), over a frozen 2×2 grid (`minTokLen`, `maxLifted`) ∈ {4,5} × {2,4}, selection = highest train
 primary with any cell regressing train single-file strict@10 by more than 1pp disqualified; the
-held-out 243 run with repo-clustered bootstrap would be spent only if a cell advanced. It also
+held-out run with repo-clustered bootstrap would be spent only if a cell advanced (306 instances on the
+current split; the round's `PREREG.md` says 243, the count before the 2026-07-31 salt change in §3). It also
 carried a hard pre-grid stop: if the trigger's gold fire-rate on the currently-missed set came in
 under 20%, archive and stop.
 
@@ -7195,7 +7206,7 @@ Listed because the reason is more useful than the silence.
   referenced does not ship here. Until a source can be named, it is not a published number.
 - **"+66.7% held-out strict@10" for the mention anchor.** The 66.7% figure that circulates is an
   *absolute* strict file@10 belonging to the *baseline* arm of a *different* experiment
-  (anchor-hop expansion, held-out slice, n=243), and that experiment's candidate was **rejected and never
+  (anchor-hop expansion, held-out slice, n=243 on the pre-rename split of §3), and that experiment's candidate was **rejected and never
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
