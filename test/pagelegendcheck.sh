@@ -36,6 +36,11 @@
 #         are still checked under the same priced rule (no premise demanded of them).
 #   (LD8m) the (LD8) predicate FAILS a must-omit page served whole and a must-keep page served reduced (it can fail both ways)
 #   (LD9) every page is well-formed XML, and page N is byte-identical across two runs
+#   (LD10) A RE-OPENED SECTION CARRIES ITS BLOCK-LOCAL LEGEND: a page that re-opens a section the page before left open (continued=)
+#         carries the comments glued before that section's open tag, unless page 1 holds them (src/forpages.h reopenedLegend). On
+#         #742's CI merge this repo's 3000 B page 9 re-opened a <syms> that began on page 8 without its legend: name_total=
+#         callee_total= files_total= by= undefined (LD3). PREMISE on the frozen fixture at 600 B (its <syms> starts on a later page
+#         and is cut); this repo's pages are checked with no premise. (LD10m) the re-opened page with that legend stripped FAILS
 #   (LDm) MUTATION CONTROLS: page N with its travelling comment stripped fails (LD2); a moved clause put back on page 1 fails (LD1);
 #         a clause on both fails (LD4) — each arm can fail
 set -u
@@ -126,6 +131,17 @@ for FXSIZE in 1500 2000 2500 3000; do
         k=$(( k + 1 ))
     done
 done
+
+# (LD10) the frozen fixture at 600 B: its <syms> block starts on a page >= 2 and is cut, so a later page re-opens it
+( cd "$FX" && RIPWIRE_NO_ROWLINES=1 "$BIN" . --for="$FXTASK" --page-bytes=0 ) >"$WORK/fxr.whole.xml" 2>/dev/null
+k=1; n=1
+while :; do
+    ( cd "$FX" && RIPWIRE_NO_ROWLINES=1 "$BIN" . --for="$FXTASK" --page-bytes=600:$k ) >"$WORK/fxr.$k.xml" 2>/dev/null
+    n="$( grep -o ' pages="[0-9]*"' "$WORK/fxr.$k.xml" | head -1 | tr -dc 0-9 )"; n="${n:-1}"
+    [ "$k" -ge "$n" ] && break
+    k=$(( k + 1 ))
+done
+echo "$n" >"$WORK/fxr.n"
 
 "$BIN" --legend-dict >"$WORK/dict.txt" 2>/dev/null
 python3 - "$WORK" "$ROOT/test" <<'PY'
@@ -228,6 +244,25 @@ if keep:
     grown = P.seen_grown(page, travel, BODIES, marker)
     say(len(grown) > len(page) and not P.seen_verdict(page, grown, travel, BODIES, marker)[0],
         "(LD8m) %s reduced anyway (%d B against %d B: the never-larger rule broken) FAILS (LD8)" % (tag, len(grown), len(page)))
+# (LD10) a re-opened section carries its block-local legend when page 1 does not: this repo's pages (no premise), then the fixture's
+for size in ("6000", "3000"):
+    n = int(open(os.path.join(W, "n." + size)).read())
+    E = [rd(os.path.join(W, "e.%s.%d.xml" % (size, k))) for k in range(1, n + 1)]
+    seen, gaps = P.reopened_gaps(E, rd(os.path.join(W, "whole.%s.xml" % size)))
+    say(not gaps, "(LD10) repo %s B: every re-opened section whose legend page 1 lacks carries it (%d re-open(s))%s" % (
+        size, len(seen), (" — missing on %s" % gaps) if gaps else ""))
+n = int(open(os.path.join(W, "fxr.n")).read())
+FXR = [rd(os.path.join(W, "fxr.%d.xml" % k)) for k in range(1, n + 1)]
+FXW = rd(os.path.join(W, "fxr.whole.xml"))
+seen, gaps = P.reopened_gaps(FXR, FXW)
+say(len(seen) >= 1 and not gaps, "(LD10) fixture 600 B: PREMISE %d re-opened section(s) whose legend page 1 lacks (%s); each carries it%s" % (
+    len(seen), seen, (" — missing on %s" % gaps) if gaps else ""))
+if seen:
+    k, name = seen[0]
+    tag = re.search(rb"<" + re.escape(name.encode()) + rb"\b[^>]*>", P.MASK.sub(lambda x: b" " * len(x.group(0)), FXR[k - 1][FXR[k - 1].find(b">") + 1:]))
+    leg = P.glued_legend(FXW, tag.group(0))
+    cut = FXR[:k - 1] + [FXR[k - 1].replace(leg, b"", 1)] + FXR[k:]
+    say(bool(P.reopened_gaps(cut, FXW)[1]), "(LD10m) fixture 600 B page %d with the re-opened <%s>'s legend stripped FAILS (LD10)" % (k, name))
 sys.exit(1 if bad else 0)
 PY
 [ $? -eq 0 ] || fail=1

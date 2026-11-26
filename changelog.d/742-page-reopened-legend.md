@@ -1,0 +1,3 @@
+### Fixed — a `--for` continuation page that re-opens a section carries that section's own legend (#742)
+
+When a section such as `<syms>` starts on page 2 or later and runs on to the next page, that next page re-opens it. It used to re-open the section with only its open tag. Its rows' attributes (`by=`, `name_total=`, `callee_total=`, `files_total=`) were then defined nowhere a reader of that page holds: not on page 1, and not on the page itself. The comment glued before the section's open tag now rides with the re-opened section, verbatim. A section that starts on page 1 has its legend there and is unchanged. Gate: `test/pagelegendcheck.sh` (LD10), on a fixture the gate writes itself.
