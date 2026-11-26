@@ -760,6 +760,7 @@ for _g in \
     localitycheck \
     localscountcheck \
     locatoragentcheck \
+    locbenchagentcheck \
     locbenchplacebocheck \
     loopconservationcheck \
     lpincheck \

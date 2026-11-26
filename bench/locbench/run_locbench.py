@@ -639,6 +639,10 @@ def main():
     ap.add_argument( "--emit-payloads", default="",
                      help="with a derived arm (for-matched/placebo/placebo-shuffle/lexical): write every arm's payload "
                           "+ a sha256 manifest per instance under this dir — the seal an agent round verifies" )
+    ap.add_argument( "--instances", default="",
+                     help="comma-separated instance_ids (or @FILE, one per line): score ONLY these rows, in dataset order "
+                          "(the agent pilot's train selection, bench/locbench/agent_loc.py --select-pilot); every named id "
+                          "must be found or the run stops (zero-silent-skip)" )
     ap.add_argument( "--verbose", action="store_true" )
     a = ap.parse_args()
 
@@ -657,6 +661,13 @@ def main():
         actual = hashlib.sha256( raw.read_bytes() ).hexdigest() if raw.exists() else "missing"
         if actual != expected: raise SystemExit( f"frozen LocBench rows hash mismatch: expected {expected}, got {actual}" )
     print( f"# fetched {len(rows)} instances", file=sys.stderr )
+    if a.instances:
+        spec = pathlib.Path( a.instances[1:] ).read_text() if a.instances.startswith( "@" ) else a.instances
+        wanted_ids = [ x.strip() for x in spec.replace( ",", "\n" ).splitlines() if x.strip() ]
+        missing = sorted( set( wanted_ids ) - { r["instance_id"] for r in rows } )
+        if missing: raise SystemExit( f"--instances: {len( missing )} id(s) not in the dataset (zero-silent-skip contract)" )
+        rows = [ r for r in rows if r["instance_id"] in set( wanted_ids ) ]
+        print( f"# --instances kept {len(rows)} rows", file=sys.stderr )
 
     # accumulators per arm (Acc@k = strict ALL-gold-within-top-k, per LocAgent; anyf* = lenient any-gold recall)
     def zero(): return dict( n=0, f1=0, f3=0, f5=0, f10=0, allf10=0, fn5=0, fn10=0, mrr=0.0,
@@ -782,7 +793,10 @@ def main():
         per_instance.append( dict( instance_id=inst["instance_id"], partition=partition, repo=repo,
                                    gold_files=sorted( gold_files ), primary_files=sorted( primary_files ), gold_funcs=gold_funcs,
                                    added_funcs=added, covered=cov, n_files=len( universe_files ),
-                                   n_syms=len( uni_candidates ), arms=arm_out ) )
+                                   n_syms=len( uni_candidates ), arms=arm_out,
+                                   # the agent driver scores a submission with the same file_ranks/func_ranks,
+                                   # whose basename fallback needs the indexed universe; only kept for a seal run
+                                   **( dict( universe_files=universe_files ) if a.emit_payloads else {} ) ) )
         if a.verbose:
             print( f"[{idx+1}/{len(rows)}] {inst['instance_id']} files={len(primary_files)}/{len(gold_files)} "
                    f"funcs={len(gold_funcs)} cov={len(cov)}/{len(gold_funcs)} "
