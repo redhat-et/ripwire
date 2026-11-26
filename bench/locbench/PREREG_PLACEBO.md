@@ -321,3 +321,46 @@ different and weaker claim. This file is written first so none of them can happe
   - The pilot's TRAIN payloads are sealed and are not the held-out seal: 24 manifests,
     SHA-256 `69b32fc028aef30b4906ba086776b9bfb5dbe3bfeef3548643c6692f269949f1`, binary
     `ripwire 0.7.0-dev.20+gfe40f1d71`, every arm built on 24 of 24.
+- **2026-11-26, A2: an unbuildable instance is excluded from every arm (owner ruling). No held-out model
+  episode has run.** The 24-instance TRAIN pilot (Haiku 5.5) was running when this was written. It touches no
+  held-out instance.
+  - *Rule.* An instance is excluded from **every** arm and counted when its derived arms cannot be built
+    under A1: the unrelated-file placebo pool is empty, or no common exact size exists at or below B. Every
+    arm includes A0, the shipped `for` and A1p. The run's JSON lists each excluded instance by id
+    (`excluded_unbuildable_a2`) and reports the count beside the other exclusions. No payload is sealed for
+    it.
+  - *The test runs before the gold-based scoring.* It reads only ripwire's own exports, the issue text and
+    row lengths. The set is therefore computed by the rule, never by name: on the 243 it need not be exactly
+    the 4 the 306-row count found.
+  - *Why it cannot favour an arm.*
+    - The criterion is gold-blind and model-blind. It is fixed by repository shape: an answer that already
+      names every file, or row lengths with no common exact size.
+    - Every arm loses the same instances, so each paired contrast (A1−A2, A1−A3, A1−A0) runs over the
+      identical task set.
+    - It does not depend on any arm's outcome. It is decided before any episode and before any score.
+    - It narrows the population, and every published number states it as n = 243 − excluded.
+  - *What it costs.* The held-out n falls by the excluded count, and the power arithmetic above uses n = 243.
+    The MDE is reported at the realised n, never at 243.
+  - *Gate.* `test_placebo_arms.py`'s offline `main()` run on a fixture whose answer names every file now
+    requires exclusion by id, n = 0 in every arm, and no sealed payload. Two checks are red on the A1 tip
+    `315b057f1`, which aborts; all three are green after.
+- **2026-11-26, Stage 0 sealed under A1 + A2. No held-out model episode has run.**
+  - Run: `run_locbench.py --n 560 --split=heldout --arms=for,for-matched,placebo,placebo-shuffle,lexical,query --emit-payloads`
+    at commit `464a902b7`, binary `ripwire 0.7.0-dev.20+gfe40f1d71 (dev, AppleClang 21.0.0.21000101,
+    emit=std::print, act=on, rows=lines, built_from=fe40f1d71)`.
+  - The 560-row hash check passed. Exit 0.
+  - **Excluded by rule A2:** 4 instances, computed by the rule, not by name.
+    - 3 with an empty unrelated-file pool: `avantifellows__quiz-backend-84`, `duncanscanga__VDRS-Solutions-73`,
+      `rapidsai__dask-cuda-98`.
+    - 1 with no common exact size at or below 13,726 B: `SYSTRAN__faster-whisper-1198`.
+    - The other exclusion counters are all 0: nonpy, checkout, ctx and unindexable.
+  - **Payload seal:** 302 instance manifests. SHA-256 of their sorted concatenation:
+    **`4bc5f5114d4c8518a684eaaa62a61d3af60d3262a66833290414fe866eaf5a17`**.
+  - The payload-only metrics were written to a file nobody has read. Only the header's `n_scored` and
+    exclusion counts were read.
+  - **Discrepancy with the text above (owner call).**
+    - The held-out partition this harness selects is **306 rows over 88 repos**, so the scored n is
+      **302**. The "243 instances over 78 repos" written above does not match this harness at this seal.
+    - The 306 count was made with no gold read. It is also consistent with the train side: 560 − 254 = 306.
+    - The power arithmetic is reported at the realised n = 302 beside the frozen 243, and n is not changed
+      silently.
