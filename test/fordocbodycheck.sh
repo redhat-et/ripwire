@@ -41,6 +41,7 @@ export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (f4)(h1)(x1) read <doc_body> as the last element before the trailing legend / </ctx>; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "fordocbodycheck: BIN=$BIN"
 fail=0

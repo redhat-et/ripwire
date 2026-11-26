@@ -84,6 +84,7 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (a1)(s2) read <exemplar_family> as the last element before the trailing legend / </ctx>; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forexemplarcheck: BIN=$BIN"
 fail=0

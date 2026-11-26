@@ -56,6 +56,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py set_prefix: the head round-robin set-prefix arms (lane hrr)
 unset RIPWIRE_NO_HEAD_RR                  # lane hrr: the reorder is ON here unless a twin sets it
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (3) pins each fixture answer's bytes (1.04x); the question-sites block is outside every budget by design, capped at 1,000 B; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forrankordercheck: BIN=$BIN"
 fail=0

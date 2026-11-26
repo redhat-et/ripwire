@@ -55,6 +55,7 @@ export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (a1)(b1)(b3)(b4) read <manifest_rows> as the last element before the trailing legend / </ctx>; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "formanifestcheck: BIN=$BIN"
 fail=0

@@ -62,7 +62,9 @@ FORG="$TMP/for_graph.xml"
 # joined pages (forpagescheck P2) — and (Pg) holds the default page to present-or-disclosed-deferred. "Immediately before </ctx>"
 # reads "the last ROW block": an answer-first answer's trailing DOCUMENT legend (comments only) follows it inside the same answer.
 # TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
-lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); sys.exit(0 if re.search(r"</graph>(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>\s*\Z",s,re.S) else 1)' "$1"; }
+# THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites block (<!-- qs: --><qs …>…</qs>) is not a row block;
+# it rides after the last row block too, ahead of the trailing legend (its own gate: test/forqsitescheck.sh)
+lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); sys.exit(0 if re.search(r"</graph>(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>|<qs [^>]*>[^<]*</qs>)*</ctx>\s*\Z",s,re.S) else 1)' "$1"; }
 "$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph --page-bytes=0 > "$FORG" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph > "$TMP/for_graph_page.xml" 2>/dev/null
 if grep -qF '<graph fmt="mermaid">' "$TMP/for_graph_page.xml"; then ok "(Pg) --for --with-graph: the default page carries <graph>"

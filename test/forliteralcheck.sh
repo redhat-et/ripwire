@@ -84,6 +84,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_LITERAL_ANCHOR
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): L7 reads the answer outside <lit> against its RIPWIRE_NO_LITERAL_ANCHOR=1 twin, and <lit> is read as the last element before the trailing legend; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forliteralcheck: BIN=$BIN"
 fail=0

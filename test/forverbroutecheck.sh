@@ -410,8 +410,9 @@ if run e22 plain --for="$Q_ES" && run e22f plain --for="$Q_ES" --page-bytes=1200
     [ "$( attr "$R" early )" = proven ] && [ "$( attr "$R" page )" = 1 ] && [ -n "$( attr "$R" deferred )" ] && [ -n "$( attr "$R" withheld_bytes )" ] \
         && [ "$( wc -c <"$DIR/e22.out" )" -lt "$( wc -c <"$DIR/e22f.out" )" ]
     say $? "(22) [P] ES: page 1 ends early (early=proven page=1 deferred= withheld_bytes=), shorter than the full page" "(22) [P] root reads '${R:0:300}'"
-    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<ctx [^>]*>(.*)</ctx>$",d.strip(),re.S); sys.exit(0 if m and re.fullmatch(r"<callers by=\"subject\"[^>]*>.*</callers>",m.group(1),re.S) else 1)' "$DIR/e22.out"
-    say $? "(22) [P] ES: the early page holds the callers block and nothing after it" "(22) [P] the early page holds more than the block"
+    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<ctx [^>]*>(.*)</ctx>$",d.strip(),re.S); sys.exit(0 if m and re.fullmatch(r"<callers by=\"subject\"[^>]*>.*</callers>(?:<qs [^>]*>[^<]*</qs>)*",m.group(1),re.S) else 1)' "$DIR/e22.out"
+    # THETA11-FLIP (2026-11-25, src/forqsites.h, on by default): the question-sites <qs> elements ride on page 1, the early page too (their own gate: test/forqsitescheck.sh)
+    say $? "(22) [P] ES: the early page holds the callers block and nothing after it but the <qs> elements" "(22) [P] the early page holds more than the block"
     NEXT="$( attr "$R" next | python3 -c 'import html,sys; sys.stdout.write(html.unescape(sys.stdin.read().strip()))' )"
     case "$NEXT" in
         *"--page-bytes=12000:1") eval "\"\$BIN\" \"\$DIR/plain\" $NEXT" >"$DIR/e22n.out" 2>/dev/null; cmp -s "$DIR/e22n.out" "$DIR/e22f.out"

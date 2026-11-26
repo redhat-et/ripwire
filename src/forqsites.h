@@ -3,12 +3,13 @@
 //
 // WHAT IT IS. A `--for` question usually spells the names the agent will grep for next: a `--flag`, a `snake_name`, a
 // `Type::member`, an ALL-CAPS macro. After the answer it was given, the agent runs that grep (the follow-on calls are about 25 % of
-// session cost, tmp/orch-1124/followon/RESULT.md). θ11 runs it first: one line per question token, every file:line where the token
+// session cost, tmp/orch-1124/followon/RESULT.md). θ11 runs it first: one <qs> element per question token, every file:line where the token
 // occurs, in a block with its OWN 1,000 B budget at the end of page 1, inside the root (before </ctx>), outside est_tokens.
 //
-// STATUS: an experiment behind RIPWIRE_THETA11=1, default OFF (with it unset the answer is byte-identical). The offline proxy
-// (grep coverage of the 56 M5 sessions' recorded follow-on calls) is about −2.9 % of session cost, all of it in multi-file
-// sessions; a sealed live run decides the default.
+// STATUS: ON by default since lane THETA11-FLIP (owner 11-24, after the sealed NL4 and NL5-large runs both passed); RIPWIRE_THETA11=0
+// turns it off, and the answer is then byte-identical to the one served before the block existed (switch: forqsitesswitch.h, which
+// --version's qsites= reads too). The offline proxy (grep coverage of the 56 M5 sessions' recorded follow-on calls) is about −2.9 %
+// of session cost, most of it in multi-file sessions.
 //
 // THE RULE (pre-registered in cands.py `question_tokens` / `theta11`; this header is its product form):
 //   1. TOKENS, in this order: inside backticks every `--opt` / `-opt` and identifier (`a`, `a::b`, `a.b`, `a->b`); then over the
@@ -27,7 +28,7 @@
 //      /usr/share/dict.
 //   4. ORDER: identifier-shaped first, then fewest sites, then question order. Files in the scan's order (source, then test, then
 //      docs; path within a tier; then the unindexed files by path), lines ascending.
-//   5. EMIT: `<qs t="TOK" n="N">path:l,l path2:l</qs>`, one line per token; a line goes in whole or not at all, and on overflow the
+//   5. EMIT: `<qs t="TOK" n="N">path:l,l path2:l</qs>`, one element per token; an element goes in whole or not at all, and on overflow the
 //      next token is tried; 1,000 B of lines in all. One comment line before them says what they are. No token kept: no block.
 //   6. FLOORS: n="N+" when a file the token may occur in went unread — the crawl kept fewer skip rows than it counted (500 per
 //      class), the index scan stopped at its budget or skipped an unreadable file, or an unindexed text file could not be read or is
@@ -45,6 +46,7 @@
 #include "forliteral.h"  // lit_detail::trimAllWs — a backtick span is trimmed as Python str.strip does
 #include "infra/ownedfile.h" // openOwnedFile — an oversized file's head, read to tell text from binary
 #include "infra/Diagnostics.h" // DISCLOSE — a floored count
+#include "forqsitesswitch.h" // thetaElevenOn — the switch (default ON; RIPWIRE_THETA11=0 off)
 
 #include <algorithm>
 #include <array>
@@ -64,11 +66,6 @@ inline constexpr std::size_t kBlockBytes      = 1000;   // RESULT.md step 3: the
 inline constexpr std::size_t kMaxSitesPerTok  = 150;    // a token with more lines than this is not a lead
 inline constexpr std::size_t kRareWordSites   = 20;     // a plain word with more lines than this is prose (rule 3; the 41-task proxy's knee)
 
-[[nodiscard]] inline bool thetaElevenOn() noexcept
-{
-    const char* const v = std::getenv( "RIPWIRE_THETA11" );
-    return v != nullptr && v[0] == '1' && v[1] == '\0';
-}
 
 struct Token
 {
@@ -609,7 +606,9 @@ struct ScanPlan
     return line + "</qs>";
 }
 
-// Rules 3 to 5: the block's lines (no trailing newline), or "" when no token fits.
+// Rules 3 to 5: the block's <qs> elements, back to back, or "" when no token fits. No newline: the page is minified XML with no newline
+// outside CDATA (G4; test/actlinecheck.sh (H)). The 1,000 B still counts one separator byte per element, so the elements chosen are the
+// ones the sealed NL4 / NL5-large runs measured (they printed one per line).
 [[nodiscard]] inline std::string formatLines( std::vector<TokenSites> sites, std::size_t budget = kBlockBytes )
 {
     std::erase_if( sites, []( const TokenSites& t ) { return t.sites.empty() || t.sites.size() > siteCap( t ); } );
@@ -625,9 +624,8 @@ struct ScanPlan
         {
             continue;
         }
-        out += out.empty() ? "" : "\n";
         out += line;
-        used += line.size() + 1;
+        used += line.size() + 1;   // + 1: the separator the measured block printed (see above)
     }
     return out;
 }
@@ -635,13 +633,13 @@ struct ScanPlan
 inline constexpr std::string_view kLegend =
     "<!-- qs: where this question's own words occur, as a grep would list them (indexed, unindexed and extensionless text files): "
     "t= the word, n= its lines (N+ a floor: a file it may be in went unread), then path:line,line per file; whole-word for a name, substring for an option or a qualified name; "
-    "a word only on 150 lines or fewer, a plain word on 20 lines or fewer unless the code names it; these lines are their own 1,000 B, "
+    "a word only on 150 lines or fewer, a plain word on 20 lines or fewer unless the code names it; these entries are their own 1,000 B, "
     "outside est_tokens and any budget -->";
 static_assert( kBlockBytes == 1000 && kLegend.find( "their own 1,000 B" ) != std::string_view::npos, "the qs legend states the block's budget" );
 static_assert( kMaxSitesPerTok == 150 && kLegend.find( "150 lines or fewer" ) != std::string_view::npos, "the qs legend states the word cap" );
 static_assert( kRareWordSites == 20 && kLegend.find( "20 lines or fewer" ) != std::string_view::npos, "the qs legend states the plain-word cap" );
 
-// The whole θ11 block for `task` ("" when the knob is off or no token fits): the legend line and the <qs> lines, each ending "\n".
+// The whole θ11 block for `task` ("" when the knob is off or no token fits): the legend comment, then the <qs> elements, no newline (G4).
 [[nodiscard]] inline std::string questionSitesBlock( const IngestResult& ing, std::string_view task, std::string_view root )
 {
     if( !thetaElevenOn() )
@@ -650,11 +648,12 @@ static_assert( kRareWordSites == 20 && kLegend.find( "20 lines or fewer" ) != st
     }
     const std::vector<Token> toks  = questionTokens( task );
     const std::string        lines = formatLines( collectSites( ing, toks, root.empty() ? std::string() : sarif::rootPrefixOf( root ) ) );
-    return lines.empty() ? std::string() : std::string( kLegend ) + "\n" + lines + "\n";
+    return lines.empty() ? std::string() : std::string( kLegend ) + lines;
 }
 
-// Inside the root: the block goes in right before the answer's closing </ctx> (a trailing newline after it stays after it). false:
-// no block, or the page does not end in </ctx> (a JSON or columnar answer) — nothing is inserted.
+// Inside the root: the block goes in after the answer's last element, ahead of the comments that close the root (the document legend
+// and the ROWLINES clauses, which stay last before </ctx>: forrowlines.h; test/rowlinescheck.sh (L2)); a trailing newline after </ctx>
+// stays after it. false: no block, or the page does not end in </ctx> (a JSON or columnar answer) — nothing is inserted.
 inline bool insertBlock( std::string& page, std::string_view block )
 {
     static constexpr std::string_view kClose = "</ctx>";
@@ -667,8 +666,17 @@ inline bool insertBlock( std::string& page, std::string_view block )
     {
         return false;
     }
-    const std::size_t at = end - kClose.size();
-    page.insert( at, ( at > 0 && page[at - 1] != '\n' ? "\n" : "" ) + std::string( block ) );
+    std::size_t at = end - kClose.size();
+    while( std::string_view( page ).substr( 0, at ).ends_with( "-->" ) )   // step back over the closing comment run
+    {
+        const std::size_t open = page.rfind( "<!--", at - 3 );
+        if( open == std::string::npos )
+        {
+            break;
+        }
+        at = open;
+    }
+    page.insert( at, block );
     return true;
 }
 

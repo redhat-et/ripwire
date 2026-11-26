@@ -28,6 +28,7 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_THETA11=0   # THETA11-FLIP (θ11 question-sites block on by default): (w1)(w2)(b1)(a1)(m2)(s2) read <decl_rows> as the last element before the trailing legend / </ctx>; the question-sites block is pinned by test/forqsitescheck.sh
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "fordeclrowcheck: BIN=$BIN"
 fail=0
