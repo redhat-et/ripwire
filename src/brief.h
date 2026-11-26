@@ -2,7 +2,7 @@
 // brief.h — `--brief="TASK"` (MCP `brief {task, bytes}`): the fresh-subagent brief. One compact, size-capped answer a parent
 // pastes into a code-editing subagent's prompt, so the subagent makes its first targeted Read/Edit without the ~8 orientation
 // calls a fresh one spends (ls/find, README/CLAUDE.md, broad greps, git tours: 604K mean / 400K median cached tokens per
-// subagent, tmp/orch-1125/hard-orient RESULT.md §2). The contract is SPEC_SUBAGENT_BRIEF.md §2: eight sections, in order —
+// subagent, tmp/orch-1125/hard-orient RESULT.md §2). The contract: eight sections, in order —
 //   1 <layout>       top dirs with a role and a file count (depth 2-3 for a dir holding > 30 % of the files)
 //   2 <build>        build/test commands QUOTED from manifests and the repo's own docs, never guessed; the test registration
 //   3 <entry>        program entries and the public header, ranked by call/include reach to the task's act symbols
@@ -3066,7 +3066,7 @@ inline std::vector<std::string> primaryUsers( const Corpus& c, const FileAdjacen
     std::stable_sort( users.begin(), users.end(), [ & ]( std::string_view a, std::string_view b )
     {
         const int pa = commonPrefixDirs( a, primary ), pb = commonPrefixDirs( b, primary );
-        return pa != pb ? pa > pb : a < b;
+        return pa != pb ? pa > pb : sortutil::svLess( a, b );
     } );
     std::vector<std::string> out;
     for( std::size_t i = 0; i < users.size() && i < kUsersShown; ++i )
@@ -3957,7 +3957,7 @@ inline std::string langsOf( const Corpus& c )
     for( const Symbol& s : c.ing.symbols )
     {
         const std::size_t l = std::size_t( s.lang );
-        if( s.fileId < seen.size() && !seen[s.fileId] && l < perLang.size() && s.lang != Lang::Unknown )
+        if( s.fileId < seen.size() && !seen[s.fileId] && l < perLang.size() && l != std::size_t( Lang::Unknown ) )
         {
             seen[s.fileId] = 1;
             ++perLang[l];
@@ -3983,7 +3983,7 @@ inline std::string langsOf( const Corpus& c )
 }   // namespace detail
 
 inline constexpr std::string_view kLegend = "<!-- brief: paths root-relative; path:l-e = lines; (skip) = do not read; Read act ranges in one turn -->";
-static_assert( kLegend.size() <= 120, "SPEC §2: one legend comment of at most 120 B for the whole brief" );
+static_assert( kLegend.size() <= 120, "one legend comment of at most 120 B for the whole brief" );
 
 // The brief for `in.task`, from the finished --for page and the built graph. Named steps 1-8, then the size fit.
 inline std::string composeBrief( const BriefInputs& in )
