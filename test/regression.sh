@@ -1123,6 +1123,7 @@ for _g in \
     slicediffcheck \
     sliceflowcheck \
     sliceflowsenscheck \
+    slotbasecheck \
     slotjoincheck \
     slotregcheck \
     snapdeterminismcheck \

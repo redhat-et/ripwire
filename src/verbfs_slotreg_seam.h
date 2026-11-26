@@ -12,6 +12,7 @@
 #include "infra/emit.h"       // faultSwitchOnOnce — the mutation arms' switches
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -28,6 +29,21 @@ class FileAdjacency;
 namespace rw::verbfs::slotreg
 {
 
+// The identity of an IngestResult's row arrays (files, symbols, references, bindings, includes): data pointer and size. A copy,
+// a merge, an --ignore-tests filter or any other ingest has other arrays or other sizes. A template, so this header stays light.
+struct ModelRows
+{
+    const void* rows[ 5 ]  = {};
+    std::size_t sizes[ 5 ] = {};
+    friend bool operator==( const ModelRows&, const ModelRows& ) = default;
+};
+template<class Ingest>
+inline ModelRows modelRowsOf( const Ingest& ing ) noexcept
+{
+    return ModelRows{ { ing.files.data(), ing.symbols.data(), ing.references.data(), ing.bindings.data(), ing.includes.data() },
+                      { ing.files.size(), ing.symbols.size(), ing.references.size(), ing.bindings.size(), ing.includes.size() } };
+}
+
 // What a serve attempt found, handed back to the keep call so the one stats line can say both.
 struct Serve
 {
@@ -43,6 +59,10 @@ struct Seams
     // (2) the slot join's include adjacency: header -> the files that include it
     Serve ( *joinServe )( const IngestResult& ing, FileAdjacency& includers ) = nullptr;
     void ( *joinKeep )( const IngestResult& ing, Serve tried, const FileAdjacency& includers, bool readsPinned ) = nullptr;
+    // (3) the model identity: the noted model's key when `ing` IS that model (its row arrays' data pointers and sizes), else 0.
+    //     The narrow value index (valuerefindex.h narrowFor) keeps its question-independent base for the life of the process
+    //     only for such a model, so an IngestResult nobody vouched for (an --ignore-tests filter, a merge) builds as before.
+    std::uint64_t ( *modelKey )( const IngestResult& ing ) = nullptr;
 };
 
 inline Seams& seams() noexcept
@@ -61,6 +81,10 @@ inline bool faultAnyKey() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegAn
 inline bool faultEmptyRefused() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegEmptyRefused>( "RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED" ); }
 inline bool faultStaleRows() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegStaleRows>( "RIPWIRE_FAULT_SLOTREG_STALEROWS" ); }
 inline bool servesStaleOnPurpose() noexcept { return faultAnyKey() || faultEmptyRefused(); }
+// SLOT-NARROW (test/slotbasecheck.sh V): a narrow index derived from the kept base one value short, what a base built before an
+// in-place edit of the model would answer. The plain build's derived-vs-fresh check (valuerefindex.h derive) must trap it.
+struct FaultSlotBaseStale;
+inline bool faultBaseStale() noexcept { return rw::faultSwitchOnOnce<FaultSlotBaseStale>( "RIPWIRE_FAULT_SLOTBASE_STALE" ); }
 
 // The files a build read, for the keep decision: the tree key pins the content of a crawled file, and nothing else. Arms the
 // process-wide dependency log only when the seams are installed and no other owner holds it (none does at verb time: the

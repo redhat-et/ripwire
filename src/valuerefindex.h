@@ -8,6 +8,7 @@
 #include "resolve.h"           // includerDir, resolvePreciseInclude — a module path's file
 #include "infra/Diagnostics.h"   // EXPECTS/ENSURES — the window and index invariants
 #include "infra/sortutil.h"      // svLess: the method-name list slot_join::memberCalls binary-searches
+#include "infra/idkeyedmap.h"    // IdKeyedMap: the narrow base's ( owner, interned name ) tables, no text per key
 #include "verbfs_slotreg_seam.h"   // SLOTREG: a served index answers the includers adjacency from its record (src/verbfs_slotreg.h)
 #include "model.h"
 
@@ -16,6 +17,8 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -758,6 +761,9 @@ private:
     static constexpr std::string_view kConflict = "\x01";
     std::vector<std::uint32_t>        m_refs;   // the facts, keyed in build() (the type key by its file, TypeKeys)
     HashMap<std::string, std::string> m_slot;   // "registrarId#k" → "TypeKey#field" (kConflict: two different slots)
+
+public:
+    friend bool operator==( const ParamSlots&, const ParamSlots& ) = default;   // SLOT-NARROW: SlotIndex::sameTablesAs
 };
 // `extra` (ascending) merged into the slot calls and their per-function lists, all kept in reference order (join() and callsIn()
 // binary-search them).
@@ -931,7 +937,20 @@ private:
         std::string   type;    // the resolved declared struct type, "" unknown
         std::string   field;
         VrLangFamily  fam = VrLangFamily::None;   // fix1 F-3: the value-ref family; a slot never joins across two
+        friend bool operator==( const End&, const End& ) = default;
     };
+
+public:
+    // SLOT-NARROW: the tables this index answers from, equal to another's (the plain build's derived-vs-fresh check,
+    // ValueRefIndex::derive). The Go / Rust type keys are not compared: they are built from the model alone, never from a value.
+    bool sameTablesAs( const SlotIndex& o ) const
+    {
+        return m_fieldType == o.m_fieldType && m_alias == o.m_alias && m_aliasInFile == o.m_aliasInFile && m_body == o.m_body
+            && m_bodyScope == o.m_bodyScope && m_params == o.m_params && m_calls == o.m_calls && m_callsBySym == o.m_callsBySym
+            && m_values == o.m_values && m_callEnds == o.m_callEnds && m_valuesByField == o.m_valuesByField && m_callsByField == o.m_callsByField;
+    }
+
+private:
     // An anonymous struct's "@LINE" key is unique in its own file only: the file joins the key.
     static std::string canonType( std::string_view t, std::uint32_t fileId )
     {
@@ -1117,9 +1136,19 @@ public:
     // of a registrar that stores its parameter in a field: the cands=, K and @C counts need the whole slot), every slot fact and
     // slot call, and the Throughs those kept values join (their container, the parameter calls of their callee). Every query the
     // splice makes answers the same as on the full index, by construction; the by-name table holds only the names they resolve.
-    static ValueRefIndex narrowFor( const IngestResult& ing, std::span<const std::string_view> names ) { return ValueRefIndex( Narrowed{ ing, keepSets( ing, names ) } ); }
+    //
+    // SLOT-NARROW: most of a narrow index does not read `names`. Every slot store, every registrar argument, every slot fact and
+    // call, the Throughs those values join, the depth cuts and the import bindings are kept whatever the question; only the
+    // values NAMING one of `names` (and what those join) are the question's. A --for builds three narrow indexes per call (the slot
+    // splice, the by-bind file rows, the bind ranking), and each walked all 12.5 M references of llvm-project and resolved every
+    // slot store again (~0.4 s of ~0.8 s per build, PROFILE_SCOPE on the dev flavour). So on the model the warm snapshot
+    // identifies (seam modelKey: the noted model, its row arrays' data pointers and sizes), the empty question's narrow index is
+    // built once per process, lazily on the first narrowFor, and each question copies it and adds its own named values (derive).
+    // Any other IngestResult (an --ignore-tests filter, a merge, --no-cache, RIPWIRE_NO_VERBFS) builds as before. The plain build
+    // proves every derived index equal to a fresh narrowFor of the same names (test/slotbasecheck.sh V).
+    static ValueRefIndex narrowFor( const IngestResult& ing, std::span<const std::string_view> names );
 
-    const SlotIndex& slots() const noexcept { return m_slots; }   // IX-1: the struct-field slot join
+    const SlotIndex& slots() const noexcept { return *m_slots; }   // IX-1: the struct-field slot join
 
     // The files that the JS/TS/Python imports of file `fileId` binding `name` resolve to, in import order (none: no such import, or
     // a package outside the tree). The import's module is resolved by the call graph's own Step-A (resolve.h resolvePreciseInclude:
@@ -1129,8 +1158,8 @@ public:
     std::vector<std::uint32_t> importedFilesBinding( std::uint32_t fileId, std::string_view name ) const
     {
         std::vector<std::uint32_t> out;
-        const auto                 imp = m_importsByFile.find( fileId );
-        if( imp == m_importsByFile.end() )
+        const auto                 imp = m_importsByFile->find( fileId );
+        if( imp == m_importsByFile->end() )
         {
             return out;
         }
@@ -1388,20 +1417,23 @@ public:
 private:
     struct KeepSets;
     struct Narrowed;
+    struct NarrowBase;
+    struct Additions;
     explicit ValueRefIndex( const Narrowed& n );
+    // SLOT-NARROW (narrowFor): the kept base, a question's narrow index derived from it, and the plain build's check of that
+    static std::shared_ptr<const NarrowBase> buildBase( const IngestResult& ing, std::uint64_t key );
+    static ValueRefIndex derive( const std::shared_ptr<const NarrowBase>& base, std::span<const std::string_view> names );
+    void copyTablesFrom( const ValueRefIndex& base );
+    static Additions additionsOf( const NarrowBase& b, const std::vector<std::uint32_t>& added );
+    void growBy( const NarrowBase& b, const Additions& add );
+    void mergeValues( const ValueRefIndex& base, const std::vector<std::uint32_t>& added );
+    bool sameTablesAs( const ValueRefIndex& o ) const;
+    std::optional<bool> baseReaches( std::uint32_t defFile, std::uint32_t refFile ) const;
     // The tables (`keep` non-null: a narrow index, narrowFor).
     void index( const KeepSets* keep )
     {
         const IngestResult& ing = m_ing;
-        for( NodeId id = 0; id < ing.symbols.size(); ++id )
-        {
-            const Symbol& s = ing.symbols[id];
-            if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) != VrLangFamily::None
-                && ( keep == nullptr || keep->names.contains( s.name ) ) )
-            {
-                m_fnByName[ s.name ].push_back( id );
-            }
-        }
+        indexFunctionsByName( keep );
         indexOwners( keep );
         markPythonMembers();
         for( std::uint32_t i = 0; i < ing.references.size(); ++i )
@@ -1412,7 +1444,7 @@ private:
         {
             if( b.kind == LocalBindKind::JsImport || b.kind == LocalBindKind::Import )
             {
-                m_importsByFile[ b.fileId ].push_back( &b );
+                ( *m_importsByFile )[ b.fileId ].push_back( &b );
             }
         }
         ENSURES( std::is_sorted( m_values.begin(), m_values.end() ), "m_values is built in reference order — targetsOf binary-searches it" );
@@ -1425,9 +1457,34 @@ private:
                 m_valuesByTarget[ t ].push_back( static_cast<std::uint32_t>( k ) );
             }
         }
-        m_slots.resolveCalleesBy( [ this ]( const Reference& v ) { return resolveCallee( v ); } );
-        m_slots.build( ing, m_values, m_targets );
-        m_slots.resolveCalleesBy( nullptr );   // it captured `this`: never outlives the build
+        m_slots->resolveCalleesBy( [ this ]( const Reference& v ) { return resolveCallee( v ); } );
+        m_slots->build( ing, m_values, m_targets );
+        m_slots->resolveCalleesBy( nullptr );   // it captured `this`: never outlives the build
+    }
+    // part 1: the functions by name (`keep` non-null: only its names). The narrow base hands its unfiltered table (SLOT-NARROW),
+    // read once per kept name, so its index does not walk the symbols a second time.
+    void indexFunctionsByName( const KeepSets* keep )
+    {
+        if( keep != nullptr && keep->fnAll != nullptr )
+        {
+            for( const auto& [ name, one ] : keep->names )
+            {
+                if( const auto it = keep->fnAll->find( name ); it != keep->fnAll->end() )
+                {
+                    m_fnByName.try_emplace( name, it->second );
+                }
+            }
+            return;
+        }
+        for( NodeId id = 0; id < m_ing.symbols.size(); ++id )
+        {
+            const Symbol& s = m_ing.symbols[id];
+            if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) != VrLangFamily::None
+                && ( keep == nullptr || keep->names.contains( s.name ) ) )
+            {
+                m_fnByName[ s.name ].push_back( id );
+            }
+        }
     }
     // part 2: a path language's functions by owner type (`Editor::backspace`, ownedBy's "family#Owner::name"), and every file's
     // crate (slot_join::cratesOf) when such a language is indexed.
@@ -1456,7 +1513,7 @@ private:
     void indexReference( std::uint32_t i, const KeepSets* keep )
     {
         const Reference& r = m_ing.references[i];
-        if( m_slots.take( i, r ) )
+        if( m_slots->take( i, r ) )
         {
             return;   // IX-1: a slot fact or a call through a struct field (SlotIndex)
         }
@@ -1491,6 +1548,7 @@ private:
         HashMap<std::string, char>   names;        // the names resolveName looks up: kept values' callees and their bare callees
         HashMap<std::string, char>   containers;   // "fileId#container" of the kept values
         HashSet<NodeId>              paramOwners;  // a kept parameter default's function
+        const HashMap<std::string_view, std::vector<NodeId>>* fnAll = nullptr;   // SLOT-NARROW: every function by name (the base build's)
         bool keepsThrough( const IngestResult& ing, const Reference& t ) const
         {
             if( scopeOf( t ) == 'p' )
@@ -1502,10 +1560,25 @@ private:
     };
     struct Narrowed
     {
-        const IngestResult& ing;
-        KeepSets            keep;
+        const IngestResult&  ing;
+        KeepSets             keep;
+        const ValueRefIndex* base           = nullptr;   // SLOT-NARROW: copy base's tables instead (derive adds the question's values)
+        bool                 freshIncluders = false;     // SLOT-NARROW: build the includers here, never through the seam (the check)
     };
+    // A value's callee as resolveCallee names it: the last segment of a path language's `a::b::f`, else the whole recvVar.
+    static std::string leafOf( const Reference& r )
+    {
+        const std::string_view sep = slotPathSep( r.lang );
+        const std::size_t      at  = sep.empty() ? std::string::npos : r.recvVar.str().rfind( sep );
+        return at == std::string::npos ? r.recvVar : r.recvVar.substr( at + sep.size() );
+    }
     static KeepSets keepSets( const IngestResult& ing, std::span<const std::string_view> names )
+    {
+        return keepSetsWith( ing, names, []( std::uint32_t, const Reference& ) {} );
+    }
+    // keepSets, handing every reference it does not keep to `skipped( i, r )` (SLOT-NARROW: the base indexes them in the same walk)
+    template<class Skipped>
+    static KeepSets keepSetsWith( const IngestResult& ing, std::span<const std::string_view> names, const Skipped& skipped )
     {
         KeepSets                   k;
         HashMap<std::string, char> registrars;   // functions storing a parameter in a field slot (kValueRefSlotParamScope facts)
@@ -1522,14 +1595,14 @@ private:
             const char       sc = scopeOf( r );
             if( r.role != RefRole::Value || isSlotJoinRecord( r ) || sc == kValueRefDepthCutScope )
             {
+                skipped( i, r );
                 continue;
             }
-            const bool             named = std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess );
-            const std::string_view sep   = slotPathSep( r.lang );
-            const std::size_t      at    = sep.empty() ? std::string::npos : r.recvVar.str().rfind( sep );
-            const std::string      leaf  = at == std::string::npos ? r.recvVar : r.recvVar.substr( at + sep.size() );   // resolveCallee's name
+            const bool        named = std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess );
+            const std::string leaf  = leafOf( r );
             if( !named && r.memberPath().empty() && !( sc == 'a' && registrars.contains( leaf ) ) )
             {
+                skipped( i, r );
                 continue;
             }
             k.values.insert( i );
@@ -1851,7 +1924,7 @@ private:
         {
             return at.qualifier.empty();   // no body names the class (its header is not indexed): the scope is unproven, only a bare spelling stays
         }
-        const std::string_view path = m_slots.bodyScope( owner ).value_or( std::string_view() );   // a body without a fact: read as global
+        const std::string_view path = m_slots->bodyScope( owner ).value_or( std::string_view() );   // a body without a fact: read as global
         if( !at.qualifier.empty() )
         {
             const bool anchored = at.qualifier.starts_with( "::" );
@@ -2051,6 +2124,10 @@ private:
         {
             return false;
         }
+        if( const std::optional<bool> walked = baseReaches( defFile, refFile ) )
+        {
+            return *walked;   // SLOT-NARROW: the base walked this header already
+        }
         if( m_includers.empty() )
         {
             m_includers = includersAdj( m_ing );
@@ -2197,9 +2274,11 @@ private:
     HashMap<std::string, std::vector<std::uint32_t>>     m_valueByContainer;  // "file#container" → Value refs
     HashMap<std::string, std::vector<std::uint32_t>>     m_throughByContainer;
     HashMap<NodeId, std::vector<std::uint32_t>>          m_throughParamBySym;
-    HashMap<std::uint32_t, std::vector<const Binding*>>  m_importsByFile;
-    SlotIndex                                            m_slots;     // IX-1: struct-field slots and the calls through them
+    std::shared_ptr<HashMap<std::uint32_t, std::vector<const Binding*>>> m_importsByFile = std::make_shared<HashMap<std::uint32_t, std::vector<const Binding*>>>();   // shared by a derived index
+    std::shared_ptr<SlotIndex>                           m_slots = std::make_shared<SlotIndex>();   // IX-1: struct-field slots and the calls through them (a derived index shares its base's)
     mutable HashMap<std::string, std::uint32_t>          m_fileIndex;   // root-relative normalised path → fileId, built on first import
+    const HashMap<std::uint32_t, std::vector<char>>*     m_baseReach = nullptr;   // SLOT-NARROW: a derived index reads its base's walked headers first
+    std::shared_ptr<const NarrowBase>                    m_hold;                  //   and keeps that base alive
 };
 
 // The class DEFINITIONS of the armed languages and what relates them: a definition's enclosing class (the innermost Class symbol
@@ -2372,7 +2451,339 @@ private:
 // fix1 (RSS): the narrow index (ValueRefIndex::narrowFor), defined here where Narrowed is complete.
 inline ValueRefIndex::ValueRefIndex( const Narrowed& n ) : m_ing( n.ing )
 {
+    if( n.base != nullptr )
+    {
+        copyTablesFrom( *n.base );   // SLOT-NARROW: derive fills the values
+        return;
+    }
+    if( n.freshIncluders )
+    {
+        bool escapes = false;
+        m_includers  = includersBuilt( m_ing, escapes );   // the plain build's check: no stats line, no record read
+    }
     index( &n.keep );
+}
+
+// ── SLOT-NARROW: the question-independent base of the narrow index, kept per process (narrowFor) ─────────────────────
+// What keepSets keeps whatever the question is the empty question's keep sets: the base's index is narrowFor( ing, {} ). A
+// question adds the Value references that NAME one of its names (the only `names` read in keepSets), and through them the names,
+// containers and parameter owners those values bring, which keep more functions by name (index), and more Throughs
+// (keepsThrough). The unfiltered tables below answer each of those additions without another walk of the model.
+struct ValueRefIndex::NarrowBase
+{
+    std::uint64_t                                    key = 0;   // the noted model's key (seam modelKey)
+    verbfs::slotreg::ModelRows                       rows;      // and its row arrays: a base is only ever served to them
+    KeepSets                                         keep;      // the empty question's names, containers and parameter owners (values: none kept)
+    std::unique_ptr<const ValueRefIndex>             index;     // the empty question's narrow index
+    // The name-keyed tables key on the symbols' own text (the model outlives its base: isFor) or on the reference's interned name
+    // and its file (IdKeyedMap, lookup-only), so the base copies no text per entry.
+    using ById = IdKeyedMap<RefNames, std::vector<std::uint32_t>>;
+    HashMap<std::string_view, std::vector<NodeId>> fnAll;               // name → every function index() keeps by name, unfiltered
+    HashMap<std::string_view, std::vector<NodeId>> ownedAll;            // name → every owned path-language function (indexOwners), unfiltered
+    HashMap<std::string_view, std::vector<NodeId>> paramOwnersByName;   // name → the functions of that name with parameter Throughs
+    HashMap<NodeId, std::vector<std::uint32_t>>    throughParamAll;     // function → its parameter Throughs, ascending
+    ById                                           valuesByCallee;      // ( 0, callee ) → the Value references kept only when named, ascending
+    ById                                           throughContainerAll; // ( fileId, container ) → its container Throughs, ascending
+
+    bool isFor( const IngestResult& ing, std::uint64_t k ) const noexcept
+    {
+        return k == key && rows == verbfs::slotreg::modelRowsOf( ing ) && &index->m_ing == &ing;
+    }
+    void indexSymbols( const IngestResult& ing )
+    {
+        for( NodeId id = 0; id < ing.symbols.size(); ++id )
+        {
+            const Symbol& s = ing.symbols[id];
+            if( s.kind != SymKind::Function && s.kind != SymKind::Method )
+            {
+                continue;
+            }
+            if( valueRefFamily( s.lang ) != VrLangFamily::None )
+            {
+                fnAll[ s.name ].push_back( id );   // index()'s rule, without its name filter
+            }
+            if( !slotPathSep( s.lang ).empty() && !s.scope.empty() )
+            {
+                ownedAll[ s.name ].push_back( id );   // indexOwners' rule, without its name filter
+            }
+        }
+    }
+    static void push( ById& t, std::uint32_t owner, InternedText name, std::uint32_t i )
+    {
+        t.try_emplace( owner, name, {} ).first->push_back( i );
+    }
+    // A reference the empty question's keepSets did not keep (in reference order): a Value only a name keeps, or a Through.
+    void skipped( std::uint32_t i, const Reference& r )
+    {
+        const char sc = scopeOf( r );
+        if( r.role == RefRole::Value && !isSlotJoinRecord( r ) && sc != kValueRefDepthCutScope )
+        {
+            push( valuesByCallee, 0, r.calleeName, i );   // keepSets keeps it only when named
+        }
+        else if( r.role == RefRole::Through && sc == 'p' )
+        {
+            throughParamAll[ r.fromSymbol ].push_back( i );
+        }
+        else if( r.role == RefRole::Through && sc != kValueRefSlotCallScope )   // what SlotIndex::take leaves to indexReference
+        {
+            push( throughContainerAll, r.fileId, r.calleeName, i );
+        }
+    }
+    void indexOwnersByName( const IngestResult& ing )
+    {
+        for( const auto& [ sym, list ] : throughParamAll )
+        {
+            if( sym < ing.symbols.size() )
+            {
+                paramOwnersByName[ ing.symbols[sym].name ].push_back( sym );
+            }
+        }
+    }
+};
+
+// What a question's named values bring beyond the base: names (index() keeps functions of a name, keepsThrough the parameter
+// Throughs of one), parameter owners, and containers.
+struct ValueRefIndex::Additions
+{
+    HashSet<std::string>     names;
+    HashSet<std::string>     containers;    // "fileId#container", as m_throughByContainer keys it
+    std::vector<std::uint32_t> containerRefs;   // a named value per new container: its ( fileId, recvVar ) finds the Throughs
+    HashSet<NodeId>          owners;
+    std::vector<std::string> valueContainers;   // the containers whose value list a named value joins, sorted, once each
+};
+
+inline void ValueRefIndex::copyTablesFrom( const ValueRefIndex& b )
+{
+    m_fnByName           = b.m_fnByName;
+    m_classDefs          = b.m_classDefs;
+    m_basesOf            = b.m_basesOf;
+    m_derivedOf          = b.m_derivedOf;
+    m_hierarchyBuilt     = b.m_hierarchyBuilt;
+    m_classDefsBuilt     = b.m_classDefsBuilt;
+    m_includers          = b.m_includers;
+    m_fnByOwner          = b.m_fnByOwner;
+    m_paths              = b.m_paths;   // copied: its file index fills on first use, and a shared one would be written by two indexes
+    m_pyMember           = b.m_pyMember;
+    m_depthCuts          = b.m_depthCuts;
+    m_valueByContainer   = b.m_valueByContainer;
+    m_throughByContainer = b.m_throughByContainer;
+    m_throughParamBySym  = b.m_throughParamBySym;
+    m_importsByFile      = b.m_importsByFile;   // shared: built once in index(), never written after
+    m_slots              = b.m_slots;   // shared: no question changes the slot join (a named value is never a slot store)
+    m_fileIndex          = b.m_fileIndex;
+    m_baseReach          = &b.m_reachesHeader;
+}
+
+inline std::optional<bool> ValueRefIndex::baseReaches( std::uint32_t defFile, std::uint32_t refFile ) const
+{
+    if( m_baseReach == nullptr )
+    {
+        return std::nullopt;
+    }
+    const auto b = m_baseReach->find( defFile );   // the base is frozen once built: a read only
+    return b == m_baseReach->end() ? std::nullopt : std::optional<bool>( b->second[ refFile ] != 0 );
+}
+
+inline bool ValueRefIndex::sameTablesAs( const ValueRefIndex& o ) const
+{
+    return m_values == o.m_values && m_targets == o.m_targets && m_depthCuts == o.m_depthCuts && m_pyMember == o.m_pyMember
+        && m_fnByName == o.m_fnByName && m_fnByOwner == o.m_fnByOwner && m_valuesByTarget == o.m_valuesByTarget
+        && m_valueByContainer == o.m_valueByContainer && m_throughByContainer == o.m_throughByContainer
+        && m_throughParamBySym == o.m_throughParamBySym && *m_importsByFile == *o.m_importsByFile && m_slots->sameTablesAs( *o.m_slots );
+}
+
+inline std::shared_ptr<const ValueRefIndex::NarrowBase> ValueRefIndex::buildBase( const IngestResult& ing, std::uint64_t key )
+{
+    auto b  = std::make_shared<NarrowBase>();
+    b->key  = key;
+    b->rows = verbfs::slotreg::modelRowsOf( ing );
+    Narrowed n{ ing, keepSetsWith( ing, {}, [ &base = *b ]( std::uint32_t i, const Reference& r ) { base.skipped( i, r ); } ) };
+    b->indexSymbols( ing );
+    n.keep.fnAll = &b->fnAll;   // index() reads its by-name table from it instead of walking the symbols again
+    b->index.reset( new ValueRefIndex( n ) );
+    b->indexOwnersByName( ing );
+    b->keep        = std::move( n.keep );
+    b->keep.values = {};        // the base's values are its index's; only the question's are looked up
+    b->keep.fnAll  = nullptr;
+    return b;
+}
+
+inline ValueRefIndex::Additions ValueRefIndex::additionsOf( const NarrowBase& b, const std::vector<std::uint32_t>& added )
+{
+    Additions   add;
+    const auto& refs    = b.index->m_ing.references;
+    const auto  addName = [ & ]( std::string name )
+    {
+        if( !b.keep.names.contains( name ) )
+        {
+            add.names.insert( std::move( name ) );
+        }
+    };
+    for( const std::uint32_t a : added )
+    {
+        const Reference& r  = refs[a];
+        const char       sc = scopeOf( r );
+        addName( r.calleeName.str() );
+        if( sc == 'a' )
+        {
+            addName( leafOf( r ) );
+        }
+        else if( sc == 'p' && !b.keep.paramOwners.contains( r.fromSymbol ) )
+        {
+            add.owners.insert( r.fromSymbol );
+        }
+        if( !r.recvVar.empty() )
+        {
+            std::string key = jsImportKey( r.fileId, r.recvVar );
+            if( !b.keep.containers.contains( key ) && add.containers.insert( key ).second )
+            {
+                add.containerRefs.push_back( a );
+            }
+            add.valueContainers.push_back( std::move( key ) );
+        }
+    }
+    rw::sortutil::sortUnique( add.valueContainers );
+    return add;
+}
+
+// The tables a question's additions grow: functions by name and by owner, parameter Throughs, container Throughs. A name, owner
+// or container the base already keeps has every entry there already, so each addition is a whole entry the base lacks.
+inline void ValueRefIndex::growBy( const NarrowBase& b, const Additions& add )
+{
+    HashSet<NodeId> owners = add.owners;
+    for( const std::string& n : add.names )
+    {
+        if( const auto it = b.fnAll.find( n ); it != b.fnAll.end() )
+        {
+            m_fnByName.try_emplace( n, it->second );
+        }
+        for( const NodeId id : b.ownedAll.contains( n ) ? std::span<const NodeId>( b.ownedAll.find( n )->second ) : std::span<const NodeId>() )
+        {
+            const Symbol& s = m_ing.symbols[id];
+            m_fnByOwner[ jsImportKey( static_cast<std::uint32_t>( valueRefFamily( s.lang ) ), s.scope + "::" + s.name ) ].push_back( id );
+        }
+        if( const auto it = b.paramOwnersByName.find( n ); it != b.paramOwnersByName.end() )
+        {
+            owners.insert( it->second.begin(), it->second.end() );
+        }
+    }
+    for( const NodeId o : owners )
+    {
+        const bool inBase = b.keep.paramOwners.contains( o ) || ( o < m_ing.symbols.size() && b.keep.names.contains( m_ing.symbols[o].name ) );
+        if( const auto it = b.throughParamAll.find( o ); !inBase && it != b.throughParamAll.end() )
+        {
+            m_throughParamBySym.try_emplace( o, it->second );
+        }
+    }
+    for( const std::uint32_t a : add.containerRefs )
+    {
+        const Reference& r = m_ing.references[a];
+        if( const std::vector<std::uint32_t>* list = b.throughContainerAll.find( r.fileId, r.recvVar ) )
+        {
+            m_throughByContainer.try_emplace( jsImportKey( r.fileId, r.recvVar ), *list );
+        }
+    }
+}
+
+// The values in reference order: the base's with their resolved targets, the named ones resolved against the grown tables.
+inline void ValueRefIndex::mergeValues( const ValueRefIndex& bi, const std::vector<std::uint32_t>& added )
+{
+    for( const std::uint32_t a : added )
+    {
+        if( const Reference& r = m_ing.references[a]; !r.recvVar.empty() )
+        {
+            m_valueByContainer[ jsImportKey( r.fileId, r.recvVar ) ].push_back( a );
+        }
+    }
+    m_values.resize( bi.m_values.size() + added.size() );
+    std::ranges::merge( bi.m_values, added, m_values.begin() );
+    m_targets.resize( m_values.size() );
+    std::size_t at = 0;
+    for( std::size_t k = 0; k < m_values.size(); ++k )
+    {
+        const Reference& r = m_ing.references[ m_values[k] ];
+        m_targets[k]       = at < bi.m_values.size() && bi.m_values[at] == m_values[k] ? bi.m_targets[at++] : resolveName( r, r.calleeName );
+        for( const NodeId t : m_targets[k] )
+        {
+            m_valuesByTarget[t].push_back( static_cast<std::uint32_t>( k ) );
+        }
+    }
+}
+
+// The narrow index of `names`, from the base: what ValueRefIndex( Narrowed{ ing, keepSets( ing, names ) } ) builds, table for table.
+inline ValueRefIndex ValueRefIndex::derive( const std::shared_ptr<const NarrowBase>& base, std::span<const std::string_view> names )
+{
+    const NarrowBase&    b   = *base;
+    const ValueRefIndex& bi  = *b.index;
+    const IngestResult&  ing = bi.m_ing;
+    ValueRefIndex        d( Narrowed{ ing, {}, &bi } );
+    d.m_hold = base;
+    std::vector<std::uint32_t> added;   // the values keepSets keeps because they are named
+    for( const std::string_view n : names )
+    {
+        const std::optional<InternedText>        name = InternedText::ifInterned( n );   // a name no reference spells is no callee
+        const std::vector<std::uint32_t>* const  list = name.has_value() ? b.valuesByCallee.find( 0, *name ) : nullptr;
+        if( list != nullptr )
+        {
+            added.insert( added.end(), list->begin(), list->end() );
+        }
+    }
+    rw::sortutil::sortUnique( added );
+    const Additions add = additionsOf( b, added );
+    d.growBy( b, add );
+    d.mergeValues( bi, added );
+    for( const std::string& key : add.valueContainers )
+    {
+        std::ranges::sort( d.m_valueByContainer[ key ] );   // reference order, as indexReference appends them
+    }
+    if( verbfs::slotreg::faultBaseStale() && !d.m_values.empty() )
+    {
+        d.m_values.pop_back();   // the V mutant: one value short, as a base built before an in-place edit of the model would answer
+        d.m_targets.pop_back();
+    }
+    // The SLOTREG mutants serve a stale or empty include adjacency ON PURPOSE (the fresh index builds its own): this check stands
+    // aside for them as includersAdj's own does.
+    DASSERT( verbfs::slotreg::servesStaleOnPurpose() || d.sameTablesAs( ValueRefIndex( Narrowed{ ing, keepSets( ing, names ), nullptr, true } ) ),
+             "SLOT-NARROW: a narrow index derived from the kept base differs from a fresh narrowFor (was the model edited after ingest()?)" );
+    return d;
+}
+
+inline ValueRefIndex ValueRefIndex::narrowFor( const IngestResult& ing, std::span<const std::string_view> names )
+{
+    struct Memo
+    {
+        std::mutex                        guard;
+        std::shared_ptr<const NarrowBase> base;
+    };
+    static Memo         memo;
+    const auto          modelKey = verbfs::slotreg::seams().modelKey;
+    const std::uint64_t key      = modelKey != nullptr ? modelKey( ing ) : 0;
+    const auto stats = [ & ]( std::string_view base, std::string_view why )
+    {
+        if( memstats::enabled() )
+        {
+            rw::emitTo( stderr, "[valueref] narrow_base={} why={} names={}{}\n", base, why, names.size(), verbfs::slotreg::faultBaseStale() ? " fault=stale" : "" );
+        }
+    };
+    if( key == 0 )
+    {
+        stats( "off", modelKey == nullptr ? "unarmed" : "model" );
+        return ValueRefIndex( Narrowed{ ing, keepSets( ing, names ) } );
+    }
+    std::shared_ptr<const NarrowBase> base;
+    bool                              built = false;
+    {
+        const std::scoped_lock hold( memo.guard );
+        if( memo.base == nullptr || !memo.base->isFor( ing, key ) )
+        {
+            memo.base = nullptr;   // the previous model's base goes before this one is built: one base at a time
+            memo.base = buildBase( ing, key );
+            built     = true;
+        }
+        base = memo.base;
+    }
+    stats( built ? "built" : "reused", "ok" );
+    return derive( base, names );
 }
 
 // ── IX-3 name-template dispatch ───────────────────────────────────────────────────────────────────────────────
