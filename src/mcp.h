@@ -2441,9 +2441,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const bool pageAsked = mcpdetail::findRawValue( args, "offset" ).isPresent;
                     resp = pagedResult( [ & ]( McpPageArgs pg )
                     {
-                        std::string whole = recallText( path, task, recallTopK, recallTokens, redactPtr );
-                        overCeilingNote   = pageAsked ? std::string() : recallOverCeilingNote( whole.size() );
-                        return pageAsked ? pagedTextResult( recallPage( whole, std::size_t( pg.offset ) ) ) : textResult( whole );
+                        return pagedTextResult( recallServe( recallText( path, task, recallTopK, recallTokens, redactPtr ), pageAsked,
+                                                             std::size_t( pg.offset ), overCeilingNote ) );
                     } );
                 }
                 else if( name == "situational_awareness" && !path.empty() )

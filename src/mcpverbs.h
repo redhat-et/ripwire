@@ -1772,6 +1772,14 @@ inline McpPagedText recallPage( const std::string& whole, std::size_t offset, st
     return { std::move( out ), {} };
 }
 
+// memory_recall's CL1 decision in one place: with `offset` the answer pages (recallPage); without it the answer is whole, as
+// asked, and `overCeilingNote` carries the sentence that says it is past the ceiling (recallOverCeilingNote), or "".
+inline McpPagedText recallServe( std::string whole, bool pageAsked, std::size_t offset, std::string& overCeilingNote )
+{
+    overCeilingNote = pageAsked ? std::string() : recallOverCeilingNote( whole.size(), kOutputCeilingChars );
+    return pageAsked ? recallPage( whole, offset, kOutputCeilingChars ) : McpPagedText{ std::move( whole ), {} };
+}
+
 // `situational_awareness(diff)` verb (S5-D): for a DIFF — an explicit changed-file list in `diff`/`files`, OR
 // (when neither is given) the working-tree `git diff HEAD` — return the 5 facts as a JSON object:
 //   blast_radius   — files transitively reaching the changed set (with dependent-symbol count)
