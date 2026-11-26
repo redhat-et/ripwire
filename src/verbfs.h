@@ -771,6 +771,11 @@ inline bool readCloneRecord( std::string_view payload, CloneRecord& r )
         in.vec( e.readFiles );
         in.vec( e.readSigs );
         const std::size_t groups = in.count( 17 );   // the fixed part of a group
+        if( groups > in.left() )   // count() already held groups to the bytes left: said again where the allocation is
+        {
+            in.ok = false;
+            break;
+        }
         e.groups.reserve( groups );
         for( std::size_t g = 0; g < groups && in.ok; ++g )
         {
