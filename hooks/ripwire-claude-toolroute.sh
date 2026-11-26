@@ -81,8 +81,12 @@
 # Contract (verified against https://code.claude.com/docs/en/hooks, 2026-09-03): PreToolUse JSON
 # arrives on stdin with at least {session_id, cwd, tool_name, tool_input}. Advisory feedback that does
 # NOT block the call = exit 0 plus this JSON on stdout:
-#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
-#    "additionalContext":"..."}}
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}
+# NEVER a permissionDecision. "allow" does not mean "do not block": it SKIPS the user's permission
+# prompt, so an advisory arm that answered it approved the very Bash/Read call it was commenting on —
+# a compound `grep -rn X src/ && <anything>` included. Until lane HOOK-NOALLOW (2026-11-26) this hook
+# did exactly that; test/hookcheck.sh (15) now sweeps every hook for the field. The user's own
+# permission flow decides; this hook only adds context.
 # Malformed input (no jq, unparseable JSON, missing fields) degrades to exit 0 with EMPTY stdout —
 # valid per the same contract, and never a blocked call.
 set -u
@@ -431,5 +435,5 @@ esac
 
 context="$( printf '%s\n%s' 'Ripwire produced a confidence-gated CLI recommendation from the shape of this tool call, before it ran. Prefer it when it answers the need (add --legend=full if a definition is unclear); continue with the original call when more evidence is still required.' "$runCmd" )"
 jq -cn --arg context "$context" \
-    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",additionalContext:$context}}' \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$context}}' \
     2>/dev/null || exit 0

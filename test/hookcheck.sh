@@ -10,6 +10,9 @@
 # its preconditions (git repo, ripwire on PATH) aren't met. This gate feeds it synthetic PreToolUse JSON
 # on stdin and asserts each of those properties, plus the installer's idempotency.
 #
+# Section (15) reaches past ripwire-nudge.sh: it sweeps EVERY hook under hooks/ and asserts none of them answers a
+# permission decision (a PreToolUse "allow" skips the user's permission prompt), in any mode or meter arm.
+#
 # Usage:  test/hookcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Never touches the
 # real ~/.claude, and — since 2026-08-12, enforced by section (13) rather than asserted here — never
@@ -2199,6 +2202,170 @@ if [ -f "$REPORT" ]; then
         && ok "E9 edit-band: MUTATION CONTROL — re-pointing the policy Read at another file moves the row (50.0% -> 25.0%, policy-read 1 -> 0, sweep 1 -> 2): the column is live" \
         || no "E9 edit-band: the mutated fixture did not move the row — see $TMP/editmut.sq"
 fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (15) NO PERMISSION DECISION FROM ANY ADVISORY HOOK — every hook under hooks/, every mode, every arm
+#
+# In Claude Code a PreToolUse `permissionDecision:"allow"` SKIPS the user's permission prompt, and the legacy
+# top-level `decision:"approve"` does the same. An advisory hook that answers either one does not add context to a
+# tool call: it approves it. hooks/ripwire-claude-toolroute.sh did exactly that from 2026-09-03 until lane
+# HOOK-NOALLOW (11-26) — its treatment arm returned "allow" beside its additionalContext, so a recursive grep, or a
+# compound Bash command whose FIRST segment was one (`grep -rn X src/ && <anything>`), ran without the prompt the
+# user had configured. Exit 2 is the other way a PreToolUse hook takes the decision away (it blocks), so it is
+# asserted here too.
+#
+# THE SWEEP. Every executable hooks/*.sh, with no argument and with each `--mode` the file itself compares "${1:-}"
+# against (a wrapper that forwards "$@" to a sibling inherits the sibling's modes), under the meter arms treatment,
+# control and unset (the installed `auto` default), fed one payload per event shape the hooks are wired to — the
+# compound-Bash case included. Each run gets its own session id, so no dedup marker or per-session cap can silence a
+# later run and turn an arm vacuous. The sweep is fed through a REAL ripwire when one is built (toolroute's --expand
+# resolution and the SessionStart blurb need it) and through the stub otherwise.
+#
+# NOT VACUOUS. A "must not print X" check passes on a hook that prints nothing, so PD2 requires the toolroute
+# treatment arm to SPEAK (non-empty additionalContext) on both the recursive grep and the compound Bash payload. PD1
+# is only a verdict about hooks that actually answered.
+#
+# A REMOVED KNOB STAYS REMOVED. `ripwire-nudge.sh --agent-brief` once added `permissionDecision` when the operator
+# exported RIPWIRE_AGENT_BRIEF_DECISION=allow (a hand-run probe knob; removed in lane HOOK-NOALLOW on the owner's
+# ruling). Arm `briefallow` runs every hook's --agent-brief mode with that variable EXPORTED, so the sweep proves the
+# code path is gone rather than merely unset; PD4 requires the mode to answer its updatedInput there, so the arm is
+# not vacuous either. The other arms run with the variable cleared, as an installed hook sees it.
+# hooks/opencode/*.js is a plugin, not a stdin hook: it calls ripwire-legend-seen.sh (swept above), so PD3 checks the
+# plugin's own text instead.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(15) no advisory hook returns a permission decision"
+PDT="$TMP/pd"; mkdir -p "$PDT/home" "$PDT/tmp" "$PDT/rwhome" "$PDT/legend" "$PDT/claudeconfig"
+PDREPO="$PDT/repo"; mkdir -p "$PDREPO/src"
+printf 'int fooBar( int x )\n{\n    return x + 1;\n}\n' >"$PDREPO/src/fooBar.c"
+git -C "$PDREPO" init -q
+git -C "$PDREPO" -c user.email=dev@x.com -c user.name=Dev add -A
+git -C "$PDREPO" -c user.email=dev@x.com -c user.name=Dev commit -qm init
+PDBIN="$BIN"
+PDREAL="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${PDREAL#/}" = "$PDREAL" ] && PDREAL="$ROOT/$PDREAL"
+if [ -x "$PDREAL" ]; then
+    PDBIN="$PDT/realbin"; mkdir -p "$PDBIN"; ln -sf "$PDREAL" "$PDBIN/ripwire"
+    echo "  (sweep runs through the real binary $PDREAL)"
+else
+    echo "  (no built binary: sweep runs through the stub; toolroute's --expand resolution is not exercised)"
+fi
+
+# One payload per line: EVENT<TAB>TOOL<TAB>tool_input-or-extra JSON. SID and CWD are filled in per run.
+PDCASES="$PDT/cases.tsv"
+{
+    printf 'PreToolUse\tBash\t{"command":"grep -rn fooBar src/"}\n'
+    printf 'PreToolUse\tBash\t{"command":"grep -rn fooBar src/ && rm -rf build/tmp"}\n'
+    printf 'PreToolUse\tBash\t{"command":"rg fooBar ."}\n'
+    printf 'PreToolUse\tBash\t{"command":"git diff HEAD"}\n'
+    printf 'PreToolUse\tBash\t{"command":"ripwire . --callers=fooBar"}\n'
+    printf 'PreToolUse\tGrep\t{"pattern":"fooBar","path":"src"}\n'
+    printf 'PreToolUse\tRead\t{"file_path":"%s/src/fooBar.c"}\n' "$PDREPO"
+    printf 'PreToolUse\tAgent\t{"description":"fix it","prompt":"Fix the off-by-one in fooBar.","subagent_type":"general-purpose"}\n'
+    printf 'PreToolUse\tTask\t{"description":"fix it","prompt":"Fix the off-by-one in fooBar.","subagent_type":"general-purpose"}\n'
+    printf 'PostToolUse\tBash\t{"command":"ripwire . --callers=fooBar"}\n'
+    printf 'UserPromptSubmit\t-\t{"prompt":"who calls fooBar in src/fooBar.c?"}\n'
+    printf 'SessionStart\t-\t{"source":"startup"}\n'
+    printf 'SubagentStart\t-\t{"agent_id":"a1","agent_type":"general-purpose"}\n'
+} >"$PDCASES"
+
+pd_payload()
+{
+    # pd_payload EVENT TOOL EXTRA SID -> one hook payload on stdout
+    jq -cn --arg ev "$1" --arg tn "$2" --argjson x "$3" --arg sid "$4" --arg cwd "$PDREPO" '
+        {session_id:$sid, cwd:$cwd, hook_event_name:$ev, transcript_path:"/dev/null", permission_mode:"default"}
+        + (if $tn == "-" then $x else {tool_name:$tn, tool_input:$x} end)
+        + (if $ev == "PostToolUse" then {tool_response:{stdout:"<ctx/>",stderr:"",interrupted:false}} else {} end)'
+}
+
+pd_modes()
+{
+    # pd_modes HOOKFILE -> "" plus every --mode the file (or a sibling it forwards "$@" to) compares "${1:-}" against
+    local f="$1" sib
+    printf '\n'
+    grep -o '"\${1:-}" = "--[a-z-]*"' "$f" 2>/dev/null | sed 's/.*= "//; s/"$//'
+    for sib in $( grep -o '\$dir/ripwire-[a-z-]*\.sh" "\$@"' "$f" 2>/dev/null | sed 's|^\$dir/||; s|" "\$@"$||' ); do
+        grep -o '"\${1:-}" = "--[a-z-]*"' "$ROOT/hooks/$sib" 2>/dev/null | sed 's/.*= "//; s/"$//'
+    done
+}
+
+PDRUNS=0; PDSPOKE=0; PDBAD=""; PDGREP=""; PDCOMPOUND=""; PDHOOKS=0
+for pdh in "$ROOT"/hooks/*.sh; do
+    [ -x "$pdh" ] || continue
+    PDHOOKS=$(( PDHOOKS + 1 ))
+    pdname="$( basename "$pdh" )"
+    pdmodes="$( pd_modes "$pdh" | sort -u )"
+    for pdarm in treatment control unset briefallow; do
+        printf '%s\n' "$pdmodes" | while IFS= read -r pdmode; do
+            [ "$pdarm" = briefallow ] && [ "$pdmode" != --agent-brief ] && continue
+            pdi=0
+            while IFS="$( printf '\t' )" read -r pdev pdtn pdx; do
+                pdi=$(( pdi + 1 ))
+                sid="pd-${pdname}-${pdarm}-${pdmode:-none}-${pdi}"
+                payload="$( pd_payload "$pdev" "$pdtn" "$pdx" "$sid" )" || { echo "BAD|$sid|payload did not build"; continue; }
+                if [ "$pdarm" = unset ]; then
+                    out="$( printf '%s' "$payload" | env -u RIPWIRE_METER_ARM -u RIPWIRE_AGENT_BRIEF_DECISION HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                elif [ "$pdarm" = briefallow ]; then
+                    out="$( printf '%s' "$payload" | env RIPWIRE_AGENT_BRIEF_DECISION=allow RIPWIRE_METER_ARM=treatment HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                else
+                    out="$( printf '%s' "$payload" | env -u RIPWIRE_AGENT_BRIEF_DECISION RIPWIRE_METER_ARM="$pdarm" HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                fi
+                spoke=0; [ -n "$out" ] && spoke=1
+                echo "RUN|$spoke|$pdname"
+                if printf '%s' "$out" | grep -q 'permissionDecision\|"decision"[[:space:]]*:'; then
+                    echo "BAD|$sid|$( printf '%s' "$out" | tr -d '\n' | cut -c1-160 )"
+                fi
+                [ "$rc" -eq 2 ] && echo "BAD|$sid|exit 2 blocks the call"
+                if [ "$pdname" = ripwire-claude-toolroute.sh ] && [ "$pdarm" = treatment ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
+                    [ "$pdi" -eq 1 ] && echo "SPOKE_GREP|$sid"
+                    [ "$pdi" -eq 2 ] && echo "SPOKE_COMPOUND|$sid"
+                fi
+                [ "$pdarm" = briefallow ] && [ "$pdtn" = Agent ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.updatedInput.prompt | length > 0' >/dev/null 2>&1 \
+                    && echo "SPOKE_BRIEFALLOW|$sid"
+            done <"$PDCASES"
+        done
+    done
+done >"$PDT/sweep.log"
+PDRUNS="$( grep -c '^RUN|' "$PDT/sweep.log" )"
+PDSPOKE="$( grep -c '^RUN|1|' "$PDT/sweep.log" )"
+PDBADN="$( grep -c '^BAD|' "$PDT/sweep.log" )"
+echo "  ($PDHOOKS hooks, $PDRUNS runs, $PDSPOKE of them printed something; log $PDT/sweep.log)"
+echo "  (runs that printed, per hook: $( grep '^RUN|1|' "$PDT/sweep.log" | cut -d'|' -f3 | sort | uniq -c | awk '{printf "%s %s; ", $2, $1}' ))"
+PDQUIET=""
+for pdh in "$ROOT"/hooks/*.sh; do
+    [ -x "$pdh" ] || continue
+    grep -q "^RUN|1|$( basename "$pdh" )\$" "$PDT/sweep.log" || PDQUIET="$PDQUIET $( basename "$pdh" )"
+done
+# A hook that never printed is SWEPT, not CLEARED: PD1 is silent about it. The prompt routers' and legend-seen's own
+# speaking paths are pinned decision-free in test/routehookcheck.sh and test/legendseenhookcheck.sh.
+[ -z "$PDQUIET" ] || echo "  (swept but printed nothing on these payloads, so PD1 does not speak for them:$PDQUIET)"
+if [ "$PDBADN" -eq 0 ]; then
+    ok "PD1 no-decision: none of $PDRUNS hook runs returned permissionDecision, a top-level decision, or exit 2"
+else
+    no "PD1 no-decision: $PDBADN of $PDRUNS hook runs took the permission decision away from the user:"
+    grep '^BAD|' "$PDT/sweep.log" | head -8 | sed 's/^BAD|/        /'
+fi
+if grep -q '^SPOKE_GREP|' "$PDT/sweep.log" && grep -q '^SPOKE_COMPOUND|' "$PDT/sweep.log"; then
+    ok "PD2 not vacuous: toolroute's treatment arm answered additionalContext on the recursive grep AND the compound Bash payload"
+else
+    no "PD2 vacuous: toolroute's treatment arm did not speak on $( grep -q '^SPOKE_GREP|' "$PDT/sweep.log" || printf 'the recursive grep ' )$( grep -q '^SPOKE_COMPOUND|' "$PDT/sweep.log" || printf 'the compound Bash ' )payload, so PD1 says nothing about it"
+fi
+if grep -q '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log"; then
+    ok "PD4 not vacuous: --agent-brief answered its updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported ($( grep -c '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log" ) hook(s))"
+else
+    no "PD4 vacuous: no --agent-brief run answered an updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported, so PD1 says nothing about the removed knob"
+fi
+PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
+[ -z "$PDJS" ] && ok "PD3 opencode plugin: no hooks/opencode/*.js names permissionDecision" \
+    || no "PD3 opencode plugin: $PDJS names permissionDecision"
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log

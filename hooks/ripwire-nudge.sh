@@ -40,8 +40,8 @@
 # escalation below is untouched and still escalates on a same-class run of literal greps.
 #
 # Design posture (non-negotiable — do not "improve" this into a blocker):
-#   - NEVER blocks, denies, or rewrites the tool call. Always permissionDecision "allow" when it
-#     speaks at all; never "deny"/"ask"; never "updatedInput". Any internal failure (missing jq,
+#   - NEVER blocks, denies, approves, or rewrites the tool call: no permissionDecision of any value
+#     ("allow" skips the user's permission prompt), never "updatedInput". Any internal failure (missing jq,
 #     malformed JSON, no git, no ripwire) degrades to silent allow — exit 0, no stdout.
 #   - Fires at MOST once per session per pattern (Grep, Bash-grep, git-diff, git-log, and git-show-stat
 #     are separate patterns), via a marker file under $TMPDIR keyed by session_id (falls back to PPID
@@ -54,8 +54,8 @@
 # Contract (verified against https://code.claude.com/docs/en/hooks, 2026-07-13): PreToolUse JSON
 # arrives on stdin with at least {session_id, cwd, tool_name, tool_input}. Advisory feedback that does
 # NOT block the call = exit 0 + this JSON on stdout:
-#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
-#    "additionalContext":"..."}}
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}
+# with no permissionDecision: "allow" would skip the user's permission prompt (test/hookcheck.sh (15)).
 #
 # Usage (wired by the installer, not meant to be run by hand):
 #   printf '%s' "$PRETOOLUSE_JSON" | hooks/ripwire-nudge.sh
@@ -148,7 +148,7 @@ set -u
 # THE CONTRACT (all four are gated in test/hookcheck.sh, arms S1-S14):
 #   - At most ONE escalation per CLASS per session — the same dedup posture as the base nudges, with
 #     its own marker, so an escalated grep sweep never re-fires and never silences a read sweep.
-#   - Advisory only. Same posture as everything else here: permissionDecision "allow", never deny,
+#   - Advisory only. Same posture as everything else here: no permissionDecision, never deny,
 #     never a rewrite, and any internal failure degrades to silence.
 #   - The escalation is RECORDED — `nudge":"sweep<N>"` on the row it fired on, and `post_sweep` on
 #     every row after it in that session. Without those two fields the efficacy question cannot be
@@ -1239,9 +1239,8 @@ fi
 # scripts/hk2_probe.sh (in the lane's results) shows the appended block in the subagent's first user message.
 #
 # WHAT IT RETURNS. The whole tool_input, with `prompt` = the original prompt, a blank line, the block. `updatedInput`
-# REPLACES the input, so every other field is passed through unchanged. No permissionDecision by default: a hook that
-# answers "allow" approves every subagent launch, which no ripwire hook does. RIPWIRE_AGENT_BRIEF_DECISION=allow adds
-# it, for the probe to learn whether a client applies the rewrite only with a decision.
+# REPLACES the input, so every other field is passed through unchanged. Never a permissionDecision: a hook that
+# answers "allow" approves every subagent launch, which no ripwire hook does (test/hookcheck.sh (15) arm briefallow).
 # SILENT when the prompt already names ripwire (the orchestrator briefed it, or a re-run): the block is added once.
 # The block is a constant, the same bytes `ripwire wrap claude` prints for an orchestrator to paste by hand
 # (kSubagentBriefBlock in src/wrap.h; test/subagentroutecheck.sh (M) compares the two). Same gates as the mode above:
@@ -1262,11 +1261,8 @@ then
     [ "$insideWorkTree" = true ] || exit 0
 
     brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
-    decision=""
-    [ "${RIPWIRE_AGENT_BRIEF_DECISION:-}" = "allow" ] && decision="allow"
-    printf '%s' "$input" | jq -c --arg b "$brief" --arg d "$decision" \
-        '{hookSpecificOutput:( {hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}
-            + (if $d == "" then {} else {permissionDecision:$d} end) )}' 2>/dev/null || true
+    printf '%s' "$input" | jq -c --arg b "$brief" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}}' 2>/dev/null || true
     exit 0
 fi
 
