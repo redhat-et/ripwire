@@ -268,10 +268,13 @@ def run( args ):
     binary = os.path.abspath( args.ripwire )
     commits = eligible_commits( args.repo, args.tip, args.since, args.until, args.root )
     picked = sample_commits( commits, args.n, args.seed )
+    shard_i, shard_n = ( int( x ) for x in args.shard.split( "/" ) ) if args.shard else ( 0, 1 )
+    total_sampled = len( picked )
+    picked = picked[shard_i::shard_n]   # disjoint, and their union is the whole sample
     clone = prepare_clone( args.repo, args.work )
     meta = { "meta": { "repo": os.path.basename( os.path.abspath( args.repo ) ), "tip": git( args.repo, "rev-parse", args.tip ).strip(),
                        "since": pin_date( args.since ), "until": pin_date( args.until ), "root": args.root, "eligible": len( commits ),
-                       "sampled": len( picked ), "seed": args.seed, "leak_future": args.leak_future,
+                       "sampled": total_sampled, "shard": "%d/%d" % ( shard_i, shard_n ), "seed": args.seed, "leak_future": args.leak_future,
                        "ripwire_version": subprocess.run( [ binary, "--version" ], capture_output=True, text=True ).stdout.strip() } }
     done = set()
     if args.resume and os.path.exists( args.out ):
@@ -295,29 +298,43 @@ def run( args ):
 
 
 # ── summary ──────────────────────────────────────────────────────────────────────────────────────────────
-def summarize( paths ):
-    lines = []
+def load_runs( paths ):
+    """Rows grouped by (repo, tip, root); the shards of one run merge into one group."""
+    groups = {}
     for path in paths:
         with open( path ) as fh:
             recs = [ json.loads( l ) for l in fh if l.strip() ]
         meta = recs[0].get( "meta", {} )
-        rows = [ r for r in recs if "protocol" in r ]
-        lines.append( "## %s @ %s root=%r eligible=%s sampled=%s errors=%d" % (
-            meta.get( "repo" ), meta.get( "tip", "" )[:9], meta.get( "root", "" ), meta.get( "eligible" ), meta.get( "sampled" ),
+        key = ( meta.get( "repo" ), meta.get( "tip" ), meta.get( "root", "" ) )
+        g = groups.setdefault( key, { "meta": meta, "rows": [], "shards": [] } )
+        g[ "rows" ].extend( r for r in recs if "protocol" in r )
+        g[ "shards" ].append( meta.get( "shard", "0/1" ) )
+    return groups
+
+
+def summary_row( sel, proto, pop, arm ):
+    if not sel:
+        return "| %s | %s | 0 | %s | - | - | - | - |" % ( proto, pop, arm )
+    hits = { k: sum( r[ "scores" ][ arm ][ "hit@%d" % k ] for r in sel ) for k in KS }
+    rec = sum( r[ "scores" ][ arm ][ "recall@10" ] for r in sel ) / len( sel )
+    cells = [ "%.3f (%d)" % ( hits[k] / len( sel ), hits[k] ) for k in KS ]
+    return "| %s | %s | %d | %s | %s | %s | %s | %.3f |" % ( proto, pop, len( sel ), arm, *cells, rec )
+
+
+def summarize( paths ):
+    lines = []
+    for ( repo, tip, root ), g in sorted( load_runs( paths ).items(), key=lambda kv: str( kv[0] ) ):
+        rows, meta = g[ "rows" ], g[ "meta" ]
+        commits = len( { r[ "sha" ] for r in rows } )
+        lines.append( "## %s @ %s root=%r eligible=%s sampled=%s evaluated=%d shards=%s errors=%d" % (
+            repo, ( tip or "" )[:9], root, meta.get( "eligible" ), meta.get( "sampled" ), commits, ",".join( sorted( g[ "shards" ] ) ),
             sum( 1 for r in rows if r.get( "error" ) ) ) )
         lines.append( "| protocol | population | n | arm | Hit@1 | Hit@5 | Hit@10 | Recall@10 |" )
         lines.append( "|---|---|---|---|---|---|---|---|" )
         for proto in PROTOCOLS:
             for pop in ( "all", "indexed" ):
                 sel = [ r for r in rows if r[ "protocol" ] == proto and ( pop == "all" or r[ "indexed" ] ) ]
-                for arm in ARMS:
-                    if not sel:
-                        lines.append( "| %s | %s | 0 | %s | - | - | - | - |" % ( proto, pop, arm ) )
-                        continue
-                    hits = { k: sum( r[ "scores" ][ arm ][ "hit@%d" % k ] for r in sel ) for k in KS }
-                    rec = sum( r[ "scores" ][ arm ][ "recall@10" ] for r in sel ) / len( sel )
-                    lines.append( "| %s | %s | %d | %s | %s | %s | %s | %.3f |" % (
-                        proto, pop, len( sel ), arm, *( "%.3f (%d)" % ( hits[k] / len( sel ), hits[k] ) for k in KS ), rec ) )
+                lines.extend( summary_row( sel, proto, pop, arm ) for arm in ARMS )
     return "\n".join( lines )
 
 
@@ -386,6 +403,7 @@ def main():
     ap.add_argument( "--work" )
     ap.add_argument( "--out" )
     ap.add_argument( "--progress", action="store_true" )
+    ap.add_argument( "--shard", help="i/N: run only every N-th sampled commit from offset i (one clone per shard)" )
     ap.add_argument( "--resume", action="store_true", help="append to --out, skipping commits already in it" )
     ap.add_argument( "--guard", help="shell command run before each commit; non-zero stops the run (exit 3)" )
     ap.add_argument( "--leak-future", action="store_true", help="GATE ONLY: read history at the tip (the forbidden defect)" )
