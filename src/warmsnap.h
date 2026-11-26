@@ -79,7 +79,10 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 6;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 11;                        // bump on ANY layout change in the three sections
+                                                                    // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
+                                                                    // 8-10: reserved (M2 slot table 11-26: #752, #754, M2 C1 stages)
+                                                                    // 11: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig
                                                                     // 6: lane theta11c — CrawlSkips gains the extensionless rows + count (θ11's grep population)
                                                                     // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
                                                                     // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
