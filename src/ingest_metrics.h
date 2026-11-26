@@ -322,6 +322,10 @@ inline std::uint32_t cc_countLocalDeclarators( TSNode n )
     return count;
 }
 
+// QD-TANGLE BLOCK FACTS (tangleBlocks_* below): the index of no top-level block — before the first one, or a slot no top-level
+// statement declared.
+inline constexpr std::uint32_t kNoTangleBlock = 0xFFFFFFFFu;
+
 // Every accumulator the fused walk fills, in ONE bundle. It used to be six by-reference out-parameters
 // threaded through cc_walk's signature; the ppalt disclosure and the nesting-depth profile together
 // would have made that ten, which is the
@@ -355,11 +359,31 @@ struct CcAccum
         bool             prim         = false;
         bool             rewritten    = false;
         bool             steered      = false;
+        // QD-TANGLE BLOCK FACTS: the top-level block that declared it (kNoTangleBlock: no top-level statement did), the first block
+        // that writes it after its declaration, and 1 + the last block that reads it (0: none) — a CROSS LOCAL when that read is
+        // later than that write
+        std::uint32_t    topBlock      = kNoTangleBlock;
+        std::uint32_t    firstWrite    = kNoTangleBlock;
+        std::uint32_t    lastReadPlus1 = 0;
     };
     std::vector<SteerSlot> slots;
     TangleDetailFacts*     detail       = nullptr;
     std::uint32_t          deepDispatch = 0;       // the part of deepLoc inside short arms of a flat dispatch (dispatch_* below)
     std::uint32_t          nestOutArm   = 0;       // deepest control nesting reached OUTSIDE those arms (the tangle's nest; census 11-19: parseArgs)
+    // QD-TANGLE BLOCK FACTS (tangleBlocks_* below): the body's top-level blocks in document order, each with the nesting it reaches
+    // (all of it, and outside short dispatch arms), its deep lines and their dispatch-arm share — the body's own facts, per block.
+    // Empty unless the walk counts steering locals (steerOn) and the def has a block body: then the cap is not measured.
+    struct TangleBlock
+    {
+        std::uint32_t startByte = 0, startRow = 0, endRow = 0;   // rows 1-based
+        std::uint32_t nest = 0, nestOut = 0, deep = 0, deepDispatch = 0;
+        std::uint32_t deepEnd = 0;   // the last row this block's deep counted (its own clamp: a row two blocks share counts in both)
+    };
+    std::vector<TangleBlock> blocks;
+    std::uint32_t            blockAt   = kNoTangleBlock;   // the block the walk is in (the last one whose start it has passed)
+    std::uint32_t            blockNext = 0;
+    bool                     declTop   = false;            // the node being noted starts a top-level block: a declaration there is top-level
+    std::uint64_t            topNames  = 0;                // a 64-bit filter over the top-level slots' names (crossName_bit): a read whose bit is clear is no top-level local
 };
 
 // QD-TANGLE FLAT DISPATCH (the false-positive class STAGE0 2.4 named: parseArgs, an `if( a == "--flag" )` chain; envoy's 40-case
@@ -537,6 +561,24 @@ inline bool cc_isPreprocAlternative( const char* t ) noexcept
 }
 
 
+// QD-TANGLE BLOCK FACTS: a deep region's rows, billed to the block it starts in and clamped against that block's own last counted
+// row (not the function-wide deepEnd: a row two top-level statements share is in both blocks' loc, so both bill it).
+inline void tangleBlocks_billDeep( CcAccum& acc, std::uint32_t startRow, std::uint32_t endRow, bool inDispatchArm ) noexcept
+{
+    if( acc.blockAt == kNoTangleBlock )
+    {
+        return;
+    }
+    CcAccum::TangleBlock& b    = acc.blocks[ acc.blockAt ];
+    const std::uint32_t   from = startRow > b.deepEnd ? startRow : b.deepEnd + 1u;
+    if( endRow >= from )
+    {
+        b.deep += endRow - from + 1u;
+        b.deepDispatch += inDispatchArm ? endRow - from + 1u : 0u;
+    }
+    b.deepEnd = std::max( b.deepEnd, endRow );
+}
+
 // A hump is a control-nesting region whose depth FIRST reaches quality::kNestBar. Counting it at the
 // crossing is what makes the count exact: a deeper region inside an already-deep one has an ancestor chain
 // that is already at or over the bar, so it cannot cross again and cannot be counted twice.
@@ -561,6 +603,7 @@ inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNe
         acc.deepLoc += endRow - from + 1u;
         acc.deepDispatch += inDispatchArm ? endRow - from + 1u : 0u;   // QD-TANGLE: a short dispatch arm's own depth (ChainState)
     }
+    tangleBlocks_billDeep( acc, startRow, endRow, inDispatchArm );   // QD-TANGLE BLOCK FACTS: the same lines, billed to the block the region starts in
     if( endRow > acc.deepEnd )
     {
         acc.deepEnd = endRow;
@@ -578,6 +621,12 @@ inline void cc_noteDepth( TSNode n, std::uint32_t nesting, std::uint32_t childNe
     const bool inArm = chain == ChainState::Arm;
     acc.maxNest      = std::max( acc.maxNest, childNest );
     acc.nestOutArm   = inArm ? acc.nestOutArm : std::max( acc.nestOutArm, childNest );
+    if( acc.blockAt != kNoTangleBlock )   // QD-TANGLE BLOCK FACTS: the block's own nesting, by the same two readings
+    {
+        CcAccum::TangleBlock& b = acc.blocks[ acc.blockAt ];
+        b.nest    = std::max( b.nest, childNest );
+        b.nestOut = inArm ? b.nestOut : std::max( b.nestOut, childNest );
+    }
     cc_noteHump( n, nesting, childNest, acc, inArm );
 }
 
@@ -639,6 +688,26 @@ inline bool steer_isPrimitiveType( TSNode type, std::string_view src ) noexcept
     return std::find( std::begin( kNames ), std::end( kNames ), text ) != std::end( kNames );
 }
 
+// QD-TANGLE BLOCK FACTS — a top-level local's filter bit (CcAccum::topNames): a read whose name maps to a clear bit names no
+// top-level local, and skips the slot search. Two bytes and the length are enough to spread the few names a body declares.
+inline std::uint64_t crossName_bit( std::string_view name ) noexcept
+{
+    if( name.empty() )
+    {
+        return 0;
+    }
+    const std::uint32_t h = std::uint32_t( std::uint8_t( name.front() ) ) * 31u + std::uint32_t( std::uint8_t( name.back() ) ) * 7u + std::uint32_t( name.size() );
+    return std::uint64_t( 1 ) << ( h & 63u );
+}
+// A write to a slot in the block the walk is in: the first such block is the one a later read crosses from.
+inline void crossSlot_written( CcAccum& acc, CcAccum::SteerSlot& slot ) noexcept
+{
+    if( slot.topBlock != kNoTangleBlock && acc.blockAt != kNoTangleBlock )
+    {
+        slot.firstWrite = std::min( slot.firstWrite, acc.blockAt );
+    }
+}
+
 // The newest slot named `name` whose block is still open at byte `at` (census 11-19: genPathOf's `b == a` read the `a` of a block
 // that had closed 30 lines earlier, the for-head `a` in scope being no slot).
 inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name, std::uint32_t at ) noexcept
@@ -674,7 +743,8 @@ inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string
 {
     if( ts_node_is_null( nameNode ) || !kindIs( ts_node_type( nameNode ), "identifier" ) )
     {
-        return;   // a pattern, a pointer or a destructuring declarator: no single name, no slot
+        return;   // a pattern or a destructuring declarator: no single name, no slot (C/C++ pointer/reference/array wrappers are
+                  // unwrapped by steer_cDeclaration)
     }
     CcAccum::SteerSlot slot;
     slot.name         = nodeTextOf( nameNode, src );
@@ -682,6 +752,8 @@ inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string
     slot.lastWriteRow = ts_node_start_point( nameNode ).row + 1u;
     slot.prim         = prim;
     slot.scopeEnd     = scopeEnd;
+    slot.topBlock     = acc.declTop ? acc.blockAt : kNoTangleBlock;   // QD-TANGLE BLOCK FACTS: declared by a top-level statement
+    acc.topNames     |= acc.declTop ? crossName_bit( slot.name ) : 0u;
     acc.slots.push_back( slot );
 }
 
@@ -697,6 +769,7 @@ inline void steer_write( CcAccum& acc, TSNode target, std::string_view src )
         slot->lastWrite    = acc.stmt;
         slot->lastWriteRow = ts_node_start_point( target ).row + 1u;
         acc.anyRewritten   = acc.anyRewritten || slot->prim;
+        crossSlot_written( acc, *slot );   // QD-TANGLE BLOCK FACTS
     }
 }
 
@@ -705,6 +778,38 @@ inline bool steer_inForHead( TSNode n ) noexcept
 {
     const TSNode p = parentOf( n );   // for_statement, for_range_loop, for_in_statement, for_clause
     return !ts_node_is_null( p ) && std::string_view( ts_node_type( p ) ).starts_with( "for" );
+}
+
+// TANGLE-RULE: the identifier a C/C++ declarator slot declares — `T& header = raw;`, `int* p = q;`, `int a[ 4 ];` name the one inside
+// the wrapper (before, the wrapper reached steer_declare and made no slot: envoy parseHeader's `header` crossed four blocks unseen).
+// `wrapped`: a pointer, reference or array local, which is no primitive flag, so steer= is what it was; its slot counts for
+// crossLocals and hides an outer local of its name.
+struct CDeclaratorName
+{
+    TSNode name;
+    bool   wrapped = false;
+};
+inline CDeclaratorName steer_cDeclaratorName( TSNode d ) noexcept
+{
+    CDeclaratorName out{ kindIs( ts_node_type( d ), "init_declarator" ) ? fieldChild( d, NodeField::Declarator ) : d };
+    for( int depth = 0; depth < 8 && !ts_node_is_null( out.name ); ++depth )
+    {
+        const char* t = ts_node_type( out.name );
+        if( kindIs( t, "pointer_declarator" ) || kindIs( t, "array_declarator" ) )
+        {
+            out.name = fieldChild( out.name, NodeField::Declarator );
+        }
+        else if( kindIs( t, "reference_declarator" ) )
+        {
+            out.name = ts_node_named_child( out.name, 0 );   // the grammar gives its identifier no field name (ln_extractDeclaratorIdentifiers)
+        }
+        else
+        {
+            break;
+        }
+        out.wrapped = true;
+    }
+    return out;
 }
 
 // The C-family declaration: `[const] TYPE a = 1, b;` — every declarator slot, primitive by the written type. A const one, or one in
@@ -724,7 +829,8 @@ inline void steer_cDeclaration( CcAccum& acc, TSNode n, std::string_view src, bo
     const std::uint32_t scopeEnd = steer_scopeEndOf( n, Lang::Cpp );
     forEachDeclaratorSlot( n, [ & ]( TSNode d )
     {
-        steer_declare( acc, kindIs( ts_node_type( d ), "init_declarator" ) ? fieldChild( d, NodeField::Declarator ) : d, prim, src, scopeEnd );
+        const auto [ name, wrapped ] = steer_cDeclaratorName( d );
+        steer_declare( acc, name, prim && !wrapped, src, scopeEnd );   // a wrapped local is no primitive flag: it never steers
     } );
 }
 
@@ -791,6 +897,20 @@ inline void steer_pythonAssignment( CcAccum& acc, TSNode n, std::string_view src
 }
 
 // The declaration shapes, per grammar. True when `n` was a declaration (its children are still walked: an initializer can write).
+// A Go `var` spec whose declaration (through a grouped `var ( … )` list) starts a top-level block: the spec itself starts after `var`.
+inline bool steer_goVarTop( const CcAccum& acc, TSNode spec ) noexcept
+{
+    if( acc.blockAt == kNoTangleBlock )
+    {
+        return false;
+    }
+    TSNode p = parentOf( spec );
+    if( !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "var_spec_list" ) )
+    {
+        p = parentOf( p );
+    }
+    return !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "var_declaration" ) && ts_node_start_byte( p ) == acc.blocks[ acc.blockAt ].startByte;
+}
 inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang lang, std::string_view src )
 {
     const SteerDecl shape = langFacts( lang ).steerDecl;
@@ -845,6 +965,7 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
         const TSNode value = fieldChild( n, NodeField::Value );
         const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
                           || ( !ts_node_is_null( value ) && ts_node_named_child_count( value ) > 0 && tangleKindOf( ts_node_type( ts_node_named_child( value, 0 ) ) ) == TangleKind::PrimLiteral );
+        acc.declTop = acc.declTop || steer_goVarTop( acc, n );   // QD-TANGLE BLOCK FACTS: the spec starts after `var`, its declaration at the block
         steer_declare( acc, fieldChild( n, NodeField::Name ), prim, src, steer_scopeEndOf( n, lang ) );
         return true;
     }
@@ -891,6 +1012,214 @@ inline void steer_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_
     }
 }
 
+// ═══ QD-TANGLE BLOCK FACTS — the writes and reads a cross local is counted from (TANGLE-RULE R-D) ══════════════════════════
+//
+// steer_write already sees a bare name assigned or stepped. A local is also WRITTEN through a member or an element (`x.f = …`,
+// `x[i] += …`, `x.n++`), by a mutator call on it (`x.push_back( … )`, `x.add( … )`; the name list the labelled census used), and by
+// `&x` (C, C++) or `&mut x` (Rust) passed as an argument. It is READ by any other mention, except a plain `=` target and a name that
+// only spells a member, a qualified name's segment or a keyword argument (crossQuietChild).
+inline constexpr std::array<std::string_view, 6> kCrossAccessKinds = { "field_expression", "member_expression", "selector_expression", "attribute",
+                                                                         "field_access", "member_access_expression" };
+inline bool cross_isAccess( const char* t ) noexcept
+{
+    return std::ranges::contains( kCrossAccessKinds, std::string_view( t ) ) || tangleKindOf( t ) == TangleKind::Subscript;
+}
+// The local a member or element access lands on: `x` of `x.f`, `x->f`, `x[i]`, `x.f[i].g` (every grammar puts the object first).
+inline TSNode cross_rootName( TSNode n ) noexcept
+{
+    for( std::uint32_t hop = 0; hop < 16u && !ts_node_is_null( n ); ++hop )
+    {
+        const char* t = ts_node_type( n );
+        if( kindIs( t, "identifier" ) )
+        {
+            return n;
+        }
+        if( !cross_isAccess( t ) || ts_node_named_child_count( n ) == 0 )
+        {
+            return TSNode{};
+        }
+        n = ts_node_named_child( n, 0 );
+    }
+    return TSNode{};
+}
+// `m` is the verb `p`, or `p` and then a word boundary (`_`, a capital, a digit): `addEdge` and `add_item`, never `address`.
+inline bool cross_startsWithVerb( std::string_view m, std::string_view p ) noexcept
+{
+    if( !m.starts_with( p ) )
+    {
+        return false;
+    }
+    if( m.size() == p.size() || p.back() == '_' )
+    {
+        return true;
+    }
+    const char c = m[ p.size() ];
+    return c == '_' || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' );
+}
+inline bool cross_isMutatorName( std::string_view m ) noexcept
+{
+    static constexpr std::string_view kExact[]  = { "reserve", "swap", "sort", "splice", "release", "try_emplace", "entry", "discard", "increment",
+                                                    "decrement", "appendleft", "extendleft", "popleft", "popitem", "setdefault" };
+    static constexpr std::string_view kPrefix[] = { "push", "emplace", "insert", "erase", "clear", "append", "add", "set", "remove", "pop", "resize",
+                                                    "reset", "assign", "merge", "extend", "update", "fill", "truncate", "drain", "retain", "store",
+                                                    "fetch_", "inc", "dec", "write", "put", "mutable", "Add", "Set", "Clear", "Mutable", "Merge", "Copy" };
+    return std::ranges::find( kExact, m ) != std::end( kExact )
+        || std::ranges::any_of( kPrefix, [ m ]( std::string_view p ) { return cross_startsWithVerb( m, p ); } );
+}
+inline void cross_markWrite( CcAccum& acc, TSNode name, std::string_view src )
+{
+    if( ts_node_is_null( name ) || acc.blockAt == kNoTangleBlock )
+    {
+        return;
+    }
+    if( CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( name, src ), ts_node_start_byte( name ) ) )
+    {
+        crossSlot_written( acc, *slot );
+    }
+}
+// The object and the member name of a call's callee when the callee is a member access (`x.push_back`, `x->insert`, `x.append`).
+inline void cross_noteMutatorCall( CcAccum& acc, TSNode n, const char* t, std::string_view src )
+{
+    TSNode object, member;
+    if( kindIs( t, "method_invocation" ) )   // Java: object and name are the call's own fields
+    {
+        object = fieldChild( n, NodeField::Object );
+        member = fieldChild( n, NodeField::Name );
+    }
+    else
+    {
+        const TSNode callee = fieldChild( n, NodeField::Function );
+        if( ts_node_is_null( callee ) || tangleKindOf( ts_node_type( callee ) ) == TangleKind::Subscript || !cross_isAccess( ts_node_type( callee ) )
+            || ts_node_named_child_count( callee ) < 2 )
+        {
+            return;
+        }
+        object = ts_node_named_child( callee, 0 );
+        member = ts_node_named_child( callee, ts_node_named_child_count( callee ) - 1u );
+    }
+    if( !ts_node_is_null( object ) && !ts_node_is_null( member ) && cross_isMutatorName( nodeTextOf( member, src ) ) )
+    {
+        cross_markWrite( acc, cross_rootName( object ), src );
+    }
+}
+inline void cross_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_view src )
+{
+    if( kindIs( t, "assignment_expression" ) || kindIs( t, "augmented_assignment_expression" ) || kindIs( t, "compound_assignment_expr" )
+        || kindIs( t, "assignment" ) || kindIs( t, "augmented_assignment" ) )
+    {
+        const TSNode left = fieldChild( n, NodeField::Left );
+        if( !ts_node_is_null( left ) && !kindIs( ts_node_type( left ), "identifier" ) )   // a bare name is steer_write's (or a declaration's)
+        {
+            cross_markWrite( acc, cross_rootName( left ), src );
+        }
+        return;
+    }
+    if( kindIs( t, "assignment_statement" ) )   // Go: `x.f, y[i] = …`
+    {
+        const TSNode        left  = fieldChild( n, NodeField::Left );
+        const std::uint32_t names = ts_node_is_null( left ) ? 0u : ts_node_named_child_count( left );
+        for( std::uint32_t i = 0; i < names; ++i )
+        {
+            const TSNode target = ts_node_named_child( left, i );
+            if( !kindIs( ts_node_type( target ), "identifier" ) )
+            {
+                cross_markWrite( acc, cross_rootName( target ), src );
+            }
+        }
+        return;
+    }
+    if( kindIs( t, "update_expression" ) )   // `x.n++`, `x[i]--` (a bare name is steer_write's)
+    {
+        const TSNode arg = fieldChild( n, NodeField::Argument );
+        if( !ts_node_is_null( arg ) && !kindIs( ts_node_type( arg ), "identifier" ) )
+        {
+            cross_markWrite( acc, cross_rootName( arg ), src );
+        }
+        return;
+    }
+    if( kindIs( t, "call_expression" ) || kindIs( t, "call" ) || kindIs( t, "method_invocation" ) || kindIs( t, "invocation_expression" ) )
+    {
+        cross_noteMutatorCall( acc, n, t, src );
+        return;
+    }
+    if( kindIs( t, "argument_list" ) || kindIs( t, "arguments" ) )   // `f( &x )`, `f( &mut x )`
+    {
+        ChildCursor cursor( n );
+        forEachChild( n, cursor.cur, [ & ]( TSNode c )
+        {
+            const char*            ct   = ts_node_type( c );
+            const std::string_view text = nodeTextOf( c, src );
+            if( ( kindIs( ct, "pointer_expression" ) && text.starts_with( "&" ) ) || ( kindIs( ct, "reference_expression" ) && text.starts_with( "&mut" ) ) )
+            {
+                const TSNode named = ts_node_named_child_count( c ) > 0 ? ts_node_named_child( c, ts_node_named_child_count( c ) - 1u ) : TSNode{};
+                if( !ts_node_is_null( named ) && kindIs( ts_node_type( named ), "identifier" ) )
+                {
+                    cross_markWrite( acc, named, src );
+                }
+            }
+            return true;
+        } );
+    }
+}
+// A mention of a name that is a read: the last block that reads a top-level slot.
+inline void cross_noteRead( CcAccum& acc, TSNode n, std::string_view src ) noexcept
+{
+    if( acc.blockAt == kNoTangleBlock )
+    {
+        return;
+    }
+    const std::string_view name = nodeTextOf( n, src );
+    if( ( acc.topNames & crossName_bit( name ) ) == 0 )
+    {
+        return;   // no top-level local spells this name's filter bit
+    }
+    CcAccum::SteerSlot* slot = steer_find( acc, name, ts_node_start_byte( n ) );
+    if( slot != nullptr && slot->topBlock != kNoTangleBlock )
+    {
+        slot->lastReadPlus1 = std::max( slot->lastReadPlus1, acc.blockAt + 1u );
+    }
+}
+// The child of `n` that names no read (pushed with CcFrame::quiet): a plain `=` target (written, not read), the name in a member
+// access whose grammar spells it as an identifier (Python attribute, Java field_access / method_invocation, C# member access), a
+// qualified name's last segment (C++ `ns::x`, Rust `a::x`) and a Python keyword argument's name. Null otherwise.
+inline TSNode cross_quietChild( TSNode n, const char* t, std::string_view src )
+{
+    switch( t[0] )
+    {
+        case 'a':
+            if( kindIs( t, "assignment_expression" ) || kindIs( t, "assignment" ) || kindIs( t, "assignment_statement" ) )
+            {
+                const std::string_view op = nodeFieldText( n, NodeField::Operator, src );
+                return op.empty() || op == "=" ? fieldChild( n, NodeField::Left ) : TSNode{};
+            }
+            return kindIs( t, "attribute" ) ? fieldChild( n, NodeField::Attribute ) : TSNode{};
+        case 'f': return kindIs( t, "field_access" ) ? fieldChild( n, NodeField::Field ) : TSNode{};
+        case 'k': return kindIs( t, "keyword_argument" ) ? fieldChild( n, NodeField::Name ) : TSNode{};
+        case 'm':
+            return kindIs( t, "method_invocation" ) || kindIs( t, "member_access_expression" ) ? fieldChild( n, NodeField::Name ) : TSNode{};
+        case 'q': return kindIs( t, "qualified_identifier" ) ? fieldChild( n, NodeField::Name ) : TSNode{};
+        case 's': return kindIs( t, "scoped_identifier" ) ? fieldChild( n, NodeField::Name ) : TSNode{};
+        default:  return TSNode{};
+    }
+}
+// A quiet list (`a, b = …`) quiets its names too.
+inline constexpr std::array<std::string_view, 3> kCrossQuietListKinds = { "expression_list", "pattern_list", "tuple_pattern" };
+// Which children of a node the walk pushes quiet: the one cross_quietChild names, or all of a quiet list's.
+struct CrossQuiet
+{
+    TSNode child;
+    bool   all = false;
+    bool   of( TSNode kid ) const noexcept { return all || ( !ts_node_is_null( child ) && ts_node_eq( kid, child ) ); }
+};
+inline CrossQuiet cross_quietOf( bool blocksOn, bool frameQuiet, TSNode n, const char* t, std::string_view src )
+{
+    if( !blocksOn )
+    {
+        return {};
+    }
+    return { cross_quietChild( n, t, src ), frameQuiet && std::ranges::contains( kCrossQuietListKinds, std::string_view( t ) ) };
+}
+
 // Per named node, before the walk dispatches on it: the statement clock, then a declaration or a write (steering walks only).
 inline void steer_noteNode( CcAccum& acc, TSNode n, const char* t, Lang lang, std::string_view src )
 {
@@ -902,10 +1231,16 @@ inline void steer_noteNode( CcAccum& acc, TSNode n, const char* t, Lang lang, st
     {
         ++acc.stmt;
     }
+    acc.declTop = acc.blockAt != kNoTangleBlock && ts_node_start_byte( n ) == acc.blocks[ acc.blockAt ].startByte;   // QD-TANGLE BLOCK FACTS
     if( !steer_noteDeclaration( acc, n, t, lang, src ) )
     {
         steer_noteWrite( acc, n, t, src );
     }
+    if( !acc.blocks.empty() )
+    {
+        cross_noteWrite( acc, n, t, src );   // QD-TANGLE BLOCK FACTS: a member or element write, a mutator call, `&x` passed on
+    }
+    acc.declTop = false;
 }
 
 // A branch's condition: every identifier it reads (a member's own name and a callee's name are not reads of a local). The
@@ -1665,6 +2000,175 @@ inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8
     }
 }
 
+// ═══ QD-TANGLE BLOCK FACTS — the body's top-level blocks (TANGLE-RULE R-D; model.h TangleInputs::maxBlock10) ════════════════
+//
+// A block is a byte range the walk enters in document order. The body's statements are blocks, except: a bare scope `{ }` is
+// transparent (its statements are top-level blocks: the house style scopes a step's locals that way), an if / else-if chain is one
+// block per arm (the first arm starts at the `if` and holds its condition; each later one starts at its `else` / `elif`), and so
+// is a switch or match (the first arm holds the head). An expression statement around an if or a match (Rust) is that construct.
+inline void tangleBlocks_push( CcAccum& acc, TSNode from, TSNode to )
+{
+    acc.blocks.push_back( { ts_node_start_byte( from ), ts_node_start_point( from ).row + 1u, ts_node_end_point( to ).row + 1u } );
+}
+// The arms of the chain that starts at `n`: Python's elif / else clauses are the if's own children; every other grammar links the
+// next arm through `alternative` (an else_clause wrapper in C, C++, JS/TS and Rust; the bare if or block in Java, C# and Go).
+inline void tangleBlocks_ifArms( CcAccum& acc, TSNode n )
+{
+    TSNode armStart = n;
+    for( std::uint32_t arm = 0; !ts_node_is_null( n ) && arm < 4096u; ++arm )
+    {
+        const TSNode cons = fieldChild( n, NodeField::Consequence );
+        tangleBlocks_push( acc, armStart, ts_node_is_null( cons ) ? n : cons );
+        bool clauses = false;
+        {
+            ChildCursor cursor( n );
+            forEachChild( n, cursor.cur, [ & ]( TSNode c )
+            {
+                const char* t = ts_node_type( c );
+                if( kindIs( t, "elif_clause" ) || ( kindIs( t, "else_clause" ) && !ts_node_is_null( fieldChild( c, NodeField::Body ) ) ) )
+                {
+                    tangleBlocks_push( acc, c, c );
+                    clauses = true;
+                }
+                return true;
+            } );
+        }
+        const TSNode alt = fieldChild( n, NodeField::Alternative );
+        if( clauses || ts_node_is_null( alt ) )
+        {
+            return;
+        }
+        armStart          = alt;
+        const bool   wrap = kindIs( ts_node_type( alt ), "else_clause" );
+        const TSNode next = wrap && ts_node_named_child_count( alt ) > 0 ? ts_node_named_child( alt, ts_node_named_child_count( alt ) - 1u ) : alt;
+        if( ts_node_is_null( next ) || tangleKindOf( ts_node_type( next ) ) != TangleKind::If )
+        {
+            tangleBlocks_push( acc, alt, alt );   // the final else
+            return;
+        }
+        n = next;
+    }
+}
+inline void tangleBlocks_switchArms( CcAccum& acc, TSNode n )
+{
+    const TSNode body  = fieldChild( n, NodeField::Body );
+    const TSNode box   = ts_node_is_null( body ) ? n : body;
+    bool         first = true;
+    ChildCursor  cursor( box );
+    forEachChild( box, cursor.cur, [ & ]( TSNode c )
+    {
+        if( tangleKindOf( ts_node_type( c ) ) == TangleKind::CaseArm )
+        {
+            tangleBlocks_push( acc, first ? n : c, c );
+            first = false;
+        }
+        return true;
+    } );
+    if( first )
+    {
+        tangleBlocks_push( acc, n, n );   // no arm the table knows: the construct is one block
+    }
+}
+inline void tangleBlocks_collect( CcAccum& acc, TSNode box, std::uint32_t depth )
+{
+    ChildCursor cursor( box );
+    forEachChild( box, cursor.cur, [ & ]( TSNode c )
+    {
+        const char* t = ts_node_type( c );
+        if( !ts_node_is_named( c ) || std::strstr( t, "comment" ) != nullptr )
+        {
+            return true;
+        }
+        const TSNode     inner = kindIs( t, "expression_statement" ) && ts_node_named_child_count( c ) == 1 ? ts_node_named_child( c, 0 ) : c;
+        const TangleKind kind  = tangleKindOf( ts_node_type( inner ) );
+        if( kind == TangleKind::Block && depth < 64u )
+        {
+            tangleBlocks_collect( acc, inner, depth + 1u );   // a bare scope: its statements are top-level blocks
+        }
+        else if( kind == TangleKind::If )
+        {
+            tangleBlocks_ifArms( acc, inner );
+        }
+        else if( kind == TangleKind::Switch )
+        {
+            tangleBlocks_switchArms( acc, inner );
+        }
+        else
+        {
+            tangleBlocks_push( acc, c, c );
+        }
+        return true;
+    } );
+}
+// The def's block body (its `body` field, or the def itself when it is a block: a body-sibling def), else null — no blocks then.
+inline TSNode tangleBlocks_bodyOf( TSNode root ) noexcept
+{
+    TSNode body = fieldChild( root, NodeField::Body );
+    if( ts_node_is_null( body ) )
+    {
+        body = root;
+    }
+    return tangleKindOf( ts_node_type( body ) ) == TangleKind::Block ? body : TSNode{};
+}
+// The walk passes a block's start: it is in that block now, at the frame's nesting at least (an arm sits inside its construct).
+inline void tangleBlocks_enter( CcAccum& acc, TSNode n, std::uint32_t nesting ) noexcept
+{
+    const std::uint32_t at = ts_node_start_byte( n );
+    if( acc.blockNext >= acc.blocks.size() || at < acc.blocks[ acc.blockNext ].startByte )
+    {
+        return;
+    }
+    do
+    {
+        acc.blockAt = acc.blockNext++;
+    } while( acc.blockNext < acc.blocks.size() && at >= acc.blocks[ acc.blockNext ].startByte );
+    CcAccum::TangleBlock& b = acc.blocks[ acc.blockAt ];
+    b.nest    = std::max( b.nest, nesting );
+    b.nestOut = std::max( b.nestOut, nesting );
+}
+// Per node of a walk that collected blocks (`on`), before the steering note bills its declarations and writes: the block the node is
+// in, and a read of a top-level local when the node is a named identifier its parent did not quiet (`mayRead`).
+inline void cross_noteNode( CcAccum& acc, bool on, TSNode n, const char* t, std::uint32_t nesting, bool mayRead, std::string_view src ) noexcept
+{
+    if( !on )
+    {
+        return;
+    }
+    tangleBlocks_enter( acc, n, nesting );
+    if( mayRead && kindIs( t, "identifier" ) )
+    {
+        cross_noteRead( acc, n, src );
+    }
+}
+// The two facts, once the walk is done: the highest one-block score (tenths, tangleScore10 over the block alone, no steering locals:
+// the body's own steer stays in its S) and the cross locals. kTangleNoCap when no block was collected.
+struct TangleBlockScore
+{
+    std::uint32_t maxBlock10 = kTangleNoCap;
+    std::uint32_t cross      = 0;
+};
+inline TangleBlockScore tangleBlocks_score( const CcAccum& acc ) noexcept
+{
+    TangleBlockScore out;
+    if( acc.blocks.empty() )
+    {
+        return out;
+    }
+    out.maxBlock10 = 0;
+    for( const CcAccum::TangleBlock& b : acc.blocks )
+    {
+        const std::uint32_t loc  = b.endRow >= b.startRow ? b.endRow - b.startRow + 1u : 1u;
+        const std::uint32_t deep = std::min( b.deep, loc );
+        const std::uint32_t arms = std::min( b.deepDispatch, deep );
+        out.maxBlock10 = std::max( out.maxBlock10, tangleScore10( tangleInputsFrom( loc, b.nest, deep, 0, tangleDispatchShare( deep, arms, b.nest - std::min( b.nest, b.nestOut ) ) ) ) );
+    }
+    for( const CcAccum::SteerSlot& slot : acc.slots )
+    {
+        out.cross += slot.topBlock != kNoTangleBlock && slot.firstWrite != kNoTangleBlock && slot.lastReadPlus1 > slot.firstWrite + 1u ? 1u : 0u;
+    }
+    return out;
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
 /// Accumulate syntactic complexity and nesting in one iterative walk from start.
@@ -1676,8 +2180,8 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
     // reverse so pops preserve the original left-to-right visit order; the guard bounds the heap stack.
-    // ctrl: innermost enclosing ev arena index (kNoCtrl at root); chain: where the frame sits in a flat dispatch (tangle walks only)
-    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; ChainState chain; };
+    // ctrl: innermost enclosing ev arena index (kNoCtrl at root); chain: where the frame sits in a flat dispatch (tangle walks only); quiet: no read
+    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; ChainState chain; bool quiet = false; };
     std::vector<CcFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { start, startNesting, kNoCtrl, static_cast<std::uint16_t>( startDepth ), ChainState::None } );
@@ -1720,6 +2224,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             continue; // quoted AST is not executed control flow
         }
+        cross_noteNode( acc, !acc.blocks.empty(), n, t, nesting, !frame.quiet && isNamed, src );   // QD-TANGLE BLOCK FACTS, before the steering note
         // QD-TANGLE: the statement clock, a declaration or a write — before the dispatch below, so every named node is seen once.
         steer_noteNode( acc, n, t, lang, src );
         const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
@@ -1829,13 +2334,14 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
 
         collectChildren( n, cursor.cur, kids );
+        const CrossQuiet quiet = cross_quietOf( !acc.blocks.empty(), frame.quiet, n, t, src );
         for( std::size_t i = kids.size(); i > 0; --i )
         {
-            stack.push_back( { kids[i - 1], nesting, ctrl, childDepth, dispatch_childState( n, frame.chain, false, kids[i - 1] ) } );
+            stack.push_back( { kids[i - 1], nesting, ctrl, childDepth, dispatch_childState( n, frame.chain, false, kids[i - 1] ), quiet.of( kids[i - 1] ) } );
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; std::uint32_t steer; std::uint32_t deepDispatch; std::uint32_t nestArmCut; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; std::uint32_t steer; std::uint32_t deepDispatch; std::uint32_t nestArmCut; std::uint32_t maxBlock10; std::uint32_t cross; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
@@ -1861,6 +2367,14 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang, Ta
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
+    // QD-TANGLE BLOCK FACTS: walked with the steering locals, whose slot table the cross locals are counted on
+    if( acc.steerOn )
+    {
+        if( const TSNode body = tangleBlocks_bodyOf( root ); !ts_node_is_null( body ) )
+        {
+            tangleBlocks_collect( acc, body, 0 );
+        }
+    }
     // ONE accumulator across all top-level children: the deepEnd clamp has to see the whole def in document
     // order, and humps in sibling statements are humps of the same function.
     for( const TSNode c : kids )
@@ -1871,7 +2385,9 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang, Ta
     // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt) ;
     // humps/deepLoc = the nesting profile ; ev/evWhy = essential complexity (model.h Symbol) —
     // 0 outside evCountedLang, >= 1 inside it.
-    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {}, acc.steered, acc.deepDispatch, acc.maxNest - std::min( acc.maxNest, acc.nestOutArm ) };
+    const TangleBlockScore blocks = tangleBlocks_score( acc );
+    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {}, acc.steered, acc.deepDispatch, acc.maxNest - std::min( acc.maxNest, acc.nestOutArm ),
+                    blocks.maxBlock10, blocks.cross };
     if( evPtr != nullptr )
     {
         ev_finalize( evCtx, out.ev, out.evWhy );

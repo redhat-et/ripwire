@@ -1166,6 +1166,20 @@ struct AliasTarget
     std::uint32_t start = 0;
 };
 
+// QD-TANGLE BLOCK FACTS (ingest_metrics.h tangleBlocks_*; TangleInputs above): one row per callable whose body the walk split into
+// top-level blocks while it counted steering locals (over 50 lines, a langfacts.h steerDecl language), ascending id, 8 bytes a row —
+// a side table, not a Symbol field, because only those few callables carry it. maxBlock10 saturates at kTangleBlockMax10 (S 6553.4,
+// far above any body's S, so a saturated row caps nothing it should not); cross saturates at 255.
+inline constexpr std::uint32_t kTangleBlockMax10 = 0xFFFFu;
+struct TangleBlockFacts
+{
+    NodeId        id         = kNoNode;
+    std::uint16_t maxBlock10 = 0;
+    std::uint8_t  cross      = 0;
+    std::uint8_t  reserved   = 0;   // zero: keeps the row a padding-free 8 bytes (warmsnap writes it raw)
+};
+static_assert( sizeof( TangleBlockFacts ) == 8, "TangleBlockFacts is a raw 8-byte row" );
+
 // The byte span of the function whose body binds a function-local def's name (Symbol::fnLocal). A call site inside
 // [start, end) of the def's own file can name the def; any other site cannot (graph.h reachableByName).
 struct FnLocalScope
@@ -1266,16 +1280,28 @@ struct LocalNameFact
 // Each input counts in units of an existing bar: a nesting level past kNestBar - 1, 1 in 20 lines inside a deep region, 1 steering
 // local per 100 lines (the prototype's 1 per 50 statements: a body runs about two lines a statement). Kept in tenths, so every
 // surface prints the same rounded number and a ratchet compares integers.
+//
+// THE BLOCK CAP (TANGLE-RULE R-D, owner 11-24; the labelled census in the TANGLE-FP lane): S' = min( S, maxBlock + 2 x cross ). A body
+// is a run of top-level blocks (a statement; an if / else-if chain's and a top-level switch's arms; a bare scope's statements). maxBlock
+// is the same score taken over one block alone, and cross counts the top-level locals one block rewrites and a later one reads. A long
+// body of independent deep pockets is as tangled as its worst pocket; state threaded across blocks adds 2 a local. Measured on the
+// 105 labelled functions of ripwire and envoy: 0 of 39 real tangles lost, the length-only false class removed. The cap is applied only
+// where the walk measured both facts (maxBlock10 below is kTangleNoCap otherwise), so it can only lower a score.
+inline constexpr std::uint32_t kTangleNoCap = 0xFFFFFFFFu;
 struct TangleInputs
 {
     std::uint32_t loc   = 0;   // physical lines (Symbol::loc)
     std::uint32_t nest  = 0;   // max control nesting, the tangle reading outside short dispatch arms (3 at most when every deep line is an arm's)
     std::uint32_t deep  = 0;   // deep lines the score counts: deepLoc less the short dispatch arms' share
     std::uint32_t steer = 0;   // steering locals
+    std::uint32_t maxBlock10 = kTangleNoCap;   // the highest one-block score in tenths; kTangleNoCap = not measured (the cap does not apply)
+    std::uint32_t cross      = 0;              // top-level locals rewritten in one block and read in a later one (0 when not measured)
+    bool capped() const noexcept { return maxBlock10 != kTangleNoCap; }
 };
 inline constexpr std::uint32_t kTangleAmpLoc   = 50;   // the length the amplifier starts above
 inline constexpr std::uint32_t kTangleNestFree = 3;    // nesting levels that score nothing (quality::kNestBar - 1, asserted in quality.h)
 inline constexpr std::uint32_t kTangleBar10    = 60;   // the bar, S >= 6, in tenths
+inline constexpr std::uint32_t kTangleCross10  = 20;   // what one cross-block local adds to the cap, in tenths (2)
 
 // The byte Symbol::dispatchShare stores: ( nest cut << 5 ) | the arms' share of deepLoc in 31sts (31 only when every deep line is an arm's).
 inline constexpr std::uint32_t kTangleShareAll = 31;
@@ -1311,10 +1337,12 @@ inline TangleInputs tangleInputsFrom( std::uint32_t loc, std::uint32_t maxNest, 
     }
     return in;
 }
-
-inline TangleInputs tangleInputsOf( const Symbol& s ) noexcept
+// The same inputs with the block facts the walk measured (TANGLE-RULE; kTangleNoCap = not measured, and the cap does not apply).
+inline TangleInputs tangleWithCap( TangleInputs in, std::uint32_t maxBlock10, std::uint32_t cross ) noexcept
 {
-    return tangleInputsFrom( s.loc, s.maxNest, s.deepLoc, s.steer, s.dispatchShare );
+    in.maxBlock10 = maxBlock10;
+    in.cross      = maxBlock10 == kTangleNoCap ? 0u : cross;
+    return in;
 }
 
 // T (length-free) as a real, and T and S in tenths — rounded half up, so every surface prints the same number.
@@ -1337,7 +1365,21 @@ inline std::uint32_t tangleScore10( const TangleInputs& in ) noexcept
     {
         return 0;
     }
-    return std::uint32_t( tangleT( in ) * std::log2( double( in.loc ) / double( kTangleAmpLoc ) ) * 10.0 + 0.5 );
+    const std::uint32_t s10 = std::uint32_t( tangleT( in ) * std::log2( double( in.loc ) / double( kTangleAmpLoc ) ) * 10.0 + 0.5 );
+    if( !in.capped() )
+    {
+        return s10;
+    }
+    const std::uint64_t cap10 = std::uint64_t( in.maxBlock10 ) + std::uint64_t( kTangleCross10 ) * in.cross;
+    return cap10 < s10 ? std::uint32_t( cap10 ) : s10;   // the block cap only lowers a score
+}
+// The same inputs without the block cap: one side of a compare whose other side was measured without it (an older snapshot or
+// sidecar) — both sides then score by one rule (QD-RATCHET-BASE: a score change is a code change, never a rule change).
+inline TangleInputs tangleWithoutCap( TangleInputs in ) noexcept
+{
+    in.maxBlock10 = kTangleNoCap;
+    in.cross      = 0;
+    return in;
 }
 
 // QD-TANGLE detail (ingest.h tangleDetailOf): what a tangle row names, read by re-walking ONE function at --quality-delta time — never
@@ -2597,6 +2639,8 @@ struct IngestResult
     std::vector<AliasTarget>  aliasTargets;    // INDEX-ALIAS-CONST: one row per alias def whose target ends it, ascending id (AliasTarget above);
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
+    std::vector<TangleBlockFacts> tangleBlocks;   // QD-TANGLE BLOCK FACTS: one row per block-walked callable, ascending id (TangleBlockFacts above);
+                                                  // every symbol splice re-offsets it like fnLocalScopes
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
     std::vector<std::uint64_t> cloneKeys;      // CLONES-PERSIST: size symbols.size() when built (ingest_model.h assignSymbols), else empty:
                                                // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
@@ -2677,6 +2721,19 @@ struct IngestResult
     //    empty, so a re-ingest never sees a stale table; a copy shares the pointer (same files, same table).
     mutable std::shared_ptr<const RustCrateRoots> rustCrateRoots;
 };
+
+// A callable's tangle inputs: its own facts, and its block facts when the walk measured them (`blocks` = IngestResult::tangleBlocks).
+inline TangleInputs tangleInputsOf( const std::vector<TangleBlockFacts>& blocks, const Symbol& s ) noexcept
+{
+    const auto row = std::lower_bound( blocks.begin(), blocks.end(), s.id, []( const TangleBlockFacts& f, NodeId id ) noexcept { return f.id < id; } );
+    const bool measured = row != blocks.end() && row->id == s.id;
+    const TangleInputs in = tangleInputsFrom( s.loc, s.maxNest, s.deepLoc, s.steer, s.dispatchShare );
+    return measured ? tangleWithCap( in, row->maxBlock10, row->cross ) : in;
+}
+inline TangleInputs tangleInputsOf( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return tangleInputsOf( ing.tangleBlocks, s );
+}
 
 // These aggregates cross the ingest/main translation-unit boundary. The record is emitted once per TU by
 // structlayout.h, so a header change that leaves a mixed binary can be diagnosed after linking instead of
