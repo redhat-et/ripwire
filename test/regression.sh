@@ -502,6 +502,7 @@ for _g in \
     editcheckcheck \
     editcheckdeclcheck \
     editchecknotecheck \
+    editcheckstampcheck \
     edithandlehintcheck \
     editpayloadbinarycheck \
     editplancheck \
