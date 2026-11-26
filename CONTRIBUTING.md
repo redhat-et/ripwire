@@ -520,7 +520,7 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
     `kAsciiDigit`, `kAsciiAlnum` and `kAsciiIdent` are `std::isspace` / `isdigit` / `isalnum` / `isalnum || '_'` in the
     "C" locale, with no libc call per byte.
   - `countByte( text, b )` — `std::count( text.begin(), text.end(), b )`, and the `if( c == '\n' ) ++line;` loop (D5).
-    The line of offset `at` is `1 + countByte( text.substr( 0, at ), '\n' )`.
+  - `lineNumberAt( text, at )` — `1 + countByte( text.substr( 0, at ), '\n' )`: the 1-based `std::uint32_t` line of a byte offset.
   - `lineStarts( text, out, FinalLineStart::Keep | DropAtEnd )` — the line-start table, `{ 0 }` then `i + 1` for each
     `'\n'` (D4).
   - `forEachByte( p, n, b, fn )` — `fn( i )` for each `p[ i ] == b`, in order: a line split, or any walk over one byte.

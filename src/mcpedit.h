@@ -1,6 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/strkern.h" // strkern::countByte / forEachByte — the receipt's line numbers and line split
+#include "infra/strkern.h" // strkern::lineNumberAt / forEachByte — the receipt's line numbers and line split
 #include "infra/os.h"   // rw::os — the edit lockfile (open/flock/close), the atomic write (open/write/fchmod/fsync/rename/unlink), realpath/getcwd
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -889,7 +889,7 @@ namespace mcpedit
     {
         const auto lineAt = [ & ]( std::size_t upto ) -> std::uint32_t
         {
-            return 1u + std::uint32_t( strkern::countByte( bytes.substr( 0, upto ), '\n' ) );
+            return strkern::lineNumberAt( bytes, upto );
         };
         const std::uint32_t first = lineAt( startByte );
         const std::size_t   last  = ( endByte > startByte ) ? endByte - 1 : startByte;

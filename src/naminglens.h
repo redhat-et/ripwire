@@ -1,6 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/strkern.h" // strkern::countByte — the body / def-start line counts
+#include "infra/strkern.h" // strkern::countByte / lineNumberAt — the body line count, the def-start line
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 // naminglens.h — identifier-naming quality lens v1: the naming-* built-in --lint rules.
@@ -1159,7 +1159,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: getBytes whole-file read" );
                 const std::uint32_t defB = std::min( s.endByte,      std::uint32_t( bytes.size() ) );
                 if( defB > defA )
                 {
-                    const std::uint32_t defStartLine = 1u + std::uint32_t( strkern::countByte( std::string_view( bytes ).substr( 0, defA ), '\n' ) );
+                    const std::uint32_t defStartLine = strkern::lineNumberAt( bytes, defA );
                     const std::vector<LocalNameFact> locals = collectGatedLocalNames(
                         std::string_view( bytes ).substr( defA, defB - defA ), defStartLine, s.lang );
                     for( const LocalNameFact& local : locals )

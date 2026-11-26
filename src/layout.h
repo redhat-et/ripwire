@@ -1,6 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/strkern.h" // strkern::countByte — lineOf's newline count
+#include "infra/strkern.h" // strkern::lineNumberAt — a definition's line from its byte offset
 #include "infra/sortutil.h"   // sortUnique
 #include "infra/platform.h" // infra::platform::{add,sub,mul}Overflow — the checked constant-expression arithmetic
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -181,9 +181,10 @@ inline std::string flattenSpace( std::string_view s, std::size_t cap )
     return out;
 }
 
+// The 1-based line of byte offset `at` — the helper recall and --for's literal pages share; the count is strkern's.
 inline std::uint32_t lineOf( std::string_view src, std::size_t at )
 {
-    return 1u + std::uint32_t( strkern::countByte( src.substr( 0, at ), '\n' ) );
+    return strkern::lineNumberAt( src, at );
 }
 
 // Advance past the comment / string / character literal starting at src[i]; returns i unchanged when

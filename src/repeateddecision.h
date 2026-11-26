@@ -30,7 +30,7 @@
 // DETERMINISM: a pure function of the body bytes; the first repeat in token order is the one named.
 
 #include "cloneidiom.h"   // IdiomTok, idiomCloseOf, idiomBracketStep — the token view and bracket matcher the idiom grammars use
-#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
+#include "infra/strkern.h"   // strkern::lineNumberAt — a finding's line from its byte offset
 #include "clones.h"       // scanCodeTokens — THE one code scanner
 #include "model.h"
 
@@ -237,12 +237,6 @@ inline std::pair<TokSpan, TokSpan> firstRepeat( const std::vector<IdiomTok>& t, 
     return {};
 }
 
-// The 1-based line of a byte offset.
-inline std::uint32_t lineAt( const std::string& bytes, std::size_t offset ) noexcept
-{
-    return std::uint32_t( 1 + strkern::countByte( std::string_view( bytes ).substr( 0, offset ), '\n' ) );
-}
-
 inline std::size_t offsetOf( const std::string& bytes, std::string_view w ) noexcept { return std::size_t( w.data() - bytes.data() ); }
 
 // A span's source text, whitespace runs collapsed to one space, cut at kFixConditionMaxBytes on a UTF-8 boundary.
@@ -288,16 +282,16 @@ inline std::string repeatedDecisionFix( const std::string& bytes, std::size_t bo
     if( condAgain.end > condAgain.begin )
     {
         out += kNameDecisionFix;
-        out += spanText( bytes, t, cond ) + " is tested at lines " + std::to_string( lineAt( bytes, offsetOf( bytes, t[cond.begin].text ) ) )
-             + " and " + std::to_string( lineAt( bytes, offsetOf( bytes, t[condAgain.begin].text ) ) );
+        out += spanText( bytes, t, cond ) + " is tested at lines " + std::to_string( strkern::lineNumberAt( bytes, offsetOf( bytes, t[cond.begin].text ) ) )
+             + " and " + std::to_string( strkern::lineNumberAt( bytes, offsetOf( bytes, t[condAgain.begin].text ) ) );
     }
     const auto [ loop, loopAgain ] = firstRepeat( t, loopBodiesOf( bytes, t, close ), kClonedLoopMinTokens );
     if( loopAgain.end > loopAgain.begin )
     {
         out += out.empty() ? "" : "; ";
         out += kNameLoopFix;
-        out += "the loop body at line " + std::to_string( lineAt( bytes, offsetOf( bytes, t[loop.begin].text ) ) ) + " repeats at line "
-             + std::to_string( lineAt( bytes, offsetOf( bytes, t[loopAgain.begin].text ) ) );
+        out += "the loop body at line " + std::to_string( strkern::lineNumberAt( bytes, offsetOf( bytes, t[loop.begin].text ) ) ) + " repeats at line "
+             + std::to_string( strkern::lineNumberAt( bytes, offsetOf( bytes, t[loopAgain.begin].text ) ) );
     }
     return out;
 }

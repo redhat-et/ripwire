@@ -1,6 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
+#include "infra/strkern.h"   // strkern::lineNumberAt — a line number from a byte offset
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -350,7 +350,7 @@ inline std::uint32_t memberDeclLine( const IngestResult& ing, const Symbol& owne
         if( memberDeclShaped( bytes.substr( lineStart, lineEnd - lineStart ), at - lineStart, name.size(), owner.lang )
             && !insideFunctionOfFile( ing, owner.fileId, at, fileFirst ) )
         {
-            return std::uint32_t( 1 + strkern::countByte( std::string_view( bytes ).substr( 0, at ), '\n' ) );
+            return strkern::lineNumberAt( bytes, at );
         }
     }
     return 0;
