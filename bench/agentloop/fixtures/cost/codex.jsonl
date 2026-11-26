@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"t1"}
+{"type":"item.completed","item":{"type":"reasoning","text":"think"}}
+{"type":"item.completed","item":{"type":"command_execution","command":"rg foo","exit_code":0}}
+{"type":"item.completed","item":{"type":"command_execution","command":"sed -n 1,20p a.py","exit_code":0}}
+{"type":"item.completed","item":{"type":"command_execution","command":"ripwire . --for=foo","exit_code":0}}
+{"type":"item.completed","item":{"type":"file_change","changes":[{"path":"a.py","kind":"update"}]}}
+{"type":"item.completed","item":{"type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":50000,"cached_input_tokens":42000,"output_tokens":3000,"reasoning_output_tokens":1200}}

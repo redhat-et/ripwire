@@ -307,11 +307,13 @@ for _g in \
     affectedfoldcheck \
     affectedgroupcheck \
     affectedpathcheck \
+    agentloopaccountingcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
     agentloopfollowupcheck \
     agentloopgradercheck \
+    agentloophistorycheck \
     agentlooplockcheck \
     agentloopopencodecheck \
     agentsurfacecheck \
