@@ -16,7 +16,8 @@
 //                              block boundary.
 //   C  lowerFoldedEquals     — folded compare vs the scalar twin, including every single-byte difference
 //                              position and the case-only differences that are the point of the kernel.
-//   D  findByte / find3      — first-occurrence scans vs the scalar twins AND vs a naive memchr/memcmp
+//   D  findByte / find3 / findNeedle — first-occurrence scans vs the scalar twins AND vs a naive memchr/memcmp
+//      (D2: strkern::find vs std::string_view::find on both paths, exact-size heap buffers)
 //                              oracle, needle present and absent, matches at 0 / at n-1 / straddling.
 //   E  findByteset           — 256-bit set scan; sets built to hit the (b>>3, b&7) packing's seams
 //                              (empty, full, the 0x80 boundary, one byte only, the XML-escape set) —
@@ -73,6 +74,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>           // std::unique_ptr<char[]> — the D2 arm's exact-size heap copies
 #include <string>
 #include <string_view>
 #include <utility>          // std::move — `keep` is the one place a first-wins message is retained
@@ -554,7 +556,7 @@ std::string probeFind3( DeterministicRng& gen, const std::string& buf, int iter 
         std::memcpy( needle3, buf.data() + at, 3 );
     }
     const std::size_t got   = sk::find3( buf.data(), n, needle3 );
-    const std::size_t ref   = sk::find3_scalar( buf.data(), n, needle3 );
+    const std::size_t ref   = sk::find3( buf.data(), n, needle3, sk::KernelPath::Scalar );
     std::size_t       naive = n;
     for( std::size_t k = 0; k + 3 <= n; ++k )
     {
@@ -567,6 +569,63 @@ std::string probeFind3( DeterministicRng& gen, const std::string& buf, int iter 
         return msg;
     }
     return {};
+}
+
+// The naive answer findNeedle must equal: the first start at or after `from` where the whole needle matches, else n.
+std::size_t naiveNeedleFrom( std::string_view hay, std::string_view needle, std::size_t from )
+{
+    for( std::size_t k = from; k + needle.size() <= hay.size(); ++k )
+    {
+        if( hay.substr( k, needle.size() ) == needle ) { return k; }
+    }
+    return hay.size();
+}
+
+// Every occurrence of `needle` walked from `hit + 1`, as grepScanText walks it: vector == scalar twin == naive at each step.
+// "" when all agree, else where they first disagree.
+std::string walkNeedle( std::string_view hay, std::string_view needle )
+{
+    const std::size_t n = hay.size(), m = needle.size();
+    for( std::size_t from = 0; from < n; )
+    {
+        const std::size_t left  = n - from;
+        const std::size_t got   = sk::findNeedle( hay.data() + from, left, needle.data(), m );
+        const std::size_t ref   = sk::findNeedle( hay.data() + from, left, needle.data(), m, sk::KernelPath::Scalar );
+        const std::size_t naive = m == 0 ? 0 : naiveNeedleFrom( hay, needle, from ) - from;
+        if( got != ref || got != naive )
+        {
+            char msg[ 160 ];
+            std::snprintf( msg, sizeof( msg ), "from=%zu got=%zu ref=%zu naive=%zu n=%zu m=%zu", from, got, ref, naive, n, m );
+            return msg;
+        }
+        if( m == 0 || got == left )
+        {
+            break;
+        }
+        from += got + 1;
+    }
+    return {};
+}
+
+// D — findNeedle (any length, 0..40 bytes). Its OWN generator, seeded from the iteration, so the arms above keep the stream they
+// always swept. Half the needles are PLANTED (copied out of the buffer, so a hit is exercised, a long one straddling blocks), half
+// drawn at random.
+std::string probeFindNeedle( const std::string& buf, int iter )
+{
+    DeterministicRng  gen{ 0x9E3779B97F4A7C15ull ^ std::uint64_t( iter ) };
+    const std::size_t n = buf.size();
+    const std::size_t m = std::size_t( gen.next() % 41u );
+    std::string       needle( m, '\0' );
+    for( char& c : needle )
+    {
+        c = char( gen.next() & 0xFF );
+    }
+    if( m > 0 && m <= n && ( gen.next() & 1 ) )
+    {
+        needle.assign( buf, std::size_t( gen.next() % ( n - m + 1 ) ), m );
+    }
+    const std::string d = walkNeedle( buf, needle );
+    return d.empty() ? d : "findNeedle iter=" + std::to_string( iter ) + " " + d;
 }
 
 // E — findByteset: vector == the SHIPPED scalar tail == the re-deriving ORACLE == naive. The oracle is
@@ -633,6 +692,7 @@ const Sweep& sweep()
             keep( r.findFail, probeFindByte( gen, buf, iter ) );
             keep( r.findFail, probeFind3( gen, buf, iter ) );
             keep( r.findFail, probeFindByteset( gen, buf, iter ) );
+            keep( r.findFail, probeFindNeedle( buf, iter ) );   // its own generator: the stream above is unchanged
             {
                 const std::string d = tokenizerDiff( buf );
                 if( !d.empty() )
@@ -707,11 +767,17 @@ std::string probeFileFinds( const std::string& text, const std::string& name )
     char              needle3[ 3 ];
     std::memcpy( needle3, text.data() + at, 3 );
     const std::size_t got3  = sk::find3( text.data(), text.size(), needle3 );
-    const std::size_t ref3  = sk::find3_scalar( text.data(), text.size(), needle3 );
+    const std::size_t ref3  = sk::find3( text.data(), text.size(), needle3, sk::KernelPath::Scalar );
     std::size_t       naive = text.size();
     for( std::size_t k = 0; k + 3 <= text.size(); ++k )
     {
         if( std::memcmp( text.data() + k, needle3, 3 ) == 0 ) { naive = k; break; }
+    }
+    // findNeedle: a 12-byte needle from the file's middle (or the whole file when shorter), every occurrence walked
+    const std::size_t m = std::min<std::size_t>( 12, text.size() );
+    if( const std::string d = walkNeedle( text, std::string_view( text ).substr( ( text.size() - m ) / 2, m ) ); !d.empty() )
+    {
+        return name + " (findNeedle " + d + ")";
     }
     const std::size_t gotS = sk::findByteset( text.data(), text.size(), S.setXml );
     const std::size_t refS = sk::findByteset_scalar( text.data(), text.size(), S.setXml );
@@ -1202,11 +1268,104 @@ TEST_CASE( "strkern: C1 lowerFoldedEquals vector == scalar, equal and perturbed"
     CHECK( s.eqFail.empty() );
 }
 
-TEST_CASE( "strkern: D1/E1 findByte / find3 / findByteset vector == scalar == oracle == naive" )
+TEST_CASE( "strkern: D1/E1 findByte / find3 / findNeedle / findByteset vector == scalar == oracle == naive" )
 {
     const Sweep& s = sweep();
     INFO( "buffers: ", s.bufferCount, "  first divergence: ", s.findFail );
     CHECK( s.findFail.empty() );
+}
+
+// D2 — strkern::find (findNeedle underneath) against the standard library's own answer (std::string_view::find), on BOTH paths, every start walked. The haystack and
+// the needle are EXACT-SIZE heap copies, so a read one byte past either end is an AddressSanitizer report under strkerncheck's G1 build
+// (a std::string's capacity slack would hide it): the tail of each block loop is what this checks. "" when every answer agrees.
+std::string needleVsStd( std::string_view hay, std::string_view needle )
+{
+    const std::size_t             n = hay.size(), m = needle.size();
+    const std::unique_ptr<char[]> exactHay( new char[ n ] );
+    const std::unique_ptr<char[]> exactNeedle( new char[ m ] );
+    std::memcpy( exactHay.get(), hay.data(), n );
+    std::memcpy( exactNeedle.get(), needle.data(), m );
+    const std::string_view exactHayView( exactHay.get(), n ), exactNeedleView( exactNeedle.get(), m );
+    for( std::size_t from = 0; from <= n + 1; ++from )   // n + 1: a start past the end is npos, as for std::string_view::find
+    {
+        const std::size_t want = hay.find( needle, from );
+        for( const sk::KernelPath path : { sk::KernelPath::Vector, sk::KernelPath::Scalar } )
+        {
+            const std::size_t got = sk::find( exactHayView, exactNeedleView, from, path );
+            if( got != want )
+            {
+                char msg[ 192 ];
+                std::snprintf( msg, sizeof( msg ), "path=%s n=%zu m=%zu from=%zu got=%zu want=%zu", path == sk::KernelPath::Scalar ? "scalar" : "vector",
+                               n, m, from, got, want );
+                return msg;
+            }
+        }
+    }
+    return {};
+}
+
+// The chosen cases: needles of 1, 2, 3 and 4..40 bytes; a match at offset 0 and one ending on the last byte; overlapping runs; an empty
+// haystack and an empty needle; a needle longer than the haystack; lengths either side of the 8/16/32-start blocks.
+std::vector<std::pair<std::string, std::string>> needleCases()
+{
+    std::vector<std::pair<std::string, std::string>> cases = {
+        { "", "" },          { "", "a" },          { "a", "" },            { "a", "a" },          { "a", "b" },          { "ab", "abc" },
+        { "abc", "abc" },    { "xabc", "abc" },    { "abcx", "abc" },      { "aaaaaaa", "aaaa" }, { "aaaaaaa", "aa" },   { "abababab", "aba" },
+        { "\n\n\n", "\n" }, { std::string( 1, '\0' ), std::string( 1, '\0' ) },
+    };
+    for( const std::size_t n : { 7u, 8u, 9u, 15u, 16u, 17u, 31u, 32u, 33u, 47u, 48u, 49u, 64u, 65u, 100u } )
+    {
+        for( const std::size_t m : { 1u, 2u, 3u, 4u, 8u, 15u, 16u, 17u, 33u } )
+        {
+            if( m > n )
+            {
+                continue;
+            }
+            std::string hay( n, '.' );
+            const std::string needle = std::string( m - 1, 'q' ) + "Z";
+            hay.replace( 0, m, needle );            // a match at offset 0
+            hay.replace( n - m, m, needle );        // and one ending on the last byte
+            cases.emplace_back( hay, needle );
+            cases.emplace_back( std::string( n, 'a' ), std::string( m, 'a' ) );   // every start overlaps the next
+        }
+    }
+    return cases;
+}
+
+// D2's random text: `n` bytes over "ab\n" (dense: matches overlap often) or over every byte value.
+std::string drawNeedleText( DeterministicRng& gen, std::size_t n, bool dense )
+{
+    std::string text( n, '\0' );
+    for( char& c : text )
+    {
+        c = dense ? "ab\n"[ gen.next() % 3u ] : char( gen.next() & 0xFF );
+    }
+    return text;
+}
+
+TEST_CASE( "strkern: D2 find == std::string_view::find, both paths, exact-size buffers (lengths 0/1/2/3+, ends, overlap, empty)" )
+{
+    std::string fail;
+    std::size_t caseCount = 0;
+    for( const auto& [ hay, needle ] : needleCases() )
+    {
+        ++caseCount;
+        if( fail.empty() ) { fail = needleVsStd( hay, needle ); }
+    }
+    DeterministicRng gen{ 0xD2F1AD5EEDull };
+    for( int iter = 0; iter < 4000; ++iter )   // random haystacks: a 3-byte alphabet half the time (dense, overlapping matches)
+    {
+        const bool        dense  = ( iter & 1 ) == 0;
+        const std::string hay    = drawNeedleText( gen, std::size_t( gen.next() % 161u ), dense );
+        std::string       needle = drawNeedleText( gen, std::size_t( gen.next() % 41u ), dense );
+        const std::size_t n = hay.size(), m = needle.size();
+        if( m > 0 && m <= n && ( gen.next() & 1 ) ) { needle.assign( hay, std::size_t( gen.next() % ( n - m + 1 ) ), m ); }
+        ++caseCount;
+        if( fail.empty() ) { fail = needleVsStd( hay, needle ); }
+    }
+    INFO( "cases: ", caseCount, "  path: ", sk::kPathName, "  first divergence: ", fail );
+    CHECK( caseCount > 4000 );
+    CHECK( fail.empty() );
 }
 
 TEST_CASE( "strkern: E0 Byteset256 carries two agreeing representations (bits vs words)" )
@@ -1306,7 +1465,7 @@ TEST_CASE( "strkern: G2 lowerFoldAscii / lowerFoldedEquals over src/ + docs/" )
     CHECK( r.foldFail.empty() );
 }
 
-TEST_CASE( "strkern: G3 find3 / findByteset over src/ + docs/" )
+TEST_CASE( "strkern: G3 find3 / findNeedle / findByteset over src/ + docs/" )
 {
     const RealText& r = realText();
     INFO( "files: ", r.fileCount, "  first divergence: ", r.findFail );
