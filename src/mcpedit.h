@@ -12,6 +12,7 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
+#include "declwrap.h"         // declStartByte — the edit span starts where the served body does (wrapper prefix included)
 #include "editcheck.h"        // P9: the SAME four computations --edit-check renders as XML — folded into the receipt as JSON
 #include "testmap.h"          // P9: affectedAnswerForFile + testRowEvidence + runFieldJsonDisclosed — the SAME rows --affected=FILE emits
 #include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
@@ -22,6 +23,7 @@
 #include "redact.h"           // R1 (V3): kRedactRules — the marker table the write gate's predicate is derived FROM
 #include "pathguard.h"        // A4-F14: rw::pathguard::isSymlink — THE symlink predicate, shared with the sidecar writers
 #include "memguard.h"         // #350: an edit refuses an index the memory guard cut (verbRefusalLine)
+#include "memceiling.h"       // ruling 101: the allocator line is suspended for the post-write region (Suspension)
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
 
@@ -489,11 +491,12 @@ namespace mcpedit
 
     // apply the edit. Pure over (span, op, text, srcBytes) → the new file bytes, plus the applied [a,b) span
     // and what the seam rules did (`seam`). The rules, documented in --help and the MCP schemas:
-    //   ReplaceBody   — the new bytes are new_body; every byte outside [sigStartByte, endByte) is preserved
+    //   ReplaceBody   — the new bytes are new_body; every byte outside [declStartByte, endByte) (declwrap.h: the
+    //                   declaration from its wrapper prefix, the span --expand prints) is preserved
     //                   verbatim. ONE trailing newline on new_body is FOLDED into the newline already at
     //                   endByte (a heredoc / echo / editor always appends one the span never contained), and the
     //                   receipt says trailing_newline_folded:true; a second one — a deliberate blank line — stays.
-    //   InsertBefore  — text is inserted at sigStartByte, then PADDED with trailing newlines until it is
+    //   InsertBefore  — text is inserted at declStartByte, then PADDED with trailing newlines until it is
     //                   separated from the existing definition by the same blank-line run the file has right
     //                   before that definition (at least one newline, so the two never share a line). Padding
     //                   only ever ADDS; a payload already carrying the separator is left alone. separator_padded=N.
@@ -631,8 +634,9 @@ namespace mcpedit
     // had 45,765 of these before that; a possibly-live (held, or fresh) lock inode is still never removed.
     inline std::string editLockPath( const std::string& targetPath )
     {
-        std::uint64_t h = 1469598103934665603ULL;      // FNV-1a-64 of the target path → a stable per-file lock name
-        for( char c : targetPath ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
+        // FNV-1a-64 of the target path → a stable per-file lock name. The stored seed: an older ripwire editing the same
+        // file must open the same lock file, or flock no longer serializes the two.
+        const std::uint64_t h = hashutil::fnv1a64( targetPath, hashutil::kFnv1aLegacySeed64 );
         char name[ 64 ];
         rw::formatTo( name, sizeof( name ), "ripwire-edit-{:016x}.lock", (unsigned long long)h );
         const std::string lockDir = quality::cacheDirLadder() + "/locks";
@@ -984,7 +988,7 @@ namespace mcpedit
         // qualified target: resolveOneForEdit matches the bare name exactly, so `Alpha.run` is refused "not found" upstream.
         const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
         const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
-        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes );
+        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes, g.provenSites );
         const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
         std::size_t incompatibleCount = 0;
         for( NodeId c : callerIds )
@@ -1184,26 +1188,70 @@ namespace mcpedit
 
     // The key a post-check that stopped AFTER the write puts on the receipt; the CLI's stderr line reads it.
     inline constexpr std::string_view kPostCheckNotRunKey = ",\"post_check\":\"not run: ";
+    // The key ruling 101's disclosure puts on the receipt; the CLI's stderr line reads the receipt for it too.
+    inline constexpr std::string_view kCeilingKey = ",\"memory_ceiling\":\"";
+
+    // Ruling 101's disclosure half: the receipt says what the allocator line did about this post-check, so no
+    // output can imply a ceiling-checked run. Three states, each true as written:
+    //   * the ceiling is NOT ARMED for this run (RIPWIRE_MEM_BUDGET_MB=0, a server — --mcp and --lsp never arm
+    //     it — or a build whose operator new is not replaced) -> it says so, and nothing was suspended.
+    //   * armed, and the limit was never reached -> the suspension, and the limit that did not apply.
+    //   * armed, and the check PASSED the limit -> that, plus the peak, the count, and the two facts a caller
+    //     acts on: the edit IS applied, and this check ran unbounded.
+    // It is emitted UNCONDITIONALLY, which test/receiptpostcheck.sh (13) is the reason for: that arm requires
+    // the MCP and CLI receipts to carry the SAME keys, and --mcp does not arm the ceiling while the CLI does by
+    // default — so a field that appeared only when armed made one surface's receipt a different shape from the
+    // other's. Always present, never silent, and the same keys on both surfaces.
+    inline std::string ceilingSuspensionJson( const rw::memceiling::Suspension& sus )
+    {
+        std::string out( kCeilingKey );
+        if( !sus.armed() )
+        {
+            return out + "not armed for this run, so nothing was suspended and this check ran under the memory guard's own lines alone\"";
+        }
+        out += "suspended for this check (the write is committed, so a refusal here could not be reported and a retry could insert twice)";
+        if( const std::uint64_t crossed = sus.crossings(); crossed != 0 )
+        {
+            out += "; the check PASSED the " + std::to_string( sus.limitMib() ) + " MiB limit (peak "
+                 + std::to_string( sus.peakMib() ) + " MiB over " + std::to_string( crossed )
+                 + " admitted allocation(s)) and ran unbounded — the edit IS applied, and a fresh --edit-check runs under the ceiling";
+        }
+        else
+        {
+            out += "; the " + std::to_string( sus.limitMib() ) + " MiB limit was not reached";
+        }
+        return out + "\"";
+    }
 
     // F-W1: the post-check runs AFTER the write is committed, and its index rebuild (or the contract check's fold) can stop at
     // the memory limit. That stop refuses nothing: the write stands, so the receipt stands and says the check did not run.
     // Letting FileGraphStopped reach a surface's catch would answer "refused" for a file already edited, and an agent that
     // believes it inserts twice. Every write path's post-check goes through here: the MCP and CLI edit verbs (runEditVerb)
     // and each op of an --edit-plan --apply (editplan.h). `nextOut` keeps the caller's --edit-check= (set before the call).
+    //
+    // RULING 101: this is also where the allocator-level ceiling is SUSPENDED, and it is the only place that
+    // constructs the suspension — because this function IS the post-write region, for every write path, by the
+    // contract above. The memory guard's own stop keeps working inside it (the catch below); what the
+    // suspension removes is memceiling.h's std::_Exit(5), which cannot report a receipt for a file that is
+    // already on disk. The scope ends before this function returns, so nothing downstream runs unguarded, and
+    // the disclosure rides out on the same receipt fragment — see ceilingSuspensionJson.
     inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
                                       bool withTests = true, std::string* nextOut = nullptr )
     {
+        const rw::memceiling::Suspension sus;   // RAII: every return path below closes it, including the catch
+        std::string                      out;
         try
         {
-            return postCheckJsonBuilt( root, fileIdentity, symbolName, withTests, nextOut );
+            out = postCheckJsonBuilt( root, fileIdentity, symbolName, withTests, nextOut );
         }
         catch( const FileGraphStopped& stopped )
         {
             releaseMcpIndexMemory();     // getIndex released a half-built slot already; a stop in the check's own fold leaves a whole one
             memguard::answerStops();     // this receipt answers for the stop: no backstop line, no exit 5
-            return std::string( kPostCheckNotRunKey )
-                 + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-edit check", "the write", stopped.why() ) ) + "\"";
+            out = std::string( kPostCheckNotRunKey )
+                + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-edit check", "the write", stopped.why() ) ) + "\"";
         }
+        return out + ceilingSuspensionJson( sus );
     }
 
 }   // namespace mcpedit
@@ -1328,9 +1376,11 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     // committed write in the [read..rename] window is DETECTED and REFUSED, never silently clobbered.
     const std::uint64_t baseHash = freshHash;
 
-    // 3. span sanity — the FULL def span is [sigStartByte, endByte) (same span --expand slices). Degrade,
+    // 3. span sanity — the FULL def span is [declStartByte, endByte) (same span --expand slices: the declaration from
+    //    its wrapper prefix, declwrap.h — so a replace covers the `export` / decorator / template<…> the served body
+    //    carried, and an insert-before lands above a decorator, never between it and its function). Degrade,
     //    never assert: an out-of-range span refuses rather than splicing out of bounds.
-    const std::size_t a = s.sigStartByte, b = s.endByte;
+    const std::size_t a = declStartByte( ing, s, src ), b = s.endByte;
     if( !( a < b && b <= src.size() ) )
     {
         oc.ok = false; oc.errCode = -32603;

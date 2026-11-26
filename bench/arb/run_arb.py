@@ -287,7 +287,7 @@ FILE_GROUP_RE = re.compile(r'<f p="([^"]+)"')
 def query_files(bin_path, snap, query, top_k=200):
     """--query (plain BM25 map, XML): file groups in document order = important-first."""
     out = run_bin_or_none(bin_path, snap, ["--query=%s" % query[:QUERY_CAP], "--top-k=%d" % top_k])
-    return [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)] if out is not None else []
+    return [xml_path(m, snap) for m in FILE_GROUP_RE.findall(out)] if out is not None else []
 
 
 FRAME_RE = re.compile(r'<frame[^>]*? p="([^"]+)"')
@@ -304,13 +304,13 @@ def trace_files(bin_path, snap, trace_text):
         os.unlink(tmp_path)
     if out is None:
         return []
-    frames = [norm_path(m, snap) for m in FRAME_RE.findall(out)]
+    frames = [xml_path(m, snap) for m in FRAME_RE.findall(out)]
     # instrument v2 (2026-08-29): the binary's test-to-source hop rows are served beside the
     # innermost frame (the emitted legend states the served order), so the composition splices
     # them after frame 1 — faithful reading of the disclosed serving, registered in EVALS.
-    hops = [norm_path(m, snap) for m in HOP_RE.findall(out)]
+    hops = [xml_path(m, snap) for m in HOP_RE.findall(out)]
     ranked = frames[:1] + hops + frames[1:]
-    ranked += [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)]
+    ranked += [xml_path(m, snap) for m in FILE_GROUP_RE.findall(out)]
     return ranked
 
 
@@ -339,6 +339,12 @@ def xml_unescape(s):
                 return m.group(0)
         return _ARB_ENT.get(body, m.group(0))
     return re.sub(r"&([#0-9A-Za-z]+);", one, s)
+
+
+def xml_path(raw, snap):
+    """A <f p=>/<frame p=>/<hop p=> attribute value as the file path it names: the XML decode (ripwire's emitter
+    escapes & < > " ' and control bytes) THEN norm_path, so `src/a&amp;b.py` ranks as `src/a&b.py` (#719)."""
+    return norm_path(xml_unescape(raw), snap)
 
 
 def affected_tests(bin_path, snap, changed_file):

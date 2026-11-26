@@ -11,6 +11,7 @@
 // test/memstatscheck.sh's plateau arm) cannot read an unknown as "nothing held" (CodeRabbit 4543019678).
 #include "infra/emit.h"   // rw::emitTo
 #include "infra/os.h"     // rw::os::mem_footprint / mem_footprint_peak
+#include "memceiling.h"   // the phase a memory-ceiling refusal names; its reading count at graph-end
 
 #include <cstdint>
 #include <cstdlib>  // std::getenv
@@ -46,12 +47,20 @@ inline std::string reading( std::uint64_t bytes )
 
 // one `[mem] phase=<phase> cur_mib=<now> peak_mib=<lifetime peak>` line when RIPWIRE_STATS is set (either reading may be
 // `unavailable`)
-inline void mark( std::string_view phase )
+inline void mark( const char* literal )   // a string literal: notePhase keeps the pointer, so it must be NUL-terminated and live forever
 {
+    memceiling::notePhase( literal );
+    const std::string_view phase( literal );
     if( !enabled() )
     {
         return;
     }
     rw::emitTo( stderr, "[mem] phase={} cur_mib={} peak_mib={}\n", phase, reading( os::mem_footprint() ), reading( os::mem_footprint_peak() ) );
+    if( phase == "graph-end" )   // the allocator line's cost on this run: footprint readings taken, how many on a large block,
+    {                            // and how many the OS could not answer (admitted unchecked — memceiling.h noteUnreadable)
+        rw::emitTo( stderr, "[mem] ceiling armed_mib={} readings={} large_readings={} unreadable={}\n", memceiling::budgetBytes() / memceiling::kMiB,
+                    memceiling::g_state.readings.load( std::memory_order_relaxed ), memceiling::g_state.largeReadings.load( std::memory_order_relaxed ),
+                    memceiling::g_state.unreadable.load( std::memory_order_relaxed ) );
+    }
 }
 }   // namespace rw::memstats

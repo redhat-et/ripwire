@@ -27,7 +27,7 @@
 #include "pageview.h"  // kCallersBandMaxBytes / kCallerRowMinBytes / kCallHierarchyBandMax
 #include "defattrib.h" // the per-row definition attribution every surface of these rows serves (and tsContractSignatures)
 #include "filter.h"    // pathTierIndexOver / compareTierThenPath — the tier-then-path row order both surfaces serve
-#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
+#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / radiusTiers / isTestedByReach
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — n="Owner.name" on every member row
 #include "model.h"
 #include "nextverb.h"  // nextFlag / nextAttrXml / nextFieldJson — a cut <in> block's next=
@@ -50,23 +50,36 @@ namespace rw
 
 // A6: the 1-hop tested/untested partition, bundled into one call so a caller pays ONE statement instead of
 // separately naming testReach / tested / untested / attr. The counting loop itself lives in
-// graph.h::countTestedIn, shared with --impact. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
+// graph.h::radiusTiers, shared with --impact and --safe-delete. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
 // twins can serve the same partition instead of omitting the lens.)
+// TIER-FOLLOWUP: three tiers, not two, by IMPACT-TEST-TIER's graph.h radiusTiers. isTestedByReach never counts a test symbol,
+// so `untested = rows - tested` put every TEST caller into hop_untested=; the test rows are now their own count, hop_tests=
+// (absent at 0), and hop_tested + hop_untested + hop_tests == rows.size().
 struct HopTestedPartition
 {
     std::vector<char> testReach;
     std::size_t       tested;
     std::size_t       untested;
-    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
+    std::size_t       tests;     // test definitions among the rows (isTestSymbol): their own tier, never untested production
+    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\"" + " hop_tests=\"K\"" when K > 0
 };
 
 inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& rows )
 {
     std::vector<char> testReach = testSymbolForwardReach( ing, g );
-    const std::size_t tested    = countTestedIn( ing, testReach, rows );
-    const std::size_t untested  = rows.size() - tested;
-    std::string       attr      = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
-    return { std::move( testReach ), tested, untested, std::move( attr ) };
+    const RadiusTiers tiers     = radiusTiers( ing, testReach, rows );
+    std::string       attr      = " hop_tested=\"" + std::to_string( tiers.tested ) + "\" hop_untested=\"" + std::to_string( tiers.untested ) + "\""
+                                + ( tiers.tests > 0 ? " hop_tests=\"" + std::to_string( tiers.tests ) + "\"" : std::string() );
+    return { std::move( testReach ), tiers.tested, tiers.untested, tiers.tests, std::move( attr ) };
+}
+
+// TIER-FOLLOWUP: whether a test definition is among rows[begin, end) — the columnar <test> column and its legend clause ride
+// exactly then (a page with none is byte-identical to the two-tier answer).
+inline bool anyTestRowIn( const IngestResult& ing, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
+{
+    const std::size_t last  = std::min( end, rows.size() );
+    const std::size_t first = std::min( begin, last );
+    return std::any_of( rows.begin() + std::ptrdiff_t( first ), rows.begin() + std::ptrdiff_t( last ), [ & ]( NodeId n ) { return isTestSymbol( ing, n ); } );
 }
 
 // The rows one 1-hop question yields, with the two counts that qualify them.
@@ -103,13 +116,20 @@ struct CallHierarchyRows
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
     std::vector<std::uint32_t> declinedSites;
-    // GV-PATH-BIND (CLI --callers, src/verbs_navigate.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
+    // GV-PATH-BIND (CLI --callers, src/forgraphverb.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
     // M1 rule narrowed it to one source definition, whose spelling these rows answer; empty otherwise (the root's narrowed=)
     std::vector<std::string>   narrowed;
+    // CALLERS-TWO-COPY-BIND (forgraphverb.h sourceCopyPick): beside `narrowed`, the copies of the bound definition the answer left out
+    // (the root's copy_p= / copy_next=); empty otherwise
+    std::vector<NodeId>        copies;
     // BODILESS-SEED (contractseed.h): callers only — the selector's contract seeds and the implementor bodies `matches` gained
     // for them (the root's impls=; absent when contractSeeds is 0)
     std::size_t                contractSeeds = 0;
     std::size_t                implBodies    = 0;
+    // lane bx2-fix2-ceiling (macroCeiling below): the see-through callers NOT listed, and the macro with the most of them (its
+    // own --callers lists them whole: the root's via_macro_next=); 0 / kNoNode when every see-through caller is a row.
+    std::size_t                viaMacroWithheld = 0;
+    NodeId                     viaMacroNext     = kNoNode;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────
@@ -132,8 +152,7 @@ inline std::vector<NodeId> closureCalleeRows( const IngestResult& ing, const Gra
             rows.push_back( c );
         }
     }
-    std::ranges::sort( rows );
-    rows.erase( std::ranges::unique( rows ).begin(), rows.end() );
+    sortutil::sortUnique( rows );
     const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
     std::sort( rows.begin(), rows.end(), [ & ]( NodeId a, NodeId b )
     {
@@ -350,8 +369,7 @@ inline std::size_t declinedIfaceCallsNaming( const IngestResult& ing, const Grap
             targetSigNames.push_back( ing.symbols[id].name );
         }
     }
-    std::sort( sigNames.begin(), sigNames.end(), sortutil::svLess );
-    sigNames.erase( std::unique( sigNames.begin(), sigNames.end() ), sigNames.end() );
+    sortutil::sortUnique( sigNames, sortutil::svLess );
     std::sort( targetSigNames.begin(), targetSigNames.end(), sortutil::svLess );
     std::size_t callCount = 0;
     for( std::size_t listIndex = 0; listIndex < g.declinedListCallCount.size(); ++listIndex )
@@ -390,14 +408,6 @@ inline std::pair<std::string_view, bool> callHierarchyNextSelector( const Ingest
         }
     }
     return { name, true };
-}
-
-// attrib-multidef (defattrib.h): which definition each row belongs to, over the rows in their FINAL order — computed here,
-// once, so every dialect of both surfaces (the CLI verbs and the MCP twins) reads one attribution.
-inline CallHierarchyRows withOneHopAttribution( const IngestResult& ing, const Graph& g, CallHierarchyRows rows, bool wantCallers )
-{
-    rows.attr = attributeOneHopAnswer( ing, g, rows.matches, rows.rows, wantCallers );
-    return rows;
 }
 
 // LB-G (r10 §5): the served order of a one-hop listing — TIER before path (filter.h states the key once and --uses shares
@@ -446,6 +456,170 @@ inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Grap
     return rows;
 }
 
+// BX1 FIX 2 — MACRO SEE-THROUGH (test/verbfixcheck.sh F2). tmux calls cmdq_get_callback1 only through
+// `#define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)`: the graph holds the macro -> function edge (the macro's
+// replacement text is scanned, ingest_relations.h captureMacroBodyCalls) and --impact walks it, but --callers printed the macro
+// row and stopped — 1 of the 9 files that call it. A function-like macro is not a caller of its own: what calls the code it
+// expands to is whatever invokes it. So after the direct rows, the callers of every caller row that is a macro (t="macro") are
+// rows too (BX1 walked a chain of macros; BX2 keeps the first hop, below), each marked with the macro it
+// invokes (via="macro:NAME"). Each node once, never a match or a direct row; the walk ends because every node is visited once.
+// The block keeps the direct rows' order rule (oneHopCallerRows: tier, path, then ranked before the cap) and follows them, so
+// the direct rows keep their positions and an answer with no macro row is unchanged.
+// BX2 (the held FIX 2, limited — test/verbfixcheck.sh F2): the FIRST macro hop only, and C-preprocessor macros only. BX1's chain
+// walk printed second-order sites past the question (a confirmation cell's +1.8 KB through a macro calling a macro, no group
+// gained), so a caller of a direct macro row that is itself a macro is listed (via="macro:NAME") but not walked. A Rust
+// `macro_rules!` row (LangFacts::bangMacros) is not seen through: its transcriber's calls already sit in the macro's own file.
+inline bool seeThroughMacro( const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Macro && !langFacts( s.lang ).bangMacros;
+}
+// lane bx2-fix2-ceiling (test/verbfixcheck.sh F2C): THE PER-MACRO CEILING. BX2's T5e confirmation failed the byte bar on one
+// cell: cpython's _Py_RemoteDebug_IsFatalReadError is called through `set_exception_cause` at 46 functions in 8 files (and
+// `_set_debug_exception_cause` at 13 in 1), so --callers grew 3 -> 62 rows (+7 KB, +12.5 KB on --uses) with no group gained —
+// one hop, so the hop limit could not bound it. Per macro, the see-through rows are now ONE PER FILE (the first in served
+// order), at most kMacroSeeThroughFiles files: the answer still names every file a macro reaches up to the ceiling (tmux-01's
+// 9 files from 15 rows; dev T5c / T5e: every group kept, bytes about halved). The rest are withheld, never silent: the root
+// says how many (via_macro_capped=) and which call lists one macro's callers whole (via_macro_next=, the macro with most).
+inline constexpr std::size_t kMacroSeeThroughFiles = 16;
+struct MacroCeilingCut
+{
+    std::size_t withheld = 0;         // rows the ceiling dropped
+    NodeId      next     = kNoNode;   // the macro with the most dropped (the first such in served order)
+};
+// `via[i]` the macro row i invokes and `fileOf( i )` its file, in served order; `keep[i]` is set for the rows listed.
+template<class FileOf>
+MacroCeilingCut macroCeiling( std::span<const NodeId> via, FileOf&& fileOf, std::vector<char>& keep )
+{
+    MacroCeilingCut                        cut;
+    HashSet<std::uint64_t>                 seen;      // (macro, file) already listed — membership only (test/hashsetcheck.sh S)
+    HashMap<NodeId, std::size_t>           files;     // files listed per macro
+    HashMap<NodeId, std::size_t>           dropped;   // rows withheld per macro
+    std::size_t                            most = 0;
+    keep.assign( via.size(), 0 );
+    for( std::size_t i = 0; i < via.size(); ++i )
+    {
+        const std::uint64_t key   = ( std::uint64_t( via[i] ) << 32 ) | std::uint64_t( fileOf( i ) );
+        std::size_t&        count = files[ via[i] ];
+        if( !seen.contains( key ) && count < kMacroSeeThroughFiles )
+        {
+            seen.insert( key );
+            ++count;
+            keep[i] = 1;
+            continue;
+        }
+        ++cut.withheld;
+        if( const std::size_t d = ++dropped[ via[i] ]; d > most )
+        {
+            most     = d;
+            cut.next = via[i];
+        }
+    }
+    return cut;
+}
+// The root's disclosure of a cut, in each dialect: ` via_macro_capped="N" via_macro_next="--VERB=MACRO"`; "" when nothing was cut.
+inline std::string viaMacroCappedAttrXml( const IngestResult& ing, const MacroCeilingCut& cut, std::string_view verbFlag )
+{
+    if( cut.withheld == 0 || cut.next >= ing.symbols.size() )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    return " via_macro_capped=\"" + std::to_string( cut.withheld ) + "\" via_macro_next=\""
+         + std::string( escapeXml( nextFlag( verbFlag, ing.symbols[ cut.next ].name ), esc ) ) + "\"";
+}
+inline std::string viaMacroCappedKeyJson( const IngestResult& ing, const MacroCeilingCut& cut, std::string_view verbFlag )
+{
+    return cut.withheld == 0 || cut.next >= ing.symbols.size()
+         ? std::string()
+         : ",\"via_macro_capped\":" + std::to_string( cut.withheld ) + ",\"via_macro_next\":\"" + jsonStr( nextFlag( verbFlag, ing.symbols[ cut.next ].name ) ) + "\"";
+}
+struct MacroSeeThrough
+{
+    std::vector<NodeId> rows;   // the see-through callers, in served order
+    std::vector<NodeId> via;    // parallel: the macro each one invokes
+    MacroCeilingCut     cut;    // the ceiling's withheld rows (macroCeiling)
+};
+inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> direct )
+{
+    MacroSeeThrough     out;
+    std::vector<NodeId> frontier;
+    for( const NodeId r : direct )
+    {
+        if( r < ing.symbols.size() && seeThroughMacro( ing.symbols[r] ) )
+        {
+            frontier.push_back( r );
+        }
+    }
+    if( frontier.empty() )
+    {
+        return out;
+    }
+    std::vector<char> seen( ing.symbols.size(), 0 );
+    for( const std::span<const NodeId> set : { matches, direct } )
+    {
+        for( const NodeId n : set )
+        {
+            seen[n] = n < seen.size() ? 1 : 0;
+        }
+    }
+    HashMap<NodeId, NodeId> viaOf;
+    const auto*             ro = g.inEdges.rowOffsets();
+    const auto*             ci = g.inEdges.colIndices();
+    for( std::size_t at = 0; at < frontier.size(); ++at )   // the direct macro rows only (BX2: one hop; a macro found here is a row, not walked)
+    {
+        const NodeId m = frontier[at];
+        for( std::uint32_t k = ro[m]; k < ro[m + 1]; ++k )
+        {
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] )
+            {
+                seen[c] = 1;
+                out.rows.push_back( c );
+                viaOf.emplace( c, m );
+            }
+        }
+    }
+    sortOneHopRows( ing, out.rows );
+    rankBeforeCap( ing, out.rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; }, [ & ]( NodeId r ) { return navRelevanceWeight( g, r ); } );
+    out.via.reserve( out.rows.size() );
+    for( const NodeId r : out.rows )
+    {
+        out.via.push_back( viaOf.find( r )->second );
+    }
+    std::vector<char> keep;
+    out.cut = macroCeiling( out.via, [ & ]( std::size_t i ) { return ing.symbols[ out.rows[i] ].fileId; }, keep );
+    if( out.cut.withheld > 0 )
+    {
+        std::size_t w = 0;
+        for( std::size_t i = 0; i < out.rows.size(); ++i )
+        {
+            if( keep[i] )
+            {
+                out.rows[w] = out.rows[i];
+                out.via[w]  = out.via[i];
+                ++w;
+            }
+        }
+        out.rows.resize( w );
+        out.via.resize( w );
+    }
+    ENSURES( out.via.size() == out.rows.size(), "one macro per see-through row" );
+    return out;
+}
+// The row's via= for a see-through caller (absent on a direct row), in each dialect: XML ` via="macro:NAME"`, JSON `,"via":"macro:NAME"`.
+inline std::string viaMacroAttrXml( const IngestResult& ing, NodeId macro )
+{
+    if( macro == kNoNode || macro >= ing.symbols.size() )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    return " via=\"macro:" + std::string( escapeXml( ing.symbols[macro].name, esc ) ) + "\"";
+}
+inline std::string viaMacroKeyJson( const IngestResult& ing, NodeId macro )
+{
+    return ( macro == kNoNode || macro >= ing.symbols.size() ) ? std::string() : ",\"via\":\"macro:" + jsonStr( ing.symbols[macro].name ) + "\"";
+}
+
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers,
                                             const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
 {
@@ -468,9 +642,18 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     }
     out.crossKind = crossKindValue( ing, out.matches );
 
+    std::vector<NodeId> viaMacro;   // BX1 FIX 2: parallel to out.rows once a see-through row exists, else empty
     if( wantCallers )
     {
         out.rows = oneHopCallerRows( ing, g, out.matches );   // collected, tier/path ordered and ranked before the cap (below)
+        if( MacroSeeThrough seeThrough = macroSeeThroughRows( ing, g, out.matches, out.rows ); !seeThrough.rows.empty() )
+        {
+            viaMacro.assign( out.rows.size(), kNoNode );
+            out.rows.insert( out.rows.end(), seeThrough.rows.begin(), seeThrough.rows.end() );
+            viaMacro.insert( viaMacro.end(), seeThrough.via.begin(), seeThrough.via.end() );
+            out.viaMacroWithheld = seeThrough.cut.withheld;   // lane bx2-fix2-ceiling: the root's via_macro_capped= / via_macro_next=
+            out.viaMacroNext     = seeThrough.cut.next;
+        }
     }
     else
     {
@@ -502,7 +685,8 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
         const ValueRefIndex&               vri   = valueIndex != nullptr ? *valueIndex : *local;
         out.valueRefs = withPatternRows( wantCallers ? valueRefCallerRows( ing, vri, out.matches ) : valueRefCalleeRows( ing, vri, out.matches ), PatternIndex( ing, vri ), out.matches, wantCallers );
     }
-    return withOneHopAttribution( ing, g, std::move( out ), wantCallers );
+    out.attr = attributeOneHopAnswer( ing, g, out.matches, out.rows, wantCallers, viaMacro );   // attrib-multidef; BX1 FIX 2: + via="macro:"
+    return out;
 }
 
 // C2 callers byte band (pageview.h kCallersBandMaxBytes): the estimated bytes of EVERY row of a callers answer, so
@@ -525,13 +709,13 @@ struct CallersByteBand
 // The band is built in a local and returned as one aggregate. (Fix round 1 restructured this for the gcc-14.2 Release/LTO
 // rc=139; the SEGV round found the cause in pageview.h callHierarchyRowCap's unstated precondition, not here.)
 inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, const VrRender& rr, int pageLimit,
-                                        const std::vector<char>& testReach, const OneHopAttribution& attr, std::span<const std::uint32_t> keptForwards )
+                                        const std::vector<char>& testReach, const OneHopAttribution& attr, const Graph& g )
 {
     if( pageLimit > 0 || rows.size() <= std::size_t( kCallHierarchyBandMax ) || rows.size() > kCallersBandMaxBytes / kCallerRowMinBytes )
     {
         return CallersByteBand{};
     }
-    RowCallSites       sites = rowCallSites( ing, defs, rows, rr, keptForwards );
+    RowCallSites       sites = rowCallSites( ing, defs, rows, rr, g );
     std::vector<char>  esc;   // the escape buffer the row's n= and p= are measured through
     const MemberOwners owners( ing );   // QUALNAME-1: the row's n= is its owner-qualified name (memberowner.h), so the estimate charges it
     std::size_t       bytes = 0;
@@ -543,7 +727,8 @@ inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const
         bytes += std::string_view( "<s t=\"\" n=\"\" p=\":\"/>" ).size() + std::string_view( symTag( s.kind ) ).size() + nameLen + pathLen
                + std::to_string( s.line ).size()
                + ( isTestedByReach( ing, testReach, rows[i] ) ? std::string_view( " tested=\"1\"" ).size() : 0 )
-               + std::string_view( viaNameAttr( attr.nameOnly( i ) ) ).size() + std::string_view( splitArmAttrXml( attr.splitArm( i ) ) ).size()
+               + ( attr.viaMacro( i ) != kNoNode ? viaMacroAttrXml( ing, attr.viaMacro( i ) ).size() : std::string_view( viaNameAttr( attr.nameOnly( i ) ) ).size() )
+               + std::string_view( splitArmAttrXml( attr.splitArm( i ) ) ).size()
                + ofDefAttrXml( attr.groups, attr.tokens, i ).size() + callSitesAttrXml( sites.tokens[i], sites.totals[i] ).size();
     }
     ENSURES( sites.tokens.size() == rows.size(), "the site pass covers every row the estimate read" );   // rowCallSites' own ENSURES

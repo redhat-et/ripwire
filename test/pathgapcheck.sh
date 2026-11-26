@@ -351,8 +351,9 @@ cp "$TMP/lpy/pkg/x/a.py" "$TMP/lpy/pkg/x/c.py" "$TMP/lpysp/pkg x/"
 cp "$TMP/lpy/other/b.py" "$TMP/lpysp/other/"
 f="$TMP/P8space.xml"; path "$TMP/lpysp" "run,target" "$f"; rc=$?
 if premise "(P8) space" "$rc" "$f"; then
-    nx="$( attr "$f" next )"   # the raw attribute text: the shell quote is &apos; on the wire, as every next= with a quote is
-    if [ "$( attr "$f" gaps )" = "name:1" ] && [ "$nx" = "--expand=&apos;pkg x/c.py:run&apos;" ]; then
+    nx="$( attr "$f" next )"   # the raw attribute text: the shell quote is a raw ' on the wire (NEXT-APOS-RAW), as every next= with a quote is
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= pins read the raw ' (was &apos;): nextverb.h appendNextValueXml leaves ' raw in a "-delimited attribute
+    if [ "$( attr "$f" gaps )" = "name:1" ] && [ "$nx" = "--expand='pkg x/c.py:run'" ]; then
         ok "(P8) a gap row under a directory with a space: next=\"$nx\" is one quoted selector"
         # pasteable: XML-unescape, split the way a shell would, run it, and the gap row's body is served
         python3 -c 'import html,shlex,subprocess,sys; sys.exit(subprocess.run([sys.argv[1], sys.argv[2], "--no-cache"] + shlex.split(html.unescape(sys.argv[3])), stdout=open(sys.argv[4], "wb"), stderr=subprocess.STDOUT).returncode)' \
@@ -363,7 +364,7 @@ if premise "(P8) space" "$rc" "$f"; then
             no "(P8) the quoted next= did not serve run's body (rc=$rc): $( head -c 300 "$TMP/P8next.xml" )"
         fi
     else
-        no "(P8) want gaps=\"name:1\" and next=\"--expand=&apos;pkg x/c.py:run&apos;\"; got gaps=\"$( attr "$f" gaps )\" next=\"$nx\""
+        no "(P8) want gaps=\"name:1\" and next=\"--expand='pkg x/c.py:run'\"; got gaps=\"$( attr "$f" gaps )\" next=\"$nx\""
     fi
 fi
 
@@ -1318,7 +1319,8 @@ done
 echo "(M) MCP path_between carries the same clause"
 # Two MCP legend postures (lean-answers): the unchanged assertions run on --mcp-legend=inline, the pre-posture spelling
 # where every answer carries its root facts on <path>; a TWIN runs the default session posture, whose answers after the
-# first are legend="ref" and carry their root facts on the closing <about …/> instead. Both must match the CLI.
+# first are legend="ref": the legend is gone and a closing <about legend="ref"/> points at it, while the root facts stay
+# on <path> (ref-posture-disclosure). Both must match the CLI, read from the ROOT alone.
 for MPOST in inline session; do
 python3 - "$BIN" "$TMP" "$MPOST" <<'PY'
 import json, re, subprocess, sys
@@ -1343,9 +1345,8 @@ for line in p.stdout.splitlines():
 def head( t ):
     m = re.search( r'<path [^>]*>', t )
     return m.group( 0 ) if m else ""
-def facts( t ):   # the root's facts: <path …>, plus a legend="ref" answer's closing <about …/> (where they move)
-    ab = re.search( r'<about [^>]*legend="ref"[^>]*/>', t )
-    return head( t ) + ( ab.group( 0 ) if ab else "" )
+def facts( t ):   # the root's facts: <path …> and nothing else. This read <path> PLUS the closing <about …/>, because the
+    return head( t )   # ref posture had moved them there; a fact that left the root now fails the comparison below.
 def pick( t, name ):
     m = re.search( r'\s' + name + r'="([^"]*)"', facts( t ) )
     return m.group( 1 ) if m else None

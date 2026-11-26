@@ -7,6 +7,7 @@
 // it, don't reimplement" (and "if you fix this, fix its twins"). Type-3 (gapped) clones are a later upgrade.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on the Type-3 pair-cap guard (never throw)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
@@ -408,7 +409,7 @@ inline std::uint32_t cloneKeyTokens( std::uint64_t key ) noexcept
 
 inline std::uint64_t cloneBodyKey( const std::string& src, std::uint32_t a, std::uint32_t b, bool stripHashComments )
 {
-    std::uint64_t hash   = 14695981039346656037ull;   // FNV-1a 64 offset basis
+    std::uint64_t hash   = hashutil::kFnv1aOffset64;
     std::uint64_t tokens = 0;
     scanCodeTokens( src, a, b, stripHashComments, false,
                     [ & ]( std::string_view token, CodeTokenKind kind )
@@ -874,15 +875,14 @@ inline std::vector<std::uint64_t> cloneGramFingerprints( const std::vector<std::
         fp.reserve( raw.size() - kFpGram + 1 );
         for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
         {
-            std::uint64_t g = 1469598103934665603ull;
+            std::uint64_t g = hashutil::kFnv1aLegacySeed64;   // stored: the persisted minhash sketch is built from these
             for( std::uint32_t k = 0; k < kFpGram; ++k )
             {
                 g = cloneTokenHash( raw[i + k], g );
             }
             fp.push_back( g );
         }
-        std::sort( fp.begin(), fp.end() );
-        fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
+        rw::sortutil::sortUnique( fp );
     }
     return fp;
 }
@@ -1396,8 +1396,9 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
             }
 
             // dedup exact streams: hash the joined token TEXT (byte-identical to the pre-A4-P2 hash); keep only the
-            // first id per distinct stream. Done over `raw` so the exact-dedup equivalence classes never shift.
-            std::uint64_t sh = 1469598103934665603ull;
+            // first id per distinct stream. Done over `raw` so the exact-dedup equivalence classes never shift. Build-local
+            // (never stored, only compared for equality), so it takes the standard basis.
+            std::uint64_t sh = hashutil::kFnv1aOffset64;
             for( const std::string& t : raw )
             {
                 for( const char c : t )

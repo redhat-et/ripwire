@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -27,6 +28,7 @@
 #include "pageview.h"       // LB-G: pageWindow / effectiveRowCap / pagingDisclosure — the ONE paging vocabulary
 #include "editcheckdecl.h"   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
 #include "valuerefs.h"      // CALLSITE-AT: VrRender / vrPath — the one root-relative file spelling a site token shares with <vr> rows
+#include "sitetokens.h"     // SITES-SHORT: siteTokensFor — a site in the row's own file is a bare line, any other the full file:line
 
 #include <algorithm>
 #include <compare>
@@ -161,8 +163,8 @@ struct EditCheckGroup
 };
 
 // The (file, contract) KEYS of a match list with each key's members, in first-seen order: the name/file tier of
-// resolveAllByNameQualified comes back TOWER-ordered (applyNameTower), its early canonical-id/Scope::name tiers ascend by
-// id, so members[i][0] is group i's tower front on the name path — a POSITION, not a guarantee of the lowest id, which is
+// resolveAllByNameQualified comes back TOWER-ordered (applyNameTower), its early canonical-id tier ascends by id and its
+// Scope::name tier by symbolContentKey, so members[i][0] is group i's tower front on the name path — a POSITION, not a guarantee of the lowest id, which is
 // why editCheckRoundTripSpelling compares membership rather than first elements.
 struct EditCheckGroupKeys
 {
@@ -725,16 +727,22 @@ inline bool editCheckArityAccepts( const Symbol& os, std::uint16_t minArity, std
 // CALLSITE-AT (2026-10-09): the test is split from the arity data. CallSiteCalleeTest is the name/Elixir half alone,
 // which is all a SITE pass needs (the callers verb's sites_at= and safe-delete's sites_at=, callSitesAt below); EditCheckCalleeTest
 // adds editCheckDeclDefaults, which reads the C/C++ declarations' source text and is only the arity verdict's input.
+//
+// PROVEN-SITE-KEEPS-NAMESAKES: `proven` (Graph::provenSites) holds the proven sites a name test would misplace — a call a rule bound to
+// one definition, in a caller that also reaches another definition of the name. Such a site counts only for its own targets: envoy's
+// proven `close_action.closeSocket()` lines are sites of ConnectionCloseAction::closeSocket, never of the caller's by-name
+// ConnectionImpl::closeSocket row. Every site it does not list keeps the name test.
 struct CallSiteCalleeTest
 {
     const IngestResult&           ing;
     const Symbol&                 focus;
     std::span<const NodeId>       overloadNodes;
+    std::span<const ProvenSite>   proven;
     std::optional<ElixirResolver> logical;   // engaged for an Elixir focus only
     std::vector<NodeId>           scratch;
 
-    CallSiteCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
-        : ing( input ), focus( focusSymbol ), overloadNodes( overloads )
+    CallSiteCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads, std::span<const ProvenSite> provenSites )
+        : ing( input ), focus( focusSymbol ), overloadNodes( overloads ), proven( provenSites )
     {
         if( focus.lang == Lang::Elixir )
         {
@@ -742,11 +750,11 @@ struct CallSiteCalleeTest
         }
     }
 
-    bool reaches( const Reference& r )
+    bool reaches( const Reference& r, std::uint32_t refIndex )
     {
         if( !logical || r.lang != Lang::Elixir )
         {
-            return r.calleeName == focus.name;
+            return r.calleeName == focus.name && provenSiteCountsFor( proven, refIndex, overloadNodes );
         }
         if( elixirBaseName( r.calleeName ) != elixirBaseName( focus.name ) )
         {
@@ -768,8 +776,8 @@ struct EditCheckCalleeTest : CallSiteCalleeTest
 {
     EditCheckDeclDefaults declDefaults;   // per overload: the fewest arguments a matching C/C++ declaration admits
 
-    EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
-        : CallSiteCalleeTest( input, focusSymbol, overloads ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) )
+    EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads, std::span<const ProvenSite> provenSites )
+        : CallSiteCalleeTest( input, focusSymbol, overloads, provenSites ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) )
     {
     }
 };
@@ -810,7 +818,7 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
         {
             continue;
         }
-        if( !r.argCountKnown || !callee.reaches( r ) )
+        if( !r.argCountKnown || !callee.reaches( r, refIndex ) )
         {
             continue;
         }
@@ -861,7 +869,7 @@ inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee
         {
             continue;
         }
-        if( r.fromSymbol >= callerSelected.size() || !callerSelected[ r.fromSymbol ] || !callee.reaches( r ) )
+        if( r.fromSymbol >= callerSelected.size() || !callerSelected[ r.fromSymbol ] || !callee.reaches( r, refIndex ) )
         {
             continue;
         }
@@ -875,8 +883,7 @@ editCheckCallSites( const IngestResult& ing, CallSiteCalleeTest& callee, std::sp
 {
     std::vector<std::pair<NodeId, std::uint32_t>> sites;
     forEachCallSite( ing, callee, callerIncompatible, keptForwards, [ & ]( const Reference& r ) { sites.emplace_back( r.fromSymbol, r.line ); } );
-    std::sort( sites.begin(), sites.end() );
-    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    rw::sortutil::sortUnique( sites );
     return sites;
 }
 
@@ -898,8 +905,7 @@ struct CallSiteAt
 // The call sites of `defs` inside the caller rows `pageCallers` (one page of a callers listing). `defs` is the resolved
 // definition set of ONE selector; a set whose members carry two leaf names (a qualified tier may) gets one pass per
 // distinct name, so the second name's sites are never silently dropped. Each pass is one scan of the reference table.
-inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> pageCallers,
-                                            std::span<const std::uint32_t> keptForwards )
+inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> pageCallers, const Graph& g )
 {
     std::vector<CallSiteAt> sites;
     if( defs.empty() || pageCallers.empty() )
@@ -923,11 +929,10 @@ inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<c
         }
         sameName.clear();
         std::copy_if( defs.begin() + std::ptrdiff_t( i ), defs.end(), std::back_inserter( sameName ), nameAt );
-        CallSiteCalleeTest callee( ing, ing.symbols[ defs[i] ], sameName );
-        forEachCallSite( ing, callee, onPage, keptForwards, [ & ]( const Reference& r ) { sites.push_back( CallSiteAt{ r.fromSymbol, r.fileId, r.line } ); } );
+        CallSiteCalleeTest callee( ing, ing.symbols[ defs[i] ], sameName, g.provenSites );
+        forEachCallSite( ing, callee, onPage, g.keptForwards, [ & ]( const Reference& r ) { sites.push_back( CallSiteAt{ r.fromSymbol, r.fileId, r.line } ); } );
     }
-    std::sort( sites.begin(), sites.end() );
-    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    rw::sortutil::sortUnique( sites );
     return sites;
 }
 
@@ -939,20 +944,29 @@ inline std::span<const CallSiteAt> callSitesOf( std::span<const CallSiteAt> site
     return { lo, hi };
 }
 
-// One caller's sites as pasteable `file:line` tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a
-// runaway guard; the cut is disclosed by sites_total= and the uses verb lists the rest). `pathOf( fileId )` spells the file
-// exactly as the row's own p= does (valuerefs.h vrPath: root-relative on a single root). Unescaped: each dialect escapes its own way.
+// One caller's sites as tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a runaway guard; the cut is
+// disclosed by sites_total= and the uses verb lists the rest). SITES-SHORT (sitetokens.h): a site whose file, spelled by
+// vrPath exactly as the row's own p= spells the caller's (root-relative on a single root), EQUALS that p= file is the bare
+// line; any other is the full `file:line`. The comparison is of the two printed strings, so it holds whatever put the site
+// there. The row is the slice's own caller (callSitesOf hands over one caller's sites; its p= is that symbol's file).
+// Unescaped: each dialect escapes its own way.
 static_assert( kCallSitesPerRowCap == 16, "compactlegend.h's sites_total= readings spell this cap as 16: change both together" );
 inline std::vector<std::string> callSiteTokens( const IngestResult& ing, std::span<const CallSiteAt> mine, const VrRender& rr )
 {
-    std::vector<std::string> tokens;
+    if( mine.empty() )
+    {
+        return {};
+    }
+    EXPECTS( mine.front().caller < ing.symbols.size() && mine.back().caller == mine.front().caller, "one indexed caller's slice" );
     const std::size_t        shown = std::min( mine.size(), kCallSitesPerRowCap );
-    tokens.reserve( shown );
+    std::vector<SpelledSite> spelled;
+    spelled.reserve( shown );
     for( std::size_t i = 0; i < shown; ++i )
     {
-        tokens.push_back( vrPath( ing, mine[i].fileId, rr ) + ":" + std::to_string( mine[i].line ) );
+        spelled.emplace_back( vrPath( ing, mine[i].fileId, rr ), mine[i].line );
     }
-    ENSURES( tokens.size() <= kCallSitesPerRowCap, "the per-row site cap holds" );
+    std::vector<std::string> tokens = siteTokensFor( vrPath( ing, ing.symbols[ mine.front().caller ].fileId, rr ), spelled );
+    ENSURES( tokens.size() == shown && tokens.size() <= kCallSitesPerRowCap, "one token per shown site, and the per-row site cap holds" );
     return tokens;
 }
 
@@ -967,11 +981,10 @@ struct RowCallSites
     bool                                  anyCut;
 };
 
-inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, const VrRender& rr,
-                                  std::span<const std::uint32_t> keptForwards )
+inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, const VrRender& rr, const Graph& g )
 {
     RowCallSites out{};
-    const std::vector<CallSiteAt> sites = callSitesAt( ing, defs, rows, keptForwards );
+    const std::vector<CallSiteAt> sites = callSitesAt( ing, defs, rows, g );
     out.tokens.reserve( rows.size() );
     out.totals.reserve( rows.size() );
     for( const NodeId r : rows )
@@ -986,8 +999,8 @@ inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeI
     return out;
 }
 
-// The XML row attributes for one caller: ` sites_at="f:l f:l"` (space-separated, XML-escaped) plus ` sites_total="N"` only when
-// the list was cut. "" when the pass found no site in this caller (the attribute is never printed empty).
+// The XML row attributes for one caller: ` sites_at="l l f:l"` (space-separated, XML-escaped; sitetokens.h: a bare line is in
+// the row's own p= file) plus ` sites_total="N"` only when the list was cut. "" when the pass found no site in this caller (the attribute is never printed empty).
 inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std::size_t total )
 {
     if( tokens.empty() )
@@ -1009,7 +1022,8 @@ inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std
     return out;
 }
 
-// The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["f:l",..]` plus `,"sites_total":N` only when cut.
+// The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["l","f:l",..]` (the same tokens, so a bare line
+// is a string too) plus `,"sites_total":N` only when cut.
 inline std::string callSitesKeyJson( const std::vector<std::string>& tokens, std::size_t total )
 {
     if( tokens.empty() )
@@ -1083,8 +1097,9 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
     // the sort below makes the union's order independent of which pass found a caller.
     if( callee.logical )
     {
-        for( const Reference& r : ing.references )
+        for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
         {
+            const Reference& r = ing.references[ refIndex ];
             if( r.role != RefRole::Call || r.fromSymbol >= seenCaller.size() || seenCaller[ r.fromSymbol ] )
             {
                 continue;
@@ -1093,7 +1108,7 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
             {
                 continue;
             }
-            if( callee.reaches( r ) )
+            if( callee.reaches( r, refIndex ) )
             {
                 seenCaller[ r.fromSymbol ] = 1;
                 callerIds.push_back( r.fromSymbol );
@@ -1447,7 +1462,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
 
     const std::vector<NodeId> overloadNodes = editCheckOwnerNarrowed( ing, editCheckOverloadSet( ing, g, focus ), focus, page.selector );
     const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, maxFileBytes, excludes, focus, overloadNodes );
-    EditCheckCalleeTest       callee( ing, fsym, overloadNodes );
+    EditCheckCalleeTest       callee( ing, fsym, overloadNodes, g.provenSites );
     if( spliced.engaged )
     {
         callee.declDefaults = editCheckDeclDefaults( ing, overloadNodes, spliced );   // the preview's spans index the spliced bytes

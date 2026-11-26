@@ -168,7 +168,8 @@ g() { ( cd "$R" && "$BIN" "$R" --no-cache "$@" 2>/dev/null ); }
 root() { grep -o '<grep [^>]*>' | head -1; }
 o="$( g --grep='hlxa|hlxb' | root )"
 if printf '%s' "$o" | grep -q 'pattern_meta="|"'; then ok "B1 a|b literal → pattern_meta=|"; else no "B1 $o"; fi
-if printf '%s' "$o" | grep -q "next=\"--regex=&apos;hlxa|hlxb&apos;\""; then ok "B2 its next= is the regex verb on the pattern"; else no "B2 $o"; fi
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= pins read the raw ' (was &apos;): nextverb.h appendNextValueXml leaves ' raw in a "-delimited attribute
+if printf '%s' "$o" | grep -q "next=\"--regex='hlxa|hlxb'\""; then ok "B2 its next= is the regex verb on the pattern"; else no "B2 $o"; fi
 o="$( g --regex='hlxa|hlxb' | root )"
 if printf '%s' "$o" | grep -q 'pattern_meta='; then no "B3 a regex answer carries pattern_meta: $o"; else ok "B3 a --regex answer carries no pattern_meta"; fi
 if printf '%s' "$o" | grep -q 'hits="2"'; then ok "B4 the named regex finds the two lines"; else no "B4 $o"; fi
@@ -184,7 +185,7 @@ if printf '%s' "$o" | grep -q 'pattern_meta='; then no "B9 a trailing .* read as
 o="$( g --grep='hlxa.*hlxa' | root )"
 if printf '%s' "$o" | grep -qF 'pattern_meta=".*"'; then ok "B10 .* inside the pattern → pattern_meta=.*"; else no "B10 $o"; fi
 o="$( g --grep='hlxa\|hlxb' | root )"
-if printf '%s' "$o" | grep -q "next=\"--regex=&apos;hlxa|hlxb&apos;\""; then ok "B11 basic-grep a\\|b → next= the ERE a|b"; else no "B11 $o"; fi
+if printf '%s' "$o" | grep -q "next=\"--regex='hlxa|hlxb'\""; then ok "B11 basic-grep a\\|b → next= the ERE a|b"; else no "B11 $o"; fi
 o="$( g --grep='[^h]lxa' | root )"
 if printf '%s' "$o" | grep -q 'pattern_meta="\[\]"'; then ok "B12 a [^…] class → pattern_meta=[]"; else no "B12 $o"; fi
 o="$( g --grep='a[0]' | root )"

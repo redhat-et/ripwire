@@ -1,0 +1,48 @@
+# tangle_gate_replay20.tsv - the TANGLE-GATE-B / QD-RATCHET-BASE replay cited in docs/EVALS.md (the tangle kind paragraph).
+# Corpus: the 20 first-parent merges of ripwire up to 5df5a26be (all before 8861b0d4d). Per merge M: ripwire . --quality-delta=M^1..M --quality-kinds=tangle
+# Binaries: base = main at 8861b0d4d (0.6.10-dev.75); lane = lane/qd-lessons-2 at b636084ac (TANGLE-GATE-B + QD-RATCHET-BASE, the commits later landed rebased with the qd-lessons-2 train). Recorded 2026-11-21.
+# One line per merge with no tangle row; one line per tangle row otherwise. verdict: gating | minor | - (no row).
+merge	date	binary	symbol	was	now	verdict
+5df5a26be	2026-11-21	base	-	-	-	-
+5df5a26be	2026-11-21	lane	src/serialize.h::rw::serialize	25.4	25.5	gating
+5df5a26be	2026-11-21	lane	cc_walk	9.1	9.7	gating
+f79a94e21	2026-11-20	base	-	-	-	-
+f79a94e21	2026-11-20	lane	runForLensPass	16.4	16.5	gating
+48e8bed93	2026-11-20	base	-	-	-	-
+48e8bed93	2026-11-20	lane	-	-	-	-
+360dd12b3	2026-11-20	base	-	-	-	-
+360dd12b3	2026-11-20	lane	-	-	-	-
+ee8d1a50e	2026-11-20	base	src/graph.h::rw::buildGraph	56.8	56.9	minor
+ee8d1a50e	2026-11-20	lane	src/graph.h::rw::buildGraph	56.8	56.9	gating
+f420f7598	2026-11-20	base	-	-	-	-
+f420f7598	2026-11-20	lane	-	-	-	-
+e71db700c	2026-11-20	base	-	-	-	-
+e71db700c	2026-11-20	lane	-	-	-	-
+417d06bc7	2026-11-19	base	src/lsp.h::lsp::runLsp	2.1	11.0	minor
+417d06bc7	2026-11-19	lane	src/lsp.h::lsp::runLsp	2.1	11.0	gating
+417d06bc7	2026-11-19	lane	src/serialize.h::rw::serialize	25.2	25.4	gating
+b5cbb94b0	2026-11-19	base	-	-	-	-
+b5cbb94b0	2026-11-19	lane	-	-	-	-
+1edb6fd6a	2026-11-19	base	-	-	-	-
+1edb6fd6a	2026-11-19	lane	-	-	-	-
+33f7a1eac	2026-11-19	base	-	-	-	-
+33f7a1eac	2026-11-19	lane	-	-	-	-
+d65f60c6d	2026-11-19	base	-	-	-	-
+d65f60c6d	2026-11-19	lane	-	-	-	-
+7f461e33b	2026-11-18	base	-	-	-	-
+7f461e33b	2026-11-18	lane	-	-	-	-
+385ebd0bb	2026-11-18	base	captureTagsFacts	28.8	29.2	minor
+385ebd0bb	2026-11-18	lane	src/ingest_elixir.h::ElixirContext::prepare	12.2	12.3	gating
+385ebd0bb	2026-11-18	lane	captureTagsFacts	28.8	29.2	gating
+c565a3fad	2026-11-18	base	-	-	-	-
+c565a3fad	2026-11-18	lane	-	-	-	-
+9087eb59c	2026-11-17	base	-	-	-	-
+9087eb59c	2026-11-17	lane	-	-	-	-
+5139f7840	2026-11-17	base	-	-	-	-
+5139f7840	2026-11-17	lane	-	-	-	-
+5fb68b71a	2026-11-17	base	-	-	-	-
+5fb68b71a	2026-11-17	lane	-	-	-	-
+7ac855730	2026-11-17	base	-	-	-	-
+7ac855730	2026-11-17	lane	-	-	-	-
+2b6c2fd0f	2026-11-17	base	-	-	-	-
+2b6c2fd0f	2026-11-17	lane	-	-	-	-

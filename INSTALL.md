@@ -41,6 +41,7 @@ reports x86-64; the installer sends it to a native arm64 shell, where the arm64 
 | `RIPWIRE_INSTALL_YES=1` | Skip the confirmation prompt. |
 | `RIPWIRE_SKIP_CPU_CHECK=1` | Skip the x86-64-v3 CPU check. The binary is still test-run before it is installed. |
 | `RIPWIRE_NO_ACTIVATE=1` | Stage the skills without activating them. |
+| `RIPWIRE_NO_LOCATOR_AGENT=1` | Activate the Claude Code skills without the `ripwire-locator` subagent. |
 
 Then try it in a repository:
 
@@ -86,6 +87,11 @@ you changed it):
 | openclaw (initial support) | `bash ~/.local/share/ripwire/skills/install.sh --openclaw` | `~/.agents/skills` |
 | Anything else | `bash ~/.local/share/ripwire/skills/install.sh <dir>` | `<dir>` |
 
+For Claude Code the installer also puts the `ripwire-locator` subagent in `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/`.
+The main conversation can hand it a code lookup: it runs ripwire in its own context and returns only the file ranges
+to edit, so the full answer does not stay in the main conversation. Pass `--no-locator-agent` (or set
+`RIPWIRE_NO_LOCATOR_AGENT=1`) to leave it out; a file already at that path that the installer did not write is kept.
+
 Hermes and openclaw support is initial. CI checks what the installers write on disk. For Hermes, a contributor
 also ran the installer and the MCP registration against a real Hermes install when support landed
 ([#51](https://github.com/redhat-et/ripwire/pull/51)), but the maintainers have not re-verified it since. openclaw
@@ -113,7 +119,10 @@ its `settings.json`: a SessionStart primer that adds ripwire's when-to-use guida
 that suggests one ready-to-run command when it is confident, and a PreToolUse hook that suggests nothing and
 only records, on your machine, which tool calls ripwire could have answered. Adding `--codex --hook` does the
 same for Codex in `~/.codex/hooks.json`; open `/hooks` in Codex to review and trust them. The hooks never
-block a tool call, they need `jq`, and they are registered only when you pass `--hook`.
+block a tool call, they need `jq`, and they are registered only when you pass `--hook`. The primer sends the same
+block `ripwire wrap claude` asks you to paste into CLAUDE.md, and stays silent when a CLAUDE.md that Claude Code loads
+already holds it word for word. Pasting the block is the reliable path: the hook's measurement keeps about half of
+sessions as a control arm by default, and those get no primer.
 
 ### MCP server (optional)
 
@@ -169,8 +178,8 @@ done
 
 A skill you copied by hand carries no marker, so this keeps it; delete that copy yourself.
 
-**3. Hooks** (only if you ran `--hook`). This removes ripwire's entries from Claude Code's `settings.json` and
-Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
+**3. Hooks** (only if you ran `--hook`). This removes ripwire's entries (the SubagentStart routing note among them)
+from Claude Code's `settings.json` and Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
 
 ```bash
 strip='def ripwire: (.command // "") | (if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end) | test("/hooks/ripwire-[a-z-]+\\.sh$");
@@ -185,7 +194,8 @@ itself never writes there. This removes only ripwire's own entries, then the dir
 
 ```bash
 h="${RIPWIRE_HOME:-$HOME/.ripwire}"
-rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf"
+rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf" "$h/legend-seen" "$h/legend-seen-codex" "$h/legend-seen-opencode"
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugin/ripwire-legend-seen.js"   # the opencode legend-seen loader, if you installed it
 rmdir "$h" 2>/dev/null || true
 ```
 

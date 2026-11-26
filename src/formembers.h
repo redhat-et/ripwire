@@ -14,7 +14,11 @@
 // the same file (a C++ in-class declaration, a JS/TS/Python method), never one nested inside another member (a closure inside a
 // method is that method's text). Only callables and fields are named; a nested type is not a member name here.
 // Order: the most question words (the fold's own words, sliceWords) in the name first, then the owner's own file before others,
-// then declaration line. A name rides once (an overload, or a C++ declaration and its out-of-line definition, are one name).
+// then path (file id order is path order), then declaration line, then the name itself (two members declared on one line tie on
+// every other key; a content key, never NodeId — CodeRabbit #676 4588520035) — forOwnerMemberNames' sort key, and BOTH legend
+// clauses below name every one of those keys, so a reader derives the printed order from the legend alone (#595, soarkit: the clauses stopped at
+// "then line" while the key put the owner's file first). A name rides once (an overload, or a C++ declaration and its
+// out-of-line definition, are one name).
 // NOT listed: a name the answer already shows as a row (one of this owner's members ranked, or the owner's own name: a C++
 // constructor), and a name a comma would split. Every member name not listed for another reason is counted in mem_more=.
 //
@@ -61,13 +65,13 @@ inline bool forMemberNamesOn()
 
 // The legend clauses, present-only beside the attribute (a row carries mem=). Terse (LEGEND-SHORTEN); no "--" (an XML comment).
 inline constexpr std::string_view kForCompactMemberNamesLegend =
-    "; d mem= an owner's direct member names by the index (question words first, names only), mem_more= names cut";
+    "; d mem= an owner's direct member names only, by the index (question words first, then owner's file, path, line, name), mem_more= names cut";
 namespace member_detail
 {
 // The full clause, built at compile time around kForMemberNameCap's decimal digits, so the cap it states is the cap.
 inline constexpr std::string_view kMemberNamesLegendHead = "; mem= on an owner d row: up to ";
 inline constexpr std::string_view kMemberNamesLegendTail =
-    " names of its direct members by the index (scope or span, question words first, then line), "
+    " names of its direct members by the index (scope or span, question words first, then owner's file, path, line, name), "
     "not a claim they answer, never a row already shown, mem_more= the member names not listed";
 struct LegendText
 {
@@ -126,11 +130,7 @@ inline bool ownerNameAmbiguous( const IngestResult& ing, const Symbol& c )
 // how many of the question words the name holds as subtokens
 inline std::ptrdiff_t wordOverlap( std::string_view name, const std::vector<std::string>& words )
 {
-    std::vector<std::string> toks;
-    subtokens( name, toks );
-    std::ranges::sort( toks );
-    toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
-    return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+    return subtokenOverlap( name, words );
 }
 }   // namespace member_detail
 
@@ -159,11 +159,12 @@ inline OwnerMemberNames forOwnerMemberNames( const IngestResult& ing, NodeId own
             shownNames.push_back( ing.symbols[m].name );
         }
     }
-    using Key = std::tuple<std::ptrdiff_t, bool, std::uint32_t, std::uint32_t, NodeId>;
+    // the last key is the name, not NodeId: two members on one line tie on every other key, and equal names print once (below)
+    using Key = std::tuple<std::ptrdiff_t, bool, std::uint32_t, std::uint32_t, std::string_view>;
     const auto key = [ & ]( NodeId m ) -> Key
     {
         const Symbol& s = ing.symbols[m];
-        return { -member_detail::wordOverlap( s.name, words ), s.fileId != c.fileId, s.fileId, s.line, m };
+        return { -member_detail::wordOverlap( s.name, words ), s.fileId != c.fileId, s.fileId, s.line, s.name };
     };
     std::ranges::sort( members, [ & ]( NodeId a, NodeId b ) { return key( a ) < key( b ); } );
     std::vector<std::string_view> seen;

@@ -101,6 +101,13 @@ inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
     return d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
+// A RawDef's body start — its Symbol's sigEndByte: the body field's start, or endByte for a bodyless def and for an alias row (whose
+// bodyByte transports its target's start). QD-SHRINK-PAIR's base bodies (ingest_astquery.h tangleInputsInBlobs) cut the same span.
+inline std::uint32_t rawDefBodyStart( const RawDef& d ) noexcept
+{
+    return ( d.bodyByte > d.startByte && !rawDefIsAliasRow( d ) ) ? d.bodyByte : d.endByte;
+}
+
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: objc decl-def collapse" );
@@ -407,12 +414,18 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.fileId = d.fileId;
         s.line   = d.line;
         s.sigStartByte = d.startByte;
-        s.sigEndByte   = ( d.bodyByte > d.startByte ) ? d.bodyByte : d.endByte;
+        s.sigEndByte   = rawDefBodyStart( d );   // an alias row's whole declaration is its signature (no body)
         s.endByte      = d.endByte;
         s.cx           = d.cx;
         s.ccx          = d.ccx;
         s.loc          = d.loc;      // Q4: physical line span
-        s.locals       = d.locals;   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang)
+        s.locals       = std::uint16_t( d.locals > 65535u ? 65535u : d.locals );   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang); u16 saturating (model.h)
+        s.steer        = d.steer;    // QD-TANGLE steering locals (model.h Symbol::steer; 0 where langfacts.h steerDecl is None and at 50 lines or fewer)
+        s.dispatchShare = tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut );   // QD-TANGLE (model.h)
+        if( d.maxBlock10 != kTangleNoCap )   // QD-TANGLE BLOCK FACTS: the side table, ascending id like aliasTargets
+        {
+            result.tangleBlocks.push_back( TangleBlockFacts{ s.id, std::uint16_t( std::min( d.maxBlock10, kTangleBlockMax10 ) ), d.cross, 0 } );
+        }
         s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.paramsMin    = std::uint8_t( d.paramsMin < 15 ? d.paramsMin : 15 );   // B2.2: fewest arguments a call can pass (0 = no bound); a 4-bit field — saturating LOWERS it, which only keeps candidates
@@ -448,7 +461,6 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         // whole declaration as its signature and no body, and the target start goes to the side table (model.h AliasTarget)
         if( rawDefIsAliasRow( d ) )
         {
-            s.sigEndByte = d.endByte;
             result.aliasTargets.push_back( AliasTarget{ s.id, d.bodyByte } );
         }
         if( d.kind == SymKind::ModuleScope )
@@ -911,20 +923,20 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.fileId      = r.fileId;
         ref.line        = r.line;        // ABS-3: 1-based use-site line for --uses p="file:line"
         ref.lang        = r.lang;
-        ref.calleeName  = std::move( r.name );
-        ref.qualifier   = std::move( r.qualifier );
+        ref.calleeName  = r.name;
+        ref.qualifier   = r.qualifier;
         ref.role        = r.role;        // ABS-3 use-site role (call/read/write/import/extends)
         ref.isInherit   = r.isInherit;
         ref.isDocLink   = r.isDocLink;
         ref.isCompose   = r.isCompose;   // S5-E: HAS-A member-variable type edge — NEVER enters call graph
         ref.recv        = r.recv;        // P2-D receiver shape (this/self/var) for one-hop narrowing
-        ref.recvVar     = std::move( r.recvVar );
+        ref.recvVar     = r.recvVar;
         ref.argCount    = r.argCount;        // B2.2: call-site positional arg count (when countable)
         ref.argCountKnown = r.argCountKnown; // B2.2: whether argCount is reliable (no spread/splat)
         ref.viaArrow    = r.viaArrow;    // a call written `->`; a compose ref's smart-pointer pointee (arm p)
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
-        ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
+        ref.memberRoot  = r.memberRoot;    // FE-A: its receiver chain's root identifier
         ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)
@@ -1076,8 +1088,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
         asked.push_back( result.bindings[ i ].typeName );
         asked.push_back( result.bindings[ i ].var );
     }
-    std::ranges::sort( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
-    asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
+    sortutil::sortUnique( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
     std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
     using FileMacro = std::pair<std::uint32_t, std::string_view>;   // (fileId, name) of an asked-about Rust macro
     std::vector<FileMacro> fileMacros;
@@ -1170,7 +1181,7 @@ inline void retargetRustMacroAliases( IngestResult& result )
 }
 
 // A4-R5: FFI binding aliases in a deterministic total order (fileId, kind, aliasName, targetScope,
-// targetName) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
+// targetName, lowConf) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
 inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>& rawFfis )
 {
     std::sort( rawFfis.begin(), rawFfis.end(),
@@ -1192,7 +1203,11 @@ inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>&
                    {
                        return a.targetScope < b.targetScope;
                    }
-                   return a.targetName < b.targetName;
+                   if( a.targetName != b.targetName )
+                   {
+                       return a.targetName < b.targetName;
+                   }
+                   return a.lowConf < b.lowConf;   // DET-INCLUDES: every field is in the key, so std::sort's tie order never shows
                } );
     result.bindingAliases = std::move( rawFfis );
 }
@@ -1216,7 +1231,11 @@ inline void emitRouteDefs( IngestResult& result, std::vector<RouteDef>& rawRoute
                    {
                        return a.method < b.method;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return a.handlerName < b.handlerName;   // DET-INCLUDES: two registrations of one route on one line
                } );
     result.routeDefs = std::move( rawRouteDefs );
 }
@@ -1239,7 +1258,11 @@ inline void emitRouteUses( IngestResult& result, std::vector<RawRouteUse>& rawRo
                    {
                        return a.startByte < b.startByte;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return std::tie( a.line, a.method ) < std::tie( b.line, b.method );   // DET-INCLUDES: every field in the key
                } );
     result.routeUses.resize( rawRouteUses.size() );
     DefSweep routeSweep{ spanIndex.spans, spanIndex.fileSpanStart };

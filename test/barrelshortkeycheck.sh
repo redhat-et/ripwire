@@ -87,6 +87,9 @@
 #
 # Usage: bash test/barrelshortkeycheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -232,7 +235,9 @@ strip = lambda s: re.sub(r' (at|est_tokens)="[^"]*"', '', s)
 # rows are shown files: the answer with the block has a <syms> that the answer without it does not (cpp/fwd.* are shown only through
 # it). The block is a consequence of the shortkey rows, so both sides are read less their <syms>; the positive twin below proves the
 # on side carries one built from the block's rows (a gate that strips a block must show it was there).
-syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+# AF1 (2026-11-18): the default --for answer is answer-first, so the last ROW block is followed by the trailing DOCUMENT legend
+# (comments only) before </ctx>; "right before </ctx>" reads "with nothing but that legend after it".
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)', re.S)
 twin = syms.search(on) is not None and 'p="cpp/fwd' in syms.search(on).group(0)
 on, off = syms.sub('', on), syms.sub('', off)
 i = on.find('<!-- shortkey:'); j = on.find('</shortkey>')
@@ -374,7 +379,7 @@ c9e=1; run "$L" "$TMP/c9e.xml" "--for=capKey" && { c9e=0;
 skhas "$TMP/c9e.xml" "C9 row cap: total=8 shown=6" '<rung n="literal" key="capKey" total="8" shown="6" exact="0">'
 n=$( sk "$TMP/c9e.xml" | grep -o '<ld ' | wc -l | tr -d ' ' ); if [ "$n" = 6 ]; then ok "C9 row cap: 6 ld rows"; else no "C9 row cap: $n ld rows (want 6)"; fi
 }
-run "$L" "$TMP/c9f.xml" "--for=Big.hugeFn" && skhas "$TMP/c9f.xml" "C9 the exact leaf's body is cut past 8192 bytes" 'n="hugeFn" lines="1-518/804" truncated="1" next="--expand=ts/ts.Big.ts:1:hugeFn:519-804">'
+run "$L" "$TMP/c9f.xml" "--for=Big.hugeFn" && skhas "$TMP/c9f.xml" "C9 the exact leaf's body is cut past 8192 bytes" 'n="hugeFn" lines="1-517/804" truncated="1" next="--expand=ts/ts.Big.ts:1:hugeFn:518-804">'
 ( cd "$L" || exit 1; HOME="$TMP" "$BIN" "$L" --cache="$TMP/litcache" "--for=capKey" </dev/null >"$TMP/c9g0.xml" 2>/dev/null ) || no "C9 floor: the cache-priming run failed"
 chmod 000 "$L/src/f3.ts"
 if [ -r "$L/src/f3.ts" ]; then

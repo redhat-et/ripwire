@@ -107,10 +107,13 @@ std::optional<int> runAffected( const MainDispatch& d )
             // pre-fix arm offered only selectorFaultClause's symbol suggestion and answered `--affected=tow.c`
             // with "did you mean 'TOOLS'?" while `two.c` sat in the file list.
             const std::string affectedNearPath = rw::nearestIndexedFileClause( ing, r.badItem );
+            // AF5: reached only when NO item resolved (a partially usable list answers and names the rest), so a
+            // longer list says that none of its items did.
             rw::emitTo( stderr, "ripwire: --affected: '{}' matches no indexed file path (as a path pattern) and no indexed "
-                                  "symbol (as a symbol name; file:name and path::scope::name also accepted){}{}\n",
+                                  "symbol (as a symbol name; file:name and path::scope::name also accepted){}{}{}\n",
                           r.badItem.c_str(), affectedNearPath.c_str(),
-                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, r.badItem, "--affected=" ).c_str() : "" );
+                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, r.badItem, "--affected=" ).c_str() : "",
+                          rw::affectedNoneResolvedClause( r.unusedCount ).c_str() );
             return 1;
         }
         if( r.noSeeds )
@@ -279,6 +282,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 {
                     return 1;
                 }
+                // AF5: the items that resolved under no root, named ONCE above the per-root sections.
+                rw::writeSituUnusedBlock( stdout, rw::changedListUnused( ing, root, list ) );
             }
             bool anyGit = false;
             std::vector<std::vector<char>> perRootChanged( ws.size() );
@@ -343,7 +348,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             return 0;
         }
 
-        std::vector<char> changed;
+        std::vector<char>          changed;
+        std::vector<rw::UnusedItem> situUnused;
         if( !cfg.situFiles.empty() )
         {
             // H6: the SAME refusal --test-gate takes over the SAME grammar. --situ used to read an
@@ -354,7 +360,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             {
                 return 1;
             }
-            changed = std::move( list.mask );
+            situUnused = rw::changedListUnused( ing, root, list );   // AF5: named on the report, never dropped
+            changed    = std::move( list.mask );
         }
         else
         {
@@ -363,7 +370,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             { rw::emitRaw( stderr, "ripwire --situ: no files given and no git diff (use --situ=F1,F2)\n" ); return 1; }
         }
         rw::writeSituation( stdout, root, ing, g, changed, UINT32_MAX,
-                            rw::SituPageArgs{ cfg.pageLimit, cfg.pageOffset, cfg.situFiles } );
+                            rw::SituPageArgs{ cfg.pageLimit, cfg.pageOffset, cfg.situFiles, situUnused } );
         return 0;
     }
 
@@ -373,7 +380,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     // there are obligations (impacted tests to run OR a non-empty untested blast radius); exit 0 when neither.
     if( cfg.testGate )
     {
-        std::vector<char> changed;
+        std::vector<char>           changed;
+        std::vector<rw::UnusedItem> gateUnused;
         if( !cfg.testGateFiles.empty() )
         {
             // An unparseable FILES list REFUSES rather than reading as an all-zero mask ("your change
@@ -384,7 +392,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             {
                 return 1;
             }
-            changed = std::move( list.mask );
+            gateUnused = rw::changedListUnused( ing, root, list );
+            changed    = std::move( list.mask );
         }
         else
         {
@@ -397,7 +406,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // The gate decision (computeTestGate) is computed ONCE here and handed to whichever report emitter
         // runs, so the two report shapes can never disagree about tests/untested and never re-pay the
         // blast-radius traversal.
-        const rw::TestGateResult tg = rw::computeTestGate( root, ing, g, changed, cfg.testGateFiles.empty() );
+        rw::TestGateResult tg = rw::computeTestGate( root, ing, g, changed, cfg.testGateFiles.empty() );
+        tg.unused             = std::move( gateUnused );
         if( cfg.json )
         {
             rw::writeTestGateReportJson( stdout, ing, g, tg, root, cfg.pageLimit, cfg.pageOffset );
@@ -406,7 +416,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             rw::writeTestGateReport( stdout, ing, g, tg, root, cfg.pageLimit, cfg.pageOffset );
         }
-        return tg.hasObligations ? 4 : 0;
+        return rw::testGateExitCode( tg );   // AF5: 4 obligation, else 6 when a listed item was unusable, else 0
     }
 
     // --pr-context[=BASEREF]: Wave-4 no-LLM review-evidence bundle. Default change set = the working-tree
@@ -427,7 +437,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // per-root <pr-context> sections are wrapped in ONE <pr-context-workspace> element so the document stays
         // single-rooted (G4: xmllint-clean). Trim ladder under --max-tokens: the budget is split PER ROOT,
         // proportional to each root's changed-file count (integer floor; the remainder goes to the
-        // lexicographically-first label = ws[0], since ws is in canonical label order) — then each root runs the
+        // first root in canonical `<label>/` order = ws[0]) — then each root runs the
         // landed PrTrim ladder against its share. This reuses writePrContext verbatim; it is simpler than forcing
         // one shared global trim level (which would need writePrContext to expose a forced-level render).
         if( multiRoot )
@@ -1673,7 +1683,8 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             result.nearMiss = didYouMean( d.ing, whereisSel );
         }
         crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset,
-                                    crossref::whereisListingOf( cfg.whereisListing ) );
+                                    crossref::whereisListingOf( cfg.whereisListing ), d.redactPtr );
+        reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: t= is a redacting seam
         return 0;
     }
     return std::nullopt;
@@ -1743,7 +1754,8 @@ std::optional<int> runPlanLint( const MainDispatch& d )
         }
         return 1;
     }
-    planlint::writePlanLint( stdout, res );
+    planlint::writePlanLint( stdout, res, d.redactPtr );
+    reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: an <owed> line is a redacting seam
     return ( res.dialectDetected && planlint::gatingCount( res ) > 0 ) ? 2 : 0;
 }
 

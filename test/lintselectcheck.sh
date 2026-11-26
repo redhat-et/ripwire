@@ -36,7 +36,10 @@ def ok(m): print("  PASS  " + m)
 def no(m):
     global fail; fail = 1; print("  FAIL  " + m)
 root = ET.parse(sys.argv[1]).getroot()
-names = [r.get("name") for r in root.findall("rule")]
+# LT1: a rule that found nothing is named in the ONE <zero_rules ran= inert=> row instead of a count="0" row of its own
+zr = root.find("zero_rules")
+folded = [] if zr is None else [n for k in ("ran", "inert") for n in (zr.get(k) or "").split(",") if n]
+names = [r.get("name") for r in root.findall("rule")] + folded
 if names and all(n.startswith("cache-") for n in names):
     ok(f"--lint-select=cache- emits ONLY cache-* rows ({len(names)} of them)")
 else:
@@ -122,13 +125,17 @@ def ok(m): print("  PASS  " + m)
 def no(m):
     global fail; fail = 1; print("  FAIL  " + m)
 root = ET.parse(sys.argv[1]).getroot()
+# LT1: a zero-count rule is named in <zero_rules>: inert= is what a row's applicable="0" said, ran= a measured zero
+zr = root.find("zero_rules")
+inert_names = [] if zr is None else [n for n in (zr.get("inert") or "").split(",") if n]
+ran_names = [] if zr is None else [n for n in (zr.get("ran") or "").split(",") if n]
 magic = next((r for r in root.findall("rule") if r.get("name") == "magic-number"), None)
-if magic is None:
-    no("no magic-number row in --lint output at all")
-elif magic.get("applicable") == "0":
-    ok('a Go-only corpus makes magic-number report applicable="0"')
+if magic is None and "magic-number" in inert_names:
+    ok('a Go-only corpus names magic-number in zero_rules inert= (its applicable="0" reading)')
+elif magic is None:
+    no("magic-number is neither a rule row nor named in zero_rules inert=")
 else:
-    no(f'magic-number applicable= is "{magic.get("applicable")}" on a Go-only corpus, expected "0"')
+    no(f'magic-number printed a rule row (count={magic.get("count")}) on a Go-only corpus, expected it folded as inert')
 inert = root.get("inert_rules")
 if inert and int(inert) >= 1:
     ok(f'root tallies inert_rules="{inert}" (>= 1) on a Go-only corpus')
@@ -137,10 +144,10 @@ else:
 # a rule that DOES apply to Go (goto) must NOT carry applicable="0" — the disclosure is per-language,
 # not "everything is inert because the corpus is small".
 goto = next((r for r in root.findall("rule") if r.get("name") == "goto"), None)
-if goto is not None and goto.get("applicable") is None:
-    ok('goto (Go IS one of its languages) carries no applicable="0" on the same Go-only corpus')
+if ( goto is not None and goto.get("applicable") is None ) or ( goto is None and "goto" in ran_names and "goto" not in inert_names ):
+    ok('goto (Go IS one of its languages) is not inert on the same Go-only corpus (a row without applicable="0", or zero_rules ran=)')
 else:
-    no(f'goto applicable= is "{goto.get("applicable") if goto is not None else None}", expected absent')
+    no(f'goto is inert or missing: row applicable={goto.get("applicable") if goto is not None else None}, ran={ran_names}, inert={inert_names}')
 sys.exit(fail)
 PY
 [ $? -ne 0 ] && fail=1

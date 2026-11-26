@@ -52,6 +52,25 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     }
 }
 
+// Each module's directory as --arch prints it: relative to the crawl root (rootPrefix empty ⇒ the stored spelling, the
+// multi-root case, untouched). rootRelativeUri strips the prefix only from a path that runs on PAST it, so the root's own
+// directory comes back whole and is spelled "." here: the directory every other path= is relative to, and the spelling
+// `ripwire .` always gave it. Applied once, after computeModuleMetrics sorted the rows by their stored path, so the order
+// the rows print in does not move.
+void relativizeModulePaths( std::vector<rw::ModuleMetric>& mods, std::string_view rootPrefix )
+{
+    if( rootPrefix.empty() )
+    {
+        return;
+    }
+    const std::string_view rootItself = rw::sarif::rootRelativeUri( rootPrefix, {} );
+    for( rw::ModuleMetric& mm : mods )
+    {
+        const std::string_view rel = rw::sarif::rootRelativeUri( mm.path, rootPrefix );
+        mm.path = std::string( rel == rootItself ? std::string_view( "." ) : rel );   // a temporary first: rel views mm.path
+    }
+}
+
 // The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no measured file stands behind it, and
 // masked is the count of no-edge files left out of its denominator (arch-honest).
 void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::size_t masked, std::vector<char>& ae )
@@ -59,8 +78,9 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
     // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
     // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
     // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
-    // NOTE above computeModuleMetrics in arch.h); the summary
-    // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
+    // NOTE above computeModuleMetrics in arch.h); the legend (graphlegend.h archMetricsLegend, and the compact rows in
+    // compactlegend.h) carries that "heuristic, not proof" caveat. It rode every answer as a note= ATTRIBUTE until 2026-11-17:
+    // 574 B of definitions repeated as data in each one, 764 B with the zone_unknown clause.
     // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
     // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
     // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
@@ -94,15 +114,12 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
             ++zoneOk;
         }
     }
-    // Present-only: zone_unknown= rides beside its note clause; propagation_cost is empty when no measured file is left (its 1/N would
+    // Present-only: zone_unknown= rides beside its legend clause; propagation_cost is empty when no measured file is left (its 1/N would
     // read as a measurement of files no edge was ever seen in); masked_files= says how many no-edge files its denominator left out.
     const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
     const std::string propAttr    = ( propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string() ) + rw::countAttrXmlOrEmpty( "masked_files", masked );
-    const char* const unknownNote = zoneUnknown != 0
-        ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown, not zero, and part of the partition"
-        : "";
-    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na{} = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
-                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, zoneUnknown != 0 ? "+zone_unknown" : "", unknownNote );
+    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{}>",
+                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr );
     for( const rw::ModuleMetric& mm : mods )
     {
         const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
@@ -701,7 +718,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // the same file→file graph. Directory-level approximation from name-based edges (see arch.h) — an
         // additive, descriptive block appended inside <arch>; it never changes the exit code (the regex/
         // layer violations above own that). Emitted in every --arch path (baseline / update / normal).
-        const std::vector<ModuleMetric> mods = computeModuleMetrics( ing, adj );
+        std::vector<ModuleMetric> mods = computeModuleMetrics( ing, adj );   // not const: their paths are made root-relative below
 
         // Q5b: DSM propagation cost — density of the transitive closure of the file→file dep graph
         // (MacCormack). A single SYSTEM-level number on <metrics> (fixed 3dp → byte-identical). Reported,
@@ -717,12 +734,23 @@ std::optional<int> runArchViews( const MainDispatch& d )
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
+        // root= and the paths under it, the convention every other verb's root follows (--clones, --cochange, --deps above): a
+        // single-root run names the crawl root once and prints from=/to=/path= relative to it. Until 2026-11-17 this verb alone
+        // printed the stored spelling, so `ripwire "$PWD" --arch=…` repeated the checkout path in every row — 45,837 B of a
+        // 235,411 B answer on this repo (1,389 path attributes). Multi-root has no single root to name: the spelling is unchanged.
+        const std::string avRootPrefix = avSingleRoot ? rw::sarif::rootPrefixOf( avRootArg ) : std::string();
+        const std::string avRootAttr   = avSingleRoot ? ( " root=\"" + std::string( rw::escapeXml( avRootArg, ae ) ) + "\"" ) : std::string();
+        relativizeModulePaths( mods, avRootPrefix );
+        const auto shownFile = [ & ]( std::uint32_t f ) -> std::string_view
+        {
+            return avSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ f ], avRootPrefix ) : std::string_view( ing.files[ f ] );
+        };
         const auto emitViol = [ & ]( const Viol& v, bool showBaselined )
         {
             // escapeXml reuses a single buffer (clears on each call), so capture to strings.
-            const std::string ef  = std::string( rw::escapeXml( ing.files[ v.from ], ae ) );
+            const std::string ef  = std::string( rw::escapeXml( shownFile( v.from ), ae ) );
             const std::string efl = std::string( rw::escapeXml( v.fromLayer, ae ) );
-            const std::string et  = std::string( rw::escapeXml( ing.files[ v.to ], ae ) );
+            const std::string et  = std::string( rw::escapeXml( shownFile( v.to ), ae ) );
             const std::string etl = std::string( rw::escapeXml( v.toLayer, ae ) );
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
@@ -738,10 +766,18 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
         // baseline-update). It is a property of the VERB, not of the mode it ran in, and three hand-written
         // copies of one sentence is how two of them end up saying different things.
+        // 2026-11-17: from=/to= ARE that root-relative spelling now (root= names what they are relative to), so the sentence no
+        // longer has to warn that the rule and the row disagree. The <metrics> definitions that rode every answer as a note=
+        // attribute read here too (archMetricsLegend), and the three <arch> roots lost new_violations=: it was the count of <v>
+        // rows without baselined="1" in every mode — emitViol's flag and the newViols split read ONE predicate in a normal run,
+        // and both baseline modes print every row baselined="1" beside a literal 0 — so the legend says how to read it instead.
         static constexpr const char* kArchMatchDomain =
             " Rules — layer substrings and regex path-rules alike — are matched against each file's"
-            " ROOT-RELATIVE path (src/core/x.cpp), never the absolute or ./-prefixed spelling shown in from=/to=,"
-            " so a rule means the same thing whatever directory the tree was checked out into.";
+            " ROOT-RELATIVE path (src/core/x.cpp), never an absolute or ./-prefixed spelling,"
+            " so a rule means the same thing whatever directory the tree was checked out into."
+            " root= is the crawl root and from=/to=/path= are RELATIVE to it (single-root only; absent => they keep ingest's own spelling)."
+            " A NEW violation is a <v> row without baselined=1; their count is what exit=2 answers to.";
+        const std::string archMetricsNote = rw::archMetricsLegend( std::ranges::any_of( mods, &rw::ModuleMetric::couplingUnknown ) );
 
         // --baseline: write the sidecar with ALL current violations (accept as baseline); exit 0.
         if( cfg.baseline )
@@ -759,10 +795,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stderr, "ripwire arch: baseline written ({} violation(s) accepted) → {}\n",
                           viols.size(), sidecarPath.c_str() );
             // Still emit the arch XML for reference (shows what was baselined), then exit 0.
-            rw::emitTo( stdout, "<!-- ripwire arch: baseline mode — all {} violation(s) accepted as baseline. exit=0.{}{}{} -->", viols.size(), kArchMatchDomain,
-                         rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"0\"{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archPartialAttr );
+            rw::emitTo( stdout, "<!-- ripwire arch: baseline mode — all {} violation(s) accepted as baseline. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archPartialAttr, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -787,10 +823,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             }
             rw::emitTo( stderr, "ripwire arch: baseline updated ({} hash(es) total) → {}\n",
                           hashes.size(), sidecarPath.c_str() );
-            rw::emitTo( stdout, "<!-- ripwire arch: baseline-update mode — {} violation(s) merged into baseline. exit=0.{}{}{} -->", viols.size(), kArchMatchDomain,
-                         rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"0\"{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archPartialAttr );
+            rw::emitTo( stdout, "<!-- ripwire arch: baseline-update mode — {} violation(s) merged into baseline; baselined= is every hash the sidecar now holds. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archPartialAttr, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -831,11 +867,11 @@ std::optional<int> runArchViews( const MainDispatch& d )
         static constexpr const char* kArchBaselineRefused =
             " baseline=\"symlink-refused\": the baseline sidecar is a SYMLINK, refused unopened — no violation was"
             " suppressed, so every one below counts as new; this is not the same answer as having no baseline.";
-        rw::emitTo( stdout, "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.{}{}{}{} -->",
-                     kArchMatchDomain, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-        rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"{}\"{}{}>",
-                     ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(), newViols.size(),
-                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archPartialAttr );
+        rw::emitTo( stdout, "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.{}{}{}{}{} -->",
+                     kArchMatchDomain, archMetricsNote, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+        rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}{}>",
+                     ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(),
+                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archPartialAttr, avRootAttr );
         for( const Viol& v : viols )
         {
             emitViol( v, hasBaseline && baseline.count( v.hash ) );
@@ -904,6 +940,105 @@ CloneIdiomTally tallyCloneIdioms( const std::vector<rw::CloneIdiomVerdict>& exac
     return t;
 }
 
+// §P10.5: --clones and --quality-delta share the detector (kMinCloneTokens) but not the POLICY — quality.h exempts fixture paths and
+// shell test-runners from its duplication kind (documented false-positive classes: sibling gate scripts repeat setup boilerplate BY
+// CONVENTION). --clones is a fact verb, so those groups stay VISIBLE — but each one says the sibling verb would ignore it, via the SAME
+// predicates (quality::isFixturePath / isTestScriptPath — one policy, two verbs, no copy). nullptr when a member is on neither path.
+const char* cloneGroupExemptKind( const rw::IngestResult& ing, const rw::CloneGroup& gp )
+{
+    bool allExempt = true, allScript = true;
+    for( rw::NodeId id : gp.members )
+    {
+        const std::string_view p        = rw::rootRelPath( ing, ing.symbols[id].fileId );
+        const bool             isScript = rw::quality::isTestScriptPath( p );
+        allExempt = allExempt && ( isScript || rw::quality::isFixturePath( p ) );
+        allScript = allScript && isScript;
+    }
+    return allExempt ? ( allScript ? "shell-runner" : "fixture" ) : nullptr;
+}
+
+// PG1: what one <group> row of --clones is rendered from. The row is rendered to a string before anything is printed, so the
+// page can be byte-budgeted under the output ceiling (cloneRowsWindow) and print exactly the rows it priced.
+struct CloneRowSource
+{
+    const rw::IngestResult&                   ing;
+    const std::vector<rw::CloneGroup>&        cg;
+    const std::vector<rw::CloneGroup>&        cg3;
+    const std::vector<rw::CloneIdiomVerdict>& vx;
+    const std::vector<rw::CloneIdiomVerdict>& vx3;
+    const std::vector<std::uint32_t>&         gidOfGroup;
+    bool                                      singleRoot;
+    const std::string&                        rootPrefix;
+};
+
+// One <group> row, by its FLAT index (cg's rows, then cg3's): gid= its clone component, the exempt=/idiom= annotations, one <f>
+// per member with p= root-relative on a single root.
+std::string cloneRowXml( const CloneRowSource& src, std::size_t flat, std::vector<char>& esc )
+{
+    const bool            isType3   = flat >= src.cg.size();
+    const rw::CloneGroup& gp        = isType3 ? src.cg3[ flat - src.cg.size() ] : src.cg[ flat ];
+    const char* const     exempt    = cloneGroupExemptKind( src.ing, gp );
+    const std::string     exemptAt  = exempt ? std::string( " exempt=\"" ) + exempt + "\"" : std::string();
+    const unsigned        gid       = flat < src.gidOfGroup.size() ? src.gidOfGroup[ flat ] : 0u;
+    const std::string     idiomAttr = cloneIdiomAttrs( isType3 ? src.vx3[ flat - src.cg.size() ] : src.vx[ flat ] );
+    std::string           row       = isType3 ? std::format( "<group type=\"3\" gid=\"{}\" tokens=\"{}\" n=\"{}\" similarity=\"{:.2f}\"{}{}>", gid, gp.tokens,
+                                                             gp.members.size(), gp.similarity, exemptAt, idiomAttr )
+                                              : std::format( "<group type=\"{}\" gid=\"{}\" tokens=\"{}\" n=\"{}\"{}{}>", gp.type, gid, gp.tokens,
+                                                             gp.members.size(), exemptAt, idiomAttr );
+    for( rw::NodeId id : gp.members )
+    {
+        const rw::Symbol&      sym = src.ing.symbols[id];
+        const std::string_view rp  = src.singleRoot ? rw::sarif::rootRelativeUri( src.ing.files[ sym.fileId ], src.rootPrefix )
+                                                    : std::string_view( src.ing.files[ sym.fileId ] );
+        row += "<f n=\"" + std::string( rw::escapeXml( sym.name, esc ) ) + "\" p=\"" + std::string( rw::escapeXml( rp, esc ) ) + ":" + std::to_string( sym.line ) + "\"/>";
+    }
+    return row + "</group>";
+}
+
+// PG1 (outputceiling.h): the rows a --clones page prints. MEASURED on GA1 DEV (CL1 census, base 36a95d732): the default page printed
+// up to 25,649 characters (gson: 80 rows), over the 24,000 ceiling, and `--offset=K` alone printed EVERY row from K on (gson: 1,658).
+// An explicit --limit=N is the caller's page, unchanged. --page-bytes=0 (cli.h wholeAnswerAsked) is every row from --offset. Otherwise
+// the page is the verb's own default rows (the two per-list heads on a bare call, everything from K after --offset=K) — and when
+// main.cpp's ceiling fit (runMaintenanceViewsServed) found that page over the ceiling, cfg.pageRowBytes is the row budget it chose:
+// the page is then the prefix of those rows that fits it, at least one row, so a chain always advances.
+template <class RowBytesFn>
+rw::PageWindow cloneRowsWindow( const rw::Config& cfg, std::size_t total, std::size_t defaultEnd, RowBytesFn&& rowBytes )
+{
+    if( cfg.pageLimit > 0 )
+    {
+        return rw::pageWindow( total, cfg.pageLimit, cfg.pageOffset );
+    }
+    const std::size_t begin = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, total );
+    const std::size_t end   = rw::wholeAnswerAsked( cfg ) || cfg.pageOffset > 0 ? total : std::min( defaultEnd, total );
+    if( cfg.pageRowBytes == 0 )
+    {
+        return rw::PageWindow{ begin, end };
+    }
+    std::size_t used = 0;
+    std::size_t at   = begin;
+    for( ; at < end; ++at )
+    {
+        const std::size_t b = rowBytes( at );
+        if( at > begin && used + b > cfg.pageRowBytes )
+        {
+            break;   // the page already holds a row: stop BEFORE the overflow row
+        }
+        used += b;
+    }
+    return rw::PageWindow{ begin, at };
+}
+
+// PG1: the next page of a cut --clones answer as one pasteable call ("" when this page reaches the last row): --offset=K, plus the
+// caller's --limit=N and --pack-top-n=N (which sizes the per-list heads, and so decides the row order the offset counts in).
+inline std::string clonesPageNext( const rw::Config& cfg, std::size_t windowEnd, std::size_t total )
+{
+    if( windowEnd >= total )
+    {
+        return {};
+    }
+    return rw::pagedNext( cfg.packTopN > 0 ? "--clones --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string( "--clones" ), cfg.pageLimit, windowEnd );
+}
+
 int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
     using namespace rw;
@@ -963,47 +1098,12 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 
     // The denominator is honest either way: every group that EXISTS, not just the kept ones.
     const std::size_t cloneTotal = cg.size() + cg3.size();
-    const PageWindow  clonePage  = clonePaging ? pageWindow( rows.size(), cfg.pageLimit, cfg.pageOffset )
-                                               : PageWindow{ 0, keep12 + keep3 };
     char              cpab[ kPageDisclosureCap ];
 
-    // §P10.5: --clones and --quality-delta share the detector (kMinCloneTokens) but not the POLICY —
-    // quality.h exempts fixture paths and shell test-runners from its duplication kind (documented
-    // false-positive classes: sibling gate scripts repeat setup boilerplate BY CONVENTION). --clones is a
-    // fact verb, so those groups stay VISIBLE — but each one now says the sibling verb would ignore it,
-    // via the SAME predicates (quality::isFixturePath / isTestScriptPath — one policy, two verbs, no copy).
-    const auto groupExemptKind = [ & ]( const CloneGroup& gp ) -> const char*
+    std::size_t exemptGroupCount = 0;   // over ALL groups (cloneGroupExemptKind above)
+    for( const std::vector<CloneGroup>* list : { &cg, &cg3 } )
     {
-        bool allExempt = true, allScript = true;
-        for( NodeId id : gp.members )
-        {
-            const std::string_view p   = rootRelPath( ing, ing.symbols[id].fileId );
-            const bool         isScript = quality::isTestScriptPath( p );
-            if( !isScript && !quality::isFixturePath( p ) )
-            {
-                allExempt = false;
-            }
-            if( !isScript )
-            {
-                allScript = false;
-            }
-        }
-        return allExempt ? ( allScript ? "shell-runner" : "fixture" ) : nullptr;
-    };
-    std::size_t exemptGroupCount = 0;
-    for( const CloneGroup& gp : cg )
-    {
-        if( groupExemptKind( gp ) )
-        {
-            ++exemptGroupCount;
-        }
-    }
-    for( const CloneGroup& gp : cg3 )
-    {
-        if( groupExemptKind( gp ) )
-        {
-            ++exemptGroupCount;
-        }
+        exemptGroupCount += std::size_t( std::ranges::count_if( *list, [ & ]( const CloneGroup& gp ) { return cloneGroupExemptKind( ing, gp ) != nullptr; } ) );
     }
     const CloneIdiomTally idiomTally = tallyCloneIdioms( vx, vx3 );   // over ALL groups, like exempt_groups=
 
@@ -1014,8 +1114,21 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // detector output (cg + cg3), never the displayed window — a summary that shrank with --limit would be
     // a paging artefact, not a measurement.
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
+    // PG1: the page, byte-budgeted on the rows it will print (cloneRowsWindow above); rendered once, printed as priced.
+    std::vector<char>          esc;
+    const CloneRowSource       rowSrc{ ing, cg, cg3, vx, vx3, grouping.gidOfGroup, clnSingleRoot, clnRootPrefix };
+    std::vector<std::string>   rowXml( rows.size() );
+    const auto                 rowAt = [ & ]( std::size_t rowIndex ) -> const std::string&
+    {
+        if( rowXml[ rowIndex ].empty() )
+        {
+            rowXml[ rowIndex ] = cloneRowXml( rowSrc, rows[ rowIndex ], esc );
+        }
+        return rowXml[ rowIndex ];
+    };
+    const PageWindow           clonePage = cloneRowsWindow( cfg, rows.size(), keep12 + keep3, [ & ]( std::size_t rowIndex ) { return rowAt( rowIndex ).size(); } );
 
-    rw::emitTo( stdout, "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of four: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain), one-statement (a body of one return statement, leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. For one-statement the shared-identifier test leaves out each member's own parameter names, every std:: chain and standard container/string words (size, empty, begin, end, find, rfind, substr, npos, front, back, data, first, second, starts_with, ends_with, contains), and a pair whose bodies are identical once each member's parameters are renamed never demotes. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\" type3_capped=\"1\" (present only on a run where the Type-3 pair cap fired): a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->{}", rw::rootRelPathsLegend( clnSingleRoot ) );
+    rw::emitTo( stdout, "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of five: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain), one-statement (a body of one return statement, leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside), call-sequence (a body of call statements and nothing else). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. For one-statement and call-sequence the shared-identifier test leaves out each member's own parameter names, every std:: chain and standard container/string words (size, empty, begin, end, find, rfind, substr, npos, front, back, data, first, second, starts_with, ends_with, contains), and a pair whose bodies are identical once each member's parameters are renamed never demotes. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\" type3_capped=\"1\" (present only on a run where the Type-3 pair cap fired): a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. A page without an explicit limit is also cut to stay under the 24,000-character output ceiling; next= on a cut page is the next page as one pasteable call, and the pages in turn hold every group once (page-bytes=0, the flag, is every group in one answer). raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->{}", rw::rootRelPathsLegend( clnSingleRoot ) );
     rw::emitTo( stdout, "<clones groups=\"{}\" type3=\"{}\"{} exempt_groups=\"{}\" idiom_groups=\"{}\" demoted_groups=\"{}\" clone_groups=\"{}\" dup_loc=\"{}\" total_loc=\"{}\" dup_pct=\"{:.1f}\"{}{}{}>",
                  cg.size(), cg3.size(),
                  // M2: pageDisclosure's paging half (which spells total= itself) now also rides on a CUT bare run,
@@ -1030,37 +1143,11 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
                  t3Stats.pairCapHit ? " counts_floor=\"1\" type3_capped=\"1\"" : "",
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 clnRootAttr.c_str() );
-    std::vector<char> esc;
-    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+                 clnRootAttr + rw::nextAttrXml( clonesPageNext( cfg, clonePage.end, rows.size() ) ) );
     for( std::size_t rowIndex = clonePage.begin; rowIndex < clonePage.end; ++rowIndex )
     {
-        const std::size_t flat    = rows[ rowIndex ];
-        const bool        isType3 = flat >= cg.size();
-        const CloneGroup& gp      = isType3 ? cg3[ flat - cg.size() ] : cg[ flat ];
-        const char* exemptKind = groupExemptKind( gp );
-        char        exemptAttr[ 40 ] = "";
-        if( exemptKind )
-        {
-            rw::formatTo( exemptAttr, sizeof( exemptAttr ), " exempt=\"{}\"", exemptKind );
-        }
-        const unsigned gid = flat < grouping.gidOfGroup.size() ? grouping.gidOfGroup[ flat ] : 0u;
-        const std::string idiomAttr = cloneIdiomAttrs( isType3 ? vx3[ flat - cg.size() ] : vx[ flat ] );
-        if( isType3 )
-        {
-            rw::emitTo( stdout, "<group type=\"3\" gid=\"{}\" tokens=\"{}\" n=\"{}\" similarity=\"{:.2f}\"{}{}>", gid, gp.tokens, gp.members.size(), gp.similarity, rw::cstr( exemptAttr ), idiomAttr.c_str() );
-        }
-        else
-        {
-            rw::emitTo( stdout, "<group type=\"{}\" gid=\"{}\" tokens=\"{}\" n=\"{}\"{}{}>", gp.type, gid, gp.tokens, gp.members.size(), rw::cstr( exemptAttr ), idiomAttr.c_str() );
-        }
-        for( NodeId id : gp.members )
-        {
-            const Symbol&           s  = ing.symbols[id];
-            const std::string_view  rp = clnSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], clnRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            rw::emitTo( stdout, "<f n=\"{}\" p=\"{}:{}\"/>", ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
-        }
-        rw::emitTo( stdout, "</group>" );
+        const std::string& row = rowAt( rowIndex );
+        std::fwrite( row.data(), 1, row.size(), stdout );
     }
     rw::emitTo( stdout, "</clones>" );
     return 0;
@@ -1940,7 +2027,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
-                     "holding the TOWER FRONT of them (most specific kind, leading language, then lowest node id), so defs= above 1 means "
+                     "holding the TOWER FRONT of them (most specific kind, leading language, then path, line, name), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
                      "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
                      "definition's file -->{}{}{}{}",
@@ -2072,6 +2159,15 @@ void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
              " cannot be detected this way and are not covered. -->" );
 }
 
+// M1 — the untracked-build clause, written ONLY into a document that carries untracked-build rows (escaped_root='s
+// absent-means-nothing-happened rule), so every other --skipped document stays byte-identical. The class's DEFINITION.
+inline constexpr std::string_view kUntrackedBuildLegend =
+             "<!-- untracked_build= counts files left out of a build/ directory the crawl ENTERED only because git tracks files"
+             " under it: build/ is pruned by name as build output unless git tracks files there, and then only the TRACKED files"
+             " are indexed. Each is one f why=\"untracked-build\" row. Tested after the ignore rules, so a file git already ignores"
+             " is counted as ignored= instead; the accounting invariant adds untracked_build= to its drop classes. --no-ignore"
+             " indexes them. -->";
+
 // The nest-refused clause of the legend, written ONLY into a document that carries nest-refused rows — the same
 // absent-means-nothing-happened rule nest_refused= itself follows — so every other --skipped document stays byte-identical.
 void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
@@ -2201,10 +2297,8 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         // fileBytes == 0 is the NOT-MEASURED sentinel: counted as unmeasured and never degraded/minified (both predicates
         // below are false at 0 bytes), so such a file is rowed only if it still holds a flagged definition — never hidden.
         out.unmeasured += h.fileBytes == 0 ? 1u : 0u;
-        const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
-        const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
         const bool          degraded = rw::fileParseDegraded( ing, f );   // the ONE predicate (model.h) — grep + refusals route through it too
-        const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+        const bool          minified = rw::isMinifiedHealth( h );            // likewise the one minified verdict (ingest.h) --lint's order reads
         const bool          blanked  = rw::isMacroBlankedHealth( h );   // member-macro re-parse: rowed even when the adopted parse is clean
         const bool          useBlank = rw::isUseBoundsBlankedHealth( h );   // its Rust layer: the same rule
         out.degraded += degraded ? 1u : 0u;
@@ -2457,7 +2551,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                                   || cs.prunedDirRows.size() + cs.prunedPackageRows.size() < cs.prunedDirs              // #478 gap 3
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
-                                  || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
+                                  || cs.escaped.size() < cs.escapedFiles                                                // §SEC1
+                                  || cs.untrackedBuild.size() < cs.untrackedBuildFiles;                                 // M1
     char nestAttr[ 48 ] = "";   // absent when zero, like every attribute that only a rare corpus can make non-zero
     if( cs.nestRefusedFiles > 0 )
     {
@@ -2470,6 +2565,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     {
         rw::formatTo( escAttr, sizeof( escAttr ), " escaped_root=\"{}\"", ( unsigned long long ) cs.escapedFiles );
     }
+    // M1 — the same rule, printed right after it: only a tracked build/ that held an untracked file pays a byte
+    const std::string untrackedAttr = cs.untrackedBuildFiles > 0 ? " untracked_build=\"" + std::to_string( cs.untrackedBuildFiles ) + "\"" : std::string();
     rw::formatTo( hdr, sizeof( hdr ),
                    "<skipped indexed=\"{}\" oversize=\"{}\" excluded=\"{}\" unsupported_ext=\"{}\" excluded_dirs=\"{}\""
                    " pruned_dirs=\"{}\" ignored=\"{}\" ignored_dirs=\"{}\" ignore_mode=\"{}\""
@@ -2483,7 +2580,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    skippedHealthRootAttrs( health ),   // extent_suspect_files= then macro_blanked_files=, each absent at 0
                    health.unmeasured,
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
-                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
+                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string( escAttr ) + untrackedAttr, rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
 }
 
@@ -2534,6 +2631,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
         writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
+        w.write( cs.untrackedBuildFiles != 0 ? kUntrackedBuildLegend : std::string_view() );   // M1 — only beside untracked-build rows
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeExtractPartialLegend( w, cs );                         // only into a document that has extract-partial rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=
@@ -2547,6 +2645,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
+        writeDropRows( w, esc, cs.untrackedBuild, "untracked-build", skRootPrefix );   // M1: untracked files in a tracked build/
         writeDropRows( w, esc, cs.prunedPackageRows, "pruned-package", skRootPrefix );   // #478 gap 3: a real package the denylist took
         writeDropRows( w, esc, cs.prunedDirRows,  "pruned-dir",  skRootPrefix );   // #478 gap 3: every other policy prune
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
@@ -2620,9 +2719,10 @@ std::optional<int> runLayout( const MainDispatch& d )
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const std::string_view layoutRootArg = ( d.ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
     layout::writeLayout( stdout, result, layoutRootArg );
-    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition it could not read, so the
-    // contract was not fully verified (unreadable="N" on the root says which); 0 = verified, no break
-    return layout::layoutContractBroken( result ) ? 2 : ( result.unreadableDefs > 0 ? 3 : 0 );
+    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition, or a file the assertion
+    // scan reads, it could not read, so the contract was not fully verified (unreadable= / asserts_unreadable= on the
+    // root say which); 0 = verified, no break
+    return layout::layoutContractBroken( result ) ? 2 : ( result.isIncomplete() ? 3 : 0 );
 }
 
 // --field-affinity[=STRUCT]: the CACHE-LOCALITY lens. src/fieldaffinity.h owns the whole computation (the
@@ -3191,7 +3291,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
                      "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. "
                      // P4 (L7): the two default ceilings, defined where the reader meets them
-                     "levels_shown= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
+                     "shown_levels= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all), levels_capped=1 when deeper ones are unprinted: a module AT the cut "
                      "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
                      "default 40 by rank mass; limit=/offset= page it) and next= pastes the next page. {}{}-->",
                      bridge.size() > kZoomBridgeCap ? ", the 12 heaviest (shown_bridges=/bridges_capped=/bridges= of all pairs)" : "",
@@ -3203,7 +3303,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // a fixed-shape diagram, not a row list (its own hard-coded top-10/top-8/top-5 caps are unaffected —
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
         // P4 (L7): the default window over the top modules (kZoomTopModuleCap; --limit raises it) and the printed
-        // depth (levels_shown=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
+        // depth (shown_levels=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
         // root and next= pastes the next page; a module AT the depth cut carries children= instead of nesting.
         const PageWindow  zoomPw = pageWindow( topOrder.size(), effectiveRowCap( cfg.pageLimit, kZoomTopModuleCap ), cfg.pageOffset );
         const std::size_t levelsShown = cfg.zoomLevelsSet ? ( cfg.zoomLevels > 0 ? std::min<std::size_t>( L, std::size_t( cfg.zoomLevels ) ) : L )
@@ -3220,7 +3320,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // the lightest pairs), and the cut was silent: no total, no flag. secondaryCutAttrs is the pair plus the
         // total, present only on a cut (an uncut answer is byte-identical); no call pages it, so there is no next=.
         const std::size_t zoomBridgesShown = std::min<std::size_t>( kZoomBridgeCap, bridge.size() );
-        rw::emitTo( stdout, "<zoom levels=\"{}\" levels_shown=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, topOrder.size(), N, isolatedCount,
+        rw::emitTo( stdout, "<zoom levels=\"{}\" shown_levels=\"{}\" levels_capped=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, ( levelsShown < L ? 1 : 0 ), topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, zoomCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
@@ -3250,7 +3350,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             rw::emitTo( stdout, ">" );
             if( atCut )
             {
-                // the depth ceiling: nothing below this row is printed (levels_shown= on the root says so)
+                // the depth ceiling: nothing below this row is printed (shown_levels= on the root says so)
             }
             else if( l == 0 )   // finest community → list its top-ranked symbols
             {

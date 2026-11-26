@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -293,7 +294,7 @@ inline SymTreeIndex indexCommittish( const std::string& root, const std::string&
     }
     quality::TmpTreeGuard guard{ tmpRoot };
     const std::string cachePath = msCachePath( repoHex, exclHex, committish );
-    IngestResult ing = ingest( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
+    IngestResult ing = ingestTrackedTree( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
     // buildTreeIndex on an empty IngestResult already produces an empty-but-valid SymTreeIndex — see the
     // function comment above for why an empty `ing` here is trusted rather than re-checked.
     SymTreeIndex index = buildTreeIndex( ing, tmpRoot );
@@ -310,8 +311,7 @@ inline std::vector<ChangedSym> diffTreeIndex( const SymTreeIndex& base, const Sy
     keys.reserve( base.bodyHash.size() + ref.bodyHash.size() );
     for( const auto& [ k, v ] : base.bodyHash ) { (void)v; keys.push_back( k ); }
     for( const auto& [ k, v ] : ref.bodyHash )  { (void)v; keys.push_back( k ); }
-    std::sort( keys.begin(), keys.end() );
-    keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+    rw::sortutil::sortUnique( keys );
 
     std::vector<ChangedSym> out;
     out.reserve( keys.size() );

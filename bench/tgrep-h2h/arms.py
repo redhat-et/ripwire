@@ -24,6 +24,7 @@ All arms honour .gitignore by default, skip binary files by default, and are giv
 same corpus root.
 """
 
+import html
 import json
 import os
 import re
@@ -115,7 +116,7 @@ def rw_hitset(out, root):
     cur = None
     for m in _RW_TOKEN.finditer(body):
         if m.group(1) is not None:
-            cur = m.group(1).decode("utf-8", "replace")
+            cur = html.unescape(m.group(1).decode("utf-8", "replace"))   # XML-decoded: the rg side names the real path (#719)
         elif cur is not None:
             hits.add((cur, int(m.group(2))))
     return hits

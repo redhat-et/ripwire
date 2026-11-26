@@ -240,27 +240,6 @@ inline bool isGraphForm( std::string_view task, const std::vector<std::string_vi
     return false;
 }
 
-// A CI, tool or vendored copy: under a dot directory (.github, .circleci, .yarn), a vendoring directory, or the demo/generated tier. Such
-// a file can define the subject's symbol, even first in path order (a bundled .github action defined Angular's UrlSerializer), and it
-// is never what the subject means.
-inline bool isToolOrVendoredPath( std::string_view p ) noexcept
-{
-    if( isDemoOrGeneratedPath( p ) )
-    {
-        return true;
-    }
-    for( std::size_t start = 0, slash = p.find( '/' ); slash != std::string_view::npos; start = slash + 1, slash = p.find( '/', start ) )
-    {
-        const std::string_view dir = p.substr( start, slash - start );
-        const bool             vendoring = dir == "vendor" || dir == "third_party" || dir == "node_modules" || dir == "bower_components";
-        if( vendoring || ( dir.size() > 1 && dir.front() == '.' && dir != ".." ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 inline bool sourceClassDef( const IngestResult& ing, NodeId id )
 {
     const Symbol& s = ing.symbols[id];
@@ -589,6 +568,7 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
         }
     }
     std::vector<Spelling> parsed;
+    parsed.reserve( spellings.size() );
     for( const std::string& sp : spellings )
     {
         parsed.push_back( parseSpelling( sp ) );
@@ -637,10 +617,19 @@ inline SentenceWordText sentenceWordText( const std::vector<std::string_view>& w
 // prerequisites") asks nothing about the name.
 inline constexpr std::size_t      kCueObjectWords = 3;
 inline constexpr std::string_view kCuePronouns[]  = { "it", "them", "its" };
-inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
+// REASK-GRAIN: a dependents cue that asks what a CHANGE to the function reaches (change, add, affect, break, depend, update, modify,
+// rename, in any listed inflection) asks for the transitive radius; the others (call, caller, used, invoke, reference, exercise) ask
+// who calls it, one hop. The verb follows the question's grain, never the cheaper answer: a re-ask that sent a change question to the
+// one-hop callers verb named a smaller answer to a different question (15 of 39 change-impact sentences, m5 ROUTING_TOKEN_SAVINGS_1117 4.3).
+inline constexpr std::string_view kChangeCueStems[] = { "chang", "add", "affect", "break", "broke", "depend", "updat", "modif", "renam" };
+inline bool isChangeCue( std::string_view w )
 {
-    const SentenceWordText        read = sentenceWordText( words );
-    const std::vector<std::string_view>& text = read.text;
+    const std::string lw = routeLower( detail::graphSubjectTrimWord( w ).text );
+    return std::ranges::any_of( kChangeCueStems, [ & ]( std::string_view stem ) { return lw.starts_with( stem ); } );
+}
+// Does the sentence read the name as the CALLER of something (a call auxiliary before it, an agent cue after it: "does `f` call g")?
+inline bool nameReadsAsCallee( const std::vector<std::string_view>& text, std::string_view spelling )
+{
     bool callee = false;
     for( std::size_t k = 0; k < text.size(); ++k )
     {
@@ -649,27 +638,92 @@ inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::s
             callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
         }
     }
-    const auto objectAfter = [ & ]( std::size_t k )
+    return callee;
+}
+// Is the cue at text[k] about the name: the name, or a pronoun for it, within kCueObjectWords words after the cue?
+inline bool cueObjectIsName( const std::vector<std::string_view>& text, std::size_t k, std::string_view spelling )
+{
+    for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
     {
-        for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
-        {
-            if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-    for( std::size_t k = 0; k < text.size(); ++k )
-    {
-        if( cueInDependentsSense( text, k, callee ) && objectAfter( k ) )
+        if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
         {
             return true;
         }
     }
     return false;
 }
+// What the sentence asks about `spelling`: `asks` = a dependents cue in that sense governs the name; `change` = one such cue is a
+// change cue (isChangeCue), whatever other cue fires beside it.
+struct DependentsAsk
+{
+    bool asks   = false;
+    bool change = false;
+};
+inline DependentsAsk dependentsAskOf( const std::vector<std::string_view>& words, std::string_view spelling )
+{
+    const SentenceWordText               read   = sentenceWordText( words );
+    const std::vector<std::string_view>& text   = read.text;
+    const bool                           callee = nameReadsAsCallee( text, spelling );
+    DependentsAsk                        ask;
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( cueInDependentsSense( text, k, callee ) && cueObjectIsName( text, k, spelling ) )
+        {
+            ask.asks   = true;
+            ask.change = ask.change || isChangeCue( text[k] );
+        }
+    }
+    return ask;
+}
+inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
+{
+    return dependentsAskOf( words, spelling ).asks;
+}
+// AF4 T-B: words that make a dependents question a TRANSITIVE or RADIUS one, which a one-hop callers block does not answer first.
+// P1's rule R order 1 (transitive|hops|levels|trace|depends on) plus the blast-radius words; "depends" is already a change cue.
+inline constexpr std::string_view kCallersLeadVetoWords[] = { "transitive", "transitively", "indirect", "indirectly", "hop", "hops", "levels",
+                                                              "trace", "chain", "radius", "impact", "impacted", "risk" };
+// The last segment of a printed name (`rw::answerfirst::topLevelBlocks`, `Owner.method`): the name after the last `::` or `.`.
+inline std::string_view printedNameLeaf( std::string_view name )
+{
+    const std::size_t colons = name.rfind( "::" );
+    const std::size_t dot    = name.rfind( '.' );
+    const std::size_t from   = std::max( colons == std::string_view::npos ? 0 : colons + 2, dot == std::string_view::npos ? 0 : dot + 1 );
+    return name.substr( std::min( from, name.size() ) );
+}
 }   // namespace subject_detail
+
+// AF4 T-B (the P1 verb-route spec, section 2 (local results, not shipped)): does `task` ask WHO CALLS `subject` — the of= of the answer's <callers
+// by="subject"> block, as printed — so that block may lead the answer-first document (foranswerfirst.h rowBlockOrder)? A
+// dependents cue governs the subject (dependentsAskOf, read on the whole of= or on its leaf when the leaf is itself a name: the
+// block prints `rw::answerfirst::topLevelBlocks` where the sentence spells `topLevelBlocks`), no governing cue is a CHANGE cue,
+// and no word makes it a transitive or radius question. P1 measured the reason for each clause: who-calls cells 5,387→726,
+// 6,629→935, 11,112→743 bytes-to-all-gold; the change-risk cell 5,965→6,451, worse.
+inline bool subjectCallersCueLeads( std::string_view task, std::string_view subject )
+{
+    using namespace subject_detail;
+    if( subject.empty() )
+    {
+        return false;
+    }
+    const std::vector<std::string_view> words = splitRouteWords( task );
+    if( std::ranges::any_of( words, []( std::string_view w ) { return wordIn( detail::graphSubjectTrimWord( w ).text, kCallersLeadVetoWords ); } ) )
+    {
+        return false;
+    }
+    // Read the whole of= AND its leaf, then decide once: a change cue on EITHER spelling vetoes. Deciding per spelling let a
+    // pronoun call cue ("... defines or calls it") pass on the whole of= while the change cue sat on the leaf the sentence spells
+    // (T5d hb-rake-01/02, "What breaks if I change `X`? ..."; foranswerfirstcheck CL5).
+    DependentsAsk          ask  = dependentsAskOf( words, subject );
+    const std::string_view leaf = printedNameLeaf( subject );
+    if( leaf.size() < subject.size() && hasNameSyntax( leaf ) )
+    {
+        const DependentsAsk onLeaf = dependentsAskOf( words, leaf );
+        ask.asks                   = ask.asks || onLeaf.asks;
+        ask.change                 = ask.change || onLeaf.change;
+    }
+    return ask.asks && !ask.change;
+}
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
 {
@@ -1173,11 +1227,9 @@ inline std::string sentenceReaskInvocation( const IngestResult& ing, std::string
         const bool swap = from0 == 1 || from1 == -1;
         return "--path=" + names[ swap ? 1 : 0 ].spelling + "," + names[ swap ? 0 : 1 ].spelling;
     }
-    if( names.size() == 1 && asksDependentsOf( words, names.front().spelling ) )
-    {
-        return "--callers=" + names.front().spelling;
-    }
-    return {};
+    // REASK-GRAIN: a change question's bare form is the transitive radius; a who-calls question's is the one-hop callers
+    const DependentsAsk ask = names.size() == 1 ? dependentsAskOf( words, names.front().spelling ) : DependentsAsk{};
+    return ask.asks ? ( ask.change ? "--impact=" : "--callers=" ) + names.front().spelling : std::string();
 }
 
 // ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE

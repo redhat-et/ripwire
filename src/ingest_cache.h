@@ -9,6 +9,7 @@
 #include <bit>               // std::endian — the cache blob's arch tag, without a compiler-specific macro
 #include <memory>            // std::unique_ptr — CacheRecords holds its open frame
 #include <optional>          // std::optional — cacheBlobIdentity: "this blob's identity" vs "there is no blob to identify"
+#include <limits>            // std::numeric_limits — saturatedTo
 
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
@@ -24,6 +25,13 @@ namespace rw
 
 namespace
 {
+
+// A walk count stored in a narrower RawDef field: clamped to the field's maximum (every such count is past every bar there).
+template<class Narrow>
+inline constexpr Narrow saturatedTo( std::uint32_t v ) noexcept
+{
+    return Narrow( std::min<std::uint32_t>( v, std::numeric_limits<Narrow>::max() ) );
+}
 
 // ---- a raw definition pulled from one query match (pre-id-assignment) ----
 struct RawDef
@@ -47,6 +55,11 @@ struct RawDef
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint16_t paramsMin = 0;   // B2.2: the fewest arguments a call can pass (params − defaulted); 0 = no lower bound known
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
+    std::uint8_t  steer     = 0;   // QD-TANGLE steering locals (model.h Symbol::steer; from cc_walk, saturating at 255)
+    std::uint16_t deepDispatch = 0;   // QD-TANGLE: deepLoc lines inside short flat-dispatch arms (model.h Symbol::dispatchShare; saturating)
+    std::uint8_t  nestArmCut   = 0;   // QD-TANGLE: maxNest less the deepest nesting outside those arms (model.h Symbol::dispatchShare)
+    std::uint32_t maxBlock10   = kTangleNoCap;   // QD-TANGLE BLOCK FACTS: the highest one-block score, tenths (model.h TangleBlockFacts; kTangleNoCap = not walked)
+    std::uint8_t  cross        = 0;              // QD-TANGLE BLOCK FACTS: cross-block top-level locals (saturating)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
     std::uint8_t  testScope = 0;   // L8: 1 ⇒ an IN-FILE test convention encloses this def (see inFileTestScope)
     std::uint8_t  recovered = 0;   // extent honesty (extentsuspect.h kRecovered*): the parse RECOVERED this def's container
@@ -156,7 +169,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+constexpr std::uint32_t kCacheVersion = 55;           // 55: lane tangle-rule — a def record gains the block facts (RawDef::maxBlock10 u32, ::cross u8, after nestArmCut). 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
+                                                      // 53: lane rust-self-chain — LocalBindKind RecvCall (appended; readBind's kind bound moves).
+                                                      // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
                                                       // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
@@ -380,7 +395,93 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+                                                      // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
+                                                      //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
+                                                      //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.
+                                                      // --- history: the 0.7.0 train carried 340 ---
+                                                      // 340 = 2026-11-22 (lane m1b-tracked-dirs, PLACEHOLDER: the train renumbers; above 338 and its rich
+                                                      //   339; rich file tag 341): the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED — a build/ dist/ out/ target/
+                                                      //   directory git tracks files under is crawled (ingest_crawl.h TrackedBuildDirs), so a v338 blob has no
+                                                      //   record for those files: ABSENT, not stale, and only the header version can reject it (the 88/91
+                                                      //   precedent). No extraction or record shape changes; kCacheVersion stays 54.
+                                                      // 338 = 2026-11-21 (lane fx1-two-reds, above the train's 336 and its rich 337; rich file tag 339): a Rust
+                                                      //   macro invocation's re-read (ingest_rustmacroargs.h) drops a bare call its own file's `macro_rules!`
+                                                      //   matcher spells as a literal word (`wrap!( matcher_fn( 3 ) )`). kCacheVersion stays 54.
+                                                      // --- history: 336 ---
+                                                      // 336 = 2026-11-21 (IN8, ruling 135: train 1118a — #717, the rebase of #716 — folded into the 0.7.0 train). ONE number above
+                                                      //   BOTH sides' bumps past their merge base 5df5a26be (333): the train's 334 and train 1118a's 335. Rich file tag 337.
+                                                      //   kCacheVersion stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers, not of 336.
+                                                      // --- history: main b576a95e3 carried 337 ---
+                                                      // 337 = 2026-11-21 (#548 arm 1, @himanchalkaushale, PR #715, landed as lane land-715; was 311 on the PR, above train
+                                                      //   1118a's 335/336): a Clojure call whose list head carries metadata (`^{:doc "tagged"} (square 4)`, `^String (square 5)`)
+                                                      //   is captured, and the C++ head filter (ingest_clojure.h clojureListHead) skips meta_lit before reading the head.
+                                                      //   Rich file tag 338. kCacheVersion unchanged.
+                                                      // --- history: train 1118a (4b1f4516e) carried 335 ---
+                                                      // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
+                                                      //   using-declarations and namespace aliases are recorded while the call-result family is off
+                                                      //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
+                                                      // --- history: the 0.7.0 train after main 8861b0d4d (823276f30) carried 334 ---
+                                                      // 334 = 2026-11-21 (IN8, rulings 129/135: the 0.7.0 train merged with main 8861b0d4d, which carries #709). ONE number
+                                                      //   above BOTH sides' bumps past their merge base ee8d1a50e (331) — main's 333 (train 1117d2) and the 0.7.0 line's 332 (IN3) —
+                                                      //   so neither side's cache can be read by the other's binary. Rich file tag 335. kCacheVersion 54 is main's (qd-tangle); the
+                                                      //   0.7.0 line had stayed at 52 and changes no record shape. Both notes are kept below as HISTORY, main's first; the tags
+                                                      //   they name are the tags of those numbers, not of 334.
+                                                      // --- history: main 8861b0d4d carried 333 ---
+                                                      // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
+                                                      //   The members' extraction changes (each lane's number was a placeholder):
+                                                      //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
+                                                      //   `&str`, `Arc<Mutex<T>>`) keeps its tombstone with the type's spine as importedName (ingest_binds.h rustStdSpine), and
+                                                      //   `if let Some( x ) = v` under a written `v: Option<Vec<T>>` records x the same way.
+                                                      //   rust-self-chain (placeholder 319, kCacheVersion 53): a Rust member call on another call's result records a RecvCall (ingest_binds.h
+                                                      //   captureRustRecvCall), an `async fn`'s ReturnType carries kAwaitResultBit, and a `let x = f().await` binds its CallResult with it
+                                                      //   (rustUnwrappedCall). kCacheVersion 52 -> 53 (LocalBindKind RecvCall appended).
+                                                      //   rust-macro-args (placeholder 315): the calls written inside a Rust macro invocation's arguments are references
+                                                      //   (ingest_rustmacroargs.h: the token tree is re-read as one expression and kept only when it parses clean).
+                                                      // --- history: the 0.7.0 line (integration/070-1120, 21d4b66b7) carried 332 ---
+                                                      // 332 = 2026-11-20 (IN3, ruling 92: the 0.7.0 integration of integration/070-candidate
+                                                      //   + lane/r1b-priority with main ee8d1a50e). ONE number above BOTH sides' bumps — main's
+                                                      //   331 (train 1117d1) and the stack's 317 (INT1) — so neither side's cache can be read by
+                                                      //   the other's binary. Rich file tag 333. kCacheVersion unchanged: no record changes shape.
+                                                      //   Both provenance lists are kept below as HISTORY, main's first; the tags they name are
+                                                      //   the tags of those numbers, not of 332.
+                                                      // --- history: main ee8d1a50e carried 331 ---
+                                                      // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
+                                                      //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
+                                                      //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
+                                                      //   ReturnType as the instantiated class (ingest_binds.h goResultClass); it recorded none.
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable or a reference to it
+                                                      //   carries model.h kDirectDeclaratorBit in unwrapDepth (ingest_binds.h cppDirectDeclarator).
+                                                      //   overload-split (placeholder 329): a Go type written as a qualified generic instantiation (`addrs.Set[addrs.Module]`) keeps its
+                                                      //   package qualifier on the field / parameter / local record (ingest_binds.h goQualifiedWhole).
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row naming m with
+                                                      //   memberRoot T (ingest_valuerefs.h methodValueAt, GO-METHOD-EXPR); it recorded none. kCacheVersion unchanged.
+                                                      //   edge-strays-1118 (placeholder 327): a Rust call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
+                                                      //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
+                                                      //   Rich file tag 328. kCacheVersion unchanged.
+                                                      // --- history: integration/070-candidate carried 317 ---
+                                                      // 317 = 2026-11-19 (INT1, the 0.7.0 candidate integration/070-candidate: ONE number for lane BX2's two parser members, strictly
+                                                      //   above main d65f60c6d's 313/314 (TRAIN-1117b) and above both BX2 placeholders 313 and 315, so no cache a lane binary wrote
+                                                      //   under a placeholder reads as this tree's). Rich file tag 318. kCacheVersion unchanged.
+                                                      //   - BX2 FIX 5 (its placeholder 313): a Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` /
+                                                      //     `$crate::a::name(` is a Call reference of its macro (ingest_names.h scanTranscriberCalls).
+                                                      //   - BX2 FIX 8 (its placeholder 315): a C-family parameter stored into a struct field (`tp->signalcb = signalcb`) records
+                                                      //     the IX1-V2 slot fact Go and Rust record (ingest_valuerefs.h paramSlotFact).
+                                                      // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
+                                                      //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
+                                                      //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as
+                                                      //     @reference.base captures (queries/java/tags.scm, LangFacts::basesAsCaptures on the Java row).
+                                                      //   - #355, PR #426 by @conka8, landed as lane/land-426 (its placeholders 216, then 311): the tags pass evaluates
+                                                      //     tags.scm's string predicates (#eq?, #not-eq?, #any-of?, #not-any-of?; src/infra/tspredicates.h), and Elixir's
+                                                      //     definition keywords and metadata attribute names move into queries/elixir/tags.scm.
+                                                      //   - #688 review (unreleased, same train, so 313 stays): a type-annotated Java superclass (`extends @M Base`)
+                                                      //     is captured inside annotated_type (CodeRabbit 4614203119).
+                                                      //     A string predicate tests every node bound to its capture (CodeRabbit 4614203164).
+                                                      // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
+                                                      //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
+                                                      //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
@@ -1977,15 +2078,10 @@ static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && 
 // T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes
 // arch.h (which defines its OWN fnv1a64 for the baseline-hash path, quality.h's canonId hashing, etc.
 // — same FNV-1a family, DIFFERENT offset-basis constant; this is ingest's file-content-hash cache
-// KEY and must not change bit-for-bit, so it keeps its own constant rather than switching to arch.h's).
+// KEY and must not change bit-for-bit, so it keeps the stored seed, hashutil::kFnv1aLegacySeed64, not arch.h's).
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s, hashutil::kFnv1aLegacySeed64 );
 }
 
 // BONUS (S): a whole-blob checksum for the cache trailer. The single-lane contentHash64 above is the file-content
@@ -1995,7 +2091,7 @@ inline std::uint64_t contentHash64( std::string_view s ) noexcept
 // FNV-1a). Purpose is integrity detection (fuzzer-found bit-flips inside cached strings), not the cache key.
 inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 {
-    std::uint64_t lane[ 8 ] = { 1469598103934665603ull, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
+    std::uint64_t lane[ 8 ] = { hashutil::kFnv1aLegacySeed64, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
                                 0xc2b2ae3d27d4eb4full, 0x165667b19e3779f9ull, 0xff51afd7ed558ccdull, 0xc4ceb9fe1a85ec53ull };
     const unsigned char* p = reinterpret_cast<const unsigned char*>( s.data() );
     const std::size_t    n = s.size();
@@ -2006,7 +2102,7 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     }
     for( int k = 0; i < n; ++i, ++k ) { lane[ k ] ^= p[ i ]; lane[ k ] = hashutil::fnv1aMultiply( lane[ k ] ); }   // tail (< 8 bytes)
 
-    std::uint64_t h = 1469598103934665603ull;                   // fold the 8 lanes into one 64-bit digest
+    std::uint64_t h = hashutil::kFnv1aLegacySeed64;             // fold the 8 lanes into one 64-bit digest (stored: the trailer)
     for( int k = 0; k < 8; ++k ) { h ^= lane[ k ]; h = hashutil::fnv1aMultiply( h ); }
     return h;
 }
@@ -2573,7 +2669,7 @@ inline constexpr std::uint32_t kCloneKeyKindBits = ( 1u << unsigned( SymKind::Fu
 static_assert( kSymKindCount <= 32, "kCloneKeyKindBits holds one bit per SymKind" );
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.steer ); w.u32( d.deepDispatch ); w.u8( d.nestArmCut ); w.u32( d.maxBlock10 ); w.u8( d.cross ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     w.u8( d.cloneKey != 0 ? 1 : 0 );                                     // v50: clone-key presence byte (0 = no key), then the key
     if( d.cloneKey != 0 ) { w.u64( d.cloneKey ); }
@@ -2728,7 +2824,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 93;   // 17×u32 + 17×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 104;  // 19×u32 + 20×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50; QD-TANGLE steer u8 + deepDispatch u32 + nestArmCut u8: 93 -> 99, v54; QD-TANGLE BLOCK FACTS maxBlock10 u32 + cross u8: 99 -> 104, v55)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
@@ -2758,7 +2854,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = r.u16Of32(); d.humps = r.u16Of32(); d.deepLoc = r.u16Of32(); d.ev = r.u16Of32(); d.params = r.u16Of32(); d.paramsMin = r.u16Of32(); d.maxNest = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.internalLinkage = r.u8(); d.scopeRootsStd = r.u8(); d.fnScopeStart = r.u32(); d.fnScopeEnd = r.u32(); d.kind = r.enumU8<SymKind>( kSymKindCount ); d.lang = r.enumU8<Lang>( kLangCount ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = r.u16Of32(); d.humps = r.u16Of32(); d.deepLoc = r.u16Of32(); d.ev = r.u16Of32(); d.params = r.u16Of32(); d.paramsMin = r.u16Of32(); d.maxNest = r.u8(); d.steer = r.u8(); d.deepDispatch = r.u16Of32(); d.nestArmCut = r.u8(); d.maxBlock10 = r.u32(); d.cross = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.internalLinkage = r.u8(); d.scopeRootsStd = r.u8(); d.fnScopeStart = r.u32(); d.fnScopeEnd = r.u32(); d.kind = r.enumU8<SymKind>( kSymKindCount ); d.lang = r.enumU8<Lang>( kLangCount ); d.name = r.str(); d.scope = r.str();
     // B2.2: the extractor (ingest_sidecap.h) stores paramsMin only when it is <= params. A record past that rule is
     // corruption, and a too-high minimum is the UNSAFE direction (the resolver drops a candidate for too few arguments),
     // so it takes the same one refusal path as a short read: that file reparses and the rest of the blob stands.

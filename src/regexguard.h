@@ -216,27 +216,29 @@ inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat
 // from the command line"; that exemption is how `file(all,"(a+)+z")` and `deny path zz/.* -> (a+)+z` reached
 // the engine unscreened and aborted the process (rc 134 on libc++). A rules file is user-authored text exactly
 // as an argument is.
-struct RegexQuantifier { bool isPresent; bool isUnbounded; std::size_t lengthCount; };
+struct RegexQuantifier { bool isPresent; bool isUnbounded; bool isOptional; std::size_t lengthCount; };
 
 // reads the quantifier at `at`, if there is one. '?' and '{n,m}' are quantifiers but BOUNDED; anything
-// that is not a well-formed '{' interval is not a quantifier at all, just a literal brace.
+// that is not a well-formed '{' interval is not a quantifier at all, just a literal brace. isOptional marks
+// the OPTIONALS — '?' and '{0,1}' — which repeat nothing (upper bound 1) and so are not repeats for the
+// nesting arms to count (the #484 review's `(https?://…)?example` false-positive class).
 inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at )
 {
     if( at >= pat.size() )
     {
-        return { false, false, 0 };
+        return { false, false, false, 0 };
     }
     if( pat[at] == '*' || pat[at] == '+' )
     {
-        return { true, true, 1 };
+        return { true, true, false, 1 };
     }
     if( pat[at] == '?' )
     {
-        return { true, false, 1 };
+        return { true, false, true, 1 };
     }
     if( pat[at] != '{' )
     {
-        return { false, false, 0 };
+        return { false, false, false, 0 };
     }
 
     std::size_t cursor         = at + 1;
@@ -244,15 +246,15 @@ inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at
     while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++lowerDigitCount; }
     if( lowerDigitCount == 0 )
     {
-        return { false, false, 0 };
+        return { false, false, false, 0 };
     }
     if( cursor < pat.size() && pat[cursor] == '}' )
     {
-        return { true, false, ( cursor + 1 ) - at }; // {n} — exact, bounded
+        return { true, false, false, ( cursor + 1 ) - at }; // {n} — exact, bounded
     }
     if( cursor >= pat.size() || pat[cursor] != ',' )
     {
-        return { false, false, 0 };
+        return { false, false, false, 0 };
     }
 
     ++cursor;
@@ -260,10 +262,11 @@ inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at
     while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++upperDigitCount; }
     if( cursor >= pat.size() || pat[cursor] != '}' )
     {
-        return { false, false, 0 };
+        return { false, false, false, 0 };
     }
 
-    return { true, upperDigitCount == 0, ( cursor + 1 ) - at };                                           // {n,} unbounded, {n,m} bounded
+    const bool optional = lowerDigitCount == 1 && pat[ at + 1 ] == '0' && upperDigitCount == 1 && pat[ cursor - 1 ] == '1';
+    return { true, upperDigitCount == 0, optional, ( cursor + 1 ) - at };                    // {n,} unbounded, {n,m} bounded, {0,1} optional
 }
 
 // '(?:' / '(?=' / '(?!' — a '?' immediately after '(' opens a NON-CAPTURING or lookaround group. It is a
@@ -313,6 +316,21 @@ inline std::size_t regexGroupModifierLength( const std::string& pat, std::size_t
 inline std::string catastrophicRegexPrologue( char outerQuant )
 {
     return std::string( "catastrophic backtracking: the unbounded quantifier '" ) + outerQuant + "' is applied to ";
+}
+
+// The BOUNDED-quantifier opening, added by the multi-quantifier clause 2. That clause fires on a repeated
+// alternation whose outer quantifier may be BOUNDED (`((.|.){1,3}){1,3}` — the `{1,3}` and not a '*' or '+'),
+// and reusing catastrophicRegexPrologue there produced a sentence that was FALSE twice over: it said
+// "the unbounded quantifier '{'" — a bounded repeat called unbounded, and '{' is not a quantifier character
+// but the first byte of an interval. A refusal that misdescribes the pattern is worse than a vague one, because
+// the workaround it teaches (bound the outer quantifier) is exactly what the reader has already done.
+// The clause-2 message therefore states the bounded case as what it is.
+// `quantSpelling` is the quantifier AS WRITTEN — 'a', '*', '+', or a whole interval like '{2,5}'. The char-only
+// form printed the first byte of an interval, which read as "the quantifier '{'": true of the pattern's bytes and
+// useless to a reader.
+inline std::string catastrophicRegexBoundedPrologue( const std::string& quantSpelling )
+{
+    return std::string( "catastrophic backtracking: the quantifier '" ) + quantSpelling + "' is applied to ";
 }
 
 // The one refusal this screen emits, kept out of the scan loop so the loop reads as the small state
@@ -738,6 +756,58 @@ inline std::string catastrophicRegexAlternationMessage( char outerQuant )
              "('(X){1,5}' for whatever the group is, a ceiling every engine honours identically)";
 }
 
+// MULTI-QUANTIFIER CLAUSE 2's refusal, a sentence of its own (the #484 review, round 2). Clause 2 fires on a
+// repeated overlap under a FURTHER quantifier, and in practice that outer quantifier is BOUNDED: an unbounded one
+// is caught first by the alternation arm above. So the alternation sentence's workaround — "make the OUTER
+// quantifier a small explicit bound" — is advice the reader has already taken (`((www|www2){1,5}\.){1,5}example`
+// was refused with it). The offence here is the SECOND repeat, so the workaround removes a repeat or the overlap.
+// `outerQuantSpelling` is the quantifier as written; `outerIsUnbounded` picks the true opening, as before.
+inline std::string catastrophicRegexRepeatedAlternationMessage( const std::string& outerQuantSpelling, bool outerIsUnbounded )
+{
+    const std::string opening = outerIsUnbounded ? catastrophicRegexPrologue( outerQuantSpelling[0] )
+                                                 : catastrophicRegexBoundedPrologue( outerQuantSpelling );
+    return   opening + "a group that already REPEATS an alternation whose branches the structural screen cannot "
+             "PROVE are disjoint (the repeat-of-a-repeat shape '((a|aa){2,5}){2,5}'). The input can be split between the "
+             "branches, the inner repetition and this outer one, every split a separate path, and the two repeats multiply "
+             "each other even when both are bounded (measured: '^(ab\\w|((.|.){1,3}){1,3}){1,3}$' is abandoned by libc++ "
+             "from an 18-byte subject). Workaround: a bound on the outer quantifier does not help here, because the inner "
+             "repeat multiplies it; repeat the alternation ONCE (drop the inner or the outer quantifier), or make the branches provably "
+             "disjoint — single characters, or branches whose first characters differ ('www2?' instead of 'www|www2')";
+}
+
+// ── MULTI-QUANTIFIER CLAUSE 1's refusal: adjacent ambiguous quantifiers ─────────────────────────────────────
+// Same voice as the two above — name the construct, say why the paths multiply, leave a workaround. It opens on
+// the shared prologue so every refusal in this file starts the same way (the gates grep for that opening), then
+// names the actual offence, which is NOT "a group repeats" and NOT "branches overlap": it is quantified atoms
+// side by side with no proof they cannot match the same byte.
+inline std::string catastrophicRegexAdjacentMessage( const std::string& pat, std::size_t at )
+{
+    // NOT catastrophicRegexPrologue: that helper's sentence is "the unbounded quantifier '<c>' is applied to …",
+    // and this refusal has no single quantifier to name — the offence is two of them ADJACENT, and which one the
+    // reader should look at is not a fact the screen can pick. The opening phrase is kept identical so every
+    // refusal in this family starts the same way (the gates match on it), and the clause after it states the
+    // actual shape. Claiming a specific quantifier here would be a false statement about the pattern.
+    return   std::string( "catastrophic backtracking: unbounded quantifiers in a row whose atoms are not "
+                          "proven disjoint ('" ) + pat + "', at byte " + std::to_string( at ) + "). "
+             "Each atom repeats without bound and the split of the input between them is a separate path, so a "
+             "candidate line that does not match costs time that grows with its length on every engine — "
+             "polynomially, of degree (k-1) in the splits for k atoms in a row, whether or not the sets are the "
+             "same (libstdc++, a 320-byte run: 'a*a*b' 133 ms, '\\w+.*b' 133 ms, the one-quantifier '\\w.*b' "
+             "1.2 ms). Which runs refuse is a policy, not a cost class: a PAIR is refused when its two atoms "
+             "carry the SAME set (a*a*, .*.*, \\w+\\w+), because it always has a one-atom rewrite with the same "
+             "language and is rare in real searches; a pair whose sets merely intersect (\\s+.*, \\w+.*, "
+             "[a-z]+.*) is admitted, because it is common and on ordinary source lines costs close to its "
+             "one-quantifier rewrite; and THREE OR MORE intersecting atoms in a row are refused, because each "
+             "further atom raises the degree. The screen can prove two "
+             "atoms disjoint only when both are single width-one characters or classes and their character sets "
+             "do not intersect, and it must return ONE verdict on two standard libraries that disagree about the "
+             "cost, so it refuses rather than answer differently per platform. Workaround: make the atoms one "
+             "atom ('a*a*a*' is the language of 'a*'), or put a literal between them that cannot be swallowed by "
+             "either ('a*b*a*b'), or make all but one of them bounded ('a{0,3}a*b'), or drop one quantifier of "
+             "an intersecting pair — the pair-shapes have a plain rewrite with the same hits on ordinary "
+             "source lines ('import\\s+.*from' to 'import\\s.*from')";
+}
+
 // The group's own top-level branch spans, in order. ONE splitter for the two disjointness proofs (M2-c's
 // whole-footprint sets and M2-e's first-character sets), so they cannot disagree about what a branch is.
 inline void regexTopLevelBranchSpans( std::size_t bodyBegin, std::size_t closeAt, const std::vector<std::size_t>& pipes,
@@ -856,6 +926,11 @@ struct RegexGroupFrame
 {
     bool                     hasQuantifierInside         = false;
     bool                     hasUnprovenAlternationInside = false;
+    // Multi-quantifier clause 2: an unproven alternation inside this frame is ALREADY under a quantifier, so a
+    // further quantifier on an enclosing group is the second one — the nesting that makes the products
+    // enumerate. Folded like hasUnprovenAlternationInside (M2-d), for the same reason: the fact belongs to the
+    // subtree, not to the group that happens to carry the quantifier.
+    bool                     hasRepeatedUnprovenAlternationInside = false;
     std::size_t              bodyBegin                    = 0;
     std::vector<std::size_t> topLevelPipes;
 };
@@ -867,6 +942,9 @@ struct RegexGroupClose
 {
     std::optional<std::string> refusal             = std::nullopt;
     bool                       unprovenAlternation = false;
+    // Multi-quantifier clause 2: this group is itself an overlap UNDER a quantifier (bounded or not), so a
+    // quantifier on any enclosing group would repeat the repetition. Folded into the parent frame below.
+    bool                       repeatedUnprovenAlternation = false;
 };
 
 // The verdict made when a group CLOSES, in two arms and in this order:
@@ -898,7 +976,42 @@ inline RegexGroupClose regexCloseGroupVerdict( const std::string& pat, std::size
     if( quant.isPresent && quant.isUnbounded && ( out.unprovenAlternation || frame.hasUnprovenAlternationInside ) )
     {
         out.refusal = catastrophicRegexAlternationMessage( pat[ closeAt + 1 ] );
+        return out;
     }
+    // ── MULTI-QUANTIFIER CLAUSE 2: an overlap repeated WITHIN A REPEAT ─────────────────────────────────────
+    // The two arms above both require an UNBOUNDED quantifier on this group, and the flag they read says "an
+    // unproven alternation is somewhere in my subtree, loose". Clause 2 needs a sharper fact than either: this
+    // group carries an unproven alternation AND a quantifier of its own — i.e. it is an overlap that is
+    // REPEATED, bounded or not — and that whole repeated-overlap is itself under a further quantifier from an
+    // enclosing group. The products of the two repeats enumerate; one repeat alone does not.
+    //
+    // Measured, which is why the condition is drawn here and not wider: `(.|.){1,3}` at top level is an overlap
+    // under a bounded repeat and is CHEAP and ADMITTED at every length tested, so clause 2 must not touch it.
+    // Shape (iii) `^(ab\w|((.|.){1,3}){1,3}){1,3}$` is that same `(.|.){1,3}` one group deeper, under a second
+    // `{1,3}` — and it is the shape this spec exists for. The line between the two is exactly "is the repeated
+    // overlap repeated again", and the flag travels up the frames to answer it.
+    // An OPTIONAL outer (`?`, `{0,1}`) repeats nothing — upper bound 1 — so it is not the second repeat either
+    // (the #484 review, round 2: `((www|www2){1,5}\.)?example` was refused here, measured 0.5 ms at 400 bytes).
+    // The rule below already stops an optional from being the FIRST repeat; this is the same rule for the second.
+    if( quant.isPresent && !quant.isOptional && frame.hasRepeatedUnprovenAlternationInside )
+    {
+        // clause 2 fires on a repeat of a repeat, and that outer repeat may be BOUNDED — so it must not borrow
+        // the unbounded-quantifier opening. `quant.isUnbounded` decides which sentence is true here, and the
+        // spelling is the quantifier AS WRITTEN so an interval reads as '{2,5}' rather than as '{'.
+        out.refusal = catastrophicRegexRepeatedAlternationMessage( pat.substr( closeAt + 1, quant.lengthCount ), quant.isUnbounded );
+        return out;
+    }
+    // this group is a repeated overlap when it carries an unproven alternation AND a quantifier of its own.
+    // THE OPTIONALS DO NOT COUNT (the #484 review's blocker 2): '?' and '{0,1}' on the group repeat nothing —
+    // upper bound 1 — so `(www\.|www2\.)?` is an overlap a reader may SKIP, not a repeat of one, and the
+    // nesting arms (this clause and clause 2's fire above) must not see it as the first of two repeats.
+    // `(https?://(www\.|www2\.)?)?example` and `(((public|private)\s+)?static\s+)?void` are the measured
+    // sub-millisecond false positives; `((a|aa){2,5}){2,5}b$` keeps its refusal because `{2,5}` is a repeat.
+    // The HAS-quantifier-inside arm (the (X+)+ family, first refusal above) is untouched: `(a?)+` is a real
+    // bomb (measured: never returns on libstdc++), and its `?` sits INSIDE the group as the inner atom's
+    // quantifier, not ON the group as this rule's.
+    out.repeatedUnprovenAlternation = quant.isPresent && !quant.isOptional
+                                    && ( out.unprovenAlternation || frame.hasUnprovenAlternationInside );
     return out;
 }
 
@@ -937,9 +1050,336 @@ inline std::optional<std::string> regexCloseGroup( const std::string& pat, std::
     {
         frames.back().hasUnprovenAlternationInside = true;
     }
+    // Multi-quantifier clause 2 — and a REPEATED overlap travels one step further than a loose one: a group that
+    // is an overlap under a quantifier is a repeated overlap, whether it just became one here or a nested group
+    // already handed its own up. A quantifier on the enclosing group turns one repeat into two.
+    if( !frames.empty() && ( frame.hasRepeatedUnprovenAlternationInside || close.repeatedUnprovenAlternation ) )
+    {
+        frames.back().hasRepeatedUnprovenAlternationInside = true;
+    }
     if( quant.isPresent )
     {
         i += quant.lengthCount; // step over the quantifier we just judged
+    }
+    return std::nullopt;
+}
+
+// ── MULTI-QUANTIFIER CLAUSE 1: adjacent quantified atoms in one repetition scope ─────────────────────────────
+//
+// The other half of the family, and neither arm above can see it. `a*a*a*a*` is five quantified atoms side by
+// side at TOP level, where there is no group at all; `^(a)*(a)*(a)*(a)*(a)*$` is the same adjacency one level
+// down, where the quantified GROUPS are siblings. Both let the input be split between the quantifiers in
+// polynomially many ways — degree (k-1) for k atoms, retried from every start offset — and both are invisible
+// to a screen whose only question is "does a group close under an unbounded quantifier".
+//
+// THE PROOF IS THE SAME ONE THE ALTERNATION ARM USES, applied to adjacency instead of branches: each atom's
+// character set is read with regexCharSetOfSingleCharBranch — the width-one, no-quantifier reader — and where a
+// set cannot be read the atom is not a participant (it neither accuses nor exonerates). Adjacent participants
+// whose sets INTERSECT enter the run below; a run of TWO carries the SAME set refuses, and a run of THREE OR
+// MORE intersecting atoms refuses — a cross-set PAIR is admitted (the #484 review's proportional relaxation;
+// the message names both thresholds). That split is a POLICY, not a cost class: on a uniform run a cross-set
+// pair costs what a same-set pair does (both are degree 1 in the splits; measured equal on libstdc++), but a
+// same-set pair always has a one-atom rewrite with the same language and is rare, while a cross-set pair is
+// common and costs close to its one-quantifier rewrite on ordinary source lines.
+//
+// WHY ADJACENCY AND NOT "ANY TWO IN THE SCOPE": `ab*c` has one quantified atom, fine; `a*b*c*` is ADMITTED —
+// its three atoms' sets are pairwise DISJOINT (a vs b vs c), the split between them is forced at the letters,
+// and a disjoint chain costs nothing. The members that refuse are the INTERSECTING runs: `a*a*` (same set,
+// per-byte split), `\w*\d*` (\d ⊂ \w, intersecting). `\d+\s+\w+` is ubiquitous, genuinely deterministic in
+// practice, and is admitted by its pairwise-disjoint sets (\d vs \s; \d ⊂ \w makes \w+\w+ the same-set pair
+// that DOES refuse). The test is intersection, and its threshold is the run length, not repetition.
+//
+// A BOUNDED atom does not count. `a{2,3}a{2,3}a{2,3}` is a bounded product, not the family — the bounds cap it —
+// so only UNBOUNDED quantified atoms are participants. Measured basis: shape (i) and (ii) are unbounded
+// (`a*`), and the bounded-outer family is clause 2's business.
+// TRUE-set equality, the pair-fire gate of the #484 relaxation: `a*a*` / `.*.*` / `\w+\w+` refuse as a PAIR
+// (same-set: a one-atom rewrite with the same language always exists), while a pair that merely INTERSECTS
+// (`\s+.*`, `\w+.*`) is admitted by policy and waits for a third intersecting atom. Dense-set equality on the
+// three fields RegexCharSet carries — no shortcuts, because a "subset implies equal enough" guess here would
+// re-refuse the very pairs the relaxation admits.
+inline bool regexCharSetsIdentical( const RegexCharSet& a, const RegexCharSet& b )
+{
+    return a.asciiLow == b.asciiLow && a.asciiHigh == b.asciiHigh && a.matchesNonAscii == b.matchesNonAscii;
+}
+
+// The scopes clause 1 judges: the pattern's top level, then every group's body at EVERY depth, each as
+// (bodyBegin, bodyEnd). A quantifier belongs to the scope it sits in, and adjacency is a fact about that scope
+// only. A depth-0-only collector never learns about `((a*a*a*a*)b)`, whose inner adjacency sits at depth 2 and
+// reaches the engine unrefused. Collected with the same scan the screen already trusts, so a quantifier inside a
+// class or behind a backslash is never mistaken for a group delimiter. One body begin per OPEN GROUP, pushed on
+// '(' and popped on its ')': inner bodies come out first, in close order, then the outer ones.
+inline std::vector<std::pair<std::size_t, std::size_t>> regexAdjacencyScopes( const std::string& pat )
+{
+    std::vector<std::pair<std::size_t, std::size_t>> scopes;
+    scopes.push_back( { 0, pat.size() } );
+    bool                     isInsideClass = false;
+    std::vector<std::size_t> bodyBegins;
+    for( std::size_t i = 0; i < pat.size(); ++i )
+    {
+        const char c = pat[i];
+        if( c == '\\' ) { ++i; continue; }
+        if( isInsideClass ) { if( c == ']' ) { isInsideClass = false; } continue; }
+        if( c == '[' )  { isInsideClass = true; continue; }
+        if( c == '(' )
+        {
+            const std::size_t modifier = regexGroupModifierLength( pat, i );
+            bodyBegins.push_back( i + 1 + modifier );
+            i += modifier;
+            continue;
+        }
+        if( c == ')' && !bodyBegins.empty() )
+        {
+            scopes.push_back( { bodyBegins.back(), i } );
+            bodyBegins.pop_back();
+        }
+    }
+    return scopes;
+}
+
+// THE RUN, NOT THE PAIR — the #484 review's proportional relaxation, as the state of one scope's walk. A same-set
+// PAIR (`a*a*`, `.*.*`, `\w+\w+`) is refused: it has a one-atom rewrite with the same language. A pair whose sets
+// merely INTERSECT (`\s+.*`, `\w+.*` — the `import\s+.*from` / `TODO:\s*.*` class) is common, costs close to its
+// one-quantifier rewrite on ordinary lines, and is ADMITTED; three-or-more consecutive intersecting participants
+// raise the degree to (atoms-1) and refuse. A participant DISJOINT from the previous one restarts the run at
+// itself; a non-participant atom (literal, bounded, anchor) empties it — reset().
+struct RegexAdjacencyRun
+{
+    RegexCharSet previous;
+    bool         havePrevious = false;
+    unsigned     intersectRun = 0;       // consecutive participants whose NEIGHBOURS intersect
+    bool         sameSetPair  = false;   // the last transition was between IDENTICAL sets
+
+    void reset()
+    {
+        havePrevious = false;
+        intersectRun = 0;
+        sameSetPair  = false;
+    }
+    // Adds one participant; true when the run it closes must be refused.
+    bool accept( const RegexCharSet& member )
+    {
+        if( havePrevious && regexCharSetsIntersect( previous, member ) )
+        {
+            ++intersectRun;
+            sameSetPair = regexCharSetsIdentical( previous, member );
+            if( sameSetPair && intersectRun >= 2 ) { return true; }   // same-set pair: a one-atom rewrite exists
+            if( intersectRun >= 3 )                { return true; }   // intersecting run: degree (atoms-1)
+        }
+        else
+        {
+            intersectRun = 1;   // a participant that begins a run (or restarts one after a disjoint atom)
+            sameSetPair  = false;
+        }
+        previous     = member;
+        havePrevious = true;
+        return false;
+    }
+};
+
+// What one atom of a scope is to the run: a PARTICIPANT (an unbounded quantified atom whose set was read), a
+// RESET (anything else that is an atom or a delimiter), or a PASS (the punctuation of a transparent group,
+// which the run walks through untouched). `next` is where the walk resumes; for a participant it is past the
+// quantifier and before any lazy '?' suffix, which the walk steps over itself.
+enum class RegexAdjacencyStep : unsigned char { Participant, Reset, Pass };
+struct RegexAdjacencyAtom
+{
+    RegexAdjacencyStep step   = RegexAdjacencyStep::Reset;
+    RegexCharSet       member;
+    RegexQuantifier    quant  = {};
+    std::size_t        next   = 0;
+};
+
+// The verdict every atom kind shares: the atom ends at `atomEnd`, its set is `member` when `isReadable`, and it
+// takes part in the run only as an UNBOUNDED quantified atom. A BOUNDED atom does not count: `a{2,3}a{2,3}` is a
+// bounded product, and the bounded-outer family is clause 2's business. A non-participant resets the run and the
+// walk resumes right after the atom; the class and group readers below refine that resume point.
+inline RegexAdjacencyAtom regexAdjacencyAtomEndingAt( const std::string& pat, bool isReadable, const RegexCharSet& member, std::size_t atomEnd )
+{
+    RegexAdjacencyAtom atom;
+    atom.member = member;
+    atom.quant  = regexQuantifierAt( pat, atomEnd );
+    if( isReadable && atom.quant.isPresent && atom.quant.isUnbounded )
+    {
+        atom.step = RegexAdjacencyStep::Participant;
+        atom.next = atomEnd + atom.quant.lengthCount;
+        return atom;
+    }
+    atom.next = atomEnd;
+    return atom;
+}
+
+// The class the reader could not parse is still ONE ATOM — never walk its members (the #484 review's
+// `[[:alpha:]*.*.*]`: the walk used to stop on the unreadable POSIX class and then read its members as
+// punctuation, refusing a `.*` that sat INSIDE the brackets). Returns the index past the class: `openAt` to the
+// first ']' that closes it, found with a bounded scan (on a malformed class the compile probe owns the error).
+// A POSIX bracket form (`[:alpha:]`, `[.x.]`, `[=x=]`) owns a ']' of its own: a scan that stops on THAT one
+// re-enters the class and reads its members as atoms. A marker — '[' followed by ':' '.' or '=' — ends only at
+// its terminator + ']', and no ']' inside it can close the CLASS.
+inline std::size_t regexSkipUnparsedClass( const std::string& pat, std::size_t openAt, std::size_t scopeEnd )
+{
+    std::size_t close       = openAt;
+    char        bracketForm = '\0';
+    for( ; close + 1 < scopeEnd; ++close )
+    {
+        const char d = pat[ close + 1 ];
+        if( d == '\\' ) { ++close; continue; }
+        if( bracketForm != '\0' )
+        {
+            if( d == bracketForm && close + 2 < scopeEnd && pat[ close + 2 ] == ']' )
+            {
+                close += 2; bracketForm = '\0';
+            }
+            continue;   // inside a bracket form: no ']' here can close the class
+        }
+        if( d == ']' ) { ++close; break; }
+        if( d == '[' && close + 2 < scopeEnd )
+        {
+            const char m = pat[ close + 2 ];
+            if( m == ':' || m == '.' || m == '=' ) { bracketForm = m; ++close; }
+        }
+    }
+    if( bracketForm != '\0' ) { return scopeEnd; }   // unclosed form: the compile probe owns the error
+    return ( close > openAt ) ? close + 1 : openAt + 1;
+}
+
+// The ')' that closes the group opened at `openAt`, honouring escapes and classes; `scopeEnd` or beyond when the
+// group is unbalanced inside the scope (the compile probe owns that error).
+inline std::size_t regexAdjacencyGroupClose( const std::string& pat, std::size_t openAt, std::size_t scopeEnd )
+{
+    std::size_t close = openAt + 1, depth = 1;
+    bool        inClass = false;
+    for( ; close < scopeEnd; ++close )
+    {
+        const char d = pat[close];
+        if( d == '\\' ) { ++close; continue; }
+        if( inClass )   { if( d == ']' ) { inClass = false; } continue; }
+        if( d == '[' )  { inClass = true; continue; }
+        if( d == '(' )  { ++depth; continue; }
+        if( d == ')' )  { if( --depth == 0 ) { break; } continue; }
+    }
+    return close;
+}
+
+// An escape atom (`\d`, `\w`, `\.`): its set when the escape names one, then the quantifier after it.
+inline RegexAdjacencyAtom regexAdjacencyEscapeAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd )
+{
+    RegexCharSet member;
+    const bool   isReadable = ( at + 2 <= scopeEnd ) && regexCharSetOfEscape( pat[ at + 1 ], member );
+    return regexAdjacencyAtomEndingAt( pat, isReadable, member, std::min( scopeEnd, at + 2 ) );
+}
+
+// A class atom: parsed whole when the reader can, else skipped whole (regexSkipUnparsedClass) — an unquantified
+// class is one atom either way, never a reset of the walk's position into its members.
+inline RegexAdjacencyAtom regexAdjacencyClassAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd )
+{
+    RegexCharSet       member;
+    std::size_t        next       = at;
+    const bool         isReadable = regexCharSetOfClass( pat, at, scopeEnd, member, next );
+    RegexAdjacencyAtom atom       = regexAdjacencyAtomEndingAt( pat, isReadable, member, next );
+    if( atom.step != RegexAdjacencyStep::Participant && !isReadable && next <= at + 1 )
+    {
+        atom.next = regexSkipUnparsedClass( pat, at, scopeEnd );
+    }
+    return atom;
+}
+
+// A GROUP, when quantified, is itself a quantified atom — and this is the case that shape (ii) is made of.
+// `(a)*(a)*` is two quantified atoms side by side exactly as `a*a*` is; the parentheses change how each atom is
+// SPELLED, not how many ways the input can be split between them. The atom's character set is its body's set
+// when the body is a single width-one atom (`(a)`, `(\d)`, `([a-z])`); anything else has no readable set, so the
+// atom takes no part in the proof — it neither accuses nor exonerates, the conservative direction.
+// An UNQUANTIFIED group is TRANSPARENT (the #484 review's `(a*)(a*)(a*)(a*)(a*)b`): `(a*)` is the atom `a*` in
+// brackets, so the walk continues at its BODY with the run intact, and its ')' is recorded in `transparentCloses`
+// so the walk steps over it as punctuation. A QUANTIFIED group that is not a readable unbounded atom is the
+// opaque atom it always was: reset, and its body was already judged in its own scope.
+inline RegexAdjacencyAtom regexAdjacencyGroupAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd,
+                                                   std::vector<std::size_t>& transparentCloses )
+{
+    const std::size_t close = regexAdjacencyGroupClose( pat, at, scopeEnd );
+    if( close >= scopeEnd )
+    {
+        RegexAdjacencyAtom unbalanced;   // the compile probe owns it
+        unbalanced.next = at + 1;
+        return unbalanced;
+    }
+    const std::size_t  modifier   = regexGroupModifierLength( pat, at );
+    RegexCharSet       member;
+    const bool         isReadable = regexCharSetOfSingleCharBranch( pat, at + 1 + modifier, close, member );
+    RegexAdjacencyAtom atom       = regexAdjacencyAtomEndingAt( pat, isReadable, member, close + 1 );
+    if( atom.step == RegexAdjacencyStep::Participant )
+    {
+        return atom;
+    }
+    if( !atom.quant.isPresent )
+    {
+        transparentCloses.push_back( close );
+        atom.step = RegexAdjacencyStep::Pass;
+        atom.next = at + 1 + modifier;
+        return atom;
+    }
+    atom.next = close + 1 + atom.quant.lengthCount;
+    return atom;
+}
+
+// One atom of a scope, read at `at`. A transparent group's own ')' passes; every other thing a participant is not
+// (anchors, '|', a stray quantifier, A LITERAL — unquantified atoms break adjacency: `x.*y` is admitted, and the
+// run carries only unbounded atoms) resets.
+inline RegexAdjacencyAtom regexAdjacencyAtomAt( const std::string& pat, std::size_t at, std::size_t scopeEnd,
+                                                std::vector<std::size_t>& transparentCloses )
+{
+    const char c = pat[at];
+    if( c == '\\' ) { return regexAdjacencyEscapeAtom( pat, at, scopeEnd ); }
+    if( c == '[' )  { return regexAdjacencyClassAtom( pat, at, scopeEnd ); }
+    if( c == '.' )  { return regexAdjacencyAtomEndingAt( pat, true, regexCharSetOfAny(), at + 1 ); }
+    if( c == '(' )  { return regexAdjacencyGroupAtom( pat, at, scopeEnd, transparentCloses ); }
+    RegexAdjacencyAtom delimiter;
+    delimiter.next = at + 1;
+    if( c == ')' )
+    {
+        const auto transparent = std::find( transparentCloses.begin(), transparentCloses.end(), at );
+        if( transparent != transparentCloses.end() )
+        {
+            transparentCloses.erase( transparent );
+            delimiter.step = RegexAdjacencyStep::Pass;
+        }
+        return delimiter;
+    }
+    if( c == '|' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' || c == '{' || c == '}' || c == ']' )
+    {
+        return delimiter;
+    }
+    RegexCharSet literal;
+    literal.add( static_cast<unsigned char>( c ) );
+    return regexAdjacencyAtomEndingAt( pat, true, literal, at + 1 );
+}
+
+// Clause 1: the byte where an ambiguous run of adjacent unbounded quantified atoms is refused, or nullopt. Each
+// scope (regexAdjacencyScopes) is walked atom by atom (regexAdjacencyAtomAt) and its run state is judged by
+// RegexAdjacencyRun. A lazy `?` after a participant's quantifier is the same atom, same ambiguity. The
+// transparent-group closes are one list across all scopes, as they always were: a group's ')' follows its inner
+// groups', so a linear find is fine at pattern sizes the size cap already bounds.
+inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std::string& pat )
+{
+    std::vector<std::size_t> transparentCloses;
+    for( const auto& [ scopeBegin, scopeEnd ] : regexAdjacencyScopes( pat ) )
+    {
+        RegexAdjacencyRun run;
+        for( std::size_t i = scopeBegin; i < scopeEnd; )
+        {
+            const RegexAdjacencyAtom atom = regexAdjacencyAtomAt( pat, i, scopeEnd, transparentCloses );
+            if( atom.step == RegexAdjacencyStep::Participant )
+            {
+                if( run.accept( atom.member ) ) { return i; }
+                i = atom.next;
+                if( i < scopeEnd && pat[i] == '?' ) { ++i; }   // lazy suffix: same atom, same ambiguity
+                continue;
+            }
+            if( atom.step == RegexAdjacencyStep::Reset )
+            {
+                run.reset();
+            }
+            i = atom.next;
+        }
     }
     return std::nullopt;
 }
@@ -969,7 +1409,7 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
         if( c == '(' )
         {
             const std::size_t modifier = regexGroupModifierLength( pat, i );
-            frames.push_back( { false, false, i + 1 + modifier, {} } );
+            frames.push_back( { false, false, false, i + 1 + modifier, {} } );
             i += modifier;
             continue;
         }
@@ -1005,6 +1445,50 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
     }
     return std::nullopt;
 }
+
+// ── THE THIRD ARM (spec `regex-screen-multiquantifier`): the MULTI-QUANTIFIER family ─────────────────────────
+//
+// THE GAP. The two arms above both read a group that closes under an UNBOUNDED quantifier. Patterns with no
+// such group are invisible to them by construction, and three shapes cost the engine time that grows with the
+// SUBJECT while the screen says nothing:
+//
+//   (i)    a*a*a*a*a*b                      group-free flat — no group for either arm to inspect
+//   (ii)   ^(a)*(a)*(a)*(a)*(a)*$           grouped, no top-level '|' — nothing for the alternation arm
+//   (iii)  ^(ab\w|((.|.){1,3}){1,3}){1,3}$  bounded-nested — the outer {1,3} is BOUNDED, so the
+//                                           unbounded-outer condition is false on the one group holding
+//                                           the (.|.) overlap
+//
+// Measured cost (evidence/phase0-shape-cost.log, libstdc++ because libc++ throws error_complexity and so
+// measures nothing): shape (i) doubles every ~6.1 bytes — 5.4 ms at n=20, 29.5 s at n=96; shape (ii) is
+// ~degree-4 polynomial — 2.3 ms at n=20, 984 ms at n=80. Both are unbounded in the subject, on a pattern the
+// screen admits.
+//
+// WHAT IS CAUGHT — two clauses, because the family has two shapes of adjacency and one clause cannot see both:
+//
+//   CLAUSE 1 (repetition scope). Two or more quantified atoms ADJACENT within one repetition scope whose
+//   character sets are not provably disjoint. `a*a*a*` is the canonical member: the atoms are the SAME set, so
+//   the input can be split between the quantifiers in polynomially many ways, degree (k-1) for k atoms. `^(a)*(a)*(a)*` is the same
+//   adjacency one level in — the quantified groups are siblings in one scope. Adjacency is what makes it
+//   decidable without semantics: `ab*c` has ONE quantified atom in its scope and is admitted; `foo.*bar` has
+//   `.*` alone and is admitted.
+//
+//   CLAUSE 2 (bounded-outer overlap under repetition). An alternation the screen cannot prove disjoint, sitting
+//   under a BOUNDED outer quantifier, inside a group that is itself under a quantifier — `((.|.){1,3}){1,3}`.
+//   Clause 1 cannot see this: the two `.` atoms are in ALTERNATION branches, not adjacent in a scope, and the
+//   branch carries no quantifier of its own. The existing alternation arm cannot see it either, because it
+//   requires an UNBOUNDED outer. Measured: `(.|.){1,3}` alone is cheap at every length and stays ADMITTED (it
+//   is a bounded repeat of a two-atom overlap, tried once) — it is the NESTING under a second quantifier that
+//   makes the products enumerate, which is why clause 2 demands the enclosing quantifier.
+//
+// BOTH CLAUSES REFUSE RATHER THAN GUESS, on the `regex-screen-hardening` Q5(a) precedent this file already
+// follows: the proof runs on width-one atoms only, and where disjointness cannot be PROVEN the verdict is a
+// refusal — bounded, named, with a workaround — and never a hang. The false-positive class is exactly "a
+// genuinely deterministic pattern written in a shape whose disjointness this screen cannot read", and its cost
+// is a refusal a reader can act on, not a silent floor.
+//
+// WHAT THIS ARM IS NOT: a per-file match budget under a new name (the PR #397 review removed that and
+// test/regexbombcheck.sh section (6) pins the removal), and not a wall-clock bound of any kind — AC5 forbids
+// it, since the verdict must be a pure function of (file, pattern).
 
 // ── STACK: both standard libraries' regex PARSERS recurse, so a long or deeply nested pattern overflows the stack ──
 //
@@ -1076,7 +1560,20 @@ inline std::optional<std::string> screenRegexPattern( const std::string& pattern
     {
         return portability;
     }
-    return catastrophicRegexConstruct( pattern );
+    // The existing arms decide FIRST, so every pattern they already refused keeps its byte-identical message —
+    // regexguardcheck.sh pins their wording at every entry point, and a widened screen that re-caught one of
+    // them with a new sentence would break those arms while looking like an improvement.
+    if( std::optional<std::string> construct = catastrophicRegexConstruct( pattern ) )
+    {
+        return construct;
+    }
+    // Multi-quantifier clause 1 — the adjacency family, which has no group for the arms above to inspect
+    // (`a*a*a*a*b`) or whose quantified atoms are siblings rather than nested (`^(a)*(a)*(a)*$`).
+    if( const std::optional<std::size_t> at = regexAdjacentAmbiguousQuantifierAt( pattern ) )
+    {
+        return catastrophicRegexAdjacentMessage( pattern, *at );
+    }
+    return std::nullopt;
 }
 
 // ── the vocabulary a call site spells instead of the standard library's ─────────────────────────────────────

@@ -134,8 +134,7 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
     {
         return;
     }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     std::vector<char> searched( ing.symbols.size(), 0 );   // the cone, by symbol id
     for( const NodeId u : cone )
     {
@@ -986,8 +985,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( nameHits );
-        nameHits.erase( std::ranges::unique( nameHits ).begin(), nameHits.end() );
+        sortutil::sortUnique( nameHits );
         if( !nameHits.empty() )
         {
             // the call site: the caller's first call reference of the row's name that is not builtin-spelled (K5 rule 1)
@@ -1011,8 +1009,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( withheld );
-        withheld.erase( std::ranges::unique( withheld ).begin(), withheld.end() );
+        sortutil::sortUnique( withheld );
         for( const auto& hit : withheld )
         {
             ++out.rows[ hit.second ].nameWithheld;
@@ -1140,33 +1137,6 @@ inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::st
     }
     *glob = !out.empty();
     return out;
-}
-
-// PATH-AMBIG-VERDICT (b). vscode bare `_createInstance` (2 definitions) was searched, while the MORE specific
-// `InstantiationService._createInstance` answered rc=1 "2 definitions fit ... none is chosen": TS records no Symbol::scope, so only
-// the written-spelling tier reads the owner, and it refuses two same-chain classes in two files (a vendored copy) because a
-// single-pick verb could not say which. --path picks none: it searches every definition and lists the reaching pairs, so a
-// refusal there is no safety, only a lost answer — qualifying must narrow, never refuse. When every tier came back empty and the
-// spelling was refused over K >= 2 fitting definitions, all of them placed (an unplaced candidate keeps the refusal: it would be
-// dropped silently) and all named the spelling's last segment (the dot ACTED as the separator — #657's rule for --uses,
-// usesScopeSpellingNarrows), the endpoint binds those K, in the name tower's order. Empty = still refused. A wrong owner
-// (`Nope.f`) fits nothing and still refuses; the caller runs the one-source narrowing (narrowRefusedSpelling) first.
-inline std::vector<NodeId> pathEndpointFittedDefs( const IngestResult& ing, std::string_view spec )
-{
-    std::size_t         fitted = 0;
-    std::vector<NodeId> fits;
-    (void)resolveAllByWrittenSpelling( ing, spec, {}, &fitted, &fits );
-    const std::size_t cut = spec.find_last_of( ".#:" );
-    if( fitted < 2 || fits.size() != fitted || cut == std::string_view::npos || cut == 0 || cut + 1 >= spec.size() )
-    {
-        return {};
-    }
-    const std::string_view leaf = spec.substr( cut + 1 );
-    if( !std::all_of( fits.begin(), fits.end(), [ & ]( NodeId id ) { return id < ing.symbols.size() && ing.symbols[ id ].name == leaf; } ) )
-    {
-        return {};
-    }
-    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ) ) );
 }
 
 inline constexpr std::string_view kPathGlobLegend =
@@ -1630,8 +1600,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         toNames.push_back( ing.symbols[d].name );
     }
-    std::ranges::sort( toNames, sortutil::svLess );
-    toNames.erase( std::ranges::unique( toNames ).begin(), toNames.end() );
+    sortutil::sortUnique( toNames, sortutil::svLess );
     std::vector<std::string> hit;   // the handler names a counted post site carries that to= names
     for( const HandlerPostSite& site : hr.sites() )
     {
@@ -1665,8 +1634,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         return out;
     }
-    std::ranges::sort( hit, sortutil::svLess );
-    hit.erase( std::ranges::unique( hit ).begin(), hit.end() );
+    sortutil::sortUnique( hit, sortutil::svLess );
     for( const NodeId d : dstDefs )
     {
         if( std::ranges::binary_search( hit, std::string_view( ing.symbols[d].name ), sortutil::svLess ) && hr.classes().ownerOf( d ) != kNoNode )
@@ -1852,7 +1820,8 @@ inline constexpr std::size_t kRouteBodyMaxHops = 2;   // bridge rows 0..2 (from=
 inline constexpr std::size_t kRouteBodyMax     = 4;   // spew guard: bodies per answer; past it capped="1" next= the first unshown
 
 // The route's <bodies of="route" proven="0"> element (routeBodiesXml, the one printer); "" when the answer names no route body.
-inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, const PathBridge& br, const PathHandlerRule& hrule, std::string_view rootArg )
+inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, const PathBridge& br, const PathHandlerRule& hrule, std::string_view rootArg,
+                                       RedactCounts* redact )
 {
     std::vector<RouteBody> out;
     std::vector<NodeId>    seen;
@@ -1900,7 +1869,7 @@ inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, 
             add( reader.fn, " via=\"name-key\"" );
         }
     }
-    return routeBodiesXml( ing, out, "route", " proven=\"0\"", kRouteBodyMax, rootArg );
+    return routeBodiesXml( ing, out, "route", " proven=\"0\"", kRouteBodyMax, rootArg, redact );
 }
 static_assert( kRouteBodyMaxHops == 2 && kRouteBodyMax == 4 && kHopBodyCapBytes == 4000, "the route clause spells the bounds: re-word it with the knobs" );
 inline std::string_view pathRouteBodiesLegend( bool on ) noexcept

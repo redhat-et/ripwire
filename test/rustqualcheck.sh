@@ -212,6 +212,55 @@ printf '%s' "$MAP" | grep -qE '<s t="fn" n="new"' \
 expect uses    new 4 "4 call SITES spell ::new (name-based use-sites, one of them the external Vec)"
 expect callers new 2 "but only 2 CALLERS — external_caller is not one of them"
 
+# ── §5b RUST-PATH-OWNER: a path names the ONE type it resolves to (test/rustpathownerfix, its own tree so §1-§9's counts hold) ──
+# The canonical tier matches a path call's SCOPE NAME: `TestClient::new( 1 )` held every in-tree `TestClient::new`, and the ladder
+# picked the one in the caller's directory, unhedged. Two classes are named TestClient (test_helpers/test_client.rs, the one the
+# `use`s name; other_helpers.rs, beside every caller), one PathBuf is in-tree (mypath.rs, nushell crates/nu-path/src/path.rs's
+# shape) beside std's, and src/ext/mod.rs holds `impl From<Wrap> for PathBuf` FOR std's PathBuf. Literals read off
+# test/rustpathownerfix/src/*.rs. RED on main 9087eb59c: (a)-(j), (o) and (r) bound other_helpers.rs / mypath.rs / errs.rs /
+# procs.rs unhedged.
+PO="test/rustpathownerfix"
+poexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose; the run must succeed and answer for that caller (CR 706: a timed-out
+              #   run printed nothing, and an empty expectation matched it)
+    local out got
+    if ! out="$( run "$PO" "--callees=$1" --no-cache )"; then no "§5b $1: --callees exited non-zero (or timed out) — $3"; return; fi
+    case "$out" in *"<callees schema=\"ripwire.callees/v1\" of=\"$1\" defs=\""[1-9]*) ;; *) no "§5b $1: no callees answer for that caller — $3"; return;; esac
+    got="$( printf '%s\n' "$out" | grep -oE '<s t="[^>]*>' | sed -E 's/ (tested|test|of_def)="[^"]*"//g' )"
+    if [ "$got" = "$2" ]; then ok "§5b $1: $3"; else no "§5b $1 expected [$2] got [$got] — $3"; fi
+}
+TC='<s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3"/>'
+OH='<s t="method" n="TestClient::new" p="src/other_helpers.rs:4"/>'
+poexpect one_use "$TC" "(a) RUST-PATH-SAMENAME-CLASS: \`use crate::test_helpers::TestClient\` names test_client.rs's, proven, never the same-directory namesake"
+poexpect written "$TC" "(b) the written path crate::test_helpers::TestClient::new names test_client.rs's"
+poexpect turbo '<s t="method" n="Holder::new" p="src/test_helpers/test_client.rs:8"/>' "(c) a turbofish Holder::<u32>::new under its \`use\` names test_client.rs's"
+poexpect two_globs '<s t="method" n="TestClient::new" p="src/other_helpers.rs:4" via="name"/>
+<s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3" via="name"/>' "(d) NEGATIVE: two globs bring a TestClient and no \`use\` chooses: both hedged, never a pick"
+poexpect std_new '' "(e) RUST-STD-PATH-FROM: \`use std::path::PathBuf; PathBuf::new()\` is std's, no row (external=), never mypath.rs's"
+poexpect std_written '' "(f) the written std::path::PathBuf::new() is std's, no row"
+poexpect std_from '<s t="method" n="PathBuf::from" p="src/ext/mod.rs:6" via="name"/>' "(g) \`PathBuf::from( \"x\" )\` under std's PathBuf: the in-tree impl FOR std's PathBuf hedged (its argument is not read), never mypath.rs's"
+poexpect far_std_from '<s t="method" n="PathBuf::from" p="src/ext/mod.rs:6" via="name"/>' "(h) the same from a directory of no candidate: no split onto mypath.rs"
+poexpect io_error '<s t="method" n="Error::from" p="src/errs.rs:9" via="name"/>' "(i) std::io::Error::from( .. ): errs.rs's Error implements a trait named Error (std::error::Error; the inheritance names keep the last segment), so its From impl is hedged — the stated floor — never bound"
+poexpect trait_next '<s t="method" n="Iterator::next" p="src/errs.rs:14" via="name"/>' "(j) the trait path std::iter::Iterator::next( it ) may run errs.rs's impl of that trait: hedged, not dropped"
+poexpect other_use "$OH" "(k) guard: \`use crate::other_helpers::TestClient\` keeps other_helpers.rs's, proven"
+poexpect written_other "$OH" "(l) guard: the written crate::other_helpers::TestClient::new keeps other_helpers.rs's"
+poexpect again "$TC" "(m) guard: Self::new() inside test_client.rs's impl stays its own"
+poexpect tree_from '<s t="method" n="PathBuf::from" p="src/mypath.rs:7"/>' "(n) guard: \`use crate::mypath::PathBuf\` keeps the in-tree From impl, proven"
+poexpect far_tree_from '<s t="method" n="PathBuf::from" p="src/mypath.rs:7"/>' "(o) the in-tree PathBuf from a far directory: mypath.rs's alone, the impl FOR std's PathBuf is no member of it"
+poexpect tree_new '<s t="method" n="PathBuf::new" p="src/mypath.rs:4"/>' "(p) guard: the in-tree PathBuf::new, proven"
+poexpect bare_from '' "(q) guard: a bare From::from( .. ) keeps the rule it had (main: no row)"
+poexpect std_command '' "(r) \`use std::process::Command; Command::new( .. )\` is std's: procs.rs's inherent impl is for gen.rs's in-tree Command (no indexed class, a \`use\` into the tree names it), never a hedge onto it"
+# (e) (f) (r) read no row; the pin census says why: each `new` site is an `external` C row with no target (a declined or never-indexed
+# call would pass the empty-row arms above). CR 706, review 5994579130.
+POC="$( mktemp )"
+if run "$PO" --no-cache --pin-census="$POC" >/dev/null; then
+    for c in 'src/calls.rs::std_use::std_new#' 'src/calls.rs::std_written#' 'src/calls.rs::std_proc::std_command#'; do
+        if awk -F'\t' -v c="$c" '$1=="C" && $2=="external" && index($6,c)==1 && $7=="new" && $8=="" { f=1 } END { exit !f }' "$POC"; then
+            ok "§5b ${c#src/calls.rs::}: the census rules the \`new\` site external (no target)"
+        else no "§5b ${c#src/calls.rs::}: no external C row for its \`new\` site in the pin census"; fi
+    done
+else no "§5b the --pin-census run failed"; fi
+rm -f "$POC"
+
 # ── §6 AMBIGUITY IS DISCLOSED, never silently resolved (plan §6) ───────────────────────────────────────
 # Canonical keying makes the honest cases precise, so the amb= path is exercised ON PURPOSE: two modules
 # in ONE file each hold `impl Thing`, so `Thing::run` legitimately keys TWO defs.
@@ -279,6 +328,31 @@ if [ -d "$ROOT/$LEGO" ]; then
         && ok "legofix: Vehicle still has exactly its 2 Rust implementors (Car, Bike)" \
         || no "legofix Vehicle implementors changed: $LEGO_V"
 fi
+
+# ── §10 RUST-UFCS-QUALIFIED: a call written through a bracketed type (test/rustufcsfix, its own tree so §1-§8's counts hold) ──
+# `<Where as Command>::run( &Where, .. )` (nushell crates/nu-command/src/filters/filter.rs:50) names Where's impl of Command::run.
+# Before, the bracketed path left the qualifier empty and the call bound by name to every `run` in reach (main ac4ce4f6a: cast_call
+# count=5, all via=name, Runner::run among them). Literals read off test/rustufcsfix/src/*.rs; red on main for (a) (b) (c) (f).
+UF="test/rustufcsfix"
+ufexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose; the run must succeed and answer for that one caller
+    local out got
+    if ! out="$( run "$UF" "--callees=src/calls.rs:$1" --no-cache )"; then no "§10 $1: --callees exited non-zero (or timed out) — $3"; return; fi
+    case "$out" in *"<callees schema=\"ripwire.callees/v1\" of=\"src/calls.rs:$1\" defs=\"1\" "*) ;; *) no "§10 $1: no callees answer for the one caller — $3"; return;; esac
+    got="$( printf '%s\n' "$out" | grep -oE '<s [^>]*>' | grep -v 't= n=' | sed -E 's/ tested="[0-9]"//' )"
+    if [ "$got" = "$2" ]; then ok "§10 $1: $3"; else no "§10 $1 expected [$2] got [$got] — $3"; fi
+}
+ufexpect cast_call '<s t="method" n="Where::run" p="src/impls.rs:4"/>' "(a) <Where as Command>::run is Where's impl, one proven row"
+ufexpect inherent_call '<s t="method" n="Where::helper" p="src/impls.rs:7"/>' "(b) <Where>::helper is Where's own helper, proven"
+ufexpect twin_call '<s t="method" n="Twin::run" p="src/twins_a.rs:4" prov="split"/>
+<s t="method" n="Twin::run" p="src/twins_b.rs:4" prov="split"/>' "(c) NEGATIVE: Twin names two types, split over both, no other run"
+ufexpect external_call '' "(d) NEGATIVE: <String as Clone>::clone names no type of the tree, no row"
+ufexpect dyn_call '<s t="method" n="Sq::area" p="src/impls.rs:15" via="name"/>
+<s t="method" n="Ci::area" p="src/impls.rs:19" via="name"/>' "(e) NEGATIVE: <dyn Shape>::area stays hedged over Shape's implementors"
+ufexpect generic_call '<s t="method" n="Where::run" p="src/impls.rs:4" via="name"/>
+<s t="method" n="Other::run" p="src/impls.rs:11" via="name"/>' "(f) NEGATIVE: <T as Command>::run through a type parameter is Command's implementors, hedged, never Runner::run"
+RUNNER="$( run "$UF" --callers=src/impls.rs:Runner::run --no-cache )"
+[ "$( cnt "$RUNNER" )" = 0 ] && ok "§10 Runner::run (a namesake implementing no trait) has no caller" \
+    || no "§10 Runner::run gained a by-name caller: $RUNNER"
 
 # ── §9 hygiene: determinism, warm==cold, well-formed XML ───────────────────────────────────────────────
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

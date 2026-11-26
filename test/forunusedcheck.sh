@@ -12,6 +12,9 @@
 # Every arm here is one row of the honesty table in src/forunused.h, or a near miss: re-export only; called only by a test; called through a
 # string; a private helper; an overload set; the same name in two files. Each is RED on the pre-table binary b8c31789 (no block at all).
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 . "$( cd "$( dirname "$0" )/.." && pwd )/test/lib/clean-env.sh"   # T14 builds a git repo: hermetic git env (gitenvhermeticcheck D)
 RIPWIRE="${RIPWIRE_BIN:-${RIPWIRE:-./build/ripwire}}" # RIPWIRE_BIN first: pargates.py and regression.sh set it (binoverridecheck)
 case "$RIPWIRE" in /*) ;; *) RIPWIRE="$PWD/$RIPWIRE" ;; esac

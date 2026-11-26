@@ -3,9 +3,19 @@
 #error "verbs_for.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "outputceiling.h"   // CL1: kOutputCeilingChars — the --page-bytes=0 size line
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
+#include "forqsites.h"  // θ11 (RIPWIRE_THETA11=1): the question's own sites, inside page 1's root
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
+#include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
+#include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
+#include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
+#include "foractline.h"     // BR1: the act line — the page's top undelivered ranges, read in one turn
+#include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
+#include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
+#include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
@@ -16,6 +26,7 @@
 #include "fordocbody.h"   // FOR-DOC-BODY: a prose task's top-ranked doc sections, before </ctx>
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
+#include "formanifest.h"     // MANIFEST-ROW: the manifest lines a task names, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forsiblingdemote.h"  // SIBLING-DEMOTE: deep same-file sibling rows become tail pointers (read off the answer after ONE-SIDE-REACH)
@@ -189,14 +200,14 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
+                                                                                  0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -216,7 +227,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, kForBasenameFieldW, {}, &out.evidence, statsOutPtr );
     }
 
     rw::rowFeaturesLexical( lensRank, tierMul );   // ROW-FEATURE-DUMP: inert unless armed
@@ -509,6 +520,7 @@ struct ForLensJsonInputs
     // FOR-DOC-BODY: the graph the doc sections are scored on (fordocbody.h, the "doc_body" key) — REQUIRED like fileTail above
     const rw::Graph*                  graph;
     bool                              signaturesOnly;   // --signatures-only: no doc text rides the answer (the XML twin's rule)
+    const std::vector<float>*         tailTermTieRank;  // TAIL-SYM-TERMS: the order fileTail's added names took (forpage.h tailTermTieRank)
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -536,6 +548,7 @@ struct ForLensNotes
     const char*        confidence;  // "high" | "low"
     int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
     int                coveragePct; // L-W: the XML root's coverage= (-1 = absent: nothing scored)
+    int                fileGapPct;  // ROUTING: the XML root's file_gap_pct= (-1 = absent: the file-gap ground did not make it high)
     bool               weak;
     // M10: gitstamp::stampAt(root) — the raw sha[+dirty] value, "" on multi-root/non-git (never "null" as
     // a STRING; the JSON emitter below distinguishes empty-string-absent from a real value the same way
@@ -640,6 +653,7 @@ struct ForLensHeaderParts
     bool             tailCodeFirst = false;  // docs-rest: the tail orders code files first (forpage.h tailOrdersCodeFirst)
     bool             tailWide = false;       // FOR-TAIL-WIDE: the tail's page walk goes past page 0 (forpage.h fileTailWalksPastPage0)
                                             // question over the same ids (serialize.h splitArmsOutAny); set after construction
+    bool             tailSameDir = false;    // TL1 M2: the answer-first tail lists same-directory files first past row 24 (tailSameDirLegend)
     bool             hopsCallsNextPresent = false; // body-fold rider: a ranked <hops> row's cut <calls> carries next= (set after the
                                             // hops render, cleared with the section)
     bool             bodyFoldPresent = false; // body-fold: a compact-route answer in the default regime has fold candidates
@@ -742,6 +756,14 @@ using rw::deriveForConfidence;
 // root carries it (the ladder's rung (c) drops the attribute, and then its reading goes with it); the
 // confidence, sc=/route= and tail clauses always ride (forbudget-soft: no ceiling ladder sheds them); the compact bundle's hops/calls/noedge clause and the auto bundle's bodies clause are
 // mutually exclusive by construction (planForEnrichment).
+// The est_tokens= sentence the header's last comment carries, by which ceilings the root names (runForLens, #61). Named so
+// the legend dictionary can hold them (forlegendentries.h, lane LS1): --legend-seen leaves out only text that IS an entry.
+inline constexpr std::string_view kForEstTokensNote = " est_tokens= prices this bundle in tokens";
+inline constexpr std::string_view kForEstTokensBudgetCeilingNote =
+    " est_tokens= prices this bundle in tokens; budget_tokens=/max_tokens= the soft row target (rows stop once it is reached)/body ceiling asked";
+inline constexpr std::string_view kForEstTokensBudgetNote =
+    " est_tokens= prices this bundle in tokens; budget_tokens= the soft row target asked (rows stop once it is reached)";
+inline constexpr std::string_view kForEstTokensCeilingNote = " est_tokens= prices this bundle in tokens; max_tokens= the body ceiling asked";
 inline constexpr std::string_view kForCompactLegendRoot =
     "bundle=/bodies=/reason= the body posture; ";
 inline constexpr std::string_view kForCompactLegendRows =
@@ -780,7 +802,7 @@ inline constexpr std::string_view kForCompactLegendRoute = rw::kForRouteCodeLege
 inline constexpr std::string_view kForCompactLegendConfidence =
     "; confidence=/margin_pct= head score drop (low=flat)";
 inline constexpr std::string_view kForCompactLegendHops =
-    "; h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved";
+    "; h l= p= n=, c n= l= p= (p= if not h's; same-named joined, shown= counts them), noedge= no callee resolved";
 // owner-hop: present-only, right after the hops clause, on the same plan the rows come from. Says it is BY NAME (a lookup in
 // the ranked head, never a resolution), widens noedge= to the owners, and defines the two disclosures an owner cut carries.
 // What qword= does NOT mean: that the row is the only, or the true, implementation of the question's subject.
@@ -817,13 +839,13 @@ inline std::size_t ownerLegendExemptBytes( const ForLensHeaderParts& p, bool com
     return ownerHopLegend( p, compact ).size() + viaBytes;
 }
 inline constexpr std::string_view kForCompactLegendBodies =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures";
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's)";
 // for-body-slot: the compact dialect's reading of the ONE owner body (the full dialect's is forowner.h kForBodySlotLegend + the
 // root clause below), present-only (bodySlotPresent), right after the owner clause. No "--": it rides inside an XML comment.
 // FIX1 R3: it states what the full one states — what each pick= means and what reason=owner does NOT mean (the subject, the
 // whole answer): the default posture is this dialect, so this is the only reading most readers get.
 inline constexpr std::string_view kForCompactLegendBodySlot =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures; bodies=1 reason=owner: ONE body, the question's owner by the rule "
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's); bodies=1 reason=owner: ONE body, the question's owner by the rule "
     "(pick=name: its name is a question word; pick=member: a method so named of a ranked class), chosen by name not resolved; "
     "not necessarily the subject, not a claim it is the whole answer; shown=0 capped=1 next= when a budget skipped it";
 static_assert( kForCompactLegendBodySlot.starts_with( kForCompactLegendBodies ), "the slot's compact clause defines <b> as the bodies clause does" );
@@ -883,6 +905,8 @@ inline constexpr std::string_view callerHopClause( const ForLensHeaderParts& p, 
 inline std::string hopClauses( const ForLensHeaderParts& p, bool compact )
 {
     std::string out( callerHopClause( p, compact ) );
+    // WINDOW-AWARE HAND-OFF: rides with the hop and is erased when the rendered hop does not window (SIZE-1, runForLensPass)
+    out += presentOnlyClause( p.callerHopPresent && rw::handoffWindowOn(), compact, rw::kForCompactWindowHandoffLegend, rw::kForWindowHandoffLegend );
     out += presentOnlyClause( p.dispatchHopPresent, compact, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend );
     out += presentOnlyClause( p.selfHookPresent, compact, rw::kForCompactSelfHookLegend, rw::kForSelfHookLegend );
     return out;
@@ -914,6 +938,13 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 }
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed)";
+// TAIL-SYM-TERMS: the clause defining tsym=, right after the tail clause that defines sym=, only when a shown row carries one.
+// Absent, the clause is empty and the splice inserts nothing.
+inline void spliceTailTermsClause( std::string& header, bool compact, bool present )
+{
+    const std::string_view tailClause = compact ? kForCompactLegendTail : rw::kForFileTailLegend;
+    rw::spliceClauseAfter( header, tailClause, presentOnlyClause( present, compact, rw::kForCompactFileTailTermsLegend, rw::kForFileTailTermsLegend ) );
+}
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
@@ -922,6 +953,12 @@ inline constexpr std::string_view kForCompactLegendTailWide =
 inline std::string_view tailWideLegend( const ForLensHeaderParts& p, bool compact )
 {
     return presentOnlyClause( p.tailLegend && p.tailWide, compact, kForCompactLegendTailWide, rw::kForFileTailWideLegend );
+}
+// TL1 M2's order clause (foranswerfirst.h kTailSameDirClause), both dialects: rides after the tail clauses only where the answer-first
+// pass will reorder (tailSameDir), and that pass reorders only where the document legend carries it.
+inline std::string_view tailSameDirLegend( const ForLensHeaderParts& p ) noexcept
+{
+    return p.tailLegend && p.tailSameDir ? rw::answerfirst::kTailSameDirClause : std::string_view();
 }
 // The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
 // (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
@@ -1001,11 +1038,22 @@ inline bool forRouteAttrPresent( const ForLensHeaderParts& p, bool withRouteAttr
     return withRouteAttr && p.rootOpenStr.find( " route=\"" ) != std::string_view::npos;
 }
 
-// …and the THIN question, asked the same way: does this root carry L-W's coverage=? Four sites spelled the
-// same find() (two legend appends and two dropped-note selections), which is three chances to change it in two.
-inline bool forCoverageAttrPresent( const ForLensHeaderParts& p ) noexcept
+// …and the present-only confidence attributes, asked the same way: does this root carry L-W's coverage= (the THIN question) or
+// ROUTING's file_gap_pct= (lexical.h headFileGapPct)? Read off the built attributes, so a clause can only appear beside the
+// attribute it defines. `attrOpen` is the attribute's opening spelling, e.g. kForCoverageAttrOpen.
+inline constexpr std::string_view kForCoverageAttrOpen = " coverage=\"";
+inline constexpr std::string_view kForFileGapAttrOpen  = " file_gap_pct=\"";
+inline bool forConfidenceAttrPresent( const ForLensHeaderParts& p, std::string_view attrOpen ) noexcept
 {
-    return p.confidenceAttrs.find( " coverage=\"" ) != std::string_view::npos;
+    return p.confidenceAttrs.find( attrOpen ) != std::string_view::npos;
+}
+
+// The compact dialect's confidence clause bytes as appendCompactForLegend emits them: the clause, plus coverage='s and file_gap_pct='s
+// short clauses when the root carries them. runForLensPass subtracts exactly this from the confidence exemption (P1 / L7).
+[[nodiscard]] inline std::size_t compactConfidenceClauseBytes( bool coverageOn, std::string_view confidenceAttrs ) noexcept
+{
+    return kForCompactLegendConfidence.size() + ( coverageOn ? rw::kForCompactCoverageClause.size() : 0 )
+         + ( confidenceAttrs.find( kForFileGapAttrOpen ) != std::string_view::npos ? rw::kForCompactFileGapClause.size() : 0 );
 }
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, bool withRouteAttr, std::string_view extraNotes )
@@ -1025,9 +1073,13 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     if( !p.confidenceNote.empty() )
     {
         h += kForCompactLegendConfidence;
-        if( forCoverageAttrPresent( p ) )
+        if( forConfidenceAttrPresent( p, kForCoverageAttrOpen ) )
         {
             h += rw::kForCompactCoverageClause;   // L-W: defined where the root carries it, in this dialect's short form
+        }
+        if( forConfidenceAttrPresent( p, kForFileGapAttrOpen ) )
+        {
+            h += rw::kForCompactFileGapClause;   // ROUTING: the file-gap ground, where the root carries it
         }
     }
     if( p.compactBundle )
@@ -1053,6 +1105,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
         { p.tailLegend, kForCompactLegendTail },
         { !tailCodeFirstLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailCodeFirst },   // docs-rest: the tail's order
         { !tailWideLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailWide },   // FOR-TAIL-WIDE: the walk past page 0
+        { !tailSameDirLegend( p ).empty(), rw::answerfirst::kTailSameDirClause },          // TL1 M2: the answer-first tail order past row 24
         { p.hdrLegend, kForCompactLegendHdr },
         { p.composePresent, kForCompactLegendCompose },  { p.legoPresent, kForCompactLegendLego },
         { p.layerPresent, kForCompactLegendLayer },
@@ -1094,7 +1147,7 @@ inline constexpr std::string_view kForAutoBundleLegend =
     "(bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget "
     "whole; the signatures-only flag (no-bodies mode) opts out) — read them here instead of opening the files. The "
     "bodies element discloses the house way: total=requested, shown=printed, capped=1 when they "
-    "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
+    "differ; each body's calls child lists its callee signatures (c p= their file when it is not the body's), total= always, shown=/capped= only "
     "when that list is cut";
 
 // The clause defining the degraded reason, spliced into the header ONLY on that path (no "--": it rides in a comment).
@@ -1115,7 +1168,7 @@ inline constexpr std::string_view kForDegradedBundleNote =
 inline constexpr std::string_view kForCompactBundleLegend =
     "; bundle=compact: conceptual query, so this map ships one-hop EDGE context, no bodies (bodies=0, "
     "reason=compact-route or no_candidates). hops rows are h l=line p=file n=name, and a row's calls "
-    "child names its callees (c n= l=; l= comma-joins the lines of same-named callees, shown= counts callees). hops and calls disclose total=requested shown=printed capped=1 "
+    "child names its callees (c n= l=; l= comma-joins the lines of same-named callees of one file, c p= that file when it is not the h row's, shown= counts callees). hops and calls disclose total=requested shown=printed capped=1 "
     "when the BUDGET cut a listing; noedge=N counts ranked symbols with no RESOLVED callee found (never "
     "none exists). For a body: expand=p:n pasted off a row; the auto-bodies flag puts the bodies back";
 
@@ -1201,6 +1254,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
         h.append( tailCodeFirstLegend( p, /*compact=*/false ) );   // docs-rest: the order a code question's tail uses
         h.append( tailWideLegend( p, /*compact=*/false ) );   // FOR-TAIL-WIDE: present-only, the walk past page 0
+        h.append( tailSameDirLegend( p ) );   // TL1 M2: present-only, the answer-first tail order past row 24
     }
     if( p.hdrLegend )
     {
@@ -1320,6 +1374,10 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     if( notes.coveragePct >= 0 )
     {
         h += ",\"coverage\":" + std::to_string( notes.coveragePct );   // L-W: the XML root's third ranking fact, same presence rule
+    }
+    if( notes.fileGapPct >= 0 )
+    {
+        h += ",\"file_gap_pct\":" + std::to_string( notes.fileGapPct );   // ROUTING: present-only, as on the XML root (CodeRabbit #753)
     }
     // the adaptive cut's own counts — the abstention round-2 instrumentation described on ForLensNotes.
     // ALWAYS present (a count of zero is a measurement: "nothing scored", never "the field was dropped"),
@@ -1888,7 +1946,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     // from what the rows AT THE CUT left of the bundle budget (the same share the refill above priced the rows against)
     // lane 2: the rank rows exclude the files of the rows emitted (after a refill: the rows it kept — the XML twin's rule)
     const std::size_t  jsonCutRows = jsonAtCutUndemoted.value_or( sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes ) );
-    const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task );
+    const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, false, in.tailTermTieRank );
     std::size_t        jsonTailShown = 0;
     tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ), &jsonTailShown );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
@@ -2509,7 +2567,6 @@ inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult
     {
         return owners;
     }
-    std::vector<char> esc;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     std::size_t       cutReserve = 0;   // ' qword_cut="NNN" next="--callees=' + the longest target + '"'
     std::vector<rw::NodeId> cuttable = plan.rowIds;
@@ -2522,7 +2579,7 @@ inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult
         const rw::Symbol&      s   = ing.symbols[ id ];
         const std::string_view rel = rootArg.empty() ? std::string_view( ing.files[ s.fileId ] )
                                                      : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );   // packHops' pathRel
-        cutReserve = std::max( cutReserve, rw::ownerCalleesNext( ing, s, rel, rootArg, esc ).size() + 28 );
+        cutReserve = std::max( cutReserve, rw::ownerCalleesNext( ing, s, rel, rootArg ).size() + 28 );
     }
     owners.budgetBytes = leftBytes > cutReserve ? leftBytes - cutReserve : 1;   // 1, never 0 (0 reads as "ride on top")
     owners.fundFirst   = true;
@@ -2561,6 +2618,43 @@ inline constexpr std::string_view kForHopsBudgetCutLegendCompact =
     "; hops: this budget left out the call-hop rows (one hop of callees for each of total= top rows)";
 static_assert( kForHopsBudgetCutLegendCompact.size() < kForHopsBudgetCutLegend.size(),
                "the compact hops clause is the shorter honest spelling of the full one" );
+// value_refs= on the hop rows: which function-valued hop nodes are used as a value, and how often. The same resolution --callers
+// prints as value_refs= (ValueRefIndex::valueRefsTo), through the narrow index over the hop nodes' names. Languages whose value uses
+// are not read at all never enter (the row writer says unread for them); a corpus with no value use pays one scan and no byte.
+inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std::vector<rw::NodeId>& hopNodes )
+{
+    rw::HopValueRefs out;
+    std::vector<std::string_view> names;
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( rw::hopRowIsFunction( ing, id ) && rw::valueRefFamily( ing.symbols[ id ].lang ) != rw::ValueRefFamily::None )
+        {
+            names.push_back( ing.symbols[ id ].name );
+        }
+    }
+    rw::sortutil::sortUnique( names, rw::sortutil::svLess );
+    const auto namesAValue = [ & ]( const rw::Reference& r )
+    { return r.role == rw::RefRole::Value && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); };
+    if( names.empty() || !std::ranges::any_of( ing.references, namesAValue ) )   // COST: no value use of any hop name, no index and no byte
+    {
+        return out;
+    }
+    const rw::ValueRefIndex vri = rw::ValueRefIndex::narrowFor( ing, names );
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( !rw::hopRowIsFunction( ing, id ) || rw::valueRefFamily( ing.symbols[ id ].lang ) == rw::ValueRefFamily::None )
+        {
+            continue;
+        }
+        const std::size_t n = vri.valueRefsTo( std::span<const rw::NodeId>( &id, 1 ) ).size();
+        if( n > 0 )
+        {
+            out.counts.emplace_back( id, std::uint32_t( n ) );
+        }
+    }
+    rw::sortutil::sortUnique( out.counts );
+    return out;
+}
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker and the partial-cut splice
 inline std::string forHopsCutNextAttr( const rw::Config& cfg )
 {
@@ -2666,9 +2760,10 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     const std::vector<rw::NodeId> hopNodes = forOwnerHopNodes( ownerPlan, hopIds );
     const rw::HopOwners           owners   = forHopOwners( cfg, ing, ownerPlan, leftBytes, fcRootArg );
 
+    rw::HopValueRefs hopVals = forHopValueRefs( ing, hopNodes );   // value_refs= on a row, value_refs_unread_for_lang= on the section
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, &g.outProv, nullptr ), &g.outAnchorMiss ), redactPtr, &lensRank, fcRootArg,
-                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
+                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners, &hopVals ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
@@ -2989,7 +3084,8 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
         return;
     }
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
-    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
 }
 
 // Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
@@ -3044,12 +3140,12 @@ struct PathGapSides
         if( why == DisclosureWhy::FromUncaptured )
         {
             fromMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
         }
         else
         {
             toMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
         }
     }
 };
@@ -3113,7 +3209,14 @@ struct StdoutCaptured
 inline std::string readBackAll( std::FILE* f, bool& failed )
 {
     std::string doc;
-    std::rewind( f );
+    // fseek, not std::rewind: rewind cannot report a failed seek, and the read below would then start wherever the
+    // writes left the stream (its end) and hand back a short or empty answer with `failed` unset, i.e. as whole.
+    if( std::fseek( f, 0, SEEK_SET ) != 0 )
+    {
+        failed = true;
+        return doc;
+    }
+    std::clearerr( f );   // rewind's other half, kept: the error flag is this read's, not the writes'
     char buf[ 65536 ];
     for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
     {
@@ -3234,7 +3337,7 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 // The caller skips it under a budget, which leaves both as shaped.
 inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
 {
-    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, { .task = d.cfg.forTask, .answer = answer, .syms = syms } );
     if( !edit.answer.empty() && price )
     {
         rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
@@ -3279,9 +3382,15 @@ struct CapturedForAnswer
 };
 
 // The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
+// wholeCapture is the same test handing back the capture itself (nullptr when not whole), so a read of its bytes needs no
+// second, unchecked look into the optional.
+inline const StdoutCaptured* wholeCapture( const std::optional<StdoutCaptured>& cap )
+{
+    return cap && !cap->failed && cap->restored ? &*cap : nullptr;
+}
 inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
 {
-    return cap && !cap->failed && cap->restored;
+    return wholeCapture( cap ) != nullptr;
 }
 
 // TOKEN-BUDGET-MONOTONE: the demote passes edit the captured answer after it was priced, and the root re-prices over
@@ -3320,15 +3429,16 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
+    const StdoutCaptured* const wholeCap = wholeCapture( cap );   // restored: the branch above returned otherwise
+    const bool        whole = wholeCap != nullptr;
     const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;   // the demote passes' read (shapedForFileSymsAnswer)
     const bool        symsHeld = held || cfg.forHoldBudget > 0;            // the block's: the fitted re-render holds it too (kForHeldBlocks)
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = symsHeld,
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( wholeCap->bytes ) : std::string_view(), .held = symsHeld,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut,
                                       .cutWhenHeld = !held } );
-    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
+    const std::string  edited = whole ? shapedForFileSymsAnswer( d, wholeCap->bytes, std::move( cut ), syms, price, held ) : std::string();
     ledgerFollowsEdit( answer.ledger, cap, edited );
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
@@ -3373,6 +3483,19 @@ inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::
         std::fwrite( prefix->data(), 1, prefix->size(), stdout );
     }
     rw::emitRaw( stdout, ( rw::metBridgeCrossingXml( d.ing, *bridge ) + std::string( rw::kMetBridgeCloseXml ) ).c_str() );
+}
+
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): a callers answer whose own root says it windows is not appended as a first page; the
+// tag is self-closed with the verb's total and the one call that lists every row (windows="1" next_total= next=). Returns whether
+// that stub went out; false = the verb's answer does not window (or is not the callers verb) and is appended as before.
+inline bool emitWindowingGraphVerb( const rw::GraphSubjectArgs& args, std::string_view doc )
+{
+    const rw::HandoffWindow win = args.form == rw::GraphSubjectForm::Callers ? rw::handoffWindowOfVerbDoc( doc, "<callers " ) : rw::HandoffWindow{};
+    if( win.windows )
+    {
+        rw::emitRaw( stdout, rw::graphSubjectOpenXml( args, rw::GraphSubjectOpen{ .windowTotal = win.total } ).c_str() );
+    }
+    return win.windows;
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
@@ -3442,14 +3565,20 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
     }
     else
     {
+        if( emitWindowingGraphVerb( *args, *doc ) )
+        {
+            return true;
+        }
         // the open tag goes out after the verb ran: name_test_hops= (S5) is read off the rows it printed
         const std::size_t nameTest = args->form == rw::GraphSubjectForm::Path ? rw::graphSubjectNameTestHops( *doc ) : 0;
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .nameTestHops = nameTest } ).c_str() );
         std::fwrite( doc->data(), 1, doc->size(), stdout );
         if( args->form == rw::GraphSubjectForm::Path && rw::graphSubjectPathUnreachable( *doc ) )
         {
-            appendPathGapSides( sd, *args );
+            // AF2 E1 (results/AF2_FIRST12K_1118 §SPEC, 2026-11-18): the met bridge — the RESOLVED half, when there is one — is
+            // emitted ahead of the path gap's two sides, so a reader that stops early meets the answer before the failed search.
             appendMetBridge( d, sub, served, *args, *doc );   // GV-ASSEMBLY M3: "" unless the search reached a caller of to= (src/forgraphverb.h metBridgePlan)
+            appendPathGapSides( sd, *args );
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
@@ -3462,6 +3591,36 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
 inline constexpr std::string_view kReaskLegend =
     "<!-- ripwire for reask: the task names code in a sentence and asks for its callers or a call path, and this answer carries no "
     "callers or graph_verb block for it; next= is the same question in its bare form, the one call that answers it -->";
+// REASK-GRAIN: the sentence asks what a CHANGE to the code reaches (subjectanchor.h isChangeCue), which is the transitive radius, not
+// the one-hop callers: the impact verb is the bare form of that question. Its own legend, so the callers / path one keeps its bytes.
+inline constexpr std::string_view kReaskImpactLegend =
+    "<!-- ripwire for reask: the task names code in a sentence and asks what a change to it reaches, and this answer carries no "
+    "callers block for it; next= is the same question in its bare form, the transitive radius (the one-hop callers are its d=1 rows)";
+
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): what the re-ask's verb would do at its default caps. The impact form is counted by
+// the verb's own walk; the callers form decides its own byte band, so the verb runs captured (default caps, as the graph_verb block
+// runs it) and its root is read. A capture that cannot be set up → not known: the re-ask is the bare call, as before.
+inline rw::HandoffWindow reaskHandoffWindow( const MainDispatch& d, std::string_view flag, const std::string& spelling )
+{
+    if( !rw::handoffWindowOn() )
+    {
+        return {};
+    }
+    if( flag == "--impact=" )
+    {
+        return rw::impactHandoffWindow( d.ing, d.g, spelling );
+    }
+    rw::Config sub = d.cfg;   // the verb as its own bare call (appendSubjectGraphVerbBlock's sub-config)
+    sub.forTask    = {};
+    sub.pageLimit  = 0;
+    sub.pageOffset = 0;
+    sub.callers    = spelling;
+    const MainDispatch sd{ sub, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
+                           d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
+    const std::optional<std::string> doc = captureGraphVerbDoc( sub, [ & ] { (void)runCallHierarchy( sd ); } );
+    return doc ? rw::handoffWindowOfVerbDoc( *doc, "<callers " ) : rw::HandoffWindow{};
+}
+
 inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
 {
     const rw::Config& cfg = d.cfg;
@@ -3470,12 +3629,25 @@ inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted
         return;
     }
     const std::string invocation = rw::sentenceReaskInvocation( d.ing, cfg.forTask );
-    // the callers form stands in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns it off with it
-    if( invocation.empty() || ( invocation.starts_with( "--callers=" ) && !rw::forCallerHopOn() ) )
+    const bool        impact     = invocation.starts_with( "--impact=" );
+    const bool        dependents = impact || invocation.starts_with( "--callers=" );
+    // the dependents forms stand in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns them off with it
+    if( invocation.empty() || ( dependents && !rw::forCallerHopOn() ) )
     {
         return;
     }
-    rw::emitRaw( stdout, ( std::string( kReaskLegend ) + "<reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+    const std::string_view legend = impact ? kReaskImpactLegend : kReaskLegend.substr( 0, kReaskLegend.size() - std::string_view( " -->" ).size() );
+    const std::string_view flag   = std::string_view( invocation ).substr( 0, invocation.find( '=' ) + 1 );
+    const std::string      spelling( invocation.substr( flag.size() ) );
+    const rw::HandoffWindow win   = dependents ? reaskHandoffWindow( d, flag, spelling ) : rw::HandoffWindow{};
+    if( !win.windows )
+    {
+        rw::emitRaw( stdout, ( std::string( legend ) + " --><reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+        return;
+    }
+    // a windowing re-ask names the complete call instead of a first page; the spelling is the one sentenceReaskInvocation chose
+    rw::emitRaw( stdout, ( std::string( legend ) + std::string( rw::kWindowHandoffBlockLegend ) + " --><reask counts_floor=\"1\""
+                           + rw::handoffNextAttrsXml( flag, spelling, win ) + "/>" ).c_str() );
 }
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
@@ -3700,7 +3872,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         rw::rowFeaturesSurface( { .rank = lensRank, .surface = lensSurfaceIds, .evidence = lr.evidence, .anchors = routeAnchorDefs, .rootArg = flRootArg } );   // ROW-FEATURE-DUMP
 
-        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource, rw::headFileGapPct( lensRank, lensSurfaceIds, ing.symbols ) );
         // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
         // Another head reads low, and route= names the row that heads instead (written before any consumer below reads route=).
         // The head is the row the answer prints as r=1 (rw::routeEmittedHead: code above docs moves Markdown rows below the code rows).
@@ -4001,6 +4173,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
         headerParts.tailCodeFirst = rw::tailOrdersCodeFirst( ing, cfg.forTask );   // docs-rest: the tail-order clause rides only here
         headerParts.tailWide      = rw::fileTailWalksPastPage0( ing, lensRank );   // FOR-TAIL-WIDE: the walk-past-page-0 clause rides only here
+        // TL1 M2: the answer-first pass reorders the tail past row 24 where (and only where) this clause rides; a tail that walks past
+        // page 0 holds more than 24 rows, so the clause is not spent on a tail too short to reorder
+        headerParts.tailSameDir   = cfg.legendAnswerFirst && rw::answerfirst::tailSameDirOn() && headerParts.tailWide;
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
@@ -4031,6 +4206,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::vector<rw::NodeId> epHead;   // the ranked head the clause was priced for; narrowed to the rows <sigs> emits once it renders
         // manifest-noncode (listedin.h): the manifest lines listing a file of that same ranked head, same regime, same re-pick
         rw::ListedRender listedIn;
+        std::optional<RedactCounts> listedRedactBefore;   // the tally around the first <listed> render: a re-render below takes its count back
+        std::optional<RedactCounts> listedRedactAfter;
         const bool       peerManifestRegime = autoBundleMode && !cfg.json && cfg.tokenBudget <= 0;
         if( peerManifestRegime && ( rw::forEpManifestOn() || rw::forListedInOn() ) )
         {
@@ -4047,7 +4224,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( rw::forListedInOn() )
             {
-                listedIn = rw::renderForListedIn( ing, epHead, cfg.forTask );
+                listedRedactBefore = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
+                listedIn           = rw::renderForListedIn( ing, epHead, cfg.forTask, redactPtr );
+                listedRedactAfter  = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
             }
         }
         headerParts.epPresent     = !epManifest.xml.empty();
@@ -4099,7 +4278,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // DEEP-TAIL d2, FOLD C (forbudget-soft round C): the file-grain tail is page 0 of the --for file page — one shared
         // model (forpage.h computeFileTail) for both dialects and the MCP twin, from the SAME ranking and term evidence the
         // `--limit=40` page uses, so the tail, its next= page and the page itself cannot disagree.
-        const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask );   // the DEGRADE paths' tail
+        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below;
+        // empty under --token-budget (none is added there — the MCP twin's rule too).
+        const std::vector<float> termTieRank = rw::tailTermTieRank( g, cfg.forTask, cfg.tokenBudget );
+        const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask, false, &termTieRank );   // the DEGRADE paths' tail
         // H2H-Graft lane 2 (2026-09-07): the tail's rank rows exclude only the files of the sigs rows actually EMITTED (a row the
         // ladder trimmed must land in the tail, never nowhere).
         std::vector<NodeId> shownSigIds;
@@ -4165,7 +4347,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                                               docMentionNote, lr.anchorLifts, lr.docMentionCount,
                                                                                               adaptiveNote, floorNote,
                                                                                               forConf.level,
-                                                                                              forConf.marginPct, forCoverageOn ? forCoverage : -1, forWeak,
+                                                                                              forConf.marginPct, forCoverageOn ? forCoverage : -1, forConf.fileGapPct, forWeak,
                                                                                               forAtStamp,
                                                                                               // abstention round 2: forCut is the SAME
                                                                                               // cut the confidence facts above derive
@@ -4180,7 +4362,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly, &termTieRank } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4304,12 +4486,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // (appendCompactForLegend), so the exemption must subtract what was emitted — the full constants left the
         // ledger 64 B short and the subtraction below underflowed (UBSan: "297 - 361 cannot be represented").
         const bool        compactLegendOn      = cfg.legend == "compact";
-        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
+        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : compactConfidenceClauseBytes( forCoverageOn, forConf.attrs ) )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
                                                + tailCodeFirstLegend( headerParts, compactLegendOn ).size()
-                                               + tailWideLegend( headerParts, compactLegendOn ).size();
+                                               + tailWideLegend( headerParts, compactLegendOn ).size() + tailSameDirLegend( headerParts ).size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -4381,7 +4563,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
-                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + tailWideLegend( fullParts, false ).size() + idRouteParts.bytes()
+                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + tailWideLegend( fullParts, false ).size()
+                                              + tailSameDirLegend( fullParts ).size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
                                               + ownerLegendExemptBytes( headerParts, /*compact=*/false )
                                               + bodySlotLegend( headerParts, /*compact=*/false ).size()
@@ -4460,11 +4643,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // compact clause names the ones THIS root carries; the full dialect's bytes are unchanged (compactlegendcheck A-PIN).
         const bool compactEstLegend = cfg.legend == "compact";
         const std::string_view kForEstTokensLegend =
-            !compactEstLegend                   ? std::string_view( " est_tokens= prices this bundle in tokens" )
-            : forGateBudget && forBodyCeiling   ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens=/max_tokens= the soft row target (rows stop once it is reached)/body ceiling asked" )
-            : forGateBudget                     ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens= the soft row target asked (rows stop once it is reached)" )
-            : forBodyCeiling                    ? std::string_view( " est_tokens= prices this bundle in tokens; max_tokens= the body ceiling asked" )
-                                                : std::string_view( " est_tokens= prices this bundle in tokens" );
+            !compactEstLegend                   ? kForEstTokensNote
+            : forGateBudget && forBodyCeiling   ? kForEstTokensBudgetCeilingNote
+            : forGateBudget                     ? kForEstTokensBudgetNote
+            : forBodyCeiling                    ? kForEstTokensCeilingNote
+                                                : kForEstTokensNote;
         // F2: spliced ONLY onto a document that actually carries over_ceiling="1" (the attribute is now
         // reachable from every rung, not just the ladder's last), so a bundle inside its budget keeps every
         // byte it had. Defines the attribute in the same unit the root prints both numbers in.
@@ -4668,7 +4851,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
                                                                                 forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
                                                                                               : shownSigIds,
-                                                                                flRootArg, cfg.forTask )
+                                                                                flRootArg, cfg.forTask, false, &termTieRank )
                                                              : forFileTail;
         const bool        softOptInCandidate = forSoftTarget && legoPreRendered && composePreRendered && legoStr.size() + composeStr.size() <= sectionsShare;
         const std::size_t trailingFloor      = softOptInCandidate && autoBundleMode && sigsPreRendered
@@ -4958,6 +5141,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( headerParts.listedPresent && ( !sigsPreRendered || enrich.surfaceOff ) )   // manifest-noncode: same rule as <ep>
         {
             listedIn.xml.clear();
+            rw::redactTakeBack( redactPtr, listedRedactBefore, listedRedactAfter );   // its lines are not printed: their count comes back out
             headerParts.listedPresent = false;
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, enrich.surfaceOff ? std::string_view() : kForDegradedBundleNote );
         }
@@ -4995,6 +5179,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::size_t       tailShownRows  = 0;
         std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
         std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
+        bool tailTermNames = rw::fileTailTermNamesShown( forFileTailShown, tailShownRows );   // TAIL-SYM-TERMS: its clause rides only then
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -5031,9 +5216,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                 sigsCeilingNote = rw::sigsCutReportLegend( forSigsCut );   // a soft target: no default ceiling, no guard reading
                 // lane 2: a row the refill dropped lands in the tail's rank rows — re-listed against the rows now shown, at
                 // the same share (the share, not the rows, is what the refill priced)
-                const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask );
+                const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, false, &termTieRank );
                 tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
                 tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
+                tailTermNames = rw::fileTailTermNamesShown( refilledTail, tailShownRows );
                 return true;
             }
             forSigsCut         = firstCut;
@@ -5073,7 +5259,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string before = forHdrXml + filePageXml + unusedXml;
             const std::string after  = autoSection.xml + slot.xml;
-            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, before, sigsStr, after ); };
+            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, { .before = before, .block = sigsStr, .after = after } ); };
             std::string pointed = rw::refillRowsForDemote( forSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                            [ & ] { return forSigsCut.rowDropCut; }, [ & ] { return shownSigIds.size(); }, renderRowsAt, point );
             if( !pointed.empty() )
@@ -5107,7 +5293,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( epEmitted.size() != epHead.size() && headerParts.listedPresent )   // manifest-noncode: "lists a shown file" holds the same way
             {
-                listedIn = rw::renderForListedIn( ing, epEmitted, cfg.forTask );
+                rw::redactTakeBack( redactPtr, listedRedactBefore, listedRedactAfter );   // the first render is replaced: its lines are not printed
+                listedIn = rw::renderForListedIn( ing, epEmitted, cfg.forTask, redactPtr );
                 if( listedIn.xml.empty() )
                 {
                     headerParts.listedPresent = false;
@@ -5214,6 +5401,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // section is rendered now, so a clause whose attribute no emitted row carries is erased before the document is priced.
         // A section streamed unbuffered (the degrade path) keeps its clause: its rows are not known here.
         rw::eraseAbsentClause( headerStr, kForCompactLegendLayer, !sigsPreRendered || sigsStr.contains( " layer=\"" ) );
+        rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactWindowHandoffLegend : rw::kForWindowHandoffLegend,
+                               callerHop.xml.contains( " windows=\"1\"" ) );   // WINDOW-AWARE HAND-OFF: present only beside a windowing hop
         rw::eraseAbsentClause( headerStr, kForCompactLegendLego, !legoPreRendered || legoStr.contains( " implementors=\"" ) );
         rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
         rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
@@ -5225,6 +5414,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
                                    headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
         }
+        spliceTailTermsClause( headerStr, headerParts.compactLegend, tailTermNames );
         if( sigsPreRendered && sigsStr.contains( " same_as=\"" ) )
         {
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendFacts : std::string_view(),
@@ -5270,6 +5460,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
         fillForAnswerLedger( mode.ledger, cfg, pricedHeader.inputs, fold,
                              ForLedgerSections{ .detail = detailSection, .autoBundle = autoSection, .slot = slot, .hopsCutMarker = enrich.hopsCutMarker } );
+        if( mode.ledger != nullptr )
+        {
+            mode.ledger->docsAfterCodeRanks = forSigsCut.docsAfterCodeRanks;   // lane DA1: a rows:N shed recounts docs_after_code= by them
+            mode.ledger->pastTargetRanks    = forSigsCut.pastTargetRanks;      // lane HN1: and past_target= / files_first= by these
+            mode.ledger->filesFirstRanks    = forSigsCut.filesFirstRanks;
+        }
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
@@ -5385,7 +5581,13 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
         // reads the corpus for them too, and the block's own scans share one read; closed after the block (the held collections go with it)
-        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{} );
+        // θ11 (forqsites.h, RIPWIRE_THETA11=1): the question's tokens are expected too, so the block below shares the batch's one read
+        const bool qsitesWanted = mode.ledger != nullptr && !cfg.json && !cfg.columnar && !cfg.candidates && rw::qsites::thetaElevenOn();
+        auto [ qsSubstr, qsWords ] = qsitesWanted ? rw::qsites::batchExpectations( cfg.forTask ) : std::pair<std::vector<std::string>, std::vector<std::string>>{};
+        std::vector<std::string> forExpected = literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{};
+        forExpected.insert( forExpected.end(), std::make_move_iterator( qsSubstr.begin() ), std::make_move_iterator( qsSubstr.end() ) );
+        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, std::move( forExpected ) );
+        forScans->expectWords( std::move( qsWords ) );
         // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder, and so does a task read
         // as words whose one code-shaped name resolved to no definition (SHORT-KEY-SENTENCE: from="sentence"); "" otherwise. Its own
         // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
@@ -5414,6 +5616,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         litAnswerIds.insert( litAnswerIds.end(), enrich.emitted.begin(), enrich.emitted.end() );   // the auto <bodies> printed
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml, litAnswerIds );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
+        if( qsitesWanted )   // θ11: computed here, inside the batch; the page it belongs on is cut later, so the ledger carries it there
+        {
+            mode.ledger->questionSites = rw::qsites::questionSitesBlock( ing, cfg.forTask, flRootArg );
+        }
         if( rw::memstats::enabled() )
         {
             rw::emitTo( stderr, "[scan] for literal_asks={} corpus_reads={} expected_unasked={}\n", forScans->asks(), forScans->reads(), forScans->unasked() );
@@ -5452,6 +5658,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
 // The --for lens: the ranking runs once, the render once (forbudget-soft: no payment-mode re-renders — the lens has no hard
 // ceiling left to land a charged continuation under).
 std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger* ledger );
+// RT2 ES (verbs_forroute.h): page 1 ended early after a leading callers block that proves itself complete, or nullopt.
+std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::string& doc );
 
 // TOKEN-BUDGET-MONOTONE (forbudgetfit.h): the budgets this answer applies AFTER its posture — --token-budget, and --max-tokens
 // where --for reads it (under --detail=N) — on the XML answer of one root, unpaged. The other dialects and the budgeted page
@@ -5478,10 +5686,19 @@ struct ForBudgetFit
     };
     void disclose( DisclosureWhy why ) noexcept
     {
-        rw::emitTo( stderr, "ripwire: --for: {}\n",
-                    why == DisclosureWhy::NoCapture ? "no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)"
-                    : why == DisclosureWhy::NotWhole ? "the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget"
-                                                      : "the unbudgeted answer has no root to shed from, so it is written as it is" );
+        // emitRaw (fputs) throws nothing; std::format/std::print could, out of a noexcept function (std::terminate)
+        switch( why )
+        {
+            case DisclosureWhy::NoCapture:
+                rw::emitRaw( stderr, "ripwire: --for: no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)\n" );
+                return;
+            case DisclosureWhy::NotWhole:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget\n" );
+                return;
+            case DisclosureWhy::NoRoot:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer has no root to shed from, so it is written as it is\n" );
+                return;
+        }
     }
 };
 
@@ -5532,6 +5749,64 @@ inline void replayForPostureNotices( const ForPostureRender& r )
     }
 }
 
+// The answer-first order knobs for one finished --for answer: T-B's cue read off the task, TL1 M2's A/B handle.
+inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg, std::string_view doc )
+{
+    return { .callersLead = rw::subjectCallersCueLeads( cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
+             .tailSameDir = rw::answerfirst::tailSameDirOn() };
+}
+
+// The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
+inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
+{
+    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
+    // BR1b (foractline.h): the act line goes into an answer the budget fits WHOLE, still raw (before the permutation, as on the default
+    // path), and only while it still fits with the line — so a budget the answer fits returns the unbudgeted answer, line included,
+    // byte for byte (TOKEN-BUDGET-MONOTONE), and the line never takes a row's room (forrankordercheck (11), forbodyslotcheck E1). Not on
+    // a shed answer: a budget that had to cut content spends nothing on the line, and its price stays the fitter's own, exact one (the
+    // render's ledger describes the unfitted answer, so it could not re-price a shed one exactly: formaxtokenscheck (A/C/D)). On a whole
+    // fit that ledger still describes this answer: a copy of it re-prices the line and follows it, so SIGX below charges it too.
+    const std::size_t   budgetLimit = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
+                                                                                    : std::max( ask.targetTokens, ask.ceilingTokens );
+    const bool          wholeFit    = fit.verdict == rw::ForBudgetFitResult::Verdict::Whole;
+    rw::ForAnswerLedger ledger      = u.ledger;
+    if( wholeFit )
+    {
+        (void)rw::actline::insertActLine( out, budgetLimit, &ledger );
+    }
+    // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
+    // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
+    // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
+    // feature was dead on exactly the path where ordering decides what survives a cut, while every arm on
+    // the default path stayed green. Same shape as the inverted capture predicate earlier in this lane.
+    //
+    // Safe after fitting, not before: answerFirst() permutes whole top-level blocks and changes no byte, so
+    // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
+    // (R7/R7n) pins both directions.
+    //
+    // MERGE 2026-11-18 (origin/main c565a3fad): main renamed this read to `printed`, and the permutation
+    // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
+    // a reference here would not compile against answerFirst, and the old name no longer exists. (TL1: hoisted out of
+    // runForLensFitted with the SIGX step, which held that function over its complexity and length bars.)
+    // AF1-fix (2026-11-18): the budget's answer takes the SAME legend posture as the unbudgeted one — answer-first by default,
+    // legend-first under --legend=first — and is never paged. AF1 had kept it legend-first unless --legend=last was spelled, and
+    // that re-decided the posture under a budget: TOKEN-BUDGET-MONOTONE rule 4 ("a budget sheds the unbudgeted answer, it never
+    // re-decides its posture"; a budget the answer fits returns it byte for byte) went red in every gate that holds it
+    // (forcallerhopcheck N2t/R9t, fordispatchhopcheck, forheadrrcheck H5t, formembernamescheck F1t, forunusedcheck T5, ...).
+    // A budgeted answer is shed WHOLE — legend included — so moving its legend after the rows loses no definition.
+    if( d.cfg.legendAnswerFirst )
+    {
+        (void)rw::answerfirst::answerFirst( out, forAnswerFirstAsk( d.cfg, out ) );
+        // SIGX (TL1 M1, forsigx.h): a budget that fitted the answer whole returns the unbudgeted (compacted) answer when that still fits
+        if( wholeFit && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+        {
+            (void)rw::sigx::compactSigsWithin( out, budgetLimit, &ledger );
+        }
+        (void)rw::rowlines::encodeRows( out, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
+    }
+    return out;
+}
+
 // The answer under a budget: the posture's answer (no budget) rendered into a buffer, then shed to the budget. An answer that
 // prints blocks a budget holds (forbudgetfit.h kForHeldBlocks) and does not fit whole is rendered once more with them held.
 inline int runForLensFitted( const MainDispatch& d )
@@ -5555,17 +5830,23 @@ inline int runForLensFitted( const MainDispatch& d )
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoCapture, "runForLensFitted: no capture buffer for the unbudgeted answer" );
         return runForLensPosture( d, nullptr ).value_or( 0 );
     }
-    rw::ForBudgetFitResult fit = capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+    rw::ForBudgetFitResult fit{};
+    if( const StdoutCaptured* const firstWhole = wholeCapture( u.out ) )   // scoped: u is re-rendered below
+    {
+        fit = rw::fitForAnswerToBudget( firstWhole->bytes, ask, u.ledger );
+    }
     if( fit.verdict == rw::ForBudgetFitResult::Verdict::HoldBlocks )
     {
         d.redactCounts        = redactedBefore;   // the first render's tally is discarded with its answer: the run reports the one it prints
         posture.forHoldBudget = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
         ask.heldPass          = true;
         u                     = renderForPostureCaptured( pd );   // pd reads `posture`: the same posture, its held blocks held
-        fit = u.stdoutCaptured && capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+        const StdoutCaptured* const heldWhole = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;
+        fit = heldWhole != nullptr ? rw::fitForAnswerToBudget( heldWhole->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
     }
     replayForPostureNotices( u );
-    if( !u.stdoutCaptured || !capturedWhole( u.out ) )
+    const StdoutCaptured* const printed = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;   // the render whose bytes go out
+    if( printed == nullptr )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NotWhole, "runForLensFitted: the unbudgeted answer did not buffer whole" );
         if( u.out && u.out->restored )
@@ -5578,9 +5859,106 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
+    std::string out = fittedAnswerFirst( d, u, fit, ask );   // `printed` is u's whole capture: checked non-null above
+    rw::qsites::appendQuestionSites( out, u.ledger, 1 );      // θ11: its own 1,000 B beside the budget, as on the default path
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
+}
+
+// AF1 (forpages.h): the default --for answer, permuted answer-first, served as the asked PAGE. Paging applies on this path
+// only — the budgeted path sheds instead (forbudgetfit.h) — and only to the XML answer of the answer-first posture; every
+// other shape is served whole. Returns false when the asked page does not exist (the refusal is on stderr, stdout empty).
+// AF1-fix (2026-11-18): the ONE rule for "may this answer be paged" is the rule that refuses a typed --page-bytes
+// (cli.h pageBytesConflict). This used to restate it and dropped the budget clause, so `--signatures-only --token-budget=N`
+// — a budget the default path serves — came back as page 1 of 2 with a next= that dropped the budget.
+inline bool forPagingApplies( const rw::Config& cfg ) noexcept
+{
+    return cfg.forPageBytes > 0 && rw::pageBytesConflict( cfg ) == nullptr;
+}
+// NB1 (forbodyptr.h, ruling 162): under --bodies=pointer (or RIPWIRE_BODY_POINTERS) the first page served is rewritten to the pointer
+// form, AFTER paging cut it with its bodies in — so it ends at the row it ended at — and before the row lines encode it.
+// θ17 (forbodyptr.h pointEditBodies, default OFF: RIPWIRE_BODIES_EDIT): only an edit task's bodies in its top file become pointer rows.
+inline void forBodyPointers( const MainDispatch& d, std::string& page )
+{
+    const std::string_view root = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+    if( d.cfg.forPage == 1 && rw::bodyptr::bodyPointersOn( d.cfg.bodiesSpec ) )
+    {
+        (void)rw::bodyptr::pointBodies( page, d.ing, root );
+    }
+    else if( d.cfg.forPage == 1 && rw::bodyptr::bodyEditFormOn( d.cfg.bodiesSpec ) )
+    {
+        (void)rw::bodyptr::pointEditBodies( page, d.ing, root, d.cfg.forTask );
+    }
+}
+inline bool serveForPage( const rw::Config& cfg, std::string& doc )
+{
+    if( !forPagingApplies( cfg ) )
+    {
+        return true;
+    }
+    // A SPELLED --legend rides each page's next= (θ5, CR #740): page 1 of a spelled posture keeps the whole legend and is cut there,
+    // so a continuation without it would be cut under the core-legend refill and skip the rows between the two cuts. It is named
+    // RESOLVED (cfg.legend: last, compact and dict page the same --for answer), so --legend=dict stays byte-identical to
+    // --legend=compact (legenddefaultcheck D1). A defaulted posture adds nothing, so the default next= is unchanged; a budget's shed
+    // next= re-asks a whole answer and keeps none.
+    std::string call = forUnbudgetedCall( cfg );
+    if( !cfg.legendDefaulted && !cfg.legend.empty() )
+    {
+        call += " " + rw::nextFlag( "--legend=", cfg.legend );
+    }
+    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ) };
+    const rw::forpages::PageResult res = rw::forpages::pageAnswer( doc, ask );
+    const bool exists = res.outcome == rw::forpages::PageResult::Outcome::Paged || cfg.forPage == 1;
+    if( !exists )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: this answer has {} page{} at that size — the root's next= names each one\n",
+                    cfg.forPageBytes, cfg.forPage, res.pages, res.pages == 1 ? "" : "s" );
+    }
+    return exists;
+}
+
+// CL1 (outputceiling.h): --page-bytes=0 is the caller's explicit request for the WHOLE answer (LT1: on every paged verb — --for here,
+// the bare map, --expand and --lint through main.cpp serveWholeAnswer), so the answer is printed whole and
+// byte-identical — but when it is over kOutputCeilingChars ONE stderr line says so, BEFORE the answer, so it lands inside the 2 KB
+// preview an agent harness shows when it persists a large result to a file. Why a line and not a cut: the size override is the
+// caller's choice (a cut would make --page-bytes=0 mean something other than "whole"); why a line and not silence: an agent that
+// copied --page-bytes=0 from a pattern gets a preview and a path, and without the line it cannot tell why. MEASURED on GA1 DEV
+// (base 36a95d732, one tree per repo): 5 of 11 whole answers were over 24,000 characters, 2 over 30,000 (max 43,403).
+inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answerBytes )
+{
+    if( rw::wholeAnswerAsked( cfg ) && answerBytes > rw::kOutputCeilingChars )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes=0: this whole answer is {} B, over the {} B output ceiling (an agent harness may show "
+                            "only a preview of it); drop --page-bytes=0 to receive it in pages\n", answerBytes, rw::kOutputCeilingChars );
+    }
+}
+
+// BR1b (foractline.h): the --legend=first XML answer carries the same act line as the answer-first one, its clause in the leading
+// legend, so the two postures stay byte permutations of each other (forpagescheck P6). It needs the finished answer, so this posture
+// is rendered into a buffer here; nullopt: not this posture, or no buffer to render into, or a capture that failed (the caller then
+// renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
+// print twice).
+inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.legendAnswerFirst || !rw::actline::actLineOn() || cfg.json || cfg.columnar || cfg.candidates )
+    {
+        return std::nullopt;
+    }
+    ForPostureRender r = renderForPostureCaptured( d );
+    if( !r.stdoutCaptured || !r.out || r.out->failed )
+    {
+        return std::nullopt;
+    }
+    replayForPostureNotices( r );
+    std::string doc = r.out->bytes;
+    if( capturedWhole( r.out ) )
+    {
+        (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+        rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );   // θ11: the legend-first posture carries the same block
+    }
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return r.rc;
 }
 
 std::optional<int> runForLens( const MainDispatch& d )
@@ -5592,6 +5970,86 @@ std::optional<int> runForLens( const MainDispatch& d )
     if( forBudgetFitsAfterPosture( d ) )
     {
         return runForLensFitted( d );
+    }
+    // ITEM R (docs/EVALS.md amendment 8): the DEFAULT path buffers its answer so the permutation can run on a
+    // finished document. The budgeted path above already buffers through renderForPostureCaptured, so this
+    // reuses proven machinery rather than inverting any dependency. Measured: 0 of 216 recorded cells passed
+    // --token-budget, so the default path is where every one of them lives.
+    //
+    // A capture that cannot be taken is NOT an error: the answer is written straight through, unpermuted and
+    // complete. Only the reordering is missed, so this degrades to 0.6.x behaviour rather than to a failure.
+    if( d.cfg.legendAnswerFirst )
+    {
+        ForPostureRender r = renderForPostureCaptured( d );
+        // AF1-fix (2026-11-18): a capture that FAILED (a short write or read-back: StdoutCaptured::failed) holds a short, possibly
+        // reordered answer. Item R wrote those bytes anyway, which was an opt-in's corner; as the default it served a malformed
+        // answer — forfilesymscheck (c2), RLIMIT_FSIZE on the capture buffer, printed 8,108 B with the inner stub and </ctx> in
+        // the middle and a truncated root at the end. With stdout restored, the answer is rendered once more STRAIGHT THROUGH:
+        // complete, unpermuted, unpaged, with the posture's own notices (the failed render's are not replayed, or each would
+        // print twice), and the NoWholeCapture disclosure below says so.
+        const bool retry = r.stdoutCaptured && r.out && r.out->failed && r.out->restored && d.cfg.forPage == 1;
+        if( !retry )
+        {
+            replayForPostureNotices( r );
+        }
+        // capturedWhole() is the house predicate and the only correct one here: `restored` means the capture
+        // SUCCEEDED and handed its bytes back. An earlier version of this branch read `!restored`, the exact
+        // inverse, so the permutation never ran and the answer fell through to the write-it-anyway path
+        // below — a complete, unpermuted answer and a silently dead feature.
+        if( r.stdoutCaptured && capturedWhole( r.out ) )
+        {
+            std::string doc = r.out->bytes;
+            (void)rw::actline::insertActLine( doc, 0, &r.ledger );   // BR1 (foractline.h): into the raw render, as every path does — first
+            // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
+            (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
+            // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
+            if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+            {
+                (void)rw::sigx::compactSigs( doc, &r.ledger );
+            }
+            // KB1 (forkeybody.h): after the permutation and SIGX, before ES and paging, so every page size windows the same document
+            if( !d.cfg.signaturesOnly && rw::keybody::keyBodyOn() )
+            {
+                const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+                (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, d.redactPtr, &r.ledger );
+            }
+            if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
+            {
+                forBodyPointers( d, *early );
+                (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
+                rw::qsites::appendQuestionSites( *early, r.ledger, 1 );
+                std::fwrite( early->data(), 1, early->size(), stdout );
+                return r.rc;
+            }
+            if( !serveForPage( d.cfg, doc ) )
+            {
+                return 1;
+            }
+            forBodyPointers( d, doc );
+            (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
+            noteWholeAnswerOverCeiling( d.cfg, doc.size() );
+            rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );
+            std::fwrite( doc.data(), 1, doc.size(), stdout );
+            return r.rc;
+        }
+        if( d.cfg.forPage > 1 )   // a continuation page names a cut of the WHOLE answer: without it there is no page to serve
+        {
+            rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: the answer did not buffer whole, so no page of it can be cut; "
+                                "--page-bytes=0 serves the whole answer\n", d.cfg.forPageBytes, d.cfg.forPage );
+            return 1;
+        }
+        if( !retry && r.out && !r.out->bytes.empty() )
+        {
+            std::fwrite( r.out->bytes.data(), 1, r.out->bytes.size(), stdout );
+            return r.rc;
+        }
+        rw::answerfirst::AnswerFirstFallback afSink;
+        DISCLOSE( afSink, rw::answerfirst::AnswerFirstFallback::DisclosureWhy::NoWholeCapture,
+                  "runForLens: no whole capture for the default answer — serving it unpermuted" );
+    }
+    if( std::optional<int> rc = runForLensLegendFirstAct( d ) )
+    {
+        return rc;
     }
     return runForLensPosture( d, nullptr );
 }
@@ -5876,6 +6334,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     in.notesDegraded        = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616)
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     in.rootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
+    in.keyBody = rw::keybody::keyBodyFor( ing, task, in.rootArg );   // PB1: KB1's key body, the MCP twin's same call
 
     // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): --pack-task under --token-budget
     // with an explicit window pages its ranked candidates, mirroring --for (the shared inline). The cliff

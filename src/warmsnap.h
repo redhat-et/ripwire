@@ -56,6 +56,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"
 #include "pathguard.h"
+#include "buildkey.h"  // kBuildKey: which compilation of the sources wrote a snapshot
 #include "quality.h"   // producerIdentity, atomicWriteFile, cacheDirLadder / resolveCacheBlobPath / evictOldCacheFamily
 #include "infra/jsonesc.h"   // rw::shSingleQuote
 #include "infra/sortutil.h"  // svLess: string_view order without libstdc++'s length subtraction
@@ -78,7 +79,12 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 2;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 7;                        // bump on ANY layout change in the three sections
+                                                                    // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
+                                                                    // 6: lane theta11c — CrawlSkips gains the extensionless rows + count (θ11's grep population)
+                                                                    // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
+                                                                    // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
+                                                                    // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
                                                                     // 2: the MODEL section dropped its stored stat signature of the blob — the
                                                                     //    blob's identity is in this file's NAME, so that binding is structural
                                                                     //    and there is no field left to be wrong about it (see the note above).
@@ -292,8 +298,12 @@ struct TreeCapture
     std::vector<std::string> ignoredDirs;    // the directories pruned ONLY because git's answer listed them
     bool                     on     = false; // false: nobody is recording, and every call below is one test and a return
     bool                     usable = true;  // false: the walk hit something a replay cannot stand for (a memory stop, an unreadable level)
+    bool                     readGitIndex = false;   // M1: the walk asked git what it tracks, so the INDEX is one of its inputs
 
     void unreplayable() noexcept { usable = false; }
+    // M1: the tracked-build-dir probe ran (ingest_crawl.h CrawlNamePrune). Under --no-ignore no ignore probe ran, so without
+    // this recordTree would leave the index unwatched and replay a crawl a `git add` had changed.
+    void gitIndexRead() noexcept { readGitIndex = true; }
     // the root itself, through any link that names it
     void root( const std::string& path )
     {
@@ -341,9 +351,9 @@ inline void writeCrawlSkips( Out& o, const CrawlSkips& s )
 {
     writeSkipRows( o, s.excluded );  writeSkipRows( o, s.unsupported );  writeSkipRows( o, s.prunedDirRows );  writeSkipRows( o, s.prunedPackageRows );
     writeSkipRows( o, s.ignored );   writeSkipRows( o, s.ignoredDirRows ); writeSkipRows( o, s.nestRefused );  writeSkipRows( o, s.extractPartial );
-    writeSkipRows( o, s.escaped );
+    writeSkipRows( o, s.escaped );   writeSkipRows( o, s.untrackedBuild );  writeSkipRows( o, s.extensionless );
     for( const std::uint64_t n : { s.excludedFiles, s.unsupportedFiles, s.excludedDirs, s.prunedDirs, s.prunedPackages, s.ignoredFiles, s.ignoredDirs,
-                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles } )
+                                   s.nestRefusedFiles, s.extractPartialFiles, s.escapedFiles, s.untrackedBuildFiles, s.extensionlessFiles } )
     {
         o.u64( n );
     }
@@ -354,9 +364,9 @@ inline void readCrawlSkips( In& in, CrawlSkips& s )
 {
     readSkipRows( in, s.excluded );  readSkipRows( in, s.unsupported );  readSkipRows( in, s.prunedDirRows );  readSkipRows( in, s.prunedPackageRows );
     readSkipRows( in, s.ignored );   readSkipRows( in, s.ignoredDirRows ); readSkipRows( in, s.nestRefused );  readSkipRows( in, s.extractPartial );
-    readSkipRows( in, s.escaped );
+    readSkipRows( in, s.escaped );   readSkipRows( in, s.untrackedBuild );  readSkipRows( in, s.extensionless );
     for( std::uint64_t* n : { &s.excludedFiles, &s.unsupportedFiles, &s.excludedDirs, &s.prunedDirs, &s.prunedPackages, &s.ignoredFiles, &s.ignoredDirs,
-                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles } )
+                              &s.nestRefusedFiles, &s.extractPartialFiles, &s.escapedFiles, &s.untrackedBuildFiles, &s.extensionlessFiles } )
     {
         *n = in.u64();
     }
@@ -493,7 +503,8 @@ inline GitInputs collectGitInputs( const std::string& rootReal )
             std::string path( origin.substr( 5 ) );
             if( path.empty() || path.front() != '/' )
             {
-                path = rootReal + "/" + path;
+                path.insert( 0, 1, '/' );   // rootReal + "/" + path, built in place
+                path.insert( 0, rootReal );
             }
             if( std::ranges::none_of( g.files, [ & ]( const depwatch::Dep& d ) { return d.seam == depwatch::Seam::WholeFile && d.path == path; } ) )
             {
@@ -603,6 +614,8 @@ struct Session
     std::string   rootKey;              // quality::cacheRootKeyHex of this run's root: the field the sweep pins a family by
     std::uint64_t optionsKey = 0;
     long long     startNs    = 0;       // wall clock before the crawl: the racy rule's reference
+    bool          ignoreTests = false;  // main() drops the test files' symbols, references and bindings before the graph is
+                                        // built (--ignore-tests), so the GRAPH is of another model: it is part of the options key (viewKeyOf)
 
     // the file as read
     std::string      file;
@@ -644,19 +657,25 @@ public:
     Armed& operator=( const Armed& ) = delete;
 };
 
+// The header's build field: the ABI (six sizes and the byte order) and the BUILD KEY (buildkey.h). The producer identity
+// beside it names the sources only, so without the key a dev build and a Release build of one tree served each other's
+// stored floats — computed under -ffast-math with different inlining, and so not promised to be the same bits. A
+// mismatch is refused as Why::Producer, with its disclose line ("a snapshot another build wrote is not read").
 inline std::uint64_t layoutKey() noexcept
 {
     const std::uint64_t parts[] = { sizeof( Symbol ), sizeof( IngestResult ), sizeof( std::string ), sizeof( void* ), sizeof( StatSig ),
-                                    std::uint64_t( std::endian::native == std::endian::little ) };
+                                    std::uint64_t( std::endian::native == std::endian::little ), depwatch::digest64( kBuildKey ) };
     return depwatch::digest64( std::string_view( reinterpret_cast<const char*>( parts ), sizeof( parts ) ) );
 }
 
 // Every input of the crawl, the ingest and the resolver that is not a file's content: the options, both spellings of
 // the root, where the process stands, and the environment those stages read. Environment: every RIPWIRE_* variable but
 // the pure observers (so a test seam or a kill switch never meets a snapshot recorded without it), every GIT_* one, and
-// the four that decide which git runs and which configuration it reads.
+// the four that decide which git runs and which configuration it reads. RIPWIRE_PARSE_THREADS is an observer: it picks
+// the parse pool's worker count, and the model a run builds does not depend on it (test/snapdeterminismcheck.sh).
 inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes, bool captureValueUses,
-                                   std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits )
+                                   std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits,
+                                   bool crawlTreeAllTracked )
 {
     Out o;
     o.str( rootDir );
@@ -671,7 +690,9 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     o.u8( respectGitignore ? 1 : 0 );
     o.u32( extractionStamp );
     o.u8( wantConstructHits ? 1 : 0 );
-    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE" };
+    o.u8( crawlTreeAllTracked ? 1 : 0 );   // M1: a materialized commit tree crawls build-output names the working tree may prune
+    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE",
+                                                       "RIPWIRE_PARSE_THREADS=" };
     static constexpr std::string_view kExact[]     = { "HOME=", "PATH=", "PWD=", "XDG_CONFIG_HOME=" };
     std::vector<std::string_view> read;
     for( char** env = os::environment(); env != nullptr && *env != nullptr; ++env )
@@ -689,6 +710,23 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     {
         o.str( var );
     }
+    return depwatch::digest64( o.bytes );
+}
+
+// The options key of the VIEW the graph is built from. --ignore-tests is applied by main() between the model and the graph
+// (filter.h applyIgnoreTests), and the GRAPH section's own guard is three counts (symbols, files, references): a test file
+// that contributes bindings only — `let x: Foo;`, `using namespace std;`, `extern int x;` — leaves all three equal, so a
+// graph resolved from one view was served to the other. Each view is now its own configuration (its own name, its own
+// eviction group), and the flagless key is returned unchanged, so no flagless snapshot is renamed.
+inline std::uint64_t viewKeyOf( std::uint64_t optionsKey, bool ignoreTests )
+{
+    if( !ignoreTests )
+    {
+        return optionsKey;
+    }
+    Out o;
+    o.u64( optionsKey );
+    o.str( "--ignore-tests" );
     return depwatch::digest64( o.bytes );
 }
 
@@ -769,7 +807,7 @@ inline void openSnapshot( Session& s )
         return;
     }
     std::string_view* const sections[] = { &s.treeSection, &s.modelSection, &s.graphSection };
-    for( int i = 0; i < 3; ++i )
+    for( std::size_t i = 0; i < 3; ++i )
     {
         const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
         if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )
@@ -814,7 +852,7 @@ inline void recordTree( Session& s, const IngestResult& crawl, const std::string
     {
         return;   // the racy rule: some signature is too young to tell a later same-granule change from no change
     }
-    const GitInputs git = respectGitignore ? collectGitInputs( rootReal ) : GitInputs{};
+    const GitInputs git = respectGitignore || s.capture.readGitIndex ? collectGitInputs( rootReal ) : GitInputs{};   // M1: see gitIndexRead
     if( !git.usable || ( !git.indexPath.empty() && ( git.indexSig.mtimeNs >= racyFrom || git.indexSig.ctimeNs >= racyFrom ) ) )
     {
         return;

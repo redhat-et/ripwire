@@ -113,7 +113,7 @@ inline bool isInstanceFieldSite( const IngestResult& ing, const Reference& ref, 
 }
 
 // Cells per row. A function that reaches 300 globals has already told the reader what it needed to; the
-// list is evidence, not an inventory. Truncation is disclosed per row (cells_shown/cells_capped).
+// list is evidence, not an inventory. Truncation is disclosed per row (shown_cells/cells_capped).
 inline constexpr std::size_t kCellsPerRowCap = 12;
 
 // The bitset width ceiling. Two bitsets per symbol at this width is the whole memory cost of the closure
@@ -960,7 +960,7 @@ inline constexpr const char* kNonLocalStateLegend =
     "direct_writes=the writes= subset written in this function's OWN body "
     "direct_reads=the reads= subset read in this function's OWN body "
     "cells_total=distinct cells reached (a cell both read and written counts once) "
-    "cells_shown=cell children printed cells_capped=1 when a row's children were truncated. "
+    "shown_cells=cell children printed cells_capped=1 when a row's children were truncated. "
     "Each cell child: n=cell name p=the cell's declaration path:line "
     "dir=r for read, w for write, rw for both, taken over this function's OWN BODY AND its callee closure together "
     "at=one use site in this function's own body (direct cells; there may be more) "
@@ -1052,7 +1052,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
                      row.writeCount, row.readCount, row.directWriteCount, row.directReadCount, row.cells.size() );
         if( cellsShown != row.cells.size() )
         {
-            rw::emitTo( stdout, " cells_shown=\"{}\" cells_capped=\"1\"", cellsShown );
+            rw::emitTo( stdout, " shown_cells=\"{}\" cells_capped=\"1\"", cellsShown );
         }
         rw::emitRaw( stdout, ">" );
 

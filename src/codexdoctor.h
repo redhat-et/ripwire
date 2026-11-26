@@ -218,6 +218,24 @@ inline Check hooksCheck( const std::filesystem::path& hooksPath )
                     "run bash skills/install.sh --codex --hook to refresh all advisory Codex hooks" );
 }
 
+// ---- THE LEGEND-SEEN HOOK (lane LS1). OPT-IN, so absent is a pass: the row says installed="0" and is ok. Installed, it
+//      is working when every event it needs is registered, every registered command resolves to an executable script,
+//      and jq — which the hook needs to read a payload at all, and without which it silently does nothing — is on PATH.
+//      Counts and booleans only, never a command line, as everywhere in this file.
+inline Check legendSeenCheck( const char* name, const std::filesystem::path& configPath, std::string_view needle,
+                              std::initializer_list<const char*> events, const char* hint )
+{
+    const HookSurvey survey = surveyHooks( configPath, needle, "\x01" );   // no router for this hook: an impossible needle
+    const bool installed = !survey.nudge.empty();
+    const bool eventsOk  = namesEvents( survey, events ) && survey.nudge.size() >= events.size();
+    const bool jq        = !resolveExecutable( "jq" ).empty();
+    Check out{ name, !installed || ( eventsOk && survey.nudgeExecutable && jq ),
+               "installed=\"" + std::string( installed ? "1" : "0" ) + "\" refs=\"" + std::to_string( survey.nudge.size() ) + "\" events_ok=\""
+               + ( eventsOk ? "1" : "0" ) + "\" exec=\"" + ( survey.nudgeExecutable ? "1" : "0" ) + "\" jq=\"" + ( jq ? "1" : "0" ) + "\"" };
+    if( !out.ok ) { out.attrs += " hint=\"" + std::string( hint ) + "\""; }
+    return out;
+}
+
 inline std::string tomlString( std::string_view section, std::string_view key )
 {
     const std::size_t at = section.find( key );
@@ -246,6 +264,11 @@ inline Check mcpCheck( const std::filesystem::path& configPath )
     return out;
 }
 
+// The argument that makes hooks/ripwire-nudge.sh the SubagentStart routing note (lane HK2). It is the needle for that
+// registration rather than the script name: the script is also the PreToolUse and SessionStart entry, and a path that
+// needed quoting ends its quote BEFORE the argument, so "ripwire-nudge.sh --subagent-start" would miss it.
+inline constexpr std::string_view kSubagentRouteArg = "--subagent-start";
+
 // ---- THE CLAUDE SURFACE. It lives in this header rather than a claudedoctor.h of its own because it
 //      reuses `commandValuesContaining`, `everyCommandExecutable`, `readSmallFile` and `skillsCheck`
 //      verbatim: a second header would either duplicate those four or export them, and the file is
@@ -264,7 +287,11 @@ inline Check claudeHooksCheck( const std::filesystem::path& settingsPath )
     // `route_hook` is a BOOLEAN here where the Codex row prints a count, and that is the one place the
     // two rows deliberately differ: the Claude router is registered exactly once or not at all, and the
     // pre-registered readout's first question is "is the instrument wired up", not "how many times".
-    const HookSurvey survey = surveyHooks( settingsPath, "ripwire-nudge.sh", "ripwire-claude-route.sh" );
+    HookSurvey survey = surveyHooks( settingsPath, "ripwire-nudge.sh", "ripwire-claude-route.sh" );
+    // The SubagentStart routing note is the same script under a third event, and it has its own row
+    // (claude-subagent-route below). Counted here it would let PreToolUse + SubagentStart read as the
+    // two refs of a finished install with no SessionStart primer registered at all.
+    std::erase_if( survey.nudge, []( const std::string& command ) { return command.find( kSubagentRouteArg ) != std::string::npos; } );
     const bool routeOk = !survey.route.empty() && namesEvents( survey, { "UserPromptSubmit" } ) && survey.routeExecutable;
     const bool ok = survey.read && namesEvents( survey, { "PreToolUse", "SessionStart" } )
                  && survey.nudge.size() >= 2 && survey.nudgeExecutable && routeOk;
@@ -297,7 +324,15 @@ inline std::vector<Check> claudeInspect( const std::string& selfPath )
     Check skills = skillsCheck( claudeHome / "skills" );
     skills.name = "claude-skills";
     retargetHint( skills, "run bash skills/install.sh --claude to restore exact manifest parity" );
-    return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ) };
+    return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ),
+             legendSeenCheck( "claude-legend-seen", claudeHome / "settings.json", "ripwire-legend-seen.sh",
+                              { "PreToolUse", "PostToolUse", "SessionStart", "PreCompact" },
+                              "run bash skills/install.sh --hook-legend-seen to repair it (and put jq on PATH)" ),
+             // The SubagentStart routing note: the same row shape, because the same four facts decide it (registered,
+             // under its event, by a command that resolves, with the jq its payload parse needs). Absent is a pass, as
+             // for legend-seen: a home that ran no installer, or ran one before the mode existed, is not broken.
+             legendSeenCheck( "claude-subagent-route", claudeHome / "settings.json", kSubagentRouteArg, { "SubagentStart" },
+                              "run bash skills/install.sh --hook to repair it (and put jq on PATH)" ) };
 }
 
 inline std::vector<Check> inspect( const std::string& selfPath )
@@ -306,7 +341,10 @@ inline std::vector<Check> inspect( const std::string& selfPath )
     const std::filesystem::path agentHome = envOr( "AGENTS_HOME", home + "/.agents" );
     const std::filesystem::path codexHome = envOr( "CODEX_HOME", home + "/.codex" );
     return { binaryCheck( selfPath ), skillsCheck( agentHome / "skills" ), hooksCheck( codexHome / "hooks.json" ),
-             mcpCheck( codexHome / "config.toml" ) };
+             mcpCheck( codexHome / "config.toml" ),
+             legendSeenCheck( "codex-legend-seen", codexHome / "hooks.json", "ripwire-codex-legend-seen.sh",
+                              { "PreToolUse", "PostToolUse", "SessionStart" },
+                              "run bash skills/install.sh --codex --hook-legend-seen to repair it (and put jq on PATH)" ) };
 }
 
 }   // namespace rw::codexdoctor

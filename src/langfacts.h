@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -57,6 +58,15 @@ enum class WrittenModuleRule : std::uint8_t
     ConstantPath,
     SourceChain,
     DirsOnly,
+};
+
+/// Lane std-namesake (STD-RECEIVER-NAMESAKE): how a receiver WRITTEN as a standard type is proven, so a member call on it binds
+/// no in-tree namesake (graph.h stdWrittenReceiverOf). None: the language records no such proof and its calls keep the name tier.
+enum class WrittenStdReceiver : std::uint8_t
+{
+    None,
+    RustSpine,        // the binding's written type spine, each name proven std's in the file (receiverevidence.h rustStdWrittenReceiver)
+    CppStdTemplate,   // the declaration in scope written `std::NAME< … >` (externalnames.h kCppStdReceiverTypes; graph.h StdWrittenReceiverRule)
 };
 
 /// Lane fc2-lego-extparent: which of the file's own import facts can show that an extends / implements clause names a type
@@ -95,6 +105,23 @@ enum class FileEdges : std::uint8_t
     NotApplicable,
 };
 
+/// Lane lego-unread-for-lang: does this build read this language's IMPLEMENTOR relation — the derived → base
+/// extends/implements edges `Graph::implementors` is built from? Read: the extractor has a rule for it (an explicit
+/// base clause whose kind chain captureBases walks, src/ingest_relations.h; the Rust `impl Trait for T` pass; the
+/// Ruby mixin capture), so an empty implementor list means none was WRITTEN. Unread: there is no such rule, either
+/// because the language states conformance structurally and writes no clause at all (Go: a type implements an
+/// interface by owning its method set) or because its clause is not in that chain (ObjC `@interface D : Base`,
+/// GDScript `extends Base`, Clojure `defrecord .. Protocol`, C's vtable-struct idiom), so an empty list means
+/// NOTHING WAS LOOKED AT. `--lego=TYPE` then omits implementors= and discloses implementors_unread_for_lang=
+/// (serialize.h legoImplementorsUnreadAttr): unknown, not zero — the reading FileEdges::Unmeasured already carries
+/// for an absent file edge. Unread is the DEFAULT, the honest answer for a language that says nothing, and
+/// test/legounreadlangcheck.sh (D) pins every row to the index in BOTH directions.
+enum class ImplementorEdges : std::uint8_t
+{
+    Unread,
+    Read,
+};
+
 /// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
@@ -107,6 +134,15 @@ enum class TestRunnerEntry : std::uint8_t { None, GoTestName, RustTestAttr };
 /// C-family type first (`Type name;`), Java, C# and Dart. None: the language declares no member lexically (Ruby: instance
 /// variables are `@ivar`s and the attr_* family is indexed as Var defs), so a class-body `has_many :posts` is a call, not a field.
 enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None };
+
+/// QD-TANGLE steering locals (model.h Symbol::steer): the declaration grammar the steer walk reads a local from (ingest_metrics.h
+/// steer_noteDeclaration). None: the walk reads no declaration there, so steer stays 0 and the tangle score is nesting and deep share.
+/// Python's locals live until the function returns (no block closes a slot); every other shape's live until their block closes.
+enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CSharp, Go, Rust };
+
+/// --quality-delta defect-shape: the scanner a language's files go through (quality.h defectSitesOf; cFamilyEnumTable reads the
+/// two C-family ones for unhandled-arm's enums). None: the language has no defect-shape sites.
+enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash };
 
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
@@ -126,10 +162,10 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
-    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
-    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
-    /// still walks for template specializations. The languages this port has not reached yet keep
-    /// the walk.
+    /// C++ and Java (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm, queries/java/tags.scm), not through captureBases' kind chain — C++'s
+    /// captureSpecializationHeader still walks for template specializations. The languages this port has
+    /// not reached yet keep the walk.
     bool basesAsCaptures = false;
 
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is
@@ -158,6 +194,10 @@ struct LangFacts
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
     /// (verbs_quality.h; pinned by test/qddegradecheck.sh (E3)).
     bool defectShapeNeedsMacroSet = false;
+
+    /// C, C++: a parameter is written type first and name last, and defectshape.h's C++ lexer reads the signature. The
+    /// similar-argument-list signal (similarargs.h, quality.h similarRunByNode) reads these two languages only.
+    bool typeFirstParameters = false;
 
     /// Rust: a trait's bodyless method signature is no definition the index keeps (only a bodied default is), so a trait's contract
     /// cannot be read off its members. The dispatch tier (ifacedispatch.h) takes the implementors' methods of the called name without
@@ -250,6 +290,11 @@ struct LangFacts
     /// member written `std::shared_ptr<I>` itself (lane iface-peel; the alias record carries the pointee, graph.h
     /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
     bool aliasPeelsSmartPointer = false;
+
+    /// Rust, C++: a `.` call on a local, parameter or field whose declaration is written as a standard type runs the standard
+    /// library's own member, so a candidate an in-tree class owns under another name is dropped (lane std-namesake; the proof per
+    /// language is WrittenStdReceiver's).
+    WrittenStdReceiver writtenStdReceiver = WrittenStdReceiver::None;
 
     /// C++ (and every `.h`, which reads as C++; a `.c` file reads with the C grammar and its own query, untouched here, card
     /// C-FUNCTYPE-QUERY): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
@@ -369,6 +414,11 @@ struct LangFacts
     /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
     FileEdges fileEdges = FileEdges::Unmeasured;
 
+    /// Whether this build reads this language's implementor relation at all (ImplementorEdges above). Unread by
+    /// default: a new language draws no extends/implements edge until its clause is in captureBases' kind chain,
+    /// and --lego says so rather than printing a zero it never measured.
+    ImplementorEdges implementorEdges = ImplementorEdges::Unread;
+
     /// Python: `= (` and `return (` open a tuple, which holds data; in the other languages a `(` after `=` opens an arrow function's
     /// parameters (TS, JS) or a parenthesised expression, so it never opens a table (forliteral.h bracketReadingOf).
     bool tupleParens = false;
@@ -378,7 +428,9 @@ struct LangFacts
     bool localBraceNotData = false;
 
     /// C++, Objective-C: a call's `Q::` qualifier names a namespace or class some definition holds, so an included file's namesake
-    /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO).
+    /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO). The same scope can
+    /// be named by a declaration in force instead — a namespace alias (`namespace h = a::b;`) or a using-declaration (`using a::b::f;`):
+    /// ingest records both (ingest_binds.h kCppCallScopeFacts) and graph.h keys the call by it (CallResultTypes::cppScopeNamedAt).
     bool qualifierNamesScope = false;
 
     /// C, C++: a file-scope const object of a struct type is how a family registers its members (htop `const MeterClass
@@ -429,6 +481,16 @@ struct LangFacts
     /// Rust: a method named `drop` is `Drop::drop`, which the compiler runs when a value leaves scope, so no call names it
     /// (issue #494). rustDropImplMethodIds (quality.h) reads this column, and only for a method inside a Drop impl block.
     bool dropRunsAtScopeExit = false;
+    /// The language whose bare-name world this one shares (C/ObjC with C++, Kotlin with Java); empty =
+    /// alone. langCompatible's edge rule and the display order's family tier both read it, through
+    /// langFamilyOf below — one per-Lang row, the single source CONTRIBUTING's language-facts rule asks for.
+    std::optional<Lang> edgeFamily = {};
+
+    /// The declaration grammar the QD-TANGLE steering walk reads (SteerDecl above).
+    SteerDecl steerDecl = SteerDecl::None;
+
+    /// The defect-shape scanner this language's files go through (DefectScan above).
+    DefectScan defectScan = DefectScan::None;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -441,52 +503,52 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
-      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true },
+      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go },
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+      .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true, .objectMacrosUnindexed = true },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
-    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true },
-    { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
+    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true, .defectScan = DefectScan::Bash },
+    { .lang = Lang::Java, .basesAsCaptures = true, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .memberDecl = MemberDecl::TypeFirst },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::Java },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst },
-    { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp },
+    { .lang = Lang::C, .typeFirstParameters = true, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
-    { .lang = Lang::Php, .memberSeparator = "::", .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },
+    { .lang = Lang::Php, .memberSeparator = "::", .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },
     { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved, .singleQuoteStrings = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Dart, .memberDecl = MemberDecl::TypeFirst, .singleQuoteStrings = true },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read },
+    { .lang = Lang::Dart, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .singleQuoteStrings = true },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
+      .implicitReceiver = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .edgeFamily = Lang::Java },
     { .lang = Lang::GDScript, .hashComment = true, .singleQuoteStrings = true },
     { .lang = Lang::Clojure },
     { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
@@ -537,8 +599,40 @@ static_assert( []() constexpr
     return true;
 }(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
 static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+
+/// The inverse of memberNeverReachesFreeFunction (CPP-FREE-VS-MEMBER): an unqualified call binds a free function only when the
+/// caller's translation unit DECLARES it — in the caller's own file or a file it includes, as the body or as a prototype. A
+/// namesake defined in a source file the caller never includes, with no prototype in reach, is not what the call names (graph.h
+/// FreeDeclReach). C++; C keeps its own reach rules (FE-A).
+inline constexpr std::array<Lang, 1> kBareCallNeedsDeclaration = { Lang::Cpp };
+static_assert( std::ranges::find( kBareCallNeedsDeclaration, Lang::Cpp ) != kBareCallNeedsDeclaration.end() && langFacts( Lang::Cpp ).implicitReceiver
+                   && std::ranges::find( kBareCallNeedsDeclaration, Lang::Unknown ) == kBareCallNeedsDeclaration.end(),
+               "CPP-FREE-VS-MEMBER: the declaration rule is read on the implicit-receiver path of the resolve loop" );
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
 
+// The edge-bridging family of `l` (task D's table, folded into the facts row per CONTRIBUTING's
+// one-row-per-language rule): langFamilyOf(a) == langFamilyOf(b) is exactly the bare-name admission
+// graph.h's langCompatible decides — {C, C++, ObjC} share a world, {Java, Kotlin} share one, every
+// other language is alone. The display order's SECOND tier reads this: a middle ground between "this
+// language" and "all languages", never a synonym for either. The pair-for-pair equivalence assert in
+// graph.h proves the data cannot quietly drift from the edge rule it mirrors — the derived-table lesson
+// the repo already learned once (htmlexport's langColor carried 9 keys against langTag's 19).
+constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
+{
+    const std::size_t i = static_cast<std::size_t>( l );
+    return i < kLangCount ? static_cast< std::uint8_t >( static_cast< std::size_t >( langFacts( l ).edgeFamily.value_or( l ) ) )
+                          : static_cast< std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang
+}
+
+/// RUST-USE-PRINT-NAMESPACE: the languages whose call site never names a trait. A call names a function, a tuple struct or a tuple
+/// variant; a trait's method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so `Print( x )` over an in-tree
+/// `trait Print` is no call of it (graph.h siteNamespaceCompatible). Rust.
+inline constexpr std::array<Lang, 1> kCallNeverNamesTrait = { Lang::Rust };
+/// GO-KIND-VETO: the languages where a selector reaches a TYPE only through a module alias (`pkg.T( v )`, a conversion the alias
+/// proves), so a name-only member call (`local.Type()`) never names an in-tree type (graph.h, beside memberNeverReachesFreeFunction). Go.
+inline constexpr std::array<Lang, 1> kSelectorTypeOnlyByModule = { Lang::Go };
+static_assert( langFacts( Lang::Go ).memberNeverReachesFreeFunction && langFacts( Lang::Go ).moduleCallReachesFunctionsOnly,
+               "GO-KIND-VETO is read inside the memberNeverReachesFreeFunction erase, on a call no module alias proved" );
 
 }   // namespace rw

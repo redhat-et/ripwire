@@ -1,0 +1,137 @@
+# arm (RX) RUST-PARAM-GLOB-REEXPORT inputs, unpacked by test/receiverevidencecheck.sh into its temp dir (kept out of the
+# indexed tree, like rsrecv.txt). Each file starts at a line `@@@ <root>/<path>`. A three-crate workspace shaped like nushell:
+# a type reached through `pub use m::*;`, a free function reached through `pub use m::{f};`, and their near misses.
+@@@ rsreexp/Cargo.toml
+[workspace]
+members = ["crates/proto", "crates/eng", "crates/app"]
+@@@ rsreexp/crates/proto/Cargo.toml
+[package]
+name = "proto"
+version = "0.1.0"
+@@@ rsreexp/crates/eng/Cargo.toml
+[package]
+name = "eng"
+version = "0.1.0"
+@@@ rsreexp/crates/app/Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+@@@ rsreexp/crates/proto/src/lib.rs
+pub mod engine;
+pub mod dbg;
+pub mod prelude;
+pub mod dup;
+pub mod noreach;
+pub mod extglob;
+@@@ rsreexp/crates/proto/src/engine/mod.rs
+mod closure;
+mod engine_state;
+mod overlay;
+pub use closure::*;
+pub use engine_state::*;
+pub use overlay::*;
+@@@ rsreexp/crates/proto/src/engine/engine_state.rs
+pub struct EngineState { pub n: u32 }
+impl EngineState {
+    pub fn get_decl(&self, id: u32) -> u32 { id + self.n }
+}
+@@@ rsreexp/crates/proto/src/engine/overlay.rs
+pub struct OverlayFrame { pub n: u32 }
+impl OverlayFrame {
+    pub fn get_decl(&self, id: u32) -> u32 { id }
+}
+@@@ rsreexp/crates/proto/src/engine/closure.rs
+// a private `use` that leads back to the module globbing this one: it re-exports nothing and must not block the glob walk
+use crate::engine::EngineState;
+pub struct Closure;
+impl Closure {
+    pub fn sibling(&self, engine_state: &EngineState) -> u32 { engine_state.get_decl(1) }
+}
+@@@ rsreexp/crates/proto/src/dbg.rs
+use crate::engine::{EngineState, OverlayFrame};
+pub fn same_crate(engine_state: &EngineState, id: u32) -> u32 { engine_state.get_decl(id) }
+pub fn same_crate_overlay(frame: &OverlayFrame, id: u32) -> u32 { frame.get_decl(id) }
+@@@ rsreexp/crates/proto/src/prelude.rs
+// a prelude module: a named re-export of what a glob supplies
+pub use crate::engine::EngineState;
+@@@ rsreexp/crates/proto/src/dup/mod.rs
+// [N] two different types of one name behind two globs: `dup::Twin` names neither
+mod a;
+mod b;
+pub use a::*;
+pub use b::*;
+@@@ rsreexp/crates/proto/src/dup/a.rs
+pub struct Twin;
+impl Twin { pub fn get_decl(&self, id: u32) -> u32 { id } }
+@@@ rsreexp/crates/proto/src/dup/b.rs
+pub struct Twin;
+impl Twin { pub fn get_decl(&self, id: u32) -> u32 { id + 1 } }
+@@@ rsreexp/crates/proto/src/noreach/mod.rs
+// [N] a glob that does not reach the type: `noreach::Lone` names nothing here
+mod c;
+pub use c::*;
+@@@ rsreexp/crates/proto/src/noreach/c.rs
+pub struct Unrelated;
+@@@ rsreexp/crates/proto/src/noreach/elsewhere.rs
+pub struct Lone;
+impl Lone { pub fn get_decl(&self, id: u32) -> u32 { id } }
+@@@ rsreexp/crates/proto/src/extglob/mod.rs
+// [N] floor: a glob of an outside crate may supply the name unseen, so the in-tree glob beside it proves nothing
+mod d;
+pub use d::*;
+pub use serde::*;
+@@@ rsreexp/crates/proto/src/extglob/d.rs
+pub struct Mixed;
+impl Mixed { pub fn get_decl(&self, id: u32) -> u32 { id } }
+@@@ rsreexp/crates/eng/src/lib.rs
+mod eval;
+mod eval_ir;
+mod helpers;
+mod t1;
+mod t2;
+pub use eval::{CallEval, eval_block, redirect_env};
+pub use helpers::*;
+pub use t1::*;
+pub use t2::*;
+@@@ rsreexp/crates/eng/src/eval.rs
+pub struct CallEval;
+impl CallEval {
+    pub fn redirect_env(&self, a: u32) -> u32 { redirect_env(a) }
+}
+pub fn redirect_env(a: u32) -> u32 { a }
+pub fn eval_block<D>(a: u32) -> u32 { a }
+@@@ rsreexp/crates/eng/src/eval_ir.rs
+// private namesakes of what lib.rs re-exports from eval.rs and helpers.rs: no `use eng::…` reaches them
+fn redirect_env(a: u32) -> u32 { a + 1 }
+fn eval_block(a: u32) -> u32 { a + 1 }
+fn glob_fn(a: u32) -> u32 { a + 1 }
+pub fn ir(a: u32) -> u32 { redirect_env(a) + eval_block(a) + glob_fn(a) }
+@@@ rsreexp/crates/eng/src/helpers.rs
+pub fn glob_fn(a: u32) -> u32 { a }
+@@@ rsreexp/crates/eng/src/t1.rs
+pub fn twin_fn(a: u32) -> u32 { a }
+@@@ rsreexp/crates/eng/src/t2.rs
+pub fn twin_fn(a: u32) -> u32 { a + 1 }
+@@@ rsreexp/crates/app/src/main.rs
+mod globuse;
+mod near;
+use eng::{eval_block, glob_fn, redirect_env};
+use proto::engine::EngineState;
+fn cross_crate(engine_state: &EngineState, decl_id: u32) -> u32 { engine_state.get_decl(decl_id) }
+fn bare_list(a: u32) -> u32 { redirect_env(a) }
+fn bare_turbofish(a: u32) -> u32 { eval_block::<u8>(a) }
+fn bare_glob(a: u32) -> u32 { glob_fn(a) }
+fn main() {}
+@@@ rsreexp/crates/app/src/globuse.rs
+// the caller's own glob of a prelude module whose named re-export a glob supplies
+use proto::prelude::*;
+pub fn via_prelude(engine_state: &EngineState) -> u32 { engine_state.get_decl(2) }
+@@@ rsreexp/crates/app/src/near.rs
+use eng::twin_fn;
+use proto::dup::Twin;
+use proto::extglob::Mixed;
+use proto::noreach::Lone;
+pub fn near_twin(t: &Twin) -> u32 { t.get_decl(1) }
+pub fn near_lone(l: &Lone) -> u32 { l.get_decl(1) }
+pub fn near_mixed(m: &Mixed) -> u32 { m.get_decl(1) }
+pub fn near_twin_fn(a: u32) -> u32 { twin_fn(a) }

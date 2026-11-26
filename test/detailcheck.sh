@@ -14,6 +14,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -60,7 +64,16 @@ grep -q '<bodies [^>]*>' "$TMP/sigonly" && no "--signatures-only --for still emi
     || ok "--signatures-only --for is signatures-only (no <bodies> block)"
 
 # ── #2: --detail=3 adds a <bodies> block with AT MOST 3 bodies; the <sigs> block still present ──────────
-"$BIN" src --for="$TASK" --detail=3 --no-cache >"$TMP/d3" 2>/dev/null
+# AF1-fix (2026-11-18): the default --for answer is served in 12 KB PAGES (src/forpages.h), and on src this answer's
+# <bodies> starts past page 1's cut. The contract is about the ANSWER: --page-bytes=0 is the whole answer in one call,
+# row-identical to the joined pages (forpagescheck P2), so the counts below read it; (#2p) holds the default page to
+# PRESENT OR DISCLOSED-DEFERRED — it carries <bodies> or names it in its root deferred=/continued= with a next=.
+"$BIN" src --for="$TASK" --detail=3 --no-cache --page-bytes=0 >"$TMP/d3" 2>/dev/null
+"$BIN" src --for="$TASK" --detail=3 --no-cache >"$TMP/d3p" 2>/dev/null
+if grep -q '<bodies [^>]*>' "$TMP/d3p"; then ok "(#2p) the default page carries the <bodies> block"
+elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "bodies" in n and " next=" in r else 1)' "$TMP/d3p"; then
+    ok "(#2p) the default page does not hold <bodies> and says so: deferred= names it, next= reaches it"
+else no "(#2p) the default --detail=3 page neither carries <bodies> nor names it in deferred=/continued= (a silent drop)"; fi
 NB=$( bodies "$TMP/d3" )
 { grep -q '<bodies [^>]*>' "$TMP/d3" && [ "$NB" -ge 1 ] && [ "$NB" -le 3 ]; } \
     && ok "--detail=3 emits a <bodies> block with $NB (<=3) full bodies (the ranked head)" \
@@ -69,7 +82,7 @@ NB=$( bodies "$TMP/d3" )
     || no "--detail=3 dropped the <sigs> block (the rest must stay signatures-only)"
 
 # ── #3: MORE detail = MORE bodies (N=6 >= N=3), still bounded ───────────────────────────────────────────
-"$BIN" src --for="$TASK" --detail=6 --no-cache >"$TMP/d6" 2>/dev/null
+"$BIN" src --for="$TASK" --detail=6 --no-cache --page-bytes=0 >"$TMP/d6" 2>/dev/null
 N6=$( bodies "$TMP/d6" )
 { [ "$N6" -ge "$NB" ] && [ "$N6" -le 6 ]; } \
     && ok "--detail=6 emits >= --detail=3 bodies ($N6 >= $NB), still <=6" \

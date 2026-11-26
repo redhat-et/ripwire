@@ -226,8 +226,7 @@ private:
         }
         std::ranges::stable_sort( m_classes, {}, &ClassSpan::fileId );
         std::ranges::stable_sort( m_classIds, sortutil::svLess, &ClassName::name );
-        std::ranges::sort( m_classNames, sortutil::svLess );
-        m_classNames.erase( std::ranges::unique( m_classNames ).begin(), m_classNames.end() );
+        sortutil::sortUnique( m_classNames, sortutil::svLess );
         for( const Binding& b : m_ing.bindings )
         {
             if( ( b.kind != LocalBindKind::MemberType && b.kind != LocalBindKind::RecvType ) || b.var.empty() || b.typeName.empty() || !b.importedName.empty()
@@ -345,8 +344,7 @@ inline std::vector<NodeId> containerHolds( const ValueRefIndex& values, std::uin
         const std::vector<NodeId> t = values.targetsOf( v );
         fns.insert( fns.end(), t.begin(), t.end() );
     }
-    std::ranges::sort( fns );
-    fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+    sortutil::sortUnique( fns );
     return fns;
 }
 
@@ -1477,12 +1475,12 @@ inline constexpr std::size_t kConnectDeclinedJointCap = 3;
 
 namespace declinedjoint_detail
 {
-// A graph edge from -> to (the out-lists are sorted ascending).
-inline bool edgeTo( const Graph& g, NodeId from, NodeId to )
+// A graph edge e.from -> e.to (the out-lists are sorted ascending). ConnectEdge, not two NodeIds: the call names the direction.
+inline bool edgeTo( const Graph& g, ConnectEdge e )
 {
-    const auto first = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ from ] );
-    const auto last  = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ from + 1 ] );
-    return std::binary_search( first, last, to );
+    const auto first = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ e.from ] );
+    const auto last  = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ e.from + 1 ] );
+    return std::binary_search( first, last, e.to );
 }
 
 // Whether some non-test, non-terminal function has a graph edge to every terminal: then the graph answers, nothing is hedged.
@@ -1490,7 +1488,7 @@ inline bool resolvedCommonCallerExists( const IngestResult& ing, const Graph& g,
 {
     for( NodeId u = 0; u < nodeCount; ++u )
     {
-        if( std::ranges::all_of( terms, [ & ]( NodeId t ) { return edgeTo( g, u, t ); } ) && !std::ranges::binary_search( terms, u ) && !pathDefInTests( ing, u ) )
+        if( std::ranges::all_of( terms, [ & ]( NodeId t ) { return edgeTo( g, { .from = u, .to = t } ); } ) && !std::ranges::binary_search( terms, u ) && !pathDefInTests( ing, u ) )
         {
             return true;
         }
@@ -1539,7 +1537,7 @@ inline std::optional<ConnectResult::DeclinedJoint> jointThrough( const Graph& g,
         {
             j.links.push_back( ConnectResult::DeclinedLink{ terms[ k ], it->ref, it->cands } );
         }
-        else if( edgeTo( g, fn, terms[ k ] ) )
+        else if( edgeTo( g, { .from = fn, .to = terms[ k ] } ) )
         {
             j.links.push_back( ConnectResult::DeclinedLink{ terms[ k ], UINT32_MAX, 0 } );
         }
@@ -1571,8 +1569,7 @@ inline ConnectResult connectDeclinedJoints( const IngestResult& ing, const Graph
     {
         std::ranges::transform( v, std::back_inserter( fns ), &DeclinedWay::fn );
     }
-    std::ranges::sort( fns );
-    fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+    sortutil::sortUnique( fns );
     std::vector<ConnectResult::DeclinedJoint> found;
     for( const NodeId fn : fns )
     {

@@ -39,7 +39,10 @@
 #           A DIFF with no --intended row, any
 #           EMPTY (a vacuous comparison) and any ERROR (non-zero exit, timeout) fails the gate. Then the self-test (HEAD
 #           run with --top-k=199, or one less than the corpus has, must read as DIFF) and last the ratchet line
-#           (test/langidentity/ratchet.tsv: the "== Lang::" predicates outside per-language files may not rise).
+#           (test/langidentity/ratchet.tsv: the "== Lang::" predicates outside per-language files may not rise). That
+#           count is a FLOOR, not a total, and the line says so: the counter's hit regex requires `in=`, so a predicate
+#           in a span with no enclosing symbol is dropped silently (2026-11-20, ruling 108 -- the figures and the
+#           consequence for the ceiling are in ratchet.tsv's own header).
 #
 # With no BASE (empty, not given) this SKIPS and exits 0: CI has no "previous" binary. regression.sh passes one argument
 # (the binary under test); RIPWIRE_BASE names the reference binary. A BASE that is given but is not an executable file

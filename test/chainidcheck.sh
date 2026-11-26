@@ -26,7 +26,12 @@ echo "chainidcheck: BIN=$BIN"
 #    keeps testing the actual emitted shape if the id format ever changes. Row 6 (2026-09-12): the row prints
 #    the SHORT id (sc=, the enclosing scope) beside its own p=; the chain key composes as p::sc::n, exactly
 #    the spelling the legend states and the selectors accept.
-ID="$( "$BIN" . --for="serialize xml writer" 2>/dev/null | python3 -c '
+#    --rows=elements (2026-11-23): the default answer serves its rows as text lines (ROWS AS LINES), and only a
+#    row that keeps a child element (a <doc>) stays an XML <d>, so the harvest depended on which row happened to
+#    carry a doc comment: at the basename weight 1 none on page 1 did and the gate read "no scoped row". The
+#    element form is the same rows byte for byte as 0.6.x served them (the lines decode to it), so every scoped
+#    row is readable here; it harvests src/serialize.h::XmlWriter::XmlWriter at basename weights 0, 1 and 2.
+ID="$( "$BIN" . --for="serialize xml writer" --rows=elements 2>/dev/null | python3 -c '
 import re, sys
 for row in re.finditer( r"<d\b([^>]*)>", sys.stdin.read() ):
     a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )

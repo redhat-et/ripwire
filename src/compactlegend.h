@@ -71,27 +71,27 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "ctx", "skipped",    "why the index lacks a file <f p= why= bytes= limit= ext=>; indexed but unvouched <h p= why= err= err_ratio=>; <lang> census" },
     { "ctx", "notes",      "field notes by target: <target id= dangling=> holds <note d= sha= branch=>; the kept count comment: notes= rows, targets= <target> rows, dangling= targets matching nothing indexed (listed, surfaced nowhere)" },
     { "ctx", "lego",       "ONE interface/base type: <iface n= p= defs= implementors=>, its <m> method contract, every implementor" },
-    { "ctx", "expand",     "full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls><c n= l=> resolved callees" },
+    { "ctx", "expand",     "full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls><c n= l= p=> resolved callees (p= when not the b's file)" },
     // PR #215 review item 9: --expand has TWO servings and they share no element. The line above describes the
     // BUNDLE serving; the whole-file serving is <src p= sym=> with <s n= sc= l=/> anchor rows and no <bodies> at
     // all, so that line described a shape the document does not contain — and was LONGER than the full dialect's
     // own clause, which compactlegendcheck's "compact must shrink" arm reads as the contradiction it is.
     { "ctx", "expand-file", "the file's own text: <src p= sym=>; <s n= sc= l=/> per scoped symbol; full id = p::sc::n" },
-    // pack-task (2026-09-12, the lane's end): the bundle's own vocabulary reads here, checked against packtask.h. task= is the task
-    // text (a bare --pack-task refuses); <far> is the ranked name-only tier inside <sigs> (renderNameOnlyRows: t= n= p=), of_top=
-    // there the ranked rows it was cut from (topRanked); <calls><c> are a body's callee signatures; <callers> rows are the bodies'
-    // 1-hop neighbours in either direction, rel= which one, of_top= there the bodies that qualified (bodiesTotal), shared= how many
-    // of them a row neighbours (emitted above 1); run= rides a <test> row only when a runner is derivable (testmap.h runHint). The
-    // <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
+    // pack-task (2026-09-12; PB1 2026-11-19): the bundle's own vocabulary reads here, checked against packtask.h. task= is the task
+    // text (a bare --pack-task refuses); <sigs> is the --for head (e= the end line, files_first= its round robin by file);
+    // <bodies> holds ONE served <b> and a <bn next=> pointer row per candidate not served (bodyless= those with no body at all);
+    // <calls><c> are a body's callee signatures; <callers> rows are the key body's 1-hop callers, of_top=1; <tail> is --for's
+    // file tail; run= rides a <test> row only when a runner is derivable (testmap.h runHint).
+    // The <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
     // ── the budgeted-bundle candidate page (root <sigs>; issue #294 / PR #362) — hinted by the window
     // flag pair that rode along, and reached from the pack-task hint too (the root-attr adjust below):
     // one spec for both verbs and both dialects, because the page is ONE document shape.
     { "sigs", "candidate-page",
       "budgeted-bundle candidate page: a resumable window over the ranked candidate set the bundle cuts, for task= under budget_tokens=, one tier per page, ranks global across pages" },
-    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
+    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= e= p=> ranking (the for head) > <bodies><b t= n= p= l=> the ONE key body, with <calls><c n= l= p=> callees; <bn t= n= p= l= next=> a candidate not served (next= its expand); shown=/total= count SERVED bodies; bodyless= have no body at all > <callers><s rel=caller> its 1-hop callers (of_top=1) > notes > <tests><test p= run=> (run= when derivable) > <tail><t p= sym=> file-grain rows, weaker than ranked: total= positive-score files, next= the file page from the first row unprinted" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
-    { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate; the inner ctx est_tokens= is language-weighted). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: rows ranked (far) / bodies (callers); s rel=caller|callee shared=: 1-hop edge, bodies reached (absent at 1)" },
+    { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate, the inner ctx est_tokens= too). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: the key body (callers); s rel=caller: its 1-hop callers; d e=: the definition's end line; sigs files_first=: the head's round robin by file; sigs docs_dropped=: shown rows whose doc comment the ladder shed; bn t= n=: a body candidate not served, next= the expand call that serves it" },
     // ── navigation ──
     { "callers",     "callers",     "1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=" },
     { "callees",     "callees",     "1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>" },
@@ -102,7 +102,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // transitiveCallers( defs ), the defs themselves excluded; radius_tested= counts isTestedByReach, which never counts a test
     // symbol (a seed), and a test in the reach set is counted apart in radius_tests= (IMPACT-TEST-TIER); importers= is impactImportTier's one-hop set of
     // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
-    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
+    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "defs",        "defs",        "per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path" },
     { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none shown" },
     { "connect",     "connect",     "minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>" },
@@ -138,7 +138,10 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "handoff",      "handoff",      "continuation packet for the NEXT session: <verified changed= blast_files=>, <tests n=>, <heuristic n= candidates=>, <note>, <doc p=>" },
     { "merge-scout",  "merge-scout",  "cross-branch overlap of arms= refs: <arm ref= base= changed= head_conflicts=>, <pair a= b= conflicts= risks=>, <landing order=>" },
     { "stray-content","stray-content","per local ref, lines/symbols NOT in HEAD: <ref ok= v= base= stray=>; v=unknown = no merge base" },
-    { "abi",          "abi",          "contract diff of the indexed symbols between two refs: added/removed/changed signatures" },
+    // abi (2026-11-17, lane abiarch-retire-register). The old line described a different verb ("added/removed/changed signatures"
+    // between two refs): --abi compares struct LAYOUTS, per local branch, against HEAD. This one reads the root every answer
+    // carries, shortened from abicheck.h writeAbiCheck's full legend; the rows read present-only below (the abi block).
+    { "abi",          "abi",          "cross-branch ABI-break gate: each local branch's structs on paths it authored (its diff from its merge base with HEAD), laid out lexically, compared with HEAD's; a match is omitted; exit 2 on a drift. head_ref= HEAD's branch, refs= branches read, candidates= structs HEAD declares and locates, compared= sites modelled on both sides, blobs= git blobs read; dropped= listed rows past the 12-per-ref cap; head_only= sites on paths only HEAD changed (out of scope); unmodelable= sites skipped: HEAD's copy has no model; unrelated= refs with no merge base, never compared, also in quiet=; broken_refs= refs with a drift; quiet= refs with no row (none differed or none compared); excluded_refs= refs with unlisted kinds only" },
     { "plan-lint",    "plan-lint",    "structural lint of a plan document: each finding names the section and the rule" },
     // ── reports ──
     { "hotspots",     "hotspots",     "maintenance pain = churn x ccx over window=: <f p= churn= ccx= score= top= top_ccx= top_l=>; unranked_*= no churn/complexity" },
@@ -166,10 +169,10 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // or out-edge (isolateStats); symbols= is ing.symbols.size(). The <bridge> row attributes are present-only terms below.
     { "communities",  "communities",  "call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>; drill= the verb taking a row's id=; shown_modules=/shown_bridges= <community>/<bridge> rows listed; bridges= community pairs joined by a call edge; isolated= symbols with no call edge: isolated_doc= doc sections, isolated_decl= other bodyless, isolated_header= other header defs, isolated_source= the rest; modules= modules of 2+ symbols; connected_singletons= 1-symbol modules with a call edge; symbols= indexed symbols" },
     { "community",    "community",    "ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count; dir= its members' most common directory (a top-level file's own path); label= dir::name@file:line:byte of its top fan-in member (non-accessors first) [up to 3 top name verbs]; bridges= modules a call edge joins to it; partition= module count incl. singletons (ids 0..partition-1); modules= those of 2+ symbols; shown_bridges= <bridge> rows listed" },
-    // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/levels_shown= and files= ride EVERY answer of their root and
+    // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/shown_levels= and files= ride EVERY answer of their root and
     // were defined only by the full legend, so they read here beside the levels=/files_unlisted= this line already named.
     // That line moved the (U) --zoom probe's compact legend from 324 to 394 B.
-    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels_shown= of levels= printed; symbols= = isolated= + size= of all top_modules=" },
+    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; symbols= = isolated= + size= of all top_modules=" },
     { "tree",         "tree",         "each file with its top 3 symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; of files= indexed, files_unlisted= have none" },
     { "seams",        "seams",        "cross-directory call edges NO test reaches: <seam from= to= untested= shown= capped=> of <edge caller= p= callee= cp=>" },
     { "doc-drift",    "doc-drift",    "markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest" },
@@ -186,7 +189,11 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "comment_coherence","comment-coherence","two comment/name content measures per documented function, most name-restating first: <fn p= n= c_coeff= cic=>" },
     { "doctor",       "doctor",       "setup health: <c n= ok=> checks; exit 1 when one fails" },
     { "layout",       "layout",       "struct field layout vs cache lines: offsets, padding, hot/cold split candidates" },
-    { "arch",         "arch",         "layering rules fit: allowed/denied file-to-file edges, each violation a row" },
+    // arch (2026-11-17, lane abiarch-retire-register): the root and the <v> row every answer with a violation carries, checked
+    // against verbs_report.h runArchViews. new_violations= is retired; "a row without it is NEW" is its derivation. Elements are
+    // named WITHOUT angle brackets in the abi and arch readings: a script that counts `<v ` or takes the first `<ref ` must not
+    // count the legend (test/archmetricscheck.sh did, and read 5 violations for 4).
+    { "arch",         "arch",         "layering rules fit: v from= fromLayer= to= toLayer=: a file-to-file include/import a rule denies, with each end's layer (fromLayer=path: a regex path-rule, toLayer= that rule); layers= rules= pathRules= declared; violations= the v rows; baselined= those the baseline sidecar accepts, baselined=1 on the row (under baseline-update: every hash it now holds); a row without it is NEW, exit 2 if any; rules match root-relative paths" },
     { "flip",         "flip",         "the blast radius of flipping one build gate: the regions and symbols it toggles" },
     { "landing-plan", "landing-plan", "stranded-work landing order across refs, fewest conflicts first" },
     { "pattern",      "pattern",      "structural pattern hits with their enclosing symbol" },
@@ -308,7 +315,8 @@ struct CompactCompletenessTerm
     std::string_view onKey     = {};      // read ONLY on an answer of this schema key (ripwire.<key>/v1): the same NAME on the same
                                           // element means different things on two verbs (<f files=> on context-ratio vs ensemble)
     std::string_view unlessTag  = {};     // with unlessAttr: NOT read on a payload where this element carries that attribute — the
-    std::string_view unlessAttr = {};     // row a richer one replaces there (declined_calls= beside a <dc via=> row says "in no row")
+    std::string_view unlessAttr = {};     // row a richer one replaces there (declined_calls= beside a <dc via=> row says "in no row").
+                                          // unlessTag may name alternatives, `a|b`: the row steps aside where EITHER carries it
 };
 
 // #60: the escaped spelling of the module-scope owner's name, as it reaches a rendered document, and the
@@ -343,7 +351,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "closures",          "closures=K: named functions written inside of='s body (closures_capped=1 more than the <in> blocks)" },
     { "count",             "in n= p= via=closure count=: one closure and its OWN callees (count= distinct; shown= capped=1 next= the cut); containment, in no count above", true, "in" },
     { "unproven_defs",     "unproven_defs=K: K same-named defs not tied to that file, in no count or row (bare name shows them)" },
-    { "declined_calls",    "declined_calls=K: K call sites left unbound (no evidence chose one def), in no count or row", false, {}, MapHeaderRead::No, {}, {}, "dc", "via" },
+    { "declined_calls",    "declined_calls=K: K call sites left unbound (no evidence chose one def), in no count or row", false, {}, MapHeaderRead::No, {}, {}, "dc|dcols", "via" },
     { "cross_kind",        "cross_kind=kind:N,...: the defs= definitions differ in kind; rows union all of them (narrow with file:name)" },
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
@@ -409,7 +417,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
-    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
+    // VERB-DEF-ROWS (lane v1-verbdef): element-scoped to <bodies>, the one element that carries this COUNT (serialize.h, packtask.h).
+    // Read anywhere it fired on a <def bodyless="1"> row too — a 107 B reading of an attribute that answer does not carry — and
+    // a C function's tied declaration row now carries bodyless="1" on every --callers/--uses/--impact answer.
+    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true, "bodies" },
     // --uses=Owner.field's member form (fielduses.h appends kUsesFieldLegend to that answer alone). owner_candidates= is a
     // row attribute that exists only beside member=, so one head term defines the whole form.
     { "member",            "member=Owner.field: rows use that field; pinned=/amb_sites= rows with one owner/with owner_candidates=K; owners_of_name= fields so named" },
@@ -435,6 +446,18 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // legend on this tree or on any gate fixture moves at all, because every harness here has a runner.
     { "run_unknown",       "run_unknown=1: no runner derivable (a guess would be worse)", true },
     { "run_unknown",       "<g n= p=a,b,c>: n runner-less rows with equal attrs as ONE row, paths verbatim; a path holding ',' is never grouped, so p= splits into exactly n=; shown=/total= over these rows counts test FILES", true, "g" },
+    // affected-group-unjam (2026-11-17): the tests_to_run <g> row that carries a RUNNER (testmap.h groupRunHead). Present-only
+    // and qualified to <g>, like the run_unknown reading above it: a document of single rows never pays, and --flags' own <g>
+    // carries no run_each=. This row is the compact dialect's ONLY reading of a run_each group — the run_unknown <g> row above
+    // is not charged on a document whose groups all have runners — so it restates the two facts a consumer cannot act
+    // without (p= splits into exactly n= paths; counts are FILES) beside the one it adds: the command is the TEMPLATE with {p}
+    // replaced by each path. Gate: test/affectedgroupcheck.sh arm 6 (defined where carried, absent where not).
+    { "run_each",          "<g n= p=a,b,c run_each=>: n rows with equal attrs as ONE row; each path's command is run_each= with {p} replaced by that path; p= splits on ',' into exactly n= paths; shown=/total= count test FILES", true, "g" },
+    // PATH-FOLD (2026-11-18, testmap.h foldPathsInto): a tests_to_run <g> row whose paths are said folded carries pf= in
+    // place of p=. Present-only and qualified to <g>: a document that folds nothing never pays, and this row is the
+    // compact dialect's ONLY reading of pf=, so it states the whole expansion rule a reader needs to get the n= paths.
+    // Gate: test/affectedfoldcheck.sh arm (L) (defined where carried, absent where not) and arm (H) (the rule is bash's).
+    { "pf",                "<g pf=>: p= folded; PRE{A,B}SUF = PREASUF,PREBSUF, braces nest (bash brace expansion): d/{a,s/{b,c}}.py = d/a.py,d/s/b.py,d/s/c.py; expand in order for exactly n= paths", true, "g" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     // --regex's long-line disclosure (search.h grepScanText / regexguard.h maxEngineSubjectBytes): the count rides every
     // regex answer, the bound only beside a nonzero count.
@@ -444,6 +467,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "unread_files",      "unread_files=N: N indexed files unreadable when scanned (hits= is a floor)" },
     { "scan_degraded",     "scan_degraded=1: the scan stopped part-way (hits= is a floor)" },
     { "unreadable",        "unreadable=N: N same-name definitions unreadable when this ran, absent from defs=", false, "layout" },
+    { "asserts_unreadable", "asserts_unreadable=N: N C-family files the static_assert scan could not read (asserts= is a floor)", false, "layout" },
     { "lines_skipped",     "lines_skipped=N: N sidecar lines unparsed, absent from notes=", false, "notes" },
     { "refused",           "refused=symlink: the sidecar is a symlink, refused unopened: no note was read", false, "notes" },
     { "baseline",          "baseline=symlink-refused: the sidecar is a symlink, refused unopened: every violation is new", false, "arch",
@@ -464,7 +488,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // means the whole map was withheld — that record reads kCompactWithheldMapPurpose instead (rv-r1-L1 MED-3).
     { "withheld",          "withheld=: rows the budget cut", false, {}, MapHeaderRead::No, {}, "handoff" },
     { "at",                "at=: commit+dirty+shallow" },
-    { "root",              "root=: p= relative to it" },
+    // --arch prints from=/to=/path=, never p=, so its root= takes the arch reading (the abi/arch block) and not this one.
+    { "root",              "root=: p= relative to it", false, {}, MapHeaderRead::No, {}, {}, "arch", "layers" },
     // The multi-root roots table (serialize.h writeMultiRootTable): its `<!-- root rows:` clause is prose-stripped above
     // and nothing put the reading back. ELEMENT-qualified, because --communities carries a different label= on its rows.
     { "label",             "<root label= p=>: a workspace root; label= prefixes every p=/id=", true, "root" },
@@ -493,7 +518,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // defs= names resolveFocus's pick (graph.h), and the body preference there holds only IN THE DECLARATION'S SCOPE: a pure
     // virtual beside another class's override keeps the focus. Unconditional, this reading described that answer wrongly
     // (test/decltodefcheck.sh E3g, which also holds the full --around and --connect readings to the same condition).
-    { "defs",              "defs=N: of= names N defs; most-specific kind walked first, its language ahead, id last, code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    { "defs",              "defs=N: of= names N defs; a STATED language fronts its own definitions, else most-specific kind leads (stated: its family next) with the repo majority breaking same-kind ties; code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    // reflang/reflang-origin are NOT defined here: the around first screen renders its verb-scoped dict (below,
+    // at the layer= "around" rows), and legendcoveragecheck (A) probes THAT document — MEASURED, not assumed.
     // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
     // these fields go (kDeclinedMapLegend, kIgnoredLegend, kExtentSuspectHdrLegend, kMacroBlankedHdrLegend, the absent-if-0
     // half of the always-on legend, kMaxTokensFitLegend). Header-ONLY: several are quoted attributes elsewhere.
@@ -511,10 +538,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "est_measured",      "est_measured=0: est_tokens is the MODELLED estimate (a charge buffer failed), typically below the emitted size", false, {}, MapHeaderRead::Also },
     { "fit_unmeasured",    "fit_unmeasured=1: the fit probe could not measure the map; the cap is unverified", false, {}, MapHeaderRead::Only },
     // THE THIRD SWEEP (2026-09-12), the same defect on conditional fields the first two sweeps never produced. --zoom's
-    // <module children=> rides only a module AT the levels_shown= cut, and a map's <recent> file rows only a single-root
+    { "shown_levels", "shown_levels=N: of levels= printed; levels_capped=1 deeper ones unprinted", true, "zoom", MapHeaderRead::No, {}, "zoom" },
+    // <module children=> rides only a module AT the shown_levels= cut, and a map's <recent> file rows only a single-root
     // rank_by=churn-decay (kChurnDecayRankLegend's `recent:` clause). Both clauses are prose. Both rows are ELEMENT-qualified:
     // of= on the map root is --around's seed, and n= is a name on every <s> row.
-    { "children",          "children=K: K child modules below the levels_shown= cut, unprinted", true, "module" },
+    { "children",          "children=K: K child modules below the shown_levels= cut, unprinted", true, "module" },
     { "of",                "<recent n= of=>: the n= newest-touched of of= touched files; <rc age_d=> days since its last commit, w= decayed weight", true, "recent" },
     // merge_bombs_skipped= (2026-09-12): the cut the churn-decay miner makes, disclosed on the block it shapes (gitmine.h
     // kChurnMergeBombMaxFiles). Always on <recent>, "0" included, so the term rides every churn-decay map.
@@ -555,6 +583,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "radius_tests",      "radius_tests=: TEST definitions in impact_reaches=, counted apart; radius_tested=/radius_untested= are production rows only", true, "safe-delete" },
     { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "impact" },
     { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "safe-delete" },
+    // TIER-FOLLOWUP (callhierarchy.h computeHopTestedPartition): present-only, when a row is a test definition
+    { "hop_tests",         "hop_tests=: TEST definitions among the rows, listed but counted apart; hop_tested=/hop_untested= are production rows only", true, "callers" },
+    { "hop_tests",         "hop_tests=: TEST definitions among the rows, listed but counted apart; hop_tested=/hop_untested= are production rows only", true, "callees" },
     // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
     { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
     { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
@@ -570,6 +601,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "type_capped", "type_capped=1: the type-mention walk stopped at its budget; type rows are a floor", true, "files", MapHeaderRead::No, {}, "impact" },
     { "via",         "rf via=type: every reached symbol in that file is reached only through a type mention (syms=0: the file names the type outside any indexed definition)", true, "rf", MapHeaderRead::No, "type" },
     { "by_type",     "rf by_type=K: K of its syms= are reached only through a type mention", true, "rf" },
+    // A19 (lane s1-small; test/legendcoveragecheck.sh row impact-rollup-name-default): a multi-definition --impact rollup's
+    // by-name hedge (serialize.h impactRollupHedgeXml) rode the default answer undefined; the full dialect's reading
+    // (graphlegend.h, fix27) in the compact form, element-qualified so the <e>/<s>/<c> via=name rows cannot answer for it.
+    { "via",         "rf via=name: of= has several definitions and every reached symbol there is reached by name alone (maybe a namesake's dependant)", true, "rf", MapHeaderRead::No, "name" },
+    { "by_name",     "rf by_name=K: K of its syms= are reached by name alone", true, "rf" },
     { "shown_bridges",     "shown_bridges=/bridges=: <bridge> rows printed (the 12 heaviest) / all pairs", false, "zoom", MapHeaderRead::No, {}, "zoom" },
     { "shown_symbols",     "shown_symbols=: <s> rows printed", false, "tree", MapHeaderRead::No, {}, "tree" },
     // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,
@@ -597,7 +633,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     //     ELEMENT-qualified on <cols>: --from-trace's <trace format=> names a trace dialect. lens= names what one form of an
     //     answer withholds and another serves: the columnar --impact (shown_importers,importers_capped), --order=stable's
     //     <r> (k,est_tokens), the MCP for dialect (churn,amp,tested). Read on the head, with one meaning on all three.
-    { "lazy",              "<f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached; lazy=0: at least one is load-time", true, "f" },
+    // IMPORT-ROW-SHORT (2026-11-18): an importer row no longer prints lazy="0", so what a row WITHOUT lazy= claims is read where
+    // an <f p=> row is, and only there (an --impact answer with no importer row pays nothing; <f p=> on a map, a hotspots or a
+    // deps answer is another element, hence the schema key). The lazy=1 row below then reads only the rows that carry it.
+    { "p",                 "<f> with no lazy=: at least one of its edges into a def file is load-time", true, "f", MapHeaderRead::No, {}, "impact" },
+    { "lazy",              "<f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached", true, "f" },
     { "a",                 "<bridge a= b=>: two module ids joined by call edges", true, "bridge" },
     { "from_label",        "from_label=/to_label=: the label= of a=/b=", true, "bridge" },
     { "to",                "<bridge to= to_label=>: a peer module's id and label=", true, "bridge" },
@@ -616,6 +656,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "unindexed",         "unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most)", false, {}, MapHeaderRead::Only },
     { "unindexed_exts",    "unindexed_exts=E: E such extensions in all, the list cut", false, {}, MapHeaderRead::Only },
     { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },
+    { "untracked_build",   "untracked_build=K: K untracked files left out of a build/ indexed because git tracks files in it", false, {}, MapHeaderRead::Only },
     { "precise",           "precise=K: K call edges a SCIP index pinned", false, {}, MapHeaderRead::Only },
     { "fields",            "format=columnar: parallel arrays, not row attributes: <paths> maps I=path, each <cols> array holds n= comma-separated values in one row order, fields= naming them (the path column indexes <paths>; &#44; is a comma)", true, "cols" },
     // THE TESTED COLUMN (2026-09-12, the follow-up to the <s tested=> row below). --callers/--callees/--impact --format=columnar
@@ -624,6 +665,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // array cannot omit a false entry, so unlike the <s> attribute this prints 0, and an answer over a tree with no test carries a
     // column of zeros: the term reads the COLUMN (a <cols fields=> that lists tested), never a 1. compactlegendcheck (D34)/(D35).
     { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
+    // TIER-FOLLOWUP (columnar.h ColumnarRowExtras::testRow): present-only, when a shown row is a test definition
+    { "fields",            "<test> column: 1 = a test or fixture definition row, counted apart from production; 0 = a production row", true, "cols", MapHeaderRead::No, "test" },
     { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
     // THE SWEEP'S DESIGN REVIEW (2026-09-12) checked every reading above against its emitter and found one row reading still
     // missing: tested="1" on <s>. --callers/--callees and --impact (verbs_navigate.h), the MCP impact twin (mcpverbs.h) and the
@@ -636,11 +679,14 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
     { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
-    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
+    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f p=> importer rows (which carry no via= at all since IMPORT-ROW-SHORT) never pull it in; the
     // columnar form names it in fields= like the tested column.
     { "via",               "via=name: the target was matched by name alone (receiver unproven); every by-name candidate in reach is listed; NOT a claim the edge is false", true, "s", MapHeaderRead::No, "name" },
     { "via",               "via=impl: the receiver's interface/trait/abstract type has ONE implementor in the tree owning the target (an outside or macro-made one may exist)", true, "s", MapHeaderRead::No, "impl" },
     { "via",               "via=link: this edge is a markdown link, not a call", true, "s", MapHeaderRead::No, "link" },
+    // BX1 FIX 2 (callhierarchy.h macroSeeThroughRows; graphlegend.h kViaMacroLegend): a see-through caller row. VALUE-prefix
+    // qualified ("macro:" matches via="macro:NAME", quotedValueListsItem's trailing-colon rule).
+    { "via",               "via=macro:NAME: calls of= only through the C function-like macro NAME (a t=macro row here; one macro hop); after the direct rows, in count=, with that macro row's of_def", true, "s", MapHeaderRead::No, "macro:" },
     // STRING-KEYED (src/pathgaps.h BridgeVia::NameKey): present-only, read only on a bridge <s via="name-key"> row
     { "via",               "s via=name-key cands=K: the previous row looks this row up by a name built from a template (getattr(o, 'do_' + c), o['handle' + e]) or posts a message class this row handles; K the definitions it can name; matched, never traced; a hedge", true, "s", MapHeaderRead::No, "name-key" },
     { "anchor",            "anchor=missing: the markdown link named a heading this file does not have, so the edge is the file", true, "s", MapHeaderRead::No, "missing" },
@@ -650,9 +696,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "anchor",            "<c anchor=missing>: that markdown link named a heading this file does not have, so the edge is the file", true, "c", MapHeaderRead::No, "missing" },
     // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: the callers selector the M1 rule narrowed
     { "narrowed",          "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "callers", MapHeaderRead::No, {}, "callers" },
+    // CALLERS-TWO-COPY-BIND (src/forgraphverb.h kSourceCopyLegend), present-only: beside narrowed=, the copies the bind left out
+    { "copy_p",            "copy_p=: beside narrowed=, the other definitions the spelling fits are COPIES (CI/tool dot dir, vendoring dir, demo/generated tier, or a generated/copied banner), so the one source definition answers; p:line each, not counted", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "copy_next",         "copy_next=: the callers call on the first copy_p= copy", false, "callers", MapHeaderRead::No, {}, "callers" },
     // CALLSITE-AT (2026-10-09): a callers row's call sites (editcheck.h rowCallSites); keyed to the callers schema, so the
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
-    { "sites_at",          "<s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
+    { "sites_at",          "<s sites_at=>: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
     { "sites_total",       "<s sites_total=N>: N sites, sites_at= lists the first 16; next= (the uses verb) lists all", true, "s", MapHeaderRead::No, {}, "callers" },
     // STRING-IMPORT (fordottedstring.h): the --callers element keeps no comment in the compact layer, so each attribute it prints is defined
     // here, ELEMENT-qualified (<dotted_strings>/<ds>) and keyed to the callers schema; --for keeps the element's own comment.
@@ -671,7 +720,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "loaders",           "<ds loaders=N>: N functions spell the constant that way; over 3 none is named (a generic word)", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "loaders_floor",     "<ds loaders_floor=1>: a sink call in a file that can name the constant traced no names (too many assignments, or none), so loaders= may be short", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "s",                 "<dotted_strings s= next=>: no row is printed: s= is the first string found in a test path (counted in tests=), next= a grep command for it", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
-    { "fields",            "<sites_at> column: each row's calls of the leaf name, any receiver, as file:line, space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
+    { "fields",            "<sites_at> column: each row's leaf-name calls not proven elsewhere, as [file:]line (default: its path), space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
     { "fields",            "<sites_total> column: a row's uncut site count; its sites_at cell lists the first 16, the uses verb all", true, "cols", MapHeaderRead::No, "sites_total", "callers" },
     // FE-B: a map <c> row merging N byte-identical via=name rows (serialize.h writeMapCalleeRows) carries x=N
     { "x",                 "<c x=N>: N same-named via=name rows merged; callees=FILE:SYM lists all", true, "c" },
@@ -681,7 +730,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // attrib-multidef (defattrib.h; graphlegend.h kDefTableLegend): the definition table of a multi-group selector, its rows'
     // ties, the cut table's count, and the columnar split column. Present-only, element-scoped. A row's prov="split" (Q1) reads
     // through the shared prov= row above, which already fires on any prov= in the payload.
-    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition + the declarations tied to it; bodyless=1 tied to none)", true, "def" },
+    // DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): 133 -> 111 B, same readings (V1 measured the legend at ~2x the rows).
+    { "ix",                "<def ix= t= sc= p= bodyless=1>: defs= groups: definition, then tied declarations (same ix=; bodyless=1 no body)", true, "def" },
     { "defs_listed",       "defs_listed=N: above 16 groups, only the N this page's rows name are listed; K~n not enumerated: a bare ~n = also by name, a by-name-only row has no of_def" },
     { "of_def",            "of_def=K..: the def ix=K groups the row belongs to; K resolved edge, K~s edge labelled split, K~n by name alone, K~t into a primary template whose specialisation is listed; NOT a claim the edge is false", true, "s" },
     { "of_def",            "c of_def=K..: the def ix=K groups that caller belongs to (K~s split label, K~n by name, K~t primary template); NOT a claim the edge is false", true, "c" },
@@ -698,11 +748,26 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
                            "K is a floor in TS)", true, "dc", MapHeaderRead::No, "iface" },
     { "bound",             "dc bound=G: T: a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dc" },
     { "of_def",            "dc of_def=K: the def ix=K making the call; K~d: its candidates include group K, never a claim it calls K", true, "dc" },
-    { "dc_shown",          "dc_shown=N: dc rows printed (callers: file-first); dc_next= lists every site" },
+    { "shown_dc",          "shown_dc=N: dc rows printed of declined_calls= (callers: file-first); dc_capped=1 the rest are cut; dc_next= lists every site" },
+    // BAND DC (handoffwindow.h directRootAllNext): a windowing --callers / --impact root names the complete call; present-only
+    { "all_next",          "all_next=: the ONE call listing every row of total= (same rows, columnar); next_offset= pages" },
     { "cand",              "dc cand=: the candidate defs as file:line (legend full only); cand_more= how many more", true, "dc" },
+    // BAND DC (declinedsites.h declinedSitesColumnsXml): the columnar form carries the same sites as ONE <dcols> block, so the dc
+    // rows above (element-scoped to <dc>) do not fire there and these read in their place: the block's reading on its via=, each
+    // optional column on fields= naming it. The gate column has one row for every gate value (a column cannot be value-keyed).
+    { "via",               "declined_calls=K: K call sites left unbound, in no count; <dcols n= via=declined fields=>: those call SITES as parallel "
+                           "arrays, one row order (callees: name,line; callers: path,in,line the calling def, path an index into <paths>; empty cell: "
+                           "no value); NOT an edge or a caller/callee claim; cands: K in-tree defs it could have meant (K may be 1), the resolver "
+                           "proved none; not a claim this call reaches any of them", true, "dcols", MapHeaderRead::No, "declined" },
+    { "fields",            "dcols gate: builtin or std, a name gate declined it; side, a Ruby call whose in-reach defs answer on the other side of self; "
+                           "iface, the receiver's interface/trait/abstract type, cands its implementors' methods of the name (which one runs is unproven; "
+                           "a floor in TS)", true, "dcols", MapHeaderRead::No, "gate" },
+    { "fields",            "dcols bound: G: T, a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dcols", MapHeaderRead::No, "bound" },
+    { "fields",            "dcols of_def: K the def ix=K making the call; K~d its candidates include group K, never a claim it calls K", true, "dcols", MapHeaderRead::No, "of_def" },
+    { "fields",            "dcols cand: the candidate defs as file:line (legend full only); cand_more how many more", true, "dcols", MapHeaderRead::No, "cand" },
     { "fields",            "<of_def> column: each row's def ix=K groups (K~s split label, K~n by name, K~t primary template), space-separated", true, "cols", MapHeaderRead::No, "of_def" },
     { "fields",            "<split> column: 1 where the row's edge to of= carries the resolver's split label (may be another arm's)", true, "cols", MapHeaderRead::No, "split" },
-    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); 2 = via=link, a markdown link; NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
+    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); 2 = via=link, a markdown link; 3 = via=macro:NAME, calls of= through a t=macro row; NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
     // DEPTH-LABELLED --impact (0.6.5): graph.h transitiveCallersDepth's hop per row. The <s> row prints d= run-length
     // (graph.h depthRunAttrXml: the window's first row and each depth change), the columnar form a dense <depth> column, and
     // the root by_depth= (graphlegend.h byDepthAttrXml) partitions reaches= by depth; all three are absent at reaches="0".
@@ -751,6 +816,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // span holds the full legend comment between <ctx> and its first child, and kLegoLegend spells caveat="…" in it, so
     // a head read fired on every --lego answer (compactlegendcheck (D7) caught it on --lego=Point).
     { "caveat",            "methods=0 caveat=not-extracted-for-lang: no <m> contract read for this language", true, "iface" },
+    // lane lego-unread-for-lang (serialize.h legoImplementorsUnreadAttr, on the <iface> row): the caveat above is about
+    // the <m> ROWS; this one is about the COUNT. An honesty term rather than a per-verb reading, so it reads here beside
+    // counts_floor= — implementors= is not short here, it was never measured, and a reader who has only "a zero is none
+    // found" cannot tell those apart. ELEMENT-qualified for the same reason caveat= is: kLegoLegend spells the attribute
+    // in the head span, so a head read would fire on every --lego answer.
+    { "implementors_unread_for_lang", "implementors_unread_for_lang=LANG: no extends/implements edge is read for LANG at all, so implementors= is ABSENT — unread-for-lang is unknown, not zero (a count beside it is a floor over what did reach the graph)", true, "iface" },
     { "next",              "next=: the one pasteable follow-up", true },
     // L8 (train 29): a capped callers page's next= is the next page, and the uses verb rides beside it here (present-only)
     { "uses_next",         "uses_next=: the uses verb on this selector (the call sites), beside a capped callers page's next=", true },
@@ -761,9 +832,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // three attributes on the <b> (serialize.h kTruncatedBodyLegend is the full reading). ELEMENT-qualified: pr-context's
     // root truncated= and the doctor/naming-calibration truncated= rows below are other elements' attributes.
     // next= is NOT restated here: the generic next= term above rides every document that carries one (review N1).
-    { "truncated",         "<b truncated=1 lines=lo-hi/T>: cut at the byte budget; lines= shown of its T", true, "b" },
+    { "truncated",         "<b truncated=1 lines=lo-hi/T>: cut at the byte budget, or at cap_lines= when that is present; lines= shown of its T", true, "b" },
     // review M1: a body whose FIRST line alone exceeds the budget is served whole, never as a fragment
     { "over_ceiling",      "<b over_ceiling=1>: its first line alone exceeds the budget, served whole", true, "b" },
+    // CB1: the CAUSE of the cut, not its extent. Without this, truncated= alone would read as "cut at the byte
+    // budget" on a row the LINE cap cut -- a registered reading made false by a new code path (non-negotiable 3).
+    { "cap_lines",         "<b cap_lines=N truncated=1 lines=1-N/T>: cut at the N-line body cap, not at the byte budget; absent on a byte cut", true, "b" },
     // lane honesty-cuts-066: --pack-top-n's cut, the <b> rule on raw files (serialize.h kPackSourceCutLegend is the full reading)
     { "truncated",         "<src truncated=1 lines=1-K/T>: cut at a line end at the byte budget; K of its T lines", true, "src" },
     { "budget_bytes",      "<src_cut shown= total= capped=1 budget_bytes=>: files served of the top-N asked, the rest over the byte ceiling; unreadable=N not readable", true, "src_cut" },
@@ -823,6 +897,30 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // KEY-qualified (onKey): the same name on the same element means different things on two verbs. Each reading was
     // checked against its emitter (the per-verb comment names it) and against the full legend where it has one; the
     // default-posture floor is gone and test/legendcoveragecheck.sh fails on any undefined attribute a default row emits.
+    // abi: src/abicheck.h writeAbiCheck / writeAbiRef / writeAbiStruct. 2026-11-17 (lane abiarch-retire-register): every row
+    // below was undefined in the compact dialect (35 names, 43 element@attr pairs on the gate's fixture). Shortened from the
+    // verb's own full legend. rows=/excluded= (root and ref), size_differs= and, beside at=, head= are RETIRED, and the
+    // readings that replace them are here: the kind counts sum to the row total, size_delta=0 is what size_differs=0 said.
+    { "tip", "ref name= tip= date=: a branch with rows, its tip commit and date; shown=/capped=/head_only= and kind counts are its own", true, "ref", MapHeaderRead::No, {}, "abi" },
+    { "kind", "struct n= p= l= kind= head_size=: a struct, its file and line at HEAD, sizeof there. kind=drift: the byte contract differs (the kind that exits 2); unknown: the ref's copy could not be modelled, never read as same; absent: the ref does not define it at that path. drift= unknown= absent= count them on abi and ref; each row is on one kind count (absent at 0): their sum is the row total", true, "struct", MapHeaderRead::No, {}, "abi" },
+    { "ref_size", "ref_size= size_delta=: sizeof on the ref and its distance from head_size=, only where the ref's copy was sized; size_delta=0 is the same size, not the same layout", true, "struct", MapHeaderRead::No, {}, "abi" },
+    { "a", "d n= a= b=: a differing field as type@offset at HEAD (a=) and on the ref (b=), or absent", true, "d", MapHeaderRead::No, {}, "abi" },
+    { "k", "ref_caveat k= d=: why the ref's copy is unmodelled: kind, detail", true, "ref_caveat", MapHeaderRead::No, {}, "abi" },
+    { "k", "head_caveat k= d=: a limit of HEAD's own model of the struct: kind, detail", true, "head_caveat", MapHeaderRead::No, {}, "abi" },
+    { "structs", "more structs=N: N more listed structs on this ref (in dropped=); detail=1 lists all", true, "more", MapHeaderRead::No, {}, "abi" },
+    { "rename", "rename=N: same slots and field types, other field names (or a same-type reorder): no byte moved; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "spelling", "spelling=N: same bytes, other type names; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "stub", "stub=N: one side is an empty placeholder aggregate; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "head-moved", "head-moved=N: the ref's copy equals its merge base's, so HEAD changed; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "head", "head=: HEAD's commit, printed only where at= could not be stamped", false, {}, MapHeaderRead::No, {}, "abi" },
+    // arch: src/verbs_report.h runArchViews / emitArchMetrics (+ src/arch.h computeModuleMetrics). The <metrics> readings are the
+    // definitions that rode every answer as its note= attribute, now paid once in the legend; propagation_cost= and
+    // zone_unknown= ride only beside their attribute, as their note clauses did.
+    { "root", "root=: from=/to=/path= relative to it", false, {}, MapHeaderRead::No, {}, "arch" },
+    { "modules", "metrics: Martin metrics per directory, estimated from name-based deps; descriptive, never a gate. modules= the m rows, typed_modules= those with types>0; zone_pain= zone_useless= zone_ok= zone_na= partition modules=: the two main-sequence corners (a heuristic with no outcome-based validation: folklore, not proof), typed modules in neither, types=0 modules (no abstractness score)", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "zone_unknown", "zone_unknown=: modules holding a file in a no_file_edges= language: zone and coupling unknown, not zero; a fifth part of the partition", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "propagation_cost", "propagation_cost=: density of the file-dep transitive closure (MacCormack): the fraction of files reachable from an average file", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "path", "m path= ca= ce= types= abstract= I= A= D= zone= reachable=: a directory module: ca= modules depending on it, ce= modules it depends on, types= declared, abstract= abstract ones, I=ce/(ca+ce), A=abstract/types, D=|A+I-1| (distance from the main sequence), zone=pain|useless: D past 0.5 with A+I below|not below 1, else ok; n/a at types=0; reachable=0: no main and no module nothing depends on reaches it; isolated=1: ca=ce=0; leaf=1: ce=0 under ca>0", true, "m", MapHeaderRead::No, {}, "arch" },
     // affected: src/verbs_change.h runAffected (+ src/testmap.h resolveAffectedSeeds/affectedAnswer)
     { "seeds", "seeds=N: symbols the argument matched; only those outside test files seed the caller walk", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "seed_test_files", "seed_test_files=N: matched files that are TESTS; listed to run (seed_kind=test), never walk seeds", false, "affected", MapHeaderRead::No, {}, "affected" },
@@ -830,6 +928,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "reached", "reached=N: symbols the transitive caller walk reached from the seeds (seeds excluded)", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners; their subprocess reach is unmodelled, never in tests=/reached=", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "run_first", "run_first=N: the first N test files have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "affected", MapHeaderRead::No, {}, "affected" },
+    // AF5 (testmap.h affectedUnusedRowsXml / kAffectedUnusedLegend): present only when a list item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest", false, "affected", MapHeaderRead::No, {}, "affected" },
     // IX-5 (testmap.h classNewTestRows / kClassNewLegend): present only when the hedged group renders
     { "via", "<g via=class-new total= shown= capped= next=>: tests not listed above that construct a class owning a reached method (or the changed class); <new p= l= class=>: the test file, the construction line if exact, the class. The dispatch is not proven, so never in tests=/reached=; nearest class first; a floor (Go T{}, C++ T x;, Ruby T.new are not read)", true, "g", MapHeaderRead::No, "class-new", "affected" },
     // callees: src/callhierarchy.h computeHopTestedPartition, spliced in src/verbs_navigate.h
@@ -922,7 +1022,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "side", "alts side=from|to of=: further definitions that endpoint's name binds, not printed above (the pick is not provably unique): <d p= sel= class=>, sel= pastes as that endpoint", true, "alts", MapHeaderRead::No, {}, "path" },
     { "decl_only", "alts d decl_only=1: no body (a header declaration or interface contract), not a second definition", true, "d", MapHeaderRead::No, {}, "path" },
     { "sel_proven", "alts d sel_proven=0: no spelling tried binds it alone; its sel= names the file and owner and may bind more than that definition", true, "d", MapHeaderRead::No, {}, "path" },
-    { "alts_shown", "alts alts_shown=K defs=N: K of the other rows shown; next= pages the rest", true, "alts", MapHeaderRead::No, {}, "path" },   // also defines defs= there
+    { "shown_alts", "alts shown_alts=K defs=N: K of the other rows shown; alts_capped=1 they are cut; next= pages the rest", true, "alts", MapHeaderRead::No, {}, "path" },   // also defines defs= there
     { "from_p", "from_p=/to_p=: the definitions from= and to= were bound to", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_p=
     { "from_defs", "from_defs=/to_defs=: definitions of each name, all searched; above 1, qualify file:name", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_defs=
     // TRACE-EP (src/pathpairs.h kPathPairsLegend), present only when several definition pairs reach: <pair> chains and <alt> rows
@@ -986,8 +1086,12 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // idea #11 (lane lean-trio): present-only, on a regression-free answer whose stale sa rows were collapsed to counts
     { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    // D4 (src/quality.h ratchetAttrsXml): present when the tangle ratchet read its reference point
+    { "ratchet_ref", "ratchet_ref=TAG ratchet_judged=N: N tangle rows' functions compared with their best since TAG; ratchet_unread= / ratchet_cut=1: versions not measured", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    // CR712-SHSTATUS-DEPTH (src/verbs_quality.h QdRootFields::shellCut): present when not 0
+    { "shell_cut", "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; deeper code not judged", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, ceiling=, tangle", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped: self-registering test/bench macros or Rust #[test]; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1013,7 +1117,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "files", "files=N: files scanned (unscannable ones are skipped=)", false, "skillscan", MapHeaderRead::No, {}, "scan-skills" },
     { "findings", "findings=N: pattern hits; rows print up to 200 (shown= capped=1 past that)", false, "skillscan", MapHeaderRead::No, {}, "scan-skills" },
     { "verdict", "verdict=clean|warn|critical: the worst finding's severity, the same as exit 0/1/2", false, "skillscan", MapHeaderRead::No, {}, "scan-skills" },
-    { "why", "f why=no-cred-source: net-exfil hit, no credential-shaped source on the line (WARN); why=sensitive-read-upload: a sensitive file read feeds the upload (CRITICAL)", true, "f", MapHeaderRead::No, {}, "scan-skills" },
+    { "why", "f why=no-cred-source: net-exfil hit, no credential-shaped source on the line (WARN); why=sensitive-read-upload: a sensitive file read feeds the upload (CRITICAL); why=local-dest: a credential var sent by bare curl over HTTP(S) only to a canonical loopback or private-LAN host, no redirect, no relay/proxy/curl-config/curl-shadowing signal in the file (WARN)", true, "f", MapHeaderRead::No, {}, "scan-skills" },
+    { "dest", "f dest=: the hosts the line's curl URLs name, when all are proved (a literal URL on the curl line; a $VAR destination is never resolved); where the URLs point, not proof of the last hop; absent = unproved", true, "f", MapHeaderRead::No, {}, "scan-skills" },
+    { "owner", "f owner=: the service (cloudflare, github, airtable) a credential var names and that owns every dest= host; triage only, the row stays CRITICAL", true, "f", MapHeaderRead::No, {}, "scan-skills" },
     { "rule", "f rule=: the finding's rule, CATEGORY:name (INJECTION, EXFILTRATE, SCOPE-CREEP, FRONTMATTER, SCAN-INCOMPLETE); p= is path:line", true, "f", MapHeaderRead::No, {}, "scan-skills" },
     { "sev", "f sev=critical|warn|info: that finding's severity (verdict= is the worst)", true, "f", MapHeaderRead::No, {}, "scan-skills" },
     { "capped", "capped=1: more rows than 200; the shown rows are the worst severity first (every CRITICAL, then WARN)", false, "skillscan", MapHeaderRead::No, {}, "scan-skills" },
@@ -1031,6 +1137,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners in the corpus, a path count; not call-graph modelled", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "run_first", "run_first=N: the first N t rows have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_registered", "script_gates_registered=N: shell gates test/regression.sh registers as suite members", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
+    // AF5 (situ.h kTestGateUnusedLegend): present only when a --test-gate=FILES item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest; exit never 0 (4 if gating, else 6)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_mapped", "script_gates_mapped=N: registered gates with exact dependency evidence (literal paths or RIPWIRE_TEST_DEPS)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_unresolved_dynamic", "script_gates_unresolved_dynamic=N: registered gates with no mappable deps; they may cover the change unlisted", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "evidence", "t evidence=script_literal|manifest_declared: why a shell gate joins tests=, its text names the changed path or its RIPWIRE_TEST_DEPS does", true, "t", MapHeaderRead::No, {}, "test-gate" },
@@ -1129,6 +1237,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "suppressed_string", "suppressed_string=N: string-tier hits held back, not in hits=; the grep-in=any flag serves them", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_parsed", "tier_parsed=N: hit files parsed to classify hits as code/comment/string (budgeted; see tier_budget=)", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_unclassified", "tier_unclassified=N: hits in files never classified; nonzero = tier label unproven for them", false, "grep", MapHeaderRead::No, {}, "grep" },
+    // BX2 step 2 (verbs_grep.h grepHeldAttrs): present only when a file's every hit was held back.
+    { "held_files", "held_files=N: files whose every hit was held back (no row names them)", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held", "held=: the first 5 of those paths", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held_next", "held_next=: the call that serves them (every tier)", false, "grep", MapHeaderRead::No, {}, "grep" },
     // cut-fix lane D: three attributes the grep root and rows emit that the compact dialect never read. tier_parsed='s own
     // reading pointed at tier_budget= ("see tier_budget=") and no row defined it; tier= labelled a comment-only answer
     // undefined; and line_bytes= — the one disclosure that a row's matched text was CUT (search.h kGrepMatchedLineMaxBytes)
@@ -1158,17 +1270,23 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short (a declined, unbound or value use, or a kind read not called); not proof of more", false, {}, MapHeaderRead::No, {}, "safe-delete" },
     { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
     { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
+    // TIER-FOLLOWUP: the value whose meaning a reader cannot guess from untested-radius beside it
+    { "risk", "risk=tests-only: every symbol in the transitive radius is a test definition (radius_tests=); no production caller was found in the resolved graph", false, "safe-delete", MapHeaderRead::No, "tests-only", "safe-delete" },
     // CALLSITE-AT (2026-10-09): sites_l= became sites_at= (pasteable file:line tokens); the callers verb's s rows carry the same pair.
-    { "sites_at", "c sites_at=: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
+    // SITES-SHORT (2026-11-17, sitetokens.h): a site in the row's own p= file is the bare line again; only a foreign one is file:line.
+    // The reading is `[file:]line` with p= named as the default file: +10 B, inside the 450 / 840 B targets the file:line reading sat under.
+    { "sites_at", "c sites_at=: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     { "sites_total", "c sites_total=N: N sites, sites_at= lists the first 16; the uses verb lists all", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
+    { "shown_implementors", "shown_implementors=K: only K impl rows here of implementors=; implementors_capped=1 they are cut; implementors_next= lists all", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "shown_d2", "shown_d2=K: of d2= second-hop caller rows printed; d2_capped=1 when more were cut, 0 when whole; next= lists the whole radius", true, "callers", MapHeaderRead::No, {}, "for" },
     { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },
     // lane lego-transitive: the deeper implementors (serialize.h legoClosurePage / legoClosureAttrs / writeLegoImplRow): present-only.
     // ONE term for the closure and its two row attributes (it rides whenever a via=/depth= row does): the reading costs a fixed
     // ~100 B on every answer with a deeper row, which on a small closure is most of the growth (lane report, K1/K2 bytes).
     { "transitive", "transitive=N: rows below a direct one, each once: impl via= its base, depth= hops; implementors= counts direct", true, "iface", MapHeaderRead::No, {}, "lego" },
-    { "transitive_shown", "transitive_shown=N: deeper rows on this page; has_more=1 with next= pages on", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "shown_transitive", "shown_transitive=N: deeper rows on this page of transitive=; transitive_capped=1 they are cut; has_more=1 with next= pages on", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "transitive_offset", "transitive_offset=N: the first deeper row this page shows", true, "iface", MapHeaderRead::No, {}, "lego" },
     // fix 1: the hedge on a name-only deeper row and the count of name-collision rows left out (present-only, both)
     { "base_by", "base_by=name: that impl's extends clause names via= by spelling alone; not a proven subtype, not walked below", true, "impl", MapHeaderRead::No, {}, "lego" },
@@ -1284,6 +1402,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "near", "near=: the indexed name to retry with", false, "impact", MapHeaderRead::No, {}, "impact" },
     { "near_renamed", "near_renamed=1: a definition of the selector left a changed file that now defines near= (a rename, not a mention)", false, "impact", MapHeaderRead::No, {}, "impact" },
     { "refused", "refused=N: N definitions fit the selector and it cannot pick one (a refusal, not an absence; found=0 counts the rows listed)", false, "impact", MapHeaderRead::No, {}, "impact" },
+    // BX2 FIX 9 (notfoundtext.h): present only on a not-found answer that found the name as text.
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "callers" },
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "uses" },
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "impact", MapHeaderRead::No, {}, "impact" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "impact", MapHeaderRead::No, {}, "impact" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "impact" },
     { "found", "found=0: no indexed definition matched the selector, nothing listed or counted (zero = none found, not none exists); exit stays 1", false, "defs", MapHeaderRead::No, {}, "defs" },
     { "of", "of=: the name asked for", false, "defs", MapHeaderRead::No, {}, "defs" },
     { "near", "near=: the indexed name to retry with", false, "defs", MapHeaderRead::No, {}, "defs" },
@@ -1348,6 +1476,14 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "alias_depth_capped", "alias_depth_capped=1: the alias walk stopped at 4 hops with an alias still to follow (via_alias= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias", "u alias=: the alias definition's name the site is written as (via=alias)", true, "u", MapHeaderRead::No, {}, "uses" },
     { "via_alias", "via_alias=N: N of the counted rows are written through an alias in scope (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    // BX1 FIX 2 (verbs_navigate.h appendMacroUseSites; graphlegend.h kUsesViaMacroLegend), present-only
+    { "via", "<u via=\"macro:NAME\">: the site invokes the function-like macro NAME, whose text (or a macro it invokes) uses of=; after the direct and alias rows, in count=", true, "u", MapHeaderRead::No, "macro:", "uses" },
+    { "via_macro", "via_macro=N: N counted rows reach of= through a function-like macro (via=macro:NAME on each; the columnar form lists them last)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    // lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): present only when the per-macro ceiling withheld a row.
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "callers", MapHeaderRead::No, {}, "callers" },
     { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
@@ -1516,7 +1652,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "facet", "r facet=failure-default: an error-masking row whose growth includes a read/parse/spawn failure returned as an empty success; it never gates by itself", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "similar", "r similar=N: the params list is new or grew and holds N>=3 adjacent same-typed params (C/C++); a swapped call compiles; pass a named struct; never gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands or shrunk member, an unhandled-arm row's values with no outcome (add the arm or a default)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    // fix= rides on complexity rows WITHOUT why= (repeateddecision.h), so a row of its own: under the why row a complexity-only
+    // answer emitted fix= with no definition (legendcoveragecheck G, quality-delta-refs-default | r@fix).
+    { "fix", "r fix=: the shape the row calls for, with its lines (name the decision once / name the loop once: one condition or loop body repeated); report-only", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "call", "r call=: the call an unchecked-status row drops the status of; its p= is that site's line. Fix: check it (check=True) or (void) it with a reason", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "pr_iters", "r root= pr_iters=: the ride-along map; root= its p= base, pr_iters= PageRank iterations", true, "r", MapHeaderRead::No, {}, "expand" },   // also defines root= on <r>
@@ -1684,7 +1829,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // LATENT cut/cap/refusal attributes: conditional, NOT in the src/ answer, readings from the emitter only (keep or drop)
     { "rows_capped", "rows_capped=1: a row list hit its 500-row ceiling; rows are a SAMPLE, every count stays exact", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "cells_capped", "cells_capped=1: the cell universe hit its 2048 ceiling; cells beyond it are uncounted", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
-    { "cells_shown", "cells_shown=/cells_capped=1: only this many of cells_total= cell rows print (cap 12)", true, "fn", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines cells_capped= on <fn>
+    { "shown_cells", "shown_cells=N: cell rows printed of cells_total= (cap 12); cells_capped=1 on the row is the cut", true, "fn", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines cells_capped= on <fn>
     { "decls_capped", "decls_capped=1: a declaration query hit its match budget; cells may be missing", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
     { "undecided_decls", "undecided_decls=N: declarations whose mutability could not be decided; dropped, never guessed", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
     { "unanalyzed_langs", "unanalyzed_langs=/unanalyzed_files=: indexed languages (and their files) this lens skips; NOT zero cells", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines unanalyzed_files=
@@ -1730,6 +1875,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // metrics: src/serialize.h (s row metrics, f layer= via builtinLayer in src/arch.h)
     { "humps", "humps=/deep=: regions reaching the nesting bar / lines inside them; absent when nest= is under the bar", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines deep=
     { "deep_floor", "deep_floor=1: deep= is a FLOOR; a line two humps share is billed once, so deep below humps is legal", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "steer", "steer=N: primitive locals rewritten, then read in a branch condition 10+ statements later; absent at 0", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "tangle", "tangle=S: quality-delta's tangle score, (nest past 3 + deep%/5 + steer/100 lines) x log2(loc/50), capped at its worst top-level block's S + 2 per local crossing blocks; bar 6", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "tangle_raw", "tangle_raw=S: tangle before that cap; only when the cap lowered a score at or over the bar", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ev", "ev=/ev_why=: essential complexity (2+: jumps block extract-method; absent: 1) / the jumps behind it, tag:count", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines ev_why=
     { "ev_floor", "ev_floor=1: ev= is a FLOOR; noreturn calls, macro-hidden exits and unresolved gotos are unseen", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ppalt", "ppalt=N: #else/#elif branches in the body; metrics sum ALL branches, no one build compiles them all", true, "s", MapHeaderRead::No, {}, "metrics" },
@@ -1740,14 +1888,24 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "query" },
     // around: src/serialize.h (f layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "around" },
+    // around: task D4 — the seed answer's LANGUAGE anchor, on the root row whenever an anchor decided the answer.
+    // legendcoveragecheck (A) settled where the definition belongs: the DEFAULT (compact) around doc renders the
+    // VERB-scoped dict below — not the shared map dict (the 466-area entries for reflang were invisible to the
+    // probe), and the full seed stanza is not in the default answer either. First screen, first responsibility.
+    { "reflang", "reflang=X: the language the answer ANCHORED to — a STATED one (the query's @lang, the asked-from file, the editor's declared languageId) fronts its own definitions; reflang-origin= beside it says where X came from; absent when language decided nothing", true, "r", MapHeaderRead::No, {}, "around" },
+    { "reflang-origin", "reflang-origin=: explicit (the query's @lang suffix), context (the file the query asked from), client (the editor's declared languageId) or corpus (the repo's majority language — it fronts NOTHING, it only breaks ties between same-kind definitions, and appears only when one such tie moved the front); under an explicit anchor that language cannot fill, foreign rows are served anyway and stderr says so", true, "r", MapHeaderRead::No, {}, "around" },
+    { "next", "next= beside a corpus tie: the majority broke a same-kind tie for the front; the value carries the defs invocation that lists every definition and the spellings that pick one", true, "r", MapHeaderRead::No, {}, "around" },
+    // D4 reflang/reflang-origin: the FULL legend defines them in the seed stanza itself (serialize.h, charged only
+    // when the row carries them) — the verb table proved NOT to reach around's first screen, and legendcoveragecheck
+    // (A) is what caught that. The COMPACT dialect rides the shared dict entries above.
     // for: src/serialize.h lens rows (d p= layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "for" },
     // pack-task: src/serialize.h lens rows (d p= layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "pack-task" },
     // clones: src/verbs_report.h emitClonesReport (groupExemptKind, cloneIdiomAttrs)
     { "exempt", "group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement leaves out parameter names, std:: chains and container words and never demotes a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement, call-sequence", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement and call-sequence leave out parameter names, std:: chains and container words and never demote a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=
     { "members", "r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
@@ -1756,6 +1914,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "head_basis", "head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "base_ref", "base_ref=/target_ref=: the two resolved full shas a range compared (committed trees; at= omitted)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },   // also defines target_ref=
     { "churn", "churn=unavailable: range form; short-horizon-churn cannot be measured, so its silence is not no churn", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "stale_tree", "stale_tree=1: the working tree is not target_ref's tree (uncommitted edits or HEAD elsewhere): this answers for target_ref, not the files on disk; never gating", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     // from-trace: src/tracelocus.h (frame and skipped rows)
     { "line", "skipped line=: that frame's line; p= is its path, outside every root, so never ranked", true, "skipped", MapHeaderRead::No, {}, "from-trace" },
     { "line_encloses", "frame line_encloses=: the other def today's line sits in; STALE trace, the name binding was kept", true, "frame", MapHeaderRead::No, {}, "from-trace" },
@@ -1833,10 +1992,23 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "task", "task=: the query", false, "ctx", MapHeaderRead::No, {}, "for" },
     { "n", "d n= l=: the symbol's name and def line", true, "d", MapHeaderRead::No, {}, "for" },
     { "t", "b t= n= p= l=: a served body's kind, name, file, first line", true, "b", MapHeaderRead::No, {}, "for" },
+    // BAND CF (serialize.h MergedCalleeNameRow): present-only, on a hop callee row whose definition is outside its h row's file
+    // BAND BC (serialize.h appendOneCalleeCall): the same attribute on a served body's signature rows; one row per verb key, as the reading is key-qualified
+    { "p", "c p=: the file a hop or body callee's l= lines are in, printed when it is not the h/b row's own (no p=: that row's file)", true, "c", MapHeaderRead::No, {}, "for" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "expand" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "pack-task" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "exemplar" },
     { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
     { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
+    // AF4 T-C (forfilesyms.h TailPointerSpan::kind): a pointer's kind is on its row, so the three pointer notes define by attribute
+    // and may join the trailing legend instead of labelling the rows after them by position.
+    { "ptr", "t ptr=: a pointer's kind, twin = decl-twin, side = one-side; a sigs <t> with no ptr= is a demote pointer", true, "t", MapHeaderRead::No, {}, "for" },
     { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
-    { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
+    { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; zero_rules inert= names them (applicable=0: count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
+    // LT1 (verbs_lint.h ZeroRuleFold): the rules that found nothing, one row instead of a count="0" row each.
+    { "n", "zero_rules n= ran= inert=: the n rules that found nothing; ran= matched none here, inert= no language here", true, "zero_rules", MapHeaderRead::No, {}, "lint" },
+    // LT1 (verbs_lint.h rankLintRowsByImportance): the <f> rows' order, read only where a finding row is printed.
+    { "rule", "f rows run most important first: authored, then tool/vendored/generated/minified files; error, warn, info; source, then tests; PageRank place; path:line", true, "f", MapHeaderRead::No, {}, "lint" },
     { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },
     // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
     // changed code (the working-tree arm on a dirty tree), so the floor could not pin it stably.
@@ -1844,6 +2016,18 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // pr-context (prcontext.h): a changed file's <s> rows and their <caller> rows print t= n=; seen only when the diff
     // touches a symbol, so a HEAD~1 roster row whose last commit is test-only cannot pin it either way.
     { "n", "s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name", true, "s", MapHeaderRead::No, {}, "pr-context" },
+    // RT1 (verbs_forroute.h): the <route> element a --for question answered by --callers / --uses / --impact carries as the
+    // root's first child. Element-qualified, not key-qualified: one element, one reading, on all three roots. Present-only,
+    // so a bare verb call's legend is unchanged (test/forverbroutecheck.sh (2)).
+    { "from", "route from=for kind=who-calls|where-used|direct-radius|transitive verb= task= complete=not-proven next=: this ranked-lens question (task=) was answered by verb= alone, kind= read from its wording; a verb lists call edges and definitions only, so registrations, closures, class installs, macro aliases and declined calls are not in it; next= is the ranked lens answer, unrouted", true, "route" },
+    { "warn", "route warn=1 why=: evidence this answer misses something a fold cannot list (macro:FILE:LINE a #define naming it; macro-row:NAME a caller that is a macro, whose callers are not listed; twin-defs:N same-stem definitions; value-hop:N:NAME a caller whose own callers are a floor; target-floor the symbol's callers are a floor, it is called through a slot; text-gap-capped:N / grep-capped the text-only list is cut; kind: no check ran); absent = none found, never proof of completeness", true, "route" },
+    { "why", "route why=unchecked: the evidence check could not run, so the absent warn= proves nothing", true, "route", MapHeaderRead::No, "unchecked" },
+    // RT2 (verbs_forroute.h foldElementXml): the text gap, folded into the routed answer right after <route>. Present-only.
+    { "n", "text_only n= capped=1: N files name the symbol as a whole word and no row above lists them (macro aliases, strings, shell, a call the resolver declined); text evidence, not resolved edges; capped=1: only the first 16 are listed", true, "text_only" },
+    { "p", "tx p=FILE:LINE: a text-only file and its first whole-word line", true, "tx" },
+    { "page1", "route page1=1: the first page of the ranked lens answer follows as this root's last child <ctx>, its legend inside, its next= the second page", true, "route" },
+    // KB1 (src/forkeybody.h): present-only, read only on a routed answer's <bodies of="key"> (value-qualified, any routed verb)
+    { "of", "bodies of=key: the definition body of each symbol the question names in backticks (at most 2), b t= l= p= n= as expand prints it, no callee rows, whole up to 4000 B (longer: truncated=1 lines= next=)", true, "bodies", MapHeaderRead::No, "key" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -1956,12 +2140,6 @@ inline bool spanHasAttr( std::string_view span, std::string_view attr, std::stri
     return span.find( needle ) != std::string_view::npos;
 }
 
-// Does `head` carry ` <attr>="`? Matched at a tag boundary — a leading space and a trailing `="`.
-inline bool headHasAttr( std::string_view head, std::string_view attr )
-{
-    return spanHasAttr( head, attr, "\"" );
-}
-
 // Any payload attribute ending in `_capped` (tests_capped=, importers_capped=, …) — their names, joined by '/'.
 inline std::string payloadSubCapAttrs( std::string_view doc )
 {
@@ -2029,14 +2207,16 @@ inline bool isElementNamed( std::string_view tag, std::string_view name ) noexce
 
 // Does the quoted value that opens `value` (up to its closing quote) list `item` as one whole comma-separated entry? An empty
 // item accepts any value: only a valueItem term asks what the attribute holds rather than whether it is there.
+// An item ending in ':' names a FAMILY of values and matches any entry it prefixes (BX1 FIX 2: "macro:" matches via="macro:NAME").
 inline bool quotedValueListsItem( std::string_view value, std::string_view item ) noexcept
 {
     if( item.empty() )
     {
         return true;
     }
-    const std::string_view list  = value.substr( 0, value.find( '"' ) );
-    std::size_t            begin = 0;
+    const bool             prefix = item.back() == ':';
+    const std::string_view list   = value.substr( 0, value.find( '"' ) );
+    std::size_t            begin  = 0;
     while( begin <= list.size() )
     {
         std::size_t end = list.find( ',', begin );
@@ -2044,7 +2224,7 @@ inline bool quotedValueListsItem( std::string_view value, std::string_view item 
         {
             end = list.size();
         }
-        if( list.substr( begin, end - begin ) == item )
+        if( const std::string_view entry = list.substr( begin, end - begin ); entry == item || ( prefix && entry.starts_with( item ) ) )
         {
             return true;
         }
@@ -2092,6 +2272,17 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std:
     return false;
 }
 
+// Does a TAG of `head` carry ` <attr>="`? compactDocHead's span keeps the comments between the root and its first child, and when
+// this is asked they are the FULL-dialect legend prose, which defines an attribute by spelling it (`scrubbed="1" = a ]]> was
+// split`). A substring test over the span read that definition as the attribute: every bundle-mode expand documented scrubbed=
+// and redacted= with neither in the answer, and the ref posture, which recomputes the legend from the COMPACTED answer, then
+// disagreed with what was written and kept the legend inline. The span is right (its other readers need the child's tag and the
+// comments' position); the test was wrong. So it is the payload's own tag walk, run over the head alone.
+inline bool headHasAttr( std::string_view head, std::string_view attr )
+{
+    return payloadHasAnyAttr( head, attr );
+}
+
 // The opener of the map header's data comment (serialize.h buildStats, its one emitter).
 inline constexpr std::string_view kCompactMapHeaderOpener = "<!-- files=";
 
@@ -2132,9 +2323,14 @@ inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::st
     {
         return false;
     }
-    if( !t.unlessTag.empty() && payloadHasAnyAttr( doc, t.unlessAttr, t.unlessTag ) )
+    for( std::string_view rest = t.unlessTag; !rest.empty(); )   // each `|`-separated alternative: the row steps aside beside any
     {
-        return false;
+        const std::size_t bar = rest.find( '|' );
+        if( payloadHasAnyAttr( doc, t.unlessAttr, rest.substr( 0, bar ) ) )
+        {
+            return false;
+        }
+        rest = bar == std::string_view::npos ? std::string_view() : rest.substr( bar + 1 );
     }
     if( !t.onTag.empty() )
     {
@@ -2282,6 +2478,12 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     // Present-only like every reading above: a document without such a row pays 0 bytes. It sits outside
     // compactPresentTerms deliberately — that function answers "which TERM-TABLE rows are present", and this
     // reading is not one of them (test/compactlegendcheck.sh arm (S) proves it live instead of by a row).
+    // NOT A TERM ROW IS NOT "NOT A DEFINITION": it is a legend-dictionary entry all the same (legenddict.h
+    // kNameReadingEntries). For a day it was not, and every answer that took the ref posture dropped this
+    // sentence while the dictionary its pointer names had no line for it — test/legendhavecheck.sh arm (M).
+    // A reading added here by hand must be added there too, or reduceCompactLegend keeps the answer inline — and
+    // that function repeats this very scan, so the two must stay the same expression (its rebuild check catches a
+    // drift: the answer stays inline, disclosed).
     if( doc.find( kModScopeEscapedName ) != std::string_view::npos )
     {
         out += ' ';

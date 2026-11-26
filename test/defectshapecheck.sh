@@ -13,9 +13,12 @@
 #   dedup-first    — C++: std::unique / std::ranges::unique with a predicate over a type that carries a
 #                    severity-like field, where neither the predicate nor the sort before it reads that field,
 #                    so the FIRST row of a run survives, not the most severe. REPORT-ONLY.
-#   vacuous-assert — Bash, test-script paths only: an ABSENCE assertion (grep -q PAT whose match is the failure
-#                    branch) read off a command whose failure is never checked, so a crash reads as PASS.
-#                    REPORT-ONLY.
+#   vacuous-assert — Bash, test-script paths only: an assertion that PASSES on an empty text (an absence grep,
+#                    [ -z ], a cmp/diff/= parity of two texts) read off a run whose failure is never checked —
+#                    through a capture, a pipe without pipefail, a file it redirected into or a wrapper whose
+#                    status is dropped — so a crash reads as PASS; and three status shapes: a FAIL reporter
+#                    called inside $( ) (its flag dies with the subshell), an rc=$? no test reads, and a
+#                    `| head || fallback` (the || reads head's status). REPORT-ONLY.
 # Like every kind, a row fires only on what THIS change introduced, never on pre-existing debt: a site is new
 # when its normalized text occurs more often than among the baseline's sites of that facet (repo-wide), so an untouched,
 # MOVED or RENAMED mismatch gives no row and a swap (one fixed, one added in the same function) still does.
@@ -33,7 +36,8 @@
 # #else of #if 1 read as live), an escape that spells a brace (§1d); an unqualified format()/print();
 # the std::print ostream overload; a dedup whose sort reads severity in the MILD-first direction, or whose
 # predicate/comparator is a named function (skipped, never guessed); a utf8 cut with no ellipsis; a
-# vacuous-assert absence read off a file a run redirected into (§4 n_fileredirect). And the
+# vacuous-assert comparison of COUNTS (a failed run counts 0 rows), a text read off stderr, or a sentinel a helper
+# prints on failure (§4b). And the
 # utf8/dedup fixtures cannot see an exit-only bug on their own (their clone near-misses gate duplication) —
 # §4 vac and §5 both carry the exit judgment for the report-only facets.
 #
@@ -1149,8 +1153,8 @@ gating_split "$L" 0
 #   the absence, an enclosing if/case that requires content of the same capture, a plain capture under set -e
 #   (errexit aborts on its failure), the match-is-pass polarity, a literal producer, a commented-out shape, a
 #   pre-existing vacuous line, a sound if, a new function with a handled capture, the same shape in a script
-#   outside a test path, a text utility over a file, a script-defined wrapper (stated floor), a presence test
-#   on a variable derived from the capture, a requirement inside a { …; } group, and an elif chain. A capture
+#   outside a test path, a presence test on a variable derived from the capture, a requirement inside a
+#   { …; } group, and an elif chain. A capture
 #   derived from another capture (TAG="$( printf '%s' "$OUT" | grep -o … )") is followed back to its run.
 fx_init vac
 mkdir -p "$WORK/vac/test" "$WORK/vac/scripts"
@@ -1166,7 +1170,7 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif n_ifand n_elifpos n_helper n_fileredirect t_orcond t_undefhelper t_reassign; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo t_filepipe t_wrapper n_derivedguard n_bracegroup n_elif n_ifand n_elifpos n_helper t_fileredirect t_orcond t_undefhelper t_reassign; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
 for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
@@ -1353,11 +1357,11 @@ OUT="$( "$BIN" --list 2>/dev/null )"
 TAG="$( printf '%s' "$OUT" | grep -o '<list[^>]*>' )"
 printf '%s' "$TAG" | grep -q 'bad=' && no "bad= present" || ok "bad= absent"
 EOF
-cat >>"$WORK/vac/test/n_filepipe.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_filepipe.sh" <<'EOF'
 "$BIN" --list >"$TMPDIR/out.txt" 2>/dev/null
 grep -v '^#' "$TMPDIR/out.txt" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
-cat >>"$WORK/vac/test/n_wrapper.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_wrapper.sh" <<'EOF'
 runit(){ "$BIN" "$@" 2>/dev/null; }
 W="$( runit --list )"
 printf '%s' "$W" | grep -q 'bad' && no "bad present" || ok "bad absent"
@@ -1387,7 +1391,7 @@ EOF
 #   spelled as an if condition of &&-joined greps (wrapverbscheck:266), as an elif condition (ensemblecheck:366) or
 #   through a function the script defines (qddialscheck:320). Near-miss positives: a || condition (a crash can take
 #   the other branch's pass), a helper the script does not define, and a positive on an EARLIER capture of a
-#   reassigned variable. Stated floor: an absence read off a FILE a run redirected into (redactcheck:81).
+#   reassigned variable.
 cat >>"$WORK/vac/test/n_ifand.sh" <<'EOF'
 C_OUT="$( "$BIN" --list 2>/dev/null )"
 if echo "$C_OUT" | grep -q '<list ' && echo "$C_OUT" | grep -qF '</list>'; then
@@ -1445,7 +1449,7 @@ fi
 RA="$( "$BIN" --list --other 2>/dev/null )"
 printf '%s' "$RA" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
-cat >>"$WORK/vac/test/n_fileredirect.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_fileredirect.sh" <<'EOF'
 "$BIN" --list >"$TMPDIR/exp.xml" 2>/dev/null
 grep -q 'secret' "$TMPDIR/exp.xml" && no "the secret leaked" || ok "no secret"
 EOF
@@ -1475,28 +1479,680 @@ ds_none_p "$L" test/n_case.sh     "the absence is nested in a case arm that requ
 ds_none_p "$L" test/n_casealone.sh "a case pattern alone on its line (the scanner must not read past it), the absence on the next line"
 ds_none_p "$L" test/n_sete.sh     "set -e: a failed plain capture aborts the script"
 ds_none_p "$L" test/n_seteuo.sh   "set -euo pipefail: a failed plain capture aborts the script"
-ds_none_p "$L" test/n_filepipe.sh "a text utility over a file is not a run under test (its input's provenance is not on the line)"
-ds_none_p "$L" test/n_wrapper.sh  "a capture through a script-defined wrapper is not judged (stated floor)"
 ds_none_p "$L" test/n_derivedguard.sh "a presence test on a variable DERIVED from the capture requires the capture's text"
 ds_none_p "$L" test/n_bracegroup.sh "a requirement inside a { …; } group on the same capture"
 ds_none_p "$L" test/n_elif.sh     "an elif chain: a crash takes the final else (a failure), not a pass"
 ds_none_p "$L" test/n_ifand.sh    "a positive on the same capture in an if condition of &&-joined greps guards it (rv §1c, wrapverbscheck:271)"
 ds_none_p "$L" test/n_elifpos.sh  "a positive on the same capture in an elif condition guards it (rv §1c, ensemblecheck:371)"
 ds_none_p "$L" test/n_helper.sh   "a positive on the same capture through a script-defined function guards it (rv §1c, qddialscheck:323)"
-ds_none_p "$L" test/n_fileredirect.sh "an absence read off a FILE a run redirected into is not judged (stated floor, redactcheck:81)"
-for f in t_orcond t_undefhelper t_reassign; do
+#   QD-VA-FORMS (2026-11-19): the three former floors are positives now — a filter over a file the run wrote
+#   (t_filepipe), a capture through a script-defined wrapper (t_wrapper), an absence read off a FILE a run
+#   redirected into (t_fileredirect; redactcheck:81 was the shape).
+for f in t_orcond t_undefhelper t_reassign t_filepipe t_wrapper t_fileredirect; do
     ds_has_p "$L" vacuous-assert "test/$f.sh" minor
 done
 gating_split "$L" 0
+
+# ── 4b) VACUOUS-ASSERT FORMS (QD-VA-FORMS): the status-dataflow walk on the B43 matcher's port ──────────────────
+#   One status model (src/shstatus.h = test/lib/exitstatus.py, held equal by gateexitcheck H4): a run whose status
+#   nothing reads may fail silently, and its text is then EMPTY. Positives, one per form: an absence read off a file
+#   the run redirected into; `|| no` after a pipe without pipefail (it reads the last stage); a wrapper whose status
+#   is dropped; a cmp parity of two failed runs' files; a FAIL reporter inside $( ) (the flag dies with the
+#   subshell); rc=$? only echoed; `| head -1 || fallback`; a text kept in a loop; a capture of a wrapper call. Each
+#   negative is a positive twin with the status read or the text guarded; the twin's row is the premise that the
+#   form is read, so the arm counts its pairs and fails short of all. The last five are census false positives
+#   fixed in this lane (the site in parentheses).
+fx_init vaf
+mkdir -p "$WORK/vaf/test"
+for f in t_redir t_nopipefail t_wrapdrop t_parity t_lostflag t_rcunread t_headfallback t_ungated t_callnorc n_pipefail n_redirrc n_redirorfail n_wrapchecked n_parityguard n_rcread n_rccondreassign n_rcbranches n_headtrue n_presencegated n_callrc n_sqsub; do
+    printf '%s' "$VHDR" >"$WORK/vaf/test/$f.sh"
+done
+fx_commit vaf
+cat >>"$WORK/vaf/test/t_redir.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_nopipefail.sh" <<'EOF'
+"$BIN" --list 2>/dev/null | sed 's/x/y/' >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_wrapdrop.sh" <<'EOF'
+runit(){ "$BIN" "$@" 2>/dev/null; }
+runit --list >"$TMPDIR/o.txt"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_parity.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/vaf/test/t_lostflag.sh" <<'EOF'
+ask(){ local o; o="$( "$BIN" --list 2>/dev/null )" || { no "the list run failed"; return 0; }; printf '%s' "$o"; }
+A="$( ask )"
+printf '%s' "$A" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_rcunread.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+echo "the list run exited $rc"
+printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "no list"
+EOF
+cat >>"$WORK/vaf/test/t_headfallback.sh" <<'EOF'
+FIRST="$( "$BIN" --list 2>/dev/null | head -1 || echo 'no output' )"
+case "$FIRST" in '<list'*) ok "a list first" ;; *) no "first line: $FIRST" ;; esac
+EOF
+cat >>"$WORK/vaf/test/t_ungated.sh" <<'EOF'
+KEEP=""; HIT=""
+for n in 1 2 3; do
+    o="$( "$BIN" --list --n=$n 2>/dev/null )"
+    HIT="$n"; KEEP="$o"
+done
+if [ -z "$HIT" ]; then
+    no "no run"
+else
+    printf '%s' "$KEEP" | grep -q 'bad' && no "bad present" || ok "bad absent"
+fi
+EOF
+cat >>"$WORK/vaf/test/t_callnorc.sh" <<'EOF'
+run_hook(){ printf '%s' "$1" | bash "$HOOK"; }
+OUT="$( run_hook '{}' )"
+if [ -z "$OUT" ]; then ok "silent"; else no "fired: $OUT"; fi
+EOF
+cat >>"$WORK/vaf/test/n_pipefail.sh" <<'EOF'
+set -o pipefail
+"$BIN" --list 2>/dev/null | sed 's/x/y/' >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_redirrc.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null; rc=$?
+[ "$rc" = 0 ] || no "the list run failed (rc=$rc)"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_redirorfail.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_wrapchecked.sh" <<'EOF'
+runit(){ "$BIN" "$@" 2>/dev/null; }
+runit --list >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_parityguard.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null
+[ -s "$TMPDIR/a.txt" ] && [ -s "$TMPDIR/b.txt" ] || no "a run printed nothing"
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/vaf/test/n_rcread.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+[ "$rc" = 0 ] || no "the list run exited $rc"
+printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "no list"
+EOF
+cat >>"$WORK/vaf/test/n_rccondreassign.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/v" 2>&1; prc=$?
+"$BIN" --other >>"$TMPDIR/v" 2>&1 || prc=1
+[ "$prc" = 0 ] && ok "both ran" || no "a run failed"
+EOF
+cat >>"$WORK/vaf/test/n_rcbranches.sh" <<'EOF'
+if [ -n "${WIDE:-}" ]; then
+    OUT="$( "$BIN" --list --wide 2>/dev/null )"; rc=$?
+else
+    OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+fi
+[ "$rc" = 0 ] && printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "rc=$rc or no list"
+EOF
+cat >>"$WORK/vaf/test/n_headtrue.sh" <<'EOF'
+FIRST="$( "$BIN" --list 2>/dev/null | head -1 || true )"
+case "$FIRST" in '<list'*) ok "a list first" ;; *) no "first line: $FIRST" ;; esac
+EOF
+cat >>"$WORK/vaf/test/n_presencegated.sh" <<'EOF'
+KEEP=""; HIT=""
+for n in 1 2 3; do
+    o="$( "$BIN" --list --n=$n 2>/dev/null )"
+    if printf '%s' "$o" | grep -q '<list'; then HIT="$n"; KEEP="$o"; break; fi
+done
+if [ -z "$HIT" ]; then
+    no "no run printed a list"
+else
+    printf '%s' "$KEEP" | grep -q 'bad' && no "bad present" || ok "bad absent"
+fi
+EOF
+cat >>"$WORK/vaf/test/n_callrc.sh" <<'EOF'
+run_hook(){ printf '%s' "$1" | bash "$HOOK"; }
+OUT="$( run_hook '{}' )"; RC=$?
+if [ "$RC" -eq 0 ]; then ok "exit 0"; else no "exit was $RC"; fi
+if [ -z "$OUT" ]; then ok "silent"; else no "fired: $OUT"; fi
+EOF
+cat >>"$WORK/vaf/test/n_sqsub.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/u.xml" 2>/dev/null
+OFF="$( grep -bo '<r ' "$TMPDIR/u.xml" | head -1 | cut -d: -f1 )"
+if [ -z "$OFF" ]; then no "no row"; fi
+grep -q 'note=' "$TMPDIR/u.xml" && no "note present" || ok "no note"
+EOF
+fx_run vaf
+L="vacuous-assert forms"
+for f in t_redir t_nopipefail t_wrapdrop t_parity t_lostflag t_rcunread t_headfallback t_ungated t_callnorc; do
+    ds_has_p "$L" vacuous-assert "test/$f.sh" minor
+done
+vpairs=0
+vpair(){  # NEG TWIN WHY — the negative prints no row, and its positive twin's row proves the form was read
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence in $1 off a failed run"; return; }
+    if [ -z "$( ds_any_p "test/$2.sh" )" ]; then no "$L: $1: the premise twin $2 printed no row, so its absence proves nothing"; return; fi
+    ds_none_p "$L" "test/$1.sh" "$3; twin $2 fires"
+    [ -z "$( ds_any_p "test/$1.sh" )" ] && vpairs=$(( vpairs + 1 ))
+}
+vpair n_pipefail t_nopipefail "set -o pipefail: the || after the pipe reads the run's status"
+vpair n_redirrc t_redir "rc=\$? after the redirected run is compared"
+vpair n_redirorfail t_redir "|| no on the redirected run"
+vpair n_wrapchecked t_wrapdrop "the wrapper call's status is read (|| no)"
+vpair n_parityguard t_parity "[ -s ] on both files guards the parity"
+vpair n_rcread t_rcunread "the captured rc is compared"
+vpair n_rccondreassign t_rcunread "a conditional \`|| prc=1\` keeps the capture live until its test (pincensuscheck:414)"
+vpair n_rcbranches t_rcunread "rc=\$? captured in both arms of an if, tested after fi: the else arm never overwrites the then arm (qualitycheck:231)"
+vpair n_headtrue t_headfallback "\`|| true\` is no fallback"
+vpair n_presencegated t_ungated "the text is assigned only behind a presence check on it (prcontextcheck:226)"
+vpair n_callrc t_callnorc "rc=\$? of the wrapper call is compared (hookcheck:345)"
+vpair n_sqsub t_redir "a single-quoted pattern inside \"\$( )\" is a word, not a < redirect (expandbodyfirstcheck:122)"
+[ "$vpairs" = 12 ] && ok "$L: all $vpairs negative arms print 0 rows beside a firing twin" \
+    || no "$L: $vpairs of 12 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
+gating_split "$L" 0
+
+# ── 4c) UNCHECKED-STATUS (QD-UNCHECKED-STATUS): a dropped I/O or child status, C/C++ and Python ─────────────────
+#   A call whose return IS the status (pclose, rename, write, system, fflush; fclose / close of a stream or descriptor
+#   the function wrote; waitpid with the child's status dropped too; Python subprocess.run with no check=,
+#   subprocess.call, os.system) made where the value reaches nothing. Every function exists at the baseline with an
+#   empty body and the edit adds the call, so a row is preexisting-worse and must STILL be sev="minor" (report-only).
+#   p= is the SITE's line (not the definition's) and call= names the call. Each negative is a positive's twin with
+#   the status read, cast to (void), returned, tested, or the stream/descriptor not written; the arm counts the twins
+#   whose positive fired and fails short of all of them (an arm whose premise did not fire proves nothing).
+fx_init ucs
+UC_FNS_C="p_pclose p_rename p_write p_system p_fflush p_fclose p_close p_waitpid p_label p_append n_void n_assign n_return n_cond n_fclose_read n_close_unwritten n_waitpid_read n_fflush_stderr n_member n_helper n_fclose_failed n_fflush_stdout"
+UC_FNS_PY="p_run p_call p_system p_stdout p_bound p_bare p_alias n_check n_check_false n_rc n_return n_cond n_kwargs n_underscore n_rc_attr n_bound_returned"
+{ printf '#include <stdio.h>\n'; for f in $UC_FNS_C; do printf 'void %s( int fd, FILE* p ) { }\n' "$f"; done; } >"$WORK/ucs/a.c"
+{ printf 'import os\nimport subprocess\n'; for f in $UC_FNS_PY; do printf 'def %s(cmd):\n    return None\n' "$f"; done; } >"$WORK/ucs/t.py"
+printf 'void cpp_base( int fd ) { }\nvoid cpp_os( int fd ) { }\nvoid cpp_multi( int fd ) { }\n' >"$WORK/ucs/b.cpp"
+fx_commit ucs
+cat >"$WORK/ucs/a.c" <<'EOF'
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+void p_pclose( int fd, FILE* p ) { pclose( p ); }
+void p_rename( int fd, FILE* p ) { rename( "a", "b" ); }
+void p_write( int fd, FILE* p ) { write( fd, "x", 1 ); }
+void p_system( int fd, FILE* p ) { if( fd ) system( "ls" ); }
+void p_fflush( int fd, FILE* p ) { fflush( p ); }
+void p_fclose( int fd, FILE* p ) { FILE* f = fopen( "o", "w" ); fputs( "x", f ); fclose( f ); }
+void p_close( int fd, FILE* p ) { if( write( fd, "x", 1 ) < 0 ) { return; } close( fd ); }
+void p_waitpid( int fd, FILE* p ) { waitpid( fd, NULL, 0 ); }
+void p_label( int fd, FILE* p ) { if( !p ) goto out; out: pclose( p ); }
+void p_append( int fd, FILE* p ) { FILE* f = fopen( "o", "a" ); fclose( f ); }
+void n_void( int fd, FILE* p ) { (void)pclose( p ); }
+void n_assign( int fd, FILE* p ) { int rc = rename( "a", "b" ); if( rc ) { return; } }
+int n_return( int fd, FILE* p ) { return write( fd, "x", 1 ); }
+void n_cond( int fd, FILE* p ) { if( system( "ls" ) != 0 ) { return; } }
+void n_fclose_read( int fd, FILE* p ) { FILE* f = fopen( "o", "r" ); fclose( f ); }
+void n_close_unwritten( int fd, FILE* p ) { int w = open( "/dev/null", O_RDWR ); close( w ); }
+void n_waitpid_read( int fd, FILE* p ) { int st; waitpid( fd, &st, 0 ); if( WIFEXITED( st ) ) { return; } }
+void n_fflush_stderr( int fd, FILE* p ) { fflush( stderr ); }
+void n_member( int fd, FILE* p ) { struct { void ( *pclose )( FILE* ); } s; s.pclose( p ); }
+static int xclose( FILE* p ) { return pclose( p ); }
+void n_helper( int fd, FILE* p ) { if( xclose( p ) ) { return; } }
+void n_fclose_failed( int fd, FILE* p ) { if( fwrite( "x", 1, 1, p ) != 1 ) { fclose( p ); return; } if( fclose( p ) ) { return; } }
+void n_fflush_stdout( int fd, FILE* p ) { fflush( stdout ); }
+EOF
+cat >"$WORK/ucs/b.cpp" <<'EOF'
+#include <cstdio>
+#include <cstdlib>
+namespace pool { int close( int ); }
+void cpp_base( int fd ) { std::system( "ls" ); }
+void cpp_ns( int fd ) { pool::close( fd ); }
+void cpp_cast( int fd ) { static_cast<void>( std::system( "ls" ) ); }
+namespace rw::os { int pclose( FILE* ); }
+void cpp_os( int fd ) { rw::os::pclose( nullptr ); }
+void cpp_multi( int fd )
+{
+    std::system( "a" );
+    std::system( "b" );
+    std::system( "c" );
+    std::system( "d" );
+}
+EOF
+cat >"$WORK/ucs/t.py" <<'EOF'
+import os
+import subprocess
+import subprocess as sp
+from subprocess import call as pcall
+def p_run(cmd):
+    subprocess.run(cmd)
+def p_call(cmd):
+    subprocess.call(cmd)
+def p_system(cmd):
+    os.system(cmd)
+def p_stdout(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+def p_bound(cmd):
+    r = subprocess.run(cmd, capture_output=True)
+    print(r.stdout)
+def p_bare(cmd):
+    pcall(cmd)
+def p_alias(cmd):
+    if cmd: sp.run(cmd)
+def n_check(cmd):
+    subprocess.run(cmd, check=True)
+def n_check_false(cmd):
+    subprocess.run(cmd, check=False)
+def n_rc(cmd):
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        raise SystemExit(1)
+def n_return(cmd):
+    return subprocess.run(cmd)
+def n_cond(cmd):
+    if subprocess.call(cmd) != 0:
+        raise SystemExit(1)
+def n_kwargs(cmd, **kw):
+    subprocess.run(cmd, **kw)
+def n_underscore(cmd):
+    _ = os.system(cmd)
+def n_rc_attr(cmd):
+    return subprocess.run(cmd).returncode
+def n_bound_returned(cmd):
+    r = subprocess.run(cmd, capture_output=True)
+    print(r.stdout)
+    return r
+EOF
+L="unchecked-status"
+fx_run ucs
+uc_row(){ ds_rows | grep 'defect="unchecked-status"' | grep " sym=\"$1\"" | grep " p=\"$2:"; }   # SYM PATH
+uc_has(){    # SYM PATH LINE CALL — one minor row, p= at the SITE's line, call= the call
+    local row; row="$( uc_row "$1" "$2" )"
+    if [ -z "$row" ]; then no "$L: no unchecked-status row on $1 ($2)"; return 1; fi
+    [ "$( printf '%s\n' "$row" | wc -l | tr -d ' ' )" = 1 ] || { no "$L: more than one unchecked-status row on $1 ($2): $row"; return 1; }
+    ds_judge "$L: $1 ($2)" "$row" minor
+    if printf '%s' "$row" | grep -q " p=\"$2:$3\""; then ok "$L: $1 p=$2:$3 (the site's line)"; else no "$L: $1 p= should be the site $2:$3: $row"; fi
+    if printf '%s' "$row" | grep -q " call=\"$4\""; then ok "$L: $1 call=$4"; else no "$L: $1 call= should be $4: $row"; fi
+    return 0
+}
+uc_none(){   # SYM PATH WHY
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence on $1 off a failed run"; return; }
+    local row; row="$( uc_row "$1" "$2" )"
+    if [ -z "$row" ]; then ok "$L: no unchecked-status row on $1 ($3)"; else no "$L: false positive on $1 ($3): $row"; fi
+}
+if [ "$QD_OK" = 1 ]; then
+    uc_has p_pclose a.c 5 pclose; uc_has p_rename a.c 6 rename; uc_has p_write a.c 7 write; uc_has p_system a.c 8 system
+    uc_has p_fflush a.c 9 fflush; uc_has p_fclose a.c 10 fclose; uc_has p_close a.c 11 close; uc_has p_waitpid a.c 12 waitpid
+    uc_has p_label a.c 13 pclose; uc_has p_append a.c 14 fclose; uc_has cpp_base b.cpp 4 system; uc_has cpp_os b.cpp 8 pclose
+    uc_has cpp_multi b.cpp 11 system   # four sites: p= is the EARLIEST line, not the first in site-identity order
+    ds_wasnow "$L" unchecked-status cpp_multi 0 4
+    uc_has p_run t.py 6 subprocess.run; uc_has p_call t.py 8 subprocess.call; uc_has p_system t.py 10 os.system
+    uc_has p_stdout t.py 12 subprocess.run; uc_has p_bound t.py 14 subprocess.run; uc_has p_bare t.py 17 subprocess.call
+    uc_has p_alias t.py 19 subprocess.run
+    #   the twins: NEGATIVE [premise POSITIVE] — the positive's row above is what makes the negative's silence mean something
+    seen=0; pairs=0
+    for pair in "n_void:p_pclose:a.c:(void) is a stated decision" "n_assign:p_rename:a.c:assigned and compared" \
+                "n_return:p_write:a.c:the value is returned" "n_cond:p_system:a.c:used in a condition" \
+                "n_fclose_read:p_fclose:a.c:a read stream's close loses nothing" "n_close_unwritten:p_close:a.c:opened for writing (/dev/null), never written" \
+                "n_fclose_failed:p_fclose:a.c:the cleanup close in a failed-write branch" "n_fflush_stdout:p_fflush:a.c:a flush of stdout is not judged" \
+                "n_waitpid_read:p_waitpid:a.c:the child's status is read" "n_fflush_stderr:p_fflush:a.c:a failed flush of stderr has nowhere to go" \
+                "n_member:p_pclose:a.c:a member named pclose is not libc's" "xclose:p_pclose:a.c:a helper that returns the status" \
+                "n_helper:p_pclose:a.c:a helper call whose status is read" \
+                "cpp_ns:cpp_base:b.cpp:another namespace's close" "cpp_cast:cpp_base:b.cpp:static_cast<void> is a stated decision" \
+                "n_check:p_run:t.py:check=True" "n_check_false:p_run:t.py:check=False is a stated decision" \
+                "n_rc:p_bound:t.py:returncode is read" "n_return:p_run:t.py:the result is returned" \
+                "n_cond:p_call:t.py:used in a condition" "n_kwargs:p_run:t.py:**kwargs may carry check=" \
+                "n_underscore:p_system:t.py:bound to _" "n_rc_attr:p_stdout:t.py:.returncode read off the call" \
+                "n_bound_returned:p_bound:t.py:the bound result is returned"; do
+        neg="${pair%%:*}"; rest="${pair#*:}"; pos="${rest%%:*}"; rest="${rest#*:}"; path="${rest%%:*}"; why="${rest#*:}"
+        pairs=$(( pairs + 1 ))
+        [ -n "$( uc_row "$pos" "$path" )" ] && seen=$(( seen + 1 ))
+        uc_none "$neg" "$path" "$why"
+    done
+    if [ "$seen" = "$pairs" ] && [ "$pairs" -gt 0 ]; then ok "$L: every negative's positive twin fired ($seen/$pairs): each silence is read off a shape the scanner sees"
+    else no "$L: only $seen/$pairs negatives' positive twins fired — a silent negative proves nothing without its twin"; fi
+    #   never gating: the report-only facet carries no gating= even on a preexisting symbol
+    if ds_rows | grep 'defect="unchecked-status"' | grep -q 'gating='; then no "$L: an unchecked-status row gates: $( ds_rows | grep 'defect="unchecked-status"' | grep 'gating=' | head -1 )"
+    else ok "$L: no unchecked-status row gates ($( ds_rows | grep -c 'defect="unchecked-status"' ) rows)"; fi
+fi
+#   the legend: unchecked-status and call= are defined on an answer that carries the row, and only there
+ULEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?   # 0 or 2: the run completed
+if [ "$xrc" -le 2 ] && printf '%s' "$ULEG" | grep -q 'unchecked-status: a call whose return' && printf '%s' "$ULEG" | grep -q 'call= the call'; then ok "$L: the full legend defines unchecked-status and call="
+else no "$L: the full legend does not define unchecked-status / call="; fi
+UCLEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UCLEG" | grep -q 'r call=: the call an unchecked-status row'; then ok "$L: the compact legend defines r call="; else no "$L: the compact legend does not define r call="; fi
+FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unchecked-status: a call whose return'; then ok "$L: an answer with no unchecked-status row carries no unchecked-status legend"
+else no "$L: the unchecked-status legend rides on an answer without the row (or the run failed)"; fi
+#   the JSON twin carries call= too
+UJ="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UJ" | grep -q '"defect":"unchecked-status"' && printf '%s' "$UJ" | grep -q '"call":"pclose"'; then ok "$L: --json rows carry defect=unchecked-status and call"
+else no "$L: --json rows do not carry the unchecked-status facet and call"; fi
+#   recall replay, reversed: a fix that checked the status, read backwards (FIX..FIX^), adds the discard back
+fx_init ucfix
+printf '#include <stdio.h>\nint run( FILE* p ) { return pclose( p ) != 0; }\n' >"$WORK/ucfix/r.c"
+printf 'import subprocess\ndef run(cmd):\n    subprocess.run(cmd, check=True)\n' >"$WORK/ucfix/r.py"
+fx_commit ucfix
+( cd "$WORK/ucfix" && printf '#include <stdio.h>\nint run( FILE* p ) { pclose( p ); return 0; }\n' >r.c \
+  && printf 'import subprocess\ndef run(cmd):\n    subprocess.run(cmd)\n' >r.py && git add -A >/dev/null 2>&1 && git commit -qm "drop the checks" >/dev/null 2>&1 ) || no "$L: the recall fixture's second commit failed"
+fx_run_ref ucfix HEAD^..HEAD
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep 'defect="unchecked-status"' | grep -c ' sym="run"' )"
+    if [ "$n" = 2 ]; then ok "$L: the range that dropped both checks prints both rows (C and Python)"; else no "$L: the range that dropped both checks printed $n unchecked-status rows, want 2"; fi
+fi
+fx_run_ref ucfix HEAD..HEAD^
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep -c 'defect="unchecked-status"' )"
+    if [ "$n" = 0 ]; then ok "$L: the fixing direction prints no unchecked-status row"; else no "$L: the fixing direction printed $n unchecked-status rows"; fi
+fi
+
+# ── 4d) UNHANDLED-ARM (QD-UNHANDLED-ARM): a classifier over a closed set with no outcome for a value it does not name ──
+#   C/C++: a switch with no default: over an in-tree enum that decides a value and leaves an owed enumerator out (the
+#   enum lives in a header the switch's file does not define); shell: a case with no *) arm ending its function with
+#   return/echo arms, or setting one name read after esac; Python: an if/elif chain or a match ending a value-returning
+#   function with no else. Every function exists at the baseline with an empty body and the edit adds the classifier,
+#   so a row is preexisting-worse and must STILL be sev="minor". p= is the SITE's line, why= what is left out. Each
+#   negative is a positive's twin with a default / *) / else, full coverage, a stated omission, nothing decided, an
+#   undecidable set (an int switch, an #if, a foreign enum) or generated code; the arm counts the twins whose positive
+#   fired and fails short of all of them.
+fx_init uas
+mkdir -p "$WORK/uas/tools"
+cat >"$WORK/uas/k.h" <<'EOF'
+#pragma once
+enum class Kind : unsigned char { Fn, Var, Type, Macro, kKindCount };
+enum Color { RED, GREEN, BLUE, COLOR_DEFAULT = BLUE };
+typedef enum { M_A, M_B, M_C } Mode;
+enum class Cond {
+    A,
+#ifdef X
+    B,
+#endif
+    C };
+EOF
+UA_CPP="p_missing p_assign p_full_alias n_default n_full n_void n_comment n_named n_int n_cond n_ifdef"
+{ printf '#include "k.h"\nvoid f(); void g();\n'; for f in $UA_CPP; do printf 'int %s( int k ) { return 0; }\n' "$f"; done; } >"$WORK/uas/a.cpp"
+printf '#include "k.h"\nint p_typedef( int m ) { return 0; }\n' >"$WORK/uas/m.c"
+printf '// Code generated by mkswitch. DO NOT EDIT.\n#include "k.h"\nint n_generated( int k ) { return 0; }\n' >"$WORK/uas/gen.cpp"
+UA_PY="p_literal p_enum p_match p_in n_else n_wild n_trailing n_full_enum n_none n_optional n_void n_mixed n_foreign"
+{ printf 'import enum\nfrom typing import Optional\nclass Shade(enum.Enum):\n    LIGHT = 1\n    DARK = 2\n    DIM = 3\n    GLOOM = DARK\n'
+  for f in $UA_PY; do printf 'def %s(kind, other=None):\n    return 0\n' "$f"; done; } >"$WORK/uas/t.py"
+UA_SH="p_ret p_echo p_assign n_star n_trailing n_default n_unread n_dispatch"
+{ printf '#!/bin/bash\n'; for f in $UA_SH; do printf '%s() {\n    :\n}\n' "$f"; done; } >"$WORK/uas/tools/s.sh"
+fx_commit uas
+cat >"$WORK/uas/a.cpp" <<'EOF'
+#include "k.h"
+void f(); void g();
+const char* p_missing( Kind k ) { switch( k ) { case Kind::Fn: return "fn"; case Kind::Var: return "var"; } return "?"; }
+int p_assign( Color c ) { int v = 0; switch( c ) { case RED: v = 1; break; case GREEN: v = 2; break; } return v; }
+int p_full_alias( Color c ) { switch( c ) { case RED: return 1; case GREEN: return 2; } return 0; }
+const char* n_default( Kind k ) { switch( k ) { case Kind::Fn: return "fn"; case Kind::Var: return "var"; default: return "?"; } }
+const char* n_full( Kind k ) { switch( k ) { case Kind::Fn: return "a"; case Kind::Var: return "b"; case Kind::Type: return "c"; case Kind::Macro: return "d"; } return "?"; }
+void n_void( Kind k ) { switch( k ) { case Kind::Fn: f(); break; case Kind::Var: g(); break; } }
+const char* n_comment( Kind k ) { switch( k ) { case Kind::Fn: return "fn"; case Kind::Var: return "var"; /* the rest fall through to the generic tag */ } return "?"; }
+const char* n_named( Kind k ) { switch( k ) { case Kind::Fn: return "fn"; case Kind::Var: return "var"; // Type and Macro carry no tag
+  } return "?"; }
+int n_int( int x ) { switch( x ) { case 1: return 2; case 3: return 4; } return 0; }
+int n_cond( Cond c ) { switch( c ) { case Cond::A: return 1; } return 0; }
+int n_ifdef( Kind k ) { switch( k ) { case Kind::Fn: return 1;
+#ifdef Y
+  case Kind::Var: return 2;
+#endif
+  } return 0; }
+EOF
+# p_full_alias names RED and GREEN only: BLUE is owed (COLOR_DEFAULT is an alias of it); its twin n_alias below covers BLUE
+cat >>"$WORK/uas/a.cpp" <<'EOF'
+int n_alias( Color c ) { switch( c ) { case RED: return 1; case GREEN: return 2; case BLUE: return 3; } return 0; }
+EOF
+printf '#include "k.h"\nint p_typedef( Mode m ) { switch( m ) { case M_A: return 1; case M_B: return 2; } return 0; }\n' >"$WORK/uas/m.c"
+printf '// Code generated by mkswitch. DO NOT EDIT.\n#include "k.h"\nconst char* n_generated( Kind k ) { switch( k ) { case Kind::Fn: return "fn"; case Kind::Var: return "var"; } return "?"; }\n' >"$WORK/uas/gen.cpp"
+cat >"$WORK/uas/t.py" <<'EOF'
+import enum
+from typing import Optional
+class Shade(enum.Enum):
+    LIGHT = 1
+    DARK = 2
+    DIM = 3
+    GLOOM = DARK
+def p_literal(kind, other=None):
+    if kind == "a":
+        return 1
+    elif kind == "b":
+        return 2
+def p_enum(kind, other=None):
+    if kind == Shade.LIGHT:
+        return "l"
+    elif kind is Shade.DARK:
+        return "d"
+def p_match(kind, other=None):
+    match kind:
+        case "x" | "y":
+            return 1
+        case "z":
+            return 2
+def p_in(kind, other=None):
+    if kind in ("a", "b"):
+        return 1
+    elif kind == "c": return 2
+def n_else(kind, other=None):
+    if kind == "a":
+        return 1
+    elif kind == "b":
+        return 2
+    else:
+        return 3
+def n_wild(kind, other=None):
+    match kind:
+        case "x":
+            return 1
+        case "y":
+            return 2
+        case _:
+            return 3
+def n_trailing(kind, other=None):
+    if kind == "a":
+        return 1
+    elif kind == "b":
+        return 2
+    return 0
+def n_full_enum(kind, other=None):
+    if kind == Shade.LIGHT:
+        return "l"
+    elif kind == Shade.DARK:
+        return "d"
+    elif kind == Shade.DIM:
+        return "m"
+def n_none(kind, other=None):
+    if kind == "x":
+        return None
+    if kind == "a":
+        return 1
+    elif kind == "b":
+        return 2
+def n_optional(kind, other=None) -> Optional[int]:
+    if kind == "a":
+        return 1
+    elif kind == "b":
+        return 2
+def n_void(kind, other=None):
+    if kind == "a":
+        print(1)
+    elif kind == "b":
+        print(2)
+def n_mixed(kind, other=None):
+    if kind == "a":
+        return 1
+    elif other == "b":
+        return 2
+def n_foreign(kind, other=None):
+    if kind == Other.A:
+        return 1
+    elif kind == Other.B:
+        return 2
+EOF
+cat >"$WORK/uas/tools/s.sh" <<'EOF'
+#!/bin/bash
+p_ret() {
+    case "$1" in
+        y|yes) return 0 ;;
+        n|no) return 1 ;;
+    esac
+}
+p_echo() {
+    case "$1" in
+        a) echo alpha ;;
+        b) echo beta ;;
+    esac
+}
+p_assign() {
+    case "$1" in
+        a) mode=fast ;;
+        b) mode=slow ;;
+    esac
+    run "$mode"
+}
+n_star() {
+    case "$1" in
+        y) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+n_trailing() {
+    case "$1" in
+        y) return 0 ;;
+        n) return 1 ;;
+    esac
+    return 2
+}
+n_default() {
+    level=info
+    case "$1" in
+        -v) level=debug ;;
+        -q) level=warn ;;
+    esac
+    echo "$level"
+}
+n_unread() {
+    case "$1" in
+        a) tmpx=1 ;;
+        b) tmpx=2 ;;
+    esac
+}
+n_dispatch() {
+    case "$1" in
+        start) do_start ;;
+        stop) do_stop ;;
+    esac
+}
+EOF
+L="unhandled-arm"
+fx_run uas
+ua_row(){ ds_rows | grep 'defect="unhandled-arm"' | grep " sym=\"$1\"" | grep " p=\"$2:"; }   # SYM PATH
+ua_has(){    # SYM PATH LINE WHY-SUBSTRING — one minor row, p= at the SITE's line, why= naming what is left out
+    local row; row="$( ua_row "$1" "$2" )"
+    if [ -z "$row" ]; then no "$L: no unhandled-arm row on $1 ($2)"; return 1; fi
+    [ "$( printf '%s\n' "$row" | wc -l | tr -d ' ' )" = 1 ] || { no "$L: more than one unhandled-arm row on $1 ($2): $row"; return 1; }
+    ds_judge "$L: $1 ($2)" "$row" minor
+    if printf '%s' "$row" | grep -q " p=\"$2:$3\""; then ok "$L: $1 p=$2:$3 (the site's line)"; else no "$L: $1 p= should be the site $2:$3: $row"; fi
+    if printf '%s' "$row" | grep -qF " why=\"$4"; then ok "$L: $1 why=$4…"; else no "$L: $1 why= should start '$4': $row"; fi
+    return 0
+}
+ua_none(){   # SYM PATH WHY
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence on $1 off a failed run"; return; }
+    local row; row="$( ua_row "$1" "$2" )"
+    if [ -z "$row" ]; then ok "$L: no unhandled-arm row on $1 ($3)"; else no "$L: false positive on $1 ($3): $row"; fi
+}
+if [ "$QD_OK" = 1 ]; then
+    ua_has p_missing a.cpp 3 'no default: Kind::Macro, Kind::Type not handled'
+    ua_has p_assign a.cpp 4 'no default: BLUE not handled'
+    ua_has p_full_alias a.cpp 5 'no default: BLUE not handled'
+    ua_has p_typedef m.c 2 'no default: M_C not handled'
+    ua_has p_literal t.py 9 'no else: returns None for a value other than &quot;a&quot;, &quot;b&quot;'
+    ua_has p_enum t.py 14 'no else: returns None for Shade.DIM'
+    ua_has p_match t.py 19 'no else: returns None for a value other than &quot;x&quot;, &quot;y&quot;, &quot;z&quot;'
+    ua_has p_in t.py 25 'no else: returns None for a value other than &quot;a&quot;, &quot;b&quot;, &quot;c&quot;'
+    ua_has p_ret tools/s.sh 3 'no *) arm: an unmatched &quot;$1&quot; returns 0 and prints nothing'
+    ua_has p_echo tools/s.sh 9 'no *) arm: an unmatched &quot;$1&quot; returns 0'
+    ua_has p_assign tools/s.sh 15 'no *) arm: an unmatched &quot;$1&quot; leaves mode unset'
+    #   the twins: NEGATIVE [premise POSITIVE] — the positive's row above is what makes the negative's silence mean something
+    seen=0; pairs=0
+    for pair in "n_default:p_missing:a.cpp:a default: arm" "n_full:p_missing:a.cpp:every owed enumerator has an arm (kKindCount is a sentinel)" \
+                "n_void:p_missing:a.cpp:a void dispatcher decides nothing" "n_comment:p_missing:a.cpp:a comment states the omission" \
+                "n_named:p_missing:a.cpp:a comment names the omitted enumerators" "n_int:p_missing:a.cpp:an int switch is no closed set" \
+                "n_cond:p_missing:a.cpp:an enum under #ifdef: its enumerators depend on the build" \
+                "n_ifdef:p_missing:a.cpp:an #if inside the switch" "n_alias:p_full_alias:a.cpp:COLOR_DEFAULT is an alias, owed no arm" \
+                "n_generated:p_missing:gen.cpp:generated code" \
+                "n_else:p_literal:t.py:an else" "n_wild:p_match:t.py:case _" "n_trailing:p_literal:t.py:a trailing return" \
+                "n_full_enum:p_enum:t.py:every member has an arm (GLOOM is an alias)" "n_none:p_literal:t.py:return None elsewhere states None" \
+                "n_optional:p_literal:t.py:an Optional annotation" "n_void:p_literal:t.py:no arm returns a value" \
+                "n_mixed:p_literal:t.py:two subjects: no closed set" "n_foreign:p_enum:t.py:an enum this file does not define" \
+                "n_star:p_ret:tools/s.sh:a *) arm" "n_trailing:p_ret:tools/s.sh:a command after esac" \
+                "n_default:p_assign:tools/s.sh:the name has a default before the case" "n_unread:p_assign:tools/s.sh:nothing reads the name" \
+                "n_dispatch:p_echo:tools/s.sh:the arms run commands: no result"; do
+        neg="${pair%%:*}"; rest="${pair#*:}"; pos="${rest%%:*}"; rest="${rest#*:}"; path="${rest%%:*}"; why="${rest#*:}"
+        pairs=$(( pairs + 1 ))
+        twin_path="$path"; [ "$path" = gen.cpp ] && twin_path=a.cpp   # the generated negative's twin is the hand-written a.cpp
+        [ -n "$( ua_row "$pos" "$twin_path" )" ] && seen=$(( seen + 1 ))
+        ua_none "$neg" "$path" "$why"
+    done
+    if [ "$seen" = "$pairs" ] && [ "$pairs" -gt 0 ]; then ok "$L: every negative's positive twin fired ($seen/$pairs): each silence is read off a shape the scanner sees"
+    else no "$L: only $seen/$pairs negatives' positive twins fired — a silent negative proves nothing without its twin"; fi
+    if ds_rows | grep 'defect="unhandled-arm"' | grep -q 'gating='; then no "$L: an unhandled-arm row gates: $( ds_rows | grep 'defect="unhandled-arm"' | grep 'gating=' | head -1 )"
+    else ok "$L: no unhandled-arm row gates ($( ds_rows | grep -c 'defect="unhandled-arm"' ) rows)"; fi
+fi
+#   the legend: unhandled-arm and why= are defined on an answer that carries the row, and only there
+ULEG="$( cd "$WORK/uas" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$ULEG" | grep -q 'unhandled-arm: a classifier over a closed set' && printf '%s' "$ULEG" | grep -q 'why= what is left without an outcome'; then ok "$L: the full legend defines unhandled-arm and why="
+else no "$L: the full legend does not define unhandled-arm / why="; fi
+UCLEG="$( cd "$WORK/uas" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UCLEG" | grep -q "an unhandled-arm row's values with no outcome"; then ok "$L: the compact legend defines r why="; else no "$L: the compact legend does not define r why="; fi
+FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unhandled-arm: a classifier'; then ok "$L: an answer with no unhandled-arm row carries no unhandled-arm legend"
+else no "$L: the unhandled-arm legend rides on an answer without the row (or the run failed)"; fi
+UJ="$( cd "$WORK/uas" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UJ" | grep -q '"defect":"unhandled-arm"' && printf '%s' "$UJ" | grep -q '"why":"no default: Kind::Macro, Kind::Type not handled"'; then ok "$L: --json rows carry defect=unhandled-arm and why"
+else no "$L: --json rows do not carry the unhandled-arm facet and why"; fi
+#   appending an enumerator: the header edit alone makes an untouched, once-complete switch incomplete — that switch gets the
+#   row (its site text names the missing enumerator, so it is a new site); a twin switch with a default: does not
+fx_init uaenum
+printf 'enum class Tok { A, B };\n' >"$WORK/uaenum/t.h"
+printf '#include "t.h"\nint full( Tok t ) { switch( t ) { case Tok::A: return 1; case Tok::B: return 2; } return 0; }\nint dflt( Tok t ) { switch( t ) { case Tok::A: return 1; default: return 2; } }\n' >"$WORK/uaenum/u.cpp"
+fx_commit uaenum
+printf 'enum class Tok { A, B, C };\n' >"$WORK/uaenum/t.h"
+fx_run uaenum
+if [ "$QD_OK" = 1 ]; then
+    row="$( ds_rows | grep 'defect="unhandled-arm"' | grep ' sym="full"' )"
+    if printf '%s' "$row" | grep -q 'why="no default: Tok::C not handled"' && printf '%s' "$row" | grep -q ' p="u.cpp:2"'; then ok "$L: an appended enumerator gives the untouched switch its row (p=u.cpp:2, why= Tok::C)"
+    else no "$L: the switch the appended enumerator left incomplete has no row: ${row:-<none>}"; fi
+    if [ -n "$row" ] && [ -z "$( ds_rows | grep 'defect="unhandled-arm"' | grep ' sym="dflt"' )" ]; then ok "$L: its twin with a default: has none"; else no "$L: dflt (default:) has a row, or its premise did not fire"; fi
+fi
+#   recall replay, reversed: a fix that added the arm / else / *), read backwards (FIX..FIX^), takes it away again
+fx_init uafix
+printf 'enum class E { X, Y, Z };\n' >"$WORK/uafix/e.h"
+printf '#include "e.h"\nint cls( E e ) { switch( e ) { case E::X: return 1; case E::Y: return 2; case E::Z: return 3; } return 0; }\n' >"$WORK/uafix/c.cpp"
+printf 'def cls(k):\n    if k == "x":\n        return 1\n    elif k == "y":\n        return 2\n    else:\n        raise ValueError(k)\n' >"$WORK/uafix/c.py"
+printf 'cls() {\n    case "$1" in\n        x) return 0 ;;\n        y) return 1 ;;\n        *) return 2 ;;\n    esac\n}\n' >"$WORK/uafix/c.sh"
+fx_commit uafix
+( cd "$WORK/uafix" && printf '#include "e.h"\nint cls( E e ) { switch( e ) { case E::X: return 1; case E::Y: return 2; } return 0; }\n' >c.cpp \
+  && printf 'def cls(k):\n    if k == "x":\n        return 1\n    elif k == "y":\n        return 2\n' >c.py \
+  && printf 'cls() {\n    case "$1" in\n        x) return 0 ;;\n        y) return 1 ;;\n    esac\n}\n' >c.sh && git add -A >/dev/null 2>&1 && git commit -qm "drop the arms" >/dev/null 2>&1 ) || no "$L: the recall fixture's second commit failed"
+fx_run_ref uafix HEAD^..HEAD
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep 'defect="unhandled-arm"' | grep -c ' sym="cls"' )"
+    if [ "$n" = 3 ]; then ok "$L: the range that dropped the three arms prints three rows (C++, Python, shell)"; else no "$L: the range that dropped the arms printed $n unhandled-arm rows, want 3"; fi
+fi
+fx_run_ref uafix HEAD..HEAD^
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep -c 'defect="unhandled-arm"' )"
+    if [ "$n" = 0 ]; then ok "$L: the fixing direction prints no unhandled-arm row"; else no "$L: the fixing direction printed $n unhandled-arm rows"; fi
+fi
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
 #   D2: format-arity is the one exception to "new-symbol rows never gate", and every surface that states the
 #   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.
 L="surfaces"
 PHRASE='new-symbol rows never gate, except defect-shape format-arity'
-#   QD-ENTRY-CEILING (2026-11-13) adds the second exception, a NEW function at 4x the bar: every statement of the
-#   rule names it too, in the long form (legend, help, MCP, docs) or the compact legend's ceiling= row.
-CEILX='( and a new function at the ceiling| or a ceiling= row)'
+#   QD-ENTRY-CEILING (2026-11-13) adds the second exception, a NEW function at 4x the bar, and TANGLE-GATE-B (2026-11-21)
+#   the third, a new function at tangle 6 or more: every statement of the rule names both, in the long form (legend,
+#   help, MCP, docs) or the compact legend's ceiling= row and tangle row.
+CEILX='(, a new function at the ceiling[^.;]* (and a tangled (new )?(function|one)|and a new one at tangle 6 or more)|, ceiling=, tangle)'
 phrase_ok(){  # LABEL TEXT — the text states the exception, and every "new-symbol rows never gate" in it carries it
     local all qual flat   # whitespace-normalized first: a sentence may wrap anywhere in a document
     flat="$( printf '%s' "$2" | tr '\n' ' ' | tr -s ' ' )"
@@ -1517,6 +2173,20 @@ if printf '%s' "$LEG" | grep -q '<quality-delta '; then
     EX="$( printf '%s' "$LEG" | grep -o 'EXIT 2 fires only on[^.]*' )"
     if [ -n "$EX" ] && ! printf '%s\n' "$EX" | grep -vq 'format-arity'; then ok "$L: every 'EXIT 2 fires only on' sentence names the format-arity exception"
     else no "$L: an 'EXIT 2 fires only on' sentence omits format-arity (or none found): ${EX:-<none>}"; fi
+    # CR721: the exit-2 sentence states the whole predicate. A new function at the ceiling or tangle 6 can be the only gating
+    # row, with preexisting-worse=0, so "fires only on preexisting-worse" is false. RED before (43be39fcd): that wording.
+    # CR721 r2: checked on the extracted sentence itself (EX), so "only on major preexisting-worse rows" cannot pass on a
+    # format-arity mention elsewhere: it must name the gating-row predicate and all three new-symbol exceptions.
+    if [ -z "$EX" ]; then no "$L: no 'EXIT 2 fires only on' sentence to check the predicate of"
+    elif printf '%s\n' "$EX" | grep -qE 'only on (major |unacked |in-scope |, )*preexisting-worse'; then no "$L: the exit-2 sentence limits gating to preexisting-worse rows: $EX"
+    else
+        pmiss=""
+        for w in 'gating row' unacked in-scope major format-arity 'at the ceiling' 'tangled new function'; do
+            printf '%s\n' "$EX" | grep -q -- "$w" || pmiss="$pmiss '$w'"
+        done
+        if [ -z "$pmiss" ]; then ok "$L: the exit-2 sentence states the gating-row predicate and its three new-symbol exceptions"
+        else no "$L: the exit-2 sentence does not name:$pmiss ($EX)"; fi
+    fi
     if printf '%s' "$LEG" | grep -q 'report-only by facet, not by size'; then ok "$L: the legend says the report-only facets are sev=minor by facet, not by size (D3)"
     else no "$L: the legend does not say 'report-only by facet, not by size' — sev=minor is otherwise defined as a small numeric delta"; fi
     if printf '%s' "$LEG" | grep -q 'f-strings are not checked'; then ok "$L: the legend names the Python formats it does not check"

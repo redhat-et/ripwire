@@ -209,8 +209,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             names.push_back( s.name );
         }
     }
-    std::sort( names.begin(), names.end(), sortutil::svLess );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     if( names.empty() )
     {
         return {};
@@ -231,10 +230,9 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             covered.emplace_back( o, ing.symbols[ b ].name );
         }
     }
-    std::sort( covered.begin(), covered.end(), []( const auto& a, const auto& b ) {
+    sortutil::sortUnique( covered, []( const auto& a, const auto& b ) {
         return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
     } );
-    covered.erase( std::unique( covered.begin(), covered.end() ), covered.end() );
     std::vector<NodeId> out;
     for( std::size_t i = 0; i < covered.size(); )
     {
@@ -320,8 +318,7 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
             }
         }
     }
-    std::sort( implBodies.begin(), implBodies.end() );
-    implBodies.erase( std::unique( implBodies.begin(), implBodies.end() ), implBodies.end() );
+    sortutil::sortUnique( implBodies );
     out.impls = implBodies.size();
     const std::size_t   matchCount = out.seeds.size();
     std::vector<NodeId> sortedSeeds( out.seeds );
@@ -342,27 +339,6 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
         out.impls     = 0;
     }
     ENSURES( out.contracts > 0 || out.impls == 0, "only a contract seed adds implementor bodies" );
-    return out;
-}
-
-// --path: both endpoints widened in place (the CLI after bindPathEndpoints, the MCP twin after resolvePathEndpoint), and the
-// counts its root spells as from_impls=/to_impls=, each present exactly when that endpoint names a contract method.
-struct PathContracts
-{
-    ContractSeeds from;   // seeds moved back into the caller's endpoint defs; the counts stay
-    ContractSeeds to;
-
-    std::string attrXml() const
-    {
-        return implsFieldOrEmpty( "from_impls", from.contracts, from.impls, /*json=*/false ) + implsFieldOrEmpty( "to_impls", to.contracts, to.impls, /*json=*/false );
-    }
-    const char* legend() const noexcept { return implsLegend( from.contracts + to.contracts > 0 ); }
-};
-inline PathContracts widenPathContracts( const IngestResult& ing, const Graph& g, std::vector<NodeId>& srcDefs, std::vector<NodeId>& dstDefs )
-{
-    PathContracts out{ widenContractSeeds( ing, g, std::move( srcDefs ) ), widenContractSeeds( ing, g, std::move( dstDefs ) ) };
-    srcDefs = std::move( out.from.seeds );
-    dstDefs = std::move( out.to.seeds );
     return out;
 }
 

@@ -42,14 +42,14 @@ cnt(){ printf '%s' "$1" | grep -oE 'count="[0-9]+"' | grep -oE '[0-9]+'; }
 #    directly rather than a "queryfix/" suffix that used to tolerate an absolute-or-./-relative FIX path) ──
 OUT_HOT="$( c hot )"
 { [ "$( cnt "$OUT_HOT" )" = 2 ] \
-    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_a" p="src/util\.cpp:3" sites_at="src/util\.cpp:3"/>' \
-    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_b" p="src/util\.cpp:4" sites_at="src/util\.cpp:4"/>'; } \
+    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_a" p="src/util\.cpp:3" sites_at="3"/>' \
+    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_b" p="src/util\.cpp:4" sites_at="4"/>'; } \
     && ok "--callers=hot: exactly caller_a (util.cpp:3) + caller_b (util.cpp:4), count=2, each with its call site (CALLSITE-AT)" \
     || no "--callers=hot: wrong callers/lines — got: $OUT_HOT"
 
 # ── #2: --callers=d3 lists exactly its one known caller (d2), correct file:line ─────────────────────────
 OUT_D3="$( c d3 )"
-{ [ "$( cnt "$OUT_D3" )" = 1 ] && printf '%s' "$OUT_D3" | grep -qE '<s t="fn" n="d2" p="src/chain\.cpp:3" sites_at="src/chain\.cpp:3"/>'; } \
+{ [ "$( cnt "$OUT_D3" )" = 1 ] && printf '%s' "$OUT_D3" | grep -qE '<s t="fn" n="d2" p="src/chain\.cpp:3" sites_at="3"/>'; } \
     && ok "--callers=d3: exactly d2 (chain.cpp:3), count=1" \
     || no "--callers=d3: wrong caller/line — got: $OUT_D3"
 
@@ -198,21 +198,21 @@ row(){ printf '%s' "$1" | sed 's/<!--.*-->//' | grep -oE "<s [^>]*n=\"$2\"[^>]*/
 sat(){ printf '%s' "$1" | grep -oE ' sites_at="[^"]*"' | head -1 | sed -e 's/^ sites_at="//' -e 's/"$//'; }
 
 SA_T="$( sa --callers=target )"
-[ "$( sat "$( row "$SA_T" two_lines )" )" = "lib.c:3 lib.c:4 lib.c:5" ] \
-    && ok "SA1: four calls on three lines -> sites_at=\"lib.c:3 lib.c:4 lib.c:5\" (two calls on one line are one site)" \
+[ "$( sat "$( row "$SA_T" two_lines )" )" = "3 4 5" ] && row "$SA_T" two_lines | grep -q ' p="lib.c:2"' \
+    && ok "SA1: four calls on three lines -> p=\"lib.c:2\" sites_at=\"3 4 5\" (two calls on one line are one site; SITES-SHORT: bare lines of p='s file)" \
     || no "SA1: two_lines row: $( row "$SA_T" two_lines )"
-[ "$( sat "$( row "$SA_T" one_call )" )" = "lib.c:7" ] && row "$SA_T" one_call | grep -q ' p="lib.c:7"' \
+[ "$( sat "$( row "$SA_T" one_call )" )" = "7" ] && row "$SA_T" one_call | grep -q ' p="lib.c:7"' \
     && ok "SA1: a one-line caller keeps p= (its definition) and lists its one site" \
     || no "SA1: one_call row: $( row "$SA_T" one_call )"
 SA_P="$( sa --callers=pyhelper )"
-[ "$( sat "$( row "$SA_P" '&lt;file-scope&gt;' )" )" = "t/test_mod.py:7 t/test_mod.py:8" ] \
+[ "$( sat "$( row "$SA_P" '&lt;file-scope&gt;' )" )" = "7 8" ] && row "$SA_P" '&lt;file-scope&gt;' | grep -q ' p="t/test_mod.py:1"' \
     && ok "SA2: a test file's <file-scope> caller expands to its sites (t/test_mod.py:7 t/test_mod.py:8)" \
     || no "SA2: modscope row: $( row "$SA_P" '&lt;file-scope&gt;' )"
 SA_TS="$( sa --callers=tsHelper )"
 { row "$SA_TS" tsCaller | grep -q 'p="j.ts:2"' && ! row "$SA_TS" tsCaller | grep -q 'sites_at='; } \
     && ok "SA3: near miss: a caller whose call is spelled through an aliased import carries no sites_at=" \
     || no "SA3: tsCaller row: $( row "$SA_TS" tsCaller )"
-[ "$( sat "$( row "$SA_TS" tsDirect )" )" = "k.ts:2" ] && ok "SA3: its direct sibling caller does (k.ts:2)" \
+[ "$( sat "$( row "$SA_TS" tsDirect )" )" = "2" ] && row "$SA_TS" tsDirect | grep -q ' p="k.ts:2"' && ok "SA3: its direct sibling caller does (k.ts:2)" \
     || no "SA3: tsDirect row: $( row "$SA_TS" tsDirect )"
 SA_CE="$( sa --callees=two_lines | sed 's/<!--.*-->//' )"
 if ! printf '%s' "$SA_CE" | grep -q '<callees [^>]*count="[1-9]'; then
@@ -227,7 +227,9 @@ SA5_BAD=0; SA5_N=0
 for nm in target pyhelper; do
     ans="$( sa --callers=$nm )"; uses="$( sa --uses=$nm --limit=1000 )"
     for r in $( printf '%s' "$ans" | sed 's/<!--.*-->//' | grep -oE '<s [^>]*/>' | sed -E 's/.* n="([^"]*)".*/\1/' ); do
-        got="$( sat "$( row "$ans" "$r" )" )"
+        # SITES-SHORT: a bare line is in the row's own p= file, so put that file back before comparing with the uses verb's file:line
+        pf="$( row "$ans" "$r" | sed -E 's/.* p="([^"]*):[0-9]+".*/\1/' )"
+        got="$( sat "$( row "$ans" "$r" )" | tr ' ' '\n' | sed -E "/^[0-9]+\$/s|^|$pf:|" | tr '\n' ' ' | sed 's/ $//' )"
         want="$( printf '%s' "$uses" | grep -oE "<u role=\"call\" p=\"[^\"]*\"[^>]*in_id=\"$r\"" | sed -E 's/.* p="([^"]*)".*/\1/' | sort -t: -k2,2n -u | tr '\n' ' ' | sed 's/ $//' )"
         SA5_N=$((SA5_N+1)); [ "$got" = "$want" ] || { SA5_BAD=1; printf '        %s/%s: sites_at="%s" but --uses role=call sites "%s"\n' "$nm" "$r" "$got" "$want"; }
     done
@@ -235,11 +237,11 @@ done
 [ "$SA5_BAD" = 0 ] && [ "$SA5_N" -ge 4 ] && ok "SA5: every row's sites_at= equals its --uses role=call sites ($SA5_N rows)" \
     || no "SA5: sites_at= != --uses call sites ($SA5_N rows)"
 SA_O="$( sa --callers=target --limit=1 --offset=1 )"
-{ [ "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s ' | wc -l | tr -d ' ' )" = 1 ] && sat "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s [^>]*/>' )" | grep -qE '^lib\.c:[0-9]'; } \
+{ [ "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s ' | wc -l | tr -d ' ' )" = 1 ] && sat "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s [^>]*/>' )" | grep -qE '^[0-9]+( [0-9]+)*$'; } \
     && ok "SA6: a paged window (offset=1) still carries its row's sites" || no "SA6: paged answer: $SA_O"
 SA_M="$( sa --callers=many )"; MROW="$( row "$SA_M" '&lt;file-scope&gt;' )"
 { [ "$( sat "$MROW" | wc -w | tr -d ' ' )" = 16 ] && printf '%s' "$MROW" | grep -q ' sites_total="20"' \
-  && [ "$( sat "$MROW" | cut -d' ' -f1 )" = "m.py:4" ] && printf '%s' "$SA_M" | grep -q 'next="--uses=many"'; } \
+  && [ "$( sat "$MROW" | cut -d' ' -f1 )" = "4" ] && printf '%s' "$MROW" | grep -q ' p="m.py:1"' && printf '%s' "$SA_M" | grep -q 'next="--uses=many"'; } \
     && ok "SA7: a 20-site row lists the first 16 (ascending) with sites_total=\"20\"; next= (--uses=many) lists all" \
     || no "SA7: capped row: $MROW"
 printf '%s' "$SA_M" | grep -o '<!--.*-->' | grep -q 'sites_total=' && ok "SA7: the compact legend defines sites_total= where it rides" \
@@ -260,21 +262,21 @@ else
     ok "SA8: present-only: a zero-row answer carries no sites_at reading"
 fi
 SA_AMP="$( sa --callers=amp_target )"
-{ printf '%s' "$SA_AMP" | grep -q 'sites_at="a&amp;b/amp.c:2"' && printf '%s' "$SA_AMP" | xmllint --noout - 2>/dev/null; } \
-    && ok "SA9: a path holding & is escaped inside sites_at= (well-formed)" || no "SA9: amp answer: $SA_AMP"
+{ printf '%s' "$SA_AMP" | grep -qE '<s [^>]* p="a&amp;b/amp.c:[0-9]+"[^>]* sites_at="2"' && printf '%s' "$SA_AMP" | xmllint --noout - 2>/dev/null; } \
+    && ok "SA9: a path holding & is escaped in p= and its site is the bare line (well-formed; SITES-SHORT: the path is no longer repeated in sites_at=)" || no "SA9: amp answer: $SA_AMP"
 SA_J="$( sa --callers=target --json )"
 printf '%s' "$SA_J" | python3 -c '
 import json, sys
 d = json.load( sys.stdin ); r = { x["n"]: x.get( "sites_at" ) for x in d["callers"] }
-sys.exit( 0 if r.get( "two_lines" ) == [ "lib.c:3", "lib.c:4", "lib.c:5" ] and r.get( "one_call" ) == [ "lib.c:7" ] else 1 )' \
-    && ok "SA10: --json rows carry \"sites_at\":[file:line,...] (the XML row's list)" || no "SA10: --json: $SA_J"
+sys.exit( 0 if r.get( "two_lines" ) == [ "3", "4", "5" ] and r.get( "one_call" ) == [ "7" ] else 1 )' \
+    && ok "SA10: --json rows carry \"sites_at\":[line,...] (the XML row's tokens: bare lines of the row's p= file)" || no "SA10: --json: $SA_J"
 sa --callers=many --json | python3 -c '
 import json, sys
 d = json.load( sys.stdin ); r = d["callers"][0]
 sys.exit( 0 if len( r.get( "sites_at", [] ) ) == 16 and r.get( "sites_total" ) == 20 else 1 )' \
     && ok "SA10: a cut --json row carries sites_total" || no "SA10: --json cut row"
 SA_C="$( sa --callers=target --format=columnar )"
-{ printf '%s' "$SA_C" | grep -q 'fields="path,name,line,kind,tested,sites_at"' && printf '%s' "$SA_C" | grep -q '<sites_at>[^<]*lib.c:3 lib.c:4 lib.c:5' \
+{ printf '%s' "$SA_C" | grep -q 'fields="path,name,line,kind,tested,sites_at"' && printf '%s' "$SA_C" | grep -q '<sites_at>3 4 5,7</sites_at>' \
   && printf '%s' "$SA_C" | xmllint --noout - 2>/dev/null; } \
     && ok "SA10: --format=columnar carries the sites_at column (fields= names it)" || no "SA10: columnar: $( printf '%s' "$SA_C" | sed 's/<!--.*-->//' )"
 sa --callers=many --format=columnar | grep -q '<sites_total>20</sites_total>' && ok "SA10: a cut columnar row carries the sites_total column" \
@@ -297,7 +299,7 @@ import json, sys
 env = json.loads( sys.stdin.read() ); d = json.loads( env["result"]["content"][0]["text"] )
 r = { x["name"]: x.get( "sites_at" ) for x in d["calledBy"] }
 calls_clean = all( "sites_at" not in x for x in d.get( "calls", [] ) )
-sys.exit( 0 if r.get( "two_lines" ) == [ "lib.c:3", "lib.c:4", "lib.c:5" ] and "sites_note" in d and calls_clean else 1 )' \
+sys.exit( 0 if r.get( "two_lines" ) == [ "3", "4", "5" ] and "sites_note" in d and calls_clean else 1 )' \
         && ok "SA11: MCP $tool calledBy rows carry sites_at (== CLI) and the answer carries sites_note" \
         || no "SA11: MCP $tool: $( sa_mcp "$tool" target | head -c 400 )"
 done
@@ -338,14 +340,79 @@ SA_NM="$( sa --callers=nm_target )"
 SA_NM_ALL="$( printf '%s' "$SA_NM" | sed 's/<!--.*-->//' | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' | tr '\n' ' ' | sed 's/ $//' )"
 if [ -z "$( row "$SA_NM" nm_noise )" ]; then
     no "SA12: premise: --callers=nm_target printed no nm_noise row: $SA_NM"
-elif [ "$( sat "$( row "$SA_NM" nm_noise )" )" = "nm/noise.c:10" ] && [ "$SA_NM_ALL" = "nm/noise.c:10" ]; then
-    ok "SA12: near miss: a value use, &f, a local prototype, a string and comments are not sites (only nm/noise.c:10)"
+elif [ "$( sat "$( row "$SA_NM" nm_noise )" )" = "10" ] && [ "$SA_NM_ALL" = "10" ] && row "$SA_NM" nm_noise | grep -q ' p="nm/noise.c:3"'; then
+    ok "SA12: near miss: a value use, &f, a local prototype, a string and comments are not sites (only line 10 of nm/noise.c)"
 else
-    no "SA12: non-call references printed as call sites: every sites_at= is \"$SA_NM_ALL\", want \"nm/noise.c:10\""
+    no "SA12: non-call references printed as call sites: every sites_at= is \"$SA_NM_ALL\", want \"10\" on a p=\"nm/noise.c:3\" row"
 fi
+# RE-PINNED 2026-11-18 (lane edge-strays-1118, PROVEN-SITE-KEEPS-NAMESAKES): `w.nst_fn(5)` is PROVEN to W::nst_fn (its local's
+#   class), so it is no site of ns::nst_fn (was "5 6": the leaf-name match listed it under both rows). Sites in the row's own p=
+#   file print as the bare line since SITES-SHORT (#687), so the pins below read bare lines and check p= for the file.
 SA_NS="$( sa --callers=ns::nst_fn )"
-[ "$( sat "$( row "$SA_NS" nst_mixed )" )" = "nm/ns.cpp:5 nm/ns.cpp:6" ] \
-    && ok "SA12: by LEAF name: --callers=ns::nst_fn lists the row's w.nst_fn(5) call too (nm/ns.cpp:5 nm/ns.cpp:6)" \
+[ "$( sat "$( row "$SA_NS" nst_mixed )" )" = "6" ] && row "$SA_NS" nst_mixed | grep -q ' p="nm/ns.cpp:3"' \
+    && ok "SA12: --callers=ns::nst_fn lists ns::nst_fn(6) only; w.nst_fn(5) is proven to W::nst_fn (line 6 of nm/ns.cpp)" \
     || no "SA12: ns::nst_fn row: $( row "$SA_NS" nst_mixed )"
+SA_WN="$( sa --callers=W::nst_fn )"
+[ "$( sat "$( row "$SA_WN" nst_mixed )" )" = "5" ] && row "$SA_WN" nst_mixed | grep -q ' p="nm/ns.cpp:3"' \
+    && ok "SA12: and --callers=W::nst_fn lists w.nst_fn(5) only (line 5 of nm/ns.cpp)" \
+    || no "SA12: W::nst_fn row: $( row "$SA_WN" nst_mixed )"
+
+# SP (lane edge-strays-1118, PROVEN-SITE-KEEPS-NAMESAKES): a call site a rule PROVED is a site of its own target only, never of a
+#   by-name row of a namesake (sites_at=, a narrowed --uses). The envoy shape (FilterManagerImpl::onConnectionClose): two proven
+#   `a.closeSocket()` calls and one `latched_->closeSocket()` through a std::optional, whose by-name rows (Conn, Raw: the api/ dir
+#   holds Action) listed all three lines. RED on main 9087eb59c: SP1 and SP3 print "sp/impl/mgr.cc:10 sp/impl/mgr.cc:13 sp/impl/mgr.cc:16"
+#   (SP1 reads "10 13 16" since SITES-SHORT (#687): a site in the row's own p= file is the bare line; --uses keeps file:line).
+mkdir -p "$SA/sp/api" "$SA/sp/impl"
+printf '#pragma once\nstruct Action {\n  bool closeSocket() const { return true; }\n};\n' > "$SA/sp/api/action.h"
+printf '#pragma once\nstruct Conn {\n  void closeSocket(int ev) {}\n};\nstruct Raw {\n  void closeSocket(int ev, bool b) {}\n};\n' > "$SA/sp/impl/conn.h"
+cat > "$SA/sp/impl/mgr.cc" <<'SAEOF'
+#include "sp/api/action.h"
+#include "sp/impl/conn.h"
+#include <optional>
+struct Mgr {
+  std::optional<Action> latched_;
+  void onClose(Action a);
+  void unprovenOnly();
+};
+void Mgr::onClose(Action a) {
+  if (a.closeSocket()) {
+    return;
+  }
+  if (latched_->closeSocket()) {
+    return;
+  }
+  bool z = a.closeSocket();
+}
+void Mgr::unprovenOnly() {
+  latched_->closeSocket();
+}
+SAEOF
+SP_C="$( sa --callers=sp/impl/conn.h:Conn::closeSocket )"
+SP_ON="$( row "$SP_C" Mgr::onClose )"
+{ printf '%s' "$SP_ON" | grep -q 'via="name"' && printf '%s' "$SP_ON" | grep -q ' p="sp/impl/mgr.cc:' && [ "$( sat "$SP_ON" )" = "13" ]; } \
+    && ok "SP1: the by-name Conn::closeSocket row lists the unproven latched_->closeSocket() only (line 13 of sp/impl/mgr.cc)" \
+    || no "SP1: onClose row under Conn::closeSocket: $SP_ON"
+[ "$( sat "$( row "$SP_C" Mgr::unprovenOnly )" )" = "19" ] \
+    && ok "SP2: NEGATIVE: a caller with no proven call of the name keeps its row and site (line 19 of sp/impl/mgr.cc)" \
+    || no "SP2: unprovenOnly row under Conn::closeSocket: $( row "$SP_C" Mgr::unprovenOnly )"
+SP_U="$( sa --uses=sp/impl/conn.h:Conn::closeSocket | sed 's/<!--.*-->//' | grep -oE '<u role="call" p="[^"]*"' | sed -e 's/.*p="//' -e 's/"$//' | tr '\n' ' ' | sed 's/ $//' )"
+[ "$SP_U" = "sp/impl/mgr.cc:13 sp/impl/mgr.cc:19" ] \
+    && ok "SP3: the narrowed --uses=…:Conn::closeSocket drops the two calls proven to Action::closeSocket" \
+    || no "SP3: --uses=sp/impl/conn.h:Conn::closeSocket call sites: $SP_U"
+SP_A="$( sa --callers=sp/api/action.h:Action::closeSocket )"
+SP_AON="$( row "$SP_A" Mgr::onClose )"
+{ ! printf '%s' "$SP_AON" | grep -q 'via=' && sat "$SP_AON" | tr ' ' '\n' | grep -qx '10' && sat "$SP_AON" | tr ' ' '\n' | grep -qx '16'; } \
+    && ok "SP4: NEGATIVE: the proven Action::closeSocket row keeps both proven lines (10, 16)" \
+    || no "SP4: onClose row under Action::closeSocket: $SP_AON"
+# SP5 (CR #705): a RECURSIVE call is proven to the caller itself (no graph edge). When that caller also calls a namesake, the
+#   namesake's row must not list the self-call's line: Node::walk calls walk(d - 1) (line 4, itself) and l.walk(d) (line 7, Leaf).
+#   RED on ee8d1a50e: sites_at="4 7".
+mkdir -p "$SA/sp/rec"
+printf '#pragma once\nstruct Leaf {\n  void walk(int d) {}\n};\nstruct Node {\n  void walk(int d);\n};\n' > "$SA/sp/rec/tree.h"
+printf '#include "sp/rec/tree.h"\nvoid Node::walk(int d) {\n  if (d) {\n    walk(d - 1);\n  }\n  Leaf l;\n  l.walk(d);\n}\n' > "$SA/sp/rec/tree.cc"
+SP_R="$( row "$( sa --callers=sp/rec/tree.h:Leaf::walk )" Node::walk )"
+{ printf '%s' "$SP_R" | grep -q ' p="sp/rec/tree.cc:2"' && [ "$( sat "$SP_R" )" = "7" ]; } \
+    && ok "SP5: the Leaf::walk row lists l.walk(d) only (line 7), never Node::walk's own recursive walk(d - 1)" \
+    || no "SP5: Node::walk row under Leaf::walk: $SP_R"
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

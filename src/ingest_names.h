@@ -86,8 +86,8 @@ inline std::string immediateScope( std::string_view full )
 // explicit-template-argument call — so the template_function reference pattern matches every cast in the
 // tree (171 sites in this repo's src/ alone). A cast is not a call and must not mint a reference: it is
 // VALID INPUT, not a corrupt invariant, so the capture loop simply skips it (never ASSUME, never
-// DISCLOSE — nothing degraded). Query predicates cannot do this: passesPredicates is wired into
-// --match/--lint only, not the tags pass (measured — a `#not-eq?` left --uses=static_cast at 165).
+// DISCLOSE — nothing degraded). Query predicates could not do this before #355: the tags pass ran
+// none (measured — a `#not-eq?` left --uses=static_cast at 165). It runs the string ones now, so this can move into the query.
 inline bool isCppCastKeyword( std::string_view name ) noexcept
 {
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
@@ -99,8 +99,8 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
 // grammar carries no case distinction, so an intrinsic tag would otherwise mint a phantom call edge
 // to a symbol that is never defined. react.dev's own rule is the filter: a user component's tag name
 // MUST start with an uppercase letter for JSX to treat it as one rather than an HTML tag, so a
-// lower-case-first-letter name at this shape is never a component. Query predicates cannot do this:
-// passesPredicates is wired into --match/--lint only, not the tags pass (same measured fact
+// lower-case-first-letter name at this shape is never a component. Query predicates could not do this before
+// #355, when the tags pass ran none (the same measured fact
 // isCppCastKeyword's note above relies on) — so, exactly like that cast filter, this is VALID INPUT,
 // skipped at capture time, never ASSUME/DISCLOSE.
 //
@@ -136,7 +136,7 @@ inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::
 // `using enum E;` (C++20; re-exports the ENUMERATORS, not the named type, so an import row for the type
 // would over-claim). Both are VALID INPUT, skipped at capture time exactly like the cast keywords above:
 // the grammar puts the keyword in an anonymous child with no field name, which a tags-query pattern
-// cannot negate (passesPredicates is wired into --match/--lint only, never the tags pass).
+// cannot negate (and before #355 the tags pass ran no predicate that could test its text).
 inline bool usingDeclarationIsDirective( TSNode n ) noexcept
 {
     return !ts_node_is_null( firstChildOfType( n, "namespace" ) ) || !ts_node_is_null( firstChildOfType( n, "enum" ) );
@@ -210,39 +210,7 @@ inline std::size_t operatorNameStart( std::string_view text ) noexcept
     return punctEnd == text.size() ? op : std::string_view::npos;
 }
 
-// Index of the last `::` in `text` that sits at TEMPLATE-ARGUMENT DEPTH ZERO, or npos when there is none.
-// Scanned in reverse (the LAST top-level separator is the one that splits name from scope), tracking `<`/`>`
-// nesting so a `::` inside template arguments never splits: `tmplFn<a::B>` has NO top-level separator, while
-// `numeric_limits<std::size_t>::max` has exactly one — at the `::` before `max`.
-// PRECONDITION: `text` carries no trailing operator name. Depth is clamped at zero, which makes an
-// operator spelling merely IGNORED rather than balanced — that is enough for `operator<<` and NOT enough for
-// the `>` family, whose unmatched `>` would leave the depth pinned above zero and hide every separator. The
-// caller checks operatorNameStart() first; do not weaken that ordering.
-// The loop counts a 1-based CURSOR down to zero rather than the classic `for( i = n; i-- > 0; )`: that idiom
-// wraps `i` to SIZE_MAX on its final test, which `-fsanitize=integer` reports as an unsigned-integer
-// overflow (observed on this very function before this shape — the G1 build caught it on the fixture).
-inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
-{
-    std::size_t angleDepth = 0;
-    for( std::size_t cursor = text.size(); cursor > 0; --cursor )
-    {
-        const std::size_t charIndex = cursor - 1;
-        const char        c         = text[ charIndex ];
-        if( c == '>' )
-        {
-            ++angleDepth;
-        }
-        else if( c == '<' && angleDepth > 0 )
-        {
-            --angleDepth;
-        }
-        else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[ charIndex - 1 ] == ':' )
-        {
-            return charIndex - 1;                                 // index of the FIRST ':' of the pair
-        }
-    }
-    return std::string_view::npos;
-}
+// lastTopLevelScopeSep: infra/namesplit.h (moved there so graph-side readers split a scope by the same rule).
 
 // True when a qualified_identifier's `::` separator is a MISSING node — a zero-width token tree-sitter
 // INSERTED during error recovery, not one that is written in the source. Recovery reaches for this shape
@@ -838,7 +806,7 @@ inline bool cppDefinitionRootsStd( TSNode nameNode, std::string_view src )
 // part BEFORE the name's separator, and an operator never names a scope.
 inline std::string cppRefQualifierText( std::string_view scopeText )
 {
-    const std::size_t      sep  = lastTopLevelScopeSep( scopeText );
+    const std::size_t      sep  = namesplit::lastTopLevelScopeSep( scopeText );
     const std::string_view last = skipTemplateDisambiguator( sep == std::string_view::npos ? scopeText : scopeText.substr( sep + 2 ) );
     return last.ends_with( '>' ) ? canonicalTemplateIdText( last ) : immediateScope( last );
 }
@@ -875,7 +843,7 @@ inline void cppResplitRefName( RawRef& r, std::string_view nameTxt )
     {
         return;
     }
-    const std::size_t      sep    = lastTopLevelScopeSep( nameTxt );
+    const std::size_t      sep    = namesplit::lastTopLevelScopeSep( nameTxt );
     const bool             hasSep = sep != std::string_view::npos;
     const std::string_view tail   = hasSep ? nameTxt.substr( sep + 2 ) : nameTxt;
     const std::string_view bare   = skipTemplateDisambiguator( tail );
@@ -935,7 +903,7 @@ inline std::string rustPathSegment( std::string_view pathText ) noexcept
     { // the turbofish `::<` separator
         text.remove_suffix( 2 );
     }
-    const std::size_t sep = lastTopLevelScopeSep( text );
+    const std::size_t sep = namesplit::lastTopLevelScopeSep( text );
     const std::string_view seg = ( sep == std::string_view::npos ) ? text : text.substr( sep + 2 );
     return isRustIdentifier( seg ) ? std::string( seg ) : std::string{};
 }
@@ -977,9 +945,93 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
     return {};
 }
 
+// RUST-UFCS-QUALIFIED: is `name` a type parameter of an item enclosing `node` — `fn f<T>`, `impl<T> … for T`, `trait Tr<T>`? Each
+// parameter's own name is its first identifier (`T` in `T: Bound`), never a bound. A path written through one names no type.
+inline bool rustEnclosingTypeParam( TSNode node, std::string_view name, std::string_view src )
+{
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* t = ts_node_type( p );
+        if( !kindIs( t, "function_item" ) && !kindIs( t, "impl_item" ) && !kindIs( t, "trait_item" ) )
+        {
+            continue;
+        }
+        const TSNode params = fieldChild( p, NodeField::TypeParameters );
+        for( std::uint32_t i = 0, k = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params ); i < k; ++i )
+        {
+            TSNode id = ts_node_named_child( params, i );
+            if( !kindIs( ts_node_type( id ), "type_identifier" ) )
+            {
+                const TSNode named = fieldChild( id, NodeField::Name );
+                id = !ts_node_is_null( named ) ? named : ts_node_named_child_count( id ) > 0 ? ts_node_named_child( id, 0 ) : TSNode{};
+            }
+            if( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "type_identifier" ) && nodeTextOf( id, src ) == name )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// RUST-UFCS-QUALIFIED: the ONE type a bracketed path's written type names — `Where`, `a::Where` and `Where<T>` → "Where", a
+// primitive `u8` → "u8", `Self` → the enclosing impl's type. "" when it names no one type: a type parameter, `Self` of an impl
+// for one, an associated type reached through either (`B::Owned`, `Self::Item`), and every shape that is not a path (`&T`,
+// `dyn Tr`, `[T]`, a tuple).
+inline std::string rustBracketedTypeName( TSNode type, TSNode at, std::string_view src )
+{
+    const TSNode base = kindIs( ts_node_type( type ), "generic_type" ) ? fieldChild( type, NodeField::Type ) : type;
+    if( ts_node_is_null( base ) )
+    {
+        return {};
+    }
+    const char*            kind = ts_node_type( base );
+    const std::string_view text = nodeTextOf( base, src );
+    if( kindIs( kind, "primitive_type" ) )
+    {
+        return std::string( text );
+    }
+    if( !kindIs( kind, "type_identifier" ) && !kindIs( kind, "scoped_type_identifier" ) )
+    {
+        return {};
+    }
+    const std::size_t      sep  = text.find( "::" );
+    const std::string_view root = sep == std::string_view::npos ? text : text.substr( 0, sep );
+    if( root == "Self" )
+    {
+        const std::string self = rustEnclosingScopeOf( at, src, /*includeModules=*/false );
+        return sep != std::string_view::npos || self.empty() || rustEnclosingTypeParam( at, self, src ) ? std::string{} : self;
+    }
+    return rustEnclosingTypeParam( at, root, src ) ? std::string{} : rustPathSegment( text );
+}
+
+// RUST-UFCS-QUALIFIED: the qualifier of a call whose path is a bracketed type. `<Where as Command>::run( .. )` names Where's impl of
+// Command::run and `<Where>::helper( .. )` Where's own helper, so the qualifier is the type's name, which keepRustQualifiedCandidates
+// (graph.h) holds the call to — a type the tree does not define declines it, never every same-named method. A written type that
+// names no one type (rustBracketedTypeName "") qualifies by the trait it is cast to or is (`<T as Tr>::m`, `<dyn Tr>::m`): the
+// call dispatches to Tr's implementors. "" for any other shape (`<&T>::m`), which keeps the bare-name resolution.
+inline std::string rustBracketedQualifier( TSNode bracketed, TSNode at, std::string_view src )
+{
+    const TSNode inner = ts_node_named_child_count( bracketed ) == 1 ? ts_node_named_child( bracketed, 0 ) : TSNode{};
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const bool   cast  = kindIs( ts_node_type( inner ), "qualified_type" );
+    const TSNode type  = cast ? fieldChild( inner, NodeField::Type ) : inner;
+    std::string  named = ts_node_is_null( type ) ? std::string{} : rustBracketedTypeName( type, at, src );
+    if( !named.empty() )
+    {
+        return named;
+    }
+    const TSNode trait = cast ? fieldChild( inner, NodeField::Alias )
+                       : kindIs( ts_node_type( inner ), "dynamic_type" ) ? fieldChild( inner, NodeField::Trait ) : TSNode{};
+    return ts_node_is_null( trait ) ? std::string{} : rustPathSegment( nodeTextOf( trait, src ) );
+}
+
 // Qualifier of a Rust CALL reference whose @name is the final segment of a `scoped_identifier`:
-// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec".
-// Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
+// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec", `<Where as Command>::run()` → "Where"
+// (rustBracketedQualifier). Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
 // spelling, which has no `path:` child) → those keep the pre-existing bare-name resolution untouched.
 // This is a CALL ref (isInherit=false). graph.h's Rust `impl Trait for T` CHA path reads `qualifier` too, but
 // only behind `if( !ir.isInherit ) continue;`, so the two uses of the field cannot collide — gated by
@@ -990,6 +1042,10 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
+    }
+    if( const TSNode path = fieldChild( parent, NodeField::Path ); !ts_node_is_null( path ) && kindIs( ts_node_type( path ), "bracketed_type" ) )
+    {
+        return rustBracketedQualifier( path, nameNode, src );
     }
 
     std::string qualifier = rustPathSegment( nodeTextOf( fieldChild( parent, NodeField::Path ), src ) );
@@ -1206,9 +1262,24 @@ inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint3
     j = skipBlanks( src, j, end );
     return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
 }
-// The Macro reference for `$crate::a::name!` at `at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
-inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
+// Where one `$crate::a::name!` sits: `$crate` at byte `at`, the macro name at [nameAt, nameEnd), in file `fileId` on 1-based `line`
+// (five uint32_t, named at the call).
+struct CrateMacroSite
 {
+    std::uint32_t at      = 0;
+    std::uint32_t nameAt  = 0;
+    std::uint32_t nameEnd = 0;
+    std::uint32_t fileId  = 0;
+    std::uint32_t line    = 0;
+};
+// The Macro reference for `$crate::a::name!` at `site.at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, CrateMacroSite site )
+{
+    const std::uint32_t at      = site.at;
+    const std::uint32_t nameAt  = site.nameAt;
+    const std::uint32_t nameEnd = site.nameEnd;
+    const std::uint32_t fileId  = site.fileId;
+    const std::uint32_t line    = site.line;
     std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
     while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
     {
@@ -1224,18 +1295,192 @@ inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::ui
     std::string qualifier;
     std::string written;
     rustMacroPathOf( path, qualifier, written );
-    r.qualifier = std::move( qualifier );
+    r.qualifier = qualifier;
     if( !written.empty() )
     {
         r.setFieldName( std::move( written ) );
     }
     return r;
 }
+
+// BX2 FIX 5 — CALLS IN A TRANSCRIBER (test/rustmacrocallcheck.sh). axum calls Route::oneshot_inner_owned twice only inside the
+// fn-local `call!` macro_rules of MethodRouter::call_with_state (`return route.oneshot_inner_owned($req);`): a token tree is not
+// parsed, so no tags pattern saw the call and --callers missed the file. The same lexical floor the C macro-body scan keeps
+// (ingest_relations.h captureMacroBodyCalls), over each rule's TRANSCRIBER only (the right of `=>`; a matcher holds fragment
+// specifiers, never calls): a call-shaped `name(`, `.name(` (a member call) or `a::b::name(` / `$crate::a::name(` (a path call,
+// its qualifier and written path read as a macro path's are, `$crate` as `crate`), one Call reference at the name's byte, so the
+// macro's span owns it and the graph connects THROUGH the macro, as it does for C. Not read: a metavariable (`$f(`), a keyword
+// (`if (`, `match (`), a definition (`fn name(`), a macro (`name!(`), a turbofish or generic path segment (`Vec::<T>::new(`,
+// a floor), anything in a literal or comment. `Self::` names the impl of the EXPANSION site: read as a bare name.
+inline constexpr std::array<std::string_view, 32> kTranscriberKeywords = {
+    "if", "while", "match", "for", "return", "loop", "in", "as", "let", "mut", "ref", "move", "unsafe", "async", "await", "fn",
+    "impl", "where", "dyn", "else", "break", "continue", "struct", "enum", "union", "type", "use", "mod", "pub", "const", "static", "trait" };
+// The previous non-blank byte before `at` within [begin, at), or '\0'; `before` receives its index.
+inline char prevNonBlank( std::string_view src, std::uint32_t begin, std::uint32_t at, std::uint32_t& before ) noexcept
+{
+    for( std::uint32_t k = at; k > begin; --k )
+    {
+        if( !rw::isJsonWs( src[ k - 1 ] ) )
+        {
+            before = k - 1;
+            return src[ k - 1 ];
+        }
+    }
+    before = begin;
+    return '\0';
+}
+// True when the word right before `at` (blanks skipped) is `fn`: `fn name(` defines, it does not call.
+inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint32_t at ) noexcept
+{
+    std::uint32_t before = 0;
+    if( prevNonBlank( src, begin, at, before ) != 'n' || before < begin + 1 || src[ before - 1 ] != 'f' )
+    {
+        return false;
+    }
+    return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
+}
+// One path `seg ( :: seg )*` starting at `at` (an identifier or `$crate`): moves `at` past it, the last segment's bytes into
+// [nameAt, nameEnd). False when a segment is not an identifier (a metavariable, a turbofish `::<`): `at` then sits past what was read.
+inline bool readCallPath( std::string_view src, std::uint32_t& at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    for( bool first = true;; first = false )
+    {
+        std::uint32_t k = at;
+        if( first && src[ k ] == '$' )
+        {
+            k += 6;   // `$crate`, checked by the caller
+        }
+        else
+        {
+            while( k < end && namesplit::isIdentChar( src[ k ] ) )
+            {
+                ++k;
+            }
+        }
+        if( k == at )
+        {
+            return false;
+        }
+        nameAt  = at;
+        nameEnd = k;
+        at      = k;
+        const std::uint32_t sep = skipBlanks( src, k, end );
+        if( sep + 1 >= end || src[ sep ] != ':' || src[ sep + 1 ] != ':' )
+        {
+            return true;
+        }
+        at = skipBlanks( src, sep + 2, end );
+        if( at >= end || !namesplit::isIdentChar( src[ at ] ) )
+        {
+            return false;   // `Vec::<T>`, `x::$m`: not a plain path
+        }
+    }
+}
+// The Call reference for the call whose path starts at `pathAt` and whose last segment is [nameAt, nameEnd).
+inline RawRef transcriberCallRef( std::string_view src, std::uint32_t pathAt, std::uint32_t nameAt, std::uint32_t nameEnd, bool member,
+                                  std::uint32_t fileId, std::uint32_t line )
+{
+    RawRef r;
+    r.fileId     = fileId;
+    r.startByte  = nameAt;
+    r.line       = line;
+    r.lang       = Lang::Rust;
+    r.role       = RefRole::Call;
+    r.memberCall = member;
+    r.name       = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    if( nameAt > pathAt )
+    {
+        std::string_view path = src.substr( pathAt, nameAt - pathAt );   // `a::b::` — its trailing `::` dropped
+        while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
+        {
+            path.remove_suffix( 1 );
+        }
+        std::string qualifier;
+        std::string written;
+        rustMacroPathOf( path, qualifier, written );
+        if( qualifier != "Self" )
+        {
+            r.qualifier = qualifier;
+            if( !written.empty() )
+            {
+                r.setFieldName( std::move( written ) );   // the whole written qualifier, as a path call's (model.h Reference::fieldName)
+            }
+        }
+    }
+    return r;
+}
+// The calls one transcriber token tree [begin, end) spells, starting on 1-based line `line`.
+inline void scanTranscriberCalls( std::string_view src, std::uint32_t begin, std::uint32_t end, std::uint32_t line, std::uint32_t fileId,
+                                  std::vector<RawRef>& refs )
+{
+    std::uint32_t i = begin;
+    while( i < end )
+    {
+        if( src[ i ] == '\n' )
+        {
+            ++line;
+            ++i;
+            continue;
+        }
+        if( skipLiteralOrComment( src, i, end, line ) )
+        {
+            continue;
+        }
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
+        const bool atWord  = namesplit::isIdentChar( src[ i ] ) && !( src[ i ] >= '0' && src[ i ] <= '9' ) && ( i == begin || !namesplit::isIdentChar( src[ i - 1 ] ) );
+        if( !atCrate && !atWord )
+        {
+            ++i;
+            continue;
+        }
+        if( atWord && i > begin && src[ i - 1 ] == '$' )
+        {
+            while( i < end && namesplit::isIdentChar( src[ i ] ) )   // a metavariable `$name`: never a callee here
+            {
+                ++i;
+            }
+            continue;
+        }
+        std::uint32_t       before  = 0;
+        const char          prev    = prevNonBlank( src, begin, i, before );
+        const bool          member  = prev == '.' && !( before > begin && src[ before - 1 ] == '.' );   // `x.f(`, never a range `..f(`
+        const bool          pathed  = prev == ':' && before > begin && src[ before - 1 ] == ':';       // mid-path: a start this scan does not read
+        const std::uint32_t pathAt  = i;
+        std::uint32_t       nameAt  = 0;
+        std::uint32_t       nameEnd = 0;
+        const bool          plain   = readCallPath( src, i, end, nameAt, nameEnd );
+        const std::uint32_t toName  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + nameAt, '\n' ) );
+        const std::uint32_t inPath  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + i, '\n' ) );
+        const std::uint32_t next    = skipBlanks( src, i, end );
+        const bool          call    = plain && !pathed && next < end && src[ next ] == '(' && !( atCrate && nameAt == pathAt )
+                                   && !std::ranges::contains( kTranscriberKeywords, src.substr( nameAt, nameEnd - nameAt ) ) && !( nameAt == pathAt && afterFnKeyword( src, begin, pathAt ) );
+        if( call )
+        {
+            refs.push_back( transcriberCallRef( src, pathAt, nameAt, nameEnd, member && nameAt == pathAt, fileId, line + toName ) );
+        }
+        line += inPath;   // the scan resumes past the path; a newline inside it is counted here
+    }
+}
+// Each rule's transcriber (`macro_rule`'s right:) of `macroDef`, in source order.
+inline void scanMacroTranscribers( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    const std::uint32_t rules = ts_node_named_child_count( macroDef );
+    for( std::uint32_t c = 0; c < rules; ++c )
+    {
+        const TSNode rule  = ts_node_named_child( macroDef, c );
+        const TSNode right = kindIs( ts_node_type( rule ), "macro_rule" ) ? fieldChild( rule, NodeField::Right ) : TSNode{};
+        if( !ts_node_is_null( right ) && ts_node_end_byte( right ) <= src.size() )
+        {
+            scanTranscriberCalls( src, ts_node_start_byte( right ), ts_node_end_byte( right ), ts_node_start_point( right ).row + 1, fileId, refs );
+        }
+    }
+}
 }   // namespace rust_transcriber_scan
 
 inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
 {
     using namespace rust_transcriber_scan;
+    scanMacroTranscribers( macroDef, fileId, src, refs );   // BX2 FIX 5: the calls each transcriber spells
     const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
     std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
     std::uint32_t       i    = ts_node_start_byte( macroDef );
@@ -1261,7 +1506,7 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
         std::uint32_t nameEnd = 0;
         if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
         {
-            refs.push_back( cratePathMacroRef( src, i, nameAt, nameEnd, fileId, line ) );
+            refs.push_back( cratePathMacroRef( src, { .at = i, .nameAt = nameAt, .nameEnd = nameEnd, .fileId = fileId, .line = line } ) );
         }
         i += 6;   // resume past `$crate` so a newline inside the path is still counted
     }
@@ -2086,7 +2331,7 @@ inline FnScope enclosingFunctionScope( TSNode root, TSNode defNode ) noexcept
     for( TSNode n = root; !ts_node_is_null( n ) && !ts_node_is_null( defNode ) && !ts_node_eq( n, defNode ); n = ts_node_child_with_descendant( n, defNode ) )
     {
         const char* t = ts_node_type( n );
-        if( namesNode( kMemberContainerKinds, t ) )
+        if( isOneOf( t, kMemberContainerKinds ) )
         {
             scope = {};   // a member of a class/impl body below here, unless a function nests deeper still
         }
@@ -2231,7 +2476,7 @@ inline bool isScreamingSnakeName( std::string_view name ) noexcept
 // Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
 // constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the
 // right shape — the name gate is what scopes extraction to settings modules / feature-flag tables
-// instead of every literal. Enforced HERE because tags-pass predicates never run (#match? is wired into
+// instead of every literal. Enforced HERE because tags-pass predicates did not run before #355 (#match? is wired into
 // --match/--lint only — measured; see the note in queries/cpp/tags.scm). Deliberately NOT gated:
 // Python (vendored upstream pattern, case-blind since import — existing behavior pinned by constcheck),
 // Go (const/var patterns predate this and Go constants are conventionally CamelCase), Rust (const_item/
@@ -2315,7 +2560,7 @@ inline std::string_view childTokenAmong( TSNode node, std::string_view src, cons
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
 // patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
 // compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
-// there would make ts_query_new reject the whole query; tags-pass predicates never run (measured; see
+// there would make ts_query_new reject the whole query; tags-pass predicates did not run before #355 (measured; see
 // the cast-keyword note in tags.scm); and a `(type_qualifier)` child constraint cannot see `__device__`
 // anyway — tree-sitter-cuda parses `__constant__`/`__managed__` as NAMED type_qualifier nodes but
 // `__device__` as an ANONYMOUS token child of the declaration. The qualifier test therefore lives here,
@@ -2352,7 +2597,7 @@ inline bool declarationCarriesConstQualifier( TSNode declNode, std::string_view 
 
 // The keep decision for the class-static-constant field_declaration captures (queries/cpp/tags.scm,
 // module-constant round). The pattern is deliberately loose — it matches EVERY default-member-
-// initializer, because tags-pass predicates never run and static/constexpr child order is free — so
+// initializer, because tags-pass predicates did not run before #355 and static/constexpr child order is free — so
 // this is where the real contract lives: keep iff the field carries BOTH a `static`
 // storage_class_specifier AND a const/constexpr/constinit type_qualifier. That keeps
 // `static constexpr int kMaxDepth = 3;` case-blind (one per-class constant, the census target) and
@@ -2366,7 +2611,7 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
 }
 
 // The keep decision for the @definition.field captures (member-variable round, card A3; queries/cpp,
-// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates never run
+// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates did not run before #355
 // — so the contract lives here, per language:
 //   C/C++ : keep iff the field_declaration carries NO `static` storage_class_specifier. A class-static
 //           CONSTANT keeps its own @definition.constant row (t="var", fieldConstantCaptureKept); a mutable
@@ -3239,7 +3484,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
 
 // YAML's @definition.yamlkey gate — the yaml tier's one in-C++ predicate (see queries/yaml/tags.scm's
 // header for why the depth cut cannot live in the query: sequence nesting between a pair and its
-// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates never run).
+// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates did not run before #355).
 // A mapping key is a symbol iff its MAPPING depth is <= 2 — block and flow mappings counted alike
 // (flow is a presentation style of the same mapping node), sequences counted NOT AT ALL (sequence
 // transparency: 25.3% of real keys sit directly inside a sequence element — the steps:/containers:/
@@ -3278,7 +3523,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
 // test/pyshapecheck.sh) drops when the enclosing class's base NAME is not an enum family;
 // @definition.cjsexport / @definition.protomethod (the JS shape round, test/jsshapecheck.sh) drop when
 // the LEFT side is not really exports/module.exports/.prototype. — the query captures every `a.b = fn`
-// shape and cannot text-test, because tags-pass predicates never run (see constCaptureNeedsScreamingGate
+// shape and cannot text-test, because tags-pass predicates did not run before #355 (see constCaptureNeedsScreamingGate
 // above).
 inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode nameNode, TSNode roleNode, std::string_view src )   // NOT noexcept: the class-factory gate's scope lookup allocates
 {

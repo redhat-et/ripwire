@@ -16,6 +16,8 @@
 #   • --no-redact restores the originals verbatim and prints NO stderr summary
 #   • exactly one stderr summary line is emitted (count-by-type) when anything was redacted
 #   • the redaction transform is deterministic (two runs byte-identical) and keeps the XML well-formed
+#   • REDACT-TOUCH (section 8): the source, manifest and plan LINES an answer quotes are redacted too — --for <touch> and
+#     <listed>, --path hop bodies, --whereis t=, --plan-lint <owed>, and the MCP twins (rt1..rt5, the arms list there)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -132,6 +134,119 @@ if command -v xmllint >/dev/null 2>&1; then
 else
   printf '  SKIP  xmllint (not installed)\n'
 fi
+
+# ── 8) REDACT-TOUCH: every source, manifest or plan LINE an answer quotes passes the redactor ───────
+# Each arm's fixture is built here, at run time, with a token of a shape the redactor already knows (a GitHub ghp_ token, an AWS
+# key id). Per arm: the answer prints the marker where the line is quoted and the raw token nowhere, stderr's tally counts every
+# marker the answer prints, and --no-redact prints the token raw (no marker, no tally). Red on the pre-change main 9087eb59c:
+#   (rt1) --for <touch> (exemplarfamily.h touchListXml): a registry line naming every handler, its token straddling the 120-byte
+#         cut — cut first, `ghp_` and 15 bytes print, too short for the GitHub rule, and leak; redacted first, the marker prints
+#         (itself cut at 120 bytes, cut="1": nothing of the token is left to leak)
+#   (rt1m) MCP `for`: the same <touch> row, the tally on the server's stderr
+#   (rt2) --for <listed><ln> (listedin.h appendListed): a Makefile.am SOURCES line carrying a token
+#   (rt3) --path <bodies of="hops"> (hopbody.h routeBodiesXml, which passed nullptr): the middle hop's body holds an AWS key id;
+#         (rt3m) MCP path_between, the same body
+#   (rt4) --whereis t= (crossref.h writeWhereisPage): a definition line holding a token, on HEAD; (rt4m) MCP whereis
+#   (rt5) --plan-lint <owed> (planlint.h writePlanLint): an owed line holding a token
+RT="$TMP/rt"; mkdir -p "$RT"
+. "$ROOT/test/lib/clean-env.sh"
+rtok(){ printf '%s%s' "$1" "$( printf "$2%.0s" $( seq 1 "$3" ) )"; }   # prefix, fill byte, fill count
+markers(){ grep -o '\[REDACTED:[a-z/]*' "$1" | grep -vx '\[REDACTED:kind' | wc -l | tr -d ' '; }   # the legend's [REDACTED:kind] is no marker
+tally(){ sed -n 's/^ripwire: redacted \([0-9]*\) secret.*/\1/p' "$1" | head -1; }
+mcpcall(){   # dir tool json-args out err [--no-redact]: one tools/call; out = the text content, err = the server's stderr
+    python3 - "$BIN" "$1" "$2" "$3" "$4" "$5" "${6:-}" <<'PY'
+import json, subprocess, sys
+binp, d, tool, args, out, err, extra = sys.argv[1:8]
+reqs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "g", "version": "1"}}},
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": json.loads(args)}}]
+cmd = [binp, "--mcp"] + ([extra] if extra else [])
+p = subprocess.run(cmd, input="".join(json.dumps(r) + "\n" for r in reqs), capture_output=True, text=True, timeout=300, cwd=d)
+text = ""
+for line in p.stdout.splitlines():
+    try: o = json.loads(line)
+    except ValueError: continue
+    if o.get("id") == 1:
+        text = "".join(c.get("text", "") for c in o.get("result", {}).get("content", []))
+open(out, "w").write(text)
+open(err, "w").write(p.stderr)
+PY
+}
+# check ARM OUT ERR RAWFILL ELEMENT-REGEX: the element holds a marker, the raw fill appears nowhere, stderr counts every marker
+rtcheck(){
+    local arm="$1" out="$2" err="$3" fill="$4" el="$5" n
+    n="$( markers "$out" )"
+    if tr '\n' ' ' <"$out" | grep -Eq "$el" && ! grep -q "$fill" "$out" && [ "$n" -gt 0 ] && [ "$( tally "$err" )" = "$n" ]; then
+        ok "($arm) the quoted line prints the marker, the raw token nowhere; stderr counts all $n markers"
+    else no "($arm) $( tr '\n' ' ' <"$out" | grep -Eo "$el" | head -c 300 ) | raw: $( grep -c "$fill" "$out" ) | markers $n, stderr: $( grep -o 'redacted[^(]*' "$err" )"; fi
+}
+# raw ARM OUT ERR TOKEN-PREFIX: --no-redact prints the token raw, no marker, no tally
+rtraw(){
+    if grep -q "$4" "$2" && ! grep -q 'REDACTED' "$2" && ! grep -q 'ripwire: redacted' "$3"; then ok "($1) --no-redact prints the line raw, no tally"
+    else no "($1) --no-redact: raw $( grep -c "$4" "$2" ), markers $( markers "$2" ), stderr: $( grep -o 'redacted[^(]*' "$3" )"; fi
+}
+rtrun(){ local d="$1" out="$2" err="$3"; shift 3; ( cd "$d" || exit 1; "$BIN" "$d" --no-cache "$@" </dev/null >"$out" 2>"$err" ) || no "run $d $*: rc=$?"; }
+
+# (rt1) <touch>
+P="$RT/py"; mkdir -p "$P/app/handlers"
+printf 'class Handler:\n    def handle(self, req):\n        raise NotImplementedError\n' >"$P/app/handlers/base.py"
+for h in json xml csv yaml; do
+    H="$( printf '%s' "$h" | awk '{ print toupper( substr( $0, 1, 1 ) ) substr( $0, 2 ) }' )"
+    printf 'from .base import Handler\n\n\nclass %sHandler(Handler):\n    def handle(self, req):\n        return "%s"\n' "$H" "$h" >"$P/app/handlers/${h}_handler.py"
+done
+TT="$( rtok ghp_ A 36 )"
+printf 'HANDLERS = {"json": JsonHandler, "xml": XmlHandler, "csv": CsvHandler, "yaml": YamlHandler, "auth": "%s"}\n' "$TT" >"$P/app/registry.py"
+rtrun "$P" "$RT/t1.xml" "$RT/t1.err" "--for=add a new handler"
+rtcheck rt1 "$RT/t1.xml" "$RT/t1.err" AAAAAAAAAA '<touch p="app/registry.py:1"[^>]* cut="1">[^<]*ghp_…\[REDACTED:'
+rtrun "$P" "$RT/t1n.xml" "$RT/t1n.err" "--for=add a new handler" --no-redact
+rtraw rt1 "$RT/t1n.xml" "$RT/t1n.err" 'ghp_AAAAAAAAAAAA'
+mcpcall "$P" for "{\"path\":\"$P\",\"task\":\"add a new handler\"}" "$RT/t1m.xml" "$RT/t1m.err"
+rtcheck rt1m "$RT/t1m.xml" "$RT/t1m.err" AAAAAAAAAA '<touch p="app/registry.py:1"[^>]* cut="1">[^<]*ghp_…\[REDACTED:'
+mcpcall "$P" for "{\"path\":\"$P\",\"task\":\"add a new handler\"}" "$RT/t1mn.xml" "$RT/t1mn.err" --no-redact
+rtraw rt1m "$RT/t1mn.xml" "$RT/t1mn.err" 'ghp_AAAAAAAAAAAA'
+
+# (rt2) <listed><ln>
+A="$RT/am"; mkdir -p "$A"
+TL="$( rtok ghp_ L 36 )"
+printf 'bin_PROGRAMS = demo\n\ndist_demo_SOURCES = \\\n\twidget-alpha.c %s \\\n\twidget-beta.c \\\n\tmain.c\n' "$TL" >"$A/Makefile.am"
+printf 'int main(void) { return 0; }\n' >"$A/main.c"
+printf 'int widget_new_alpha(void) { return 1; }\nint widget_alpha_run(void) { return widget_new_alpha(); }\n' >"$A/widget-alpha.c"
+printf 'int widget_new_beta(void) { return 2; }\n' >"$A/widget-beta.c"
+rtrun "$A" "$RT/t2.xml" "$RT/t2.err" "--for=new widget"
+rtcheck rt2 "$RT/t2.xml" "$RT/t2.err" LLLLLLLLLL '<ln l="4">[^<]*\[REDACTED:github-token\]'
+rtrun "$A" "$RT/t2n.xml" "$RT/t2n.err" "--for=new widget" --no-redact
+rtraw rt2 "$RT/t2n.xml" "$RT/t2n.err" 'ghp_LLLLLLLLLLLL'
+
+# (rt3) <bodies of="hops">
+W="$RT/web"; mkdir -p "$W/src"
+printf 'export function fetch(req: string): string {\n  return dispatch(req)\n}\nexport function dispatch(req: string): string {\n  const signer = "AKIAIOSFODNN7EXAMPLE"\n  return compose(req + signer)\n}\nexport function compose(body: string): string {\n  return body\n}\n' >"$W/src/server.ts"
+rtrun "$W" "$RT/t3.xml" "$RT/t3.err" --path=fetch,compose
+rtcheck rt3 "$RT/t3.xml" "$RT/t3.err" IOSFODNN7EXAMPLE '<bodies of="hops"[^>]*><b [^>]*n="dispatch"[^>]*><!\[CDATA\[[^]]*AKIA…\[REDACTED:aws-key\]'
+rtrun "$W" "$RT/t3n.xml" "$RT/t3n.err" --path=fetch,compose --no-redact
+rtraw rt3 "$RT/t3n.xml" "$RT/t3n.err" 'AKIAIOSFODNN7EXAMPLE'
+mcpcall "$W" path_between "{\"path\":\"$W\",\"from\":\"fetch\",\"to\":\"compose\"}" "$RT/t3m.xml" "$RT/t3m.err"
+rtcheck rt3m "$RT/t3m.xml" "$RT/t3m.err" IOSFODNN7EXAMPLE '<bodies of="hops"[^>]*><b [^>]*n="dispatch"[^>]*><!\[CDATA\[[^]]*AKIA…\[REDACTED:aws-key\]'
+
+# (rt4) --whereis t=
+G="$RT/git"; mkdir -p "$G"
+TW="$( rtok ghp_ W 36 )"
+printf 'def deploy(token="%s"):\n    return token\n' "$TW" >"$G/deploy.py"
+( cd "$G" && git init -q -b main . && git add -A && git -c user.name=ripwire -c user.email=ripwire@example.invalid commit -qm init ) || no "(rt4) git fixture"
+rtrun "$G" "$RT/t4.xml" "$RT/t4.err" --whereis=deploy
+rtcheck rt4 "$RT/t4.xml" "$RT/t4.err" WWWWWWWWWW '<hit [^>]*t="def deploy\(token=&quot;ghp_[^"]*\[REDACTED:github-token\]'
+rtrun "$G" "$RT/t4n.xml" "$RT/t4n.err" --whereis=deploy --no-redact
+rtraw rt4 "$RT/t4n.xml" "$RT/t4n.err" 'ghp_WWWWWWWWWWWW'
+mcpcall "$G" whereis "{\"path\":\"$G\",\"symbol\":\"deploy\"}" "$RT/t4m.xml" "$RT/t4m.err"
+rtcheck rt4m "$RT/t4m.xml" "$RT/t4m.err" WWWWWWWWWW '<hit [^>]*t="def deploy\(token=&quot;ghp_[^"]*\[REDACTED:github-token\]'
+
+# (rt5) --plan-lint <owed>
+TP="$( rtok ghp_ P 36 )"
+printf '# PLAN\n\n### T1\nRotate the deploy token.\n- owed: rotate the deploy token %s before release\n' "$TP" >"$RT/plan.md"
+( cd "$RT" && "$BIN" "$RT" --no-cache --plan-lint="$RT/plan.md" </dev/null >"$RT/t5.xml" 2>"$RT/t5.err" ); rc5=$?
+[ "$rc5" = 2 ] || no "(rt5) --plan-lint exited $rc5, want 2 (the owed line is undischarged: a gating row)"
+rtcheck rt5 "$RT/t5.xml" "$RT/t5.err" PPPPPPPPPP '<owed line="5"[^>]*><!\[CDATA\[[^]]*\[REDACTED:github-token\]'
+( cd "$RT" && "$BIN" "$RT" --no-cache --plan-lint="$RT/plan.md" --no-redact </dev/null >"$RT/t5n.xml" 2>"$RT/t5n.err" ); rc5n=$?
+[ "$rc5n" = 2 ] || no "(rt5) --plan-lint --no-redact exited $rc5n, want 2"
+rtraw rt5 "$RT/t5n.xml" "$RT/t5n.err" 'ghp_PPPPPPPPPPPP'
 
 echo
 if [ "$fail" -eq 0 ]; then

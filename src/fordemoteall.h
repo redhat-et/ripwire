@@ -33,12 +33,21 @@ inline bool demoteRulesOn()
     return siblingDemoteOn() || declTwinOn();
 }
 
+// A <sigs> block and the answer bytes rendered around it, in answer order (three string_views, named at the call).
+struct BlockInAnswer
+{
+    std::string_view before;
+    std::string_view block;
+    std::string_view after;
+};
 // The rules over `block` (the <sigs> block of an answer still being assembled), read with `before` and `after` (the rows and hop rows
 // rendered around it, in answer order); "" when no row moves. Both rules move <sigs> rows only, so the bytes around the block come
 // back unchanged and the block is the edited text between them.
-inline std::string demoteAndPointBlock( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view before, std::string_view block,
-                                        std::string_view after )
+inline std::string demoteAndPointBlock( const IngestResult& ing, const Graph& g, std::string_view task, BlockInAnswer in )
 {
+    const std::string_view before = in.before;
+    const std::string_view block  = in.block;
+    const std::string_view after  = in.after;
     if( !demoteRulesOn() )
     {
         return {};
@@ -84,9 +93,13 @@ inline std::vector<ObjectSpan> arrayObjects( std::string_view arr )
         {
             at = i;
         }
-        else if( c == '}' && depth > 0 && --depth == 0 )
+        else if( c == '}' && depth > 0 )
         {
-            out.push_back( { .at = at, .end = i + 1 } );
+            --depth;
+            if( depth == 0 )
+            {
+                out.push_back( { .at = at, .end = i + 1 } );
+            }
         }
     }
     return out;

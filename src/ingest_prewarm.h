@@ -286,14 +286,23 @@ struct QueryPrewarm
     std::condition_variable       cv;
 };
 
+// One bool per kLangTable row: the grammars a prewarm step marks as needed.
+using LangRowSet = std::array<bool, kLangTable.size()>;
+
+// The kLangTable row of a grammar table entry.
+inline std::size_t langRowOf( const LangEntry* le ) noexcept
+{
+    return static_cast<std::size_t>( le - kLangTable.data() );
+}
+
 // The rows whose construct tables this ingest's parse will use: each parsed file's row (no cache, a miss, or the ObjC row of
 // a missed .h that sniffs ObjC), and a hit whose record lacks its hits (the pool parses it for them alone). A .h hit that
 // sniffs ObjC there, or a hit whose record fails late, compiles its table in the worker as before, unmeasured: the
 // projection then counts those bytes as growth, the cautious side.
-inline std::array<bool, kLangTable.size()> constructRowsNeeded( const CacheRecords& cache, const IngestFileScan& scan,
-                                                                const std::vector<char>& isMiss, const std::vector<char>& isObjCHeaderMiss )
+inline LangRowSet constructRowsNeeded( const CacheRecords& cache, const IngestFileScan& scan, const std::vector<char>& isMiss,
+                                       const std::vector<char>& isObjCHeaderMiss )
 {
-    std::array<bool, kLangTable.size()> rows {};
+    LangRowSet rows {};
     const LangEntry* objcLe = lookupLang( ".m" );
     for( std::size_t fi = 0; fi < scan.lang.size(); ++fi )
     {
@@ -311,313 +320,312 @@ inline std::array<bool, kLangTable.size()> constructRowsNeeded( const CacheRecor
         {
             le = objcLe;
         }
-        rows[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
+        rows[ langRowOf( le ) ] = true;
     }
     return rows;
 }
 
-// pre-warm the per-language tags.scm cache single-threaded; workers then only READ it.
-// LAZY: compile ONLY grammars needed by changed/uncached files (the miss set).
-// The grammar set must be a SUPERSET of every grammar any worker will touch:
-//   - a cache miss → grammar guaranteed needed → mark it
-//   - a cache hit (hash-match) → worker skips parse → grammar NOT needed (safe to omit)
-//   - a .h miss that looks Objective-C → marks objc instead of cpp (same looksObjC re-route as parse pool)
-//   - an unreadable .h miss → conservatively marks both cpp and objc, matching the old safety fallback
-inline void prewarmTagsQueries( const std::vector<std::string>& files, const CacheRecords& cache,
-                                long long cacheWriteNs, IngestFileScan& scan, QueryPrewarm& prewarm )
+// With no cache every code file is a parse miss: mark each one's grammar, and ObjC's beside every header's, so a header
+// that reroutes after the parse pool's content sniff never blocks on an uncompiled query.
+inline LangRowSet markNoCacheGrammars( const IngestFileScan& scan, std::size_t nfiles )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest: compile queries (tags.scm prewarm)" );
-    const std::size_t nfilesEarly = files.size();
-    std::array<bool, kLangTable.size()> present {};
-    bool anyUnknownHeaderMiss = false;
+    PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: mark no-cache grammars" );
 
-    // The miss-detection pass reads + FNV-hashes every cache-present code file to decide which grammars a
-    // worker will actually need. That I/O + hashing was serial (~61ms on canyon warm). It is READ-ONLY and
-    // a pure function of each file's bytes, so parallelize it — but keep the RESULT deterministic: every
-    // thread writes ONLY its own per-index slots (scan.hash[fi], isMiss[fi]); nothing is
-    // push_back'd from a worker. The grammar-mark reduction that follows is a serial pass over those slots,
-    // so the compiled-grammar set (and thus everything downstream) is independent of thread scheduling.
-    // The 204bb02 constraint still holds: compiledQueryCache() is populated single-threaded after the
-    // async compile join, and workers wait on prewarm.ready before reading it. scan.hash is pre-filled
-    // so the pool skips the re-read on a cache hit.
-    std::vector<char> isMiss( nfilesEarly, 0 );              // 1 ⇒ this file's grammar is needed (cache miss/new)
-    std::vector<char> isObjCHeaderMiss( nfilesEarly, 0 );    // 1 ⇒ missed .h should reroute to ObjC grammar
-    std::vector<char> isUnknownHeaderMiss( nfilesEarly, 0 ); // 1 ⇒ missed .h could not be sniffed; compile fallback
-
-    if( cache.empty() )
+    LangRowSet       present {};
+    const LangEntry* objcLe = lookupLang( ".m" );
+    for( std::size_t fi = 0; fi < nfiles; ++fi )
     {
-        PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: mark no-cache grammars" );
-
-        for( std::size_t fi = 0; fi < nfilesEarly; ++fi )
+        const LangEntry* le = scan.lang[ fi ];
+        if( le == nullptr || le->grammar == nullptr )
         {
-            const LangEntry* le = scan.lang[ fi ];
-            if( le == nullptr || le->grammar == nullptr )
-            {
-                continue;   // doc extensions / markdown — no grammar needed
-            }
-
-            present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-            if( le->ext == ".h" )
-            {
-                // With no cache, every header is a parse miss. Mark ObjC too so a header that reroutes
-                // after the parse pool's content sniff never blocks on an uncompiled query.
-                if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                {
-                    present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                }
-            }
+            continue;   // doc extensions / markdown — no grammar needed
         }
+        present[ langRowOf( le ) ] = true;
+        if( le->ext == ".h" && objcLe != nullptr )
+        {
+            present[ langRowOf( objcLe ) ] = true;
+        }
+    }
+    return present;
+}
+
+// Per-index results of the miss-detection pass. Every hash worker writes ONLY file fi's slots (and scan's); nothing is
+// push_back'd from a worker, so the grammar set reduced from these serially is independent of thread scheduling.
+struct PrewarmMissSlots
+{
+    std::vector<char> isMiss;                // 1 ⇒ this file's grammar is needed (cache miss/new)
+    std::vector<char> isObjCHeaderMiss;      // 1 ⇒ missed .h should reroute to ObjC grammar
+    std::vector<char> isUnknownHeaderMiss;   // 1 ⇒ missed .h could not be sniffed; compile fallback
+
+    explicit PrewarmMissSlots( std::size_t nfiles ) : isMiss( nfiles, 0 ), isObjCHeaderMiss( nfiles, 0 ), isUnknownHeaderMiss( nfiles, 0 ) {}
+};
+
+// What the miss-detection pass shares across its hash workers: read-only inputs, and the per-index slots each worker
+// writes for its own files only. Built only when the cache holds records.
+struct PrewarmMissPass
+{
+    const std::vector<std::string>& files;
+    const CacheRecords&             cache;
+    long long                       cacheWriteNs;   // the cache blob's own write time: the stat-gate's racy-entry bound
+    IngestFileScan&                 scan;
+    PrewarmMissSlots&               slots;
+};
+
+// One hash worker's read buffers, reused across its files (readFile / readFilePrefix keep their capacity).
+struct PrewarmReadBuffers
+{
+    std::string bytes;          // a whole file, read to re-hash it
+    std::string headerPrefix;   // the first 8 KiB of a missed .h the stat-gate skipped reading, for the ObjC sniff
+};
+
+// The verdict on one file the cache holds a record for.
+enum class CachedRecordVerdict : std::uint8_t
+{
+    kept,      // no parse needs its grammar: the record still holds (stat-gate or matching re-hash), or the file is unreadable
+    changed,   // its bytes, now in the worker's buffer, hash differently from the record: a miss
+};
+
+// Record a file's content hash and the stat observed now in its scan slots: the parse pool reads `hash` (equal to the
+// record's ⇒ a hit, no re-read) and the re-saved blob keeps the (size, mtime, ctime) so the file stays stat-gate-eligible.
+inline void captureHashAndStat( IngestFileScan& scan, std::size_t fi, std::uint64_t hash, long long sizeBytes, const StatInfo& si ) noexcept
+{
+    scan.hash[ fi ]      = hash;
+    scan.statSize[ fi ]  = sizeBytes;
+    scan.statMtime[ fi ] = si.mtimeNs;
+    scan.statCtime[ fi ] = si.ctimeNs;
+}
+
+// Does file fi's cached record still hold? The A4-P7 stat-gate first (no read), else read + hash (the bytes stay in
+// `bytes` for the caller's header sniff).
+inline CachedRecordVerdict probeCachedRecord( const PrewarmMissPass& pass, std::size_t fi, const CachedRecordHead& record, std::string& bytes )
+{
+    // A4-P7 STAT-GATE: trust the cached parse WITHOUT reading/hashing when the current size+mtime+ctime all still match the
+    // cache AND the entry is not racy (its mtime is strictly older than the blob's own write time — a same-granule post-hash
+    // edit could otherwise slip through undetected). Content hash stays the authority: any mismatch, an unstatable file, or
+    // a racy entry falls through to the read+hash path below.
+    //
+    // ctimeNs is the third discriminator and the one that closes the same-(mtime,size) residual: mtime can be restored by
+    // any unprivileged writer (`touch -r`, `cp -p`, an editor preserving it, a checkout of an older revision) and the byte
+    // length can survive an edit, but the utimes() that performs the restore is itself an inode change and moves ctime
+    // forward. It is free — this ::stat already returned it. See ingest_crawl.h statSizeTimes for what is still outside it
+    // (a clock moved backward, raw device writes, a ctime-less filesystem), which is why the racy rule below is kept rather
+    // than replaced.
+    const std::string& path           = pass.files[ fi ];
+    const StatInfo     si             = statSizeTimes( path );
+    const bool         sizeMtimeMatch = si.mtimeNs >= 0 && record.mtimeNs >= 0 && si.sizeBytes == record.sizeBytes && si.mtimeNs == record.mtimeNs;
+    const bool         statMatches    = sizeMtimeMatch && si.ctimeNs >= 0 && record.ctimeNs >= 0 && si.ctimeNs == record.ctimeNs;
+    const bool         notRacy        = pass.cacheWriteNs >= 0 && record.mtimeNs < pass.cacheWriteNs;
+    if( statMatches && notRacy )
+    {
+        captureHashAndStat( pass.scan, fi, record.hash, si.sizeBytes, si );   // parse pool sees a cache hit → never reads
+        return CachedRecordVerdict::kept;                                     // provably unchanged — grammar NOT needed
+    }
+
+    if( !readFile( path, bytes ) )
+    {
+        // THE COST SIDE OF THE ctime DISCRIMINATOR, and the one place it needs a degrade. ctime moves on
+        // chmod/chown/xattr/rename as well as on a write, so those all land here — correctly, and cheaply, since the re-hash
+        // then agrees with the record. But when the metadata change is what made the file UNREADABLE, this read fails, and
+        // dropping the file would turn a `chmod 000` into a silently partial index (caught by postingscheck (d), pinned by
+        // statgatecheck (e)).
+        //
+        // So: an unreadable file whose (size, mtime) still match a non-racy record KEEPS its cached parse. A ctime that moved
+        // on its own is a metadata change, not evidence of a content change, and serving the last-known parse of a file we
+        // were unable to look at beats deleting it from the answer. Disclosed exposure: a same-(mtime,size) edit hidden
+        // behind a chmod-to-unreadable is served stale — no cache-free run can do better (--no-cache cannot read it either),
+        // and the MCP edit verbs re-read and byte-hash their target regardless. An unreadable file whose size or mtime DID
+        // move keeps the pre-existing behaviour: it is dropped.
+        if( sizeMtimeMatch && notRacy )
+        {
+            captureHashAndStat( pass.scan, fi, record.hash, si.sizeBytes, si );   // absorb the metadata move: next run stat-hits again
+        }
+        return CachedRecordVerdict::kept;   // unreadable — worker will skip it too (not a miss to compile for)
+    }
+
+    // pre-fill the hash so the parse pool can skip the re-read on a cache hit, with the stat observed at hash time
+    const std::uint64_t h = contentHash64( bytes );
+    captureHashAndStat( pass.scan, fi, h, si.sizeBytes >= 0 ? si.sizeBytes : static_cast<long long>( bytes.size() ), si );
+    return record.hash == h ? CachedRecordVerdict::kept : CachedRecordVerdict::changed;
+}
+
+// A missed .h: does its content look Objective-C (the parse pool then re-routes it to the ObjC grammar)? `fullBytes` is
+// the whole file when the probe read it; otherwise its first 8 KiB are read here. A header that cannot be read at all is
+// marked unknown: the reduction then compiles ObjC as well as its own grammar.
+inline void sniffMissedHeader( const PrewarmMissPass& pass, std::size_t fi, const std::string* fullBytes, std::string& headerPrefix )
+{
+    std::string_view headerBytes;
+    if( fullBytes != nullptr )
+    {
+        headerBytes = *fullBytes;
+    }
+    else if( readFilePrefix( pass.files[ fi ], headerPrefix, 8192 ) )
+    {
+        headerBytes = headerPrefix;
     }
     else
     {
-        PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: detect cache misses" );
-
-        unsigned hwHash = std::thread::hardware_concurrency();
-        if( hwHash == 0 )
-        {
-            hwHash = 1;
-        }
-        const unsigned nHashThreads = static_cast<unsigned>( std::min<std::size_t>( hwHash, std::max<std::size_t>( nfilesEarly, 1 ) ) );
-        std::atomic<std::size_t> nextIdx{ 0 };
-        std::vector<std::thread> hashPool;
-        hashPool.reserve( nHashThreads );
-
-        for( unsigned t = 0; t < nHashThreads; ++t )
-        {
-            hashPool.emplace_back( [ & ]() noexcept
-            {
-                std::string bytes;
-                std::string headerPrefix;
-                for( ;; )
-                {
-                    const std::size_t fi = nextIdx.fetch_add( 1, std::memory_order_relaxed );
-                    if( fi >= nfilesEarly )
-                    {
-                        break;
-                    }
-                    try   // per-file degrade — a throw escaping a worker thread would std::terminate
-                    {
-                        const std::string& f = files[ fi ];
-                        const LangEntry* le = scan.lang[ fi ];
-                        if( le == nullptr )
-                        {
-                            continue;   // doc extensions — never cached (the doc post-pass re-extracts)
-                        }
-                        // B0: grammar-less languages (markdown) still flow through the cache stat-gate /
-                        // read+hash below so an UNCHANGED .md warm-hits without any read (previously the
-                        // early grammar skip left scan.hash=0 and the parse pool re-read every .md every
-                        // run — the last per-run file-read the postings path had left). They only skip
-                        // the grammar-miss bookkeeping at the bottom (nothing to compile for them).
-
-                        bool hasFullBytes = false;
-
-                        // path absent from cache ⇒ definitely a miss (no read needed). Present ⇒ try the
-                        // A4-P7 stat-gate first, else read+hash.
-                        if( !cache.empty() )
-                        {
-                            if( const CachedRecordHead* head = cache.headOf( fi ) )
-                            {
-                                const CachedRecordHead& ff = *head;
-
-                                // A4-P7 STAT-GATE: trust the cached parse WITHOUT reading/hashing when the
-                                // current size+mtime+ctime all still match the cache AND the entry is not
-                                // racy (its mtime is strictly older than the blob's own write time — a
-                                // same-granule post-hash edit could otherwise slip through undetected).
-                                // Content hash stays the authority: any mismatch, an unstatable file, or a
-                                // racy entry falls through to the read+hash path below.
-                                //
-                                // ctimeNs is the third discriminator and the one that closes the
-                                // same-(mtime,size) residual: mtime can be restored by any unprivileged
-                                // writer (`touch -r`, `cp -p`, an editor preserving it, a checkout of an
-                                // older revision) and the byte length can survive an edit, but the utimes()
-                                // that performs the restore is itself an inode change and moves ctime
-                                // forward. It is free — this ::stat already returned it. See
-                                // ingest_crawl.h statSizeTimes for what is still outside it (a clock moved
-                                // backward, raw device writes, a ctime-less filesystem), which is why the
-                                // racy rule below is kept rather than replaced.
-                                const StatInfo si = statSizeTimes( f );
-                                const bool sizeMtimeMatch = si.mtimeNs >= 0 && ff.mtimeNs >= 0
-                                                         && si.sizeBytes == ff.sizeBytes
-                                                         && si.mtimeNs   == ff.mtimeNs;
-                                const bool statMatches = sizeMtimeMatch
-                                                      && si.ctimeNs >= 0 && ff.ctimeNs >= 0
-                                                      && si.ctimeNs == ff.ctimeNs;
-                                const bool notRacy = cacheWriteNs >= 0 && ff.mtimeNs < cacheWriteNs;
-                                if( statMatches && notRacy )
-                                {
-                                    scan.hash[ fi ]      = ff.hash;        // parse pool sees a cache hit → never reads
-                                    scan.statSize[ fi ]  = si.sizeBytes;   // carry stat forward into the re-saved blob
-                                    scan.statMtime[ fi ] = si.mtimeNs;
-                                    scan.statCtime[ fi ] = si.ctimeNs;
-                                    continue;   // provably unchanged — grammar NOT needed for this file
-                                }
-
-                                if( !readFile( f, bytes ) )
-                                {
-                                    // THE COST SIDE OF THE ctime DISCRIMINATOR, and the one place it needs a
-                                    // degrade. ctime moves on chmod/chown/xattr/rename as well as on a write,
-                                    // so those all land here — correctly, and cheaply, since the re-hash then
-                                    // agrees with the record. But when the metadata change is what made the
-                                    // file UNREADABLE, this read fails, and dropping the file would turn a
-                                    // `chmod 000` into a silently partial index (caught by postingscheck (d),
-                                    // pinned by statgatecheck (e)).
-                                    //
-                                    // So: an unreadable file whose (size, mtime) still match a non-racy record
-                                    // KEEPS its cached parse. A ctime that moved on its own is a metadata
-                                    // change, not evidence of a content change, and serving the last-known
-                                    // parse of a file we were unable to look at beats deleting it from the
-                                    // answer. Disclosed exposure: a same-(mtime,size) edit hidden behind a
-                                    // chmod-to-unreadable is served stale — no cache-free run can do better
-                                    // (--no-cache cannot read it either), and the MCP edit verbs re-read and
-                                    // byte-hash their target regardless. An unreadable file whose size or
-                                    // mtime DID move keeps the pre-existing behaviour: it is dropped.
-                                    if( sizeMtimeMatch && notRacy )
-                                    {
-                                        scan.hash[ fi ]      = ff.hash;
-                                        scan.statSize[ fi ]  = si.sizeBytes;
-                                        scan.statMtime[ fi ] = si.mtimeNs;
-                                        scan.statCtime[ fi ] = si.ctimeNs;   // absorb the metadata move: next run stat-hits again
-                                    }
-                                    continue;   // unreadable — worker will skip it too (not a miss to compile for)
-                                }
-                                hasFullBytes = true;
-                                const std::uint64_t h = contentHash64( bytes );
-                                scan.hash[ fi ] = h;   // pre-fill so the parse pool can skip the re-read on a cache hit
-                                // capture the stat observed at hash time so this file stays stat-gate-eligible next run
-                                scan.statSize[ fi ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
-                                scan.statMtime[ fi ] = si.mtimeNs;
-                                scan.statCtime[ fi ] = si.ctimeNs;
-                                if( ff.hash == h )
-                                {
-                                    continue;   // cache hit — parse skipped → grammar NOT needed for this file
-                                }
-                            }
-                            // else: path not in cache → miss (fall through)
-                        }
-
-                        if( le->grammar == nullptr )
-                        {
-                            continue;   // markdown: hash prefill only — no grammar to compile, no miss to mark
-                        }
-
-                        if( le->ext == ".h" )
-                        {
-                            std::string_view headerBytes;
-                            if( hasFullBytes )
-                            {
-                                headerBytes = bytes;
-                            }
-                            else if( readFilePrefix( f, headerPrefix, 8192 ) )
-                            {
-                                headerBytes = headerPrefix;
-                            }
-                            else
-                            {
-                                isUnknownHeaderMiss[ fi ] = 1;
-                            }
-                            if( !headerBytes.empty() && looksObjC( headerBytes ) )
-                            {
-                                isObjCHeaderMiss[ fi ] = 1;
-                            }
-                        }
-                        isMiss[ fi ] = 1;   // cache empty, path-absent, or hash-changed → grammar needed
-                    }
-                    catch( ... )
-                    {
-                        DISCLOSE( Diagnostics::answerUnchanged,
-                                  "a missed prewarm only defers a grammar's query: a file then left without it discloses extract-partial itself",
-                                  "ingest: prewarm hash worker exception on a file — treated as no-miss" );
-                    }
-                }
-            } );
-        }
-        for( std::thread& th : hashPool )
-        {
-            th.join();
-        }
-        // serial grammar-mark reduction over the per-index results (order-independent: pure boolean OR).
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: reduce grammar set" );
-
-            for( std::size_t fi = 0; fi < nfilesEarly; ++fi )
-            {
-                if( !isMiss[fi] )
-                {
-                    continue;
-                }
-                const LangEntry* le = scan.lang[ fi ];
-                if( le == nullptr )
-                {
-                    continue; // defensive (isMiss only set for grammar-bearing files)
-                }
-                if( le->ext == ".h" )
-                {
-                    if( isObjCHeaderMiss[ fi ] )
-                    {
-                        if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                        {
-                            present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                        }
-                    }
-                    else
-                    {
-                        present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-                        if( isUnknownHeaderMiss[ fi ] )
-                        {
-                            anyUnknownHeaderMiss = true;
-                        }
-                    }
-                    continue;
-                }
-                present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-            }
-            if( anyUnknownHeaderMiss )
-            {
-                if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                {
-                    present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                }
-            }
-        }
+        pass.slots.isUnknownHeaderMiss[ fi ] = 1;
     }
-
-    // distinct grammars needed by cache-miss files (several extensions share one grammar)
+    if( !headerBytes.empty() && looksObjC( headerBytes ) )
     {
-        PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: unique grammars" );
+        pass.slots.isObjCHeaderMiss[ fi ] = 1;
+    }
+}
 
-        for( std::size_t i = 0; i < kLangTable.size(); ++i )
+// One file of the miss-detection pass: does its cached parse still hold, and if not, which grammar will its parse need?
+// Writes ONLY file fi's slots.
+inline void detectFileCacheMiss( const PrewarmMissPass& pass, std::size_t fi, PrewarmReadBuffers& buffers )
+{
+    const LangEntry* le = pass.scan.lang[ fi ];
+    if( le == nullptr )
+    {
+        return;   // doc extensions — never cached (the doc post-pass re-extracts)
+    }
+    // B0: grammar-less languages (markdown) still flow through the cache stat-gate / read+hash so an UNCHANGED .md
+    // warm-hits without any read (previously the early grammar skip left scan.hash=0 and the parse pool re-read every .md
+    // every run — the last per-run file-read the postings path had left). They only skip the grammar-miss bookkeeping at
+    // the bottom (nothing to compile for them).
+
+    // path absent from cache ⇒ definitely a miss (no read needed). Present ⇒ the record probe decides.
+    bool hasFullBytes = false;
+    if( const CachedRecordHead* head = pass.cache.headOf( fi ) )
+    {
+        if( probeCachedRecord( pass, fi, *head, buffers.bytes ) == CachedRecordVerdict::kept )
         {
-            const LangEntry& e = kLangTable[ i ];
-            if( e.grammar == nullptr || e.querySub.empty() || !present[ i ] )
+            return;   // cache hit or unreadable — parse skipped → grammar NOT needed for this file
+        }
+        hasFullBytes = true;
+    }
+
+    if( le->grammar == nullptr )
+    {
+        return;   // markdown: hash prefill only — no grammar to compile, no miss to mark
+    }
+    if( le->ext == ".h" )
+    {
+        sniffMissedHeader( pass, fi, hasFullBytes ? &buffers.bytes : nullptr, buffers.headerPrefix );
+    }
+    pass.slots.isMiss[ fi ] = 1;   // path-absent or hash-changed → grammar needed
+}
+
+// The miss-detection pass reads + FNV-hashes every cache-present code file to decide which grammars a worker will actually
+// need. That I/O + hashing was serial (~61ms on canyon warm). It is READ-ONLY and a pure function of each file's bytes, so
+// it runs on a pool — every thread claims files by index and writes only their slots (detectFileCacheMiss). scan.hash is
+// pre-filled so the parse pool skips the re-read on a cache hit. Returns after the pool joins.
+inline void runPrewarmHashPool( const PrewarmMissPass& pass )
+{
+    const std::size_t nfiles = pass.files.size();
+    unsigned          hwHash = std::thread::hardware_concurrency();
+    if( hwHash == 0 )
+    {
+        hwHash = 1;
+    }
+    const unsigned           nHashThreads = static_cast<unsigned>( std::min<std::size_t>( hwHash, std::max<std::size_t>( nfiles, 1 ) ) );
+    std::atomic<std::size_t> nextIdx{ 0 };
+    std::vector<std::thread> hashPool;
+    hashPool.reserve( nHashThreads );
+    for( unsigned t = 0; t < nHashThreads; ++t )
+    {
+        hashPool.emplace_back( [ &pass, &nextIdx, nfiles ]() noexcept
+        {
+            PrewarmReadBuffers buffers;
+            for( std::size_t fi = nextIdx.fetch_add( 1, std::memory_order_relaxed ); fi < nfiles; fi = nextIdx.fetch_add( 1, std::memory_order_relaxed ) )
             {
-                continue;   // querySub "" = markdown: a grammar with NO tags.scm (custom walk) — nothing to compile
-            }
-            const TSLanguage* lang = e.grammar();
-            bool seen = false;
-            for( const LangEntry* c : prewarm.toCompile )
-            {
-                if( c->grammar() == lang )
+                try   // per-file degrade — a throw escaping a worker thread would std::terminate
                 {
-                    seen = true;
-                    break;
+                    detectFileCacheMiss( pass, fi, buffers );
+                }
+                catch( ... )
+                {
+                    DISCLOSE( Diagnostics::answerUnchanged,
+                              "a missed prewarm only defers a grammar's query: a file then left without it discloses extract-partial itself",
+                              "ingest: prewarm hash worker exception on a file — treated as no-miss" );
                 }
             }
-            if( !seen )
+        } );
+    }
+    for( std::thread& th : hashPool )
+    {
+        th.join();
+    }
+}
+
+// The serial grammar-mark reduction over the pass's per-index slots (order-independent: a pure boolean OR). A missed .h
+// marks ObjC when it sniffed ObjC, else its own grammar — plus ObjC, once, when any header could not be sniffed at all
+// (the conservative fallback).
+inline LangRowSet reduceMissedGrammars( const IngestFileScan& scan, const PrewarmMissSlots& slots )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: reduce grammar set" );
+
+    LangRowSet       present {};
+    const LangEntry* objcLe               = lookupLang( ".m" );
+    bool             anyUnknownHeaderMiss = false;
+    for( std::size_t fi = 0; fi < slots.isMiss.size(); ++fi )
+    {
+        const LangEntry* le = scan.lang[ fi ];
+        if( !slots.isMiss[ fi ] || le == nullptr )
+        {
+            continue;   // le == nullptr is defensive: isMiss is only set for grammar-bearing files
+        }
+        if( le->ext != ".h" )
+        {
+            present[ langRowOf( le ) ] = true;
+            continue;
+        }
+        if( slots.isObjCHeaderMiss[ fi ] )
+        {
+            if( objcLe != nullptr )
             {
-                prewarm.toCompile.push_back( &e );
+                present[ langRowOf( objcLe ) ] = true;
             }
+            continue;
+        }
+        present[ langRowOf( le ) ] = true;
+        if( slots.isUnknownHeaderMiss[ fi ] )
+        {
+            anyUnknownHeaderMiss = true;
         }
     }
-
-    // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
-    // (the hash pool has joined), so the footprint they add is theirs alone.
-    if( scan.wantConstructHits )
+    if( anyUnknownHeaderMiss && objcLe != nullptr )
     {
-        warmConstructTables( constructRowsNeeded( cache, scan, isMiss, isObjCHeaderMiss ) );
+        present[ langRowOf( objcLe ) ] = true;
     }
+    return present;
+}
 
-    // Compile distinct grammars IN PARALLEL (ts_query_new is compute-bound — PMC IPC 4.0) and install
-    // into the shared cache single-threaded after the join. Query sources are immutable embedded views.
+// With a cache: find the files whose record no longer holds (in parallel), then mark the grammars their parses need.
+inline LangRowSet markCacheMissGrammars( const PrewarmMissPass& pass )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: detect cache misses" );
+
+    runPrewarmHashPool( pass );
+    return reduceMissedGrammars( pass.scan, pass.slots );
+}
+
+// The distinct grammars the marked rows need (several extensions share one grammar), first row first.
+inline void collectGrammarsToCompile( const LangRowSet& present, QueryPrewarm& prewarm )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: unique grammars" );
+
+    for( std::size_t i = 0; i < kLangTable.size(); ++i )
+    {
+        const LangEntry& e = kLangTable[ i ];
+        if( e.grammar == nullptr || e.querySub.empty() || !present[ i ] )
+        {
+            continue;   // querySub "" = markdown: a grammar with NO tags.scm (custom walk) — nothing to compile
+        }
+        const TSLanguage* lang = e.grammar();
+        if( std::ranges::none_of( prewarm.toCompile, [ lang ]( const LangEntry* c ) { return c->grammar() == lang; } ) )
+        {
+            prewarm.toCompile.push_back( &e );
+        }
+    }
+}
+
+// Compile distinct grammars IN PARALLEL (ts_query_new is compute-bound — PMC IPC 4.0); installCompiledQueriesAndOpenGate
+// installs them into the shared cache single-threaded after the join. Query sources are immutable embedded views.
+inline void launchQueryCompiles( QueryPrewarm& prewarm )
+{
     prewarm.compiledQueries.assign( prewarm.toCompile.size(), nullptr );
     prewarm.compilePool.reserve( prewarm.toCompile.size() );
     prewarm.ready.store( prewarm.toCompile.empty(), std::memory_order_release );
@@ -629,6 +637,34 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
             prewarm.compilePool.emplace_back( [ &prewarm, i ]() noexcept { prewarm.compiledQueries[ i ] = compileQueryStandalone( *prewarm.toCompile[ i ] ); } );
         }
     }
+}
+
+// pre-warm the per-language tags.scm cache single-threaded; workers then only READ it.
+// LAZY: compile ONLY grammars needed by changed/uncached files (the miss set).
+// The grammar set must be a SUPERSET of every grammar any worker will touch:
+//   - a cache miss → grammar guaranteed needed → mark it
+//   - a cache hit (hash-match) → worker skips parse → grammar NOT needed (safe to omit)
+//   - a .h miss that looks Objective-C → marks objc instead of cpp (same looksObjC re-route as parse pool)
+//   - an unreadable .h miss → conservatively marks both cpp and objc, matching the old safety fallback
+// The 204bb02 constraint holds: compiledQueryCache() is populated single-threaded after the async compile join, and
+// workers wait on prewarm.ready before reading it.
+inline void prewarmTagsQueries( const std::vector<std::string>& files, const CacheRecords& cache,
+                                long long cacheWriteNs, IngestFileScan& scan, QueryPrewarm& prewarm )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: compile queries (tags.scm prewarm)" );
+
+    PrewarmMissSlots missSlots( files.size() );
+    const LangRowSet present = cache.empty() ? markNoCacheGrammars( scan, files.size() )
+                                             : markCacheMissGrammars( PrewarmMissPass{ files, cache, cacheWriteNs, scan, missSlots } );
+    collectGrammarsToCompile( present, prewarm );
+
+    // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
+    // (the hash pool has joined), so the footprint they add is theirs alone.
+    if( scan.wantConstructHits )
+    {
+        warmConstructTables( constructRowsNeeded( cache, scan, missSlots.isMiss, missSlots.isObjCHeaderMiss ) );
+    }
+    launchQueryCompiles( prewarm );
 }
 
 // The install moment: called from the parse pool AFTER the workers are launched (they are doing parse-side

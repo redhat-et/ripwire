@@ -44,7 +44,8 @@
 
 #include "model.h"
 #include "infra/Diagnostics.h"
-#include "infra/sortutil.h"   // svLess — R2's class-name table sorts and searches in byte order, never through operator<
+#include "infra/sortutil.h"
+#include "infra/tablelookup.h"   // inSet: the membership lookup the two tables above are read through   // svLess — R2's class-name table sorts and searches in byte order, never through operator<
 
 #include <algorithm>
 #include <array>
@@ -87,11 +88,7 @@ inline constexpr std::array<SymKind, 6> kExtentClassKinds = { SymKind::Class, Sy
                                                               SymKind::NamedType, SymKind::Alias, SymKind::FuncType };   // the Struct split (model.h isStructOrNamedType)
 inline constexpr std::array<Lang, 3>    kHeadRuleLangs    = { Lang::C, Lang::Cpp, Lang::ObjC };   // R3's C family
 
-template<class T, std::size_t N>
-constexpr bool inSet( const std::array<T, N>& set, T value ) noexcept
-{
-    return std::find( set.begin(), set.end(), value ) != set.end();
-}
+using rw::inSet;   // infra/tablelookup.h
 
 // One definition's extent facts, as the classifier reads them. The views borrow the caller's Symbol strings.
 struct ExtentDef

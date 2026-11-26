@@ -28,6 +28,7 @@
 // est_tokens= is re-priced over the rewritten bytes (serialize.h repriceRootAfterCut, signed); <syms> is outside the price.
 // RIPWIRE_NO_ONE_SIDE_REACH=1 turns it off (byte identity and the gate's twins).
 #include "forfilesyms.h" // filesyms_detail::FileLookup / DeclHome / leafName / unescapeXmlAttr / bodylessHeaderDecl (attrOf: serialize.h)
+#include "infra/sortutil.h"   // sortUnique
 #include "graph.h" // shortestPathAny, expandCallers
 #include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
 #include "model.h"
@@ -53,7 +54,7 @@ inline constexpr std::size_t kOneSideRootPathMaxHops = 6; // (M): the longest A 
 inline constexpr std::size_t kOneSideMaxEndpointDefs = 32; // (E): definitions one endpoint name may place (more: a namesake flood, the rule is off)
 
 inline constexpr std::string_view kOneSideReachLegend =
-    "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+    "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
     "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
     "not the answer -->";
 
@@ -267,6 +268,7 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
         wants.push_back( std::move( w ) );
     }
     std::vector<std::uint32_t> wantedFiles;
+    wantedFiles.reserve( wants.size() );
     for( const Want& w : wants )
     {
         wantedFiles.push_back( w.file );
@@ -381,11 +383,15 @@ inline void addShortestPathNodes( const Graph& g, std::span<const NodeId> from, 
     {
         out.insert( out.end(), level.begin(), level.end() );
         std::vector<NodeId> next;
+        // One hop nearer is `toSink[u] - 1`, compared on u's side: every node in `level` is reached (toSink[u] < kUnreached) and the loop
+        // runs only while toSink[u] > 0, so the subtraction cannot wrap. The old `toSink[v] + 1 == toSink[u]` wrapped to 0 for a callee
+        // the walk never reached (toSink[v] == kUnreached) — no wrong row, since 0 never equals a hop count > 0, but an unsigned
+        // overflow the ASan build aborts on (foronesidecheck (a2), (u)).
         for( const NodeId u : level )
         {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1] && toSink[u] > 0; ++k )
             {
-                if( const NodeId v = g.outTargets[k]; toSink[v] + 1 == toSink[u] && !std::ranges::contains( next, v ) )
+                if( const NodeId v = g.outTargets[k]; toSink[v] == toSink[u] - 1 && !std::ranges::contains( next, v ) )
                 {
                     next.push_back( v );
                 }
@@ -395,11 +401,18 @@ inline void addShortestPathNodes( const Graph& g, std::span<const NodeId> from, 
     }
 }
 
+// The two endpoint definition sets of a root -> sink path (two spans of NodeId, named at the call so the direction is said).
+struct RootSinkDefs
+{
+    std::span<const NodeId> root;
+    std::span<const NodeId> sink;
+};
 // Every node of every shortest R -> S path, not only the one shortestPathAny picked (`rootPath`, kept too): from each root definition at
 // the path's length, one hop nearer the sink per step (distances over the path's length, not the side walk's kOneSideReachHops).
-inline std::vector<NodeId> everyShortestRootSinkNode( const Graph& g, std::span<const NodeId> root, std::span<const NodeId> sink,
-                                                      const std::vector<NodeId>& rootPath )
+inline std::vector<NodeId> everyShortestRootSinkNode( const Graph& g, RootSinkDefs ends, const std::vector<NodeId>& rootPath )
 {
+    const std::span<const NodeId> root = ends.root;
+    const std::span<const NodeId> sink = ends.sink;
     const std::size_t len = rootPath.size() - 1;
     const std::vector<std::uint32_t> toSink = boundedReach( g, sink, /*forward=*/false, len );
     std::vector<NodeId> roots;
@@ -428,7 +441,7 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
     {
         s.one = boundedReach( g, aIsRoot ? ep.a : ep.b, /*forward=*/true );
         s.two = boundedReach( g, aIsRoot ? ep.b : ep.a, /*forward=*/false );
-        s.onPath = everyShortestRootSinkNode( g, aIsRoot ? ep.a : ep.b, aIsRoot ? ep.b : ep.a, rootPath );
+        s.onPath = everyShortestRootSinkNode( g, { .root = aIsRoot ? ep.a : ep.b, .sink = aIsRoot ? ep.b : ep.a }, rootPath );
     }
     else
     {
@@ -449,8 +462,7 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
     }
     if( !s.rootSink ) // one walk per side from all of them: the union of their shortest paths, however many rows reach both
     {
-        std::ranges::sort( sources );
-        sources.erase( std::ranges::unique( sources ).begin(), sources.end() );
+        rw::sortutil::sortUnique( sources );
         addShortestPathNodes( g, sources, s.one, s.onPath );
         addShortestPathNodes( g, sources, s.two, s.onPath );
     }
@@ -482,7 +494,7 @@ inline std::string pointerText( std::string_view text, const std::vector<const R
     {
         const std::string_view p = attrOf( r->attrs, "p" );
         const std::size_t colon = r->tag == 'd' ? std::string_view::npos : p.rfind( ':' ); // <s>/<y> p= is file:line; a pointer names the file
-        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ) } );
+        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ), .kind = "side" } );
     }
     std::string out = filesyms_detail::tailPointerText( text, spans, legend ? kOneSideReachLegend : std::string_view() );
     legend = legend && spans.empty();
@@ -495,8 +507,18 @@ struct OneSideReachEdit
 {
     std::string answer, syms;
 };
-inline OneSideReachEdit demoteOneSideRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string_view syms )
+// The three texts the demote pass reads (three string_views, named at the call): the task, the shaped answer, its <syms> block.
+struct OneSideReachTexts
 {
+    std::string_view task;
+    std::string_view answer;
+    std::string_view syms;
+};
+inline OneSideReachEdit demoteOneSideRows( const IngestResult& ing, const Graph& g, OneSideReachTexts texts )
+{
+    const std::string_view task   = texts.task;
+    const std::string_view answer = texts.answer;
+    const std::string_view syms   = texts.syms;
     namespace od = onesidereach_detail;
     if( !oneSideReachOn() || answer.empty() )
     {

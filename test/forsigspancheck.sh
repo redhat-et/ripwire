@@ -69,6 +69,10 @@
 #        TOKEN-BUDGET-MONOTONE: the XML --token-budget and the --max-tokens --detail answers are now the unbudgeted answer
 #        shed (the reorder and its note included), so their (T) arms are "reorders" arms; the JSON and MCP arms keep (T).
 #        ts at 1200 was 4 rows with no docs_after_code=; it is 4 rows with docs_after_code="6", shed=...docs:2,rows:12.
+#        Lane DA1: those 4 rows are all CODE — rows:12 shed exactly the doc rows the reorder moved — so docs_after_code="6" said
+#        "6 doc rows of the shown set moved" over a shown set with none. The fitter now recounts it over the kept rows: the XML
+#        arms are "shed" arms (the reorder applied in U: unequal to the plain-order twin; no doc row shown, so no docs_after_code=
+#        and no reading). test/fordocsaftercodecheck.sh holds the exact count at every budget.
 #        A BODY ceiling (--max-tokens=N --detail=K, XML only: --json refuses the pair, MCP `for` has no max_tokens) is the third tight
 #        ceiling: the same twin equality, est_tokens <= N, on the TS fixture at 1700 and the Python+docs fixture (pydocs) at 1760
 #        (round C re-anchor: 1600 / 1660 before the tail carried the file page)
@@ -95,6 +99,17 @@
 # Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
 # legitimately differ under them: (R) compares the docs-after-code reorder with plain score order, and SIBLING-DEMOTE's rank > 10
 # rule reads the SERVED order, so the two orders demote different rows; (N) drops e=, and DECL-TWIN reads a one-line declaration off
@@ -110,6 +125,13 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 CORPUS="$ROOT/test/forcompletefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE. This gate compares stderr, and the warm snapshot in a SHARED $TMPDIR carries the
+# writing build's source identity: a binary whose identity differs refuses it, says so on stderr
+# ("warmsnap: written by another build", warmsnap.h:760/762), runs cold and overwrites it, then is silent on
+# its next run. So a foreign build touching this corpus first turns a stderr comparison red for reasons that
+# have nothing to do with the code, and it self-heals on re-run — which is what makes it read as a flake.
+# Diagnosed on budgetmonotonecheck 2026-11-17; these are its siblings by the same shared-root exposure.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -413,7 +435,7 @@ echo "(T) a tight explicit ceiling carries no reorder and no note; the near miss
 cat >"$TMP/tight.py" <<'PY'
 import json, re, sys
 exec( open( sys.argv[ 1 ] ).read() )
-# tight.py ROWS.PY LABEL MODE ON OFF [BUDGET]  — MODE: tight | reorders
+# tight.py ROWS.PY LABEL MODE ON OFF [BUDGET]  — MODE: tight | reorders | shed
 label, mode, on, off = sys.argv[ 2: 6 ]
 budget = int( sys.argv[ 6 ] ) if len( sys.argv ) > 6 and sys.argv[ 6 ].isdigit() else 0
 def body( path ):
@@ -504,6 +526,13 @@ if mode == "tight":
                 up, udet = upper_bound( A, body( sys.argv[ 7 ] ), T, k, len( ref[ 0 ] ), U )
                 if not up: bad.append( "UP: " + udet )
             print( "  ....  %s: ST rows=%d/%d charged=%d T=%d" % ( label, k, len( ref[ 0 ] ), a[ 1 ], T ) )
+elif mode == "shed":
+    # lane DA1: the unbudgeted answer shed. U reordered (so the shed kept code rows the plain-order twin's shed did not), and
+    # docs_after_code= counts only the moved doc rows still shown: none shown, no attribute and no reading
+    if not isjson and not any( is_doc_row( a ) for _, a in drows( A ) ) and ( moved or note ):
+        bad.append( "docs_after_code= or its reading on a shed answer that shows no doc row" )
+    if moved and not note and not isjson: bad.append( "docs_after_code= without its reading" )
+    if open( on, "rb" ).read() == open( off, "rb" ).read(): bad.append( "equals the plain score-order twin (U's reorder did not apply)" )
 else:
     if not moved: bad.append( "no docs_after_code= (the reorder did not apply)" )
     if not note and not isjson: bad.append( "no reading for docs_after_code=" )   # the JSON twin carries the count only
@@ -530,7 +559,7 @@ for b in 700 1200; do
             REF="$( offr ts "r$tag" "$Q1" $extra )"   # the uncut plain-order answer (no budget): the rank order a soft cut is a prefix of
             ran_ok "$REF" "T/$b/$tag (uncut reference)" || continue
             if [ "$tag" = xml ]; then   # TOKEN-BUDGET-MONOTONE: U shed, so U's reorder stays
-                tcheck "T/xml --token-budget=$b: the unbudgeted answer shed keeps its reorder and note" reorders "$ON" "$OFF"; continue
+                tcheck "T/xml --token-budget=$b: the unbudgeted answer shed keeps its reorder; docs_after_code= counts only shown docs" shed "$ON" "$OFF"; continue
             fi
             tcheck "T/$tag --token-budget=$b: byte-equal to the plain-order twin, no docs_after_code=$([ "$b" = 1200 ] && echo ", NOLBL + ST (soft target)")" tight "$ON" "$OFF" "$([ "$b" = 1200 ] && echo 1200 || echo 0)" "$REF" "$TBPT"
         fi

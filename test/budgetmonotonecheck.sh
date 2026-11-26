@@ -45,6 +45,19 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE, and this arm needs it more than most.
+#
+# The warm snapshot in $TMPDIR carries the WRITING build's source identity. A binary whose identity differs
+# refuses it, says so on stderr ("warmsnap: written by another build", warmsnap.h:760/762 — 447 B), runs cold
+# and overwrites it; its next run is silent. Arm (a) compares stdout AND stderr AND rc, so a shared $TMPDIR
+# makes it red whenever a FOREIGN build touched this corpus first: the notice lands on the unbudgeted run U
+# (q5 is the first question on $ROOT/src) and not on the budgeted ones. stdout is byte-identical throughout —
+# the gate's own message says "or stderr/rc differ" and that is the half that fires. It self-heals on a
+# re-run, which is exactly what makes it look like a flake instead of a shared-state bug.
+#
+# The stderr comparison STAYS: a budget that adds a stderr clause is a real regression. Only the sharing goes.
+# Same convention pargates.py already records for two other gates (see its $TMPDIR note).
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 echo "budgetmonotonecheck: BIN=$BIN"
 
 # ── the two engineered corpora ──────────────────────────────────────────────────────────────────────────────────────────
@@ -122,7 +135,10 @@ while IFS='	' read -r corpus q; do
     [ -z "$corpus" ] && continue
     i=$(( i + 1 ))
     d="$TMP/q$i"; mkdir -p "$d"; printf '%s\n%s\n' "$corpus" "$q" >"$d/what"
-    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
+    # AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and PAGED; a budget sheds the WHOLE answer in the same posture
+    # and is never paged, so the U a fitting budget reproduces byte for byte is --page-bytes=0 (AF1-fix: AF1 had kept the budget
+    # legend-first and pinned U to --legend=first, which re-decided the posture under a budget — this arm's own rule).
+    ( cd "$corpus" && "$BIN" . --for="$q" --page-bytes=0 ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     E="$( est_of "$d/U" )"
     [ -n "$E" ] || { echo "  INFO  q$i: the unbudgeted answer carries no est_tokens — skipped (counted as not judged)"; continue; }
     echo "$E" >"$d/E"
@@ -131,7 +147,7 @@ while IFS='	' read -r corpus q; do
         ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>"$d/tb.$B.err"; echo "$?" >"$d/tb.$B.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     done
     if [ "$i" -le "$DETAIL_ROWS" ]; then
-        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
+        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --page-bytes=0 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
         ED="$( est_of "$d/D" )"
         if [ -n "$ED" ]; then
             echo "$ED" >"$d/ED"
@@ -157,13 +173,33 @@ import xml.etree.ElementTree as ET
 tmp = sys.argv[1]
 fails = []
 counts = { "a": 0, "b": 0, "c": 0, "d": 0 }
+ceil_noted = [ 0 ]   # references (U, D) whose whole answer is over the output ceiling and carried CL1's notice (taken off before the compare)
 def ok( m ): print( "  PASS  " + m )
 def no( m ): print( "  FAIL  " + m ); fails.append( m )
 def raw( p ): return open( p, encoding = "utf-8", errors = "replace" ).read()
 
+# CL1 (outputceiling.h, verbs_for.h noteWholeAnswerOverCeiling; on the 0.7.0 train since 70bf0fa52): --page-bytes=0 is the explicit
+# request for the WHOLE answer, and when that answer is over the 24,000 B output ceiling ONE stderr line says so. The references U and
+# D are run with --page-bytes=0 (that is how the whole answer is asked for); a budgeted run is not, so it never carries the line.
+# The line belongs to the reference's own flag, not to anything a budget does, so it is taken off the REFERENCE's stderr before the
+# byte compare — exactly that line, once, and a notice that does not name the reference's own stdout size over the ceiling is a
+# failure (ceiling_note_ok, judged per reference below). Every other stderr byte still compares, so a budget that adds a stderr clause
+# stays a failure.
+CEIL = re.compile( r"ripwire: --page-bytes=0: this whole answer is (\d+) B, over the (\d+) B output ceiling \(an agent harness may show "
+                   r"only a preview of it\); drop --page-bytes=0 to receive it in pages\n" )
+OUTPUT_CEILING = 24000   # rw::kOutputCeilingChars (outputceiling.h)
+def ref_err( q ):
+    return CEIL.sub( "", raw( q + ".err" ), count = 1 )
+def ceiling_note_ok( q ):
+    # a notice on the reference is ONE line naming the reference's own stdout size, over the ceiling. Whether CL1 must print it is
+    # outputceilingcheck's to pin, not this gate's (a binary before CL1 prints none, and nothing is then taken off).
+    out = os.path.getsize( q ); ms = CEIL.findall( raw( q + ".err" ) )
+    return not ms or ( len( ms ) == 1 and out > OUTPUT_CEILING and ms[ 0 ] == ( str( out ), str( OUTPUT_CEILING ) ) )
+
 def same_run( p, q ):
-    # rule 12 byte identity: stdout, stderr and exit code
-    return all( os.path.exists( p + x ) and os.path.exists( q + x ) and raw( p + x ) == raw( q + x ) for x in ( "", ".err", ".rc" ) )
+    # rule 12 byte identity: stdout, stderr and exit code (q is the --page-bytes=0 reference: its CL1 notice is not compared, above)
+    if not all( os.path.exists( p + x ) and os.path.exists( q + x ) for x in ( "", ".err", ".rc" ) ): return False
+    return raw( p ) == raw( q ) and raw( p + ".rc" ) == raw( q + ".rc" ) and raw( p + ".err" ) == ref_err( q )
 
 def parse( p ):
     try:
@@ -236,6 +272,9 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
     if U is None: continue
     # (a) at and above the price: U, byte for byte
     good = True
+    if not ceiling_note_ok( os.path.join( d, "U" ) ):
+        no( f"(a) {tag}: U's --page-bytes=0 output-ceiling notice is doubled, or does not name U's own size ({os.path.getsize( os.path.join( d, 'U' ) )} B) over {OUTPUT_CEILING} B" ); good = False
+    elif CEIL.search( raw( os.path.join( d, "U.err" ) ) ): ceil_noted[ 0 ] += 1
     for B in ( E, E + 1, 2 * E ):
         p = os.path.join( d, f"tb.{B}" )
         if not os.path.exists( p ): good = False; no( f"(a) {tag} B={B}: no run" ); continue
@@ -277,6 +316,9 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
         ED = int( raw( os.path.join( d, "ED" ) ) )
         Draw = raw( os.path.join( d, "D" ) ); D = parse( os.path.join( d, "D" ) )
         good = D is not None
+        if not ceiling_note_ok( os.path.join( d, "D" ) ):
+            no( f"(c) {tag}: D's --page-bytes=0 output-ceiling notice is doubled, or does not name D's own size over {OUTPUT_CEILING} B" ); good = False
+        elif CEIL.search( raw( os.path.join( d, "D.err" ) ) ): ceil_noted[ 0 ] += 1
         for M in ( ED, 2 * ED ):
             p = os.path.join( d, f"mt.{M}" )
             if not os.path.exists( p ): good = False; continue
@@ -298,6 +340,7 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
 for arm, n in sorted( counts.items() ):
     if n == 0: no( f"arm ({arm}) judged 0 questions — vacuous" )
     else: print( f"  INFO  arm ({arm}) judged {n} question(s)" )
+print( f"  INFO  {ceil_noted[ 0 ]} --page-bytes=0 reference(s) over the {OUTPUT_CEILING} B output ceiling carried CL1's notice (verified, then not compared)" )
 sys.exit( 1 if fails else 0 )
 PYEOF
 rc=$?

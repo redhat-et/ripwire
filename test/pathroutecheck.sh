@@ -49,6 +49,9 @@
 #
 # Usage: test/pathroutecheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -492,7 +495,9 @@ if [ -z "$blk" ]; then
     no "(F) no <graph_verb> block on the --for path subject"
 elif pblk="$( python3 -c 'import re,sys; m=re.search(r"<path [^>]*>.*?</path>",sys.stdin.read(),re.S); print(m.group(0) if m else "")' <<<"$blk" )" \
      && [ -n "$pblk" ] && [ "$( attr route_hedged <<<"$pblk" )" = not-proven ] && [ -z "$( rows <<<"$pblk" )" ] \
-     && grep -q '<path_gap from="start_entry" to="Sink.sink_call" reachable="0">' <<<"$blk" && grep -qF 'route_hedged="not-proven" refused the one it found' <<<"$blk"; then
+     && grep -q '<path_gap from="start_entry" to="Sink.sink_call" reachable="0">' <<<"$blk" && grep -qF 'route_hedged="not-proven" refused the one it found' <<<"$F"; then
+    # AF2 A (2026-11-18, kept by AF1): a comment that is a direct child of <graph_verb> (the <path_gap> legend) joins the answer-first
+    # document legend, once — so the refusal reading is read from the whole --for answer, not from inside the block
     ok "(F) the --for <graph_verb> block refuses the same chain (no <s> in its <path>); its <path_gap> sides follow and their legend names the refusal"
 else
     no "(F) $( grep -o '<path [^>]*>' <<<"$blk" )"

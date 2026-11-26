@@ -11,7 +11,8 @@
 # (WidgetConfigHdr::stop_widget_config: slot_by=) whose last segment also names a bodied free function stop_widget_config.
 # ARMS (RED on a binary without the rule: (t), (t2), (a) with pointers, (l), (x), (n5o); the negatives hold on both)
 #   (a)  each answer equals its RIPWIRE_NO_DECL_TWIN=1 twin with exactly the rows the rule picks (recomputed here from the off answer)
-#        rewritten as pointers, the legend comment before the first, est_tokens= aside
+#        rewritten as pointers <t p= sym= r= ptr="twin"/>, est_tokens= aside, comments compared apart: the on answer's are the off
+#        answer's plus the decl-twin legend once (AF4 T-C: the kind is on the row, so the legend's PLACE is the order's, not the rule's)
 #   (t)  a twinned declaration goes to the tail: cpp WidgetConfigHdr::parse_widget_config (a first-10 row, its cfg.cc body row in the
 #        answer) is a pointer in its place;  (t2) ts WidgetParser.parseWidgetConfig (its body parseWidgetConfig printed) too
 #   NEGATIVES, each a one-line owner-qualified row of the off answer whose last segment names a bodied row of it, that stays a row in
@@ -31,6 +32,17 @@
 #   (e)  est_tokens= is re-priced on the final bytes (estchargecheck holds the rate); (w) well formed; (l) the legend once, no "--" inside
 #   (sd) with SIBLING-DEMOTE on, (a) on its result;  (x) MCP `for` (one renderer): (a) on the MCP answer and its off twin
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -160,22 +172,27 @@ def decl( r ):
     return r["tag"] == "d" and r["sigs"] and r["a"].get( "l" ) and r["a"].get( "l" ) == r["a"].get( "e" ) and i > 0
 def kept( r, t, task ):
     return "<note " in t[r["s"]:r["e"]] or any( k in r["a"] for k in ( "mem", "slot_by", "slot_fields" ) ) or named( r["a"].get( "n", "" ), task )
-LEG = ( "<!-- decl-twin: a <t> in sigs is a one-line Owner.member declaration whose bodied same-name row is in this answer, a pointer "
-        "(p= file, sym= name, r= rank), not the answer -->" )
+LEG = ( "<!-- decl-twin: a <t> in sigs with ptr=twin is a one-line Owner.member declaration whose bodied same-name row is in this answer, "
+        "a pointer (p= file, sym= name, r= rank), not the answer -->" )
 def twin( t, task ):
     R = rows( t )
     bodied = { last( r["a"].get( "n", "" ) ) for r in R if r["tag"] == "d" and r["sigs"] and r["a"].get( "l" ) and r["a"].get( "e" ) and r["a"].get( "l" ) != r["a"].get( "e" ) }
     P = [ r for r in R if decl( r ) and not kept( r, t, task ) and last( r["a"]["n"] ) in bodied ]
+    # AF4 T-C: the pointer carries its kind (ptr="twin"); the legend is compared apart from the rows, because WHERE it sits is the
+    # order's business (legend-first: before the first pointer; answer-first: lifted into the trailing legend), not the rule's
     exp, at = [], 0
     for k, r in enumerate( P ):
-        exp += [ t[at:r["s"]], LEG if k == 0 else "", '<t p="%s" sym="%s"%s/>' % ( r["raw"]["p"], r["raw"]["n"], ' r="%s"' % r["raw"]["r"] if "r" in r["raw"] else "" ) ]
+        exp += [ t[at:r["s"]], '<t p="%s" sym="%s"%s ptr="twin"/>' % ( r["raw"]["p"], r["raw"]["n"], ' r="%s"' % r["raw"]["r"] if "r" in r["raw"] else "" ) ]
         at = r["e"]
     return "".join( exp ) + t[at:], [ r["a"]["n"] for r in P ]
 off, on, task = open( sys.argv[1] ).read(), open( sys.argv[2] ).read(), sys.argv[3]
 exp, P = twin( off, task )
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
+nocom = lambda s: re.sub( r"<!--.*?-->", "", est( s ), flags = re.S )
+coms = lambda s: sorted( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", s, flags = re.S ), re.S ) )
+legok = coms( on ) == sorted( coms( off ) + ( [ LEG ] if P else [] ) )
 print( "ptr " + ",".join( P ) )
-print( ( "PASS" if est( exp ) == est( on ) else "FAIL" ) + " (a) %d pointers" % len( P ) )
+print( ( "PASS" if nocom( exp ) == nocom( on ) and legok else "FAIL" ) + " (a) %d pointers%s" % ( len( P ), "" if legok else " (comments: the off answer's plus the decl-twin legend once expected)" ) )
 PY
 # pos NAME FILE: the answer-row position of the <d> row NAME (0 when it is not a <d> row); ptr NAME FILE: 1 when it is an in-sigs pointer
 cat >"$TMP/pos.py" <<'PY'

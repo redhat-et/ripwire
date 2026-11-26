@@ -2,9 +2,9 @@
 # legendrefcheck.sh — the SESSION legend dictionary and the legend="ref" posture (src/legenddict.h; round-2 LO + L6).
 #
 # THE CONTRACT. An MCP stdio session answers with inline legends (today's compact posture) until it reads the resource
-# ripwire://legend-dict. From then on a verb whose legend the dictionary holds answers rows first, keeps on its root only
-# the answer's identity (task= changed= from= to=), carries every other root attribute on a LAST child
-# <about … legend="ref" dict= dictv=/>, and sends each definition once per session: a definition this process already sent
+# ripwire://legend-dict. From then on a verb whose legend the dictionary holds answers rows first, keeps EVERY attribute
+# on its root exactly as the inline answer has it, ends with a LAST child <about legend="ref" dict= dictv=/> that is the
+# legend pointer and nothing else, and sends each definition once per session: a definition this process already sent
 # is dropped, one it has not is kept in a comment after the rows. Every arm below asserts one clause of that:
 #
 #   (A) THE DICTIONARY RESOLVES. `--legend-dict` prints it; its dictv= is FNV-1a 64 of its body, recomputed here; the
@@ -20,7 +20,10 @@
 #       to the pre-read answer — the one place a definition can reach the session a second time, priced in the lane report.
 #   (D) NOTHING HONESTY-BEARING MOVES OUT. Each ref answer and the same call under legend:"full" carry the same multiset of
 #       attribute name="value" pairs (schema=/legend=/dict=/dictv= aside; a <g> group counted as its rows); `for`, which takes
-#       no legend argument, against its pre-read answer. The root keeps only identity attributes; <about> is its last child.
+#       no legend argument, against its pre-read answer. The root's attributes are its inline twin's, in order; <about>
+#       is the root's last child and carries legend= dict= dictv= only (ref-posture-disclosure, 2026-11-17: this arm
+#       asserted the opposite — "a ref root keeps only task=/changed=/from=/to=" — which pinned every cut and floor
+#       disclosure to the answer's last bytes; test/refdisclosurecheck.sh holds the placement with mutation controls).
 #   (E) ROSTER HONESTY. In both MCP postures (the pre-read inline answer, ref), every roster attribute an answer
 #       carries on an element the roster names is defined where the reader holds it: the answer's own comments for an
 #       inline answer; for a ref answer, the resource text plus every comment this session has carried so far. The
@@ -171,10 +174,17 @@ check(not nonref, f"(B) every XML answer of a repeated call after the read is re
 NREF = sum(1 for _, t in refs if is_ref(t))
 bad_v = [CALLS[i][0] for i, t in refs if is_ref(t) and f'dictv="{DICTV}"' not in t]
 check(not bad_v, f"(B) every ref answer names the dictionary's dictv ({bad_v})")
+# ref-posture-disclosure: ONE comment may precede a ref root, the map header (`<!-- files= … shown= … -->`). The map legend
+# calls it data — it states the map's own cut — and the posture no longer carries it to the answer's tail. It is matched by
+# its opener, so a legend or a note standing there still fails; the root must still be followed by a row.
 def row_first(t):
-    m = re.match(r'\s*<[A-Za-z][\w.-]*(?:\s+[\w:-]+="[^"]*")*\s*>(.)', t, re.S)
+    m = re.match(r'\s*(?:<!-- files=\d[^>]*-->)?<[A-Za-z][\w.-]*(?:\s+[\w:-]+="[^"]*")*\s*>(.)', t, re.S)
     return m is not None and m.group(1) == "<" and not t[m.end() - 1:].startswith("<!--")
-check(all(row_first(t) for _, t in refs if is_ref(t)), "(B) a ref answer's root is followed by a row (or <about>), never a comment")
+notfirst = [(CALLS[i][0], t[:420]) for i, t in refs if is_ref(t) and not row_first(t)]
+check(not notfirst, f"(B) a ref answer's root is followed by a row (or <about>), never a comment ({notfirst[:2]})")
+check(not row_first('<!-- ripwire map schema=ripwire.map/v1: x --><r><f/></r>') and not row_first('<r><!-- note --><f/></r>')
+      and row_first('<!-- files=6 symbols=17 shown=17 --><r schema="s"><f/></r>'),
+      "(B) control: a legend before the root and a comment after it are both caught; the map header alone is not")
 
 # An explicit inline posture after the read is exactly that posture: legend:"compact" the pre-read answer, legend:"full"
 # the full answer of a session that never read the dictionary.
@@ -203,7 +213,7 @@ legend_in_third = [CALLS[i][0] for i, t in refs if is_ref(t) and any(c.startswit
 check(not legend_in_third, f"(C) a repeated call's ref answer carries no legend ({legend_in_third})")
 
 # ── (D) nothing honesty-bearing moves out ──────────────────────────────────────────────────────────────────────────
-print("=== (D) the trailer carries every root attribute; the rows keep theirs ===")
+print("=== (D) the root keeps every attribute; the trailer is only the pointer; the rows keep theirs ===")
 diffs = []
 for i, t in refs:
     if not is_ref(t): continue
@@ -223,15 +233,26 @@ for i, t in refs:
     er, ef = est(t), est(twin) if twin else None
     if (er is None) != (ef is None) or (er is not None and er > ef): badprice.append((CALLS[i][0], er, ef))
 check(not badprice, f"(D) est_tokens= is the answer's own delivered price: present in both postures, never above the twin ({badprice[:3]})")
-KEEP = {"task", "changed", "from", "to"}
-badroot, badlast = [], []
+# CORRECTED by lane ref-posture-disclosure. This arm required `any(k not in {task,changed,from,to})` to be false on a ref
+# root, i.e. it REQUIRED capped=/has_more=/counts_floor= to have left the root. It now requires the reverse, and more
+# than the old arm ever did: the ref root's attributes are the inline twin's, same names, same order, same values
+# (est_tokens= aside, the delivered price asserted above), and <about> carries the three pointer attributes only.
+ROOTRE = re.compile(r'\s*(?:<!--.*?-->\s*)*<([A-Za-z][\w.-]*)((?:\s+[\w:-]+="[^"]*")*)\s*/?>', re.S)
+def root_attrs(t):
+    m = ROOTRE.match(t)
+    return [(k, v) for k, v in attrs(m.group(2)) if k != "est_tokens"] if m else None
+badroot, badlast, badptr = [], [], []
 for i, t in refs:
     if not is_ref(t): continue
-    m = re.match(r'\s*<([A-Za-z][\w.-]*)((?:\s+[\w:-]+="[^"]*")*)\s*>', t)
-    if not m or any(k not in KEEP for k, _ in attrs(m.group(2))): badroot.append(CALLS[i][0])
-    if not re.search(r'<about [^>]*/></' + re.escape(m.group(1) if m else "x") + r'>\s*$', t): badlast.append(CALLS[i][0])
-check(not badroot, f"(D) a ref root keeps only task=/changed=/from=/to= ({badroot})")
+    m = ROOTRE.match(t)
+    twin = pre[i][1]
+    if not m or root_attrs(t) != root_attrs(twin): badroot.append(CALLS[i][0])
+    last = re.search(r'<about((?:\s+[\w:-]+="[^"]*")*)\s*/></' + re.escape(m.group(1) if m else "x") + r'>\s*$', t)
+    if not last: badlast.append(CALLS[i][0])
+    elif [k for k, _ in attrs(last.group(1))] != ["legend", "dict", "dictv"]: badptr.append(CALLS[i][0])
+check(NREF >= 12 and not badroot, f"(D) over {NREF} ref answers, the ref root carries its inline twin's attributes: same names, order and values ({badroot})")
 check(not badlast, f"(D) <about …/> is the root's last child ({badlast})")
+check(not badptr, f"(D) <about> is the legend pointer only: legend= dict= dictv= and no root fact ({badptr})")
 hon = {a for a, _, _ in ROSTER}
 cnt = lambda t: sum(1 for k, _ in pairs(t) if k in hon)
 cdiff = [CALLS[i][0] for i, t in refs if is_ref(t) and cnt(t) != cnt(full_by.get(i) or pre[i][1])]

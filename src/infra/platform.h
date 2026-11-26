@@ -274,7 +274,7 @@ namespace infra::platform
 {
 #if defined(__clang__) || defined(__GNUC__)
     using Wide = unsigned __int128;
-    constexpr Wide kMask64 = Wide( ~std::uint64_t( 0 ) );
+    constexpr Wide kMask64 = std::numeric_limits<std::uint64_t>::max();   // the low 64 bits; widened from a value, not a cast of ~
     return static_cast<std::uint64_t>( ( Wide( lhs ) * Wide( rhs ) ) & kMask64 );
 #else
     return lhs * rhs;
@@ -289,7 +289,7 @@ namespace infra::platform
 {
 #if defined(__clang__) || defined(__GNUC__)
     using Wide = unsigned __int128;
-    constexpr Wide kMask64 = Wide( ~std::uint64_t( 0 ) );
+    constexpr Wide kMask64 = std::numeric_limits<std::uint64_t>::max();   // the low 64 bits; widened from a value, not a cast of ~
     const Wide     sum     = Wide( lhs ) + Wide( rhs ) + Wide( carry );
     carry                  = static_cast<std::uint64_t>( sum >> 64 );
     return static_cast<std::uint64_t>( sum & kMask64 );

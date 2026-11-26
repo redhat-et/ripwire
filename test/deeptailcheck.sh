@@ -34,10 +34,22 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# TAIL-SYM-TERMS (2026-11-14): this gate pins the tail's ROWS and their sym= (rank, page, fold, R-DEDUP, JSON, MCP), so it reads
+# the tail without the task-word names a row may add after sym= (tsym=; this fixture's task names every file's symbols).
+# test/tailsymtermscheck.sh arm (b) proves the default tail IS this one plus tsym= on each row (same attributes, same order), so the
+# pins here hold for the default answer too.
+export RIPWIRE_NO_TAIL_SYM_TERMS=1
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -374,7 +386,9 @@ esac
 HDR="$( printf '%s' "$XML" | sed 's/-->.*//' )"
 if printf '%s' "$HDR" | grep -q 'tail: file-grain rows, WEAKER evidence' && printf '%s' "$HDR" | grep -q 'sym= its top symbols'; then ok "legend defines the tail (file-grain, weaker evidence; rank rows, then page rows with sym=)"; else no "legend does not define the tail"; fi
 if printf '%s' "$HDR" | grep -q 'cover); sym= its top symbols by lens rank, minus names a sigs row or the syms block shows (a pointer, not the answer); total='; then ok "legend: sym= on either tail row kind is the file's top lens symbols, a pointer, not the answer (tail-sym)"; else no "legend does not say what sym= on a rank row means"; fi
-CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | sed 's/-->.*//' )"
+# AF1 (2026-11-18): the default --for answer is answer-first, its compact legend AFTER the rows (inside the same answer), so the
+# legend is every comment of the answer, not the text before the first "-->" (the legend-first shape).
+CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | python3 -c 'import re,sys; d=re.sub(r"<!\[CDATA\[.*?\]\]>","",sys.stdin.read(),flags=re.S); print("".join(re.findall(r"<!--.*?-->",d,re.S)))' )"
 if printf '%s' "$CL" | grep -q 't sym= its top symbols not in sigs/syms (a pointer, not the answer)'; then ok "compact legend: t sym= is the file's top symbols, a pointer (tail-sym)"; else no "compact legend does not define t sym= for every tail row"; fi
 if printf '%s' "$HDR" | grep -q 'r= on a ranked row'; then ok "legend defines r= (true ranker order)"; else no "legend does not define r="; fi
 

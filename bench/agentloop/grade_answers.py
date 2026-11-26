@@ -78,7 +78,9 @@ CIRCULAR_RE = re.compile( r"(?:^|[|;&`]|\$\(|&&|\|\|)\s*(?:[\w./\-]*/)?(%s)(?!\w
 
 # ── the bank ────────────────────────────────────────────────────────────────────────────────────────
 def load_instances( path ):
-    """Fail-closed TSV load: the header must be exactly the protocol's 13 columns, in order."""
+    """Fail-closed TSV load: the header must be exactly the protocol's 13 columns, in order, and no row may
+    carry more cells than that. A short row is padded with empty cells; a long one is refused, because `zip`
+    would keep the first 13 cells and drop the rest without a word."""
     lines = pathlib.Path( path ).read_text().splitlines()
     if not lines:
         raise SystemExit( f"{path}: empty instances file" )
@@ -87,10 +89,13 @@ def load_instances( path ):
         raise SystemExit( f"{path}: unexpected header {header!r}; expected the graded-TSV schema "
                           f"{COLUMNS!r} — refusing (fail-closed, no silent column re-mapping)" )
     rows = []
-    for line in lines[ 1: ]:
+    for lineno, line in enumerate( lines[ 1: ], start=2 ):
         if not line.strip():
             continue
         cells = line.split( "\t" )
+        if len( cells ) > len( COLUMNS ):
+            raise SystemExit( f"{path}:{lineno}: row {cells[ 0 ]!r} has {len( cells )} cells, the graded-TSV schema "
+                              f"has {len( COLUMNS )} — refusing surplus columns (fail-closed, no silent truncation)" )
         cells += [ "" ] * ( len( COLUMNS ) - len( cells ) )
         rows.append( dict( zip( COLUMNS, cells ) ) )
     return [ r for r in rows if r[ "status" ].strip().upper() == "GRADED" ]

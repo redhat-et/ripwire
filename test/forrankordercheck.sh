@@ -34,6 +34,17 @@
 # Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's readings
 # legitimately differ under them: <sigs shown= docs_dropped=> count the rows the ladder served BEFORE the rules print some as
 # <t p= sym= r=/> pointers (a pointer carries no <doc>), and (6)/(8) check those counts against the printed <d> rows. The rules are
@@ -203,6 +214,17 @@ FX_Q=( "geometry area of a shape" "call a native function from python" "parse th
 
 # ── (3) byte growth ≤ 4% against the registered sizes ─────────────────────────────────────────────────────
 growth_fail=0
+# FOLD C's tail page rows: sym=, sym= then tsym=, or tsym= alone (R-DEDUP's <syms> cut can empty a head file's sym= and keep tsym=,
+# CodeRabbit #678). Path-only rows (`<t p="…"/>`) are FOR-TAIL-WIDE's separate pattern below, so this one never matches them.
+export TAIL_PAGE_ROW_RE='<t p="[^"]*"(?: sym="[^"]*"(?: tsym="[^"]*")?| tsym="[^"]*")/>'
+# (3t) the pattern's own arm: four canned rows, one of each shape; page rows 3, path-only 1, every row counted exactly once
+pr_rows="$( python3 -c '
+import os, re
+s = "<t p=\x22a.py\x22 sym=\x22x\x22/><t p=\x22b.py\x22 sym=\x22x\x22 tsym=\x22y\x22/><t p=\x22c.py\x22 tsym=\x22y\x22/><t p=\x22d.py\x22/>"
+page = re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ); po = re.findall( r"<t p=\x22[^\x22]*\x22/>", s )
+print( len( page ), len( po ), sum( map( len, page + po ) ) == len( s ) )' )"
+if [ "$pr_rows" = "3 1 True" ]; then ok "(3t) tail page-row pattern: sym=, sym=+tsym= and tsym=-only rows counted once each, path-only apart (got $pr_rows)"
+else no "(3t) tail page-row pattern: want '3 1 True' (page rows, path-only, every byte once), got '$pr_rows'"; growth_fail=1; fi
 # body-fold (train 31; rule 4, by design — the FOLD C precedent): a compact answer now ends with <fold kind="bodies">, the top ranked
 # bodies appended after the unchanged answer (forbodyfoldcheck (F5) pins that nothing before it moved). The band reads the answer
 # WITHOUT those additions: the fold element, its legend clause, the hop-calls next= clause and the <sigs> continuation pair
@@ -254,19 +276,22 @@ for q in "${REPO_Q[@]}"; do
     now=$(( now - ex ))   # body-fold: the band reads the answer before its fold additions
     marker="$( printf '%s' "$out" | grep -o '<sigs[^>]*>' | head -1 )"
     # forbudget-soft (stop when complete; PROCESS rule 5's stair-step target): rows served past the 7.5 KB target are disclosed
-    # (<sigs past_target="K">: the last K rows) and are what the answer needs, so the band applies to the answer WITHOUT them —
+    # (<sigs past_target="K">: K rows, the lowest in score order) and are what the answer needs, so the band applies to the answer WITHOUT them —
     # every byte over 4% must be a disclosed past-target row, or a <hops> row past the old 1,000 B allowance (decision D-3:
     # the default serves every hop row), or — forbudget-soft round C, FOLD C (owner decision 2026-10-14) — a tail PAGE row
     # (`<t p= sym=/>`: page 0 of the --for file page now rides the answer), never anything else
     past="$( printf '%s' "$out" | python3 -c '
-import re, sys
+import os, re, sys
 s = sys.stdin.read(); m = re.search( r"<sigs\b([^>]*)>(.*?)</sigs>", s, re.S )
 k = re.search( r"past_target=\"([0-9]+)\"", m.group( 1 ) ) if m else None
 rows = sorted( ( int( re.search( r"\br=\"([0-9]+)\"", d.group( 1 ) ).group( 1 ) ), len( d.group( 0 ).encode() ) )
                for d in re.finditer( r"<d ([^>]*)>.*?</d>", m.group( 2 ) if m else "", re.S ) )
 past = sum( b for _, b in rows[ len( rows ) - int( k.group( 1 ) ): ] ) if k else 0
 h = re.search( r"<hops\b.*?</hops>", s, re.S )      # D-3: the compact <hops> is no longer cut at its 1,000 B allowance
-page = sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>", s ) )   # FOLD C: the tail page rows
+page = sum( len( t.encode() ) for t in re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ) )   # FOLD C: the tail page rows (TAIL_PAGE_ROW_RE)
+# TAIL-SYM-TERMS (2026-11-14): a page row may add tsym= (task-word names after sym=) and its present-only clause; tail bytes like the rows
+for pat in ( r"; tail tsym= up to \d+ more .*?not a lens rank", r"; t tsym= up to \d+ more file symbols named by a task word \(a name match\)" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 for pat, was in ( ( r"; tail: [^\]]*?budget-trimmed row\)", 391 ), ( r"; t p= file outside sigs \(weaker\)[^;]*?r= rank \(gap = trimmed\)", 57 ) ):
     lm = re.search( pat, s )                         # …and the growth of the clause that now defines them (full 391 B / compact 57 B before)
     page += max( 0, len( lm.group( 0 ).encode() ) - was ) if lm else 0
@@ -486,7 +511,10 @@ nodoc = [ int( r ) for r, inner in rows if "<doc>" not in inner ]
 dd = re.search( r"docs_dropped=\"([0-9]+)\"", m.group( 1 ) )
 got = int( dd.group( 1 ) ) if dd else 0
 if got != len( nodoc ) or ( got == 0 and not budgeted ): print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
-if got > 0 and "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
+# AF1 (2026-11-18): the DEFAULT answer is answer-first (its legend after the rows, inside the same page); a budgeted one keeps it
+# ahead of <sigs>. Either way the reading must ride a legend COMMENT of THIS answer, which is what is checked.
+leg = "".join( re.findall( r"<!--.*?-->", s, re.S ) )
+if got > 0 and "[docs_dropped=N:" not in leg: print( "FAIL docs_dropped= rides with no legend clause in this answer" ); sys.exit( 1 )
 sh = re.search( r"shown=\"([0-9]+)\"", m.group( 1 ) ); tt = re.search( r"total=\"([0-9]+)\"", m.group( 1 ) )
 shrunk = bool( sh and tt and sh.group( 1 ) == tt.group( 1 ) )
 if not budgeted and shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
@@ -556,11 +584,11 @@ ranks = [ int( r ) for r in re.findall( r"<d [^>]*\br=\"([0-9]+)\"", m.group( 2 
 no_ = re.search( r"\snext_offset=\"([0-9]+)\"", tag ); nb_ = re.search( r"\snext_budget_tokens=\"([0-9]+)\"", tag )
 out = { "capped": "capped=\"1\"" in tag, "shown": int( sh.group( 1 ) ) if sh else len( names ), "total": int( tt.group( 1 ) ) if tt else len( names ),
         "next": nx.group( 1 ).replace( "&apos;", chr( 39 ) ).replace( "&quot;", chr( 34 ) ).replace( "&amp;", "&" ) if nx else "",
-        "clause": "[sigs next=:" in s[ : s.find( "<sigs" ) ], "names": names,
+        "clause": "[sigs next=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "names": names,
         "next_offset": int( no_.group( 1 ) ) if no_ else None, "max_r": max( ranks ) if ranks else 0,
         "next_budget_tokens": int( nb_.group( 1 ) ) if nb_ else None,
         "past_target": int( re.search( r"past_target=\"([0-9]+)\"", tag ).group( 1 ) ) if re.search( r"past_target=\"([0-9]+)\"", tag ) else 0,
-        "offset_clause": "[sigs next_offset=:" in s[ : s.find( "<sigs" ) ], "budget_clause": "[sigs next_budget_tokens=:" in s[ : s.find( "<sigs" ) ] }
+        "offset_clause": "[sigs next_offset=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "budget_clause": "[sigs next_budget_tokens=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ) }
 root = re.search( r"<ctx[^>]*>", s ); r = root.group( 0 ) if root else ""
 for k in ( "est_tokens", "budget_tokens" ):
     v = re.search( r"\b%s=\"([0-9]+)\"" % k, r ); out[ k ] = int( v.group( 1 ) ) if v else None
@@ -593,7 +621,7 @@ case "$NX1" in
     "--for='gadget assembler' --signatures-only --token-budget="[0-9]*) ok "(9) the capped <sigs> names its call: next=\"$NX1\"" ;;
     *) no "(9) the capped <sigs> carries next='$NX1' (want --for='gadget assembler' --signatures-only --token-budget=N)" ;;
 esac
-if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it ahead of <sigs>"; else no "(9) <sigs next=> rides with no legend clause"; fi
+if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it in this answer's legend"; else no "(9) <sigs next=> rides with no legend clause in this answer"; fi
 # nothing dropped, so no resume index (the explicit cut below carries one)
 if [ "$( cfield "$C1" next_offset )" = null ] && [ "$( cfield "$C1" offset_clause )" = false ]; then
     ok "(9) the default's complete head carries no next_offset= (no row was dropped)"

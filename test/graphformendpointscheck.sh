@@ -13,6 +13,9 @@
 #   (n2) "strip the directory path from a_start() to the end": not the form (lead-in), no graph block, no path_gap
 #   (c1) a crashing / silent binary turns the arms red (every arm reads rc and requires its positive text)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -74,10 +77,12 @@ blk="$( python3 - "$TMP/f1.xml" <<'PY'
 import re, sys
 s = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
 m = re.search( r'<graph_verb [^>]*>(.*)</graph_verb>', s, re.S )
-print( m.group( 1 ) if m else '' , end='' )
+# AF2 A (2026-11-18): the answer-first --for answer lifts a comment that is a direct child of <graph_verb> into its document
+# legend, so the block equals the bare verb answer with its comments out (foranswerfirstcheck (R1)/(R2): none lost, none doubled)
+print( re.sub( r'<!--.*?-->', '', m.group( 1 ), flags = re.S ) if m else '' , end='' )
 PY
 )"
-bare="$( cat "$TMP/f1v.xml" )"
+bare="$( python3 -c 'import re,sys; print(re.sub(r"<!--.*?-->", "", open(sys.argv[1], encoding="utf8", errors="replace").read(), flags=re.S), end="")' "$TMP/f1v.xml" )"
 if [ "$( rc f1 )" = 0 ] && [ "$( rc f1v )" = 0 ] && case "$r" in *"dropped:"*) false;; *) true;; esac \
    && [ "$( count f1 '<path_gap ' )" = 0 ] && grep -q 'reachable="1"' "$TMP/f1.xml" && [ -n "$bare" ] && [ "$blk" = "$bare" ]; then
     ok "(f1) path form: route= '$r' unchanged; path found, no <path_gap>; graph block == bare --path"
@@ -91,7 +96,7 @@ s = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
 gv = re.search( r'<graph_verb [^>]*>(.*)</graph_verb>', s, re.S )
 inner = gv.group( 1 ) if gv else ''
 pg = re.search( r'<path_gap ([^>]*)>(.*)</path_gap>', inner, re.S )
-leg = re.search( r'<!-- ripwire for path_gap:(.*?)-->', inner, re.S )
+leg = re.search( r'<!-- ripwire for path_gap:(.*?)-->', s, re.S )   # AF2 A: in the document legend now
 a = pg.group( 1 ) if pg else ''
 body = pg.group( 2 ) if pg else ''
 print( "n=%d reach0=%d gapreach0=%d from=%s to=%s missing=%d callee=%d caller=%d legdash=%d" % (

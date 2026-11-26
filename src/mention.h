@@ -29,6 +29,8 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <iterator>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -620,8 +622,7 @@ inline std::uint32_t mentionFilesNamedTotal( const IngestResult& ing, const std:
         mentionUnkeptFiles( ing, m, kept, named );
     }
     named.insert( named.end(), stemNamed.begin(), stemNamed.end() );   // FOR-FILE-ANCHOR: the stem-named files (resolveStemFile)
-    std::sort( named.begin(), named.end() );
-    named.erase( std::unique( named.begin(), named.end() ), named.end() );
+    rw::sortutil::sortUnique( named );
     return std::uint32_t( named.size() );
 }
 
@@ -1171,13 +1172,30 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
 // The files (best definition each) that one named identifier lifts at, from its `matches` rows: the qualifier's files when it
 // places any, else the bare reading, narrowed to ONE file when another task word names it by path (namesakeFileByPathWord).
 // Empty when nothing matched. Longer than kMentionMaxNameFiles means ambiguous — the caller lifts nothing.
+// RD-c: `rows` (one identifier's definitions) without each bodyless one whose file also holds a definition WITH A BODY. A bodyless
+// namesake there (Rust's `mod x;` beside `fn x`, a forward declaration above its definition) is not a candidate, whatever its score:
+// the one-line item can out-score the function it only announces.
+inline std::vector<std::pair<std::uint32_t, NodeId>> bodiedOverBodyless( const IngestResult& ing, std::span<const std::pair<std::uint32_t, NodeId>> rows )
+{
+    const auto bodied = [ & ]( const auto& row ) { return isDefinitionNotDeclaration( ing.symbols[ row.second ] ); };
+    std::vector<std::uint32_t> bodiedFiles;
+    for( const auto& row : rows | std::views::filter( bodied ) )
+    {
+        bodiedFiles.push_back( ing.symbols[ row.second ].fileId );
+    }
+    std::vector<std::pair<std::uint32_t, NodeId>> kept;
+    std::ranges::copy_if( rows, std::back_inserter( kept ),
+                          [ & ]( const auto& row ) { return bodied( row ) || !std::ranges::contains( bodiedFiles, ing.symbols[ row.second ].fileId ); } );
+    return kept;
+}
+
 inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const IngestResult& ing, const std::vector<float>& lensRank,
                                                                          const NamedIdent& n, std::string_view task,
                                                                          std::span<const std::pair<std::uint32_t, NodeId>> rows )
 {
     const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
     std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare, every;   // every: the bare reading uncut, for the namesake choice
-    for( const auto& row : rows )
+    for( const auto& row : bodiedOverBodyless( ing, rows ) )   // RD-c
     {
         const Symbol& s = ing.symbols[ row.second ];
         ASSUME( s.id < lensRank.size() );
@@ -1352,18 +1370,26 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         {
             const std::string& scopeSeg = m.segments[0];
             const std::string& nameSeg  = m.segments[1];
+            std::vector<NodeId> scoped;   // this ONE mention's matches, id order
             for( const Symbol& s : ing.symbols )
             {
                 if( s.name == nameSeg && s.scope == scopeSeg && !notLexRanked( s ) )   // a --recall-only unit is no mention target
                 {
-                    ++directSymbolTotal;
-                    if( directSymbols.size() < kMentionMaxDirectSymbols )
-                    {
-                        directSymbols.push_back( s.id );
-                        matchedSymbol = true;
-                    }
+                    scoped.push_back( s.id );
                 }
             }
+            directSymbolTotal += std::uint32_t( scoped.size() );
+            // RD-b: one mention matching more definitions than the WHOLE room is ambiguous and lifts none (the identifier path's
+            // rule, kMentionMaxNameFiles): the first 8 of django's 59 `Command.handle` in id order are path order, eight look-alikes
+            // lifted over the right one, and a full room then refuses the task's unique identifier. Still read as a Scope.name
+            // (no later rule takes it over) and still counted: mention_syms_capped= / mention_syms_total= disclose it.
+            const bool ambiguous = scoped.size() > kMentionMaxDirectSymbols;
+            for( std::size_t k = 0; !ambiguous && k < scoped.size() && directSymbols.size() < kMentionMaxDirectSymbols; ++k )
+            {
+                directSymbols.push_back( scoped[k] );
+                matchedSymbol = true;
+            }
+            matchedSymbol = matchedSymbol || ambiguous;
         }
 
         // (c) package-directory match — see liftPackageDirMention.
@@ -1454,8 +1480,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         if( lensRank[id] < target ) { lensRank[id] = target; ++liftedSymbolCount; }
     };
 
-    std::sort( directSymbols.begin(), directSymbols.end() );
-    directSymbols.erase( std::unique( directSymbols.begin(), directSymbols.end() ), directSymbols.end() );
+    rw::sortutil::sortUnique( directSymbols );
     for( const NodeId id : directSymbols )
     {
         lift( id, 0 );
@@ -1685,8 +1710,7 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
     std::vector<NodeId>& refusedDocs = tally.refusedDocs;
     const std::uint32_t  liftedDocs  = tally.liftedDocs;
     const std::uint32_t  usedAnchors = tally.usedAnchors;
-    std::sort( refusedDocs.begin(), refusedDocs.end() );      // one doc under two anchors is ONE refusal
-    refusedDocs.erase( std::unique( refusedDocs.begin(), refusedDocs.end() ), refusedDocs.end() );
+    rw::sortutil::sortUnique( refusedDocs );   // one doc under two anchors is ONE refusal
     // doc_mentions_total= is lifted + refused: how many docs the caps had to choose from. It was nullptr —
     // a bare boolean saying content was withheld and neither how much nor how to get it, which is §9-3 of
     // docs/METHODOLOGY.md unmet by the same file whose mention_tokens_capped/mention_syms_capped both pass

@@ -25,6 +25,10 @@
 #        library's bounds checks on (an out-of-range index aborts the driver), plus an in-range control
 # Every negative arm counts what it saw (notices, lines, cases) and FAILs on zero.
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 . "$ROOT/test/lib/cxxflags.sh"   # the ONE flags.make parse, for (U)

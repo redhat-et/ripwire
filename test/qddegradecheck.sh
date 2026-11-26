@@ -6,8 +6,8 @@
 #
 # THE CONTRACT these arms pin. Why a kind is LOCAL: every per-symbol baseline key is path-qualified (quality.h qualityKey)
 # and so is the canonical id, so an UNCHANGED file yields the same keys and metrics in both trees and no row of such a kind:
-#   * The 12 kinds split by input scope. LOCAL kinds (api-surface, complexity, error-masking, nesting, params,
-#     placeholder, verbosity) need only the changed files' trees. defect-shape is LOCAL when the changed files define
+#   * The 13 kinds split by input scope. LOCAL kinds (api-surface, complexity, error-masking, nesting, params,
+#     placeholder, tangle, verbosity) need only the changed files' trees. defect-shape is LOCAL when the changed files define
 #     the same C-family macro names on both sides and either the base's whole macro set was read (P1) or no changed
 #     file is C++ (P0); otherwise it is skipped. WHOLE-TREE kinds (dead-code, duplication, new-clone-of-reused-helper)
 #     need every file. short-horizon-churn is unavailable in the range form.
@@ -61,7 +61,7 @@
 #       changed files cannot answer refuses under a stop (exit 5), never an empty pass, and is never pre-empted by the
 #       projection (the replay runs in full).
 #   (S) R9 --quality-kinds=complexity reports no false finding-gone for a dead-code ack.
-#   (T) S2 fits near the line: --max-memory at 2x the measured full peak answers in full, byte-identical (guard).
+#   (T) S2 fits near the line: --max-memory at 2x the measured full peak (max of 3 runs; one fresh retry) answers in full, byte-identical (guard).
 #   (V) R8 a degraded answer with rows and no gating row exits 6, not 2 and not 0.
 #   --- fix round 1 (final review C1) ---
 #   (W) --quality-kinds with a LOCAL kind under pressure: the kinds the caller left out are skipped_why="selector",
@@ -84,10 +84,10 @@ WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/tmp"
 echo "qddegradecheck: BIN=$BIN"
 
-LOCAL_KINDS="api-surface complexity defect-shape error-masking nesting params placeholder verbosity"
+LOCAL_KINDS="api-surface complexity defect-shape error-masking nesting params placeholder tangle verbosity"
 LOCAL_CSV="$( echo "$LOCAL_KINDS" | tr ' ' ',' )"
 WHOLE_KINDS="dead-code,duplication,new-clone-of-reused-helper"
-ALL12="api-surface,complexity,dead-code,defect-shape,duplication,error-masking,nesting,new-clone-of-reused-helper,params,placeholder,short-horizon-churn,verbosity"
+ALL13="api-surface,complexity,dead-code,defect-shape,duplication,error-masking,nesting,new-clone-of-reused-helper,params,placeholder,short-horizon-churn,tangle,verbosity"
 
 g(){ git -C "$1" -c user.name=t -c user.email=t@example.com "${@:2}"; }
 
@@ -119,7 +119,7 @@ mkfx(){
 }
 # target: complexity+nesting (grow), verbosity (chatty), params (wide 5->6), api-surface (api_scale 1->2, a header),
 # error-masking (an emptied catch), dead-code (legacy_used loses its caller), duplication + new-clone-of-reused-helper
-# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss)
+# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss); tangle (sweep, new)
 mktarget(){
     local R="$1"
     printf '#pragma once\ninline int api_scale( int a, int b ) { return a * b; }\n' >"$R/src/api.h"
@@ -142,6 +142,12 @@ mktarget(){
         printf 'int drive( int x ) { return use1( x ) + use2( x ) + use3( x ) + wide( 1, 2, 3, 4, 5, 6 ) + grow( x ) + api_scale( x, 2 ) + chatty( x ); }\n'
     } >"$R/src/core.cpp"
     printf 'int helper_copy( int a, int b ) { int s = 0; for( int i = 0; i < a; ++i ) { s += i * b; if( s > 100 ) { s -= b; } } return s + a - b; }\n' >"$R/src/copy.cpp"
+    {   # tangle (a NEW function: a 90-line body whose statements sit at nesting 6 — a new-symbol row, never gating)
+        printf 'int sweep( int n )\n{\n    int r = 0;\n    for( int a = 0; a < n; ++a ) {\n        for( int b = 0; b < a; ++b ) {\n'
+        printf '            if( a %% 2 ) {\n                while( r < b ) {\n                    if( b %% 3 ) {\n                        for( int c = 0; c < 2; ++c ) {\n'
+        for i in $( seq 1 80 ); do printf '                            r += c * %s;\n' "$i"; done
+        printf '                        }\n                    }\n                    ++r;\n                }\n            }\n        }\n    }\n    return r;\n}\n'
+    } >"$R/src/deep.cpp"
     printf 'def other():\n    # TODO: wire this up\n    return 1\n\ndef greet(name):\n    return "hello {} {}".format(name)\n\ndef later():\n    raise NotImplementedError\n' >"$R/py/mod.py"
     g "$R" add -A; g "$R" commit -qm target
 }
@@ -341,7 +347,7 @@ else no "(G) A..A: rc $r1 vs $r2 or the answers differ"; fi
 # ── (H) --quality-kinds ───────────────────────────────────────────────────────────────────────────────────────
 qd "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dupe --no-cache
 if [ "$RC" = 1 ] && [ ! -s "$WORK/o" ] && grep -q "dupe" "$WORK/e" && grep -q "new-clone-of-reused-helper" "$WORK/e" && grep -q "short-horizon-churn" "$WORK/e"; then
-    ok "(H) an unknown kind is refused (exit 1) naming it and the 12 kinds"
+    ok "(H) an unknown kind is refused (exit 1) naming it and the 13 kinds"
 else no "(H) unknown kind: rc=$RC stderr: $( head -c 300 "$WORK/e" )"; fi
 qd "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity --quality-ack --no-cache
 if [ "$RC" = 1 ] && [ ! -e "$FX/.ripwire_quality_acks" ] && grep -q -- '--quality-kinds.*--quality-ack\|--quality-ack.*--quality-kinds' "$WORK/e" && ! grep -q 'unknown flag' "$WORK/e"; then
@@ -357,7 +363,7 @@ for k in api-surface complexity dead-code defect-shape duplication error-masking
     if [ "$( rows "$WORK/o" )" = "$( rows "$WORK/A.xml" "$k" )" ] && [ -n "$( rows "$WORK/o" )" ] && [ "$( attr "$WORK/o" skipped_why )" = selector ]; then ok "(H) --quality-kinds=$k: exactly (A)'s $k rows"
     else no "(H) --quality-kinds=$k: rc=$RC rows=$( rows "$WORK/o" | grep -c . ) want $( rows "$WORK/A.xml" "$k" | grep -c . ) why=$( attr "$WORK/o" skipped_why )"; fi
 done
-qd "$BIN" . --quality-delta=HEAD~1..HEAD "--quality-kinds=$ALL12" --no-cache
+qd "$BIN" . --quality-delta=HEAD~1..HEAD "--quality-kinds=$ALL13" --no-cache
 if [ "$RC" = "$ARC" ] && cmp -s "$WORK/o" "$WORK/A.xml"; then ok "(H) all 12 named: byte-identical to no selector"; else no "(H) all 12 named: rc=$RC or output differs from (A)"; fi
 
 # ── (I) --quality-ack: the projection never pre-empts it (C2); a real stop refuses it ───────────────────────────
@@ -605,20 +611,53 @@ else
 fi
 
 # ── (T) S2: a limit near (above) the measured peak answers in full ─────────────────────────────────────────────
-peak_mb=""
-if /usr/bin/time -l true >/dev/null 2>&1; then
-    ( cd "$FX" && TMPDIR="$WORK/tmp" /usr/bin/time -l "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t.err" )
-    peak_mb="$( awk '/peak memory footprint/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t.err" )"
-    [ -n "$peak_mb" ] || peak_mb="$( awk '/maximum resident set size/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t.err" )"
-elif /usr/bin/time -v true >/dev/null 2>&1; then
-    ( cd "$FX" && TMPDIR="$WORK/tmp" /usr/bin/time -v "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t.err" )
-    peak_mb="$( awk -F: '/Maximum resident set size/ { printf "%d", $2 / 1024 + 1 }' "$WORK/t.err" )"
-fi
+# QDDEGRADE-T-FLAKE (#676 CI, ubuntu Release gcc shard 4/4, gates at jobs=3): the peak is read off one run and the
+# projection off ANOTHER, and on a loaded runner the two runs' footprints differ by more than the 2 MiB room (T2) pins
+# inside one run, so a single high sample put ingest_need over the parse line (half the limit) and (T) failed on a run
+# that fits. The 2x margin stays — it is what makes this arm near the line. Two things absorb cross-run noise instead:
+#   * the peak is the MAX of 3 serial runs (one sample under-reads the upper tail the limited run can land in);
+#   * a recognised degraded answer (tdegraded) is re-tried ONCE at 2x a freshly measured peak, and (T) fails only when
+#     both attempts degrade; a crash or any other mismatch on the first attempt fails at once.
+# A binary that degrades a run that fits degrades both attempts and still FAILS (shown with a wrapper that sets
+# RIPWIRE_TEST_MEMGUARD=project:1 on every limited run; the once-only wrapper, a one-off spike, passes on the retry).
+tpeak1(){
+    if /usr/bin/time -l true >/dev/null 2>&1; then
+        ( cd "$FX" && TMPDIR="$WORK/tmp" /usr/bin/time -l "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t.err" )
+        local mb; mb="$( awk '/peak memory footprint/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t.err" )"
+        [ -n "$mb" ] || mb="$( awk '/maximum resident set size/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t.err" )"
+        printf '%s' "$mb"
+    elif /usr/bin/time -v true >/dev/null 2>&1; then
+        ( cd "$FX" && TMPDIR="$WORK/tmp" /usr/bin/time -v "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t.err" )
+        awk -F: '/Maximum resident set size/ { printf "%d", $2 / 1024 + 1 }' "$WORK/t.err"
+    fi
+}
+tpeak(){   # the max of 3 serial samples; empty when any sample has no number (no /usr/bin/time that reports a peak)
+    local m="" one i
+    for i in 1 2 3; do
+        one="$( tpeak1 )"; isnum "$one" || { printf ''; return; }
+        { [ -z "$m" ] || [ "$one" -gt "$m" ]; } && m="$one"
+    done
+    printf '%s' "$m"
+}
+tfits(){ lim=$(( peak_mb * 2 )); [ "$lim" -lt 64 ] && lim=64
+         qd "$BIN" . --quality-delta=HEAD~1..HEAD "--max-memory=${lim}M" --no-cache; [ "$RC" = "$ARC" ] && cmp -s "$WORK/o" "$WORK/A.xml"; }
+# CR680 (review 5934094974): only a recognised degraded answer earns the retry: a parseable changed-files answer with
+# skipped_why=memory and exactly its degraded exit code (2 or 6). A crash (rc >= 128), any other rc, or a full answer whose
+# bytes differ from (A) FAILs at once, so a later matching run cannot mask it.
+tdegraded(){ [ "$RC" -lt 128 ] && [ -s "$WORK/o" ] && validxml "$WORK/o" && [ "$( attr "$WORK/o" ingest_scope )" = changed-files ] \
+             && [ "$( attr "$WORK/o" skipped_why )" = memory ] && [ "$RC" = "$( degrc "$WORK/o" )" ]; }
+peak_mb="$( tpeak )"
 if isnum "$peak_mb"; then
-    lim=$(( peak_mb * 2 )); [ "$lim" -lt 64 ] && lim=64
-    qd "$BIN" . --quality-delta=HEAD~1..HEAD "--max-memory=${lim}M" --no-cache
-    if [ "$RC" = "$ARC" ] && cmp -s "$WORK/o" "$WORK/A.xml"; then ok "(T) --max-memory=${lim}M (2x the measured ${peak_mb}M peak): answered in full, byte-identical to (A)"
-    else no "(T) --max-memory=${lim}M rc=$RC scope=$( attr "$WORK/o" ingest_scope ) — the projection degraded a run that fits"; fi
+    if tfits; then ok "(T) --max-memory=${lim}M (2x the ${peak_mb}M peak, max of 3 runs): answered in full, byte-identical to (A)"
+    else
+        t1="--max-memory=${lim}M rc=$RC scope=$( attr "$WORK/o" ingest_scope )"
+        if ! tdegraded; then
+            no "(T) $t1: not a recognised degraded answer (a crash, another rc, or a full answer unlike (A)) — no retry"
+        elif peak_mb="$( tpeak )"; isnum "$peak_mb" && tfits; then
+            ok "(T) --max-memory=${lim}M (2x the ${peak_mb}M peak, max of 3 runs): answered in full, byte-identical to (A), on the one retry"
+            printf '  INFO  (T) the first attempt degraded (%s): a cross-run footprint spike, not a projection that degrades every run\n' "$t1"
+        else no "(T) $t1, then --max-memory=${lim}M rc=$RC scope=$( attr "$WORK/o" ingest_scope ) on the retry — the projection degraded a run that fits"; fi
+    fi
 else
     printf '  SKIP  (T) no /usr/bin/time that reports a peak (-l or -v) — the near-the-line arm needs a measured peak\n'
 fi
@@ -668,7 +707,7 @@ if [ "$RC" = 6 ] && [ "$( attr "$WORK/o" gating )" = 0 ] && [ -n "$( rows "$WORK
 else no "(V) rc=$RC gating=$( attr "$WORK/o" gating ) rows=$( rows "$WORK/o" | grep -c . )"; fi
 
 # ── (W) C1: a selector's exclusions are not memory cuts ─────────────────────────────────────────────────────────
-others(){ echo "$ALL12" | tr ',' '\n' | grep -vx -e "$1" -e "${2:-}" | paste -sd, -; }   # the 12 kinds without $1 (and $2)
+others(){ echo "$ALL13" | tr ',' '\n' | grep -vx -e "$1" -e "${2:-}" | paste -sd, -; }   # the 13 kinds without $1 (and $2)
 emptyskip(){ grep -q 'skipped *$' "$WORK/e"; }
 qd RIPWIRE_TEST_MEMGUARD=project:1 "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity --no-cache
 if [ "$( attr "$WORK/o" ingest_scope )" = changed-files ] && [ "$( attr "$WORK/o" kinds_skipped )" = "$( others complexity )" ] \

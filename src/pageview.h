@@ -56,6 +56,11 @@
 //                           never a count (--abi used to print the dropped-row COUNT under this name; that
 //                           count is `dropped=` now). If a verb emits no shown=, it emits no capped= either
 //                           (--skill-scan emits the pair only on a capped scan; that is conformant).
+//                           A CUT-ONLY secondary listing (shown_dc=, shown_transitive=, shown_implementors=,
+//                           shown_alts=: printed only when the listing was cut) carries <noun>_capped="1" beside
+//                           it and nothing when whole: presence IS the cut, absence means whole. A listing that
+//                           prints shown_<noun>= on EVERY answer (shown_levels=, shown_d2=) prints its bit 0|1
+//                           always. Never the noun-first spelling <noun>_shown=: arm (I) of truncvocabcheck.
 //                           M2 (capture-audit 2026-09-04): capped="1" ⇒ the paging half (rule 6) is on the
 //                           SAME element, HOWEVER the window was set — a default display cap included. The
 //                           audited binary printed `shown="40" capped="1"` and nothing else on a bare
@@ -235,7 +240,7 @@ inline constexpr int kImportReachRowCap   = 40;
 // house quintet + next=. Explicit --limit=N raises any of them (effectiveRowCap).
 inline constexpr std::size_t kTreeSymbolsPerFile = 3;   // cut-fix E: --tree's <s> rows per <file>, disclosed by the root's shown_symbols=/symbols_capped=
 inline constexpr int kTreeRowCap            = 80;    // files, by best symbol's rank: 80 rows ≈ 11.5 KB on this repo (100 = 14.3 KB)
-inline constexpr int kZoomTopModuleCap      = 40;    // top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: levels_shown=2)
+inline constexpr int kZoomTopModuleCap      = 40;    // top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2)
 inline constexpr std::size_t kZoomBridgeCap = 12;    // cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs
 inline constexpr int kExternalSurfaceRowCap = 100;   // names, by ref count (≈ 5.2 KB on this repo)
 
@@ -343,11 +348,10 @@ inline constexpr PageSyntax kJsonPageSyntax
 // `collectionCapped` (H8): true when the verb's OWN collection cap fired (the rule-4 marker it emits beside
 // this block — hits_capped=/findings_capped=). Callers pass it under a /*collectionCapped=*/ annotation so
 // test/collectioncapcheck.sh arm (D) can read, from src/ alone, that every rule-4 emitter feeds it.
-inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
-                                   std::size_t windowEnd, int limit, int offset, bool discloseCap,
-                                   const PageSyntax& syn = kXmlPageSyntax, bool collectionCapped = false ) noexcept
+// The two halves above, written from already-computed values (pageDisclosure and pageDisclosureChained share it).
+inline const char* formatPageDisclosure( char* buf, std::size_t bufCap, const PageDisclosureValues& v, std::size_t rowsShown,
+                                         std::size_t rowTotal, const PageSyntax& syn ) noexcept
 {
-    const PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap, collectionCapped );
     if( !v.active ) { buf[0] = '\0';  return buf; }
 
     const char* isCapped = v.capped ? syn.yes : syn.no;
@@ -372,6 +376,33 @@ inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t ro
         rw::formatTo( buf + written, bufCap - written, "{}", syn.floor );
     }
     return buf;
+}
+
+inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
+                                   std::size_t windowEnd, int limit, int offset, bool discloseCap,
+                                   const PageSyntax& syn = kXmlPageSyntax, bool collectionCapped = false ) noexcept
+{
+    return formatPageDisclosure( buf, bufCap, computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap, collectionCapped ),
+                                 rowsShown, rowTotal, syn );
+}
+
+// PG1 (owner ruling 192): a root whose ONE window also cuts a secondary listing (--grep's <unindexed> list obeys the in-index
+// list's --limit/--offset). shown=/capped=/total= stay the primary list's (the secondary element carries its own capped=); but
+// has_more=/next_offset= describe the WHOLE chain: while the secondary list still has rows past `chainEnd` (the window's end over
+// both lists), the paging half rides with has_more="1" next_offset=chainEnd, so a loop that reads has_more= never stops while
+// next= would still serve rows. `secondaryMore` false: byte-identical to pageDisclosure.
+inline const char* pageDisclosureChained( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal, std::size_t windowEnd,
+                                          int limit, int offset, bool collectionCapped, bool secondaryMore, std::size_t chainEnd ) noexcept
+{
+    PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, true, collectionCapped );
+    if( secondaryMore )
+    {
+        v.active      = true;
+        v.paging      = true;
+        v.hasMore     = 1u;
+        v.nextOrTotal = chainEnd;
+    }
+    return formatPageDisclosure( buf, bufCap, v, rowsShown, rowTotal, kXmlPageSyntax );
 }
 
 // ── LB-G (listing-paging round, 2026-09-10) — the SECONDARY listing's pair, emitted ONLY on a CUT ────────

@@ -23,6 +23,7 @@
 --all	real flag of the `wrap` subcommand (src/wrap.h:254, "ripwire wrap --all" auto-detects every installed agent) — wrap's own flags are not enumerated in the top-level --help catalog
 --no-prefilter	real flag (src/cli.h:120, 2997) — modifies --grep=STR/--regex=PAT to force a full scan instead of the trigram prefilter; the (debug) soundness oracle test/regexcheck.sh compares --regex against, deliberately left out of --help's public catalog
 --noout	xmllint's own flag ("xmllint --noout -") quoted in the G4 well-formedness example, not a ripwire flag
+--xpath	xmllint's own flag ("xmllint --xpath") named in changelog.d/fmt2-rowlines.md as a consumer that parses rows as elements, not a ripwire flag
 --read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ripwire flag
 --short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ripwire flag
 --build	cmake's own flag ("cmake --build build -j") quoted in every build recipe (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, docs/EVALS.md), not a ripwire flag
@@ -61,6 +62,7 @@
 --triage-only	scripts/optremarks.sh's own flag ("optremarks.sh --triage-only", re-triage an existing build_remarks/ tree without rebuilding) quoted in docs/OPTREMARKS.md, not a ripwire flag
 --corpus	scripts/pgobuild.sh's own flag ("pgobuild.sh --corpus /path", which tree the PGO training workload runs over) quoted in docs/OPTREMARKS.md, not a ripwire flag
 --reuse-profile	scripts/pgobuild.sh's own flag ("pgobuild.sh --reuse-profile", rebuild from an existing .profdata without re-instrumenting) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--check-training	scripts/pgobuild.sh's own flag ("pgobuild.sh --check-training BIN", run the PGO training workload with BIN, no build) quoted in changelog.d/, not a ripwire flag
 --out	bench/ensemblecal/run_ensemblecal.py's own flag ("run_ensemblecal.py collect --out cal.json", where the scan JSON lands) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
 --in	bench/ensemblecal/run_ensemblecal.py's own flag ("run_ensemblecal.py report --in cal.json", which scan JSON to report on) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
 --samples	bench/ensemblecal/run_ensemblecal.py's own flag ("stability --samples 8", how many commits the stability ladder visits) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
@@ -146,3 +148,14 @@
 --max-drift	flag of this repo's own docs/counts_snapshot.py (check --max-drift, the drift-bounded staleness gate; CONTRIBUTING, docs/EVALS.md), never a ripwire flag
 --max-pods	the kubelet flag (kubernetes), quoted in a --for task in a changelog worked example (forliteral-3 FLAG-SHAPE-LIT)
 --stdin	git's own diff-tree option ("git diff-tree --stdin", one process fed every revision pair) quoted in changelog.d/large-partial-1.md's REF-WINDOW-COST entry - a foreign tool flag, not a ripwire flag
+--hook-legend-seen	skills/install.sh's own flag (lane LS1): the legend-seen hook that rewrites ripwire commands to add --legend-seen= (hooks/ripwire-legend-seen.sh and its Codex/opencode ports, gated by test/legendseenhookcheck.sh and test/legendseenportcheck.sh), ON BY DEFAULT with a --hook install since owner ruling 111 (2026-11-20) and kept as the flag that installs it alone, disclosed by `ripwire wrap` — not a ripwire binary flag
+--no-hook-legend-seen	skills/install.sh's own flag (owner ruling 111, 2026-11-20): installs the advisory --hook entries WITHOUT the command-rewriting legend-seen hook, which is otherwise on by default (gated by test/legendseenhookcheck.sh (i) and test/legendseenportcheck.sh (B)); RIPWIRE_LEGEND_SEEN=0 is the run-time equivalent — not a ripwire binary flag
+--hook-subagent-primer	skills/install.sh's own flag (lane AR1): the OPT-IN Claude Code SubagentStart hook that adds the two-line ripwire brief to every subagent's context (hooks/ripwire-subagent-primer.sh, gated by test/subagentprimercheck.sh) — not a ripwire binary flag
+--subagent-start	hooks/ripwire-nudge.sh's own mode (lane HK2), not a ripwire flag: the SubagentStart routing note skills/install.sh --hook registers for Claude Code's Explore and Plan subagents (gated by test/subagentroutecheck.sh)
+--agent-brief	hooks/ripwire-nudge.sh's own mode (lane HK2), not a ripwire flag: the probe-only PreToolUse arm that returns updatedInput for an Agent/Task call; no installer registers it (gated by test/subagentroutecheck.sh (M))
+--opencode	skills/install.sh's opencode target (lane LS1): it writes the legend-seen plugin loader under ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin, which since owner ruling 111 (2026-11-20) is what it does on its own, the plugin being the only hook this installer has for opencode — not a ripwire binary flag
+--no-locator-agent	skills/install.sh's own flag (owner ruling 189, 2026-11-22): a Claude skills install without the ripwire-locator subagent (skills/agents/ripwire-locator.md), which is otherwise installed by default; RIPWIRE_NO_LOCATOR_AGENT=1 is the environment form the curl installers pass through (gated by test/locatoragentcheck.sh (I) and test/releaseinstallcheck.sh (E9)) — not a ripwire binary flag
+--data-binary	curl's upload-from-file option, quoted in changelog.d/353-net-exfil-flow.md from the #353 report's `cat /etc/passwd | curl ... --data-binary @-` exfil shape — a foreign tool flag, not a ripwire flag
+--resolve	curl's host-to-address pin option, named in changelog.d/353-net-exfil-flow.md as a destination the --scan-skills net-exfil proof refuses to vouch for — a foreign tool flag, not a ripwire flag
+--url	curl's URL option (and its @file URL-list form, curl ≥ 8.13), named in changelog.d/353-net-exfil-flow.md as a destination the --scan-skills net-exfil proof refuses to vouch for — a foreign tool flag, not a ripwire flag
+--location	curl's follow-redirects option, named in changelog.d/353-net-exfil-flow.md as an option in option position that withholds the --scan-skills local-dest WARN — a foreign tool flag, not a ripwire flag

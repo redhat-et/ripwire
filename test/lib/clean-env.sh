@@ -24,7 +24,11 @@
 # builds a repo without sourcing this file.
 unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR RIPWIRE_DATA_HOME
 # (3) THE MEMORY GUARD (#350): an exported limit or test trip changes what every gate's ripwire answers.
-unset RIPWIRE_MAX_MEMORY RIPWIRE_TEST_MEMGUARD
+#     RIPWIRE_MEM_BUDGET_MB is the allocator line's own knob (memceiling.h) and belongs here for a stronger reason
+#     than the others: an exported value that is not 0 or a whole MiB count of at least 64 refuses EVERY ordinary
+#     invocation at exit 1, so a gate would fail before reaching whatever it meant to assert, and an exported small
+#     value would refuse mid-run at exit 5. An arm that wants the line off still sets it per command.
+unset RIPWIRE_MAX_MEMORY RIPWIRE_TEST_MEMGUARD RIPWIRE_MEM_BUDGET_MB
 # (4) THE RUBY BASE-SCOPE SEAM (#325, resolve.h rubyBaseUnscopedTestSeam): forces every Ruby base onto the byName fallback.
 unset RIPWIRE_TEST_RUBY_BASE_UNSCOPED
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX

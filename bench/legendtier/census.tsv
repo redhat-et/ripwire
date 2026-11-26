@@ -1,0 +1,648 @@
+# census.tsv — written by bench/legendtier/census.py; read by bench/legendtier/packs_build.py. Do not edit by hand.
+# binary: ripwire 0.6.10-dev.79+g1318bff62.dirty
+# answers: registered453 388, wide135 135; 104 without a compact legend the dictionary holds (skipped)
+# N<TAB>key<TAB>answers   |   E<TAB>key<TAB>count<TAB>attr<TAB>element<TAB>item   (core-tier lines are not counted)
+N	affected	29
+N	around	39
+N	callees	39
+N	callers	42
+N	clones	3
+N	cochange	3
+N	communities	3
+N	connect	3
+N	dead-code	8
+N	defs	3
+N	deps	3
+N	dmm	3
+N	doc-drift	3
+N	doctor	3
+N	edit-check	3
+N	exemplar	3
+N	expand	37
+N	expand-file	2
+N	external-surface	3
+N	flags	3
+N	graph-query	3
+N	grep	39
+N	hotspots	3
+N	impact	39
+N	lego	18
+N	lint	3
+N	map	6
+N	map-diff	3
+N	match	3
+N	mentions	3
+N	merge-scout	3
+N	metrics	3
+N	nonlocal-state	3
+N	owners	3
+N	pack-signatures	3
+N	pack-task	68
+N	path	3
+N	pr-context	3
+N	quality-delta	3
+N	quality-panel	3
+N	readability	3
+N	safe-delete	3
+N	seams	3
+N	skipped	3
+N	slice	1
+N	stray-content	3
+N	test-gate	3
+N	tree	3
+N	uses	39
+N	whereis	9
+N	zoom	3
+E	affected	29	@purpose		
+E	affected	29	changed	affected	
+E	affected	29	reached	affected	
+E	affected	6	run_each	g	
+E	affected	18	run_first	affected	
+E	affected	19	run_unknown		
+E	affected	16	run_unknown	g	
+E	affected	29	script_gates_unmodelled	affected	
+E	affected	29	seed_test_files	affected	
+E	affected	29	seeds	affected	
+E	affected	29	tests	affected	
+E	affected	3	via	g	class-new
+E	around	3	@file-scope		
+E	around	39	@purpose		
+E	around	14	amb		
+E	around	39	declined		
+E	around	24	defs	r	
+E	around	8	extent_suspect_syms		
+E	around	31	external		
+E	around	39	files		
+E	around	39	k	s	
+E	around	8	layer	f	
+E	around	24	locality_pinned		
+E	around	8	macro_blanked_files		
+E	around	39	n	s	
+E	around	1	overloads		
+E	around	14	prov		
+E	around	17	sc		
+E	around	16	skipped_oversize		
+E	around	32	unindexed		
+E	around	32	unindexed_exts		
+E	around	22	via	c	name
+E	around	10	x	c	
+E	callees	39	@purpose		
+E	callees	7	bodyless		
+E	callees	13	bodyless_defs		
+E	callees	1	closures		
+E	callees	1	count	in	
+E	callees	6	cross_kind		
+E	callees	2	shown_dc		
+E	callees	3	gate	dc	
+E	callees	39	hop_tested	callees	
+E	callees	4	hop_tests	callees	
+E	callees	4	hop_tests	callers	
+E	callees	18	ix	def	
+E	callees	3	n	stdm	
+E	callees	4	of_def	dc	
+E	callees	15	of_def	s	
+E	callees	3	prov		
+E	callees	9	sc		
+E	callees	4	test	s	
+E	callees	21	tested	s	
+E	callees	5	value_refs_depth_at		
+E	callees	5	value_refs_depth_capped		
+E	callees	11	via	dc	declined
+E	callees	1	via	s	link
+E	callees	7	via	s	name
+E	callers	3	@file-scope		
+E	callers	42	@purpose		
+E	callers	11	all_next		
+E	callers	7	bodyless		
+E	callers	1	called_at	vr	
+E	callers	1	called_by	vr	
+E	callers	1	cands	vr	
+E	callers	6	cross_kind		
+E	callers	4	shown_dc		
+E	callers	20	hop_tests	callees	
+E	callers	20	hop_tests	callers	
+E	callers	2	into	vr	
+E	callers	19	ix	def	
+E	callers	6	of_def	dc	
+E	callers	18	of_def	s	
+E	callers	9	sc		
+E	callers	41	sites_at	s	
+E	callers	3	sites_total	s	
+E	callers	1	slot_name_also		
+E	callers	16	test	s	
+E	callers	21	tested	s	
+E	callers	2	total	vrs	
+E	callers	11	uses_next		
+E	callers	2	value_refs		
+E	callers	5	value_refs_depth_at		
+E	callers	5	value_refs_depth_capped		
+E	callers	6	via	dc	declined
+E	callers	1	via	s	link
+E	callers	14	via	s	name
+E	clones	3	@purpose		
+E	clones	3	clone_groups	clones	
+E	clones	3	exempt_groups	clones	
+E	clones	3	groups	clones	
+E	clones	3	idiom_groups	clones	
+E	clones	3	total_loc	clones	
+E	cochange	3	@purpose		
+E	cochange	3	at		
+E	cochange	3	commits	cochange	
+E	cochange	3	partners	cochange	
+E	cochange	3	shallow		
+E	cochange	3	sub_windows	cochange	
+E	communities	1	@file-scope		
+E	communities	3	@purpose		
+E	communities	3	a	bridge	
+E	communities	3	edges	bridge	
+E	communities	3	from_label	bridge	
+E	communities	3	pr_iters		
+E	connect	1	@file-scope		
+E	connect	3	@purpose		
+E	connect	2	call	e	
+E	connect	2	defs	t	
+E	connect	3	hub_floor		
+E	connect	3	n	t	
+E	connect	3	nodes	connect	
+E	connect	3	radius	connect	
+E	connect	2	sig	e	
+E	connect	2	sig	s	
+E	connect	2	site	e	
+E	connect	1	sites	e	
+E	connect	1	source_joint	connect	
+E	connect	3	terminals	connect	
+E	dead-code	8	@purpose		
+E	dead-code	8	count	dead-code	
+E	dead-code	8	evidence	dead-code	
+E	dead-code	8	register-macro-excluded	dead-code	
+E	dead-code	1	test-only	dead-code	
+E	dead-code	3	value-ref-excluded		
+E	dead-code	1	value_refs_depth_at		
+E	dead-code	1	value_refs_depth_capped		
+E	defs	3	@purpose		
+E	defs	1	decl_only	d	
+E	defs	3	in	d	
+E	deps	3	@purpose		
+E	deps	2	ccd	health	
+E	deps	3	dep_files	health	
+E	deps	3	dep_langs	health	
+E	deps	3	files	deps	
+E	deps	2	from	v	
+E	deps	2	gap	v	
+E	deps	1	graph_partial		
+E	deps	1	lazy_edges	health	
+E	deps	1	masked_files		
+E	deps	1	no_file_edges		
+E	deps	2	shape	health	
+E	deps	3	t	inc	
+E	deps	1	unmeasured_files		
+E	deps	2	violations	stabledeps	
+E	dmm	3	@purpose		
+E	dmm	3	at		
+E	dmm	3	available	dmm	
+E	dmm	3	base_units	dmm	
+E	dmm	3	combine	dmm	
+E	dmm	3	low_loc	dmm	
+E	dmm	3	reason	dmm	
+E	doc-drift	3	@purpose		
+E	doc-drift	3	at		
+E	doc-drift	3	checked	doc-drift	
+E	doc-drift	3	clean	doc-drift	
+E	doc-drift	3	corpus	doc-drift	
+E	doc-drift	3	docs	doc-drift	
+E	doc-drift	3	drift	doc-drift	
+E	doc-drift	3	prose	doc-drift	
+E	doc-drift	2	r	unchecked	
+E	doc-drift	3	unchecked	doc-drift	
+E	doctor	3	@purpose		
+E	doctor	3	at		
+E	doctor	3	binaries	c	
+E	doctor	3	blobs	c	
+E	doctor	3	built_from	doctor	
+E	doctor	3	bytes	c	
+E	doctor	3	cache_version	c	
+E	doctor	3	checked	c	
+E	doctor	3	checks	doctor	
+E	doctor	3	core_abi	c	
+E	doctor	3	dir	c	
+E	doctor	3	filter_drivers	c	
+E	doctor	3	fsmonitor	c	
+E	doctor	3	git	c	
+E	doctor	3	head	c	
+E	doctor	3	hint	c	
+E	doctor	3	history	c	
+E	doctor	3	languages	c	
+E	doctor	3	lean	c	
+E	doctor	3	lean_path	c	
+E	doctor	3	loaded	c	
+E	doctor	3	locks	c	
+E	doctor	3	many	c	
+E	doctor	3	n	c	
+E	doctor	3	neutralised	c	
+E	doctor	3	non_git	c	
+E	doctor	3	on_path	c	
+E	doctor	3	repo	c	
+E	doctor	3	rich_verbs	c	
+E	doctor	3	same_bytes	c	
+E	doctor	3	same_file	c	
+E	doctor	3	self	c	
+E	doctor	3	self_mtime	c	
+E	doctor	3	shallow	c	
+E	doctor	3	source	c	
+E	doctor	3	stale	c	
+E	doctor	3	state	c	
+E	doctor	3	tracked	c	
+E	doctor	3	truncated	c	
+E	doctor	3	types	c	
+E	doctor	3	units	c	
+E	doctor	3	volatile	c	
+E	edit-check	3	@purpose		
+E	edit-check	3	at		
+E	edit-check	3	callers	edit-check	
+E	edit-check	3	defs	edit-check	
+E	edit-check	1	shown_unflagged	edit-check	
+E	edit-check	3	t	edit-check	
+E	exemplar	3	@purpose		
+E	exemplar	3	candidates	exemplar	
+E	exemplar	2	low_confidence	exemplar	
+E	exemplar	1	off_task	exemplar	
+E	exemplar	3	t	b	
+E	exemplar	1	via	c	name
+E	expand	18	@file-scope		
+E	expand	37	@purpose		
+E	expand	37	inc_total	b	
+E	expand	23	map_next	ctx	
+E	expand	37	mode	ctx	
+E	expand	37	topk_default	ctx	
+E	expand	1	via	c	link
+E	expand	6	via	c	name
+E	expand-file	2	@purpose		
+E	expand-file	1	map_next	ctx	
+E	expand-file	2	mode	ctx	
+E	expand-file	2	topk_default	ctx	
+E	external-surface	3	@purpose		
+E	external-surface	2	builtins_excluded	external-surface	
+E	external-surface	3	names	external-surface	
+E	flags	3	@purpose		
+E	flags	3	compile	flags	
+E	flags	3	files	flags	
+E	flags	3	gates	flags	
+E	graph-query	3	@purpose		
+E	graph-query	3	expr	query	
+E	graph-query	3	pr_iters		
+E	grep	39	@purpose		
+E	grep	39	callers	enc	
+E	grep	27	callers_floor	enc	
+E	grep	16	corpus_oversize	grep	
+E	grep	39	corpus_pruned_dirs	grep	
+E	grep	11	count	unindexed	
+E	grep	39	cx	enc	
+E	grep	22	defs	enc	
+E	grep	39	files	grep	
+E	grep	27	floor_next	enc	
+E	grep	39	hits_capped		
+E	grep	2	line_bytes	hit	
+E	grep	39	n	enc	
+E	grep	30	n	hit	
+E	grep	9	occ	hit	
+E	grep	15	parse_degraded		
+E	grep	39	pattern	grep	
+E	grep	21	suppressed_comment	grep	
+E	grep	17	suppressed_string	grep	
+E	grep	11	tier_budget	grep	
+E	grep	24	tier_parsed	grep	
+E	grep	24	tier_unclassified	grep	
+E	grep	16	unindexed_candidates_capped	grep	
+E	grep	39	unindexed_files_scanned	grep	
+E	grep	24	unindexed_files_skipped	grep	
+E	grep	39	unindexed_hits	grep	
+E	hotspots	3	@purpose		
+E	hotspots	3	at		
+E	hotspots	3	files	hotspots	
+E	hotspots	3	shallow		
+E	hotspots	3	unranked_no_churn	hotspots	
+E	impact	9	@file-scope		
+E	impact	39	@purpose		
+E	impact	32	all_next		
+E	impact	1	behind	hub	
+E	impact	7	bodyless		
+E	impact	1	bound	dc	
+E	impact	38	by_depth		
+E	impact	1	called_at	vr	
+E	impact	1	called_by	vr	
+E	impact	1	cands	vr	
+E	impact	38	d	s	
+E	impact	20	shown_dc		
+E	impact	1	gate	dc	
+E	impact	1	gate	dc	iface
+E	impact	7	importers_next	impact	
+E	impact	7	importers_tests	impact	
+E	impact	6	importers_umbrella	impact	
+E	impact	2	into	vr	
+E	impact	18	ix	def	
+# AMENDED BY DERIVATION 2026-11-18 (lane/t3-lossless, IMPORT-ROW-SHORT), the two impact rows below and nothing else; the next
+# re-take with census.py supersedes this. Before that change every importer row printed lazy="0|1", so "carried lazy on <f>"
+# (22 of 39) meant "carried an importer row". An importer row is now <f p=> and its reading is the impact `p f` entry, carried by
+# exactly those 22 answers. `lazy f` is now carried only by an answer with a lazy="1" row; the census corpora are not in this
+# repository, so that count was NOT re-measured and the row is withdrawn rather than guessed (13 of 264 --impact answers carried
+# one on three other populations, under the one-third rule). An entry in no pack stays in the answer that carries it.
+E	impact	22	p	f	
+E	impact	8	no_file_edges		
+E	impact	16	of_def	rf	
+E	impact	17	of_def	s	
+E	impact	39	pr_iters		
+E	impact	28	radius_tests	impact	
+E	impact	1	reaches_hedged		
+E	impact	1	reaches_hedged_hubs		
+E	impact	9	sc		
+E	impact	32	shown_files	files	
+E	impact	39	shown_importers	impact	
+E	impact	1	slot_name_also		
+E	impact	23	test	s	
+E	impact	19	tested	s	
+E	impact	2	total	vrs	
+E	impact	2	value_refs		
+E	impact	5	value_refs_depth_at		
+E	impact	5	value_refs_depth_capped		
+E	impact	25	via	dc	declined
+E	impact	2	via	s	link
+E	impact	17	via	s	name
+E	lego	18	@purpose		
+E	lego	17	caveat	iface	
+E	lego	7	implementors_unread_for_lang	iface	
+E	lego	2	transitive_unwalked	iface	
+E	lego	2	unwalked	impl	
+E	lego	2	unwalked_next	iface	
+E	lint	3	@purpose		
+E	lint	3	findings	lint	
+E	lint	1	findings_next	lint	
+E	lint	2	inert_rules	lint	
+E	map	1	@file-scope		
+E	map	6	@purpose		
+E	map	4	amb		
+E	map	2	data_sections_cut		
+E	map	6	declined		
+E	map	2	dirs_capped	inv	
+E	map	4	external		
+E	map	6	files		
+E	map	5	listed	inv	
+E	map	2	locality_pinned		
+E	map	4	n	entry	
+E	map	5	n	ls	
+E	map	1	overloads		
+E	map	6	pr_iters		
+E	map	5	prov		
+E	map	2	sc		
+E	map	2	skipped_oversize		
+E	map	4	unindexed		
+E	map	4	unindexed_exts		
+E	map	4	via	c	name
+E	map	3	x	c	
+E	map-diff	3	@purpose		
+E	map-diff	3	amb		
+E	map-diff	3	at		
+E	map-diff	3	changed		
+E	map-diff	3	declined		
+E	map-diff	2	external		
+E	map-diff	3	files		
+E	map-diff	3	k	s	
+E	map-diff	1	locality_pinned		
+E	map-diff	3	n	s	
+E	map-diff	1	overloads		
+E	map-diff	3	pr_iters		
+E	map-diff	3	prov		
+E	map-diff	2	sc		
+E	map-diff	1	skipped_oversize		
+E	map-diff	2	unindexed		
+E	map-diff	2	unindexed_exts		
+E	map-diff	1	via	c	link
+E	map-diff	2	via	c	name
+E	map-diff	2	x	c	
+E	match	3	@purpose		
+E	match	3	hits_capped		
+E	match	3	of_files	match	
+E	mentions	3	@purpose		
+E	mentions	3	defs	mentions	
+E	merge-scout	3	@purpose		
+E	merge-scout	3	at		
+E	merge-scout	3	head	merge-scout	
+E	merge-scout	3	note	no-work	
+E	merge-scout	3	ok	arm	
+E	metrics	1	@file-scope		
+E	metrics	3	@purpose		
+E	metrics	3	amb		
+E	metrics	3	cx	s	
+E	metrics	1	data_sections_cut		
+E	metrics	3	declined		
+E	metrics	2	deep_floor	s	
+E	metrics	1	dirs_capped	inv	
+E	metrics	3	ev	s	
+E	metrics	3	ev_floor	s	
+E	metrics	2	external		
+E	metrics	3	files		
+E	metrics	2	humps	s	
+E	metrics	3	k	s	
+E	metrics	1	l	s	
+E	metrics	2	listed	inv	
+E	metrics	1	locality_pinned		
+E	metrics	1	locals_floor	s	
+E	metrics	2	n	entry	
+E	metrics	2	n	ls	
+E	metrics	3	n	s	
+E	metrics	1	ppalt	s	
+E	metrics	3	pr_iters		
+E	metrics	3	prov		
+E	metrics	3	role	s	
+E	metrics	1	sc		
+E	metrics	1	skipped_oversize		
+E	metrics	2	tested	s	
+E	metrics	2	unindexed		
+E	metrics	2	unindexed_exts		
+E	metrics	2	via	c	name
+E	metrics	2	x	c	
+E	nonlocal-state	3	@purpose		
+E	nonlocal-state	3	cells	nonlocal_state	
+E	nonlocal-state	3	functions	nonlocal_state	
+E	nonlocal-state	3	unanalyzed_langs	nonlocal_state	
+E	owners	3	@purpose		
+E	owners	3	at		
+E	owners	3	files	owners	
+E	owners	3	files	uniform	
+E	owners	3	of	owners	
+E	owners	3	shallow		
+E	pack-signatures	3	@purpose		
+E	pack-signatures	3	map_next	ctx	
+E	pack-signatures	3	topk_default	ctx	
+E	pack-task	14	@file-scope		
+E	pack-task	68	@purpose		
+E	pack-task	2	bodyless		
+E	pack-task	3	budget_per_agent_tokens	ctx-partitions	
+E	pack-task	68	ccx	d	
+E	pack-task	3	core_overlap	ctx-partitions	
+E	pack-task	3	core_symbols	ctx-partitions	
+E	pack-task	68	in	d	
+E	pack-task	3	modules	ctx-partitions	
+E	pack-task	3	overlap_mean	ctx-partitions	
+E	pack-task	3	partitions	ctx-partitions	
+E	pack-task	68	r	d	
+E	pack-task	68	route	ctx	
+E	pack-task	11	run_each	g	
+E	pack-task	22	run_unknown		
+E	pack-task	22	run_unknown	g	
+E	pack-task	9	sc		
+E	pack-task	3	shared_symbols	ctx-partitions	
+E	pack-task	3	total_bytes	ctx-partitions	
+E	pack-task	5	truncated	b	
+E	pack-task	16	via	c	name
+E	path	1	@file-scope		
+E	path	3	@purpose		
+E	path	1	call	s	
+E	path	1	crossings	bridge	
+E	path	2	d	ns	
+E	path	1	decl_only	d	
+E	path	3	from_defs	path	
+E	path	3	from_p	path	
+E	path	2	gap_syms	path	
+E	path	2	gaps		
+E	path	2	hint	path	
+E	path	1	of	bodies	route
+E	path	2	rows	near_sink	
+E	path	2	searched	path	
+E	path	2	side	alts	
+E	path	1	sig	s	
+E	path	2	site	ns	
+E	path	1	site	s	
+E	pr-context	3	@purpose		
+E	pr-context	3	at		
+E	pr-context	3	budget_default	pr-context	
+E	pr-context	3	direction	pr-context	
+E	pr-context	3	files	pr-context	
+E	pr-context	3	shallow		
+E	pr-context	3	skipped_mode_only	pr-context	
+E	pr-context	3	trim_level	pr-context	
+E	pr-context	3	truncated	pr-context	
+E	quality-delta	3	@purpose		
+E	quality-delta	3	acked	quality-delta	
+E	quality-delta	3	api-new-surface	quality-delta	
+E	quality-delta	3	at		
+E	quality-delta	3	head_basis	quality-delta	
+E	quality-delta	3	new-symbol	quality-delta	
+E	quality-delta	3	preexisting-worse	quality-delta	
+E	quality-delta	3	register-macro-excluded	quality-delta	
+E	quality-delta	3	stale	quality-delta	
+E	quality-delta	3	value-ref-excluded		
+E	quality-panel	3	@purpose		
+E	quality-panel	3	at		
+E	quality-panel	3	bar_ccx	quality_panel	
+E	quality-panel	3	below_cut	quality_panel	
+E	quality-panel	3	ccut	quality_panel	
+E	quality-panel	3	cells	quality_panel	
+E	quality-panel	3	cfiles	quality_panel	
+E	quality-panel	3	counted	e	
+E	quality-panel	3	cut	quality_panel	
+E	quality-panel	3	cut_reachable	quality_panel	
+E	quality-panel	3	deep_untested	quality_panel	
+E	quality-panel	3	eligible	quality_panel	
+E	quality-panel	3	enabled	quality_panel	
+E	quality-panel	3	f	e	
+E	quality-panel	3	families	quality_panel	
+E	quality-panel	3	hcut	quality_panel	
+E	quality-panel	3	lscope	quality_panel	
+E	quality-panel	3	no_family	quality_panel	
+E	quality-panel	3	preset	quality_panel	
+E	quality-panel	3	ranked	quality_panel	
+E	quality-panel	3	rcut	quality_panel	
+E	quality-panel	3	sfiles	quality_panel	
+E	quality-panel	3	tested_scope	quality_panel	
+E	quality-panel	2	unavail	s	
+E	quality-panel	2	unavailable	quality_panel	
+E	quality-panel	2	unavailable_why	quality_panel	
+E	quality-panel	3	why	e	
+E	quality-panel	3	window	quality_panel	
+E	readability	3	@purpose		
+E	readability	3	functions	readability	
+E	safe-delete	3	@purpose		
+E	safe-delete	1	amb		
+E	safe-delete	1	callers_floor		
+E	safe-delete	2	radius_tests	safe-delete	
+E	safe-delete	3	sites_at	c	
+E	seams	3	@purpose		
+E	seams	3	bridges	seams	
+E	seams	2	doc_links	seams	
+E	seams	3	modules	seams	
+E	seams	3	pr_iters		
+E	seams	3	seam_pairs	seams	
+E	seams	3	test_files	seams	
+E	skipped	3	@purpose		
+E	skipped	3	degraded_parse	skipped	
+E	skipped	3	excluded	skipped	
+E	skipped	3	excluded_dirs	skipped	
+E	skipped	3	files	lang	
+E	skipped	3	ignore_mode	skipped	
+E	skipped	3	ignored	skipped	
+E	skipped	3	indexed	skipped	
+E	skipped	3	json_ceiling	skipped	
+E	skipped	3	max_file_size	skipped	
+E	skipped	3	n	lang	
+E	skipped	3	oversize	skipped	
+E	skipped	3	pruned_dirs	skipped	
+E	skipped	1	rows_capped	skipped	
+E	skipped	3	unmeasured	skipped	
+E	skipped	3	unsupported_ext	skipped	
+E	skipped	2	ws_freq	h	
+E	skipped	2	x	e	
+E	slice	1	@purpose		
+E	slice	1	at		
+E	slice	1	counts	slice	
+E	slice	1	sym	slice	
+E	slice	1	vars	slice	
+E	stray-content	3	@purpose		
+E	stray-content	3	at		
+E	stray-content	3	blobs	stray-content	
+E	stray-content	3	head	stray-content	
+E	stray-content	3	head_ref	stray-content	
+E	stray-content	3	merged	stray-content	
+E	stray-content	3	refs	stray-content	
+E	stray-content	3	superseded	stray-content	
+E	stray-content	3	unknown	stray-content	
+E	stray-content	3	unmerged	stray-content	
+E	test-gate	3	@purpose		
+E	test-gate	3	at		
+E	test-gate	3	ccx_bar	test-gate	
+E	test-gate	3	impacted	test-gate	
+E	test-gate	3	script_gates_mapped	test-gate	
+E	test-gate	3	script_gates_registered	test-gate	
+E	test-gate	3	script_gates_unmodelled	test-gate	
+E	test-gate	3	script_gates_unresolved_dynamic	test-gate	
+E	test-gate	3	shown_tests	test-gate	
+E	test-gate	3	tests	test-gate	
+E	test-gate	3	untested_modscope	test-gate	
+E	tree	1	@file-scope		
+E	tree	3	@purpose		
+E	tree	3	pr_iters		
+E	tree	3	shown_symbols	tree	
+E	uses	3	@file-scope		
+E	uses	39	@purpose		
+E	uses	39	count	uses	
+E	uses	39	defs	uses	
+E	uses	39	external	uses	
+E	uses	1	role	u	value
+E	uses	2	unindexed_roles	uses	
+E	uses	5	value_refs_depth_at		
+E	uses	5	value_refs_depth_capped		
+E	whereis	9	@purpose		
+E	whereis	9	at		
+E	whereis	9	complete	whereis	
+E	whereis	9	head_date	whereis	
+E	whereis	9	head_labels	whereis	
+E	whereis	9	hits	whereis	
+E	whereis	7	listing	whereis	
+E	whereis	9	on-head	whereis	
+E	whereis	1	test_local	hit	
+E	whereis	9	worktree	whereis	
+E	zoom	3	@purpose		
+E	zoom	2	a	bridge	
+E	zoom	3	children	module	
+E	zoom	2	edges	bridge	
+E	zoom	3	pr_iters		
+E	zoom	1	shown_bridges	zoom	

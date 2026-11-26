@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mcpedit.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::realpath / getcwd / lstat — plan-directory confinement and the symlink-target refusal
 #include "nextverb.h"   // E4: nextFlag — the shell-safe spelling of the rollback message's one next:
 
@@ -332,7 +333,7 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
             // not owner-narrowed (XF-QUALIFIED-ENDPOINTS): a plan target resolves as the edit verbs do (mcpedit.h
             // resolveOneForEdit, the bare name exactly), so a qualified `Alpha.run` never reaches here
             const std::vector<NodeId> overloads = editCheckOverloadSet( ix.ing, ix.g, edit.node );
-            EditCheckCalleeTest       callee( ix.ing, target, overloads );
+            EditCheckCalleeTest       callee( ix.ing, target, overloads, ix.g.provenSites );
             const auto [ callerIds, callerIncompatible ] = editCheckCallers( ix.ing, ix.g, overloads, callee );
             (void) callerIncompatible;   // the FLAGS are an after-the-edit question; a dry-run has no edit yet
             edit.callers = callerIds;
@@ -388,8 +389,7 @@ inline std::size_t callersUnionSize( const std::vector<Edit>& edits )
     {
         union_.insert( union_.end(), e.callers.begin(), e.callers.end() );
     }
-    std::sort( union_.begin(), union_.end() );
-    union_.erase( std::unique( union_.begin(), union_.end() ), union_.end() );
+    rw::sortutil::sortUnique( union_ );
     return union_.size();
 }
 

@@ -71,6 +71,9 @@ else:
 
 lintRoot = ET.parse(lintPath).getroot()
 builtinNames = set(r.get("name") for r in lintRoot.findall("rule") if r.get("sev") is None)
+# LT1: the built-in rules that found nothing are named in the ONE <zero_rules ran= inert=> row, not a count="0" row each
+_zr = lintRoot.find("zero_rules")
+builtinNames |= set() if _zr is None else {n for k in ("ran", "inert") for n in (_zr.get(k) or "").split(",") if n}
 
 onlyInLint = builtinNames - catalogNames
 onlyInCatalog = catalogNames - builtinNames

@@ -8,6 +8,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -48,6 +49,23 @@ constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b
 }
 constexpr bool svLess( std::string_view a, std::string_view b ) noexcept { return svCompare( a, b ) < 0; }
 
+// Sort `values` and drop repeats: the sort-then-erase(unique) pair, spelled once. The de-dup is operator==, so
+// `less` must group exactly the elements == calls equal (operator<, or svLess for text, per the note above).
+template< class Container, class Less = std::less<> >
+inline void sortUnique( Container& values, Less less = {} )
+{
+    std::sort( values.begin(), values.end(), less );
+    values.erase( std::unique( values.begin(), values.end() ), values.end() );
+}
+
+// The element of `sorted` (ascending by `proj` under `less`) whose projection equals `key`, nullptr when none: the
+// lower_bound-then-equality pair, spelled once.
+template< class Range, class Key, class Less = std::ranges::less, class Proj = std::identity >
+inline auto findSorted( Range& sorted, const Key& key, Less less = {}, Proj proj = {} ) -> decltype( &*std::ranges::begin( sorted ) )
+{
+    const auto it = std::ranges::lower_bound( sorted, key, less, proj );
+    return it != std::ranges::end( sorted ) && std::invoke( proj, *it ) == key ? &*it : nullptr;
+}
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {

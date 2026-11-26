@@ -15,7 +15,7 @@ namespace rw::warmsnap
 {
 
 #if defined( _LIBCPP_VERSION ) && defined( __LP64__ )
-static_assert( sizeof( Graph ) == 1512, "Graph changed: store and load the new field in writeGraph / readGraph below, bump warmsnap::kVersion, then re-pin this size" );
+static_assert( sizeof( Graph ) == 1536, "Graph changed: store and load the new field in writeGraph / readGraph below, bump warmsnap::kVersion, then re-pin this size" );
 #endif
 
 // A per-symbol array almost every symbol leaves at zero (ambOut, declinedOut, ...): its size, then the non-zero rows.
@@ -184,6 +184,7 @@ inline std::string writeGraph( const Graph& g, const IngestResult& ing, const st
     o.u64( g.stdMemberDeclines.size() );
     for( const auto& [ caller, name ] : g.stdMemberDeclines ) { o.u32( caller ); o.pod( name ); }
     o.vec( g.keptForwards );
+    o.vec( g.provenSites );
     o.pod( g.callDispositions );
     o.u64( g.composeEdges.size() );
     for( const ComposeEdge& e : g.composeEdges ) { o.u32( e.ownerSym ); o.u32( e.typeSym ); o.str( e.fieldName ); o.str( e.typeName ); o.str( e.ownerName ); o.str( e.rel ); }
@@ -366,6 +367,7 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
         g.stdMemberDeclines.emplace_back( caller, in.pod<std::uint16_t>() );
     }
     in.vec( g.keptForwards );
+    in.vec( g.provenSites );
     g.callDispositions = in.pod<CallDispositionCounts>();
     for( std::size_t i = 0, n = in.count( 24 ); i < n && in.ok; ++i )
     {
@@ -407,8 +409,12 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
     const auto symbolIds = [ & ]( const auto& ids ) { return std::ranges::all_of( ids, [ & ]( NodeId id ) { return id < N; } ); };
     const auto refIds    = [ & ]( const auto& ids ) { return std::ranges::all_of( ids, [ & ]( std::uint32_t id ) { return id < ing.references.size(); } ); };
     const auto nestedIds = [ & ]( const std::vector<std::vector<NodeId>>& rows ) { return std::ranges::all_of( rows, symbolIds ); };
+    const auto provenSitesIn = [ & ]( const std::vector<ProvenSite>& sites )
+    {
+        return std::ranges::is_sorted( sites ) && std::ranges::all_of( sites, [ & ]( const ProvenSite& p ) { return p.ref < ing.references.size() && p.target < N; } );
+    };
     const bool inRange = in.ok && symbolIds( g.outTargets ) && symbolIds( std::span<const std::uint32_t>( g.inEdges.colIndices(), g.inEdges.nnz() ) ) && nestedIds( g.implementors )
-                      && nestedIds( g.mentions ) && refIds( g.declinedSiteRef ) && refIds( g.keptForwards ) && refIds( g.baseOutsideClauses ) && symbolIds( g.declinedSiteCaller )
+                      && nestedIds( g.mentions ) && refIds( g.declinedSiteRef ) && refIds( g.keptForwards ) && provenSitesIn( g.provenSites ) && refIds( g.baseOutsideClauses ) && symbolIds( g.declinedSiteCaller )
                       && symbolIds( g.declinedListCand ) && symbolIds( g.inertDeclinedCaller ) && std::ranges::is_sorted( g.outOff ) && std::ranges::is_sorted( g.declinedListOff )
                       && !g.declinedListOff.empty() && g.declinedListOff.back() == g.declinedListCand.size() && g.declinedListCallCount.size() + 1 == g.declinedListOff.size()
                       && g.declinedSiteList.size() == g.declinedSiteCaller.size() && g.declinedSiteRef.size() == g.declinedSiteCaller.size()

@@ -32,7 +32,9 @@ if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical, $
 ZOOM="$( cat "$TMP/a" )"
 
 # 2) ≥2 hierarchy levels (the whole point of multi-level — a single partition is NOT a hierarchy)
-LEVELS="$( printf '%s' "$ZOOM" | grep -o 'levels="[0-9]*"' | grep -o '[0-9]*' )"
+# The leading space anchors the attribute NAME: since 2026-11-17 (31d9d3255) the root also carries shown_levels=, which an
+# unanchored 'levels="' matched too, so LEVELS read "2<newline>2" and the integer test failed on a correct hierarchy.
+LEVELS="$( printf '%s' "$ZOOM" | grep -o ' levels="[0-9]*"' | grep -o '[0-9]*' )"
 if [ "${LEVELS:-0}" -ge 2 ]; then ok "hierarchy has ≥2 levels (levels=$LEVELS)"; else no "hierarchy levels=${LEVELS:-?} (expected ≥2)"; fi
 
 # 3) the hierarchy is NESTED — a level-0 <module> is emitted INSIDE a level-1 <module> (not a flat list). We
@@ -74,7 +76,7 @@ else ok "xml well-formed (xmllint absent — skipped)"; fi
   && ok "--zoom --mermaid deterministic nested-subgraph diagram" || { no "--zoom --mermaid broken/non-deterministic"; head -6 "$TMP/m1"; }
 
 # 8) --zoom=DEPTH respects an explicit depth cap (=1 → exactly 2 levels: base + 1 contraction)
-D1="$( "$BIN" "$CORPUS" --zoom=1 --no-cache 2>/dev/null | grep -o 'levels="[0-9]*"' | grep -o '[0-9]*' )"
+D1="$( "$BIN" "$CORPUS" --zoom=1 --no-cache 2>/dev/null | grep -o ' levels="[0-9]*"' | grep -o '[0-9]*' )"
 if [ "${D1:-0}" -eq 2 ]; then ok "--zoom=1 caps at 2 levels (base + 1 contraction)"; else no "--zoom=1 levels=${D1:-?} (expected 2)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

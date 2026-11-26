@@ -20,14 +20,17 @@
 // carries its enclosing symbol chain, its matched line, and optional context lines.
 
 #include "infra/stackthreads.h" // rw::runOnStackThreads — the scan threads, with a stack the regex line bound is computed for
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "infra/sortutil.h"     // sortUnique — the one sorted-unique step
 #include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
 #include "pathguard.h"           // openRegularFileNoFollow — a piece-read file is opened no-follow, its size read from the descriptor
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
+#include "darkflags.h"          // wholeWordAt — a word-bounded literal pattern (FOR θ11) keeps its whole-word sites in the read
 #include "regexguard.h"         // THE owner of a user's regex: the screens, the compile, and the guarded match
 
 #include <algorithm>
@@ -200,8 +203,7 @@ inline constexpr std::size_t kMaxAffixSet = 8;     // cap on prefix/suffix set s
 // sorted-unique a small string set (determinism + dedup) and report whether it stayed within `cap`.
 inline bool normSet( std::vector<std::string>& v, std::size_t cap )
 {
-    std::sort( v.begin(), v.end() );
-    v.erase( std::unique( v.begin(), v.end() ), v.end() );
+    rw::sortutil::sortUnique( v );
     return v.size() <= cap;
 }
 
@@ -1178,8 +1180,11 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
     return line;
 }
 
+// `wordBounded` (literal only): a site an identifier byte flanks is not a site — tested before it is counted, so the cap is spent
+// on whole-word sites alone (a long run of a longer word cannot use the cap up and hide a real site after it).
 [[nodiscard]] inline GrepScanVerdict grepScanText( const std::string& text, const std::string& pat, const GuardedRegex* re,
-                                                   std::size_t hitCapCount, std::vector<GrepMatchSite>& out, RegexLinePolicy linePolicy = {} )
+                                                   std::size_t hitCapCount, std::vector<GrepMatchSite>& out, RegexLinePolicy linePolicy = {},
+                                                   bool wordBounded = false )
 {
     std::uint32_t line    = 1;
     std::size_t   scanned = 0;
@@ -1212,9 +1217,10 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
         // on CRLF input the way rg's `--crlf` does rather than never matching.
         //
         // The engine can give up DURING a match (libc++'s error_complexity/error_stack) on a pattern the
-        // structural screen ADMITS — the multi-quantifier residual (a*a*a*a*a*b, docs/LIMITS.md) over a
-        // pathological line; the overlapping-alternation shape this note used to name ((a|a)+z) is refused at
-        // admission since M2-c, before a byte reaches an engine. Only
+        // structural screen ADMITS — an admitted pattern whose cost in the subject is super-linear, such as
+        // `(a|aa){1,100}b$`, over a pathological line; the multi-quantifier family (a*a*a*a*a*b) this note used
+        // to name is refused at admission since #484, and the overlapping-alternation shape ((a|a)+z) since
+        // M2-c, both before a byte reaches an engine. Only
         // construction was guarded before A4-F10, and an uncaught throw here reached std::terminate; A4-F10
         // then skipped the rest of the file, which kept the run alive but left a silent floor. GuardedRegex
         // now owns the catch and says Exhausted: this file's sites so far are kept, scanning it stops (as the
@@ -1242,15 +1248,17 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
     }
     else
     {
-        std::size_t pos = text.find( pat );
-        while( pos != std::string::npos )
+        for( std::size_t pos = text.find( pat ); pos != std::string::npos; pos = text.find( pat, pos + 1 ) )
         {
+            if( wordBounded && !darkflags::wholeWordAt( text, pos, pat.size() ) )
+            {
+                continue;
+            }
             out.push_back( { lineAtOffset( text, pos, scanned, line ), std::uint32_t( pos ) } );
             if( out.size() >= hitCapCount )
             {
                 break;
             }
-            pos = text.find( pat, pos + 1 );
         }
     }
     return {};
@@ -1521,10 +1529,13 @@ inline GrepCollection rankGrepSites( const IngestResult& ing, std::vector<std::v
 // own ranking (rankGrepSites). The file-level facts — a file the read could not open, a worker that died — are facts of the one read,
 // so every result carries them, as each pattern's own scan of the same disk state would have. A --regex scan is one pattern.
 // `stackBytes` is the size the scan threads ask for; only a gate's fault switch or a caller testing the degrade passes less.
+// `wordBounded` (empty = none): wordBounded[k] != 0 makes literal pattern k WORD-BOUNDED — of its sites the scan keeps those no identifier
+// byte flanks (darkflags::wholeWordAt), tested on the bytes already read, so a whole-word scan costs no second read of a file.
 inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std::span<const std::string> pats, bool regex, bool noPrefilter,
-                                                    std::size_t stackBytes = kGrepScanStackBytes )
+                                                    std::size_t stackBytes = kGrepScanStackBytes, std::span<const char> wordBounded = {} )
 {
     EXPECTS( !regex || pats.size() == 1, "a --regex scan is one pattern" );
+    EXPECTS( wordBounded.empty() || ( !regex && wordBounded.size() == pats.size() ), "a word-bounded flag per literal pattern" );
     const std::uint32_t fileCount   = std::uint32_t( ing.files.size() );
     const std::size_t   budgetCount = kGrepCollectionBudget;
     if( fileCount == 0 || pats.empty() )
@@ -1583,7 +1594,8 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
                 }
                 for( std::size_t k = 0; k < pats.size(); ++k )
                 {
-                    const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy );
+                    const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy,
+                                                                             !wordBounded.empty() && wordBounded[k] != 0 );
                     if( isAbandoned )
                     {
                         perFileAbandoned[f] = 1;
@@ -1653,6 +1665,9 @@ public:
     GrepScanBatch( const GrepScanBatch& )            = delete;
     GrepScanBatch& operator=( const GrepScanBatch& ) = delete;
 
+    // word-bounded scans (grepCollectEach `wordBounded`) expected too: FOR θ11's question tokens share the batch's one read
+    void expectWords( std::vector<std::string> expected ) { expectKeys( std::move( expected ), true ); }
+
     // the RIPWIRE_STATS counts: literal scans asked, corpus reads made, expectations read but never asked (their search was the cost)
     std::size_t asks() const noexcept { return asks_; }
     std::size_t reads() const noexcept { return reads_; }
@@ -1670,11 +1685,12 @@ public:
         return tlOpen != nullptr && &tlOpen->ing_ == &ing ? tlOpen : nullptr;
     }
 
-    // the literal scan of `pat`: a held collection (no read), or one read for `pat` and every pending expectation
-    GrepCollection collect( const std::string& pat, std::size_t stackBytes )
+    // the literal scan of `pat` (`word`: word-bounded): a held collection (no read), or one read for it and every pending expectation
+    GrepCollection collect( const std::string& pat, std::size_t stackBytes, bool word = false )
     {
         ++asks_;
-        const auto held = std::find_if( held_.begin(), held_.end(), [ & ]( const HeldScan& e ) { return e.pattern == pat; } );
+        const ScanKey key{ pat, word };
+        const auto held = std::find_if( held_.begin(), held_.end(), [ & ]( const HeldScan& e ) { return e.key == key; } );
         if( held != held_.end() )
         {
             unasked_ -= held->asked ? 0 : 1;
@@ -1682,26 +1698,30 @@ public:
             return keepOrHandOver( held );
         }
         std::vector<std::string> todo{ pat };
-        for( std::string& p : pending_ )
+        std::vector<char>        todoWord{ char( word ) };
+        for( ScanKey& p : pending_ )
         {
-            if( p != pat )
+            if( !( p == key ) )
             {
-                todo.push_back( std::move( p ) );
+                todo.push_back( std::move( p.pattern ) );
+                todoWord.push_back( char( p.word ) );
             }
         }
         pending_.clear();
-        if( std::find( known_.begin(), known_.end(), pat ) == known_.end() )
+        if( std::find( known_.begin(), known_.end(), key ) == known_.end() )
         {
-            known_.push_back( pat );
+            known_.push_back( key );
         }
-        std::vector<GrepCollection> got = grepCollectEach( ing_, todo, /*regex=*/false, /*noPrefilter=*/false, stackBytes );
+        const bool anyWord = std::find( todoWord.begin(), todoWord.end(), char( 1 ) ) != todoWord.end();   // none: the scan it always was
+        std::vector<GrepCollection> got = grepCollectEach( ing_, todo, /*regex=*/false, /*noPrefilter=*/false, stackBytes,
+                                                           anyWord ? std::span<const char>( todoWord ) : std::span<const char>() );
         ++reads_;
         unasked_ += todo.size() - 1;
         for( std::size_t k = 1; k < todo.size(); ++k )
         {
-            held_.push_back( HeldScan{ std::move( todo[k] ), std::move( got[k] ), false } );
+            held_.push_back( HeldScan{ ScanKey{ std::move( todo[k] ), todoWord[k] != 0 }, std::move( got[k] ), false } );
         }
-        held_.push_back( HeldScan{ pat, std::move( got[0] ), true } );
+        held_.push_back( HeldScan{ key, std::move( got[0] ), true } );
         return keepOrHandOver( held_.end() - 1 );
     }
 
@@ -1709,9 +1729,15 @@ private:
     // A collection read here. One the block asked for may be asked again (a candidate and then a table anchor of the same text), so a
     // small one stays held: a copy goes out. A large one is handed over (moved): holding it would cost the memory column more than a
     // second read of the corpus costs time.
+    struct ScanKey
+    {
+        std::string pattern;
+        bool        word = false;   // word-bounded (grepCollectEach `wordBounded`)
+        bool operator==( const ScanKey& ) const = default;
+    };
     struct HeldScan
     {
-        std::string    pattern;
+        ScanKey        key;
         GrepCollection collection;
         bool           asked = false;
     };
@@ -1729,14 +1755,16 @@ private:
     }
 
     // an expectation already scanned, held or pending is not added twice (an empty one is never scanned: no caller asks for it)
-    void expect( std::vector<std::string> expected )
+    void expect( std::vector<std::string> expected ) { expectKeys( std::move( expected ), false ); }
+    void expectKeys( std::vector<std::string> expected, bool word )
     {
         for( std::string& p : expected )
         {
-            if( !p.empty() && std::find( known_.begin(), known_.end(), p ) == known_.end() )
+            ScanKey key{ std::move( p ), word };
+            if( !key.pattern.empty() && std::find( known_.begin(), known_.end(), key ) == known_.end() )
             {
-                known_.push_back( p );
-                pending_.push_back( std::move( p ) );
+                known_.push_back( key );
+                pending_.push_back( std::move( key ) );
             }
         }
     }
@@ -1744,8 +1772,8 @@ private:
     inline static thread_local GrepScanBatch* tlOpen = nullptr;
     const IngestResult&                                 ing_;
     GrepScanBatch*                                      outer_;
-    std::vector<std::string>                            known_;     // every pattern expected or asked so far
-    std::vector<std::string>                            pending_;   // expected, not read yet
+    std::vector<ScanKey>                                known_;     // every pattern expected or asked so far
+    std::vector<ScanKey>                                pending_;   // expected, not read yet
     std::vector<HeldScan>                               held_;      // read: expected and not asked yet, or asked and small
     std::size_t                                         asks_ = 0, reads_ = 0, unasked_ = 0;
 };
@@ -2405,6 +2433,8 @@ enum class GrepIn : std::uint8_t { Code = 0, Any = 1 };
 
 // Everything the emitters must DISCLOSE about a tier pass, and nothing they can infer. Counts are per-run
 // facts of the corpus, not of thread timing.
+inline constexpr std::size_t kGrepHeldFilesListed = 5;   // held= paths listed; held_files= counts every one
+
 struct GrepTierReport
 {
     std::uint32_t suppressedComment = 0;   // classified hits held back because a tighter tier was non-empty
@@ -2418,6 +2448,10 @@ struct GrepTierReport
                                                    // served hits are string-tier (string_hits=); 0 on main's plain literal lift
     const char*   budgetHit         = nullptr;       // nullptr | "files" | "bytes" — E5's disclosed bail-out
     bool          didRun            = false;         // false under --grep-in=any: no tier vocabulary may be emitted
+    // BX2 step 2 (test/grepdegradedcheck.sh P3-P7): the files whose EVERY hit was held back — no row of the answer names them, so
+    // the answer does (held_files= the count, held= the first kGrepHeldFilesListed in collection order, held_next= serves them).
+    std::uint32_t              heldFiles = 0;
+    std::vector<std::uint32_t> heldFileIds;
 
     // Is there anything a reader MUST be told? The emitters gate both the attributes and the legend prose on
     // this one predicate, so a run that held nothing back stays byte-identical to an untiered answer (and
@@ -2648,6 +2682,20 @@ inline std::vector<char> grepFilesHoldingCode( const IngestResult& ing, const st
     return fileHasCode;
 }
 
+// BX2 step 2: one hit file closed by the tier filter — counted (and listed, up to kGrepHeldFilesListed) when none of its hits was kept.
+inline void grepNoteHeldFile( GrepTierReport& report, std::uint32_t fileId, bool nothingKept )
+{
+    if( !nothingKept )
+    {
+        return;
+    }
+    ++report.heldFiles;
+    if( report.heldFileIds.size() < kGrepHeldFilesListed )
+    {
+        report.heldFileIds.push_back( fileId );
+    }
+}
+
 // Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders), the
 // same post-filter shape as grepApplyBooleanTerms above, and runs AFTER it: tiering the survivors of a
 // boolean query is both cheaper and the only reading that matches what the answer will print.
@@ -2728,7 +2776,10 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
     {
         const GrepRawHit&   r     = collected.raw[h];
         const std::uint32_t index = batchIndexOf[r.fileId];
-        if( index == UINT32_MAX || !batch.perFile[index].isParsed )
+        // BX2 FIX 6 (test/grepdegradedcheck.sh): a hit in a file whose indexed parse DEGRADED (fileParseDegraded, the row's
+        // parse_degraded="1") is unclassified too. Its span tier comes from the same grammar that failed there — fzf's
+        // completion.zsh, parsed as bash, held real code back as "string" (lane BS1, fzf-02) — so the tier is no evidence.
+        if( index == UINT32_MAX || !batch.perFile[index].isParsed || fileParseDegraded( ing, r.fileId ) )
         {
             ++report.unclassifiedHits;
             continue;   // stays unclassified — and unclassified is never suppressible
@@ -2782,8 +2833,14 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
     const std::vector<char> fileHasCode = ranked ? grepFilesHoldingCode( ing, collected.raw, hitTier ) : std::vector<char>();   // idea #5's rank key
     std::vector<GrepRawHit> kept;
     kept.reserve( collected.raw.size() );
+    std::size_t keptAtFileStart = 0;   // BX2 step 2: kept.size() when the current file's hits began (a file's hits are contiguous)
     for( std::size_t h = 0; h < collected.raw.size(); ++h )
     {
+        if( h > 0 && collected.raw[h].fileId != collected.raw[h - 1].fileId )
+        {
+            grepNoteHeldFile( report, collected.raw[h - 1].fileId, kept.size() == keptAtFileStart );
+            keptAtFileStart = kept.size();
+        }
         if( hitTier[h] == kUnclassifiedTier || ( serveMask & std::uint8_t( 1u << hitTier[h] ) ) != 0 )
         {
             kept.push_back( collected.raw[h] );
@@ -2798,6 +2855,7 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
             ++report.suppressedString;
         }
     }
+    grepNoteHeldFile( report, collected.raw.back().fileId, kept.size() == keptAtFileStart );   // raw is non-empty (checked on entry)
     collected.raw = std::move( kept );
     if( ranked )   // a Served lift keeps main's bytes: no order, no window, no string_hits=, no ref= (all key on servedString)
     {
@@ -3061,8 +3119,7 @@ inline std::vector<GrepEncRow> grepEnclosingRows( const IngestResult& ing, const
                 callerIds.push_back( inColIndex[k] );
             }
         }
-        std::sort( callerIds.begin(), callerIds.end() );
-        callerIds.erase( std::unique( callerIds.begin(), callerIds.end() ), callerIds.end() );
+        rw::sortutil::sortUnique( callerIds );
         row.callerCount = std::uint32_t( callerIds.size() );
         row.defCount    = std::uint32_t( row.ids.size() );
     }

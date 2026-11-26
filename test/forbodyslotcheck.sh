@@ -104,6 +104,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
 # legitimately differ under them: its premises read the owner's one-line in-class declaration as the r1 ROW (Builder::Build in
 # build.h, PoolDispatcher::Dispatch, …), which DECL-TWIN prints as a pointer to its bodied twin, and its E arms compare the budget
@@ -158,6 +162,14 @@ def rows(t):
     return sorted(out, key=lambda x: x[0])
 def bodies(t):
     """every <b …><![CDATA[…]]>…</b>: (attrs, cdata bytes, the whole element)"""
+    # CB1: COMMENTS FIRST. The legend defines `<b …>` rows by printing their own tag text, so a document
+    # carrying that legend holds `<b ` strings that are not rows. Unstripped, the regex matched the LEGEND's
+    # `<b ` and ran `(.*?)</b>` to the real row's close — swallowing the row's open tag into group(2), so the
+    # attributes came back EMPTY and `n` came back None while the CDATA still looked right. The MCP arm then
+    # read "no <b n=render_screen>" on a document that plainly contains it. Same class as the miscount OR1
+    # recorded (a legend's own `<bodies>` read as an answer's); line 185 below already strips comments for the
+    # row parser, so this is the gate's own idiom, applied where it was missing.
+    t = re.sub(r'<!--.*?-->', '', t, flags=re.S)
     out = []
     for m in re.finditer(r'<b ([^>]*)>(.*?)</b>', t, re.S):
         cd = "".join(re.findall(r'<!\[CDATA\[(.*?)\]\]>', m.group(2), re.S))
@@ -394,8 +406,17 @@ else:
 PY
 export FIX
 chk(){ python3 "$TMP/chk.py" "$@"; }
-run(){ "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }       # a fresh cache per gate run: this binary's own parse
-runoff(){ RIPWIRE_NO_BODY_SLOT=1 "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); on this fixture several answers (big,
+# hyd) span two, the slot's <bodies> starting past page 1's cut. Every arm here is about the WHOLE answer (the slot, its cut, its
+# MCP twin — MCP is not paged), so a --for call the pager would shape reads --page-bytes=0: the whole answer in one call,
+# row-identical to the joined pages (forpagescheck P2). (PG) below holds the DEFAULT page to present-or-disclosed-deferred.
+# --page-bytes refuses beside a budget, another dialect or a legend-first posture (cli.h pageBytesConflict): those calls are
+# never paged and run as written.
+whole(){ local a; for a in "$@"; do case "$a" in --token-budget=*|--max-tokens=*|--json|--format=*|--legend=first|--legend=full|--legend=dict|--limit=*|--offset=*|--legend-have=*|--page-bytes=*) return 1;; esac; done
+         for a in "$@"; do case "$a" in --for=*) return 0;; esac; done; return 1; }
+run(){ if whole "$@"; then set -- "$@" --page-bytes=0; fi; "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }       # a fresh cache per gate run: this binary's own parse
+runoff(){ if whole "$@"; then set -- "$@" --page-bytes=0; fi; RIPWIRE_NO_BODY_SLOT=1 "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }
+runpage(){ "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }   # the default PAGE, as an agent receives it
 strip_at(){ sed -e 's/ at="[^"]*"//g' -e 's/"at":"[^"]*",\{0,1\}//g'; }
 cat > "$TMP/mcptext.py" <<'PY'
 import json, sys
@@ -473,7 +494,11 @@ python3 "$TMP/gen.py" "$TMP/rt" || { echo "the runtime-root generator failed"; e
 rrun(){ local r="$1"; shift; "$BIN" "$TMP/rt/$r" --cache="$TMP/rt.$r.cache" "$@" 2>/dev/null; }   # one cache per runtime root
 
 T_D="How does the JWT middleware verify a token?"
-T_PY="How does Stylesheet apply the parsed rules to a widget?"
+# D8 re-pinned (LP1, rule 4): the premise is "the CLASS Stylesheet outranks its method apply" (so a slot that let a class own
+# would serve the class). The old wording held it only by ranking accident: once --for scores the file basename
+# (lexical.h kForBasenameFieldW) stylesheet.py lifts the method too and apply took r1, leaving nothing to discriminate. This
+# wording puts the class at r1 with the basename field on AND off (measured both ways), and the body is still apply.
+T_PY="How does the Stylesheet apply the parsed CSS rules to a widget?"
 T_C="How does cmd_find_target resolve the session, window and pane of a command?"
 T_SUB="How does tmux resolve which session, window and pane a command targets (the -t target)?"
 T_BIG="How does render_screen draw the screen?"
@@ -575,6 +600,15 @@ if r="$( chk body "$TMP/c.xml" cmd_find_target src/c/cmd-find.c "cmd_find_get_se
 if grep -q '<d [^>]*n="cmd_find_target"' "$TMP/sub.xml"; then :; else no "(D9b) premise: cmd_find_target is not a ranked row on T_SUB"; fi
 if r="$( chk nobody "$TMP/sub.xml" )" && cmp -s "$TMP/sub.xml" "$TMP/sub.off.xml"; then ok "(D9b) only a subtoken match (cmd_find_target ~ 'target'): no slot, byte-identical to RIPWIRE_NO_BODY_SLOT=1"; else no "(D9b) only a subtoken match: a body rides or the answer differs from slot-off ${r:-}"; fi
 if grep -q 'pick="subtoken"' "$TMP/sub.xml"; then no "(D9b) pick=\"subtoken\" still rides"; else ok "(D9b) no pick=\"subtoken\""; fi
+# (PG) the default PAGE of the two-page answers: the slot's <bodies> rides it, or its root names <bodies> in deferred=/continued=
+for k in big hyd; do
+    case $k in big) q="$T_BIG";; hyd) q="$T_HYD";; esac
+    runpage --for="$q" >"$TMP/$k.page.xml"
+    if grep -q '<bodies ' "$TMP/$k.page.xml"; then ok "(PG) $k: the default page carries the slot's <bodies>"
+    elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "bodies" in n and " next=" in r else 1)' "$TMP/$k.page.xml"; then
+        ok "(PG) $k: the default page does not hold <bodies> and says so: deferred= names it, next= reaches it"
+    else no "(PG) $k: the default page neither carries <bodies> nor names it in deferred=/continued= (a silent drop)"; fi
+done
 if r="$( chk bodyattr "$TMP/big.xml" render_screen truncated '^1$' )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
 if r="$( chk cutatline "$TMP/big.xml" render_screen 6000 )"; then ok "(D10) oversized owner: $r (whole lines, <= 6000 B)"; else no "(D10) oversized: $r"; fi
 if nx="$( chk nextof "$TMP/big.xml" render_screen )" && printf '%s' "$nx" | grep -q '^--expand=src/c/render.c:'; then
@@ -671,13 +705,18 @@ else
 fi
 # DS1-DS4: the declaration outranks its definition; the body is the definition's
 ds(){   # ds KEY ARM DECL_NAME DECL_PATH DECL_RANK DEF_PATH DEF_LINE [DECL_ROW_NAME]  (the <d> row spelling; the <b n=> body keeps DECL_NAME)
-    local k="$1" arm="$2" n="$3" p="$4" dr="$5" dp="$6" dl="$7" rn="${8:-$3}"
-    if ! r="$( chk rowis "$TMP/ds.$k.xml" "$dr" "$rn" "$p" )"; then no "($arm) premise: $r"; return; fi
+    local k="$1" arm="$2" n="$3" p="$4" dr="$5" dp="$6" dl="$7" rn="${8:-$3}" alt hit=""
+    # DECL_ROW_NAME may list alternatives A|B: any DECLARATION row at rank DR satisfies the premise (DS2 below)
+    for alt in ${rn//|/ }; do if r="$( chk rowis "$TMP/ds.$k.xml" "$dr" "$alt" "$p" )"; then hit="$alt"; break; fi; done
+    if [ -z "$hit" ]; then no "($arm) premise: $r"; return; fi
     if [ "$( chk rowline "$TMP/ds.$k.xml" "$dr" )" = "$dl" ] && [ "$p" = "$dp" ]; then no "($arm) premise: the r$dr row IS the definition (l=$dl): no declaration outranks it"; return; fi
     if r="$( chk bodyat "$TMP/ds.$k.xml" "$n" "$dp" "$dl" )"; then ok "($arm) $k: $r — the definition, not the r$dr declaration"; else no "($arm) $k: $r"; fi
 }
 ds tsover DS1 format src/format.ts 1 src/format.ts 5
-ds cppvirt DS2 Dispatch src/dispatch.h 1 src/dispatch.cc 2 PoolDispatcher::Dispatch
+# DS2 re-pinned (LP1, rule 4): the premise is "a DECLARATION in dispatch.h is r1, not the definition in dispatch.cc". Which of the
+# two declarations (the base's pure virtual or the override's) leads was a length-normalisation accident: the basename field
+# (dispatch.h carries "dispatch" for both) flips them, while the definition stays r5 and the body stays dispatch.cc:2 either way.
+ds cppvirt DS2 Dispatch src/dispatch.h 1 src/dispatch.cc 2 'PoolDispatcher::Dispatch|Dispatcher::Dispatch'
 ds goiface DS3 Pack src/packer.go 1 src/packer.go 10 Packer.Pack
 ds tsabs DS4 print src/printer.ts 1 src/printer.ts 6 Base.print   # js-def-naming: the TS declaration row names its class; the <b n=> body keeps print
 # Q1 member owner: the head-tier class's member, defined past the head tier (no name owner exists)
@@ -703,8 +742,23 @@ q1 ts 24 Forge src/forge.ts assemble src/forge.ts 9 "TS class (span)"
 # scope the member owner applies to Go as to the rows above, and q1 still asserts the type itself is never served.
 q1 go 24 Forge src/forge.go Assemble src/forge.go 14 "Go receiver (sc=)"
 # near misses
+# The common/other premises re-pinned (LP1, rule 4): "Forge is r1" was stricter than the rule they serve. The member owner is
+# the FIRST head-tier CLASS row, so the premise is: Forge in the head tier (1..24) and no other class/struct of the fixture
+# (KilnJob, GlazeBatch, Smelter) ranked above it. Once --for scores the file basename (lexical.h kForBasenameFieldW), the
+# in-class DECLARATION Forge::Run / Forge::Assemble in forge.h ("forge" in its basename) took r1 and the class r2 — a
+# method row, not a class, so the owner rule reads the same answer; r1 held only by ranking accident.
+first_class(){   # first_class FILE : 0 when Forge (src/forge.h) is in 1..24 and outranks every other class of the fixture
+    local f="$1" fr o orr
+    fr="$( chk rankof "$f" Forge src/forge.h )"
+    [ "$fr" -ge 1 ] 2>/dev/null && [ "$fr" -le 24 ] || return 1
+    for o in KilnJob GlazeBatch Smelter; do
+        orr="$( chk rankof "$f" "$o" src/forge.h )"; [ "$orr" -ge 1 ] 2>/dev/null && [ "$orr" -lt "$fr" ] && return 1
+        orr="$( chk rankof "$f" "$o" src/smelter.cc )"; [ "$orr" -ge 1 ] 2>/dev/null && [ "$orr" -lt "$fr" ] && return 1
+    done
+    return 0
+}
 cr="$( chk rankof "$TMP/q1.common.so.xml" Forge src/forge.h )"; mr="$( chk rankof "$TMP/q1.common.so.xml" Run src/forge.cc )"
-if [ "$cr" = 1 ] && [ "$mr" -gt 24 ] 2>/dev/null; then
+if first_class "$TMP/q1.common.so.xml" && [ "$mr" -gt 24 ] 2>/dev/null; then
     if r="$( chk nobodyof "$TMP/q1.common.xml" Run )"; then ok "(Q1) near miss: a common-word member (Run, 'run') is never the member owner"; else no "(Q1) common-word member: $r"; fi
 else
     no "(Q1) common-word premise: Forge r$cr Run r$mr"
@@ -716,7 +770,7 @@ else
     no "(Q1) deep premise: Forge r$cr, wanted 25..40"
 fi
 sr="$( chk rankof "$TMP/q1.other.so.xml" Assemble src/smelter.cc )"; fr="$( chk rankof "$TMP/q1.other.so.xml" Assemble src/forge.cc )"
-if [ "$sr" -gt 24 ] 2>/dev/null && [ "$fr" -gt "$sr" ] 2>/dev/null && [ "$( chk rankof "$TMP/q1.other.so.xml" Forge src/forge.h )" = 1 ]; then
+if [ "$sr" -gt 24 ] 2>/dev/null && [ "$fr" -gt "$sr" ] 2>/dev/null && first_class "$TMP/q1.other.so.xml"; then
     if r="$( chk bodyat "$TMP/q1.other.xml" Assemble src/forge.cc 4 )"; then ok "(Q1) entity identity: $r — Forge's member, not Smelter::Assemble (r$sr, outranks it at r$fr)"; else no "(Q1) entity identity: $r"; fi
 else
     no "(Q1) other-class premise: Smelter::Assemble r$sr, Forge::Assemble r$fr"
@@ -848,8 +902,8 @@ done
 # ── I: optional byte identity against the pre-change binary where the slot must not fire ─────────────────────
 # (FX) [G] body-fold: with the fold on (the default), the slot's <bodies> element is byte-identical to the fold-off answer's and the
 #      owner's body is never repeated inside the <fold>
-( unset RIPWIRE_NO_BODY_FOLD; "$BIN" "$FIX" --no-cache --for="$T_D" ) >"$TMP/fx.on" 2>/dev/null
-"$BIN" "$FIX" --no-cache --for="$T_D" >"$TMP/fx.off" 2>/dev/null
+( unset RIPWIRE_NO_BODY_FOLD; "$BIN" "$FIX" --no-cache --for="$T_D" --page-bytes=0 ) >"$TMP/fx.on" 2>/dev/null
+"$BIN" "$FIX" --no-cache --for="$T_D" --page-bytes=0 >"$TMP/fx.off" 2>/dev/null
 if python3 - "$TMP/fx.on" "$TMP/fx.off" <<'PYFX'
 import re, sys
 on, off = open(sys.argv[1]).read(), open(sys.argv[2]).read()

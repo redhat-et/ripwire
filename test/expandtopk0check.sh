@@ -141,8 +141,12 @@ fi
 # The probe is now lspPercentDecode (src/lsp.h, ~50 KB, one definition): a small body in a real file under the budget,
 # the same shape darkflags.h had when V1 was found. Pick another such symbol if lsp.h crosses the budget too.
 PROBE=lspPercentDecode
-"$BIN" "$ROOT" --expand=$PROBE --no-cache --legend=full >"$TMP/real_default.xml" 2>"$TMP/real_default.err"
-"$BIN" "$ROOT" --expand=$PROBE --no-cache --top-k=0 --legend=full >"$TMP/real_tk0.xml" 2>/dev/null
+# CL1 (src/outputceiling.h): a bare --expand budgets its bodies under the output ceiling (16 KB), and lsp.h (~50 KB) / serialize.h are
+# over it, so by default the whole file is no candidate. (G-b) and (J1) price the bundle-vs-file comparison, so they pass the
+# historic budget explicitly; the (N) >16 paste does too, so its 16 listed definitions are served in ONE answer as the arm asks
+# (by default the paste is itself cut under the ceiling and names its own unserved_next=).
+"$BIN" "$ROOT" --expand=$PROBE --no-cache --legend=full --pack-budget-bytes=65536 >"$TMP/real_default.xml" 2>"$TMP/real_default.err"
+"$BIN" "$ROOT" --expand=$PROBE --no-cache --top-k=0 --legend=full --pack-budget-bytes=65536 >"$TMP/real_tk0.xml" 2>/dev/null
 realTk0Bytes=$( wc -c < "$TMP/real_tk0.xml" | tr -d ' ' )
 
 if grep -q 'mode="whole-file"' "$TMP/real_default.xml"; then
@@ -263,7 +267,7 @@ grep -q '<b [^>]*p="dupA.c"' "$TMP/cut.xml" \
 # ── (J) the whole-file comparison prices the PAYLOAD, not a map ─────────────────────────────────────────────────────
 # (J1) real repo: emitTo (2 overloads, one file) used to serve the whole 24 KB file because the bundle was priced with the
 #      ~19 KB map. Now bundle mode, the priced bundle is the served document, and the document is far under the file.
-"$BIN" "$ROOT" --expand=emitTo --no-cache --legend=full >"$TMP/emit.xml" 2>/dev/null
+"$BIN" "$ROOT" --expand=emitTo --no-cache --legend=full --pack-budget-bytes=65536 >"$TMP/emit.xml" 2>/dev/null
 if grep -q 'mode="bundle"' "$TMP/emit.xml"; then
     pb=$( grep -oE 'reason="bundle [0-9]+B' "$TMP/emit.xml" | grep -oE '[0-9]+' )
     sz=$( wc -c < "$TMP/emit.xml" | tr -d ' ' )
@@ -349,7 +353,8 @@ SC="$TMP/sc"; mkdir -p "$SC"; cp -R "$FIX" "$SC/fix"; mkdir -p "$SC/fix/tests"
 printf 'int testOnlyHelper(void) { return dupTarget(); }\nint testOnlyCaller(void) { return testOnlyHelper(); }\n' >"$SC/fix/tests/test_dup.c"
 ( cd "$SC" && "$BIN" fix --expand=dupTarget --ignore-tests '--exclude=nomatch*' --no-cache ) >"$TMP/scope.xml" 2>/dev/null
 scNext="$( attrOf map_next "$TMP/scope.xml" )"
-[ "$scNext" = "ripwire fix --exclude=&apos;nomatch*&apos; --ignore-tests" ] \
+# RE-PIN (NEXT-APOS-RAW/FINISH, 2026-11-15): next-family values print a raw ' (was &apos;) — nextverb.h appendNextValueXml; here and (N)
+[ "$scNext" = "ripwire fix --exclude='nomatch*' --ignore-tests" ] \
     && ok "(M) crawl scope: map_next replays --exclude (quoted) and --ignore-tests" \
     || no "(M) crawl scope: map_next='$scNext', want the root plus --exclude='nomatch*' --ignore-tests"
 scShell="$( printf '%s' "$scNext" | xmlUnesc )"
@@ -383,7 +388,7 @@ servedAnyOf(){ { servedOf "$1"; grep -oE '<src p="[^"]*" sym="work:[0-9]+"' "$1"
 SP4="$TMP/sp4"; mkwork "$SP4" 4
 ( cd "$SP4" && "$BIN" . --expand=work --pack-budget-bytes=3500 --no-cache ) >"$TMP/sp4.xml" 2>/dev/null
 un4="$( attrOf unserved_next "$TMP/sp4.xml" )"
-grep -q 'unserved_total="3"' "$TMP/sp4.xml" && case "$un4" in "--expand=&apos;sub dir/"*) true ;; *) false ;; esac \
+grep -q 'unserved_total="3"' "$TMP/sp4.xml" && case "$un4" in "--expand='sub dir/"*) true ;; *) false ;; esac \
     && ok "(N) space path: unserved_total=\"3\" and unserved_next is single-quoted for the shell" \
     || no "(N) space path: $( grep -oE '<ctx[^>]*>' "$TMP/sp4.xml" | head -1 )"
 rootOf "$TMP/sp4.xml" | grep -q 'unserved_listed=' \
@@ -400,7 +405,7 @@ served20="$( servedOf "$TMP/sp20.xml" | wc -l | tr -d ' ' )"
 [ -n "$tot20" ] && [ "$tot20" -gt 16 ] && [ "$(( tot20 + served20 ))" = 20 ] && rootOf "$TMP/sp20.xml" | grep -q 'unserved_listed="16"' \
     && ok "(N) >16 cut: unserved_total=\"$tot20\" (+$served20 served = 20) and unserved_listed=\"16\"" \
     || no "(N) >16 cut: total='$tot20' served=$served20: $( grep -oE '<ctx[^>]*>' "$TMP/sp20.xml" | head -1 | cut -c1-300 )"
-( cd "$SP20" && eval "\"\$BIN\" . --no-cache $( printf '%s' "$un20" | xmlUnesc )" ) >"$TMP/sp20_paste.xml" 2>/dev/null
+( cd "$SP20" && eval "\"\$BIN\" . --no-cache --pack-budget-bytes=1000000 $( printf '%s' "$un20" | xmlUnesc )" ) >"$TMP/sp20_paste.xml" 2>/dev/null
 [ "$( selectorsOf "$un20" | wc -l | tr -d ' ' )" = 16 ] && [ "$( servedAnyOf "$TMP/sp20_paste.xml" )" = "$( selectorsOf "$un20" )" ] \
     && rootOf "$TMP/sp20_paste.xml" | grep -q 'schema=' && ! rootOf "$TMP/sp20_paste.xml" | grep -q 'unserved_' \
     && ok "(N) >16 cut: the pasted unserved_next serves exactly the 16 it lists, and nothing is cut in that answer" \

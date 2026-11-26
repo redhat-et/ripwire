@@ -37,6 +37,7 @@
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
 #include "defslookup.h"          // aliasTargetRow — an alias row (model.h AliasTarget) is another name, not the definition a sentence asks for
+#include "infra/sortutil.h"   // sortUnique
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
@@ -780,8 +781,7 @@ inline std::vector<const Binding*> reexportCandidates( const Walk& w, bool rust,
     {
         take( m );
     }
-    std::ranges::sort( cand );
-    cand.erase( std::unique( cand.begin(), cand.end() ), cand.end() );
+    rw::sortutil::sortUnique( cand );
     return cand;
 }
 
@@ -1708,6 +1708,7 @@ inline constexpr std::string_view kShortKeyLegend =
     "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved (from=sentence: the route read "
     "the task as words, X is its one code-shaped name and no definition of X resolved); the ladder below says what "
     "the index holds, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
+    "found=0: no definition of X resolved; key= the name a rung searched, q= the Q of Q.leaf. "
     "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
     "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
     "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "

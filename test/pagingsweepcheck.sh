@@ -755,7 +755,7 @@ TABLE = {
     # construction and carries no quintet; the page itself (test/forwidencheck.sh) carries the full quintet.
     "--for":                ( [ "--for=escapeXml" ], None ),
     # lane lego-transitive (2026-10-10): --lego joins for its DEEPER implementor rows (depth >= 2) — --limit/--offset
-    # window those rows; the direct rows repeat on every page. The cut is disclosed on the CHILD <iface> (transitive_shown=
+    # window those rows; the direct rows repeat on every page. The cut is disclosed on the CHILD <iface> (shown_transitive=
     # has_more="1" next=), so the <ctx> root is uncut by construction and the "quintet absent" branch applies; the page
     # itself is test/legotransitivecheck.sh's arm.
     "--lego":               ( [ "--lego=CalleeCallsSink" ], None ),
@@ -965,7 +965,8 @@ def mcp_on( corpus, verb, args ):
             return msg["result"]["content"][0]["text"]
     return ""
 def walk_mcp( verb, budget, limit ):
-    # walked page by page (each page's next_offset names the next window), capped at 4 pages:
+    # walked page by page (each page's next_offset names the next window), capped at 8 pages (4 until train 1117d2,
+    # whose fixtures grew test/ past four MCP pages):
     # the pack_task twin can serve fewer rows per page than its window (its shell reserves
     # differ), so 152 candidates are not always 2 pages; the cap FAILs loudly rather than
     # walking silently short.
@@ -976,13 +977,13 @@ def walk_mcp( verb, budget, limit ):
             no( "B1 walk: MCP " + verb + " page at offset=" + str( off ) + " is not a <sigs page" ); return None
         return doc
     seq, off, pages = [], 0, 0
-    while pages < 4:
+    while pages < 8:
         doc = page( off )
         if doc is None: return None, None
         a = attrs_of( doc ); seq += rows_of( doc ); pages += 1
         if a.get( "has_more" ) != "1": return seq, a
         off = int( a["next_offset"] )
-    no( "B1 walk: MCP " + verb + " on " + CORPUS + " needs more than 4 pages - raise the arm's page cap here, not a silent partial walk" )
+    no( "B1 walk: MCP " + verb + " on " + CORPUS + " needs more than 8 pages - raise the arm's page cap here, not a silent partial walk" )
     return None, None
 
 # B1 — the five surfaces, pruning default, one list.

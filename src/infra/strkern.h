@@ -404,6 +404,21 @@ inline bool lowerFoldedEquals( const char* a, const char* bLowered, std::size_t 
     return lowerFoldedEquals_scalar( a + k, bLowered + k, n - k );
 }
 
+// The string_view call-site form: `s` equals the all-lowercase `lowered` once s is A-Z-folded. An adapter that
+// adds the length test and forwards, not a kernel. `lowered` must already be lowercase: an upper-case byte in it
+// never matches.
+inline bool lowerFoldedEquals( std::string_view s, std::string_view lowered ) noexcept
+{
+    return s.size() == lowered.size() && lowerFoldedEquals( s.data(), lowered.data(), s.size() );
+}
+
+// The same adapter for a prefix: `s` begins with the all-lowercase `loweredPrefix` once A-Z-folded. An upper-case
+// byte in `loweredPrefix` never matches. substr( 0, n ) clamps, so an `s` shorter than the prefix fails the length test.
+inline bool lowerFoldedStartsWith( std::string_view s, std::string_view loweredPrefix ) noexcept
+{
+    return lowerFoldedEquals( s.substr( 0, loweredPrefix.size() ), loweredPrefix );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //  3. findByte / find3 / findByteset — first-occurrence scans
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -16,7 +16,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # found scripts/install.sh's Claude-skills block (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}`) reads it the
 # same as skills/install.sh, so an ambient CLAUDE_CONFIG_DIR leaked past the HOME= override here too.
 unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR RIPWIRE_DATA_HOME \
-      RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
+      RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO RIPWIRE_NO_LOCATOR_AGENT
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
@@ -25,6 +25,9 @@ chmod +x "$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
 # installer actually ACTIVATES skills, which a no-op stub would report without doing.
 cp "$ROOT/skills/install.sh" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/install.sh"
 printf '%s\n' '---' 'name: ripwire-router' 'description: route' '---' >"$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router/SKILL.md"
+# the Claude Code locator subagent travels as skills/agents/ (release.yml packages it); arms (E8)/(E9) read it
+mkdir -p "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/agents"
+cp "$ROOT/skills/agents/ripwire-locator.md" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/agents/"
 printf '%s\n' '#!/bin/sh' >"$TMP/assets/ripwire-0.3.6-macos-arm64/hooks/ripwire-nudge.sh"
 printf '%s\n' '#!/bin/sh' >"$TMP/assets/ripwire-0.3.6-macos-arm64/hooks/ripwire-codex-nudge.sh"
 chmod +x "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/install.sh" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks/"*.sh
@@ -224,6 +227,21 @@ grep -qi 'Hermes' "$TMP/e.out" \
 [ ! -d "$EH7/.claude/skills" ] \
     && ok "(E7) an agent that is NOT installed is not given a Claude skills directory" \
     || no "(E7) the installer created ~/.claude/skills for an agent that is not installed"
+
+# (E8)/(E9) the ripwire-locator subagent (lane LC1, owner ruling 189): ON by default with the Claude activation, and
+# RIPWIRE_NO_LOCATOR_AGENT=1 reaches the skills installer through the one-liner's environment and leaves it out.
+if [ -f "$EH1/.claude/agents/ripwire-locator.md" ] && cmp -s "$EH1/.claude/agents/ripwire-locator.md" "$ROOT/skills/agents/ripwire-locator.md"; then
+    ok "(E8) the one-liner's Claude activation installs the ripwire-locator subagent by default"
+else
+    no "(E8) the one-liner's Claude activation did not install the ripwire-locator subagent"
+fi
+EH9="$TMP/home-noagent"; mkdir -p "$EH9/.claude"
+run_install "$EH9" "$TMP/prefix-e9" RIPWIRE_NO_LOCATOR_AGENT=1
+if [ "$E_RC" -eq 0 ] && [ -e "$EH9/.claude/skills/ripwire-router" ] && [ ! -e "$EH9/.claude/agents/ripwire-locator.md" ]; then
+    ok "(E9) RIPWIRE_NO_LOCATOR_AGENT=1: skills active, no locator subagent written"
+else
+    no "(E9) RIPWIRE_NO_LOCATOR_AGENT=1 through the one-liner: rc=$E_RC, or skills missing, or the agent was written"
+fi
 
 # ── (F) THE UPGRADE PATH LEAVES A BINARY THAT RUNS ──────────────────────────────────────────────────
 # (E6) above re-ran the installer over an existing prefix and called it "clean" on the strength of an

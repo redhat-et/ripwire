@@ -253,6 +253,10 @@ REALBIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${REALBIN#/}" = "$REALBIN" ] && REALBIN="$ROOT/$REALBIN"
 if [ -x "$REALBIN" ]; then
     RBIN="$TMP/realbin"; mkdir -p "$RBIN"; ln -sf "$REALBIN" "$RBIN/ripwire"
+    # The primer stays silent when a CLAUDE.md Claude Code loads already holds the block (3i6); the user-level one is
+    # ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, and these arms keep the operator's HOME. A sandbox for the arms of this block only
+    # (unset after it: install.sh honours CLAUDE_CONFIG_DIR too), so an operator's own pasted block cannot silence one.
+    export CLAUDE_CONFIG_DIR="$TMP/claudeconfig"; mkdir -p "$CLAUDE_CONFIG_DIR"
     WITH_REAL="$RBIN:$PATH"
     T3I="$TMP/t3i"; mkdir -p "$T3I"
     SS_JSON='{"session_id":"sscase","cwd":"'"$REPO"'","source":"startup"}'
@@ -333,6 +337,185 @@ if [ -x "$REALBIN" ]; then
     [ "$RC3I4P" -eq 0 ] && printf '%s' "$OUT3I4P" | grep -q 'Do NOT open a file you have not located first' \
         && ok "SessionStart positive control: a real work tree still gets the primer" \
         || no "SessionStart positive control: exit=$RC3I4P out=[$( printf '%s' "$OUT3I4P" | head -c 160 )] — the bare/.git arms above prove nothing"
+    # ── (3i6) HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND the hook installed, the primer sent the same
+    # ~3.9 KB a second time, re-read on every request. It now stays silent when a CLAUDE.md that Claude Code loads holds the
+    # block word for word. Three cases, all from a subdirectory of a work tree:
+    #   PRESENT (each file Claude Code loads at start; CRLF too)  -> no output;
+    #   ABSENT                                                    -> byte-identical to the wrap block as SessionStart JSON (unchanged);
+    #   PRESENT BUT STALE OR EDITED (CHOSEN, pinned here)        -> the CURRENT block is sent, byte-identical to ABSENT: an old or
+    #     edited block is not this version's guidance, and the match is the exact text, never a heading grep.
+    #   NOT DELIVERED (CodeRabbit #744 round 1)                   -> byte-identical to ABSENT: the block only inside an HTML comment
+    #     (Claude Code strips those), or any settings file naming claudeMdExcludes (the hook keeps the primer, conservatively).
+    #   INSTRUCTION MODE (CodeRabbit #744 round 2)                -> byte-identical to ABSENT: pluginConfigs[...].options.instructionFiles
+    #     `managed-only` drops the project, local and user CLAUDE.md files, so a block there is never delivered; any value but the
+    #     default keeps the primer (conservative), and the default written out explicitly still dedups (control).
+    #   OVER THE SIZE LIMIT (CodeRabbit #744 round 3)             -> byte-identical to ABSENT: Claude Code skips a CLAUDE.md over 4 MiB
+    #     and loads none of it (code.claude.com/docs/en/memory); a file of exactly 4 MiB still dedups (control).
+    # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
+    # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
+    SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_CODEX="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_LINES="$( printf '%s\n' "$SSD_BLURB" | grep -c . )"
+    SSDREPO="$TMP/ssdrepo"; SSDCWD="$SSDREPO/sub"; mkdir -p "$SSDCWD/.claude"; git -C "$SSDREPO" init -q
+    ssd_run() # SESSION [env args: -u NAME / VAR=value...] -> the primer's stdout for cwd $SSDCWD, treatment arm
+    {
+        local s="$1"; shift; mkdir -p "$TMP/ssd.$s"
+        printf '%s' '{"session_id":"ssd'"$s"'","cwd":"'"$SSDCWD"'","source":"startup"}' \
+            | env "$@" RIPWIRE_METER_ARM=treatment PATH="$WITH_REAL" TMPDIR="$TMP/ssd.$s" bash "$HOOK" --session-start
+    }
+    ssd_plant() # FILE TEXT: the text inside a CLAUDE.md that has other notes around it
+    {
+        mkdir -p "${1%/*}"; printf '# Project notes\n<!-- team: keep this file short -->\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
+    }
+    # The managed-policy memory and settings files are read too and a gate cannot sandbox /etc or /Library: when one already
+    # holds the block (every case below silent) or a managed settings file names claudeMdExcludes or a non-default instruction
+    # mode (every PRESENT case keeps the primer), the section reports why it cannot run instead of failing.
+    ssd_managed=""
+    for ssd_f in "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md"; do
+        [ -r "$ssd_f" ] && grep -q '^## ripwire' "$ssd_f" 2>/dev/null && ssd_managed="the managed-policy file $ssd_f holds a ripwire block"
+    done
+    for ssd_f in "/Library/Application Support/ClaudeCode/managed-settings.json" "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json \
+                 "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json; do
+        [ -r "$ssd_f" ] || continue
+        grep -q claudeMdExcludes "$ssd_f" 2>/dev/null && ssd_managed="the managed settings file $ssd_f names claudeMdExcludes"
+        sed -E 's/"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"//g' "$ssd_f" 2>/dev/null | grep -q instructionFiles \
+            && ssd_managed="the managed settings file $ssd_f sets a non-default instructionFiles mode"
+    done
+  if [ -n "$ssd_managed" ]; then
+    echo "  SKIP  SessionStart dedup (3i6): $ssd_managed on this machine"
+  else
+    if command -v jq >/dev/null 2>&1; then
+        SSD_WANT="$( jq -n --arg m "$SSD_BLURB" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
+    else
+        SSD_WANT="$( printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+            "$( printf '%s' "$SSD_BLURB" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{printf "%s\\n", $0}' )" )"
+    fi
+    if [ "${SSD_LINES:-0}" -ge 10 ] && printf '%s' "$SSD_BLURB" | grep -q '^## ripwire'; then
+        ok "SessionStart dedup: the wrap claude block to plant has $SSD_LINES lines"
+    else no "SessionStart dedup: the wrap claude block has ${SSD_LINES:-0} lines (expected >= 10 under a '## ripwire' heading); every arm below is vacuous"; fi
+    SSD_ABS="$( ssd_run absent )"
+    [ -n "$SSD_ABS" ] && [ "$SSD_ABS" = "$SSD_WANT" ] \
+        && ok "SessionStart dedup ABSENT: no CLAUDE.md holds the block -> the block is sent, byte-identical to before (${#SSD_ABS} B)" \
+        || no "SessionStart dedup ABSENT: ${#SSD_ABS} B, expected ${#SSD_WANT} B byte-identical to the wrap block as JSON"
+    # PRESENT: one file at a time, each a place Claude Code loads at session start
+    ssd_seen=0; ssd_silent=0
+    for ssd_case in "cwd CLAUDE.md|$SSDCWD/CLAUDE.md" "cwd .claude/CLAUDE.md|$SSDCWD/.claude/CLAUDE.md" \
+                    "cwd CLAUDE.local.md|$SSDCWD/CLAUDE.local.md" "parent dir CLAUDE.md|$SSDREPO/CLAUDE.md" \
+                    "user-level \$CLAUDE_CONFIG_DIR/CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"
+        ssd_planted="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        [ "${ssd_planted:-0}" -ge 1 ] && ssd_seen=$(( ssd_seen + 1 ))
+        ssd_out="$( ssd_run "p$ssd_seen" )"
+        if [ "${ssd_planted:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT ($ssd_name): silent"
+        else no "SessionStart dedup PRESENT ($ssd_name): planted=${ssd_planted:-0} out=${#ssd_out} B, expected silent"; fi
+        rm -f "$ssd_file"
+    done
+    # CRLF line endings (a block pasted on Windows) and the default user level ~/.claude when CLAUDE_CONFIG_DIR is unset
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; sed 's/$/\r/' "$SSDCWD/CLAUDE.md" > "$SSDCWD/CLAUDE.md.crlf"; mv "$SSDCWD/CLAUDE.md.crlf" "$SSDCWD/CLAUDE.md"
+    ssd_cr="$( grep -c $'\r$' "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run crlf )"
+    if [ "${ssd_cr:-0}" -ge "$SSD_LINES" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (CRLF, $ssd_cr CR lines): silent"
+    else no "SessionStart dedup PRESENT (CRLF): CR lines=${ssd_cr:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    SSDHOME="$TMP/ssdhome"; ssd_plant "$SSDHOME/.claude/CLAUDE.md" "$SSD_BLURB"
+    ssd_out="$( ssd_run home -u CLAUDE_CONFIG_DIR HOME="$SSDHOME" )"
+    if [ -s "$SSDHOME/.claude/CLAUDE.md" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (~/.claude/CLAUDE.md, no CLAUDE_CONFIG_DIR): silent"
+    else no "SessionStart dedup PRESENT (~/.claude/CLAUDE.md): out=${#ssd_out} B, expected silent"; fi
+    rm -rf "$SSDHOME"
+    [ "$ssd_seen" -eq 5 ] && [ "$ssd_silent" -eq 7 ] && ok "SessionStart dedup PRESENT: 7 of 7 placements silent (5 planted files seen)" \
+        || no "SessionStart dedup PRESENT: $ssd_silent of 7 silent, $ssd_seen of 5 planted files seen (0 seen = a vacuous arm)"
+    # STALE OR EDITED (chosen behaviour): the current block is sent, byte-identical to ABSENT
+    ssd_stale=0
+    for ssd_case in "last line dropped|$( printf '%s\n' "$SSD_BLURB" | sed '$d' )" \
+                    "one word edited|$( printf '%s\n' "$SSD_BLURB" | sed '2s/BEFORE/before/' )" \
+                    "heading line only|$( printf '%s\n' "$SSD_BLURB" | head -n1 )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_text="${ssd_case#*|}"
+        if [ -z "$ssd_text" ] || [ "$ssd_text" = "$SSD_BLURB" ]; then no "SessionStart dedup STALE ($ssd_name): the edit did not change the block"; continue; fi
+        ssd_plant "$SSDCWD/CLAUDE.md" "$ssd_text"
+        ssd_out="$( ssd_run "s$ssd_stale${#ssd_text}" )"
+        if [ "$ssd_out" = "$SSD_ABS" ] && [ -n "$ssd_out" ]; then ssd_stale=$(( ssd_stale + 1 )); ok "SessionStart dedup STALE ($ssd_name): the current block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup STALE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"; fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
+    [ "$ssd_stale" -eq 3 ] && ok "SessionStart dedup STALE: 3 of 3 edited blocks still get the current one" \
+        || no "SessionStart dedup STALE: $ssd_stale of 3"
+    # NOT DELIVERED: the exact block is in the file but Claude Code would not inject it (or may not): the primer still speaks
+    ssd_kept=0
+    printf '# notes\n<!--\n%s\n-->\nBuild with make.\n' "$SSD_BLURB" > "$SSDCWD/CLAUDE.md"
+    ssd_n="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run comment )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (block only inside an HTML comment): the block is sent, byte-identical to ABSENT"
+    else no "SessionStart dedup NOT DELIVERED (HTML comment): planted=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+    for ssd_case in "project .claude/settings.json|$SSDCWD/.claude/settings.json" "project .claude/settings.local.json|$SSDREPO/.claude/settings.local.json" \
+                    "user-level settings.json|$CLAUDE_CONFIG_DIR/settings.json"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; mkdir -p "${ssd_file%/*}"
+        printf '{"claudeMdExcludes":["**/vendor/**/CLAUDE.md"]}\n' > "$ssd_file"
+        ssd_n="$( grep -c claudeMdExcludes "$ssd_file" )"; ssd_out="$( ssd_run "x$ssd_kept" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): seen=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$SSDCWD/CLAUDE.md"
+    done
+    if [ "$ssd_kept" -eq 4 ]; then ok "SessionStart dedup NOT DELIVERED: 4 of 4 keep the primer"
+    else no "SessionStart dedup NOT DELIVERED: $ssd_kept of 4"; fi
+    # OVER THE SIZE LIMIT: the block, then filler to an exact byte size; RED on the hook that read the file whatever its size
+    for ssd_case in "4194305|over 4 MiB (4194305 B)" "4194304|exactly 4 MiB (4194304 B), control"; do
+        ssd_size="${ssd_case%%|*}"; ssd_name="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; yes 'Keep tests green.' | head -c "$(( ssd_size - ssd_n ))" >> "$SSDCWD/CLAUDE.md"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"
+        ssd_out="$( ssd_run "z$ssd_size" )"
+        if [ "$(( ssd_n ))" -ne "$ssd_size" ] || [ "${ssd_p:-0}" -lt 1 ]; then
+            no "SessionStart dedup SIZE ($ssd_name): planted $(( ssd_n )) B with ${ssd_p:-0} block heading(s), expected $ssd_size B with the block"
+        elif [ "$ssd_size" -gt 4194304 ]; then
+            [ "$ssd_out" = "$SSD_ABS" ] && ok "SessionStart dedup SIZE ($ssd_name): Claude Code skips the file, the block is sent, byte-identical to ABSENT" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"
+        else
+            [ -z "$ssd_out" ] && ok "SessionStart dedup SIZE ($ssd_name): silent" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected silent"
+        fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
+    # INSTRUCTION MODE: the block is in a project or user CLAUDE.md and the user-level settings.json (where Claude Code reads the
+    # mode, as in managed settings) sets it; RED on the hook that only knew claudeMdExcludes (every keep arm went silent)
+    ssd_pc='{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n'
+    ssd_mode=0
+    for ssd_case in "managed-only, block in the project CLAUDE.md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only, block in the user CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only under the pre-2.1.285 ID agents-md@builtin, pretty-printed|$SSDCWD/CLAUDE.md|$( printf '{\n  "pluginConfigs": {\n    "agents-md@builtin": {\n      "options": {\n        "instructionFiles" : "managed-only"\n      }\n    }\n  }\n}\n' )" \
+                    "non-default claude-md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" claude-md )" \
+                    "default under one ID, managed-only under the other|$SSDCWD/CLAUDE.md|$( printf '{"pluginConfigs":{"agents-md@builtin":{"options":{"instructionFiles":"claude-md-or-agents-md"}},"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"managed-only"}}}}\n' )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; ssd_set="${ssd_rest#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"; printf '%s\n' "$ssd_set" > "$CLAUDE_CONFIG_DIR/settings.json"
+        ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        ssd_out="$( ssd_run "m$ssd_mode${#ssd_name}" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "${ssd_p:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_mode=$(( ssd_mode + 1 )); ok "SessionStart dedup INSTRUCTION MODE ($ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup INSTRUCTION MODE ($ssd_name): seen=${ssd_n:-0} planted=${ssd_p:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$CLAUDE_CONFIG_DIR/settings.json"
+    done
+    [ "$ssd_mode" -eq 5 ] && ok "SessionStart dedup INSTRUCTION MODE: 5 of 5 non-default modes keep the primer" \
+        || no "SessionStart dedup INSTRUCTION MODE: $ssd_mode of 5"
+    # control: the default mode written out explicitly (with the other key in the file) still dedups
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+    printf '{"model":"x","pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles": "claude-md-or-agents-md"}}}}\n' > "$CLAUDE_CONFIG_DIR/settings.json"
+    ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_out="$( ssd_run mdefault )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ok "SessionStart dedup INSTRUCTION MODE (default claude-md-or-agents-md written out): silent"
+    else no "SessionStart dedup INSTRUCTION MODE (default written out): seen=${ssd_n:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md" "$CLAUDE_CONFIG_DIR/settings.json"
+    # Codex: its primer is not deduped against CLAUDE.md, even when CLAUDE.md holds Codex's own block
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssd_out="$( ssd_run codex RIPWIRE_METER_AGENT=codex )"
+    if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"
+    else no "SessionStart dedup: the Codex primer (block ${#SSD_CODEX} B) went silent or changed (out=${#ssd_out} B)"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    # the recipe names the paste as the reliable path and says the hook skips the control arm, for Claude only; it never says
+    # the hook alone delivers the block (the control arm, half the sessions under the default arm=auto, gets no primer)
+    ssd_wcl="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null )"; ssd_wxl="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null )"
+    ssd_wc="$( printf '%s\n' "$ssd_wcl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wx="$( printf '%s\n' "$ssd_wxl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wo="$( printf '%s\n%s\n' "$ssd_wcl" "$ssd_wxl" | grep -c -i -e 'either one delivers' -e 'rely on the hook' )"
+    [ "$ssd_wc" = 2 ] && [ "$ssd_wx" = 0 ] && [ "$ssd_wo" = 0 ] && ok "wrap claude names the paste as the reliable path and the control arm the hook skips (codex: not said; no hook-alone promise)" \
+        || no "wrap paste/hook note: claude=$ssd_wc (want 2) codex=$ssd_wx (want 0) hook-alone wording=$ssd_wo (want 0)"
+  fi
+    unset CLAUDE_CONFIG_DIR
 else
     echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"
 fi

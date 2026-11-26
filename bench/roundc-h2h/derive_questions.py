@@ -60,6 +60,11 @@ strides = {}
 for name, pred in SHAPES:
     elig = [s for s in order if s not in claimed and pred(commits[s])]
     L = len(elig)
+    # Rule 4's arithmetic needs L >= 6: below that stride = 0 picks elig[0] six times (one commit, one
+    # question, six rows), and L = 0 is an IndexError. Refuse the bank rather than write duplicates.
+    if L < 6:
+        sys.exit(f"{name}: {L} eligible commits; rule 4 (stride = L // 6 = {L // 6}) needs at least 6 "
+                 f"to pick six distinct commits - refusing to write the bank")
     stride = L // 6
     strides[name] = (L, stride)
     for i in range(6):

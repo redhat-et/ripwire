@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "infra/tablelookup.h" // isOneOf
 #include "infra/jsonesc.h"   // shSingleQuote — the repository's canonical POSIX argv quoting
 #include "model.h"           // IngestResult
 #include "queryshape.h"      // detail::lowerAscii — the one ASCII lowercaser (K50)
@@ -86,13 +87,6 @@ inline bool commandTakesName( std::string_view command, std::string_view name )
 // text )`, an implicit sign change on every byte >= 0x80 that aborted the sanitizer build on a non-ASCII prompt), and the fix for it
 // made that loop byte-identical to queryshape.h's, which --quality-delta flagged as a clone of the reused helper. It is that one now.
 using queryshape::detail::lowerAscii;
-
-// "is this word one of these?" — the shape four tables' predicates were each writing out by hand, which is
-// how a five-line any_of becomes a duplication finding against its own neighbours.
-inline bool isOneOf( std::string_view word, const std::string_view* table, std::size_t count ) noexcept
-{
-    return std::any_of( table, table + count, [word]( const std::string_view t ) { return t == word; } );
-}
 
 inline bool wordByte( char c ) noexcept
 {
@@ -325,7 +319,7 @@ inline WordBefore wordBefore( std::string_view lowerTask, std::size_t pos ) noex
 inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) noexcept
 {
     const WordBefore before = wordBefore( lowerTask, pos );
-    if( !isOneOf( before.word, std::begin( kWeakSymbolCues ), std::size( kWeakSymbolCues ) ) )
+    if( !isOneOf( before.word, kWeakSymbolCues ) )
     {
         return false;
     }
@@ -354,7 +348,7 @@ inline bool weakSymbolCandidate( std::string_view name ) noexcept
     {
         return false;
     }
-    return !isOneOf( name, std::begin( kWeakSymbolStopWords ), std::size( kWeakSymbolStopWords ) );
+    return !isOneOf( name, kWeakSymbolStopWords );
 }
 
 // The first word-bounded occurrence of an all-lowercase `name` that sits in a symbol slot, or npos when
@@ -445,7 +439,7 @@ inline bool identifierMentionShape( std::string_view task, std::size_t pos, std:
     // this round's own noise prompts used as report/notification prose. Extend here, narrowly, rather
     // than in kWeakSymbolStopWords (a different tier's already-audited list).
     static constexpr std::string_view kShapelessCollisionWords[] = { "lane", "report", "split", "summary" };
-    return !isOneOf( lowered, std::begin( kShapelessCollisionWords ), std::size( kShapelessCollisionWords ) );
+    return !isOneOf( lowered, kShapelessCollisionWords );
 }
 
 // Where, and how strongly, one indexed name is mentioned in the task. Identifier shape
@@ -810,7 +804,7 @@ inline std::string slotCandidate( std::string_view task, std::string_view lowerT
             {
                 break;
             }
-            if( !isOneOf( lowerAscii( token ), std::begin( kSlotFillers ), std::size( kSlotFillers ) ) )
+            if( !isOneOf( lowerAscii( token ), kSlotFillers ) )
             {
                 if( accept( token ) )
                 {
@@ -1350,7 +1344,7 @@ inline bool saysSinceWhen( std::string_view lowerTask ) noexcept
             continue;
         }
         if( std::isdigit( static_cast<unsigned char>( word.front() ) ) != 0
-         || isOneOf( word, std::begin( kCalendarWords ), std::size( kCalendarWords ) ) )
+         || isOneOf( word, kCalendarWords ) )
         {
             return true;
         }

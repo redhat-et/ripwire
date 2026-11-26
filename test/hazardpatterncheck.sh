@@ -499,18 +499,20 @@ REGA
 cat > "$TMP/reg_b1.tsv" <<'REGB1'
 infra/emit.h	emitTo	silent	1	not an answer path: std::print's failed write is made silent to keep fputs's contract, which the header documents
 ingest_astquery.h	astQueryGrouped	silent	1	FINDING: a file whose query walk throws drops out of --match/--lint hits with no disclosure in any build; file held by the regexguard and crash-fixes lanes
-ingest_astquery.h	definitionLinesWorker	alert-only	1	records in every build: the handler is the sink form DISCLOSE( ( BlobDefsSlot{ slot } ), WorkerThrew, … ), whose disclose() clears that blob's lines and marks it Failed, so the blob confirms no definition (its rows read kind="text"); the parenthesized sink is what the RECORDS pattern does not see
+ingest_astquery.h	blobPoolWorker	alert-only	1	records in every build: the handler is the sink form DISCLOSE( ( BlobDefsSlot{ slot } ), WorkerThrew, … ), whose disclose() clears that blob's lines and marks it Failed, so the blob confirms no definition (its rows read kind="text"); the parenthesized sink is what the RECORDS pattern does not see
 ingest_astquery.h	spanTiersOfFiles	alert-only	1	FINDING (disclosure lane): a tier worker that throws leaves its files unclassified for --grep-in, silent in Release
 ingest_docpass.h	runDocPostPass	alert-only	1	FINDING (disclosure lane): a doc post-pass throw skips that document, silent in Release
 mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional background prefetch of the HEAD snapshot; a request recomputes whatever it did not fill (§2b rule 3)
 REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
 largealloc.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits: the replaced operator's own bad_alloc, as the library's would throw
+memceiling_new.cpp	operator new	1	the same operator new seam where largealloc.cpp is not linked (the memory ceiling's portable hook): the replaced operator's own bad_alloc, as the library's would throw
 infra/fileSetStore.h	fromEdges	1	an adjacency past its u32 offset is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
 main.cpp	dispatchMainBody	1	the rethrow after joining the grep prefetch worker, which would std::terminate if unwound joinable; dispatchMain catches it
 mcpindex.h	getIndex	1	the rethrow after releasing the half-built index; mcp.h's request envelope and mcpserver.h's warm-up catch it
 memguard.h	guardedFileClosure	1	a stopped fold is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
 alloccount.cpp	operator new	2	the one throw seam CONTRIBUTING §3 permits: operator new under RIPWIRE_ALLOC_COUNT, an A/B instrument no shipped build links
+memceiling_new.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits: the replaced operator's own bad_alloc, thrown exactly where the library's would be (no handler left after get_new_handler); THE one translation unit replacing the allocation functions where largealloc.cpp is not linked — non-Apple, or RIPWIRE_LARGE_ALLOC=OFF — and CMake never links the two together
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
 regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)
 ingest_parsepool.h	collectWantedConstructHits	1	the RIPWIRE_TEST_EXTRACT_THROW test seam, off unless the variable is set; its one caller is the parse worker body inside its try (ingest_parsepool.h), whose catch( ... ) reports FileExtractThrew: the file reads extract-partial and its constructsKnown flag clears (qdconstructscheck X, qbasecachecheck D drive it)
@@ -518,6 +520,7 @@ REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys
 crossref.h	listTreesOfRefs	.at	1	rootTreesOf returns its map only when catFileBatch served every distinct tip (an answer for another object fails the read) and each served tip is assigned its tree, so every ref's tip is a key
+graph.h	rustOutsideGlobMaySupply	.at	1	not std's throwing at: CallResultTypes::RustGlobFacts::at (receiverevidence.h) is a sortutil::findSorted lookup that returns nullptr on a miss, and the caller tests the pointer before reading it
 infra/dynamic_map.hpp	at	.at	1	the non-const at forwards to the const at of the same container; no ripwire caller
 ingest_astquery.h	nearestNodeKindHint	.at	1	the key was just read out of this same map by nearestNameByEditDistance, so it is present
 REGC
@@ -525,8 +528,10 @@ cat > "$TMP/reg_d.tsv" <<'REGD'
 REGD
 cat > "$TMP/reg_e.tsv" <<'REGE'
 largealloc.cpp	allocOrNull	malloc	1	the replaced operator new's storage for a block the route does not take, freed by its operator delete
+memceiling_new.cpp	operator new	malloc	1	the replaced operator new's storage (the memory ceiling's portable hook), freed by its operator delete
 alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed by its operator delete (A/B instrument, never shipped)
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
+memceiling_new.cpp	operator new	malloc	1	the replaced operator new's own storage, handed to the caller exactly as the default operator new does and freed by the operator delete beside it in the same file; an RAII owner is impossible at this seam, since returning raw storage IS the contract (the non-Apple twin of largealloc.cpp's allocOrNull row)
 infra/dynamic_map.hpp	compact	new	4	the rebuilt pools replace the old ones (delete[] before the swap, owned by ~dynamic_map after it); the two scratch arrays are delete[]d before the return
 infra/dynamic_map.hpp	dynamic_map	new	2	the constructor's pools, owned by ~dynamic_map
 infra/os.h	pipe_cloexec	pipe	1	POSIX body of os::pipe_cloexec: closes both ends itself when the FD_CLOEXEC step fails, else hands them to the caller, as pipe() does (helpdeadline.h ChildPipes owns them as pathguard::OwnedFd)
@@ -546,8 +551,9 @@ ingest_astquery.h	collectGatedLocalNames	ts_parser_new	1	deleted before each of 
 ingest_astquery.h	collectGatedLocalNames	ts_parser_parse_string	1	deleted before the final return
 ingest_astquery.h	compileGrammarQueries	ts_query_new	2	moved into GrammarQueries (or deleted when the combined query does not add up); astQueryGrouped deletes every one by hand after the pass
 ingest_astquery.h	computeGrammarDisclosure	ts_query_new	1	a compile probe, deleted inside the same if
-ingest_astquery.h	definitionLinesWorker	ts_query_cursor_new	1	deleted on both exits of the noexcept worker: the no-parser return (when non-null) and after the claim loop, whose one throwing call sits inside try/catch
+ingest_astquery.h	blobPoolWorker	ts_query_cursor_new	1	deleted on both exits of the noexcept worker: the no-parser return (when non-null) and after the claim loop, whose one throwing call sits inside try/catch
 ingest_astquery.h	spanTiersOfFiles	ts_parser_parse_string	1	the tree is deleted right after the walk
+ingest_astquery.h	tangleDetailOf	ts_parser_parse_string	1	adopted into a TreeGuard at the call, freed on every exit (the qd tangle detail re-parse)
 ingest_crawl.h	compileQueryStandalone	ts_query_new	1	returned into the process-lifetime CompiledQueryCache, whose destructor deletes every query
 ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of the worker; the returns in between belong to lambdas
 ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard

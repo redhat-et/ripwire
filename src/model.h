@@ -17,6 +17,7 @@
 #include "refnames.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
 #include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
+#include <cmath>       // std::log2 — tangleScore10
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
 #include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
 #include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
@@ -327,6 +328,100 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
     }
     return false;   // a byte past the enum (a corrupt cache value) is not a language
 }
+
+// The edge-bridging families are ONE column of the LangFacts row now (langfacts.h::edgeFamily, surfaced
+// by langFamilyOf there) — task D kept a second per-Lang table beside kLangFacts until #440's review
+// folded it in; the equivalence guard lives in graph.h beside langCompatible, where it always did.
+
+// langTag inverted (task D): the @lang selector's vocabulary is exactly the tags the emitter prints — a linear
+// scan over the 25 languages, called once per suffixed query, so the only cost is never a second tag list to drift
+// (the htmlexport langColor lesson again: 9 hand keys against 19 tags). The pair of asserts below makes the parser
+// and the emitter ONE source: an appended Lang without a distinct tag, or a tag that does not parse back, is a
+// build error, not a selector that silently never matches.
+//
+// tagEq compares the tags BYTE BY BYTE, never through string_view::operator==: that operator may short-circuit on
+// data-pointer equality, and comparing the addresses of two distinct literals has unspecified value — an OK answer
+// for runtime code, but it takes the constexpr verifier below out of constant-expression land on every compiler
+// that keeps the shortcut (CI's clang/gcc-13; newer libstdc++ alone made the container builds lie).
+constexpr bool tagEq( std::string_view a, std::string_view b ) noexcept
+{
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < a.size(); ++i )
+    {
+        if( a[ i ] != b[ i ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+constexpr bool langFromTag( std::string_view tag, Lang& out ) noexcept
+{
+    // Case-tolerance is PARSE-only (arm (36), task D5): @CPP and @C resolve to the same languages @cpp and @c do.
+    // The emitted tag keeps one canonical spelling everywhere (langTag), so a disclosure lane never grows variants —
+    // leniency where a human types, exactness where a machine reads.
+    char low[ 16 ];
+    if( tag.empty() || tag.size() > sizeof( low ) )
+    {
+        return false;   // no tag is 16+ bytes; oversized tails are not languages
+    }
+    for( std::size_t i = 0; i < tag.size(); ++i )
+    {
+        low[ i ] = ( tag[ i ] >= 'A' && tag[ i ] <= 'Z' ) ? static_cast< char >( tag[ i ] + 32 ) : tag[ i ];
+    }
+    const std::string_view v( low, tag.size() );
+    const std::size_t unknownIdx = static_cast< std::size_t >( Lang::Unknown );   // ONE index read, zero predicates (langidentity ratchet)
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( i == unknownIdx )
+        {
+            continue;   // "?" is langTag's DISPLAY fallback, not vocabulary: no selector may ask for Unknown
+        }
+        if( tagEq( v, langTag( static_cast< Lang >( i ) ) ) )
+        {
+            out = static_cast< Lang >( i );
+            return true;
+        }
+    }
+    return false;
+}
+namespace
+{
+constexpr bool kLangTagsUniqueAndRoundTrip = []
+{
+    const std::size_t unknownIdxA = static_cast< std::size_t >( Lang::Unknown );   // index reads, not predicates
+    Lang probe = Lang::Unknown;
+    if( langFromTag( "?", probe ) )
+    {
+        return false;   // "?" must NOT parse as a selector — the display fallback is not vocabulary
+    }
+    for( std::size_t a = 0; a < kLangCount; ++a )
+    {
+        for( std::size_t b = a + 1; b < kLangCount; ++b )
+        {
+            if( tagEq( langTag( static_cast< Lang >( a ) ), langTag( static_cast< Lang >( b ) ) ) )
+            {
+                return false;   // two languages, one tag: a selector could not address them apart
+            }
+        }
+        if( a == unknownIdxA )
+        {
+            continue;           // Unknown's tag is the display fallback; its refusal is pinned above
+        }
+        Lang back = Lang::Unknown;
+        if( !langFromTag( langTag( static_cast< Lang >( a ) ), back ) || back != static_cast< Lang >( a ) )
+        {
+            return false;   // an emitted tag the parser cannot route home
+        }
+    }
+    return true;
+}();
+static_assert( kLangTagsUniqueAndRoundTrip, "every Lang has a unique short tag and langFromTag(langTag(l)) == l" );
+} // namespace
 
 // Call-site RECEIVER classification (P2-D one-hop type narrowing). Captured at ingest from the AST shape
 // of `recv.method()` / `recv->method()` so resolve.h can narrow BEFORE the ambiguous §2a name spray:
@@ -851,7 +946,23 @@ struct Symbol
     // with no declarator (a local forward decl, e.g. `struct Foo;`) now correctly counts as 0 rather than
     // the pre-fix "1". `--metrics` emits it as locals="N" locals_floor="1" (never a bare 0 for an
     // uncovered language — see localsCountedLang).
-    std::uint32_t locals       = 0;
+    // u16, SATURATING at 65535 in ingest_model.h::assignSymbols (the cache record keeps the full u32): a def past that many local
+    // declarators is beyond every triage threshold, and the count is a floor already. Narrowed from u32 so `steer` below lands in the
+    // freed bytes and Symbol does not grow (the static_assert below holds unchanged).
+    std::uint16_t locals       = 0;
+    // QD-TANGLE STEERING LOCALS (--quality-delta's tangle kind; gate test/tanglecheck.sh): how many locals of a primitive written type
+    // (bool/int/size_t/char/…; never `auto`, never const) are written again after their declaration AND read in a branch condition
+    // (if/while/for/switch/elif) 10 or more statements after their last preceding write — a flag or counter set in one place that
+    // steers a branch far away. Counted by the SAME fused cc_walk DFS (no new parse), only for functions/methods over 50 lines (the
+    // tangle score is 0 at 50 lines or fewer, so a shorter body is not walked for it) in the languages with a langfacts.h steerDecl. 0 elsewhere,
+    // and absent (never a bare 0) on --metrics there. Saturates at 255.
+    std::uint8_t  steer        = 0;
+    // QD-TANGLE FLAT DISPATCH, two facts in one byte (tangleDispatchShare packs, tangleInputsFrom unpacks): the low 5 bits are the
+    // share of deepLoc (in 31sts; 31 exactly when ALL of it) that lies inside short arms of a flat dispatch — a switch, or an if /
+    // else-if chain, of 4+ arms whose arm is at most 40 lines (ingest_metrics.h ChainState); the high 3 bits are how much of maxNest
+    // only such an arm reaches (saturating at 7). An arm reads alone, like a row of a table, so the tangle score leaves its lines and
+    // its nesting out. deepLoc and maxNest themselves are unchanged. Walked with `steer`, so 0 under the same conditions.
+    std::uint8_t  dispatchShare = 0;
     // PPALT DISCLOSURE — count of ALTERNATIVE-introducing preprocessor nodes (`#else`/`#elif`/`#elifdef`)
     // inside the def, filled by the SAME fused cc_walk DFS that computes cx/ccx/maxNest/locals (zero new
     // tree-sitter queries). When > 0 the body carries branches that never coexist at compile time, so every
@@ -1055,6 +1166,20 @@ struct AliasTarget
     std::uint32_t start = 0;
 };
 
+// QD-TANGLE BLOCK FACTS (ingest_metrics.h tangleBlocks_*; TangleInputs above): one row per callable whose body the walk split into
+// top-level blocks while it counted steering locals (over 50 lines, a langfacts.h steerDecl language), ascending id, 8 bytes a row —
+// a side table, not a Symbol field, because only those few callables carry it. maxBlock10 saturates at kTangleBlockMax10 (S 6553.4,
+// far above any body's S, so a saturated row caps nothing it should not); cross saturates at 255.
+inline constexpr std::uint32_t kTangleBlockMax10 = 0xFFFFu;
+struct TangleBlockFacts
+{
+    NodeId        id         = kNoNode;
+    std::uint16_t maxBlock10 = 0;
+    std::uint8_t  cross      = 0;
+    std::uint8_t  reserved   = 0;   // zero: keeps the row a padding-free 8 bytes (warmsnap writes it raw)
+};
+static_assert( sizeof( TangleBlockFacts ) == 8, "TangleBlockFacts is a raw 8-byte row" );
+
 // The byte span of the function whose body binds a function-local def's name (Symbol::fnLocal). A call site inside
 // [start, end) of the def's own file can name the def; any other site cannot (graph.h reachableByName).
 struct FnLocalScope
@@ -1144,6 +1269,138 @@ struct LocalNameFact
     std::string   name;
     std::uint32_t line      = 0;   // 1-based, absolute file line (not the re-parsed substring's own row)
     std::uint8_t  declDepth = 0;
+};
+
+// QD-TANGLE SCORE (STAGE0 2.1; --quality-delta's tangle kind, --metrics tangle=). LENGTH AMPLIFIES TANGLE, NEVER STANDS ALONE:
+//   T (length-free) = max(0, nest - 3)      one point per nesting level past 3 (quality::kNestBar 4 is the first counted)
+//                   + 20 * deep / loc       one point per 5 % of lines inside regions at nesting >= 4 (short flat-dispatch arms left out)
+//                   + 100 * steer / loc     one point per steering local per 100 lines (Symbol::steer)
+//   S               = T * max(0, log2(loc / 50))   0 at 50 lines or fewer, +1 multiplier per doubling of length; the bar is S >= 6
+// A short nested helper scores 0 (no length to amplify), and a long flat body or an orchestrator of named steps scores 0 (no tangle).
+// Each input counts in units of an existing bar: a nesting level past kNestBar - 1, 1 in 20 lines inside a deep region, 1 steering
+// local per 100 lines (the prototype's 1 per 50 statements: a body runs about two lines a statement). Kept in tenths, so every
+// surface prints the same rounded number and a ratchet compares integers.
+//
+// THE BLOCK CAP (TANGLE-RULE R-D, owner 11-24; the labelled census in the TANGLE-FP lane): S' = min( S, maxBlock + 2 x cross ). A body
+// is a run of top-level blocks (a statement; an if / else-if chain's and a top-level switch's arms; a bare scope's statements). maxBlock
+// is the same score taken over one block alone, and cross counts the top-level locals one block rewrites and a later one reads. A long
+// body of independent deep pockets is as tangled as its worst pocket; state threaded across blocks adds 2 a local. Measured on the
+// 105 labelled functions of ripwire and envoy: 0 of 39 real tangles lost, the length-only false class removed. The cap is applied only
+// where the walk measured both facts (maxBlock10 below is kTangleNoCap otherwise), so it can only lower a score.
+inline constexpr std::uint32_t kTangleNoCap = 0xFFFFFFFFu;
+struct TangleInputs
+{
+    std::uint32_t loc   = 0;   // physical lines (Symbol::loc)
+    std::uint32_t nest  = 0;   // max control nesting, the tangle reading outside short dispatch arms (3 at most when every deep line is an arm's)
+    std::uint32_t deep  = 0;   // deep lines the score counts: deepLoc less the short dispatch arms' share
+    std::uint32_t steer = 0;   // steering locals
+    std::uint32_t maxBlock10 = kTangleNoCap;   // the highest one-block score in tenths; kTangleNoCap = not measured (the cap does not apply)
+    std::uint32_t cross      = 0;              // top-level locals rewritten in one block and read in a later one (0 when not measured)
+    bool capped() const noexcept { return maxBlock10 != kTangleNoCap; }
+};
+inline constexpr std::uint32_t kTangleAmpLoc   = 50;   // the length the amplifier starts above
+inline constexpr std::uint32_t kTangleNestFree = 3;    // nesting levels that score nothing (quality::kNestBar - 1, asserted in quality.h)
+inline constexpr std::uint32_t kTangleBar10    = 60;   // the bar, S >= 6, in tenths
+inline constexpr std::uint32_t kTangleCross10  = 20;   // what one cross-block local adds to the cap, in tenths (2)
+
+// The byte Symbol::dispatchShare stores: ( nest cut << 5 ) | the arms' share of deepLoc in 31sts (31 only when every deep line is an arm's).
+inline constexpr std::uint32_t kTangleShareAll = 31;
+inline std::uint8_t tangleDispatchShare( std::uint32_t deepLoc, std::uint32_t deepDispatch, std::uint32_t nestArmCut ) noexcept
+{
+    std::uint32_t share = 0;
+    if( deepDispatch > 0 && deepLoc > 0 )
+    {
+        share = deepDispatch >= deepLoc ? kTangleShareAll
+                                        : std::min<std::uint32_t>( kTangleShareAll - 1u, ( deepDispatch * kTangleShareAll + deepLoc / 2u ) / deepLoc );
+    }
+    return std::uint8_t( ( std::min<std::uint32_t>( nestArmCut, 7u ) << 5 ) | share );
+}
+
+// The inputs from the raw facts — the ONE rule a Symbol (tangleInputsOf) and a history blob's definition (ingest.h tangleInputsOfBlob) share.
+inline TangleInputs tangleInputsFrom( std::uint32_t loc, std::uint32_t maxNest, std::uint32_t deepLoc, std::uint32_t steer, std::uint8_t dispatchShare ) noexcept
+{
+    const std::uint32_t share = dispatchShare & 31u;
+    const std::uint32_t cut   = std::uint32_t( dispatchShare ) >> 5;
+    TangleInputs in;
+    in.loc   = loc;
+    in.steer = steer;
+    in.nest  = maxNest - std::min( maxNest, cut );   // the nesting outside short dispatch arms
+    in.deep  = deepLoc;
+    if( share == kTangleShareAll )
+    {
+        in.deep = 0;
+        in.nest = in.nest < kTangleNestFree ? in.nest : kTangleNestFree;   // every deep line is a dispatch arm's: no depth past the bar is the body's
+    }
+    else if( share > 0 )
+    {
+        in.deep = deepLoc - ( deepLoc * share + kTangleShareAll / 2u ) / kTangleShareAll;
+    }
+    return in;
+}
+// The same inputs with the block facts the walk measured (TANGLE-RULE; kTangleNoCap = not measured, and the cap does not apply).
+inline TangleInputs tangleWithCap( TangleInputs in, std::uint32_t maxBlock10, std::uint32_t cross ) noexcept
+{
+    in.maxBlock10 = maxBlock10;
+    in.cross      = maxBlock10 == kTangleNoCap ? 0u : cross;
+    return in;
+}
+
+// T (length-free) as a real, and T and S in tenths — rounded half up, so every surface prints the same number.
+inline double tangleT( const TangleInputs& in ) noexcept
+{
+    if( in.loc == 0 )
+    {
+        return 0.0;
+    }
+    return double( in.nest > kTangleNestFree ? in.nest - kTangleNestFree : 0u ) + 20.0 * double( in.deep ) / double( in.loc )
+         + 100.0 * double( in.steer ) / double( in.loc );
+}
+inline std::uint32_t tangleT10( const TangleInputs& in ) noexcept
+{
+    return std::uint32_t( tangleT( in ) * 10.0 + 0.5 );
+}
+inline std::uint32_t tangleScore10( const TangleInputs& in ) noexcept
+{
+    if( in.loc <= kTangleAmpLoc )
+    {
+        return 0;
+    }
+    const std::uint32_t s10 = std::uint32_t( tangleT( in ) * std::log2( double( in.loc ) / double( kTangleAmpLoc ) ) * 10.0 + 0.5 );
+    if( !in.capped() )
+    {
+        return s10;
+    }
+    const std::uint64_t cap10 = std::uint64_t( in.maxBlock10 ) + std::uint64_t( kTangleCross10 ) * in.cross;
+    return cap10 < s10 ? std::uint32_t( cap10 ) : s10;   // the block cap only lowers a score
+}
+// The same inputs without the block cap: one side of a compare whose other side was measured without it (an older snapshot or
+// sidecar) — both sides then score by one rule (QD-RATCHET-BASE: a score change is a code change, never a rule change).
+inline TangleInputs tangleWithoutCap( TangleInputs in ) noexcept
+{
+    in.maxBlock10 = kTangleNoCap;
+    in.cross      = 0;
+    return in;
+}
+
+// QD-TANGLE detail (ingest.h tangleDetailOf): what a tangle row names, read by re-walking ONE function at --quality-delta time — never
+// stored on a Symbol, never cached. A steering local with the line of the write before the far read and the read itself; a deep region
+// (a hump: a control-nesting region that first reaches quality::kNestBar) with its 1-based line span.
+struct TangleSteerHit
+{
+    std::string   name;
+    std::uint32_t setLine  = 0;
+    std::uint32_t readLine = 0;
+};
+struct TangleHumpSpan
+{
+    std::uint32_t startLine = 0;
+    std::uint32_t endLine   = 0;
+};
+struct TangleDetailFacts
+{
+    bool                        ok = false;   // false: the file did not parse or no node spans the function — the row then names no locals or span
+    std::vector<TangleSteerHit> steer;        // in first-read order
+    std::vector<TangleHumpSpan> humps;        // in document order
 };
 
 // An unresolved reference (call/usage). Resolved into an edge in the graph stage.
@@ -1792,6 +2049,15 @@ enum class LocalBindKind : std::uint8_t
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).
     ReExport,
+    // Lane rust-self-chain (test/receiverevidencecheck.sh RUST-SELF-CHAIN, root rust7): a Rust MEMBER call written on another
+    // call's result — each hop after the first of `Router::new().route( a ).layer( b )`, `T::open()?.read()`, `x.get().await.text()`.
+    // One record per such call: startByte = the call's own start (its Reference's; with typeName it names the call, as a CallResult's
+    // does), typeName = its callee name, var = the INNER call's callee name, spanStart = the inner call's start byte (spanEnd the
+    // same: no span), resultIndex = the call's hop depth (1: the inner call is the chain's ROOT — a path call `T::f()` or a member
+    // call on a named receiver, read through its own Reference; k: the inner call is itself the depth k-1 record's call),
+    // unwrapDepth = the `?` operators between the two, isFromAssignment = an `.await` applied to the inner result first.
+    // Read by receiverevidence.h ReceiverEvidence::rustChainReceiver ONLY. APPENDED (cache u8).
+    RecvCall,
 };
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
@@ -1799,7 +2065,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RecvCall ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1811,7 +2077,8 @@ inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
     // those: one run CallResult .. ImplBlock
     static_assert( std::uint8_t( LocalBindKind::StaticMember ) - std::uint8_t( LocalBindKind::RecvType ) == 4, "FE-B's five receiver-evidence kinds stay one run" );
     static_assert( std::uint8_t( LocalBindKind::ImplBlock ) - std::uint8_t( LocalBindKind::CallResult ) == 8, "the call-result, in-place, dispatch and impl-block kinds stay one run" );
-    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock );
+    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock )
+        || k == LocalBindKind::RecvCall;   // lane rust-self-chain: its var is the INNER callee's name, never a local
 }
 // The language family whose call results take a callee's declared result type (train 29 call-result typing), ONE row read
 // by ingest (which records CallResult / ReturnType / TypeImport) and by graph.h (where the type resolves, and which
@@ -1874,6 +2141,16 @@ inline constexpr std::uint8_t kWholeResult = 0xFF;
 // bit); graph.h typeCallResults alone reads it, and types the local as SOME implementor of the trait (ReceiverEvidence::LocalFact
 // iface). The low bits stay the Result/Option layers (always 0 today: a layered trait object is not read).
 inline constexpr std::uint8_t kDispatchResultBit = 0x80;
+// CPP-PTR-ALIAS: the unwrapDepth of a C++ Type / ParamType record whose declarator names the variable itself or a reference to
+// it (ingest_binds.h cppDirectDeclarator: `CodecPtr c`, `const CodecPtr& c`, never `CodecPtr* c`), so a smart-pointer type's `->`
+// reaches its pointee. 0 on every other record: a record that does not say so is never read through a smart pointer.
+inline constexpr std::uint8_t kDirectDeclaratorBit = 0x01;
+// lane rust-self-chain: the `.await` bit of a Rust call-result record's unwrapDepth. A ReturnType of an `async fn` carries it (its
+// declared result is what the call's FUTURE yields: a call that is not awaited holds no T), and so does a CallResult whose value is
+// `f().await` — the await applied to the call first, before any `?` (`f().await?`; `f()?.await` records nothing). The low bits stay
+// the Result/Option layers, so a plain depth compare matches an awaited `async fn` call and nothing else (graph.h typeCallResults).
+inline constexpr std::uint8_t kAwaitResultBit = 0x40;
+inline constexpr std::uint8_t kUnwrapLayersMask = 0x3F;   // the Result/Option layers below both bits
 // lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
 // PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
 // the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the
@@ -1935,7 +2212,7 @@ struct Binding
                                               //   that name exists (resolve.h assignmentNamesNoClass). Rides the padding after `kind`.
                                               // kind==ReturnType (Rust): the result is written `Self` (LocalBindKind::ReturnType).
     std::uint8_t  resultIndex = kWholeResult; // kind==CallResult/ReturnType: the result position (see LocalBindKind). Rides the padding.
-    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind). Rides the padding.
+    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind); C++ Type/ParamType: kDirectDeclaratorBit. Rides the padding.
     std::uint32_t startByte  = 0;         // the record's own position (RawBind::startByte). ONE declaration's
                                           //   VarDecl and its typed record (Type or ParamType) carry the SAME
                                           //   value — that shared byte is how Rule 2's lexical receiver lookup
@@ -2229,6 +2506,18 @@ struct CrawlSkips
     // IN-ROOT link, never the target, for the same reason.
     std::vector<SkippedFile>  escaped;              // capped rows, path-sorted (bytes 0 = not measured)
     std::uint64_t             escapedFiles    = 0;  // EXACT count (rows may be fewer)
+    // M1: inside a build/ directory the crawl entered ONLY because git tracks files under it (ingest_crawl.h CrawlNamePrune),
+    // a file git does NOT track is dropped: the name prune's guess was falsified for the tracked files, not for whatever a
+    // build left beside them. Tested after the ignore class, so it counts only untracked files git's rules did not already
+    // hide, i.e. files that would OTHERWISE HAVE BEEN INDEXED — one of the accounting invariant's drop classes.
+    std::vector<SkippedFile>  untrackedBuild;       // capped rows, path-sorted
+    std::uint64_t             untrackedBuildFiles = 0;  // EXACT count (rows may be fewer)
+    // θ11 (forqsites.h): the text-candidate files with NO extension (NEWS, Gemfile, Dockerfile, Makefile, ...), which no other class
+    // rows (kNonTextExts: an extensionless file has no extension to report). Not a drop disclosure and read by nothing else: only the
+    // --for question-sites block greps them, as rg would. The rows are the kMaxSkipRowsPerClass SHALLOWEST (path depth, then path) —
+    // a walk-order-free pick that keeps a root's Makefile ahead of a deep testdata tree — sorted by path; not --exclude'd, not ignored.
+    std::vector<SkippedFile>  extensionless;        // capped rows, path-sorted
+    std::uint64_t             extensionlessFiles = 0;   // EXACT count (rows may be fewer)
     // The DISCLOSE sink for a file the crawl refused because its link left the root: the exact count escaped_root= prints.
     enum class DisclosureWhy : std::uint8_t
     {
@@ -2350,6 +2639,8 @@ struct IngestResult
     std::vector<AliasTarget>  aliasTargets;    // INDEX-ALIAS-CONST: one row per alias def whose target ends it, ascending id (AliasTarget above);
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
+    std::vector<TangleBlockFacts> tangleBlocks;   // QD-TANGLE BLOCK FACTS: one row per block-walked callable, ascending id (TangleBlockFacts above);
+                                                  // every symbol splice re-offsets it like fnLocalScopes
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
     std::vector<std::uint64_t> cloneKeys;      // CLONES-PERSIST: size symbols.size() when built (ingest_model.h assignSymbols), else empty:
                                                // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
@@ -2391,7 +2682,7 @@ struct IngestResult
     //    the LABELED spelling `<label>/<root-relative-path>` (the identity every surface emits) and
     //    realPaths hold the on-disk crawl spelling (what any fopen/stat must use — see diskPath below).
     std::vector<std::string>   realPaths;    // fileId → on-disk path (empty ⇒ ing.files ARE the disk paths)
-    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical label order)
+    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical `<label>/` order)
     std::vector<std::string>   rootLabels;   // root index → label (shortest unique whole-segment suffix)
     std::vector<std::string>   rootPaths;    // root index → the root path as passed (post-dedupe)
     std::vector<std::string>   rootReals;    // root index → realpath (cross-root include probes, git -C)
@@ -2430,6 +2721,19 @@ struct IngestResult
     //    empty, so a re-ingest never sees a stale table; a copy shares the pointer (same files, same table).
     mutable std::shared_ptr<const RustCrateRoots> rustCrateRoots;
 };
+
+// A callable's tangle inputs: its own facts, and its block facts when the walk measured them (`blocks` = IngestResult::tangleBlocks).
+inline TangleInputs tangleInputsOf( const std::vector<TangleBlockFacts>& blocks, const Symbol& s ) noexcept
+{
+    const auto row = std::lower_bound( blocks.begin(), blocks.end(), s.id, []( const TangleBlockFacts& f, NodeId id ) noexcept { return f.id < id; } );
+    const bool measured = row != blocks.end() && row->id == s.id;
+    const TangleInputs in = tangleInputsFrom( s.loc, s.maxNest, s.deepLoc, s.steer, s.dispatchShare );
+    return measured ? tangleWithCap( in, row->maxBlock10, row->cross ) : in;
+}
+inline TangleInputs tangleInputsOf( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return tangleInputsOf( ing.tangleBlocks, s );
+}
 
 // These aggregates cross the ingest/main translation-unit boundary. The record is emitted once per TU by
 // structlayout.h, so a header change that leaves a mixed binary can be diagnosed after linking instead of

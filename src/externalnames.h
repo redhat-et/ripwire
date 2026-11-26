@@ -412,6 +412,48 @@ inline constexpr std::string_view kCppStdArrowTemplates[] = { "optional", "share
 inline constexpr std::string_view kCppStdElementFirstArg[]  = { "array", "deque", "forward_list", "list", "span", "vector" };
 inline constexpr std::string_view kCppStdElementSecondArg[] = { "flat_map", "map", "unordered_map" };
 
+// ── THE STANDARD RECEIVER TYPES (lane std-namesake, STD-RECEIVER-NAMESAKE; gate test/stdmembergatecheck.sh N). The two tables above
+// decline by the call's NAME, whatever the receiver. These decide by the receiver's WRITTEN TYPE, whatever the name: a member call
+// on a local, parameter or field whose declaration spells one of these types is the standard library's own member (`m.get( k )`
+// on a `HashMap`, `self.opt.map( .. )` on an `Option<T>` field, `p.get()` on a `std::unique_ptr<T>`), so an in-tree class's
+// method of that name is no candidate. graph.h (stdWrittenReceiverOf) proves the spelling names the standard type, never an
+// in-tree or imported namesake, before any candidate is dropped; an unproven spelling keeps the name tier as it was.
+//
+// RUST. A type here has no `Deref` to a user type and takes no inherent `impl` outside std, so only a TRAIT method can be an
+// in-tree callee of such a receiver (graph.h keeps every trait and unowned candidate). Collections, strings and paths, Option /
+// Result, the cells and locks (their payload is reached through `borrow()` / `lock()` / `get()`, calls of their own), time
+// values, `str` and "[]" (the slice and array types, which no declaration can shadow). NOT here: Rc / Arc / Box (kRustStdDerefTypes:
+// their methods are their argument's), Cow / Pin / MutexGuard / Ref (they deref to their argument too), every numeric primitive
+// (their receivers are rarely a namesake's and would cost a record each). Sorted by byte.
+inline constexpr std::string_view kRustStdReceiverTypes[] = {
+    "BTreeMap", "BTreeSet", "BinaryHeap", "CStr", "CString", "Cell", "Duration", "HashMap", "HashSet", "Instant", "LinkedList", "Mutex",
+    "OnceCell", "OnceLock", "Option", "OsStr", "OsString", "Path", "PathBuf", "RefCell", "Result", "RwLock", "String", "SystemTime", "Vec",
+    "VecDeque", "[]", "str"
+};
+// The Rust wrappers a member call passes THROUGH to their first argument's members (auto-deref): a receiver written
+// `Arc<Mutex<T>>` is a Mutex for `.lock()` and an Arc for `.clone()`, both std's. A wrapper proves nothing by itself: only a
+// spine that ends in a kRustStdReceiverTypes name is read (ingest_binds.h rustStdSpine). Sorted by byte.
+inline constexpr std::string_view kRustStdDerefTypes[] = { "Arc", "Box", "Rc" };
+// The names of the two tables above that the Rust prelude brings into every module: a bare spelling of one needs no `use`.
+// Every other name is the standard type only where the file imports it from std / core / alloc or the spelling is a path
+// rooted there. Sorted by byte.
+inline constexpr std::string_view kRustPreludeTypes[] = { "Box", "Option", "Result", "String", "Vec", "[]", "str" };
+
+// C++. The class templates and classes of namespace `std` whose `.` members are their own: a declaration written
+// `std::NAME` or `std::NAME< … >` with nothing after the closing bracket. Containers and their adaptors, strings, the smart
+// pointers and wrappers (`p.get()` / `p.reset()` are the pointer's; the pointee is reached through `->`, never read here),
+// the string and file streams, locks. NOT here, on purpose: every type TRANSFORMATION (`std::remove_reference_t<T>`,
+// `std::decay_t<T>`, `std::tuple_element_t<I, T>`, a nested `::value_type` / `::element_type`), which names a user type, and the
+// polymorphic bases a user class overrides (`std::exception` and its family: `e.what()` on a `const std::exception&` runs the
+// in-tree override; `std::streambuf`, `std::error_category`). `filesystem::path` is the one nested name. Sorted by byte.
+inline constexpr std::string_view kCppStdReceiverTypes[] = {
+    "any", "array", "atomic", "basic_string", "basic_string_view", "bitset", "condition_variable", "deque", "filesystem::path", "forward_list",
+    "fstream", "function", "ifstream", "istringstream", "list", "lock_guard", "map", "multimap", "multiset", "mutex", "ofstream", "optional",
+    "ostringstream", "pair", "priority_queue", "queue", "reference_wrapper", "set", "shared_mutex", "shared_ptr", "span", "stack", "string",
+    "string_view", "stringstream", "thread", "tuple", "unique_lock", "unique_ptr", "unordered_map", "unordered_multimap", "unordered_multiset",
+    "unordered_set", "variant", "vector", "weak_ptr", "wstring"
+};
+
 // ONE sortedness proof for the three tables above, taking the table as a span, so the three stay one shape rather than
 // three near-copies of the assert this file already spells per table. The lookup is graph.h BuiltinMethodGate::appliesTo,
 // its only reader, which picks the table by language first.
@@ -428,6 +470,10 @@ static_assert( isStrictlySortedTable( kCppStdArrowTemplates ), "kCppStdArrowTemp
 static_assert( isStrictlySortedTable( kCppStdElementFirstArg ), "kCppStdElementFirstArg must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kCppStdElementSecondArg ), "kCppStdElementSecondArg must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kKotlinScopeFunctionNames ), "kKotlinScopeFunctionNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kRustStdReceiverTypes ), "kRustStdReceiverTypes must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kRustStdDerefTypes ), "kRustStdDerefTypes must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kRustPreludeTypes ), "kRustPreludeTypes must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kCppStdReceiverTypes ), "kCppStdReceiverTypes must be strictly sorted (binary search)" );
 // #155: the lookup of a strictly sorted table (isStrictlySortedTable), taken as a span so a new table reuses it.
 inline bool inSortedTable( std::span<const std::string_view> table, std::string_view name ) noexcept
 {

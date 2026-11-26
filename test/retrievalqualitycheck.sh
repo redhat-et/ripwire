@@ -18,6 +18,10 @@ first="$( sed -n 's/.*<cand r="1"[^>]* p="\([^"]*\)".*/\1/p' "$TMP/path.xml" )"
 [[ "$first" == *'/server/config.py' || "$first" == 'server/config.py' ]] && ok 'duplicate basename resolved by semantic evidence; evaluator keeps exact path identity' \
     || no "server/config.py not first ($first)"
 
+# LP1 (4ba1fdec6, 0.7.0 train) ranks a file's BASENAME at weight 2 by default. The authored competitor of generated/client.py used
+# to live in generated_api.py, so the word "generated" in the explicit query met its basename and lifted it exactly as far as the
+# generated tier lifts the artifact (r=2 in both runs, the arm's premise gone). It is authored_api.py now: the same function and
+# text, a basename no question word names. The artifact rises 2 -> 1 at the default and under RIPWIRE_BASENAME_W=0 alike.
 run '--for=protocol adapter' "$TMP/gen-control.xml"
 run '--for=generated protocol adapter' "$TMP/gen.xml"
 if grep -q 'generated/client.py' "$TMP/gen.xml" && ! grep -q 'noise_pb2.py' "$TMP/gen.xml" && python3 - "$TMP/gen-control.xml" "$TMP/gen.xml" <<'PY'

@@ -58,10 +58,15 @@ fi
 #     answer AND the honesty around it, so the class is observable instead of silent: the row must be
 #     disclosed via suppressed_string=, and the answer must NOT claim complete=.
 #     WHEN BOARD ITEM 15 LANDS this arm goes red on purpose: flip it to the (a) shape in that commit.
+#     RE-PIN (INT1 2026-11-19, BX2 FIX 6 f3b8632f0, by design): a file whose every hit the tier held back is now NAMED on the
+#     root (held_files="1" held="package.json" held_next=…), never as a row. So package.json may appear in held= only: the
+#     arm strips the root's held= value before asserting no package.json row, and asserts that held= names it.
 mixCode="$( "$BIN" "$MIXFIX" --grep=retryBudget --no-cache 2>/dev/null )"
-if grep -q 'loader.c' <<<"$mixCode" && ! grep -q 'package.json' <<<"$mixCode" \
+mixRows="$( sed 's/ held="[^"]*"//g' <<<"$mixCode" )"
+if grep -q 'loader.c' <<<"$mixCode" && ! grep -q 'package.json' <<<"$mixRows" \
+   && grep -q 'held_files="1" held="package.json"' <<<"$mixCode" \
    && grep -q 'suppressed_string="1"' <<<"$mixCode" && ! grep -q 'complete="1"' <<<"$mixCode"; then
-    ok "mixed corpus: a code-tier hit still hides the config row — DISCLOSED (suppressed_string=), no completeness claim (P4-C, board 15)"
+    ok "mixed corpus: a code-tier hit still hides the config row — DISCLOSED (suppressed_string=, held= names the file), no completeness claim (P4-C, board 15)"
 else
     no "mixed corpus: the config-suppression case changed shape — if this is board item 15 landing, re-pin this arm deliberately"
     printf '%s\n' "$mixCode" | grep -o '<grep [^>]*>'

@@ -77,6 +77,9 @@
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_LITERAL_ANCHOR
@@ -175,9 +178,10 @@ if [ "$neg" -eq 0 ]; then
 fi
 # ── L7 ──
 for t in APPTOOL_RENDER_MODE '"dependency cycle detected" error' APPTOOL_BIG_FLAG; do
+    # AF1 (2026-11-18): answer-first — <syms> is the last ROW block and only the trailing DOCUMENT legend (comments) may follow it
     # the K-WRONGSYM <syms> block reads the answer's own bytes (the <lit> block among them), so it differs with the literal block off: both sides drop it
-    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S);print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
-    b="$( off "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
+    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S);print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->)*</ctx>)","",s,flags=re.S),end="")' )"
+    b="$( off "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->)*</ctx>)","",s,flags=re.S),end="")' )"
     if [ -n "$b" ] && [ "$a" = "$b" ]; then ok "L7 prefix identity vs RIPWIRE_NO_LITERAL_ANCHOR=1: $t"; else no "L7 answer outside the block changed: $t"; fi
 done
 # ── L8 ──
@@ -783,7 +787,8 @@ for f in range(40):
         o.write("}\n")
 open(f"{d}/s.go","w").write("package a\n\nfunc cap_anchor_one() {}\nfunc cap_anchor_two() {}\nfunc cap_anchor_three() {}\n")
 PY
-A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+# AF1-fix (2026-11-18): two ~20 KB <lit> elements make this a two-page answer (src/forpages.h): the cap arms read the WHOLE answer
+A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' --page-bytes=0 </dev/null 2>/dev/null )"
 CAPJ="$( python3 -I -c '
 import sys,re
 s=sys.stdin.read()
@@ -811,7 +816,8 @@ open(d+"/b.go","w").write("package a\n\nvar TB = map[string]int{\n"+"".join('\t"
 open(d+"/c.go","w").write("package a\n\nvar TC = map[string]int{\n\t\"k1\": bc_three,\n\t\"k2\": bc_three,\n}\n")
 open(d+"/s.go","w").write("package a\n\nfunc bc_one() {}\nfunc bc_two() {}\nfunc bc_three() {}\n")
 PY
-  A="$( cd "$BW" || exit 1; "$BIN" "$BW" --no-cache '--for=register `bc_one` `bc_two` `bc_three`' </dev/null 2>/dev/null )"
+  # AF1-fix (2026-11-18): a ~40 KB answer is paged (src/forpages.h); the window arm reads the WHOLE answer
+  A="$( cd "$BW" || exit 1; "$BIN" "$BW" --no-cache '--for=register `bc_one` `bc_two` `bc_three`' --page-bytes=0 </dev/null 2>/dev/null )"
   U="$( python3 -I -c '
 import sys,re
 s=sys.stdin.read(); el=[s.find("</lit>",m.start())+6-m.start() for m in re.finditer(r"<lit s=\"bc_(?:one|two)\"",s)]
@@ -959,7 +965,8 @@ A="$( nf1 '--for=register `alpha_key`' )"; L="$( lits <<<"$A" )"
 if has "$L" 'tbl="table = {"'; then ok "T24e [G] twin: a dict literal in a function body keeps tbl= (its opener is an assignment)"; else no "T24e in-function table lost: ${L:0:300}"; fi
 if has "$( lits <<<"$( tr1 '--for=add a new function; use `abspath` as the model' )" )" 'tbl="baseFunctions := map[string]Function{"'; then ok "T24f [G] twin: a Go map literal in a method keeps tbl="; else no "T24f go local map lost"; fi
 # T25 [P] the capped note's legend is true when the skipped anchor WAS scanned and had sites (the byte cap), and still true for a walk that found none
-A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+# AF1-fix (2026-11-18): two ~20 KB <lit> elements make this a two-page answer (src/forpages.h): the cap arms read the WHOLE answer
+A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' --page-bytes=0 </dev/null 2>/dev/null )"
 if has "$A" '<lit_capped' && ! has "$A" 'none found a source site' && has "$A" 'no room'; then ok "T25 [P] the byte-cap skip is not described as 'none found a source site'"; else no "T25 legend: $( grep -o '<!-- ripwire for lit: lit_capped[^>]*>' <<<"$A" | cut -c1-400 )"; fi
 # T26 [P] a fourth anchor is counted, never dropped silently; anchors with no site do not eat the slots of one that has
 A="$( tr1 '--for=register `abspath` `basename` `concat` `Each`' )"

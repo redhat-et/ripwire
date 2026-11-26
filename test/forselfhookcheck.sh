@@ -23,6 +23,9 @@
 #   D   two runs are byte-identical.
 # Usage:  bash test/forselfhookcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forselfhookcheck.sh
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_SELF_HOOK
@@ -517,7 +520,8 @@ class Y(Mix):
 E2
 H="$( run k7 "--for=what calls X.hk" | hook )"
 nx="$( printf '%s' "$H" | python3 -c 'import re,sys; print(re.search(r"n=.X.hk.[^>]*? next=.([^\"]+).", sys.stdin.read()).group(1))' )"
-if has "$( run k7 "$nx" )" 'lib/base.py:12'; then ok "(K7) the printed next= ($nx) lists the hidden site across directories"; else no "(K7) the printed next= ($nx) does not list lib/base.py:12"; fi
+# SITES-SHORT: the hidden site (lib/base.py line 12, inside Mix.e defined on line 11) is that row's bare line beside its own p= file
+if printf '%s' "$( run k7 "$nx" )" | grep -qE '<s [^>]*p="lib/base\.py:11"[^>]* sites_at="12"'; then ok "(K7) the printed next= ($nx) lists the hidden site across directories (lib/base.py line 12)"; else no "(K7) the printed next= ($nx) does not list line 12 on a p=lib/base.py:11 row"; fi
 mk k5/base.py <<'E2'
 class Base:
     def a(self):
@@ -632,7 +636,9 @@ open( f"{root}/base.py", "w" ).write( "class Base:\n    def run_it(self):\n     
 for k in range( 6 ):
     open( f"{root}/impl{k}.py", "w" ).write( f"from base import Base\n\nclass Impl{k}(Base):\n    def process_item(self):\n        total = 0\n{filler}        return total\n" )
 PY
-run u "--for=how do impl classes process items" --auto-bodies >"$TMP/u"
+# AF1-fix (2026-11-18): this answer is ~13 KB, so the default serves it in two pages (src/forpages.h) with <bodies> continued past page 1's
+# cut; "a body the answer printed" is the WHOLE answer's, so the arm reads --page-bytes=0 (row-identical to the joined pages, forpagescheck P2)
+run u "--for=how do impl classes process items" --auto-bodies --page-bytes=0 >"$TMP/u"
 python3 - "$TMP/u" <<'PY'
 import re, sys
 t = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()

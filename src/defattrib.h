@@ -41,6 +41,7 @@
 
 #include "editcheck.h"   // editCheckGroupKeys' fold (editCheckDeclFoldTargets) — the C-family declaration identity
 #include "graph.h"
+#include "graphlegend.h"   // VERB-DEF-ROWS: defTableLegend, the reading usesDefTable hands its two emitters
 #include "hoprecord.h"   // HOP-CONTEXT-1: THE hop record — site= call= sig= on every hop row
 #include "langfacts.h"   // langFacts(l).overloadSignatures — the TypeScript overload-signature rule, as a column
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — the one member-owner rule for every row
@@ -80,6 +81,8 @@ enum class DefMark : std::uint8_t
 struct DefGroups
 {
     std::vector<std::uint32_t> ofMatch;         // parallel to the matches: the group each one belongs to
+    std::vector<NodeId>        member;          // parallel to the matches: the match itself (VERB-DEF-ROWS: a group's other
+                                                // members — its tied declarations — print as rows of their own after its row)
     std::vector<NodeId>        rep;             // per group: the bodied member (the table's t=/sc=/p=), else its first match
     std::vector<char>          bodyless;        // per group: no member has a body (a declaration that declares no listed definition)
     std::vector<char>          primaryOfSpec;   // per group: its sc= is the template base of another group's sc= (the ~t mark)
@@ -87,6 +90,10 @@ struct DefGroups
                                                 // identity rule's Unproven: a template-qualified or macro-built declarator, no shared
                                                 // #include) — dropped only when no row ties to it and one group is left
                                                 // (defGroupsDropSilent); on a printed table it is listed bodyless="1"
+    // BX1 FIX 7 (test/verbfixcheck.sh F7): the members of the untied groups defGroupsDropSilent dropped, in group then match order.
+    // Out of every group and every row's attribution, still counted by defs=: a printed table lists each as a bodyless row of
+    // its own after the groups (ix = size() + 1, …), so the table's rows equal defs= and nothing it counts is silent.
+    std::vector<NodeId>        unattributed;
 
     std::size_t size() const noexcept { return rep.size(); }
     bool        multi() const noexcept { return rep.size() >= 2; }
@@ -269,6 +276,7 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
     if( matches.size() < 2 )
     {
         out.ofMatch.assign( matches.size(), 0 );
+        out.member.assign( matches.begin(), matches.end() );
         if( !matches.empty() )
         {
             out.rep.push_back( matches.front() );
@@ -296,6 +304,7 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
     {
         out.ofMatch[i] = groupOfKept[ target[i] ];
     }
+    out.member.assign( matches.begin(), matches.end() );
     out.primaryOfSpec.assign( out.rep.size(), 0 );
     for( std::size_t a = 0; a < out.rep.size(); ++a )
     {
@@ -307,7 +316,8 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
         }
     }
     out.untied = defGroupUntied( ing, matches, out );
-    ENSURES( out.ofMatch.size() == matches.size() && out.rep.size() <= matches.size() && out.untied.size() == out.rep.size() );
+    ENSURES( out.ofMatch.size() == matches.size() && out.member.size() == matches.size() && out.rep.size() <= matches.size()
+             && out.untied.size() == out.rep.size() );
     return out;
 }
 
@@ -510,8 +520,7 @@ inline ReachBits reachBitsets( const Graph& g, const DefGroups& groups, std::spa
     ReachBits bits;
     bits.dense.assign( reach.begin(), reach.end() );
     bits.dense.insert( bits.dense.end(), seeds.begin(), seeds.end() );
-    std::sort( bits.dense.begin(), bits.dense.end() );
-    bits.dense.erase( std::unique( bits.dense.begin(), bits.dense.end() ), bits.dense.end() );
+    sortutil::sortUnique( bits.dense );
     bits.words = ( groups.size() + 63 ) / 64;
     bits.p.assign( bits.dense.size() * bits.words, 0 );
     bits.s = bits.p;
@@ -721,10 +730,54 @@ inline bool rowSplitArm( const DefGroups& groups, const RowDefTokens& tokens, st
 inline const char* splitArmAttrXml( bool on ) noexcept { return on ? " prov=\"split\"" : ""; }
 inline const char* splitArmKeyJson( bool on ) noexcept { return on ? ",\"prov\":\"split\"" : ""; }
 
-// The <def> rows (XML; the columnar form prints the same rows before its <cols>).
-inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix )
+// IMPACT-SOLE-DEF (lane t2-rankdefects, gate test/impactsoledefcheck.sh): WHICH answers print the <def> rows. A multi-group
+// selector always does. A ONE-group selector does on the verbs whose answer set includes the definition itself — --impact: the
+// radius of a change holds the file the change is made in, and `of="intersection" defs="1"` named that file only when a caller
+// happened to live in it. VERB-DEF-ROWS (lane v1-verbdef, gate test/verbdefrowscheck.sh) extends it to --callers and --uses
+// and their MCP twins: on the held-out set 13 of the 16 gold groups a routed --callers/--uses/--impact answer lost were the file
+// that defines or declares the symbol. --callees, --safe-delete and find_symbol keep a one-group answer table-less.
+enum class DefRows : std::uint8_t
 {
-    if( !groups.multi() )
+    MultiOnly,
+    SoleToo
+};
+// VERB-DEF-ROWS: --callers prints the one group's rows, --callees does not (a callees answer is another question).
+inline DefRows callersDefRows( bool wantCallers ) noexcept { return wantCallers ? DefRows::SoleToo : DefRows::MultiOnly; }
+inline bool defRowsPrint( const DefGroups& groups, DefRows when ) noexcept
+{
+    return groups.multi() || ( when == DefRows::SoleToo && groups.size() == 1 );
+}
+// VERB-DEF-ROWS (lane v1-verbdef): the rows of the listed groups, in table order — each group's row (its bodied member, bodyless
+// when it has none), then each declaration tied to that definition as a row of its own with the group's ix (a prototype in a
+// header is a file a change to the definition must touch; a non-representative member has no body by construction). One walk
+// for both dialects, so XML and JSON cannot list different rows. `row( k, symbol, bodyless )` is called once per row.
+template<class RowFn>
+inline void forEachDefRow( const DefGroups& groups, const DefTableListing& listing, const IngestResult& ing, RowFn&& row )
+{
+    EXPECTS( groups.member.size() == groups.ofMatch.size(), "the groups are defGroupsOf( matches ): member is parallel to ofMatch" );
+    for( const std::uint32_t k : listing.listed )
+    {
+        row( k, ing.symbols[ groups.rep[k] ], groups.bodyless[k] != 0 );
+        for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
+        {
+            if( groups.ofMatch[i] == k && groups.member[i] != groups.rep[k] )
+            {
+                row( k, ing.symbols[ groups.member[i] ], true );
+            }
+        }
+    }
+    // BX1 FIX 7: then each declaration defGroupsDropSilent dropped, a bodyless row of its own (k = size() + j, the spelling a
+    // multi-group table gives an untied declaration), so an uncut table lists every definition and declaration defs= counts
+    for( std::size_t j = 0; !listing.cut && j < groups.unattributed.size(); ++j )
+    {
+        row( std::uint32_t( groups.size() + j ), ing.symbols[ groups.unattributed[j] ], true );
+    }
+}
+// The <def> rows (XML; the columnar form prints the same rows before its <cols>).
+inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix,
+                                DefRows when = DefRows::MultiOnly )
+{
+    if( !defRowsPrint( groups, when ) )
     {
         return {};
     }
@@ -732,48 +785,40 @@ inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups
     // defs_listed="0" says the table was cut to nothing.
     std::vector<char> esc;
     std::string       out;
-    for( const std::uint32_t k : listing.listed )
+    forEachDefRow( groups, listing, ing, [ & ]( std::uint32_t k, const Symbol& s, bool bodyless )
     {
-        const Symbol&          s   = ing.symbols[ groups.rep[k] ];
         const std::string_view raw = ing.files[ s.fileId ];
         const std::string_view rel = rootPrefix.empty() ? raw : sarif::rootRelativeUri( raw, rootPrefix );
         out += "<def ix=\"" + std::to_string( k + 1 ) + "\" t=\"" + symTag( s.kind ) + "\"";
-        if( !s.scope.empty() )
-        {
-            out += " sc=\"" + std::string( escapeXml( s.scope, esc ) ) + "\"";
-        }
+        out += s.scope.empty() ? std::string() : " sc=\"" + std::string( escapeXml( s.scope, esc ) ) + "\"";
         out += " p=\"" + std::string( escapeXml( rel, esc ) ) + ":" + std::to_string( s.line ) + "\"";
-        out += groups.bodyless[k] ? " bodyless=\"1\"/>" : "/>";
-    }
+        out += bodyless ? " bodyless=\"1\"/>" : "/>";
+    } );
     return out;
 }
 // The CLI JSON dialect: "def_table":[{"ix","t","sc","p"[,"bodyless"]}] (the XML attribute names); `mcp` spells the MCP row
 // vocabulary instead ({"ix","kind","scope","file","line"[,"bodyless"]}), the keys find_symbol's own rows use.
-inline std::string defTableJson( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix, bool mcp )
+inline std::string defTableJson( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix, bool mcp,
+                                 DefRows when = DefRows::MultiOnly )
 {
-    if( !groups.multi() )
+    if( !defRowsPrint( groups, when ) )
     {
         return {};
     }
-    std::string out = ",\"def_table\":[";
-    for( std::size_t i = 0; i < listing.listed.size(); ++i )
+    std::string out   = ",\"def_table\":[";
+    bool        first = true;
+    forEachDefRow( groups, listing, ing, [ & ]( std::uint32_t k, const Symbol& s, bool bodyless )
     {
-        const std::uint32_t    k   = listing.listed[i];
-        const Symbol&          s   = ing.symbols[ groups.rep[k] ];
         const std::string_view raw = ing.files[ s.fileId ];
         const std::string_view rel = rootPrefix.empty() ? raw : sarif::rootRelativeUri( raw, rootPrefix );
-        out += ( i ? ",{\"ix\":" : "{\"ix\":" ) + std::to_string( k + 1 );
-        out += mcp ? ",\"kind\":\"" : ",\"t\":\"";
-        out += symTag( s.kind );
-        out += '"';
-        if( !s.scope.empty() )
-        {
-            out += ( mcp ? ",\"scope\":\"" : ",\"sc\":\"" ) + jsonStr( s.scope ) + "\"";
-        }
+        out += ( first ? "{\"ix\":" : ",{\"ix\":" ) + std::to_string( k + 1 );
+        first = false;
+        out += ( mcp ? ",\"kind\":\"" : ",\"t\":\"" ) + std::string( symTag( s.kind ) ) + "\"";
+        out += s.scope.empty() ? std::string() : ( mcp ? ",\"scope\":\"" : ",\"sc\":\"" ) + jsonStr( s.scope ) + "\"";
         out += mcp ? ",\"file\":\"" + jsonStr( rel ) + "\",\"line\":" + std::to_string( s.line )
                    : ",\"p\":\"" + jsonStr( rel ) + ":" + std::to_string( s.line ) + "\"";
-        out += groups.bodyless[k] ? ",\"bodyless\":1}" : "}";
-    }
+        out += bodyless ? ",\"bodyless\":1}" : "}";
+    } );
     out += "]";
     if( listing.cut )
     {
@@ -786,36 +831,47 @@ inline std::string defsListedAttrXml( const DefGroups& groups, const DefTableLis
     return ( groups.multi() && listing.cut ) ? " defs_listed=\"" + std::to_string( listing.listed.size() ) + "\"" : std::string();
 }
 
-// An answer's groups once its ties are known: the untied groups (defGroupUntied) no row names are dropped ONLY when that leaves
-// one group — the tmux/ninja prototype + definition answer stays one group with no table. When two or more groups would remain
-// the table is printed anyway, and it claims to list every group defs= forms, so nothing is dropped: each untied declaration
-// is listed (bodyless="1": "another function, or the tie is unproven"), as --edit-check counts it as a contract of its own
-// (final review R1). Dropping: the rest renumbered in order, the tokens rewritten to the new numbers.
-inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
+// BX1 FIX 7: one pass over the matches, because a dropped group's member is exactly the declaration a printed table must still
+// list. ofMatch is renumbered into the kept groups (UINT32_MAX = a silent group's member, no row ties to it), and every match
+// that lands on one is appended to kept.unattributed in match order. Its own function so defGroupsDrop, which only needs
+// the result, does not carry this loop's two decision points on top of its own.
+inline void defGroupsRenumberMatches( const DefGroups& groups, const std::vector<std::uint32_t>& renum, DefGroups& kept )
 {
-    if( !groups.multi() || std::none_of( groups.untied.begin(), groups.untied.end(), []( char c ) { return c != 0; } ) )
+    kept.ofMatch.reserve( groups.ofMatch.size() );
+    for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
     {
-        return;
+        kept.ofMatch.push_back( renum[ groups.ofMatch[i] ] );
+        if( kept.ofMatch.back() == UINT32_MAX )
+        {
+            kept.unattributed.push_back( groups.member[i] );
+        }
     }
+}
+
+// The untied groups (defGroupUntied) no row names, 1 per group: the ones a plain answer leaves unsaid.
+inline std::vector<char> defGroupsSilent( const DefGroups& groups, const RowDefTokens& tokens )
+{
     std::vector<char> named( groups.size(), 0 );
     for( const std::uint32_t t : tokens.tok )
     {
         named[ t >> 2 ] = 1;
     }
-    std::size_t left = 0;
+    std::vector<char> silent( groups.size(), 0 );
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        left += ( groups.untied[k] && !named[k] ) ? 0 : 1;
+        silent[k] = static_cast<char>( groups.untied[k] && !named[k] );
     }
-    if( left >= 2 )
-    {
-        return;   // a table is printed: every group is listed
-    }
+    return silent;
+}
+// Drop the groups marked in `drop`: the rest renumbered in order, the tokens rewritten to the new numbers. No row may name a
+// dropped group.
+inline void defGroupsDrop( DefGroups& groups, RowDefTokens& tokens, const std::vector<char>& drop )
+{
     std::vector<std::uint32_t> renum( groups.size(), UINT32_MAX );
     DefGroups                  kept;
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        if( groups.untied[k] && !named[k] )
+        if( drop[k] )
         {
             continue;
         }
@@ -825,17 +881,33 @@ inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
         kept.primaryOfSpec.push_back( groups.primaryOfSpec[k] );
         kept.untied.push_back( groups.untied[k] );
     }
-    kept.ofMatch.reserve( groups.ofMatch.size() );
-    for( const std::uint32_t g : groups.ofMatch )
-    {
-        kept.ofMatch.push_back( renum[g] );   // UINT32_MAX: a silent group's member (no row ties to it)
-    }
+    defGroupsRenumberMatches( groups, renum, kept );   // BX1 FIX 7: ofMatch renumbered, and the dropped groups' members collected
+    kept.member = std::move( groups.member );   // parallel to ofMatch, which keeps every match (a silent one as UINT32_MAX)
     for( std::uint32_t& t : tokens.tok )
     {
         ASSUME( renum[ t >> 2 ] != UINT32_MAX, "a group a row names is kept" );
         t = ( renum[ t >> 2 ] << 2 ) | ( t & 3u );
     }
     groups = std::move( kept );
+}
+// An answer's groups once its ties are known: the silent groups (defGroupsSilent) are dropped ONLY when that leaves one
+// group — the tmux/ninja prototype + definition answer stays one group with no table. When two or more groups would remain
+// the table is printed anyway, and it claims to list every group defs= forms, so nothing is dropped: each untied declaration
+// is listed (bodyless="1": "another function, or the tie is unproven"), as --edit-check counts it as a contract of its own
+// (final review R1). With no untied group nothing is silent, so a multi-group answer keeps all of its two or more.
+inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
+{
+    if( !groups.multi() )
+    {
+        return;
+    }
+    const std::vector<char> silent    = defGroupsSilent( groups, tokens );
+    const auto              remaining = std::count( silent.begin(), silent.end(), 0 );
+    if( remaining >= 2 )
+    {
+        return;   // a table is printed: every group is listed
+    }
+    defGroupsDrop( groups, tokens, silent );
 }
 
 // ── one answer's attribution, computed once ──────────────────────────────────────────────────────────────────────────
@@ -846,11 +918,59 @@ struct OneHopAttribution
     DefGroups         groups;
     RowDefTokens      tokens;   // parallel to the rows; empty when nothing was computed
     std::vector<char> impl;     // lane L6: parallel to the rows, 1 = every edge joining the row to the matches is via="impl"; empty when none is
+    // BX1 FIX 2 (callhierarchy.h macroSeeThroughRows): parallel to the rows, the function-like macro a see-through caller row
+    // invokes (its via="macro:NAME"), kNoNode on a direct row; empty when the answer has none, so it keeps its bytes
+    std::vector<NodeId> macro;
 
-    bool nameOnly( std::size_t row ) const noexcept { return tokens.strongest( row ) == DefMark::Name; }   // None when none recorded
-    bool splitArm( std::size_t row ) const noexcept { return rowSplitArm( groups, tokens, row ); }
-    bool viaImpl( std::size_t row ) const noexcept { return row < impl.size() && impl[ row ] != 0; }
+    bool   nameOnly( std::size_t row ) const noexcept { return tokens.strongest( row ) == DefMark::Name; }   // None when none recorded
+    bool   splitArm( std::size_t row ) const noexcept { return rowSplitArm( groups, tokens, row ); }
+    bool   viaImpl( std::size_t row ) const noexcept { return row < impl.size() && impl[ row ] != 0; }
+    NodeId viaMacro( std::size_t row ) const noexcept
+    {
+        if( macro.empty() )
+        {
+            return kNoNode;   // the common answer: no see-through row
+        }
+        EXPECTS( row < macro.size(), "macro is parallel to the rows once any row is a see-through row" );
+        return macro[ row ];
+    }
 };
+// BX1 FIX 2: a see-through row has no edge to the matches — it reaches them through the macro row it invokes — so it carries
+// that macro row's ties (of_def, the ~n/~s marks), followed down a chain of macros to the direct macro row. `viaMacro` is
+// parallel to `rows` (kNoNode on a direct row); every macro it names is an earlier row (macroSeeThroughRows appends a row
+// only after the macro it invokes). Returns `tokens` unchanged when no row is a see-through row or none was computed.
+inline RowDefTokens inheritMacroRowTies( const RowDefTokens& tokens, std::span<const NodeId> rows, std::span<const NodeId> viaMacro )
+{
+    if( tokens.empty() || viaMacro.size() != rows.size() )
+    {
+        return tokens;
+    }
+    HashMap<NodeId, std::size_t> rowOf;
+    rowOf.reserve( rows.size() );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        rowOf.emplace( rows[i], i );
+    }
+    RowDefTokens out;
+    out.off.push_back( 0 );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        std::size_t src = i;
+        for( std::size_t hop = 0; hop < rows.size() && viaMacro[src] != kNoNode; ++hop )
+        {
+            const auto it = rowOf.find( viaMacro[src] );
+            if( it == rowOf.end() )
+            {
+                break;   // the macro is not a row: no tie to inherit (never reached: macroSeeThroughRows lists it first)
+            }
+            src = it->second;
+        }
+        const std::span<const std::uint32_t> ties = tokens.of( src );
+        out.tok.insert( out.tok.end(), ties.begin(), ties.end() );
+        out.off.push_back( std::uint32_t( out.tok.size() ) );
+    }
+    return out;
+}
 // lane L6: per row, whether every edge joining it to the matches (row → match toward the matches, match → row away) is the
 // one-implementor edge (graph.h kProvImpl); empty when no row's is, so an answer without one keeps its bytes
 inline std::vector<char> rowsViaImpl( const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> rows, bool towardMatches )
@@ -884,16 +1004,17 @@ inline std::vector<char> rowsViaImpl( const Graph& g, std::span<const NodeId> ma
     return out;
 }
 inline OneHopAttribution attributeOneHopAnswer( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches,
-                                                std::span<const NodeId> rows, bool towardMatches )
+                                                std::span<const NodeId> rows, bool towardMatches, std::span<const NodeId> viaMacro = {} )
 {
     OneHopAttribution out;
     out.groups = defGroupsOf( ing, matches );
     if( out.groups.multi() || !g.outProv.empty() || !g.outNameOnly.empty() )
     {
-        out.tokens = attributeOneHop( g, out.groups, matches, rows, towardMatches );
+        out.tokens = inheritMacroRowTies( attributeOneHop( g, out.groups, matches, rows, towardMatches ), rows, viaMacro );   // BX1 FIX 2
         defGroupsDropSilent( out.groups, out.tokens );
     }
-    out.impl = rowsViaImpl( g, matches, rows, towardMatches );
+    out.impl  = rowsViaImpl( g, matches, rows, towardMatches );
+    out.macro.assign( viaMacro.begin(), viaMacro.end() );
     return out;
 }
 
@@ -965,6 +1086,32 @@ inline void attachRollupOfDef( RollupT& rollup, const IngestResult& ing, const R
         rollup.rows[i].ofDefXml  = ofDefAttrXml( a.groups, fileTok, i );
         rollup.rows[i].ofDefJson = ofDefKeyJson( a.groups, fileTok, i );
     }
+}
+
+// VERB-DEF-ROWS (lane v1-verbdef, test/verbdefrowscheck.sh): the --uses answer's <def> table, built once for the CLI arm and
+// its MCP twin. --uses names no group on a row (its rows are use-sites), so no untied declaration is ever named: those drop
+// exactly as a one-group 1-hop answer drops them, and above the 16-group cap the listing is empty and defs_listed="0" says so.
+struct UsesDefTable
+{
+    std::string rows;         // the <def> rows (empty when the selector resolved no definition, or above the cap)
+    std::string listedAttr;   // " defs_listed=\"0\"" above the cap, else empty
+    std::string legend;       // the full-dialect clause, exactly when a row or defs_listed= rides
+};
+inline UsesDefTable usesDefTable( const IngestResult& ing, std::span<const NodeId> defs, std::string_view rootPrefix )
+{
+    UsesDefTable out;
+    DefGroups    groups = defGroupsOf( ing, defs );
+    RowDefTokens none;
+    defGroupsDropSilent( groups, none );
+    const DefTableListing listing = defTableListing( groups, std::vector<char>{} );
+    out.rows       = defTableXml( ing, groups, listing, rootPrefix, DefRows::SoleToo );
+    out.listedAttr = defsListedAttrXml( groups, listing );
+    if( !out.rows.empty() || !out.listedAttr.empty() )
+    {
+        out.legend = defTableLegend( { .table = groups.multi(), .cut = listing.cut, .sole = groups.size() == 1, .rows = DefLegendFor::UseSites } )
+                   + untiedDeclLegend( !groups.unattributed.empty() );   // BX1 FIX 7
+    }
+    return out;
 }
 
 // ── --path endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────

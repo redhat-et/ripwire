@@ -130,7 +130,27 @@ namespace mcpdetail
     // the first source file to a previously file-less directory is detected — creating the file bumps its
     // own dir's mtime, and creating a brand-new subdir bumps its (already-tracked) parent's mtime, so every
     // add/delete bubbles into a watched dir. Errors degrade: an unreadable subtree is simply not watched.
-    inline void collectDirMtimes( const std::string& root, HashMap<std::string, long long>& dirMtime )
+    //
+    // M1: the crawl now CRAWLS a build-output-named dir (build/dist/out/target) that git tracks files under, so the name
+    // alone no longer means "nothing indexed lives here". `indexed` (the index this watch-list belongs to) keeps such a dir
+    // watched when an indexed file sits under it — the crawl's own decision, read back from its answer rather than
+    // re-asking git on every rebuild. A linear scan, paid only for a dir that carries one of the four names. The residual,
+    // stated: a tracked build-output dir holding NO indexed file stays unwatched, so its first source file is seen only at
+    // the next rebuild something else forces.
+    inline bool holdsIndexedFile( const IngestResult* indexed, const std::string& dir )
+    {
+        const std::string prefix = dir + "/";
+        for( std::uint32_t i = 0; indexed != nullptr && i < indexed->files.size(); ++i )
+        {
+            if( diskPath( *indexed, i ).starts_with( prefix ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    inline void collectDirMtimes( const std::string& root, HashMap<std::string, long long>& dirMtime, const IngestResult* indexed = nullptr )
     {
         namespace fs = std::filesystem;
         dirMtime.try_emplace( root, mtimeOf( root ) );
@@ -166,6 +186,10 @@ namespace mcpdetail
             if( !skip && dn.size() > 12 && dn.compare( 0, 12, "cmake-build-" ) == 0 )
             {
                 skip = true;
+            }
+            if( skip && isTrackedBuildOutputName( dn ) && holdsIndexedFile( indexed, it->path().string() ) )
+            {
+                skip = false;   // M1: the crawl indexed files under this tracked build-output dir — watch it (header)
             }
             if( !skip )
             {
@@ -356,9 +380,7 @@ namespace mcpdetail
     // FNV-1a 64 over a byte range — the per-file content fingerprint the EDIT verbs verify against.
     inline std::uint64_t byteHash( const char* data, std::size_t n ) noexcept
     {
-        std::uint64_t h = 14695981039346656037ull;
-        for( std::size_t i = 0; i < n; ++i ) { h ^= static_cast<unsigned char>( data[i] ); h = hashutil::fnv1aMultiply( h ); }
-        return h;
+        return hashutil::fnv1a64( std::string_view( data, n ) );
     }
 
     // FNV-1a 64 over a std::string — the same hash the handle system uses for the STABLE identity part.
@@ -467,7 +489,7 @@ namespace mcpdetail
                                            const std::vector<long long>&      fileMtime,
                                            const std::vector<std::uint64_t>&  fileByteHash )
     {
-        std::uint64_t h = 14695981039346656037ull;
+        std::uint64_t h = hashutil::kFnv1aOffset64;
         const auto mix = [ &h ]( const void* data, std::size_t n ) noexcept
         {
             const unsigned char* b = static_cast<const unsigned char*>( data );
@@ -609,7 +631,7 @@ inline std::string mcpCachePath( const std::string& root )
 // requires: a clean tree's stamp/rank must equal a non-git root's.
 inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 {
-    std::uint64_t          h = 14695981039346656037ull;
+    std::uint64_t          h = hashutil::kFnv1aOffset64;
     std::vector<std::uint32_t> ids;
     for( std::uint32_t f = 0; f < changed.size(); ++f )
     {
@@ -1086,7 +1108,7 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
         gitDir = gd;
     }
 
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto fold = [ &h ]( const std::string& path )
     {
         // (mtime, size) only, and ctime DELIBERATELY not folded: this is a "did git move HEAD" stamp, not a
@@ -1370,12 +1392,12 @@ inline const McpIndex& getIndex( const std::string& root )
     {
         for( const WorkspaceRoot& r : wsIt->second )
         {
-            mcpdetail::collectDirMtimes( r.arg, ix.dirMtime );
+            mcpdetail::collectDirMtimes( r.arg, ix.dirMtime, &ix.ing );   // M1: see collectDirMtimes
         }
     }
     else
     {
-        mcpdetail::collectDirMtimes( root, ix.dirMtime );
+        mcpdetail::collectDirMtimes( root, ix.dirMtime, &ix.ing );
     }
 
     // Feature 1: (re-)arm the FS-event watcher over the freshly-collected dir set. The rebuild we just did IS

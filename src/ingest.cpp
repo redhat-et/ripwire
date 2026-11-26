@@ -21,6 +21,7 @@
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
+#include "infra/tspredicates.h" // rw::passesStringPredicates — the tags pass evaluates #eq?/#any-of?/#not-any-of? (#355); --match/--lint share the walk
 #include "infra/ownedfile.h"   // rw::OwnedFile — readFile/readFilePrefix own their stream, so no return path skips the close
 #include "infra/statclock.h"   // rw::saturatingNanoseconds — statSizeTimes' stat timestamps without signed overflow past 2262
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
@@ -212,6 +213,7 @@ extern "C"
 #include "ingest_valuerefs.h"
 #include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
+#include "ingest_rustmacroargs.h"   // RUST-MACRO-ARGS: the calls written inside a Rust macro invocation's arguments
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
 #include "ingest_docpass.h"
@@ -373,7 +375,7 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
     snap.treeKeyValid = true;
     if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )   // the parse pool's line, for the run it did not have to make
     {
-        rw::emitTo( stderr, "ripwire: cache-stats reparsed=0 reused={} files={} cached_records={} blob_entries={} warm_growths=0\n", result.files.size(), result.files.size(),
+        rw::emitTo( stderr, "ripwire: cache-stats reparsed=0 reused={} files={} cached_records={} blob_entries={} warm_growths=0 parse_threads=0\n", result.files.size(), result.files.size(),
                     blob.cachedRecords, blob.blobEntries );
     }
     return true;
@@ -450,8 +452,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         snap->blobPath   = std::string( cacheFile );
         snap->startNs    = wallClockNs();
         snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
-        snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
-                                                   kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits );
+        snap->optionsKey = warmsnap::viewKeyOf( warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
+                                                                        kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits,
+                                                                        tlCrawlTreeAllTracked ),
+                                                snap->ignoreTests );
         if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses ) )
         {
             snap->path = warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId );
@@ -713,3 +717,6 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 // The --match/--lint tail: rw-level query services, a SECTION of this same TU (see the split note
 // at the top). Included last, exactly where its content sat before the 2026-08-29 split.
 #include "ingest_astquery.h"
+// rw::wrappedDeclStart (declwrap.h): where a declaration starts, wrapper prefix included. After ingest_astquery.h: it asks
+// sliceGrammarForFile for the grammar.
+#include "ingest_declwrap.h"

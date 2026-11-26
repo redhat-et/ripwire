@@ -293,7 +293,11 @@ if seen == len( FIXTURES ):
 # is "a number that is printed but not checked". If you add a row, force the gate to fail and read the
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
+    "routingcheck.sh":         ( "its arms accumulate inside one exec'd python3 heredoc (fail, sys.exit(fail)), so the heredoc's rc IS the script's. rc READ, not inferred: run against main d847bd3f3 (no file_gap_pct=, no edit-form default: 7 arms red) it exits 1 (2026-11-25)", 1 ),
+    "tailsymtermscheck.sh":    ( "its arms accumulate inside one TRAILING python3 heredoc (sys.exit(1 if fails)); its rc IS the script's. rc READ, not inferred: run against the pre-lane main binary (no tsym=, 7 arms fail) and against /usr/bin/true (every run empty), it exits 1 both times (2026-11-14)", 1 ),
     "bodilessseedcheck.sh":    ( "its arms accumulate inside one embedded Python block (sys.exit(1 if nfail)), the script's last command. rc READ, not inferred: run against main d624cff5f (no impls=, 16 arms red) and a stub binary that exits 3, it exits 1 both times (2026-11-14)", 1 ),
+    "tiercallerscheck.sh":     ( "its arms accumulate inside one embedded Python block (fail[0], sys.exit(fail[0])), the script's last command, so the shell exits on its status. rc READ, not inferred: run against the parent lane binary 36bbc660b (lane/impact-test-tier, 13 arms red) it exits 1 (2026-11-15)", 1 ),
+    "impactfirstwindowcheck.sh": ( "its arms accumulate inside one embedded Python block (fail[0], sys.exit(fail[0])), the script's last command, so the shell exits on its status. rc READ, not inferred: run against the pre-lane base binary 2f5561c26 (arms 1 and 4 red) and against /usr/bin/true (every answer empty), it exits 1 both times (2026-11-19)", 1 ),
     "impacttesttiercheck.sh":  ( "its arms accumulate inside one embedded Python block (fail[0], sys.exit(fail[0])), the script's last command, so the shell exits on its status. rc READ, not inferred: run against the pre-lane main binary 67b08d46b (10 arms red) it exits 1 (2026-11-15)", 1 ),
     "hopcontextcheck.sh":      ( "its checks accumulate inside one embedded Python block (sys.exit(1 if fails)); the shell then exits 1 on its status. rc READ, not inferred: run against the pre-lane base binary (no hop attributes) and a crashing stub, it exits 1 both times (2026-11-04)", 1 ),
     "elixirsemanticcheck.sh":  ( "set -e and Python assertions; missing protocol and branch-scope probes observed exit 1", 1 ),
@@ -314,8 +318,11 @@ FAILFAST = {
     "lintprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "mcpattrparitycheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED by breaking one RENAME entry, rc read, not inferred", 1 ),
     "mcpcontractcheck.sh":      ( "python3 heredoc's rc captured into `rc`, propagated by a brace group", 1 ),
+    "headleakcheck.sh":         ( "python3 heredoc's rc captured into `rc` and re-exited as 0/1; FORCED on the pre-fix binary (7 FAIL lines) and on two adversary builds, rc 1 read, not inferred", 1 ),
+    "nextaposcheck.sh":         ( "python3 heredoc's rc captured into `rc` and re-exited as 0/1; FORCED on the main binary (19 FAIL lines), rc 1 read, not inferred", 1 ),
     "mcptwinclaimscheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED on the pre-fix binary (6 checks fail), rc read, not inferred", 1 ),
     "mcpmanifestcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED by appending a bogus routing-sentence pin, rc read, not inferred", 1 ),
+    "mcplisttrimcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED on the pre-trim base binary 82ed4c8bf (ceiling arm (2) fails), rc 1 read, not inferred", 1 ),
     # type3clonecheck.sh was pinned here until 2026-08-11, when its PART 2 (clone grouping + duplication
     # %) gained a real accumulator (`p2fail`) so every drifted attribute is named in one run instead of
     # only the first. PART 1's cap_run arms are still fail-fast, but arm (B) now reaches the terminal
@@ -338,6 +345,11 @@ FAILFAST = {
     "forsizetrimcheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary (5 FAIL), a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
     "fortailfoldcheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary, a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
     "fortailwidecheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary (11 FAIL), a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
+    "forroutepagecheck.sh":     ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against RL1's parent binary a0c020bb6 (5 arms red) and against /usr/bin/true (every answer empty), it exits 1 both times (2026-11-21)", 1 ),
+    "lintordercheck.sh":        ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against the pre-CL1/LT1 train binary 9bef85af8 (34 FAIL lines) and against /usr/bin/true, it exits 1 both times (2026-11-22)", 1 ),
+    "outputceilingcheck.sh":    ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against the pre-CL1 train binary 9bef85af8 (19 FAIL lines) and against /usr/bin/true, it exits 1 both times (2026-11-22)", 1 ),
+    "mcpforroutepagecheck.sh":  ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against the base binary 36a95d732 (6 arms red) it exits 1 (MR1, 2026-11-21)", 1 ),
+    "mcpforrowscheck.sh":       ( "its arms accumulate inside one trailing embedded Python block (bad, sys.exit(1 if bad else 0)), the script's last command. rc READ, not inferred: run against the base binary 36a95d732 (25 arms red) it exits 1 (MR1, 2026-11-21)", 1 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────
@@ -723,9 +735,31 @@ PY
 #   H0  the PREMISE: every gate in which a grep sees the binary variable ("$" + "BIN") in command position yields at least one call to the
 #       matcher (a blind parser would pass H1/H2 on nothing), and the planted controls below are classified as
 #       the CodeRabbit shapes they reproduce.
-python3 - "$ROOT" <<'PY' || fail=1
-import glob, os, re, sys
+#   H4  ONE MATCHER, TWO HOSTS: src/shstatus.h is this matcher's C++ port, the one the --quality-delta defect-shape
+#       vacuous-assert facet reads inside the binary. test/shstatus_harness.cpp prints the port's calls in this
+#       matcher's CLI format; every gate's rows must be identical (line, verdict, how, command), and the arm counts the
+#       rows it compared and fails on zero. A change to either copy lands with the other, or this arm reds. With no C++
+#       front end on the runner the arm SKIPs, saying so (it compiles the header alone, no CMake flags).
+SHH=""
+SHHDIR="$( mktemp -d )"
+. "$ROOT/scripts/cxxstd.sh"
+SHCXX="${CXX:-c++}"
+if command -v "$SHCXX" >/dev/null 2>&1; then
+    # diagnostics.cpp supplies Diagnostics::ConsoleLog::handleAssert for shstatus.h's ASSUME (UnguardedSkip): linked as every
+    # other standalone harness links it (columnarcommacheck, clonepersistcheck)
+    if "$SHCXX" "$( ripwire_cxx_std_flag "$SHCXX" )" -O1 -I"$ROOT/src" -I"$ROOT/src/infra" "$ROOT/test/shstatus_harness.cpp" \
+        "$ROOT/src/infra/diagnostics.cpp" -o "$SHHDIR/shh" 2>"$SHHDIR/cc.log"; then
+        SHH="$SHHDIR/shh"
+    else
+        no "(H4) test/shstatus_harness.cpp did not compile with $SHCXX: $( head -c 600 "$SHHDIR/cc.log" )"
+    fi
+else
+    echo "  SKIP  (H4) no C++ front end ($SHCXX): the src/shstatus.h port is not compared with this matcher on this runner"
+fi
+python3 - "$ROOT" "$SHH" <<'PY' || fail=1
+import glob, os, re, subprocess, sys
 ROOT = sys.argv[1]
+SHH = sys.argv[2] if len( sys.argv ) > 2 else ""
 sys.path.insert( 0, os.path.join( ROOT, "test", "lib" ) )
 import exitstatus as es
 
@@ -796,6 +830,11 @@ PLANT = {
     "h3_twin":      ( 'run(){ ( cd "$T" && @BIN@ . "$@" ); }\nrunoff(){ ( cd "$T" && "${OFF[@]}" @BIN@ . "$@" ); }\n'
                       'run --token-budget=9 > b.xml; runoff --token-budget=9 > b.off\n[ "$( rk b.xml )" -ge "$( rk b.off )" ] && ok b || no b\n',
                       [ ( 3, "unchecked" ), ( 3, "unchecked" ) ] ),
+    # (QD-VA-FORMS) a single quote inside "$( … )" is a live quote: '<r ' stays one word, so the next statement's
+    # rc=$? is read and compared (jsverbscheck:42 read as unchecked while the quotes were blanked), and a quoted
+    # `./build/ripwire` pattern word is no call (argvdiffcheck:258)
+    "h2_dq_quote":  ( 'G="$( @BIN@ . --x=\'callees(name("a"),2)\' )"\nRC=$?\n[ $RC -eq 0 ] || no rc\n'
+                      'R="$( grep -oE \'^## `\\./build/ripwire [^`]*\' f )"\n', [ ( 1, "checked" ) ] ),
 }
 BINVAR = "$" + "BIN"
 PLANT = { k: ( src.replace( "@BIN@", '"%s"' % BINVAR ), want ) for k, ( src, want ) in PLANT.items() }
@@ -806,7 +845,7 @@ for name, ( src, want ) in PLANT.items():
         ctl_bad += 1
         no( "(H0 control) planted %s: the matcher says %s, the shape is %s -- H1/H2 below cannot be trusted" % ( name, got, want ) )
 if not ctl_bad:
-    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the six checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
+    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the seven checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
 
 gates = sorted( glob.glob( os.path.join( ROOT, "test", "*.sh" ) ) )
 CMDPOS = re.compile( r'(?:^\s*|[;&|(]\s*|\$\(\s*|\bthen\s+|\bdo\s+|\belse\s+)(?:[A-Z_]+=\S*\s+)*"\$' r'BIN"\s' )
@@ -875,8 +914,39 @@ unch = [ ( n, c ) for n, c in bin_calls if c.verdict == "unchecked" ]
 print( "  INFO  (H3) census, not gated: %d of %d ripwire / wrapper calls in %d gates test no status (%d gates test none); the rule for these is diff-scoped"
        % ( len( unch ), len( bin_calls ), len( { n for n, _c in unch } ),
            sum( 1 for n, v in calls.items() if v and not any( c.verdict == "checked" for c in v ) ) ) )
+
+# H4: the C++ port classifies every call of every gate exactly as this matcher does
+if SHH:
+    want = []
+    for p in gates:
+        for c in calls[os.path.basename( p )]:
+            want.append( "%s:%d\t%s\t%s\t%s" % ( p, c.line, c.verdict, c.how, c.cmd ) )
+    for name, ( src, _w ) in sorted( PLANT.items() ):   # the planted shapes, through the same CLI format
+        path = os.path.join( os.environ.get( "TMPDIR", "/tmp" ), "gateexit_h4_%d_%s.sh" % ( os.getpid(), name ) )
+        open( path, "w" ).write( src )
+        for c in es.scan( src ):
+            want.append( "%s:%d\t%s\t%s\t%s" % ( path, c.line, c.verdict, c.how, c.cmd ) )
+    planted = sorted( os.path.join( os.environ.get( "TMPDIR", "/tmp" ), "gateexit_h4_%d_%s.sh" % ( os.getpid(), n ) ) for n in PLANT )
+    r = subprocess.run( [ SHH ] + gates + planted, capture_output=True, text=True, errors="surrogateescape" )
+    for p in planted:
+        try: os.remove( p )
+        except OSError: pass
+    got = r.stdout.splitlines()
+    if r.returncode != 0:
+        no( "(H4) the src/shstatus.h harness exited %d: %s" % ( r.returncode, r.stderr[:300] ) )
+    elif not want:
+        no( "(H4) premise: this matcher reported no call on %d gates -- nothing to compare" % len( gates ) )
+    elif got != want:
+        ws, gs = set( want ), set( got )
+        only_py = [ x for x in want if x not in gs ]; only_cc = [ x for x in got if x not in ws ]
+        for x in only_py[:6]: no( "(H4) exitstatus.py only: %s" % x )
+        for x in only_cc[:6]: no( "(H4) src/shstatus.h only: %s" % x )
+        if not only_py and not only_cc: no( "(H4) same rows, different order (%d rows)" % len( want ) )
+    else:
+        ok( "(H4) src/shstatus.h and test/lib/exitstatus.py agree on all %d calls in %d gates and %d planted shapes" % ( len( want ), len( gates ), len( PLANT ) ) )
 sys.exit( bad )
 PY
+rm -rf "$SHHDIR"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

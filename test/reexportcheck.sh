@@ -45,6 +45,9 @@
 #
 # Usage: bash test/reexportcheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -116,8 +119,25 @@ if grep -q '<reexports>' "$TMP/n1.xml"; then no "N1 no code-shaped name: no bloc
 ask --json "--for=where Boom used in main.rs is defined" >"$TMP/n2.json"
 if grep -q 'reexports' "$TMP/n2.json"; then no "N1 --json carries no block"; else ok "N1 --json carries no block"; fi
 ( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache "--for=where Boom used in main.rs is defined" </dev/null 2>/dev/null ) >"$TMP/off.xml"
-sed 's|<reexports>.*</reexports>||' "$TMP/r1.xml" >"$TMP/r1.stripped"
-if cmp -s "$TMP/off.xml" "$TMP/r1.stripped"; then ok "N1 the off switch removes exactly the block"; else no "N1 the off switch changed more than the block"; fi
+# AF2 A (built by AF1, 2026-11-18): the answer-first default lifts the comments that are DIRECT CHILDREN of <reexports> into the
+# trailing document legend, so "exactly the block" is the block plus those notes wherever they now sit. They are read off the
+# legend-first twin (inside its <reexports>), each removed once; nothing else may differ.
+ask --legend=first "--for=where Boom used in main.rs is defined" >"$TMP/r1.first.xml"
+python3 - "$TMP/r1.xml" "$TMP/r1.first.xml" >"$TMP/r1.stripped" <<'PY_N1'
+import re, sys
+s, first = ( open( p, encoding="utf-8" ).read() for p in sys.argv[ 1:3 ] )
+b = re.search( r"<reexports>(.*)</reexports>", first, re.S )
+kids, depth = [], 0
+for t in re.finditer( r"<!--.*?-->|<(/?)[A-Za-z_][\w-]*[^>]*?(/?)>", b.group( 1 ) if b else "", re.S ):
+    if t.group( 0 ).startswith( "<!--" ):
+        if depth == 0: kids.append( t.group( 0 ) )
+    elif t.group( 1 ): depth -= 1
+    elif not t.group( 2 ): depth += 1
+s = re.sub( r"<reexports>.*</reexports>", "", s, flags=re.S )
+for c in kids: s = s.replace( c, "", 1 )
+sys.stdout.write( s )
+PY_N1
+if cmp -s "$TMP/off.xml" "$TMP/r1.stripped"; then ok "N1 the off switch removes exactly the block (and the block's own notes A lifted into the legend)"; else no "N1 the off switch changed more than the block"; fi
 # ── fix round 1: the Rust module-identity guards (fixture test/reexportfix2) ────────────────────────────────────────────
 FIX2="$ROOT/test/reexportfix2"
 ask2(){ ( cd "$FIX2" || exit 1; HOME="$TMP" "$BIN" "$FIX2" --no-cache "$@" </dev/null 2>/dev/null ); }

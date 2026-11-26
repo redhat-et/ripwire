@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # The version string lives in exactly ONE place — this project() call. --version (main.cpp)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
-project(ripwire VERSION 0.6.10 LANGUAGES C CXX)
+project(ripwire VERSION 0.7.0 LANGUAGES C CXX)
 
 # ---- language standards (C++23 for our own code / C11 for the vendored C dependencies) ----
 set(CMAKE_CXX_STANDARD 23)
@@ -748,6 +748,47 @@ target_include_directories(ripwire PRIVATE
   src)
 add_dependencies(ripwire ripwire_version_stamp ripwire_source_identity)
 
+# ---- the BUILD KEY: which compilation of the sources this binary is (src/buildkey.h) ----
+# The producer identity above names the SOURCES, and is the same for a dev and a Release build of one tree. The warm
+# snapshot (src/warmsnap.h) stores floats those builds compute — the ranks, the prior weights, the in-edge CSR values —
+# under -ffast-math everywhere but pagerank.cpp, and LTO and -O3 decide where a*b+c is contracted to an fma. Nothing
+# promises the two produce the same bits, so a snapshot one wrote must not be served to the other. The key digests
+# everything here that changes code generation: the compiler and its version, the target, the build type, LTO, PGO
+# (and the profile's bytes), and every compile, link and per-configuration flag. It is computed once, after every
+# add_compile_options above, and reaches only the two targets that read it. $<CONFIG> rides beside it for a
+# multi-config generator, where the configuration is picked at build time.
+set(_ripwire_build_profile_sha "")
+if(RIPWIRE_PGO_PROFILE AND EXISTS "${RIPWIRE_PGO_PROFILE}")
+  file(SHA256 "${RIPWIRE_PGO_PROFILE}" _ripwire_build_profile_sha)
+  # the compiler reads the profile at every compile; a profile rewritten in place must re-run this hash, not keep the old one
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RIPWIRE_PGO_PROFILE}")
+endif()
+get_directory_property(_ripwire_build_copts COMPILE_OPTIONS)
+get_directory_property(_ripwire_build_cdefs COMPILE_DEFINITIONS)
+get_directory_property(_ripwire_build_lopts LINK_OPTIONS)
+set(_ripwire_build_descriptor
+  "${CMAKE_CXX_COMPILER_ID}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_CXX_COMPILER_TARGET}|${CMAKE_SYSTEM_NAME}|${CMAKE_SYSTEM_PROCESSOR}"
+  "${CMAKE_OSX_ARCHITECTURES}|${CMAKE_OSX_DEPLOYMENT_TARGET}|${CMAKE_BUILD_TYPE}|lto=${RIPWIRE_LTO}|ipo=${CMAKE_INTERPROCEDURAL_OPTIMIZATION}"
+  "pgo=${RIPWIRE_PGO}|${_ripwire_build_profile_sha}|native=${RIPWIRE_NATIVE}|asan=${RIPWIRE_ASAN}|tsan=${RIPWIRE_TSAN}"
+  "copts=${_ripwire_build_copts}|cdefs=${_ripwire_build_cdefs}|lopts=${_ripwire_build_lopts}|${CMAKE_CXX_FLAGS}|${CMAKE_EXE_LINKER_FLAGS}")
+# every configuration's own compile and executable-link flags, the four standard ones and any custom one named
+set(_ripwire_build_configs DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+foreach(_ripwire_build_cfg IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+  string(TOUPPER "${_ripwire_build_cfg}" _ripwire_build_cfg)
+  list(APPEND _ripwire_build_configs "${_ripwire_build_cfg}")
+endforeach()
+list(REMOVE_DUPLICATES _ripwire_build_configs)
+foreach(_ripwire_build_cfg IN LISTS _ripwire_build_configs)
+  list(APPEND _ripwire_build_descriptor
+    "${_ripwire_build_cfg}:cxx=${CMAKE_CXX_FLAGS_${_ripwire_build_cfg}}|exe=${CMAKE_EXE_LINKER_FLAGS_${_ripwire_build_cfg}}")
+endforeach()
+string(SHA256 _ripwire_build_key "${_ripwire_build_descriptor}")
+string(SUBSTRING "${_ripwire_build_key}" 0 16 _ripwire_build_key)
+foreach(_ripwire_build_target ripwire ripwire_probe)
+  target_compile_definitions(${_ripwire_build_target} PRIVATE
+    "RIPWIRE_BUILD_KEY=\"${_ripwire_build_key}\"" "RIPWIRE_BUILD_CONFIG=\"$<CONFIG>\"")
+endforeach()
+
 # ---- small-vector A/B knobs (bench/svectorab.py drives both; see bench/SVECTORAB.md) ----
 # RIPWIRE_SMALLVEC selects which container src/smallvec.h's `rw::SmallVec` alias resolves to:
 #   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)
@@ -774,19 +815,26 @@ endif()
 # zone keeps freed large blocks resident (the file says why). Never beside a sanitizer (they own operator new) or
 # RIPWIRE_ALLOC_COUNT (which replaces the same functions); the toolchain's own LTO and strip are unaffected.
 option(RIPWIRE_LARGE_ALLOC "macOS: route large operator new through mmap so freed blocks leave the footprint" ON)
-if(RIPWIRE_LARGE_ALLOC AND APPLE AND NOT RIPWIRE_ALLOC_COUNT)
-  # the global flags and every configuration's own (CMAKE_CXX_FLAGS_<CONFIG> is spelled upper-case): a sanitizer in any of them keeps the route out
-  set(_ripwire_effective_flags "${CMAKE_CXX_FLAGS}")
-  foreach(_ripwire_config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
-    string(TOUPPER "${_ripwire_config}" _ripwire_config_upper)
-    string(APPEND _ripwire_effective_flags " ${CMAKE_CXX_FLAGS_${_ripwire_config_upper}}")
-  endforeach()
-  string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${_ripwire_effective_flags}")
-  if(NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
+# The memory ceiling (src/memceiling.h, on by default) reads the footprint inside operator new, so exactly ONE translation unit
+# that replaces the global allocation functions is linked: largealloc.cpp on macOS (it calls the ceiling's hook), else
+# memceiling_new.cpp (malloc/free plus the hook). Neither beside a sanitizer (they own operator new) or RIPWIRE_ALLOC_COUNT;
+# such a build leaves the ceiling disarmed (memguard's own readings still apply), and RIPWIRE_MEM_CEILING_HOOK stays undefined.
+# the global flags and every configuration's own (CMAKE_CXX_FLAGS_<CONFIG> is spelled upper-case): a sanitizer in any of them keeps both out
+set(_ripwire_effective_flags "${CMAKE_CXX_FLAGS}")
+foreach(_ripwire_config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+  string(TOUPPER "${_ripwire_config}" _ripwire_config_upper)
+  string(APPEND _ripwire_effective_flags " ${CMAKE_CXX_FLAGS_${_ripwire_config_upper}}")
+endforeach()
+string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${_ripwire_effective_flags}")
+if(NOT RIPWIRE_ALLOC_COUNT AND NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
+  if(RIPWIRE_LARGE_ALLOC AND APPLE)
     target_sources(ripwire PRIVATE src/largealloc.cpp)
     # memguard.h reads the real peak for its overshoot disclosure only in a build that routes (freed blocks leave the reading)
     target_compile_definitions(ripwire PRIVATE RIPWIRE_LARGE_ALLOC_LINKED)
+  else()
+    target_sources(ripwire PRIVATE src/memceiling_new.cpp)
   endif()
+  target_compile_definitions(ripwire PRIVATE RIPWIRE_MEM_CEILING_HOOK)
 endif()
 
 # ---- global install: `cmake --install build --prefix /opt/homebrew --component ripwire` (see install.sh) ----

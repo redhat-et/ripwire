@@ -323,7 +323,7 @@ mcp_text "$( call owners '{"path":"'"$ROOT"'"}' )" | grep -q "two different thin
     || no "M12: the owners depth collision is still shipped undefused on the MCP arm"
 mcp_text "$( call grep '{"path":"'"$ROOT"'","pattern":"pageDisclosure"}' )" >"$TMP/grep.json"
 GREP_CLI_FILES="$( "$BIN" "$ROOT" --grep=pageDisclosure 2>/dev/null | tr '<' '\n' | grep '^grep ' | head -1 \
-                   | sed -n 's/.*files="\([0-9]*\)".*/\1/p' )"
+                   | sed -n 's/.* files="\([0-9]*\)".*/\1/p' )"   # " files=" whole-word: BX2 FIX 6's held_files= also ends in files= (INT1)
 python3 - "$TMP/grep.json" "$GREP_CLI_FILES" <<'PY' >"$TMP/grep.res" 2>&1
 import sys, json
 j = json.load(open(sys.argv[1])); want = sys.argv[2]

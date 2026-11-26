@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 
 #include <algorithm>
 #include <string>
@@ -103,8 +104,7 @@ struct ElixirResolver
         }
         for( auto& [ name, nodes ] : functions )
         {
-            std::sort( nodes.begin(), nodes.end() );
-            nodes.erase( std::unique( nodes.begin(), nodes.end() ), nodes.end() );
+            rw::sortutil::sortUnique( nodes );
         }
     }
 
@@ -197,8 +197,7 @@ struct ElixirResolver
             if( admits( state, key ) ) { append( ref, state.module, true, state.kind, out ); }
         }
         if( !explicitKernel && out.empty() ) { append( ref, "Kernel", true, {}, out ); }
-        std::sort( out.begin(), out.end() );
-        out.erase( std::unique( out.begin(), out.end() ), out.end() );
+        rw::sortutil::sortUnique( out );
     }
 
     bool reachesAny( const Reference& ref, std::span<const NodeId> selected ) const

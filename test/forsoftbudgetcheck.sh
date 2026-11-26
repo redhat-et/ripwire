@@ -60,6 +60,18 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
+# TL1 M2 (foranswerfirst.h tailSameDirFirst): the default answer-first XML tail lists same-directory files first past row 24; the
+# --json / MCP tails and the file page keep rank order (an owner call, lane TL1 READOUT). This gate pins tail ORDER across surfaces,
+# so M2 is off here; test/foranswerfirstcheck.sh (SD) pins M2.
+export RIPWIRE_NO_TAIL_SAMEDIR=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"   # gitenvhermeticcheck (D): no ambient GIT_* reaches the RP10 fixture repos
 # SIBLING-DEMOTE (2026-11-08) is a post-cut pass that prints deep same-file <d> rows as <t> pointers; this gate pins
@@ -167,17 +179,26 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            # count-floor) is present-only by design — verbs_for.h splices it only when the served <lego>
                            # carries an implementors_ attribute, and the lego is narrowed to the rendered rows' files. Measured:
                            # #572's Symbol::rankFlags pulls model.h rows into this query's wide head, where MEM-REF-SHRINK's
-                           # RefColdFields renders implementors="2" implementors_shown="1"; at N<=3000 those rows are past
+                           # RefColdFields renders implementors="2" shown_implementors="1"; at N<=3000 those rows are past
                            # the cut, the lego narrows away and the clause is rightly absent. Its two segments, below.
-                           r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
+                           r'shown_implementors=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
                            r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
                            # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
-                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=', re.I )
+                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=|'
+                           # TAIL-SYM-TERMS (2026-11-14): the tsym= clause rides only when a SHOWN tail row added a task-word name
+                           r'tsym=|question words such as which, function, file are ignored|'
+                           # BR1b (src/foractline.h): the act-line clause rides only with its own <act> element, which a budget
+                           # carries only while the answer still fits with it — present-only by design; its three segments
+                           r'the act line: read=|search only for what no row lists|absent if one lacks e=', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]
+    # AF1 (2026-11-18): the default --for answer — and a budget's, which keeps the default posture — is ANSWER-FIRST: its
+    # document legend is the trailing run of comments before </ctx>, inside the same answer. Read both runs.
+    m3 = re.search( r'((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z', s, re.S )
+    if m3: head += m3.group( 1 )
     com = re.findall( r'<!--(.*?)-->', head, re.S )
     if not com: sys.exit( 3 )
     out = set()
@@ -219,7 +240,16 @@ for line in sys.stdin:
     c = d.get( "result", {} ).get( "content" )
     if c: print( c[ 0 ].get( "text", "" ) )
 PY
-cli_for(){ "$BIN" "$CORPUS" --for="$Q" "$@" "$CF" 2>/dev/null; }
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h): on src the 40-row head is split by
+# the page cut (continued="sigs") and its tail/hops land on later pages. Every arm here is about the ANSWER the soft target
+# shapes, so a call the pager would shape reads --page-bytes=0 — the whole answer in one call, row-identical to the joined pages
+# (forpagescheck P2/P11). --page-bytes refuses beside a budget, another dialect, a legend-first posture or the file page
+# (cli.h pageBytesConflict): those calls are never paged and run as written. (DP) below holds the DEFAULT page itself.
+whole(){ local a; for a in "$@"; do case "$a" in --token-budget=*|--max-tokens=*|--json|--format=*|--legend=first|--legend=full|--legend=dict|--limit=*|--offset=*|--legend-have=*|--page-bytes=*) return 1;; esac; done; return 0; }
+cli_for(){ if whole "$@"; then set -- "$@" --page-bytes=0; fi; "$BIN" "$CORPUS" --for="$Q" "$@" "$CF" 2>/dev/null; }
+# the document legend of an answer, wherever it sits: the leading run of comments after the root (legend-first) plus the trailing
+# run before </ctx> (answer-first, AF1 2026-11-18). Replaces `sed 's/<sigs.*//'`, which read only the legend-first header.
+legendof(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); h=s.split("<sigs",1)[0]; m=re.search(r"((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z",s,re.S); sys.stdout.write(h+(m.group(1) if m else ""))' "$1"; }
 cli_so(){ RIPWIRE_NO_HEAD_RR=1 cli_for "$@"; }   # the rule-4 twin of cli_for: the score-order answer (lane hrr)
 mcp_call(){ # mcp_call TOOL TASK EXTRA-JSON
     printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"%s","arguments":{"path":"%s","task":"%s"%s}}}\n' \
@@ -290,14 +320,14 @@ fi
 
 # (D3) past-target disclosure on that answer
 PT="$( attr sigs past_target "$TMP/def.xml" )"; OC="$( attr ctx over_ceiling "$TMP/def.xml" )"
-sed 's/<sigs.*//' "$TMP/def.xml" > "$TMP/def.head"
+legendof "$TMP/def.xml" > "$TMP/def.head"
 if isnum "$PT" && [ "$PT" -gt 0 ] && [ "$PT" -le $(( DN - 4 )) ]; then
     ok "(D3) <sigs past_target=\"$PT\"> names the rows served past the default target (<= shown-4: the floor is never past it)"
 else
     no "(D3) <sigs> carries no past_target=K with 0 < K <= shown-4 (got '$PT', shown=$DN) although the answer passes the 7.5 KB target"
 fi
-if grep -q 'past_target=' "$TMP/def.head"; then ok "(D3) the header legend defines past_target="
-else no "(D3) no legend clause defines past_target= ahead of <sigs>"; fi
+if grep -q 'past_target=' "$TMP/def.head"; then ok "(D3) the answer's legend defines past_target="
+else no "(D3) no legend clause of this answer defines past_target="; fi
 if grep -q 'default BYTE ceiling this ranked payload' "$TMP/def.head"; then
     no "(D3) the legend still calls budget_bytes= a ceiling on an answer that passed it by design"
 elif grep -q 'budget_bytes= is the default BYTE target' "$TMP/def.head"; then
@@ -314,7 +344,13 @@ if [ "$( lines "$TMP/def.cuts" )" -eq 0 ]; then ok "(NX4) every cut element of t
 else no "(NX4) cut elements without a continuation: $( tr '\n' '|' < "$TMP/def.cuts" | cut -c1-300 )"; fi
 
 # (D3H) D-3: the compact route's <hops> serves its whole row set on the default answer
-"$BIN" "$CORPUS" --for="$QH" "$CF" > "$TMP/hops.xml" 2>/dev/null; hrc=$?
+"$BIN" "$CORPUS" --for="$QH" --page-bytes=0 "$CF" > "$TMP/hops.xml" 2>/dev/null; hrc=$?   # AF1-fix: the whole answer (see cli_for)
+# (DP) AF1-fix: the DEFAULT page of that answer holds <hops>, or names it on its root (deferred=/continued=) beside a next=
+"$BIN" "$CORPUS" --for="$QH" "$CF" > "$TMP/hops.page.xml" 2>/dev/null
+if grep -q '<hops ' "$TMP/hops.page.xml"; then ok "(DP) the default page of '$QH' carries <hops>"
+elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "hops" in n and " next=" in r else 1)' "$TMP/hops.page.xml"; then
+    ok "(DP) the default page of '$QH' does not hold <hops> and says so: deferred= names it, next= reaches it"
+else no "(DP) the default page of '$QH' neither carries <hops> nor names it in deferred=/continued= (a silent drop)"; fi
 HS="$( attr hops shown "$TMP/hops.xml" )"; HT="$( attr hops total "$TMP/hops.xml" )"; HE="$( attr hops noedge "$TMP/hops.xml" )"; HC="$( attr hops capped "$TMP/hops.xml" )"
 HE="${HE:-0}"
 if [ "$hrc" -ne 0 ] || ! isnum "$HS" || ! isnum "$HT"; then
@@ -337,7 +373,7 @@ if [ "$GOC" = "1" ] && [ "$GCAP" = "1" ] && [ -n "$GNX" ]; then
 else
     no "(D4) --pack-top-n=400: expected over_ceiling=1 + <sigs capped=1 next=…>; got over_ceiling='$GOC' capped='$GCAP' next='${GNX:0:40}'"
 fi
-sed 's/<sigs.*//' "$TMP/guard.xml" > "$TMP/guard.head"
+legendof "$TMP/guard.xml" > "$TMP/guard.head"
 # S3: the guard's value is read from the legend of the answer that hit it, and must agree with the source's one owner
 GUARD="$( sed -n 's/.*runaway guard of \([0-9][0-9]*\) B.*/\1/p' "$TMP/guard.head" | head -1 )"
 if isnum "$GUARD" && [ "$GUARD" = "$GUARD_SRC" ]; then ok "(D4) the legend names the runaway guard ($GUARD B, == kForRunawayGuardBytes)"
@@ -430,12 +466,12 @@ cli_for --token-budget=20000 > "$TMP/wide.xml"                                  
 cli_for --token-budget=20000 --legend=full > "$TMP/wide_full.xml"
 cli_for --token-budget=20000 --legend=compact > "$TMP/wide_compact.xml"
 rows "$TMP/wide.xml" "$TMP/wide.rows"
-"$BIN" "$CORPUS" --for="$Q" --signatures-only "$CF" > "$TMP/so_def.xml" 2>/dev/null
+"$BIN" "$CORPUS" --for="$Q" --signatures-only --page-bytes=0 "$CF" > "$TMP/so_def.xml" 2>/dev/null   # AF1-fix: the whole answer (see cli_for)
 # TAIL-SYM-WIDE (2026-11-10): the widened tail rows carry sym= now, so a reader can no longer find the old 40-row walk's part of a
 # tail as "the rows before the p_only= ones"; the reserve's cap is read off the same answer on the pre-card tail
 # (RIPWIRE_TAIL_SYM_WIDE_ROWS=0: the same rows, the widened ones path-only; test/fortailwidecheck.sh arm 14 pins the equality)
 RIPWIRE_TAIL_SYM_WIDE_ROWS=0 cli_for > "$TMP/def0.xml"
-RIPWIRE_TAIL_SYM_WIDE_ROWS=0 "$BIN" "$CORPUS" --for="$Q" --signatures-only "$CF" > "$TMP/so_def0.xml" 2>/dev/null
+RIPWIRE_TAIL_SYM_WIDE_ROWS=0 "$BIN" "$CORPUS" --for="$Q" --signatures-only --page-bytes=0 "$CF" > "$TMP/so_def0.xml" 2>/dev/null
 # (ST)'s reader: st.py ANSWER REF T -> "OK ..." | "BAD ... -- detail" (the sweep below and (ST-L) after it)
 cat > "$TMP/st.py" <<'PY'
 import subprocess, sys, re
@@ -537,7 +573,15 @@ for n in "${SWEEP[@]}"; do
     if python3 "$TMP/prefix.py" "$TMP/t_${n}_full.rows" "$TMP/t_${n}_compact.rows"; then ok "(E4) N=$n: the full dialect's rows ($TN) are a prefix of the compact dialect's ($( lines "$TMP/t_${n}_compact.rows" ))"
     else no "(E4) N=$n: full rows ($TN) are not a prefix of compact rows ($( lines "$TMP/t_${n}_compact.rows" ))"; fi
     # (ST) stop at target, default and --signatures-only modes: rows fit T (or are the floor); a cut is maximal
-    "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" "$CF" > "$TMP/so_$n.xml" 2>/dev/null
+    # AF1-fix (2026-11-18): a budget's answer now keeps the default posture, ANSWER-FIRST, so its document legend trails the rows,
+    # and st.py's U ("everything after </sigs>") would count that legend as reserved sections. The rows a target serves do not
+    # depend on the posture (answerFirst is a permutation applied after the shed), so (ST) reads the --legend=first twin, where U
+    # means what it always meant, and (STp) proves the default-posture answer is a byte permutation of that twin.
+    "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" --legend=first "$CF" > "$TMP/so_$n.xml" 2>/dev/null
+    "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" "$CF" > "$TMP/so_af_$n.xml" 2>/dev/null
+    if [ -s "$TMP/so_af_$n.xml" ] && python3 -c 'import sys; a,b=(open(p,"rb").read() for p in sys.argv[1:3]); sys.exit(0 if a!=b and sorted(a)==sorted(b) else 1)' "$TMP/so_af_$n.xml" "$TMP/so_$n.xml"; then
+        ok "(STp) N=$n so: the default-posture budget answer is a byte permutation of its --legend=first twin (same rows, answer first)"
+    else no "(STp) N=$n so: the default-posture budget answer is not a permutation of its --legend=first twin (or is identical: not answer-first)"; fi
     for mode in def so; do
         if [ "$mode" = def ]; then a="$f"; ref="$TMP/def.xml"; else a="$TMP/so_$n.xml"; ref="$TMP/so_def.xml"; fi
         st="$( python3 "$TMP/st.py" "$a" "$ref" "$T" "${ref%.xml}0.xml" )"
@@ -719,7 +763,7 @@ s = open( sys.argv[ 1 ] ).read()
 m = re.search( r'<tail\b([^>]*)>(.*?)</tail>', s, re.S )
 if not m: sys.exit( 3 )
 a = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 1 ) ) )
-rows = [ ( html.unescape( p ), html.unescape( y ), bool( h ) ) for p, h, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', m.group( 2 ) ) ]
+rows = [ ( html.unescape( p ), html.unescape( y ), bool( h ) ) for p, h, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?(?: tsym="[^"]*")?/>', m.group( 2 ) ) ]
 mode = sys.argv[ 2 ]
 if mode == "attrs": print( a.get( "total", "" ), a.get( "shown", "" ), a.get( "capped", "" ), html.unescape( a.get( "next", "" ) ) )
 k = 0
@@ -833,7 +877,7 @@ C4="$( python3 - "$TMP/def.json" "$TMP/def.xml" <<'PY'
 import json, re, sys, html
 t = json.load( open( sys.argv[ 1 ] ) ).get( "tail", {} ); x = open( sys.argv[ 2 ] ).read()
 xa = dict( re.findall( r'(\w+)="([^"]*)"', re.search( r'<tail\b([^>]*)>', x ).group( 1 ) ) )
-xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', x ) ]
+xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?(?: tsym="[^"]*")?/>', x ) ]
 heads = { html.unescape( p ) for p in re.findall( r'<d [^>]*?\bp="([^"]*)"', x ) }
 ys = { html.unescape( n ) for n in re.findall( r'<y [^>]*?\bn="([^"]*)"', x ) }; ys |= { re.split( r'::|\.', n )[ -1 ] for n in ys }
 jr = [ ( p, ",".join( n for n in y.split( "," ) if n and n not in ys ) if p in heads else y ) for p, y in zip( t.get( "files", [] ), t.get( "sym", [] ) ) ]

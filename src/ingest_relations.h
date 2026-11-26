@@ -7,7 +7,7 @@
 // 2026-08-29 split: base-clause type references (isBaseTypeNode/emitBaseRef/captureBases with the
 // Rust impl walk), function-like #define body call edges (the macro-edges round), field/composition
 // capture (captureFields), and the import/include layer — importName and the per-language
-// specifier readers (C# using, PHP use, JS module loads, preproc include/import), the
+// specifier readers (PHP use, JS module loads, preproc include/import; C# using moved to ingest_importcap.h in #358), the
 // import-container tables by language, directiveTargetOf and captureIncludes. Everything that turns
 // one file's AST into edges BETWEEN symbols and files. Same contract as every ingest_*.h: reopens
 // `namespace rw` and the unnamed namespace inside it — one TU, one unnamed namespace, internal
@@ -59,7 +59,7 @@ inline bool isBaseTypeNodeIn( const char* nt, Lang lang ) noexcept
 // One use-site RawRef sited at node `at`: its start byte (the byte-span sweep attributes the ref to the enclosing def)
 // and its 1-based line (ABS-3: --uses p="file:line"), with the role and name the caller decides; every other field keeps
 // RawRef's default.
-inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string name )
+inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string_view name )
 {
     RawRef r;
     r.fileId    = fileId;
@@ -67,7 +67,7 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
     r.line      = ts_node_start_point( at ).row + 1;
     r.lang      = lang;
     r.role      = role;
-    r.name      = std::move( name );
+    r.name.assign( name );
     return r;
 }
 
@@ -1677,41 +1677,12 @@ inline std::string importSpecifierText( TSNode node, std::string_view src )
     return std::string( s );
 }
 
-// C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;` target extraction, factored out of
-// captureIncludes (kept as its own def to hold captureIncludes' own complexity/LOC down — one AST shape
-// per language stays a one-line call at the use site, matching the existing per-branch grain there).
-//
-// C# namespaces do not map 1:1 onto files (unlike a Python module or a Rust `mod`), so — same as Go/
-// Swift below — this is captured for --uses/--deps visibility only; resolve.h's Rule 3 precise-import
-// narrower (includeLangOf) has no C# entry and DEFERS (kNoFile), matching Java's existing "Other"
-// treatment: the conservative fall-through the P2-D Rule 3 contract requires.
-//
-// The ALIAS form `using X = Foo.Bar;` exposes a `name` field, but it names the ALIAS (`X`), not the
-// aliased type — walk the `type` field instead so the target is the real aliased spelling. The plain/
-// `static` form (`using Foo.Bar;` / `using static Foo;`) has NO named field at all: the grammar's
-// `$._name` production is hidden-inlined, so its resolved concrete node (a qualified_name for a dotted
-// path, else a bare identifier/generic_name) is just an unnamed-field child of using_directive — scan
-// for the first one.
-inline std::string csharpUsingTarget( TSNode usingNode, std::string_view src )
-{
-    if( const TSNode aliasType = fieldChild( usingNode, NodeField::Type ); !ts_node_is_null( aliasType ) )
-    {
-        return importSpecifierText( aliasType, src );
-    }
-
-    // O(children): `using /*…*/ System.Text;` puts the comments in the using_directive itself — 16 000 of
-    // them measured 36x the identical flood inside a method body (test/childwalkscalecheck.sh, arm B16)
-    const TSNode c = firstChildOfKind( usingNode, /*namedOnly=*/true, { "qualified_name", "identifier", "generic_name", "alias_qualified_name" } );
-    return ts_node_is_null( c ) ? std::string {} : importSpecifierText( c, src );
-}
-
-// csharpUsingTarget's PHP sibling: the written specifier of a `use` statement. Node shapes read off
+// PHP: the written specifier of a `use` statement. Node shapes read off
 // tree-sitter-php v0.24.2's node-types.json and confirmed on a real parse:
 //   use Foo\Bar;             namespace_use_declaration > namespace_use_clause > qualified_name
 //   use Bar;                 namespace_use_declaration > namespace_use_clause > name
 //   use Foo\Bar as Baz;      the same, plus an `alias:` field we deliberately ignore — the DEPENDENCY is
-//                            the real name, not the local nickname (mirroring csharpUsingTarget, which
-//                            also reports the aliased target rather than the alias)
+//                            the real name, not the local nickname
 //   use function Foo\bar;    a `type:` field on the CLAUSE ("function"/"const"); the specifier is
 //                            unchanged, so nothing here needs to branch on it
 //   use Foo\{A, B};          namespace_use_declaration > namespace_name + namespace_use_group — the
@@ -1761,9 +1732,8 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
 }
 
 // TS/JS `require("./x")` and dynamic `import("./x")` → the written specifier, or empty when this call
-// expression is not a module load. Its own function for the same reason csharpUsingTarget and phpUseTarget
-// are: one AST shape per language stays a one-line call at the use site rather than one branch plus one nested
-// scan. #358: its readers are now the DepDialect::Web normaliser (src/ingest_importcap.h — the captured
+// expression is not a module load. Like phpUseTarget, one AST shape stays a one-line call at the use site
+// rather than one branch plus a nested scan. #358: its readers are now the DepDialect::Web normaliser (src/ingest_importcap.h — the captured
 // `require`/`import` call) and captureJsImportFacts (src/ingest_jsimports.h — the binding a destructured
 // require makes); directiveTargetOf no longer reads it, because the walk no longer visits TS/JS.
 //
@@ -2498,16 +2468,9 @@ inline std::vector<std::string> elixirAliasGroup( TSNode n, std::string_view src
 // one pass, and a grammar bump that renames a node kind is a one-line edit here.
 inline constexpr std::array<std::string_view, 5> kPreprocConditionalNodes = { "preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif", "preproc_elifdef" };
 
-// One membership test for every node-kind table below — a single shape rather than one hand-rolled scan
-// per table (the repo already spells this `std::find( … ) != end` elsewhere; see graph.h / flipimpact.h).
-inline bool namesNode( std::span<const std::string_view> table, const char* type ) noexcept
-{
-    return std::find( table.begin(), table.end(), std::string_view( type ) ) != table.end();
-}
-
 inline bool isPreprocConditional( const char* type ) noexcept
 {
-    return namesNode( kPreprocConditionalNodes, type );
+    return isOneOf( type, kPreprocConditionalNodes );
 }
 
 // ─── Non-preprocessor import containers, keyed by language ───────────────────────────────────────────
@@ -2659,11 +2622,11 @@ inline bool isFunctionLike( Lang lang, const char* type ) noexcept
 {
     if( lang == Lang::TypeScript || lang == Lang::JavaScript )
     {
-        return namesNode( kJsFunctionContainers, type );
+        return isOneOf( type, kJsFunctionContainers );
     }
     if( lang == Lang::Ruby )
     {
-        return namesNode( kRubyClosureContainers, type );
+        return isOneOf( type, kRubyClosureContainers );
     }
     return false;
 }
@@ -2753,7 +2716,7 @@ inline bool isImportContainer( Lang lang, const char* type ) noexcept
     {
         if( e.lang == lang )
         {
-            return namesNode( e.nodes, type );
+            return isOneOf( type, e.nodes );
         }
     }
     return false;
@@ -2770,7 +2733,7 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // at all. Split out of captureIncludes so the walk that FINDS directives and the per-grammar table that
 // READS them stay separately readable — the walk is one shape, this is one branch per grammar spelling.
 //
-// Node types confirmed per grammar: Swift import_declaration; Rust use_declaration + mod_item; C# using_directive; plus the kParserVer-81 four (bash
+// Node types confirmed per grammar: Swift import_declaration; Rust use_declaration + mod_item; plus the kParserVer-81 four (bash
 // `command`, lua `function_call`, ruby `call`, elixir `call`). LEVER-B B0: non-C imports capture the
 // CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
 // sliced clause — the sound resolver input.
@@ -2928,10 +2891,6 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // landing. Keep the best-effort target for --uses / --deps back-compat.
         target = importClauseTarget( n, src );
     }
-    else if( kindIs( t, "using_directive" ) )
-    { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
-        target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
-    }
     else if( kindIs( t, "namespace_use_declaration" ) )
     { // PHP `use Foo\Bar;` / `use Foo\Bar as Baz;` / `use function Foo\bar;` / `use Foo\{A, B};`
         // Captured for --uses / --deps visibility, NEVER precise-resolved: PHP has no entry in
@@ -2969,6 +2928,7 @@ struct ExtractShortfall
         ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
         RestUnitsCapped,          // a reST file past kMaxRestUnits or kMaxRestDepth: later units stay in the whole-file node
+        MacroArgsNestedTooDeep,   // Rust macro arguments nested past kMacroArgNestingDepth: the deeper calls are not captured
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
@@ -3092,7 +3052,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.startByte = ts_node_start_byte( n );   // the DIRECTIVE, not its enclosing #if → file-scope attribution
                 r.line      = ts_node_start_point( n ).row + 1;
                 r.role      = RefRole::Import;
-                r.name      = std::move( nm );
+                r.name      = nm;
                 refs.push_back( std::move( r ) );
             }
             // The site byte. A Ruby `superclass` carries its CLASS's own start byte: the superclass expression is

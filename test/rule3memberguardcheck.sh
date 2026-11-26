@@ -66,7 +66,10 @@ row R6.outside    "$R" callees u_outside    src/a.rs channel none
 row R6.twin       "$R" callees u_outside    src/a.rs helper  proven
 row R7.stdtype    "$R" callees u_stdtype    src/a.rs new     none
 row R7.twin       "$R" callees u_stdtype    src/a.rs helper  proven
-row R8.stduse     "$R" callees u_stduse     src/a.rs swap    name
+# RUST-USE-PRINT-NAMESPACE (lane small-edges-1118): a bare call whose every `use` in force leads provably out of the tree (std,
+# an external crate, an in-tree re-export of one) names that outside item: counted external=, no row for the in-tree namesake.
+# R8 and R15 read via="name" before that lane; the twins beside them keep their proven rows.
+row R8.stduse     "$R" callees u_stduse     src/a.rs swap    none
 row R5.alias      "$R" callees u_alias      src/a.rs Thing::new proven
 row R5.extuse     "$R" callees u_ext_use    src/a.rs json    none
 # Rust records no local or parameter binding (RUST-LOCALS card): a closure named like a def, called, keeps Rule 3's file hedged like any unbound name
@@ -103,8 +106,9 @@ row R14.super     "$M" callees m_super       src/a.rs helper   name
 row R14.direct    "$M" callees m_direct      src/a.rs helper   proven
 row R14.std       "$M" callees m_std         src/io.rs stdout  none
 row R14.stdtwin   "$M" callees m_std         src/a.rs helper   proven
-# a `use` into the crate that a module re-exports from outside it (`pub use extlib::lone`) proves no in-tree namesake (red under M21)
-row R15.useout    "$M" callees m_reexport_out src/a.rs lone   name
+# a `use` into the crate that a module re-exports from outside it (`pub use extlib::lone`) proves no in-tree namesake (red under M21);
+# since RUST-USE-PRINT-NAMESPACE it leads out of the tree, so the namesake gets no row at all (was via="name")
+row R15.useout    "$M" callees m_reexport_out src/a.rs lone   none
 row R15.twin      "$M" callees m_reexport_out src/a.rs helper proven
 
 # ---- Rust, a workspace whose crates have no lib.rs (`[lib] path`): the module layout knows nothing, the written root reads against the package directory.
