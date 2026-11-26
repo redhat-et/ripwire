@@ -859,6 +859,7 @@ for _g in \
     nextaposcheck \
     nextverbcheck \
     noaliascheck \
+    nocacheevictcheck \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
