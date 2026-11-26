@@ -59,6 +59,7 @@
 // and scalar paths return identical values for identical input, which is precisely what
 // test/strkerncheck.sh asserts on 100k random buffers and on every byte of src/ and docs/.
 
+#include <algorithm>      // std::min — countByte's 255-block lane bound
 #include <bit>            // std::countr_zero — the portable spelling of ctz; the scalar twins must compile on MSVC too
 #include <cstddef>
 #include <cstdint>
@@ -809,12 +810,15 @@ struct Byteset256
 // THE SHIPPED SCALAR TWIN, and the tail every vector path below falls into. One O( 1 ) bit test per byte
 // against the set's own precomputed words; no preamble, nothing derived per call. This is the function a
 // target with neither NEON nor AVX2 runs, and it is also the function a 6-byte input runs on every target.
+// kOutside = true asks the complement question — the first byte NOT in the set (find_first_not_of, skipWhile) — on the same
+// tables, so a caller never builds a second, inverted set.
+template<bool kOutside = false>
 inline std::size_t findByteset_scalar( const char* p, std::size_t n, const Byteset256& set ) noexcept
 {
     for( std::size_t k = 0; k < n; ++k )
     {
         const unsigned char c = static_cast<unsigned char>( p[ k ] );
-        if( ( set.words[ c >> 6 ] >> ( c & 63u ) ) & 1u )
+        if( ( ( ( set.words[ c >> 6 ] >> ( c & 63u ) ) & 1u ) != 0 ) != kOutside )
         {
             return k;
         }
@@ -848,6 +852,7 @@ inline std::size_t findByteset_oracle( const char* p, std::size_t n, const Bytes
     return n;
 }
 
+template<bool kOutside = false>
 inline std::size_t findByteset( const char* p, std::size_t n, const Byteset256& set ) noexcept
 {
     std::size_t k = 0;
@@ -870,7 +875,8 @@ inline std::size_t findByteset( const char* p, std::size_t n, const Byteset256& 
                                          vqtbl1q_u8( rowsHi, vsubq_u8( idx, vdupq_n_u8( 16 ) ) ) );
 #endif
         const uint8x16_t bit = vqtbl1q_u8( bitTab, vandq_u8( v, vdupq_n_u8( 7 ) ) );
-        const std::uint64_t m = neonNibbleMask( vtstq_u8( row, bit ) );
+        const uint8x16_t    in = vtstq_u8( row, bit );
+        const std::uint64_t m  = neonNibbleMask( kOutside ? vmvnq_u8( in ) : in );
         if( m != 0 )
         {
             return k + ( std::size_t( std::countr_zero( m ) ) >> 2 );
@@ -896,7 +902,8 @@ inline std::size_t findByteset( const char* p, std::size_t n, const Byteset256& 
 #endif
         const __m256i bit = _mm256_shuffle_epi8( bitTab, _mm256_and_si256( v, _mm256_set1_epi8( 7 ) ) );
         const __m256i hit = _mm256_cmpeq_epi8( _mm256_and_si256( row, bit ), bit );
-        const std::uint32_t m = std::uint32_t( _mm256_movemask_epi8( hit ) );
+        const std::uint32_t in = std::uint32_t( _mm256_movemask_epi8( hit ) );
+        const std::uint32_t m  = kOutside ? ~in : in;
         if( m != 0 )
         {
             return k + std::size_t( std::countr_zero( m ) );
@@ -905,7 +912,7 @@ inline std::size_t findByteset( const char* p, std::size_t n, const Byteset256& 
 #endif
     // The tail is the scalar twin above — one bit test per byte against the set's OWN words. It is NOT
     // the oracle: see the Byteset256 note for the 4.62% -> 22.46% that rule is written from.
-    const std::size_t tail = findByteset_scalar( p + k, n - k, set );
+    const std::size_t tail = findByteset_scalar<kOutside>( p + k, n - k, set );
     return tail == n - k ? n : k + tail;
 }
 
@@ -966,6 +973,224 @@ inline std::size_t appendCleanRun( const char* d, std::size_t i, std::size_t n, 
         out.insert( out.end(), d + i, d + i + clean );
     }
     return i + clean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//  5. one byte's positions and count — lineStarts, countByte
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// About nine hand loops built a line-start table (`if( text[ i ] == '\n' ) starts.push_back( i + 1 )`) and about thirty counted
+// newlines one byte at a time (`std::count`, or a loop with `++line`). Both are one question — where, or how many, of ONE byte — so
+// both are one block compare: sixteen (NEON) or thirty-two (AVX2) bytes against a splat, then the mask's set bits (positions) or
+// their number (count). The scalar twins are the SWAR form of the same compare (swarZeroByteMask: one exact high bit per match).
+
+// fn( k ) for every k < n with p[ k ] == b, in ascending order.
+template<class Fn>
+inline void forEachByte_scalar( const char* p, std::size_t n, char b, Fn&& fn )
+{
+    constexpr std::uint64_t kOnes = 0x0101010101010101ull;
+    const std::uint64_t     splat = kOnes * static_cast<unsigned char>( b );
+    std::size_t             k     = 0;
+    for( ; k + 8 <= n; k += 8 )
+    {
+        std::uint64_t x = 0;
+        std::memcpy( &x, p + k, 8 );
+        for( std::uint64_t m = swarZeroByteMask( x ^ splat ); m != 0; m &= m - 1 )   // one exact bit per match: the bit idiom is right here
+        {
+            fn( k + ( std::size_t( std::countr_zero( m ) ) >> 3 ) );
+        }
+    }
+    for( ; k < n; ++k )
+    {
+        if( p[ k ] == b )
+        {
+            fn( k );
+        }
+    }
+}
+
+template<class Fn>
+inline void forEachByte( const char* p, std::size_t n, char b, Fn&& fn )
+{
+    std::size_t k = 0;
+#if defined( __ARM_NEON )
+    const uint8x16_t splat = vdupq_n_u8( static_cast<std::uint8_t>( b ) );
+    for( ; k + 16 <= n; k += 16 )
+    {
+        // keep one bit of each match's nibble, so the bit-per-match idiom walks it
+#if defined( STRKERN_MUTATE )
+        constexpr std::uint64_t kOneBitPerByte = 0x0888888888888888ull;   // MUTATION: a match in lane 15 is never reported
+#else
+        constexpr std::uint64_t kOneBitPerByte = 0x8888888888888888ull;
+#endif
+        std::uint64_t m = neonNibbleMask( vceqq_u8( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) ), splat ) ) & kOneBitPerByte;
+        for( ; m != 0; m &= m - 1 )
+        {
+            fn( k + ( std::size_t( std::countr_zero( m ) ) >> 2 ) );
+        }
+    }
+#elif defined( __AVX2__ )
+    const __m256i splat = _mm256_set1_epi8( b );
+    for( ; k + 32 <= n; k += 32 )
+    {
+        const __m256i v = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) );
+#if defined( STRKERN_MUTATE )
+        constexpr std::uint32_t kLanes = 0x7FFFFFFFu;   // MUTATION: a match in lane 31 is never reported
+#else
+        constexpr std::uint32_t kLanes = 0xFFFFFFFFu;
+#endif
+        for( std::uint32_t m = std::uint32_t( _mm256_movemask_epi8( _mm256_cmpeq_epi8( v, splat ) ) ) & kLanes; m != 0; m &= m - 1 )
+        {
+            fn( k + std::size_t( std::countr_zero( m ) ) );
+        }
+    }
+#endif
+    forEachByte_scalar( p + k, n - k, b, [ &fn, k ]( std::size_t at ) { fn( k + at ); } );
+}
+
+template<class Fn>
+inline void forEachByteOn( KernelPath path, const char* p, std::size_t n, char b, Fn&& fn )
+{
+    path == KernelPath::Scalar ? forEachByte_scalar( p, n, b, fn ) : forEachByte( p, n, b, fn );
+}
+
+// How many bytes of `text` equal `b`. Contract: == std::count( text.begin(), text.end(), b ), for every input. A line count is
+// countByte( text, '\n' ) (plus one, or not, as the caller's own convention says); the line holding offset `at` is
+// 1 + countByte( text.substr( 0, at ), '\n' ). D5 in test/verify_strkern.cpp is the property test.
+[[nodiscard]] inline std::size_t countByte( std::string_view text, char b, KernelPath path = KernelPath::Vector ) noexcept
+{
+    const char* const p = text.data();
+    const std::size_t n = text.size();
+    std::size_t       k = 0, count = 0;
+    if( path == KernelPath::Vector )
+    {
+#if defined( __ARM_NEON )
+        const uint8x16_t splat = vdupq_n_u8( static_cast<std::uint8_t>( b ) );
+        while( k + 16 <= n )
+        {
+            // a match compares to 0xFF, i.e. -1: subtracting it adds one to that lane. 255 blocks at most, so no lane wraps
+            uint8x16_t        lanes = vdupq_n_u8( 0 );
+            const std::size_t stop  = k + 16 * std::min<std::size_t>( 255, ( n - k ) / 16 );
+            for( ; k < stop; k += 16 )
+            {
+                lanes = vsubq_u8( lanes, vceqq_u8( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) ), splat ) );
+            }
+#if defined( STRKERN_MUTATE )
+            lanes = vsetq_lane_u8( 0, lanes, 15 );   // MUTATION: lane 15's matches are never counted
+#endif
+            count += vaddlvq_u8( lanes );
+        }
+#elif defined( __AVX2__ )
+        const __m256i splat = _mm256_set1_epi8( b );
+        for( ; k + 32 <= n; k += 32 )
+        {
+            const __m256i v = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) );
+#if defined( STRKERN_MUTATE )
+            constexpr std::uint32_t kLanes = 0x7FFFFFFFu;   // MUTATION: lane 31's matches are never counted
+#else
+            constexpr std::uint32_t kLanes = 0xFFFFFFFFu;
+#endif
+            count += std::size_t( std::popcount( std::uint32_t( _mm256_movemask_epi8( _mm256_cmpeq_epi8( v, splat ) ) ) & kLanes ) );
+        }
+#endif
+    }
+    constexpr std::uint64_t kOnes = 0x0101010101010101ull;
+    const std::uint64_t     splat = kOnes * static_cast<unsigned char>( b );
+    for( ; k + 8 <= n; k += 8 )
+    {
+        std::uint64_t x = 0;
+        std::memcpy( &x, p + k, 8 );
+        count += std::size_t( std::popcount( swarZeroByteMask( x ^ splat ) ) );   // exact: one high bit per matching byte
+    }
+    for( ; k < n; ++k )
+    {
+        count += p[ k ] == b ? 1u : 0u;
+    }
+    return count;
+}
+
+// Whether the table ends with a start AT text.size() when the text ends in '\n' — the start of an empty last line. Both house
+// conventions exist: most tables keep it (graph, lsp, situ, search); FileTextCache and the file page drop it.
+enum class FinalLineStart : std::uint8_t
+{
+    Keep,
+    DropAtEnd,
+};
+
+// THE line-start table: appends 0, then k + 1 for every '\n' at k, to `out` (any container with push_back / pop_back and an
+// integral value_type; the value is cast to it). A "\r\n" line ends at its '\n' like every other, so CRLF text gets the same starts
+// the hand loops gave it; a text with no final newline gets no extra start; an empty text gets { 0 }. With
+// FinalLineStart::DropAtEnd, the start a final '\n' would add at text.size() is left out. D4 in test/verify_strkern.cpp checks it
+// against the hand loop it replaced, both conventions, on both paths.
+template<class Vec>
+inline void lineStarts( std::string_view text, Vec& out, FinalLineStart final = FinalLineStart::Keep, KernelPath path = KernelPath::Vector )
+{
+    using T = typename Vec::value_type;
+    out.push_back( T( 0 ) );
+    forEachByteOn( path, text.data(), text.size(), '\n', [ &out ]( std::size_t k ) { out.push_back( T( k + 1 ) ); } );
+    if( final == FinalLineStart::DropAtEnd && !text.empty() && text.back() == '\n' )
+    {
+        out.pop_back();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//  6. findAnyOf / findNotAnyOf / skipWhile — the std byte-set searches, on findByteset
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// std::string_view::find_first_of( chars ) tests each text byte against each set byte (libc++ calls memchr over the set per text
+// byte); a Byteset256 built once (constexpr: bytesetOf below) answers in two table lookups per byte, sixteen or thirty-two bytes at
+// a time (findByteset, section 3). A set of one or two bytes stays `find( c )` / memchr.
+
+// The set of the bytes in `chars`. constexpr, so a call site's set is built at compile time:
+//     static constexpr auto kQuoteOrEscape = strkern::bytesetOf( "\"'\\\\" );
+[[nodiscard]] constexpr Byteset256 bytesetOf( std::string_view chars ) noexcept
+{
+    Byteset256 set;
+    for( const char c : chars )
+    {
+        set.add( static_cast<unsigned char>( c ) );
+    }
+    return set;
+}
+
+// The ASCII classes the "C" locale's <cctype> predicates name — the only locale ripwire runs in — so a scan loop needs no libc
+// call per byte. A byte >= 0x80 is in none of them, as in the "C" locale.
+inline constexpr Byteset256 kAsciiSpace = bytesetOf( " \t\n\v\f\r" );   // std::isspace
+inline constexpr Byteset256 kAsciiDigit = bytesetOf( "0123456789" );    // std::isdigit
+inline constexpr Byteset256 kAsciiAlnum = bytesetOf( "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" );   // std::isalnum
+inline constexpr Byteset256 kAsciiIdent = bytesetOf( "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" );  // isalnum || '_'
+
+// The first position at or after `from` whose byte is in `set`, or npos. Contract: == hay.find_first_of( chars, from ) for the
+// `chars` the set was built from, for every input (npos when from >= hay.size()). D6 in test/verify_strkern.cpp.
+[[nodiscard]] inline std::size_t findAnyOf( std::string_view hay, const Byteset256& set, std::size_t from = 0,
+                                            KernelPath path = KernelPath::Vector ) noexcept
+{
+    if( from >= hay.size() ) { return std::string_view::npos; }
+    const std::size_t left = hay.size() - from;
+    const std::size_t at   = path == KernelPath::Scalar ? findByteset_scalar( hay.data() + from, left, set ) : findByteset( hay.data() + from, left, set );
+    return at == left ? std::string_view::npos : from + at;
+}
+
+// The first position at or after `from` whose byte is NOT in `set`, or npos. Contract: == hay.find_first_not_of( chars, from ).
+[[nodiscard]] inline std::size_t findNotAnyOf( std::string_view hay, const Byteset256& set, std::size_t from = 0,
+                                               KernelPath path = KernelPath::Vector ) noexcept
+{
+    if( from >= hay.size() ) { return std::string_view::npos; }
+    const std::size_t left = hay.size() - from;
+    const std::size_t at   = path == KernelPath::Scalar ? findByteset_scalar<true>( hay.data() + from, left, set )
+                                                        : findByteset<true>( hay.data() + from, left, set );
+    return at == left ? std::string_view::npos : from + at;
+}
+
+// The run loop `while( i < hay.size() && in( hay[ i ] ) ) ++i;` as one call: the first position at or after `from` whose byte is not
+// in `set`, hay.size() when the run reaches the end, and `from` itself when from >= hay.size() (the loop's body never ran).
+[[nodiscard]] inline std::size_t skipWhile( std::string_view hay, const Byteset256& set, std::size_t from = 0,
+                                            KernelPath path = KernelPath::Vector ) noexcept
+{
+    if( from >= hay.size() ) { return from; }
+    const std::size_t at = findNotAnyOf( hay, set, from, path );
+    return at == std::string_view::npos ? hay.size() : at;
 }
 
 }   // namespace rw::strkern
