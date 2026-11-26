@@ -10,35 +10,29 @@ allowed-tools: Bash, Read
 # Handoff with ripwire
 
 > Routing: understanding the subsystem yourself → **ripwire-orient** · ONE symbol's contract → **ripwire-navigate**
-> (`--expand`) · an architecture/layering read → **ripwire-layers** · unsure → **ripwire-router**.
+> (`--expand`) · an architecture/layering read → **ripwire-layers**.
 
-Trigger: you are handing a subsystem to another agent or developer and want a fast, accurate brief — not a wall of
-source. `SUBSYSTEM` = the area in plain words ("ingest pipeline").
+**An interrupted WORKING SESSION** (not a subsystem summary)? One call: `ripwire <dir> --handoff --legend=compact` — a `<verified>`
+section (branch, HEAD sha with `+dirty`, changed files and their symbols, blast radius, tests to run) that is disk truth,
+and a `<heuristic>` section (co-change partners, notes, design-doc pointers) labelled as suggestion. Paste it as-is.
+Single-root.
 
-## The decision
-
-**An interrupted WORKING SESSION** (not a subsystem summary)? One call: `ripwire <dir> --handoff --legend=compact` —
-a `<verified>` section (branch, HEAD sha with `+dirty`, changed files and their symbols, blast radius, tests to
-run) that is disk truth, and a `<heuristic>` section (co-change partners, notes, design-doc pointers) labelled as
-suggestion. Paste it to the next agent as-is. Single-root.
-
-**A subsystem brief** — four calls, in order:
+**A subsystem brief** (`SUBSYSTEM` = the area in plain words) — four calls, in order:
 
 1. `ripwire <dir> --for="SUBSYSTEM" --signatures-only` — the top 10 symbols the recipient most needs.
-2. `ripwire <dir> --expand=SYM1,SYM2,SYM3 --legend=compact` — the top 3 in full; paste the contract verbatim.
-   Bodies are redacted by default (credentials masked), so pasting is safe.
+2. `ripwire <dir> --expand=SYM1,SYM2,SYM3` — the top 3 in full; paste the contract verbatim (bodies are redacted by
+   default, so pasting is safe).
 3. `ripwire <dir> --recall="SUBSYSTEM"` — the design docs that say WHY; summarize the decisions. Fold in
-   `ripwire <dir> --notes --legend=compact` and `--note-add` any trap you found that is not written down.
-4. `ripwire <subdir> --hotspots` — maintenance risk scoped to the subsystem; also `--owners` for bus factor.
+   `ripwire <dir> --notes --legend=compact`, and `--note-add` any unwritten trap you found.
+4. `ripwire <subdir> --hotspots` — maintenance risk in the subsystem; `--owners` for bus factor.
 
-## Stamp it, and the stop rule
+## Stamp it, and stop
 
-Stamp the brief with the commit you measured at: `--pr-context`/`--test-gate`/`--quality-delta`/`--map-diff`
-headers carry `at="<sha>[+dirty]"`; record the sha yourself for the rest. Facts (signatures, bodies, counts) are
-measured; "why" comes from docs and is framing — say which is which. The brief is the four calls above, compact
-and pasteable; do not append whole files.
+Stamp the brief with the commit you measured at (`--pr-context`/`--test-gate`/`--quality-delta`/`--map-diff` headers
+carry `at="<sha>[+dirty]"`; record it yourself otherwise). Signatures, bodies and counts are measured; "why" comes from
+docs and is framing — say which is which. The brief is the four calls, compact and pasteable; append no whole files.
 
 ## Reference file
 
-`handoff-reference.md` — each step in full, the calibration of fact vs framing, commit stamping, the Output
-shape, and the `--handoff` packet with `--token-budget`.
+`handoff-reference.md` — each step in full, fact vs framing, commit stamping, the Output shape, the `--handoff` packet
+with `--token-budget`.
