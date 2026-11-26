@@ -1,0 +1,27 @@
+{
+  "what": "PILOT aggregate (PREREG_PLACEBO.md stopping rule 1). TRAIN split only, K=1. NOT a finding: the prereg forbids reading a pilot effect; it exists to measure isolation, resolved_model, the token rate, the submission rate and d.",
+  "date": "2026-11-26",
+  "model_requested": "claude-haiku-5-5", "resolved_model": ["claude-haiku-5-5"], "effort": "low",
+  "credential": "claude.ai subscription (CLI)", "backend": "claude -p, --tools '' --setting-sources '' --strict-mcp-config, empty cwd, ripwire off PATH",
+  "tool_protocol": "text-json",
+  "instances": 24, "arms": ["A0", "A1", "A2", "A3"], "seeds": 1, "episodes": 96,
+  "pilot_train_payload_seal_sha256": "69b32fc028aef30b4906ba086776b9bfb5dbe3bfeef3548643c6692f269949f1",
+  "stops": {"submit": 96}, "provider_errors": 0,
+  "submission_rate": {"submitted": 96, "of": 96, "floor": "50%"},
+  "per_arm_pilot_counts_of_24": {
+    "A0": {"func_hit10": 16, "file_hit5": 20, "strict_file10": 10, "strict_func10": 7, "mean_turns": 4.25},
+    "A1": {"func_hit10": 21, "file_hit5": 22, "strict_file10": 12, "strict_func10": 9, "mean_turns": 2.83},
+    "A2": {"func_hit10": 18, "file_hit5": 21, "strict_file10": 13, "strict_func10": 7, "mean_turns": 4.12},
+    "A3": {"func_hit10": 19, "file_hit5": 20, "strict_file10": 11, "strict_func10": 8, "mean_turns": 4.12}
+  },
+  "discordance_d": {"A1_A2": 0.2083, "A1_A3": 0.1667, "A1_A0": 0.2083, "A2_A0": 0.1667, "n_pairs": 24},
+  "seed_share": "NOT MEASURED: a K=1 pilot has no replicate; the prereg's assumed 0.5 is used",
+  "holm_mde_pp_effect_free": {"n243_K3": 7.46, "n243_K5": 7.08, "n302_K3": 6.69, "n302_K5": 6.35, "n302_K3_seed_share_1.0": 8.2},
+  "tokens_total": {"uncached_in": 736, "cache_write": 3217688, "cache_read": 0, "output": 48404, "input_total": 3218424},
+  "tokens_per_episode_mean": {"uncached_in": 7.7, "cache_write": 33517.6, "cache_read": 0.0, "output": 504.2, "input_total": 33525.2, "input_max": 97451},
+  "input_tokens_per_episode_mean_by_arm": {"A0": 14876, "A1": 29363, "A2": 44823, "A3": 45039},
+  "cost_guard_after_12": {"mean_input_tokens": 31699.25, "mean_output_tokens": 594.58, "prereg_priced_usd_per_episode": 0.00426, "central_usd_per_episode": 0.0096, "multiple": 0.444, "verdict": "pass (<= 2x)"},
+  "prereg_priced_usd": {"total": 0.4265, "per_episode": 0.00444, "note": "tokens x the prereg price table; cache writes priced at the ASSUMED 1.25x; billed on a subscription, so no dollars were charged"},
+  "cli_notional_usd_total": 0.6678,
+  "wall_s_total": 1582
+}
