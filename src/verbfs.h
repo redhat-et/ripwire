@@ -213,7 +213,7 @@ inline RecordFile readRecord( Part part, std::string_view rootKey )
         out.why = Why::Ok;
         return out;
     }
-    DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS record that is refused is not read: the pass does its full work, and the run writes a fresh record" );
+    DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS record that is refused is not read: the pass does its full work and rebuilds the answer; whether a fresh record is written is the keep path's call" );
     out.bytes.clear();
     return out;
 }

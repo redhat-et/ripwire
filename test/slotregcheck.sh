@@ -21,7 +21,7 @@
 #   S1  COUNTER: a served --for serves both indexes (index=regindex served=1, index=slotjoin served=1); the premise: the
 #       answers carry a <reg> row and slot_by=, so the served indexes are read
 #   S2  IDENTITY: the registry question, the slot question and --uses=row_cmp (a full value index, same seam) equal both
-#       references
+#       references, and each of those three calls is itself a served hit (regindex / slotjoin / slotjoin served=1)
 #   S3  a served adjacency prints the `[stats] header_static_adj` line its build prints (scope= is derived from the rows)
 #   I1  EDIT (slotjoin input): c/table.h stops including row.h — t2.c no longer sees the header static: slot_by= goes
 #   I2  EDIT (regindex input): a receiver renamed in py/db/__init__.py — the <reg> row lists the new name
@@ -30,15 +30,22 @@
 #   I5  A FLAG THAT CHANGES THE INDEX: --exclude=extra drops the flush_logs registration — n="1": no row at all
 #       each of I1..I5: the stats line says served=0 why=key (built=1 wrote=1), the answer equals both references, and the
 #       ANYKEY mutant (serve the newest stored entry whatever model it was built from) differs from --no-cache
-#   I6  DAMAGED: one payload byte of the regindex record flipped — why=checksum, identity, and the next call is served again
-#   I7  VERSION: the slotjoin record's header version bumped — why=version, identity, and the next call is served again
+#   I6  DAMAGED: one payload byte of the regindex record flipped — why=checksum, the very next call is served again, and the
+#       refusal call's own answer equals both references
+#   I7  VERSION: the slotjoin record's header version bumped — why=version, then the same two checks
 #   I8  FOREIGN: the regindex record copied over the slotjoin record's name (another part) — why=shape, identity
 #       I6..I8 mutant: EMPTYREFUSED (a refused record answers as an EMPTY index instead of a rebuild) differs from --no-cache
 #   E   an #include into another dialect (scope=all, the whole-corpus adjacency): served, same stats line, identical
-#   K   RIPWIRE_NO_VERBFS=1: no `[verbfs] slotreg` line at all; --no-cache: none either
+#   K   RIPWIRE_NO_VERBFS=1: no `[verbfs] slotreg` line at all; --no-cache: none either (both calls exit 0)
 #   V   the plain build DASSERTs every served index equals a fresh build of the same IngestResult (the guard against a
-#       pass that edits the model in place after ingest()); STALEROWS (served rows one site / one edge short) must abort
-#   D   determinism: two served calls are byte-identical (stdout and stderr)   X  xmllint well-formed
+#       pass that edits the model in place after ingest()); STALEROWS (served rows one site / one edge short) must abort.
+#       Each arm is attributed to ONE check: the registry question never reaches the adjacency (no slotjoin line), and the
+#       slot question runs on a C-only root with no registry key, so the registrar's check has no site to lose
+#   D   determinism: two served calls are byte-identical (stdout and stderr), both exit 0, bracketed by two served hits on
+#       the same cache key   X  xmllint well-formed
+#
+# The fault arms (IM, RM, V) run only where --version's build-type token says NDEBUG is off; there a fault switch that
+# does not report itself is a FAIL, never a skip.
 #
 # Usage:  bash test/slotregcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/slotregcheck.sh
 
@@ -93,12 +100,14 @@ QS='how does row_cmp compare rows'
 # ── runners (verbfscheck.sh's) ──────────────────────────────────────────────────────────────────────────────────────
 # run TAG MODE ARGS... : warm = the served path (--cache=C); novfs = RIPWIRE_NO_VERBFS=1 (its own cache: the variable is
 # keyed into the snapshot's options); nocache = --no-cache. stdout/stderr/rc into $TMP/TAG.{out,err,rc}.
+# RUNROOT / RUNCACHE pick another root and its own cache files (V's C-only root).
 run(){
     local tag="$1" mode="$2"; shift 2
+    local root="${RUNROOT:-$FIX}" cb="${RUNCACHE:-}"
     case "$mode" in
-        warm)    ( cd "$FIX" && "$BIN" "$FIX" --cache="$TMP/c.bin" "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
-        novfs)   ( cd "$FIX" && RIPWIRE_NO_VERBFS=1 "$BIN" "$FIX" --cache="$TMP/n.bin" "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
-        nocache) ( cd "$FIX" && "$BIN" "$FIX" --no-cache "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
+        warm)    ( cd "$root" && "$BIN" "$root" --cache="$TMP/c$cb.bin" "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
+        novfs)   ( cd "$root" && RIPWIRE_NO_VERBFS=1 "$BIN" "$root" --cache="$TMP/n$cb.bin" "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
+        nocache) ( cd "$root" && "$BIN" "$root" --no-cache "$@" </dev/null >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) ;;
     esac
     echo $? >"$TMP/$tag.rc"
 }
@@ -108,14 +117,27 @@ statrun(){ local tag="$1"; shift; RIPWIRE_STATS=1 run "$tag" warm "$@"; }
 field(){ grep "^\[verbfs\] slotreg index=$2 " "$TMP/$1.err" | head -1 | grep -oE "(^| )$3=[^ ]+" | head -1 | cut -d= -f2; }
 line(){ grep "^\[verbfs\] slotreg index=$2 " "$TMP/$1.err" | head -1; }
 same(){ cmp -s "$TMP/$1.out" "$TMP/$2.out" && cmp -s "$TMP/$1.rc" "$TMP/$2.rc"; }
-# ident LABEL ARGS... : the served answer equals both references
+# identOf TAG LABEL ARGS... : the answer of the warm call TAG, already run, equals both references
+identOf(){
+    local tag="$1" label="$2"; shift 2
+    run "id.n" novfs "$@"; run "id.c" nocache "$@"
+    if [ "$( cat "$TMP/id.c.rc" )" != 0 ]; then no "$label: the --no-cache reference exited $( cat "$TMP/id.c.rc" )"; return 1; fi
+    if same "$tag" id.c && same id.n id.c; then return 0; fi
+    no "$label: served / no-verbfs / no-cache differ: $( diff "$TMP/$tag.out" "$TMP/id.c.out" | head -4 | tr '\n' ' ' )"
+    return 1
+}
+# ident LABEL ARGS... : a fresh warm call's answer equals both references
 ident(){
     local label="$1"; shift
-    run "id.w" warm "$@"; run "id.n" novfs "$@"; run "id.c" nocache "$@"
-    if [ "$( cat "$TMP/id.c.rc" )" != 0 ]; then no "$label: the --no-cache reference exited $( cat "$TMP/id.c.rc" )"; return 1; fi
-    if same id.w id.c && same id.n id.c; then return 0; fi
-    no "$label: served / no-verbfs / no-cache differ: $( diff "$TMP/id.w.out" "$TMP/id.c.out" | head -4 | tr '\n' ' ' )"
-    return 1
+    run "id.w" warm "$@"
+    identOf id.w "$label" "$@"
+}
+# identServed LABEL INDEX ARGS... : ident, on a warm call that is itself a served hit of INDEX (its own stats line)
+identServed(){
+    local label="$1" index="$2"; shift 2
+    statrun "id.w" "$@"
+    if [ "$( field id.w "$index" served )" != 1 ]; then no "$label: the compared call is not a served $index hit: '$( line id.w "$index" )'"; return 1; fi
+    identOf id.w "$label" "$@"
 }
 recordOf(){ find "$TMP/t/ripwire" -name "ripwire-verbfs-*-$1-*.bin" 2>/dev/null | head -1; }
 regRow(){ grep -o '<reg [^>]*>' "$TMP/$1.out" | head -1; }
@@ -138,10 +160,10 @@ else no "S1b premise: reg='$( regRow s1r )' slot_by=$( grep -c 'slot_by' "$TMP/s
 
 # ── S2: identity, nothing changed ─────────────────────────────────────────────────────────────────────────────────
 s2=0
-ident "S2 registry question" --for="$QR" && s2=$(( s2 + 1 ))
-ident "S2 slot question" --for="$QS" && s2=$(( s2 + 1 ))
-ident "S2 --uses=row_cmp" --uses=row_cmp && s2=$(( s2 + 1 ))
-if [ "$s2" = 3 ]; then ok "S2 three served answers equal no-verbfs and --no-cache"; fi
+identServed "S2 registry question" regindex --for="$QR" && s2=$(( s2 + 1 ))
+identServed "S2 slot question" slotjoin --for="$QS" && s2=$(( s2 + 1 ))
+identServed "S2 --uses=row_cmp" slotjoin --uses=row_cmp && s2=$(( s2 + 1 ))
+if [ "$s2" = 3 ]; then ok "S2 three served hits (regindex, slotjoin, slotjoin) equal no-verbfs and --no-cache"; fi
 
 # ── S3: a served adjacency prints the stats line its build printed ───────────────────────────────────────────────
 hsa(){ grep -F '[stats] header_static_adj' "$TMP/$1.err" | sort -u; }
@@ -150,14 +172,25 @@ if [ "$( field s1s slotjoin served )" = 1 ] && [ -n "$( hsa s3c )" ] && [ "$( hs
 else no "S3 served '$( hsa s1s )' vs built '$( hsa s3c )'"; fi
 
 # ── the mutants ───────────────────────────────────────────────────────────────────────────────────────────────────
-MUT=0
-RIPWIRE_FAULT_SLOTREG_ANYKEY=1 statrun mprobe --for="$QR"
-[ "$( field mprobe regindex fault )" = anykey ] && MUT=1
+# Whether the fault switches exist is the build's NDEBUG, read from --version's build-type token (CMakeLists defines NDEBUG
+# for Release / RelWithDebInfo / MinSizeRel and nothing else) — never from the switch's own silence, which would let a plain
+# build that stopped honouring a switch skip the arm it guards.
+FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel) MUT=0 ;;
+    *) MUT=1 ;;
+esac
+if [ "$MUT" = 1 ]; then
+    RIPWIRE_FAULT_SLOTREG_ANYKEY=1 statrun mprobe --for="$QR"
+    if [ "$( field mprobe regindex fault )" = anykey ]; then ok "M this '${FLAVOUR:-unknown}' (non-NDEBUG) build honours the fault switches (fault=anykey reported)"
+    else no "M this '${FLAVOUR:-unknown}' build is not NDEBUG, yet the ANYKEY switch is not reported: '$( line mprobe regindex )'"; fi
+fi
 # kmut LABEL ARGS... : the ANYKEY mutant, run BEFORE the honest call (the record still holds the previous state), must differ
 kmut(){
     local label="$1"; shift
     [ "$MUT" = 1 ] || return 0
     run km.c nocache "$@"
+    if [ "$( cat "$TMP/km.c.rc" )" != 0 ]; then no "IM $label: the --no-cache reference exited $( cat "$TMP/km.c.rc" ) (a failed oracle differs from anything)"; return 0; fi
     RIPWIRE_FAULT_SLOTREG_ANYKEY=1 run km.w warm "$@"
     if [ "$( cat "$TMP/km.w.rc" )" != 0 ]; then no "IM $label: the ANYKEY mutant exited $( cat "$TMP/km.w.rc" ) (a crash differs from anything: it proves nothing)"; return 0; fi
     if ! same km.w km.c; then ok "IM $label: serving a stale entry turns the identity red"; else no "IM $label: the ANYKEY mutant matched the reference: the arm cannot see a stale index"; fi
@@ -167,6 +200,7 @@ rmut(){
     local label="$1"; shift
     [ "$MUT" = 1 ] || return 0
     run rm.c nocache "$@"
+    if [ "$( cat "$TMP/rm.c.rc" )" != 0 ]; then no "RM $label: the --no-cache reference exited $( cat "$TMP/rm.c.rc" ) (a failed oracle differs from anything)"; return 0; fi
     RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED=1 run rm.w warm "$@"
     if [ "$( cat "$TMP/rm.w.rc" )" != 0 ]; then no "RM $label: the EMPTYREFUSED mutant exited $( cat "$TMP/rm.w.rc" ) (a crash differs from anything: it proves nothing)"; return 0; fi
     if ! same rm.w rm.c; then ok "RM $label: answering a refused record as empty turns the identity red"; else no "RM $label: the EMPTYREFUSED mutant matched the reference"; fi
@@ -249,9 +283,9 @@ PY
     rmut "I6 a flipped payload byte" --for="$QR"
     statrun i6 --for="$QR"
     if [ "$( field i6 regindex served )" = 0 ] && [ "$( field i6 regindex why )" = checksum ]; then ok "I6 a flipped payload byte is refused (why=checksum)"; else no "I6 expected why=checksum, got '$( line i6 regindex )'"; fi
-    ident "I6" --for="$QR" && ok "I6 identical after the refusal"
-    statrun i6b --for="$QR"
+    statrun i6b --for="$QR"   # the very next call: only the refusal call can have rewritten the record
     if [ "$( field i6b regindex served )" = 1 ]; then ok "I6 the refused record was rewritten: the next call is served"; else no "I6 not served after the rewrite: '$( line i6b regindex )'"; fi
+    identOf i6 "I6" --for="$QR" && ok "I6 the refusal call's answer equals both references"
     # I7: the header version bumped (u32 at byte 8)
     python3 - "$REC_S" <<'PY'
 import struct, sys
@@ -260,9 +294,9 @@ PY
     rmut "I7 another format version" --for="$QS"
     statrun i7 --for="$QS"
     if [ "$( field i7 slotjoin served )" = 0 ] && [ "$( field i7 slotjoin why )" = version ]; then ok "I7 a record of another version is refused (why=version)"; else no "I7 expected why=version, got '$( line i7 slotjoin )'"; fi
-    ident "I7" --for="$QS" && ok "I7 identical after the refusal"
-    statrun i7b --for="$QS"
+    statrun i7b --for="$QS"   # the very next call: only the refusal call can have rewritten the record
     if [ "$( field i7b slotjoin served )" = 1 ]; then ok "I7 the refused record was rewritten: the next call is served"; else no "I7 not served after the rewrite: '$( line i7b slotjoin )'"; fi
+    identOf i7 "I7" --for="$QS" && ok "I7 the refusal call's answer equals both references"
     # I8: a foreign record (the other part's bytes under this part's name)
     REC_R="$( recordOf regindex )"; REC_S="$( recordOf slotjoin )"
     cp "$REC_R" "$REC_S"
@@ -271,7 +305,7 @@ PY
     if [ "$( field i8 slotjoin served )" = 0 ] && [ "$( field i8 slotjoin why )" = shape ]; then ok "I8 another part's record is refused (why=shape)"; else no "I8 expected why=shape, got '$( line i8 slotjoin )'"; fi
     ident "I8" --for="$QS" && ok "I8 identical after the refusal"
 fi
-[ "$MUT" = 1 ] || printf '  INFO  IM/RM this binary compiles fault switches out (NDEBUG); the mutation arms run on the plain-flavour leg\n'
+[ "$MUT" = 1 ] || printf '  INFO  IM/RM this %s build defines NDEBUG (fault switches compiled out); the mutation arms run on the plain-flavour leg\n' "$FLAVOUR"
 
 # ── E: an include into another dialect widens the build to the whole corpus; served, it still says so ─────────────
 printf '#include "../py/core/signals.py"\n#include "table.h"\nint t5(void *v, void *x) { return vec_index(v, x, row_cmp); }\n' >"$FIX/c/gen.c"
@@ -284,36 +318,59 @@ rm -f "$FIX/c/gen.c"
 run eback warm --for="$QR"; run eback2 warm --for="$QR"
 
 # ── K: the kill switch and --no-cache print no slotreg line ──────────────────────────────────────────────────────
-( cd "$FIX" && RIPWIRE_STATS=1 RIPWIRE_NO_VERBFS=1 "$BIN" "$FIX" --cache="$TMP/n.bin" --for="$QR" </dev/null >/dev/null 2>"$TMP/k1.err" )
-( cd "$FIX" && RIPWIRE_STATS=1 "$BIN" "$FIX" --no-cache --for="$QR" </dev/null >/dev/null 2>"$TMP/k2.err" )
-if ! grep -q '^\[verbfs\] slotreg' "$TMP/k1.err" && ! grep -q '^\[verbfs\] slotreg' "$TMP/k2.err"; then ok "K RIPWIRE_NO_VERBFS=1 and --no-cache neither read nor write the record (no slotreg line)"
+( cd "$FIX" && RIPWIRE_STATS=1 RIPWIRE_NO_VERBFS=1 "$BIN" "$FIX" --cache="$TMP/n.bin" --for="$QR" </dev/null >/dev/null 2>"$TMP/k1.err" ); k1rc=$?
+( cd "$FIX" && RIPWIRE_STATS=1 "$BIN" "$FIX" --no-cache --for="$QR" </dev/null >/dev/null 2>"$TMP/k2.err" ); k2rc=$?
+if [ "$k1rc" != 0 ] || [ "$k2rc" != 0 ]; then no "K a disabled call failed before SLOTREG could run (kill switch rc=$k1rc, --no-cache rc=$k2rc): its silence proves nothing"
+elif ! grep -q '^\[verbfs\] slotreg' "$TMP/k1.err" && ! grep -q '^\[verbfs\] slotreg' "$TMP/k2.err"; then ok "K RIPWIRE_NO_VERBFS=1 and --no-cache neither read nor write the record (no slotreg line)"
 else no "K a slotreg line under the kill switch or --no-cache: $( grep -h '^\[verbfs\] slotreg' "$TMP/k1.err" "$TMP/k2.err" | head -2 | tr '\n' ' ' )"; fi
 
 # ── V: the plain build proves every served index against a fresh build; an index that no longer matches the model fires ──
 # What it stands for: a pass that edited the model IN PLACE after ingest() returned (same arrays, same sizes) would keep the noted
 # identity and serve a stale index. Every served call of a plain-flavour run (every arm above) re-builds both indexes and DASSERTs
 # equality; STALEROWS serves rows one site / one edge short, which is what such an edit would leave, and must abort the call.
-VMUT=""
-for q in "$QR" "$QS"; do
-    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.p --for="$q"; RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.r --for="$q"
-    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v --for="$q"
-    if [ -z "$VMUT" ]; then grep -q 'fault=stalerows' "$TMP/v.p.err" "$TMP/v.r.err" "$TMP/v.err" && VMUT=1 || VMUT=0; fi
-    if [ "$VMUT" = 0 ]; then printf '  INFO  V this binary compiles fault switches out (NDEBUG): the served-vs-fresh check is a plain-build check\n'; break; fi
-    run v.h warm --for="$q"   # the same served call, honest: it answers (the check passes on an index that matches)
-    # The DASSERT's trap is __builtin_trap: `brk` on arm64 (SIGTRAP, 128+5=133), `ud2` on x86-64 (SIGILL, 128+4=132). Its banner
-    # goes to the render's captured stream, so the status is the signal; any other status (a crash, an exit) is not this check.
-    vrc="$( cat "$TMP/v.rc" )"
-    if { [ "$vrc" = 133 ] || [ "$vrc" = 132 ]; } && [ "$( cat "$TMP/v.h.rc" )" = 0 ]; then ok "V stale served rows trap the plain build (rc=$vrc), the honest served call answers (rc=0)"
-    else no "V a served index that differs from the model was not caught (mutant rc=$vrc, honest rc=$( cat "$TMP/v.h.rc" ))"; fi
-done
+# The DASSERT's trap is __builtin_trap: `brk` on arm64 (SIGTRAP, 128+5=133), `ud2` on x86-64 (SIGILL, 128+4=132). Its banner
+# goes to the render's captured stream, so the status is the signal; any other status (a crash, an exit) is not this check.
+# Both checks run in one compact --for, so each arm is placed where only ONE of them can see a short row:
+#   registrar  the registry question on the fixture; its honest call prints no slotjoin line (the adjacency is not reached)
+#   adjacency  the slot question on a C-only root: no registry key (keys=0), so STALEROWS has no registrar site to drop
+FIXC="$TMP/fixc"; mkdir -p "$FIXC/c"; cp "$FIX"/c/row.h "$FIX"/c/vec.h "$FIX"/c/vec.c "$FIX"/c/table.h "$FIX"/c/t2.c "$FIXC/c/"
+# varm LABEL INDEX OTHER ARGS... : STALEROWS on a served INDEX traps; the honest served call answers, and OTHER is not in play.
+# The arm runs only on a non-NDEBUG build, and there it demands the trap: a switch that stopped working is a FAIL, not a skip.
+# (No fault= marker is asked for: the slot question uses the adjacency twice per call, the second use is served from what the
+# first left loaded, so every STALEROWS call traps before the render's captured stderr is written.)
+varm(){
+    local label="$1" index="$2" other="$3"; shift 3
+    run v.h0 warm "$@"; run v.h1 warm "$@"; statrun v.h "$@"
+    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.p "$@"; RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.r "$@"
+    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v "$@"
+    local vrc hrc; vrc="$( cat "$TMP/v.rc" )"; hrc="$( cat "$TMP/v.h.rc" )"
+    if [ "$hrc" != 0 ] || [ "$( field v.h "$index" served )" != 1 ]; then no "V $label: the honest call is not a served $index hit (rc=$hrc, '$( line v.h "$index" )')"; return 0; fi
+    case "$other" in
+        noslotjoin) if [ -n "$( line v.h slotjoin )" ]; then no "V $label: the adjacency is in play too ('$( line v.h slotjoin )'): the trap is not the registrar's alone"; return 0; fi ;;
+        nokeys)     local k; k="$( field v.h regindex keys )"; if [ -n "$k" ] && [ "$k" != 0 ]; then no "V $label: the registrar has keys here ('$( line v.h regindex )'): the trap is not the adjacency's alone"; return 0; fi ;;
+    esac
+    if [ "$vrc" = 133 ] || [ "$vrc" = 132 ]; then ok "V $label: stale served rows trap the plain build (rc=$vrc); the honest served call answers (rc=0, served=1)"
+    else no "V $label: a served index that differs from the model was not caught (mutant rc=$vrc)"; fi
+}
+case "$FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel)
+        printf '  INFO  V this %s build defines NDEBUG: the served-vs-fresh check is a plain-build check\n' "$FLAVOUR" ;;
+    *)
+        varm "registrar" regindex noslotjoin --for="$QR"
+        RUNROOT="$FIXC" RUNCACHE=v varm "adjacency" slotjoin nokeys --for="$QS" ;;
+esac
 
 # ── D, X ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 # One honest call first. Every RIPWIRE_* variable is in the options key, so V's fault-switch calls recorded entries of their
-# own and (a record keeps two) pushed the honest one out; a Release build, where V stops after them, then met a cold key
-# here. D is about two SERVED calls, so it re-records the honest entry before its premise call.
+# own and (a record keeps two) pushed the honest one out. D is about two SERVED calls, so it re-records the honest entry first.
+# RIPWIRE_STATS prints memory readings, so the compared pair runs without it; RIPWIRE_STATS is an observer the options key
+# leaves out (warmsnap.h kObservers), so d0, d1, d2 and d3 share one cache key, and the served hits d0 and d3 bracket the pair.
 run d_rec warm --for="$QR"
-statrun d0 --for="$QR"; run d1 warm --for="$QR"; run d2 warm --for="$QR"   # RIPWIRE_STATS prints memory readings: the pair runs without it
-if [ "$( field d0 regindex served )" = 1 ] && same d1 d2 && cmp -s "$TMP/d1.err" "$TMP/d2.err"; then ok "D two served calls are byte-identical (stdout and stderr)"; else no "D served calls differ (or were not served: '$( line d0 regindex )')"; fi
+statrun d0 --for="$QR"; run d1 warm --for="$QR"; run d2 warm --for="$QR"; statrun d3 --for="$QR"
+if [ "$( cat "$TMP/d1.rc" )" != 0 ] || [ "$( cat "$TMP/d2.rc" )" != 0 ]; then no "D a compared call failed (rc=$( cat "$TMP/d1.rc" ) / $( cat "$TMP/d2.rc" )): two equal failures prove nothing"
+elif [ "$( field d0 regindex served )" != 1 ] || [ "$( field d3 regindex served )" != 1 ]; then no "D the pair is not bracketed by served hits: '$( line d0 regindex )' / '$( line d3 regindex )'"
+elif same d1 d2 && cmp -s "$TMP/d1.err" "$TMP/d2.err"; then ok "D two served calls are byte-identical (stdout and stderr, rc=0)"
+else no "D served calls differ"; fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/d1.out" 2>/dev/null && xmllint --noout "$TMP/s1s.out" 2>/dev/null; then ok "X well-formed XML"; else no "X xmllint rejects a served answer"; fi
 fi

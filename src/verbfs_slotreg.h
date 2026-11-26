@@ -228,13 +228,15 @@ inline bool refused( const Serve& tried ) noexcept
 }
 
 // The record write both parts share: the fresh entry first, then the stored ones of other models, up to the cap. "" when it
-// wrote, else the stats line's reason.
-template<class Rec, class Entry = typename decltype( Rec::entries )::value_type>
-inline std::string_view keepEntry( const IngestResult& ing, const PartIo<Rec>& io, Entry fresh, bool readsPinned )
+// wrote, else the stats line's reason. `makeFresh` builds the entry only once the write is known to be eligible: an
+// unidentified model or a build that read outside the crawl copies nothing.
+template<class Rec, class Make>
+inline std::string_view keepEntry( const IngestResult& ing, const PartIo<Rec>& io, bool readsPinned, Make&& makeFresh )
 {
+    using Entry                  = typename decltype( Rec::entries )::value_type;
     const ArmedRoot* const armed = armedFor( ing );
     bool                   found = false;
-    fresh.key                    = modelKeyOf( ing, found );
+    const std::uint64_t    key   = modelKeyOf( ing, found );
     if( armed == nullptr || !found )
     {
         return " wrote=0 nowrite=model";
@@ -247,9 +249,12 @@ inline std::string_view keepEntry( const IngestResult& ing, const PartIo<Rec>& i
     Why  why    = Why::Absent;
     if( const auto old = loadOnce( io.slot, io.part, armed->rootKey, io.parse, why ) )
     {
-        std::ranges::copy_if( old->entries | std::views::take( kSlotRegEntriesKept - 1 ), std::back_inserter( merged->entries ),
-                              [ & ]( const Entry& e ) { return e.key != fresh.key; } );
+        // The refreshed key is dropped BEFORE the cap: a record [A, B] whose A this build replaces keeps B.
+        std::ranges::copy( old->entries | std::views::filter( [ key ]( const Entry& e ) { return e.key != key; } ) | std::views::take( kSlotRegEntriesKept - 1 ),
+                           std::back_inserter( merged->entries ) );
     }
+    Entry fresh = makeFresh();
+    fresh.key   = key;
     merged->entries.insert( merged->entries.begin(), std::move( fresh ) );
     merged->entries.resize( std::min( merged->entries.size(), kSlotRegEntriesKept ) );
     warmsnap::Out o = beginRecord();
@@ -389,6 +394,7 @@ inline Serve serveReg( const IngestResult& ing, std::vector<RegKey>& keys, std::
     const RegEntry*                  hit = findEntry( ing, regIo(), tried, hold );
     if( hit != nullptr && !VALIDATE( faultAnyKey() || regEntryFits( ing, *hit ), "verbfs: a stored registrar key names an id this index does not hold" ) )
     {
+        DISCLOSE( Diagnostics::answerUnchanged, "a stored registrar index that names an id this model does not hold is not served: the index is rebuilt from the model" );
         hit       = nullptr;
         tried.why = std::uint8_t( Why::Shape );
     }
@@ -413,7 +419,7 @@ inline Serve serveReg( const IngestResult& ing, std::vector<RegKey>& keys, std::
 
 inline void keepReg( const IngestResult& ing, Serve tried, const std::vector<RegKey>& keys, const std::vector<std::string>& cut, bool readsPinned )
 {
-    const std::string_view wrote = keepEntry( ing, regIo(), RegEntry{ 0, keys, cut }, readsPinned );
+    const std::string_view wrote = keepEntry( ing, regIo(), readsPinned, [ & ] { return RegEntry{ 0, keys, cut }; } );
     statsLine( "regindex", tried, std::format( " built=1{} keys={}", wrote, keys.size() ) );
 }
 
@@ -480,6 +486,7 @@ inline Serve serveJoin( const IngestResult& ing, FileAdjacency& includers )
     const JoinEntry*                  hit = findEntry( ing, joinIo(), tried, hold );
     if( hit != nullptr && !VALIDATE( joinEntryFits( ing, *hit ), "verbfs: a stored include adjacency does not fit this index" ) )
     {
+        DISCLOSE( Diagnostics::answerUnchanged, "a stored include adjacency that does not fit this model is not served: the adjacency is rebuilt from the model" );
         hit       = nullptr;
         tried.why = std::uint8_t( Why::Shape );
     }
@@ -507,18 +514,20 @@ inline Serve serveJoin( const IngestResult& ing, FileAdjacency& includers )
 
 inline void keepJoin( const IngestResult& ing, Serve tried, const FileAdjacency& includers, bool readsPinned )
 {
-    JoinEntry fresh;
-    fresh.off.reserve( includers.size() + 1 );
-    fresh.off.push_back( 0 );
-    fresh.tgt.reserve( includers.edgeCount() );
-    for( std::size_t f = 0; f < includers.size(); ++f )
+    const std::string_view wrote = keepEntry( ing, joinIo(), readsPinned, [ & ]
     {
-        std::ranges::copy( includers[ f ], std::back_inserter( fresh.tgt ) );
-        fresh.off.push_back( std::uint32_t( fresh.tgt.size() ) );
-    }
-    const std::size_t      edges = fresh.tgt.size();
-    const std::string_view wrote = keepEntry( ing, joinIo(), std::move( fresh ), readsPinned );
-    statsLine( "slotjoin", tried, std::format( " built=1{} edges={}", wrote, edges ) );
+        JoinEntry fresh;
+        fresh.off.reserve( includers.size() + 1 );
+        fresh.off.push_back( 0 );
+        fresh.tgt.reserve( includers.edgeCount() );
+        for( std::size_t f = 0; f < includers.size(); ++f )
+        {
+            std::ranges::copy( includers[ f ], std::back_inserter( fresh.tgt ) );
+            fresh.off.push_back( std::uint32_t( fresh.tgt.size() ) );
+        }
+        return fresh;
+    } );
+    statsLine( "slotjoin", tried, std::format( " built=1{} edges={}", wrote, includers.edgeCount() ) );
 }
 
 // ── arming ──────────────────────────────────────────────────────────────────────────────────────────────────────────
