@@ -1433,7 +1433,17 @@ private:
     void index( const KeepSets* keep )
     {
         const IngestResult& ing = m_ing;
-        for( NodeId id = 0; id < ing.symbols.size(); ++id )
+        if( keep != nullptr && keep->fnAll != nullptr )
+        {
+            for( const auto& [ name, one ] : keep->names )   // SLOT-NARROW: the base's unfiltered table, read once per kept name
+            {
+                if( const auto it = keep->fnAll->find( name ); it != keep->fnAll->end() )
+                {
+                    m_fnByName.try_emplace( name, it->second );
+                }
+            }
+        }
+        for( NodeId id = 0; id < ing.symbols.size() && ( keep == nullptr || keep->fnAll == nullptr ); ++id )
         {
             const Symbol& s = ing.symbols[id];
             if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) != VrLangFamily::None
@@ -1531,6 +1541,7 @@ private:
         HashMap<std::string, char>   names;        // the names resolveName looks up: kept values' callees and their bare callees
         HashMap<std::string, char>   containers;   // "fileId#container" of the kept values
         HashSet<NodeId>              paramOwners;  // a kept parameter default's function
+        const HashMap<std::string_view, std::vector<NodeId>>* fnAll = nullptr;   // SLOT-NARROW: every function by name (the base build's)
         bool keepsThrough( const IngestResult& ing, const Reference& t ) const
         {
             if( scopeOf( t ) == 'p' )
@@ -2580,11 +2591,13 @@ inline std::shared_ptr<const ValueRefIndex::NarrowBase> ValueRefIndex::buildBase
     b->key  = key;
     b->rows = verbfs::slotreg::modelRowsOf( ing );
     Narrowed n{ ing, keepSetsWith( ing, {}, [ &base = *b ]( std::uint32_t i, const Reference& r ) { base.skipped( i, r ); } ) };
-    b->index.reset( new ValueRefIndex( n ) );
     b->indexSymbols( ing );
+    n.keep.fnAll = &b->fnAll;   // index() reads its by-name table from it instead of walking the symbols again
+    b->index.reset( new ValueRefIndex( n ) );
     b->indexOwnersByName( ing );
     b->keep        = std::move( n.keep );
-    b->keep.values = {};   // the base's values are its index's; only the question's are looked up
+    b->keep.values = {};        // the base's values are its index's; only the question's are looked up
+    b->keep.fnAll  = nullptr;
     return b;
 }
 
