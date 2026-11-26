@@ -597,7 +597,7 @@ inline std::string sweepEmptyCause( const std::string& root, std::string_view wh
     };
     const auto noStart = [ & ]( int err )
     {
-        return "git could not be started from this server (popen failed: " + std::string( err != 0 ? std::strerror( err ) : "no errno" )
+        return "this server could not start git (popen failed: " + std::string( err != 0 ? std::strerror( err ) : "no errno" )
              + ") — no refs to " + std::string( what ) + "; the repository itself was not checked";
     };
     int                   err  = 0;
@@ -608,7 +608,7 @@ inline std::string sweepEmptyCause( const std::string& root, std::string_view wh
     }
     if( decodedExitCode( repo.status ) != 0 )
     {
-        return "not a git repository: git rev-parse --git-dir exited " + std::to_string( decodedExitCode( repo.status ) ) + " — no refs to " + std::string( what );
+        return "not a git repository: git's repository probe exited " + std::to_string( decodedExitCode( repo.status ) ) + " — no refs to " + std::string( what );
     }
     const GitCommandLines head = probe( "rev-parse --verify --quiet HEAD", err );
     if( !head.isStarted )
@@ -1712,6 +1712,16 @@ struct McpPagedText
     std::string text;
     std::string refusal;
 };
+
+// An explicit budget_tokens past the ceiling is answered whole (the caller asked for those bytes); this is the sentence that
+// says so, in the result's visible notes (mcp.h McpEnvelopeNotes), or "" when the answer fits.
+inline std::string recallOverCeilingNote( std::size_t bytes, std::size_t ceiling = kOutputCeilingChars )
+{
+    return bytes <= ceiling ? std::string()
+         : "this answer is " + std::to_string( bytes ) + " B, served whole because budget_tokens asked for it; that is past the "
+           + std::to_string( ceiling ) + " B a host shows inline, so a host may save it to a file — pass offset=0 (same task, top_k, "
+           "budget_tokens) to receive it in pages";
+}
 
 inline McpPagedText recallPage( const std::string& whole, std::size_t offset, std::size_t ceiling = kOutputCeilingChars )
 {

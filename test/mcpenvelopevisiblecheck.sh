@@ -11,14 +11,16 @@
 # `_fresh`. So "every truncation is disclosed" held for the JSON-RPC client and failed for the agent.
 #
 # THE RULE. When a result carries any of those keys, `content` carries a second text block that says the same sentence,
-# key by key. The verb's own payload (the first block) is untouched, so a JSON payload stays parseable. A result that carries
+# key by key, one "<key>: <sentence>" line each (never opening with '[' or '{': no reader may take it for a JSON payload).
+# `_memory_peak` is the one exception, and the gate pins it: the answer it rides is whole, its number differs run to run,
+# and the CLI says it on stderr only — so it stays machine-only, and a deterministic answer stays byte-identical. The verb's own payload (the first block) is untouched, so a JSON payload stays parseable. A result that carries
 # none of them is byte-identical to before: one content block.
 #
 # Arms ([P] RED on the parent 5f4b50415; [C] holds on every binary):
 #   (V1..V5) [C] the envelope key is forced and present — without this each [P] arm below would judge nothing.
 #   (V1) [P] _assumed_root      bare --mcp launched in the fixture, path= omitted
 #   (V2) [P] _memory_stop       RIPWIRE_TEST_MEMGUARD=crawl:30 under --max-memory=64M (memguardcheck's B6 recipe)
-#   (V3) [P] _memory_peak       RIPWIRE_TEST_MEMGUARD=peak:1 under --max-memory=64M (memguardcheck's B8c recipe)
+#   (V3) [C] _memory_peak       RIPWIRE_TEST_MEMGUARD=peak:1 under --max-memory=64M: in the envelope, NOT in content[]
 #   (V4) [P] _history_cut       RIPWIRE_GIT_WALK_COMMITS=100 over a 130-commit history (historywalkcheck's M1 recipe)
 #   (V5) [P] _fresh:"reindexed" a file edited between two calls; the block names both counts with the envelope's values
 #   (V6) [C] a result with no disclosure has exactly one content block, and the first block of a disclosing result still
@@ -126,7 +128,7 @@ except (ValueError, IndexError):
 (r,) = mcp([("grep", {"path": small, "pattern": "perimeter"})], extra=["--max-memory=64M"], env={"RIPWIRE_TEST_MEMGUARD": "peak:1"})
 note = r.get("result", {}).get("_memory_peak", "")
 say(bool(note), "(V3) [C] a run over its memory limit is disclosed in the envelope (_memory_peak present)")
-say(bool(note) and visible(r, "_memory_peak", note), "(V3) [P] ...and the same sentence is in content[] (blocks: %d)" % len(blocks(r)))
+say(bool(note) and len(blocks(r)) == 1, "(V3) [C] ...and it stays machine-only: one content block, no run-dependent peak in the answer (blocks: %d)" % len(blocks(r)))
 
 # ── (V4) _history_cut ────────────────────────────────────────────────────────────────────────────────────────────────
 (r,) = mcp([("cochange", {"path": hist, "file": "m1.c"})], cwd=hist, env={"RIPWIRE_GIT_WALK_COMMITS": "100"})
@@ -148,6 +150,9 @@ say(env2.get("_fresh") == "reindexed" and any(all(w in b for w in want) and "_fr
 say(env2.get("_fresh") != "reindexed" or len(blocks(r1)) == 1,
     "(V6) [C] a result with no disclosure (_fresh=%s) has exactly one content block (%d)" % (r1.get("result", {}).get("_fresh"), len(blocks(r1))))
 say(payload_ok, "(V6) [C] the first block of a disclosing result is still the verb's own JSON payload")
+notes = [b for m in (r2,) for b in blocks(m)[1:]]
+say(bool(notes) and all(not ln.lstrip()[:1] in ("[", "{") for b in notes for ln in b.split("\n")),
+    "(V6) [C] no visible-notes line opens with '[' or '{' (a JSON-sniffing reader must not take it for a payload)")
 print("mcpenvelopevisiblecheck: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 sys.exit(1 if bad else 0)
 PY

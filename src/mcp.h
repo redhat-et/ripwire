@@ -682,16 +682,20 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
 
 // Research audit 2026-11-26 item 1: an MCP host hands the MODEL `content` and nothing else — 0 of 102 sampled Claude Code
 // results carried `_index` or `_fresh` — so an envelope sibling alone discloses a cut to the JSON-RPC client and not to
-// the agent. Every non-empty note is therefore said again in a SECOND content block, one "[<key>] <sentence>" line per
+// the agent. Every non-empty note is therefore said again in a SECOND content block, one "<key>: <sentence>" line per
 // key, the same sentence as the machine copy. A second block and not a suffix of the first: several verbs answer JSON, and
-// a trailing line would make it unparseable (the reason the notes were siblings in the first place). "" when nothing is
-// disclosed, so such a result is byte-identical to before. Gate: test/mcpenvelopevisiblecheck.sh.
+// a trailing line would make it unparseable (the reason the notes were siblings in the first place); a line never opens
+// with '[' or '{', so no reader takes the block for a JSON payload. "" when nothing is disclosed, so such a result is
+// byte-identical to before. Gate: test/mcpenvelopevisiblecheck.sh.
+// `_memory_peak` is NOT said here, on purpose: the answer it rides is whole (the run finished and answered), its number is
+// the process's peak footprint — different run to run — and the CLI says it on stderr, never in a verb's answer (memguard.h).
+// It stays the machine copy only, so an answer that is meant to be byte-identical across runs still is.
 struct McpEnvelopeNotes
 {
     std::string_view assumedRoot;
     std::string_view memoryStop;
-    std::string_view memoryPeak;
     std::string_view historyCut;
+    std::string_view overCeiling;   // CL1: an answer served whole BY REQUEST past the output ceiling (memory_recall's budget_tokens)
     bool             reindexed    = false;   // `_fresh:"reindexed"`, with the two counts mcpFreshFields emits beside it
     std::size_t      staleFiles   = 0;
     std::size_t      changedFiles = 0;
@@ -706,15 +710,15 @@ inline std::string mcpVisibleNotesBlock( const McpEnvelopeNotes& n )
         {
             return;
         }
-        lines += lines.empty() ? "[" : "\n[";
+        lines += lines.empty() ? "" : "\n";
         lines.append( key );
-        lines += "] ";
+        lines += ": ";
         lines.append( sentence );
     };
     add( "_assumed_root", n.assumedRoot );
     add( "_memory_stop", n.memoryStop );
-    add( "_memory_peak", n.memoryPeak );
     add( "_history_cut", n.historyCut );
+    add( "_over_ceiling", n.overCeiling );
     if( n.reindexed )
     {
         add( "_fresh", "reindexed: files changed on disk since this server last read the tree, so the index was rebuilt before "
@@ -1400,7 +1404,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
-                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut; an answer past 24,000 B pages (next_offset= -> offset).\","
+                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut.\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
                    "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files default to 'git diff HEAD'; files is a comma-separated STRING (an array is refused rather than read as absent). limit/offset page blast_radius and forgotten only (default: every row). " + std::string( kTestRowJsonShapeClause ) + "\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
@@ -1469,7 +1473,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals; add var (or SYM:VAR) for per-line rows. flow=back|fwd|both adds the TRANSITIVE data-flow slice, bounded by depth (1..32, default 8; flow_truncated discloses a cut). @FILE:LINE seeds resolve. reach=cfg (C-family, Python) or reach=linear elsewhere. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust; other languages refuse loudly. Single-root.\","
                    + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly; past 24,000 B it pages by whole sub-answers (next_offset= -> offset).\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             resp = mcpFilterToolsList( std::move( resp ), policy );   // --mcp-tools: the subset (unchanged without one)
@@ -1718,6 +1722,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // (JSON, XML, or plain text) — so it's the version of "append a trailing marker" that is actually
             // uniform across every verb, per the requirement.
             std::string memoryStopNote;   // #350: set by indexStamp when the index answering this request is memory-guard partial
+            std::string overCeilingNote;  // CL1: set by a verb that served a whole answer past the output ceiling because the caller asked
             const auto indexStamp = [ & ]( const std::string& root ) -> std::string
             {
                 // F-W1: the stamp is built AFTER the verb's answer is complete, so a rebuild that stops here refuses nothing. A write
@@ -1806,7 +1811,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
                 const McpIndex&   slot     = mcpIndexSlot();
-                const std::string visible  = mcpVisibleNotesBlock( McpEnvelopeNotes{ assumedRootNote, memoryStopNote, peakNote, cutNote,
+                const std::string visible  = mcpVisibleNotesBlock( McpEnvelopeNotes{ assumedRootNote, memoryStopNote, cutNote, overCeilingNote,
                                                                                      mcpRefreshedThisRequest( passesAtEntry ),
                                                                                      slot.lastStaleFiles, slot.lastChangedFiles } );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
@@ -1814,7 +1819,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
                      + mcpEnvelopeNoteField( "_memory_peak", peakNote )
-                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + mcpEnvelopeNoteField( "_over_ceiling", overCeilingNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
@@ -2431,10 +2436,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // a 1500-token ceiling and disclosed none. recall.h's recallBytesForTokens owns it now.
                     const std::size_t recallTokens = budgetArg.isPresent ? std::size_t( budgetArg.value )
                                                                          : kDefaultRecallMaxTokens;
-                    // CL1 (audit 2026-11-26 item 2): an answer over the output ceiling pages by its body bytes (recallPage)
+                    // CL1 (audit 2026-11-26 item 2): an explicit budget_tokens is a request for the whole answer, and gets it (the CLI
+                    // --page-bytes=0 rule); past the ceiling the answer says so and names offset, which pages it (recallPage)
+                    const bool pageAsked = mcpdetail::findRawValue( args, "offset" ).isPresent;
                     resp = pagedResult( [ & ]( McpPageArgs pg )
                     {
-                        return pagedTextResult( recallPage( recallText( path, task, recallTopK, recallTokens, redactPtr ), std::size_t( pg.offset ) ) );
+                        std::string whole = recallText( path, task, recallTopK, recallTokens, redactPtr );
+                        overCeilingNote   = pageAsked ? std::string() : recallOverCeilingNote( whole.size() );
+                        return pageAsked ? pagedTextResult( recallPage( whole, std::size_t( pg.offset ) ) ) : textResult( whole );
                     } );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
