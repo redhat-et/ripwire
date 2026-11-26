@@ -33,3 +33,7 @@ The brief now learns a unit's registration, test home, build file and docs from 
 `history="1"` now means that walk holds at least 10 commits after the wide ones are dropped. A clone deepened past the window counts, even though it is still marked shallow. A 1-commit clone stays at `history="0"`.
 
 Off switches: `RIPWIRE_BRIEF_COCHANGE=0` drops the history roles and `RIPWIRE_BRIEF_UNITBUILD=0` drops the build-file line. Each leaves the rest of the brief as it was. New gate arm: `test/briefcheck.sh (H)`.
+
+#### Opt-in, with the measured limits
+
+`--brief` is an opt-in verb; `--for` stays the default route. Held-out check (8 repos; axum, django, fmt, gin, nest, pydantic, textual, trpc): `--brief` 64 items in 25,483 B, `--for` 58 items in 121,072 B. By class (E/S/T/B items, `--brief` vs `--for`): 9/24 vs 13/24, 24/32 vs 23/32, 12/24 vs 6/24, 19/32 vs 16/32. By language: Python 23 vs 16, TypeScript 17 vs 10, Go 10 vs 11, C++ 9 vs 12, Rust 5 vs 9. Entry points are the limit: `--for` finds more (13 vs 9). Only 1 of 8 repos met every per-class bar. The help (`--help=--brief`), `docs/COMMANDS.md` and `docs/LIMITS.md` state this.
