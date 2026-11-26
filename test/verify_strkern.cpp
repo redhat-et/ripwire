@@ -18,6 +18,7 @@
 //                              position and the case-only differences that are the point of the kernel.
 //   D  findByte / find3 / findNeedle — first-occurrence scans vs the scalar twins AND vs a naive memchr/memcmp
 //      (D2: strkern::find vs std::string_view::find on both paths, exact-size heap buffers)
+//      (D3: ciFindLiteral vs std::tolower + std::string_view::find on both paths, exact-size heap buffers)
 //                              oracle, needle present and absent, matches at 0 / at n-1 / straddling.
 //   E  findByteset           — 256-bit set scan; sets built to hit the (b>>3, b&7) packing's seams
 //                              (empty, full, the 0x80 boundary, one byte only, the XML-escape set) —
@@ -70,6 +71,7 @@
 #include "serialize.h"
 #include "harnesscommon.h"      // DeterministicRng — the sanitizer-clean generator the SIMD harnesses share
 
+#include <cctype>           // std::tolower — D3's reference fold
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1278,7 +1280,10 @@ TEST_CASE( "strkern: D1/E1 findByte / find3 / findNeedle / findByteset vector ==
 // D2 — strkern::find (findNeedle underneath) against the standard library's own answer (std::string_view::find), on BOTH paths, every start walked. The haystack and
 // the needle are EXACT-SIZE heap copies, so a read one byte past either end is an AddressSanitizer report under strkerncheck's G1 build
 // (a std::string's capacity slack would hide it): the tail of each block loop is what this checks. "" when every answer agrees.
-std::string needleVsStd( std::string_view hay, std::string_view needle )
+// D2/D3's driver: `kernel( hay, needle, from, path )` against `reference( from )` for every start 0..n+1 on both paths. The haystack and
+// needle the kernel sees are EXACT-SIZE heap copies (see above). "" when every answer agrees, else the first divergence.
+template<class Kernel, class Reference>
+std::string kernelVsReference( std::string_view hay, std::string_view needle, Kernel&& kernel, Reference&& reference )
 {
     const std::size_t             n = hay.size(), m = needle.size();
     const std::unique_ptr<char[]> exactHay( new char[ n ] );
@@ -1288,10 +1293,10 @@ std::string needleVsStd( std::string_view hay, std::string_view needle )
     const std::string_view exactHayView( exactHay.get(), n ), exactNeedleView( exactNeedle.get(), m );
     for( std::size_t from = 0; from <= n + 1; ++from )   // n + 1: a start past the end is npos, as for std::string_view::find
     {
-        const std::size_t want = hay.find( needle, from );
+        const std::size_t want = reference( from );
         for( const sk::KernelPath path : { sk::KernelPath::Vector, sk::KernelPath::Scalar } )
         {
-            const std::size_t got = sk::find( exactHayView, exactNeedleView, from, path );
+            const std::size_t got = kernel( exactHayView, exactNeedleView, from, path );
             if( got != want )
             {
                 char msg[ 192 ];
@@ -1302,6 +1307,27 @@ std::string needleVsStd( std::string_view hay, std::string_view needle )
         }
     }
     return {};
+}
+
+std::string needleVsStd( std::string_view hay, std::string_view needle )
+{
+    return kernelVsReference( hay, needle, []( std::string_view h, std::string_view nd, std::size_t from, sk::KernelPath path ) { return sk::find( h, nd, from, path ); },
+                              [ & ]( std::size_t from ) { return hay.find( needle, from ); } );
+}
+
+// D3's reference: std::tolower on every ASCII byte of the haystack (the "C" locale's fold, A-Z only), bytes >= 0x80 left as they are,
+// then std::string_view::find. ciFindLiteral must agree with it for every start.
+std::string ciNeedleVsTolower( std::string_view hay, std::string_view needleLowered )
+{
+    std::string folded( hay );
+    for( char& c : folded )
+    {
+        const auto u = static_cast<unsigned char>( c );
+        c            = u < 0x80 ? static_cast<char>( std::tolower( u ) ) : c;
+    }
+    return kernelVsReference( hay, needleLowered,
+                              []( std::string_view h, std::string_view nd, std::size_t from, sk::KernelPath path ) { return sk::ciFindLiteral( h, nd, from, path ); },
+                              [ & ]( std::size_t from ) { return std::string_view( folded ).find( needleLowered, from ); } );
 }
 
 // The chosen cases: needles of 1, 2, 3 and 4..40 bytes; a match at offset 0 and one ending on the last byte; overlapping runs; an empty
@@ -1365,6 +1391,78 @@ TEST_CASE( "strkern: D2 find == std::string_view::find, both paths, exact-size b
     }
     INFO( "cases: ", caseCount, "  path: ", sk::kPathName, "  first divergence: ", fail );
     CHECK( caseCount > 4000 );
+    CHECK( fail.empty() );
+}
+
+// D3's text: mixed-case letters next to the fold's edges ('@' = 'A' - 1, '[' = 'Z' + 1, '`', '{'), the high-bit images of A-Z and a-z
+// (0xC1, 0xDA, 0xE1, 0xFA: a byte >= 0x80 must never fold, and the SWAR fold must not borrow across one), 0x80, 0xFF and '\n'.
+std::string drawCiText( DeterministicRng& gen, std::size_t n )
+{
+    static constexpr char kAlphabet[] = "aAbBzZ@[`{\xC1\xDA\xE1\xFA\x80\xFF\n";
+    std::string           text( n, '\0' );
+    for( char& c : text )
+    {
+        c = kAlphabet[ gen.next() % ( sizeof( kAlphabet ) - 1 ) ];
+    }
+    return text;
+}
+
+// The A-Z fold of `s` (the needle a caller lowers once).
+std::string asciiLowered( std::string s )
+{
+    for( char& c : s )
+    {
+        c = ( c >= 'A' && c <= 'Z' ) ? char( c + 0x20 ) : c;
+    }
+    return s;
+}
+
+// D3's chosen cases: every needle length 1..64, planted in a random case at offset 0 and ending on the last byte, over ten haystack
+// sizes either side of the 8/16/32-start blocks; and the empty edges.
+std::vector<std::pair<std::string, std::string>> plantedCiCases( DeterministicRng& gen )
+{
+    std::vector<std::pair<std::string, std::string>> cases = { { "", "" }, { "ABC", "" }, { "", "a" } };
+    for( std::size_t m = 1; m <= 64; ++m )
+    {
+        for( const std::size_t extra : { 0u, 1u, 7u, 15u, 16u, 17u, 31u, 32u, 33u, 64u } )
+        {
+            std::string       hay    = drawCiText( gen, m + extra );
+            const std::string needle = drawCiText( gen, m );
+            std::string       mixed  = needle;
+            for( char& c : mixed ) { c = ( c >= 'a' && c <= 'z' && ( gen.next() & 1 ) ) ? char( c - 0x20 ) : c; }
+            hay.replace( 0, m, mixed );
+            hay.replace( hay.size() - m, m, mixed );
+            cases.emplace_back( hay, asciiLowered( needle ) );
+        }
+    }
+    return cases;
+}
+
+// One random D3 case: half the needles planted from the haystack, one in eight left with an upper-case byte (it never matches).
+std::pair<std::string, std::string> randomCiCase( DeterministicRng& gen )
+{
+    const std::string hay    = drawCiText( gen, std::size_t( gen.next() % 161u ) );
+    std::string       needle = drawCiText( gen, std::size_t( 1 + gen.next() % 64u ) );
+    const std::size_t n = hay.size(), m = needle.size();
+    if( m <= n && ( gen.next() & 1 ) ) { needle.assign( hay, std::size_t( gen.next() % ( n - m + 1 ) ), m ); }
+    return { hay, ( gen.next() % 8u ) == 0 ? needle : asciiLowered( needle ) };
+}
+
+TEST_CASE( "strkern: D3 ciFindLiteral == tolower + std::string_view::find, both paths, exact-size buffers (m 1..64, block edges, high bytes)" )
+{
+    DeterministicRng gen{ 0xD3C1F01DEDull };
+    auto             cases = plantedCiCases( gen );
+    for( int iter = 0; iter < 4000; ++iter )
+    {
+        cases.push_back( randomCiCase( gen ) );
+    }
+    std::string fail;
+    for( const auto& [ hay, needleLowered ] : cases )
+    {
+        if( fail.empty() ) { fail = ciNeedleVsTolower( hay, needleLowered ); }
+    }
+    INFO( "cases: ", cases.size(), "  path: ", sk::kPathName, "  first divergence: ", fail );
+    CHECK( cases.size() > 4600 );
     CHECK( fail.empty() );
 }
 
