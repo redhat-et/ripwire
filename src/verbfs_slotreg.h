@@ -534,15 +534,7 @@ inline void keepJoin( const IngestResult& ing, Serve tried, const FileAdjacency&
 // Beside verbfs::arm, in ingest(): only where VERB-FS armed (the kill switch, --no-cache and every unarmed run install nothing).
 inline void arm() noexcept
 {
-    if( !armedRoot().on )
-    {
-        return;
-    }
-    Seams& s    = seams();
-    s.regServe  = &serveReg;
-    s.regKeep   = &keepReg;
-    s.joinServe = &serveJoin;
-    s.joinKeep  = &keepJoin;
+    installSeamsWhereArmed( seams(), Seams{ .regServe = &serveReg, .regKeep = &keepReg, .joinServe = &serveJoin, .joinKeep = &keepJoin } );
 }
 
 }   // namespace rw::verbfs::slotreg

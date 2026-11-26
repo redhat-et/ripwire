@@ -150,6 +150,17 @@ inline ArmedRoot& armedRoot() noexcept
     return root;
 }
 
+// Every derived record family (QMetrics, SLOTREG) installs its seams only where VERB-FS armed this run's root
+// (verbfs::arm); elsewhere they stay null and the pass computes as before. One gate, one assignment per family.
+template<class SeamSet>
+inline void installSeamsWhereArmed( SeamSet& slot, const SeamSet& armed ) noexcept
+{
+    if( armedRoot().on )
+    {
+        slot = armed;
+    }
+}
+
 inline bool killSwitchOn() noexcept
 {
     return std::getenv( "RIPWIRE_NO_VERBFS" ) != nullptr;
