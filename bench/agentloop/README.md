@@ -129,6 +129,19 @@ fair per-repo cap is smaller — see the honest count in `tasks.lock` and the no
   (`FAIL_TO_PASS`/`PASS_TO_PASS`)? The primary metric.
 - `localization_hit` — did the agent touch at least one gold file from the reference patch?
 - `tokens_in` / `tokens_out`, `wall_seconds`, `cost_usd` — cost side of the ledger.
+- `split_uncached_in` / `split_cache_write` / `split_cache_read` / `split_output` — the same tokens split
+  four ways from the run's own transcript (`cost_accounting.py`), because under prefix caching a total
+  cannot price a run. `tool_calls` (every tool of any kind; `command_calls` stays shell-only) and
+  `model_calls` (the harness's request count) sit beside them. A cell the transcript lacks is `None`,
+  never 0; codex reports no cache-write count. `analyze.py` prints them per arm and per task beside the
+  totals above and re-derives them from `events_path` for older records.
+- **pass^k** — beside each arm's single-trial rate, the chance that all k trials of a task succeed
+  (C(c,k)/C(n,k)), for every k from 2 to the largest trial count, with each k's task count.
+
+**History leakage.** The agent never gets the fetch cache. Every run gets a freshly built repository
+holding `base_commit` alone (QUESTIONS mode: and its ancestors), with no remote, tags, branches or reflog
+beyond it, and `run_one()` refuses a checkout that `history_leak_findings()` does not pass.
+`test/agentloophistorycheck.sh` holds both on a fixture with a commit and two tags past the base.
 
 **Cost estimate:** $0.30-$1.50/instance (https://arxiv.org/pdf/2412.21139) x tasks x 2 arms x 3 seeds.
 `run_agentloop.py --dry-run` prints the exact projected range for the locked task count — **read that
@@ -232,7 +245,7 @@ Two pieces carry that shape, and they are deliberately additive; nothing above c
 
 | piece | what it does |
 | --- | --- |
-| `run_agentloop.py --questions TSV` | a local task source that bypasses `tasks.lock` and the HuggingFace gold-row fetch entirely. Rows come from the graded TSV (id / repo / pin\_ref / tier / grader / question / gt\_command / accept\_rule). `--local-corpus DIR` materializes private trees with `git worktree add --detach` at the pinned sha; the per-tier budget cap and wall timeout come from the row, never from the observed chain. |
+| `run_agentloop.py --questions TSV` | a local task source that bypasses `tasks.lock` and the HuggingFace gold-row fetch entirely. Rows come from the graded TSV (id / repo / pin\_ref / tier / grader / question / gt\_command / accept\_rule). `--local-corpus DIR` materializes private trees as fresh ancestor-only repositories at the pinned sha (not `git worktree`, which shares the corpus's refs and later commits); the per-tier budget cap and wall timeout come from the row, never from the observed chain. |
 | `grade_answers.py` | grades the retained transcripts against keys **derived at the pin by running each row's `gt_command`**. |
 
 ```sh

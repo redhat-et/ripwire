@@ -435,7 +435,10 @@ R.checkout_repo = lambda repo, base_commit, repos_dir: _fake_repo
 R.prepare_environment = ( lambda harness, work_dir, instance_id, arm, seed, ripwire_bin:
                           ( {}, pathlib.Path( work_dir ) / "home", "shim" ) )
 R.evaluate_patch = lambda *a, **k: ( None, None )
-_fake_task = dict( instance_id="fake-1", repo="fake/repo", base_commit="deadbeef" )
+# base_commit is the fake repo's real HEAD: run_one() refuses a checkout that is not at its base commit
+# (history_leak_findings(), test/agentloophistorycheck.sh), and a made-up sha would trip that guard here.
+_fake_base = subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=_fake_repo, capture_output=True, text=True ).stdout.strip()
+_fake_task = dict( instance_id="fake-1", repo="fake/repo", base_commit=_fake_base )
 _fake_gold_rows = { "fake-1": dict( problem_statement="fix the bug" ) }
 
 # ── 14. error-capture keep-both-streams — stdout detail must survive an empty-stderr failure ────

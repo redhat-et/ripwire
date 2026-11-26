@@ -1,0 +1,9 @@
+### Added — the agent-loop eval splits cost by cache, reports pass^k, and refuses a checkout that can see the fix
+
+`bench/agentloop/` gains three things. None of them changes an existing column, and no agent was run to build them.
+
+- **Cost split.** Every record now splits its tokens four ways: uncached input, cache write, cache read and output. The numbers come from the run's own transcript, for all three harnesses. Each record also carries a count of tool calls of any kind and the harness's own model-call count. `analyze.py` prints these per arm and per task, beside the existing `tokens_in`/`tokens_out`/`cost_usd` totals and wall clock. It re-derives them from `events_path` for older records. Under prefix caching a token total cannot price a run (arXiv 2611.22238), so a cell the transcript does not carry reads n/a, never 0. Codex reports no cache-write count.
+- **pass^k.** Wherever a task has at least 2 runs, each arm's single-trial rate is printed beside pass^k, the chance that all k trials succeed. Each k shows its task count.
+- **History leakage.** On a fixture with one commit and two tags past `base_commit`, the old runner leaked on 6 of 6 arms. The agent was handed the per-repo fetch cache. Reused from a later instance, that cache still held the future commit in its object store and reflog. The unshallow fallback brought in both tags and every `origin/*` branch. QUESTIONS mode's `git worktree add` shared the corpus's refs. Every run now gets a freshly built repository holding `base_commit` alone (QUESTIONS mode keeps its ancestors), with no remote, tags or reflog. `run_one()` refuses any checkout that reaches past the base.
+
+Gates: `test/agentloopaccountingcheck.sh` (7 arms: 6 red on `5f4b50415`, 1 a preservation pin) and `test/agentloophistorycheck.sh` (6 arms, 6 red on `5f4b50415`).
