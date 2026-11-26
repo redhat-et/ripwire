@@ -4312,6 +4312,13 @@ inline void validatePagingHonored( Config& c ) noexcept
     {
         return;
     }
+    // CL1 (batchpage.h): `--batch=F --offset=K` continues a batch paged under the output ceiling by whole <q> sub-answers (the
+    // root's next=). --batch outranks every other verb in dispatch, so the window is the batch's; --limit stays refused, since
+    // the output ceiling is the batch's page size and a sub-query that wants a page spells it on its own line (§A5a above).
+    if( !c.batchFile.empty() && c.pageLimit <= 0 )
+    {
+        return;
+    }
 
     // §B11.6: name the MODE first when one is what disabled paging — the honoring list below is otherwise
     // read as self-contradicting, and the remedy ("drop the mode flag") is not derivable from it.
@@ -5280,6 +5287,27 @@ inline bool rowPagedVerbAsked( const Config& c ) noexcept
     return c.forTask.empty() && c.expand.empty() && !lintPagedVerbAsked( c ) && ( !c.grep.empty() || c.clones );
 }
 
+// CL1 (batchpage.h): --batch pages by whole <q> sub-answers under the output ceiling, continued by --offset=K; --page-bytes=0
+// is the whole batch. --batch outranks every other verb in dispatch, so it is asked whatever else is on the command line.
+inline bool batchPagedVerbAsked( const Config& c ) noexcept
+{
+    return !c.batchFile.empty() && !c.mcp && !c.lsp && c.listen.empty();
+}
+
+// wholeOnlyConflict's --batch arm — N == 0 alone, and not beside --offset=K (a page of the batch, where 0 asks for all of it).
+[[nodiscard]] inline const char* batchWholeConflict( const Config& c, std::size_t bytes ) noexcept
+{
+    if( bytes != 0 )
+    {
+        return "takes 0 only beside --batch (the whole answer): --batch pages by whole <q> sub-answers — follow the root's next= (--offset=K)";
+    }
+    if( c.pageOffset > 0 )
+    {
+        return "=0 (the whole answer) does not combine with --offset=K, one page of the batch — pass one";
+    }
+    return nullptr;
+}
+
 // PG1: wholeOnlyConflict's --grep / --clones arm — N == 0 alone, and not beside --limit=N (their own page size).
 [[nodiscard]] inline const char* rowPagedWholeConflict( const Config& c, std::size_t bytes ) noexcept
 {
@@ -5296,9 +5324,13 @@ inline bool rowPagedVerbAsked( const Config& c ) noexcept
     return nullptr;
 }
 
-// Why --page-bytes=N cannot shape a --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
+// Why --page-bytes=N cannot shape a --batch / --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
 [[nodiscard]] inline const char* wholeOnlyConflict( const Config& c, std::size_t bytes ) noexcept
 {
+    if( batchPagedVerbAsked( c ) )
+    {
+        return batchWholeConflict( c, bytes );
+    }
     if( lintPagedVerbAsked( c ) )
     {
         if( bytes != 0 )         { return "takes 0 only beside --lint (the whole answer): --lint pages by findings — follow the root's next= (--offset=K), or --limit=N"; }
@@ -5341,7 +5373,8 @@ inline void validatePageBytes( Config& c ) noexcept
         c.ok = false;
         return;
     }
-    const char* why = lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) || rowPagedVerbAsked( c ) ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
+    const bool  ownUnit = batchPagedVerbAsked( c ) || lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) || rowPagedVerbAsked( c );
+    const char* why     = ownUnit ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
     if( why != nullptr )
     {
         rw::emitTo( stderr, "ripwire: --page-bytes{}{}\n", why[0] == '=' ? "" : " ", why );
