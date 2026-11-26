@@ -34,8 +34,8 @@
 #       skills/ripwire-orient/subagent-brief.md carries the same block byte for byte
 #   (L) every command the note and the block name runs on a fixture repo with the real binary
 #   (M) `--agent-brief`, the PROBE-ONLY PreToolUse mode: for an Agent or Task call it returns updatedInput whose prompt
-#       is the original plus the block, byte-equal to wrap's, every other input field kept, no permissionDecision
-#       unless asked; silent for other tools, a prompt that already names ripwire and the no-op cases; not silenced
+#       is the original plus the block, byte-equal to wrap's, every other input field kept, never a permissionDecision;
+#       silent for other tools, a prompt that already names ripwire and the no-op cases; not silenced
 #       by the meter's control arm either; and skills/install.sh --hook does NOT register it
 #   (N) uninstall: INSTALL.md's documented hook strip ("**3. Hooks**"), run as written, removes the SubagentStart entry
 #       and keeps a user's own SubagentStart hook
@@ -414,12 +414,8 @@ printf '%s' "$HOUT" | "$JQ" -e '.hookSpecificOutput | .hookEventName == "PreTool
     && ok "hookEventName PreToolUse; every other input field passed through, none added" \
     || no "the updated input lost or gained a field"
 printf '%s' "$HOUT" | "$JQ" -e '.hookSpecificOutput | has("permissionDecision") | not' >/dev/null 2>&1 \
-    && ok "no permissionDecision by default (the hook does not approve a spawn)" \
+    && ok "no permissionDecision (the hook does not approve a spawn)" \
     || no "the hook carries a permissionDecision nobody asked for"
-brief "$( agentCall Agent 'Locate the function helper.' )" RIPWIRE_AGENT_BRIEF_DECISION=allow
-printf '%s' "$HOUT" | "$JQ" -e '.hookSpecificOutput.permissionDecision == "allow" and (.hookSpecificOutput.updatedInput.prompt | endswith("`--test-gate --legend=compact`."))' >/dev/null 2>&1 \
-    && ok "RIPWIRE_AGENT_BRIEF_DECISION=allow adds the decision, same prompt" \
-    || no "RIPWIRE_AGENT_BRIEF_DECISION=allow did not add permissionDecision"
 brief "$( agentCall Task 'Locate the function helper.' )"
 [ -n "$HOUT" ] && [ "$HOUT" = "$AGENT_OUT" ] \
     && ok "the Task tool name gets the same bytes" \

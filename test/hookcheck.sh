@@ -2225,9 +2225,11 @@ fi
 # treatment arm to SPEAK (non-empty additionalContext) on both the recursive grep and the compound Bash payload. PD1
 # is only a verdict about hooks that actually answered.
 #
-# ONE OPT-IN STAYS OUT OF THE SWEEP, BY NAME: RIPWIRE_AGENT_BRIEF_DECISION=allow on `ripwire-nudge.sh --agent-brief`
-# (installed by nothing; a hand-run probe that asks whether a client applies an Agent-prompt rewrite only alongside a
-# decision; test/subagentroutecheck.sh pins it). The sweep unsets it, so the DEFAULT of that mode is covered here.
+# A REMOVED KNOB STAYS REMOVED. `ripwire-nudge.sh --agent-brief` once added `permissionDecision` when the operator
+# exported RIPWIRE_AGENT_BRIEF_DECISION=allow (a hand-run probe knob; removed in lane HOOK-NOALLOW on the owner's
+# ruling). Arm `briefallow` runs every hook's --agent-brief mode with that variable EXPORTED, so the sweep proves the
+# code path is gone rather than merely unset; PD4 requires the mode to answer its updatedInput there, so the arm is
+# not vacuous either. The other arms run with the variable cleared, as an installed hook sees it.
 # hooks/opencode/*.js is a plugin, not a stdin hook: it calls ripwire-legend-seen.sh (swept above), so PD3 checks the
 # plugin's own text instead.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2293,8 +2295,9 @@ for pdh in "$ROOT"/hooks/*.sh; do
     PDHOOKS=$(( PDHOOKS + 1 ))
     pdname="$( basename "$pdh" )"
     pdmodes="$( pd_modes "$pdh" | sort -u )"
-    for pdarm in treatment control unset; do
+    for pdarm in treatment control unset briefallow; do
         printf '%s\n' "$pdmodes" | while IFS= read -r pdmode; do
+            [ "$pdarm" = briefallow ] && [ "$pdmode" != --agent-brief ] && continue
             pdi=0
             while IFS="$( printf '\t' )" read -r pdev pdtn pdx; do
                 pdi=$(( pdi + 1 ))
@@ -2302,6 +2305,10 @@ for pdh in "$ROOT"/hooks/*.sh; do
                 payload="$( pd_payload "$pdev" "$pdtn" "$pdx" "$sid" )" || { echo "BAD|$sid|payload did not build"; continue; }
                 if [ "$pdarm" = unset ]; then
                     out="$( printf '%s' "$payload" | env -u RIPWIRE_METER_ARM -u RIPWIRE_AGENT_BRIEF_DECISION HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                elif [ "$pdarm" = briefallow ]; then
+                    out="$( printf '%s' "$payload" | env RIPWIRE_AGENT_BRIEF_DECISION=allow RIPWIRE_METER_ARM=treatment HOME="$PDT/home" \
                         PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
                         CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
                 else
@@ -2320,6 +2327,9 @@ for pdh in "$ROOT"/hooks/*.sh; do
                     [ "$pdi" -eq 1 ] && echo "SPOKE_GREP|$sid"
                     [ "$pdi" -eq 2 ] && echo "SPOKE_COMPOUND|$sid"
                 fi
+                [ "$pdarm" = briefallow ] && [ "$pdtn" = Agent ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.updatedInput.prompt | length > 0' >/dev/null 2>&1 \
+                    && echo "SPOKE_BRIEFALLOW|$sid"
             done <"$PDCASES"
         done
     done
@@ -2347,6 +2357,11 @@ if grep -q '^SPOKE_GREP|' "$PDT/sweep.log" && grep -q '^SPOKE_COMPOUND|' "$PDT/s
     ok "PD2 not vacuous: toolroute's treatment arm answered additionalContext on the recursive grep AND the compound Bash payload"
 else
     no "PD2 vacuous: toolroute's treatment arm did not speak on $( grep -q '^SPOKE_GREP|' "$PDT/sweep.log" || printf 'the recursive grep ' )$( grep -q '^SPOKE_COMPOUND|' "$PDT/sweep.log" || printf 'the compound Bash ' )payload, so PD1 says nothing about it"
+fi
+if grep -q '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log"; then
+    ok "PD4 not vacuous: --agent-brief answered its updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported ($( grep -c '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log" ) hook(s))"
+else
+    no "PD4 vacuous: no --agent-brief run answered an updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported, so PD1 says nothing about the removed knob"
 fi
 PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
 [ -z "$PDJS" ] && ok "PD3 opencode plugin: no hooks/opencode/*.js names permissionDecision" \

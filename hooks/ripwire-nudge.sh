@@ -1239,9 +1239,8 @@ fi
 # scripts/hk2_probe.sh (in the lane's results) shows the appended block in the subagent's first user message.
 #
 # WHAT IT RETURNS. The whole tool_input, with `prompt` = the original prompt, a blank line, the block. `updatedInput`
-# REPLACES the input, so every other field is passed through unchanged. No permissionDecision by default: a hook that
-# answers "allow" approves every subagent launch, which no ripwire hook does. RIPWIRE_AGENT_BRIEF_DECISION=allow adds
-# it, for the probe to learn whether a client applies the rewrite only with a decision.
+# REPLACES the input, so every other field is passed through unchanged. Never a permissionDecision: a hook that
+# answers "allow" approves every subagent launch, which no ripwire hook does (test/hookcheck.sh (15) arm briefallow).
 # SILENT when the prompt already names ripwire (the orchestrator briefed it, or a re-run): the block is added once.
 # The block is a constant, the same bytes `ripwire wrap claude` prints for an orchestrator to paste by hand
 # (kSubagentBriefBlock in src/wrap.h; test/subagentroutecheck.sh (M) compares the two). Same gates as the mode above:
@@ -1262,11 +1261,8 @@ then
     [ "$insideWorkTree" = true ] || exit 0
 
     brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
-    decision=""
-    [ "${RIPWIRE_AGENT_BRIEF_DECISION:-}" = "allow" ] && decision="allow"
-    printf '%s' "$input" | jq -c --arg b "$brief" --arg d "$decision" \
-        '{hookSpecificOutput:( {hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}
-            + (if $d == "" then {} else {permissionDecision:$d} end) )}' 2>/dev/null || true
+    printf '%s' "$input" | jq -c --arg b "$brief" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}}' 2>/dev/null || true
     exit 0
 fi
 
