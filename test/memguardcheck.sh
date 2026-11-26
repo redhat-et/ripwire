@@ -82,6 +82,10 @@ for line in open( path, encoding="utf-8", errors="replace" ):
             print( e.get( "message", "" ) ); break
         if res.get( "isError" ):
             print( "".join( c.get( "text", "" ) for c in res.get( "content", [] ) ) ); break
+        # SEP-1303 (lane mcp-metadata): a not-found is a found=0 ANSWER now, its refusal sentence the second block
+        content = res.get( "content", [] )
+        if len( content ) > 1 and " not found: " in content[ 1 ].get( "text", "" ):
+            print( content[ 1 ].get( "text", "" ) ); break
         print( "" ); break
     if what == "text":
         print( "".join( c.get( "text", "" ) for c in res.get( "content", [] ) ) ); break

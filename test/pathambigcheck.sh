@@ -270,8 +270,15 @@ for line in p.stdout.splitlines():
     i = o.get( "id" )
     if not isinstance( i, int ) or i <= 0:
         continue
+    content = o.get( "result", {} ).get( "content", [] )
     if "error" in o:
         print( i, "err", json.dumps( o[ "error" ] ).replace( "\n", " " ) )
+    # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result, and a not-found a found=0 answer whose second block
+    # is the refusal sentence; both are the refusal these arms read as "err"
+    elif o.get( "result", {} ).get( "isError" ):
+        print( i, "err", "".join( c.get( "text", "" ) for c in content ).replace( "\n", " " ) )
+    elif len( content ) > 1 and " not found" in content[ 1 ].get( "text", "" ):
+        print( i, "err", content[ 1 ].get( "text", "" ).replace( "\n", " " ) )
     else:
         print( i, "ok", "".join( c.get( "text", "" ) for c in o.get( "result", {} ).get( "content", [] ) ).replace( "\n", " " ) )
 PY
