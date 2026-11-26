@@ -422,6 +422,10 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.locals       = std::uint16_t( d.locals > 65535u ? 65535u : d.locals );   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang); u16 saturating (model.h)
         s.steer        = d.steer;    // QD-TANGLE steering locals (model.h Symbol::steer; 0 where langfacts.h steerDecl is None and at 50 lines or fewer)
         s.dispatchShare = tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut );   // QD-TANGLE (model.h)
+        if( d.maxBlock10 != kTangleNoCap )   // QD-TANGLE BLOCK FACTS: the side table, ascending id like aliasTargets
+        {
+            result.tangleBlocks.push_back( TangleBlockFacts{ s.id, std::uint16_t( std::min( d.maxBlock10, kTangleBlockMax10 ) ), d.cross, 0 } );
+        }
         s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.paramsMin    = std::uint8_t( d.paramsMin < 15 ? d.paramsMin : 15 );   // B2.2: fewest arguments a call can pass (0 = no bound); a 4-bit field — saturating LOWERS it, which only keeps candidates
@@ -1177,7 +1181,7 @@ inline void retargetRustMacroAliases( IngestResult& result )
 }
 
 // A4-R5: FFI binding aliases in a deterministic total order (fileId, kind, aliasName, targetScope,
-// targetName) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
+// targetName, lowConf) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
 inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>& rawFfis )
 {
     std::sort( rawFfis.begin(), rawFfis.end(),
@@ -1199,7 +1203,11 @@ inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>&
                    {
                        return a.targetScope < b.targetScope;
                    }
-                   return a.targetName < b.targetName;
+                   if( a.targetName != b.targetName )
+                   {
+                       return a.targetName < b.targetName;
+                   }
+                   return a.lowConf < b.lowConf;   // DET-INCLUDES: every field is in the key, so std::sort's tie order never shows
                } );
     result.bindingAliases = std::move( rawFfis );
 }
@@ -1223,7 +1231,11 @@ inline void emitRouteDefs( IngestResult& result, std::vector<RouteDef>& rawRoute
                    {
                        return a.method < b.method;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return a.handlerName < b.handlerName;   // DET-INCLUDES: two registrations of one route on one line
                } );
     result.routeDefs = std::move( rawRouteDefs );
 }
@@ -1246,7 +1258,11 @@ inline void emitRouteUses( IngestResult& result, std::vector<RawRouteUse>& rawRo
                    {
                        return a.startByte < b.startByte;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return std::tie( a.line, a.method ) < std::tie( b.line, b.method );   // DET-INCLUDES: every field in the key
                } );
     result.routeUses.resize( rawRouteUses.size() );
     DefSweep routeSweep{ spanIndex.spans, spanIndex.fileSpanStart };

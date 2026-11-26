@@ -2417,7 +2417,8 @@ std::vector<BlobTangleDefs> tangleInputsInBlobs( std::span<const BlobText> blobs
         {
             if( d.kind == SymKind::Function || d.kind == SymKind::Method )
             {
-                mine.defs.push_back( { d.scope, d.name, tangleInputsFrom( d.loc, d.maxNest, d.deepLoc, d.steer, tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut ) ),
+                const TangleInputs in = tangleInputsFrom( d.loc, d.maxNest, d.deepLoc, d.steer, tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut ) );
+                mine.defs.push_back( { d.scope, d.name, tangleWithCap( in, d.maxBlock10 == kTangleNoCap ? kTangleNoCap : std::min( d.maxBlock10, kTangleBlockMax10 ), d.cross ),
                                        rawDefBodyStart( d ), d.endByte } );
             }
         }

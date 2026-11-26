@@ -424,7 +424,7 @@ enum class Framework : std::uint8_t { None, Vitest, Jest, NodeTest };
 // a human wrote, so it reads the same as "absent" for evidence purposes (rv-test-gate-tsjs F2). The named
 // `marker` local (not a bare one-line `return x.find(y) != npos`) is deliberate: a bare return of that
 // exact shape structurally matched three UNRELATED substring checks elsewhere in the tree
-// (taskroute::has, verbs_for.h's forCoverageAttrPresent/forRouteAttrPresent) under --quality-delta's
+// (taskroute::has, verbs_for.h's forConfidenceAttrPresent/forRouteAttrPresent) under --quality-delta's
 // duplication kind — the same false-positive class infra/dirwalk.h's own banner already documents fixing
 // for pythonrunner::hasPytestProject, not a real clone of any of those three unrelated checks.
 inline bool isNpmPlaceholderScript( std::string_view script ) noexcept
