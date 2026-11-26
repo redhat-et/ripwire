@@ -24,12 +24,13 @@
 #      graph --callers stored and served (graph=loaded): a --whereis in between leaves it served. Every cached answer is
 #      the --no-cache run's bytes. S1's "built, not loaded" is red on a binary that builds the graph for --whereis.
 #
-# Usage: bash test/whereisnographcheck.sh [BIN]
+# Usage: bash test/whereisnographcheck.sh [BIN]      or   RIPWIRE_BIN=./build/ripwire bash test/whereisnographcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
+echo "whereisnographcheck: BIN=$BIN  $( "$BIN" --version 2>/dev/null | head -1 )"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
