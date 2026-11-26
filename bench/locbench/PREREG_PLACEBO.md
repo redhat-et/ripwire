@@ -364,3 +364,18 @@ different and weaker claim. This file is written first so none of them can happe
     - The 306 count was made with no gold read. It is also consistent with the train side: 560 − 254 = 306.
     - The power arithmetic is reported at the realised n = 302 beside the frozen 243, and n is not changed
       silently.
+- **2026-11-26, the 243 is a different split (a fact for the owner; no rule here). No held-out model episode
+  has run, and none will until the owner rules.**
+  - The "243 over 78 repos" (README, `docs/EVALS.md` §3: train 317/87, held-out 243/78) is the split
+    produced by salt **`ctxpack-a7-v2`**.
+  - Commit `3315fb19d` (2026-07-31, "rename: ctxpack -> ripwire … mechanical sweep") rewrote
+    `frozen_partition()`'s salt to `ripwire-a7-v2`. That gives a different split, **held-out 306/88 and train
+    254**, and it is the split this harness, `dataset.lock`, the Stage 0 seal above and the TRAIN pilot all
+    used.
+  - Measured on repository names only, with no gold read:
+    - 138 instances (39 repos) are held-out under both salts.
+    - **10 of the 24 pilot instances, which a model has already seen, are held-out under `ctxpack-a7-v2`.**
+    - 3 of A2's 4 excluded instances fall inside that 243.
+  - The 302-manifest seal above covers the `ripwire-a7-v2` held-out set, not the 243.
+  - The owner needs to rule on which split is the held-out one, and on what the 10 pilot-touched instances
+    mean, before any held-out episode.
