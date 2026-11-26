@@ -82,9 +82,9 @@ def row( rs, sha, proto ):
 out = []
 def arm( name, cond, why ):
     out.append( ( "PASS " if cond else "FAIL " ) + name + ( "" if cond else ": " + why ) )
-# 8 eligible commits (3x ab, H, E, 4x af) — the 5 single-file add commits are not; 16 rows = 2 protocols each
-arm( "(3) eligibility: 8 commits, 16 rows, the single-file adds excluded",
-     meta[ "eligible" ] == 8 and len( rows ) == 16, "eligible=%s rows=%d" % ( meta[ "eligible" ], len( rows ) ) )
+# 9 eligible commits (3x ab, H, E, 4x af) — the 5 single-file add commits are not; 18 rows = 2 protocols each
+arm( "(3) eligibility: 9 commits, 18 rows, the single-file adds excluded",
+     meta[ "eligible" ] == 9 and len( rows ) == 18, "eligible=%s rows=%d" % ( meta[ "eligible" ], len( rows ) ) )
 for proto in ( "L1O", "SEED1" ):
     h, e = row( rows, H, proto ), row( rows, E, proto )
     if not h or not e:

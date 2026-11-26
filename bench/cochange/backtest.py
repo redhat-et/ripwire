@@ -258,9 +258,19 @@ def run( args ):
                        "since": args.since, "until": args.until, "root": args.root, "eligible": len( commits ),
                        "sampled": len( picked ), "seed": args.seed, "leak_future": args.leak_future,
                        "ripwire_version": subprocess.run( [ binary, "--version" ], capture_output=True, text=True ).stdout.strip() } }
-    with open( args.out, "w" ) as fh:
-        fh.write( json.dumps( meta ) + "\n" )
+    done = set()
+    if args.resume and os.path.exists( args.out ):
+        with open( args.out ) as fh:
+            done = { json.loads( l ).get( "sha" ) for l in fh if l.strip() }
+    with open( args.out, "a" if done else "w" ) as fh:
+        if not done:
+            fh.write( json.dumps( meta ) + "\n" )
         for i, c in enumerate( picked ):
+            if c[ "sha" ] in done:
+                continue
+            if args.guard and subprocess.run( args.guard, shell=True ).returncode != 0:
+                print( "guard tripped before %s: stopped at %d/%d; rerun with --resume" % ( c[ "sha" ][:9], i, len( picked ) ), file=sys.stderr )
+                return 3
             for row in run_commit( args, clone, c, binary ):
                 fh.write( json.dumps( row ) + "\n" )
             fh.flush()
@@ -358,6 +368,8 @@ def main():
     ap.add_argument( "--work" )
     ap.add_argument( "--out" )
     ap.add_argument( "--progress", action="store_true" )
+    ap.add_argument( "--resume", action="store_true", help="append to --out, skipping commits already in it" )
+    ap.add_argument( "--guard", help="shell command run before each commit; non-zero stops the run (exit 3)" )
     ap.add_argument( "--leak-future", action="store_true", help="GATE ONLY: read history at the tip (the forbidden defect)" )
     ap.add_argument( "--summarize", nargs="+" )
     ap.add_argument( "--self-test", action="store_true" )
