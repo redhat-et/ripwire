@@ -35,7 +35,7 @@
 
 #include "infra/os.h"        // rw::os::realpath / getcwd / stat — the root-is-a-directory check at initialize, the launch-cwd base for relative index paths
 #include "infra/pctenc.h"    // rw::appendPercentEncoded — the file-URI path escape
-#include "infra/strkern.h"   // rw::strkern::ciFindLiteral — workspace/symbol's case-insensitive name match
+#include "infra/strkern.h"   // rw::strkern::ciFindLiteral — workspace/symbol's name match; lineStarts — a document's line table
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -288,11 +288,7 @@ inline LspDoc lspLoadDoc( const std::string& path )
     if( !raw ) return d;
     d.ok    = true;
     d.bytes = *raw;
-    d.starts.push_back( 0 );
-    for( std::size_t i = 0; i < d.bytes.size(); ++i )
-    {
-        if( d.bytes[ i ] == '\n' ) d.starts.push_back( i + 1 );
-    }
+    rw::strkern::lineStarts( d.bytes, d.starts );
     return d;
 }
 

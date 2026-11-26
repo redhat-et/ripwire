@@ -31,6 +31,7 @@
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
 #include "restlinks.h"           // bindRestLink — a reST :ref: or :doc:`/root` link, whose target no path spells
 #include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
+#include "infra/strkern.h"       // strkern::lineStarts — resolveAtSeed's line-start table
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
 #include "argtypepick.h"         // B2.3: ArgTypeOverloadPick — a C++ call's same-arity overloads picked by the arguments' declared types; cppFullChainOf
@@ -15486,14 +15487,7 @@ inline AtSeed resolveAtSeed( const IngestResult& ing, std::string_view spec )
         return r;
     }
     const std::string& text = *onDisk;
-    r.lineStarts.push_back( 0 );
-    for( std::size_t byteIndex = 0; byteIndex < text.size(); ++byteIndex )
-    {
-        if( text[ byteIndex ] == '\n' )
-        {
-            r.lineStarts.push_back( std::uint32_t( byteIndex + 1 ) );
-        }
-    }
+    strkern::lineStarts( text, r.lineStarts );
     const bool endsWithNewline = !text.empty() && r.lineStarts.back() == text.size();
     r.fileLines = std::uint32_t( r.lineStarts.size() ) - ( endsWithNewline || text.empty() ? 1u : 0u );
     if( line > r.fileLines )
