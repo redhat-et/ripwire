@@ -126,8 +126,11 @@ inline constexpr std::uint32_t kTrigramProbes       = 3;
 
 inline std::uint64_t layoutKey()
 {
-    return depwatch::digest64( std::format( "verbfs statsig={} little={} tri_bits={} tri_probes={} float={}", sizeof( warmsnap::StatSig ),
-                                            std::endian::native == std::endian::little ? 1 : 0, kTrigramBitsPerEntry, kTrigramProbes, sizeof( float ) ) );
+    // producer: the build that wrote the record, as warmsnap keys its own (quality::producerIdentityHash). A stored clone group
+    // or manifest kind is the OUTPUT of this build's code, so another build's record is refused, never served as current.
+    return depwatch::digest64( std::format( "verbfs statsig={} little={} tri_bits={} tri_probes={} float={} producer={}", sizeof( warmsnap::StatSig ),
+                                            std::endian::native == std::endian::little ? 1 : 0, kTrigramBitsPerEntry, kTrigramProbes, sizeof( float ),
+                                            quality::producerIdentityHash() ) );
 }
 
 // ── arming ──────────────────────────────────────────────────────────────────────────────────────────────────────────
