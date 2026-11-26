@@ -27,6 +27,10 @@
 #   (K) the refusal still has its baseline — a payload that raises the file's parse errors still refuses on the
 #       warm path, so reading the count off the index did not turn the delta into "no baseline, accept all".
 #   (W) the preview writes nothing to the warm index — a plain run after it still reparses 0 files.
+#   (H) after a one-file COMMIT, the first preview's HEAD-baseline ingest reparses 1 file, not the tree, and the
+#       answer is byte-identical to a fully cold run. This is where the measured 15 s actually went: the HEAD
+#       ingest cache is named by sha, so every commit used to start the baseline from nothing. Red on the base
+#       (reparsed= every committed file).
 #
 # Operates entirely on private temp git repos and a private TMPDIR (the cache ladder's first rung); never touches
 # the real repo or the user's caches. Needs git.
@@ -69,9 +73,12 @@ preview(){ # $1 selector  $2 payload  [...] extra flags — the WARM preview (th
     local sel="$1" pay="$2"; shift 2
     ( cd "$BASE" && "$BIN" . --edit-check="$sel" --edit-payload="$pay" --dry-run --legend=full --limit=40 "$@" 2>/dev/null )
 }
-coldpreview(){ # the COLD preview: no content cache, no warm snapshot — every file parsed by the run's own ingest
-    local sel="$1" pay="$2"; shift 2
-    ( cd "$BASE" && RIPWIRE_NO_WARMSNAP=1 "$BIN" . --edit-check="$sel" --edit-payload="$pay" --dry-run --no-cache --legend=full --limit=40 "$@" 2>/dev/null )
+coldpreview(){ # the COLD preview: no content cache, no warm snapshot, and a FRESH cache ladder, so the HEAD baseline is built
+               # from nothing too — every file of both trees parsed by this run
+    local sel="$1" pay="$2" t="$WORK/cold.$RANDOM"; shift 2
+    mkdir -p "$t"
+    ( cd "$BASE" && TMPDIR="$t" RIPWIRE_NO_WARMSNAP=1 "$BIN" . --edit-check="$sel" --edit-payload="$pay" --dry-run --no-cache --legend=full --limit=40 "$@" 2>/dev/null )
+    rm -rf "$t"
 }
 applied(){ # $1 name  $2 file  $3 payload → the POST-apply --edit-check document, on a fresh corpus (test/editpreviewcheck.sh applied())
     local w="$WORK/apply.$RANDOM"
@@ -168,6 +175,29 @@ esac
 grep -q 'cache-stats reparsed=0 ' "$WORK/w2.err" \
     && ok "(W) a plain run after the previews still reparses 0 files" \
     || { no "(W) the previews disturbed the warm index"; sed -n 1,3p "$WORK/w2.err"; }
+
+# ── (H) the first preview after a COMMIT reparses what the commit changed, not the HEAD tree ───────────
+# The HEAD baseline's ingest cache is named by HEAD sha; a new sha used to start from nothing and reparse every committed
+# file (quality.h seedHeadSnapCache). One file changes in this commit, so the HEAD ingest must reparse exactly that one.
+nfiles="$( cd "$BASE" && git ls-files | wc -l | tr -d ' ' )"
+perl -0pi -e 's/\}\s*\z/}\n\nint trimTwice( int a, int b )\n{\n    return trim( trim( a, b ), b );\n}\n/' "$BASE/lib.cpp"
+( cd "$BASE" && git commit -qam "one-file commit" ) >/dev/null 2>&1
+( cd "$BASE" && RIPWIRE_CACHE_STATS=1 "$BIN" . --edit-check=lib.h:scale --edit-payload="$FIX/payloads/chg01.txt" --dry-run --legend=full --limit=40 \
+    >"$WORK/h.out" 2>"$WORK/h.err" ); rc=$?
+headLine="$( grep -oE "cache-stats reparsed=[0-9]+ reused=[0-9]+ files=$nfiles " "$WORK/h.err" | sed -n 2p )"
+if [ "$rc" != 0 ] || ! grep -q '<edit-check ' "$WORK/h.out"; then
+    no "(H) the post-commit preview did not answer (rc=$rc)"
+elif [ -z "$headLine" ]; then
+    no "(H) presence guard: no HEAD-tree ingest line (files=$nfiles) after the commit — the HEAD baseline was not rebuilt, so the arm proved nothing"; sed -n 1,6p "$WORK/h.err"
+else
+    case "$headLine" in
+        "cache-stats reparsed=1 "*) ok "(H) the first preview after a one-file commit reparses 1 HEAD file ($headLine)";;
+        *) no "(H) the first preview after a one-file commit rebuilt the HEAD tree from nothing ($headLine; want reparsed=1)";;
+    esac
+fi
+cold="$( coldpreview lib.h:scale "$FIX/payloads/chg01.txt" )"
+[ -n "$cold" ] && [ "$( cat "$WORK/h.out" )" = "$cold" ] && ok "(H) the post-commit preview is byte-identical to a fully cold one" \
+    || no "(H) the post-commit preview differs from a fully cold one"
 
 if [ "$fail" = 0 ]; then echo "editpreviewwarmcheck: PASS"; exit 0; fi
 echo "editpreviewwarmcheck: FAIL"; exit 1
