@@ -321,3 +321,26 @@ different and weaker claim. This file is written first so none of them can happe
   - The pilot's TRAIN payloads are sealed and are not the held-out seal: 24 manifests,
     SHA-256 `69b32fc028aef30b4906ba086776b9bfb5dbe3bfeef3548643c6692f269949f1`, binary
     `ripwire 0.7.0-dev.20+gfe40f1d71`, every arm built on 24 of 24.
+- **2026-11-26, A2: an unbuildable instance is excluded from every arm (owner ruling). No held-out model
+  episode has run.** The 24-instance TRAIN pilot (Haiku 5.5) was running when this was written. It touches no
+  held-out instance.
+  - *Rule.* An instance is excluded from **every** arm and counted when its derived arms cannot be built
+    under A1: the unrelated-file placebo pool is empty, or no common exact size exists at or below B. Every
+    arm includes A0, the shipped `for` and A1p. The run's JSON lists each excluded instance by id
+    (`excluded_unbuildable_a2`) and reports the count beside the other exclusions. No payload is sealed for
+    it.
+  - *The test runs before the gold-based scoring.* It reads only ripwire's own exports, the issue text and
+    row lengths. The set is therefore computed by the rule, never by name: on the 243 it need not be exactly
+    the 4 the 306-row count found.
+  - *Why it cannot favour an arm.*
+    - The criterion is gold-blind and model-blind. It is fixed by repository shape: an answer that already
+      names every file, or row lengths with no common exact size.
+    - Every arm loses the same instances, so each paired contrast (A1−A2, A1−A3, A1−A0) runs over the
+      identical task set.
+    - It does not depend on any arm's outcome. It is decided before any episode and before any score.
+    - It narrows the population, and every published number states it as n = 243 − excluded.
+  - *What it costs.* The held-out n falls by the excluded count, and the power arithmetic above uses n = 243.
+    The MDE is reported at the realised n, never at 243.
+  - *Gate.* `test_placebo_arms.py`'s offline `main()` run on a fixture whose answer names every file now
+    requires exclusion by id, n = 0 in every arm, and no sealed payload. Two checks are red on the A1 tip
+    `315b057f1`, which aborts; all three are green after.

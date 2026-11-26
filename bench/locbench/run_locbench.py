@@ -627,9 +627,9 @@ def run_for_pair( repo_path, query, top_k, rich_cache, extra_args ):
     return cand, prod
 
 def score_derived_arms( acc, arms, shipped_for, uni_xml, instance_id, repo_path, query, universe_files, gold, emit_dir ):
-    # Build the matched-budget control arms from the `for` answer and score them with the same scorer. An
-    # unbuildable placebo aborts the run (zero-silent-skip): a control that quietly went missing on the
-    # hard instances would bias exactly the comparison it exists to make.
+    # Build the matched-budget control arms from the `for` answer and score them with the same scorer. main()
+    # has already excluded (rule A2, every arm, counted) any instance whose arms cannot be built, so a failure
+    # HERE means the pre-check and the build disagree: that aborts the run (zero-silent-skip).
     primary_files, gold_files, cov = gold
     for_xml, production_xml = shipped_for
     try:
@@ -705,6 +705,7 @@ def main():
     acc = { arm: zero() for arm in arms }
     gold_total = cov_total = added_total = 0
     skipped_nonpy = skipped_checkout = skipped_ctx = skipped_unindexable = 0
+    excluded_unbuildable = []   # ADDENDUM rule A2: excluded from EVERY arm, gold-blind, listed in the JSON
     per_instance = []
 
     for idx, inst in enumerate( rows ):
@@ -758,6 +759,18 @@ def main():
         if rc != 0 or not uni_candidates:
             raise SystemExit( f"[{idx+1}/{len(rows)}] {inst['instance_id']}: CTX FAIL rc={rc} parse={locals().get('parse_error','')} (zero-silent-skip contract)" )
         universe_files = sorted( { c["path"] for c in uni_candidates } )
+        if any( x in DERIVED_ARMS for x in arms ):
+            # PREREG_PLACEBO.md ADDENDUM rule A2: an instance whose derived arms cannot be built (empty unrelated
+            # pool, or no common exact size) is EXCLUDED FROM EVERY ARM and counted, decided before the gold-based scoring.
+            # The test reads only ripwire's own exports and row lengths, so it is gold-blind, and every arm keeps
+            # the identical task set.
+            try:
+                pre_for = run_for_pair( repo_path, query, a.top_k, rich_cache, extra_args )
+                build_derived_arms( pre_for[0], uni_xml, nbytes( pre_for[1] ), inst["instance_id"], repo_path, query, universe_files )
+            except PlaceboUnbuildable as e:
+                excluded_unbuildable.append( inst["instance_id"] )
+                print( f"[{idx+1}/{len(rows)}] {inst['instance_id']}: EXCLUDED (rule A2, every arm): {e}", file=sys.stderr )
+                continue
         primary_files = { f for f in gold_files if norm_path( f ) in universe_files }
         cov = covered( uni_candidates, gold_funcs, universe_files )
         gold_total += len( gold_funcs ); cov_total += len( cov ); added_total += len( added )
@@ -833,7 +846,7 @@ def main():
     scored = acc[arms[0]]["n"] if arms else 0
     print( "\n" + "=" * 78 )
     print( f"LocBench validation slice — dataset={a.dataset}  split={a.split}  n_scored={scored}"
-           f"  (excluded-with-reason: nonpy={skipped_nonpy} checkout={skipped_checkout} ctx={skipped_ctx} unindexable={skipped_unindexable})" )
+           f"  (excluded-with-reason: nonpy={skipped_nonpy} checkout={skipped_checkout} ctx={skipped_ctx} unindexable={skipped_unindexable} unbuildable-A2={len( excluded_unbuildable )})" )
     print( "=" * 78 )
     print( f"parse coverage: {cov_total}/{gold_total} gold functions emitted by ripwire's parser "
            f"= {pct(cov_total, gold_total)}   (added_functions excluded, structurally absent: {added_total})" )
@@ -874,7 +887,8 @@ def main():
             dict( dataset=a.dataset, split=a.split, split_contract="repo-disjoint sha256(ripwire-a7-v2\\0 + lowercase(repo)), byte0<128=train",
                   history_depth=a.history_depth, ctx_extra_args=a.ctx_extra_args,
                   n_scored=scored,
-                  skipped=dict( nonpy=skipped_nonpy, checkout=skipped_checkout, ctx=skipped_ctx, unindexable=skipped_unindexable ),
+                  skipped=dict( nonpy=skipped_nonpy, checkout=skipped_checkout, ctx=skipped_ctx, unindexable=skipped_unindexable,
+                                unbuildable_a2=len( excluded_unbuildable ) ), excluded_unbuildable_a2=excluded_unbuildable,
                   coverage=dict( covered=cov_total, gold=gold_total, added=added_total ),
                   arms={ arm: acc[arm] for arm in arms }, instances=per_instance ), indent=2 ) )
         print( f"\nwrote {a.json_out}" )

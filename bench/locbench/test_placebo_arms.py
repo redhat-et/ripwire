@@ -307,10 +307,17 @@ def test_main_integration( bin_path ):
         man = pathlib.Path( w ) / "payloads" / "fixture__geom-1" / "manifest.json"
         check( man.exists() and "for-production" in json.loads( man.read_text() ), "--emit-payloads sealed the instance's payloads" )
     with tempfile.TemporaryDirectory() as w:
-        # test/fixture is 14 symbols: the --for answer names every file, so no unrelated pool exists. The run must
-        # STOP on that instance, not score a short or empty placebo.
-        msg, _ = run_main_offline( bin_path, "for,placebo", w )
-        check( bool( msg ) and "PLACEBO UNBUILDABLE" in msg, f"main() aborts on an unbuildable placebo instead of scoring it ({msg})" )
+        # test/fixture is 14 symbols: the --for answer names every file, so no unrelated pool exists. ADDENDUM rule
+        # A2: that instance is EXCLUDED FROM EVERY ARM (the shipped `for` arm included) and counted, never scored
+        # with a short or empty placebo, and never dropped silently.
+        msg, res = run_main_offline( bin_path, "for,placebo", w )
+        arms = ( res or {} ).get( "arms", {} )
+        check( msg is None and res is not None and res["skipped"].get( "unbuildable_a2" ) == 1
+               and res.get( "excluded_unbuildable_a2" ) == [ "fixture__geom-1" ],
+               f"main() excludes an unbuildable instance under rule A2 and counts it by id ({msg})" )
+        check( res is not None and all( arms.get( a, {} ).get( "n" ) == 0 for a in ( "for", "placebo" ) ) and res["instances"] == [],
+               "the excluded instance is scored in NO arm (the task set stays identical across arms)" )
+        check( not ( pathlib.Path( w ) / "payloads" / "fixture__geom-1" ).exists(), "no payload is sealed for an excluded instance" )
 
 def main():
     for name, fn in sorted( globals().items() ):
