@@ -113,7 +113,11 @@ check( all( t.get( "description", "" ).strip() for t in tools ), "(1) every tool
 # verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
 # MR1 (2026-11-21, owner ruling 168): +73 B over the 40,073 B base 36a95d732 — `for` gains the `rows` string (the CLI --rows= twin):
 # schemas 20,391 -> 20,464 B, descriptions unchanged; measured 40,146 B. Ceiling = measured + 30 B (mcpmanifestcheck's figure).
-CEILING = 40176
+# MCP-HONESTY CL1 (2026-11-26, PR #774): +184 B, every byte attributed — `memory_recall` and `batch` each declare `offset` (92 B
+#   per property entry, the lego/explore precedent): memory_recall's schema 500 -> 592 B, batch's 997 -> 1,089 B; descriptions
+#   unchanged at 15,141 B. Measured 40,170 -> 40,354 B (base 5f4b50415 vs the lane binary). Ceiling = measured + 30 B, the same
+#   margin. OWNER CALL flagged on the PR: the MCP-METADATA lane stacked on this one raises it again separately.
+CEILING = 40384
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 print( "  INFO  manifest %d B (ensure_ascii metric), wire line %d B, descriptions %d B"
        % ( manifest, len( first.encode( "utf-8" ) ), sum( len( t[ "description" ].encode( "utf-8" ) ) for t in tools ) ) )

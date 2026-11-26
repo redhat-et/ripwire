@@ -360,7 +360,11 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # MR1 (2026-11-21, owner ruling 168): +73 B, every byte attributed — `for` gains the `rows` string (the CLI --rows= twin: lines, the
 #   default, or elements): measured 40,073 -> 40,146 B, descriptions unchanged at 15,117 B, schemas 20,391 -> 20,464 B, the 33 first
 #   sentences unchanged. Ceiling = measured + 30 B, the same margin.
-CEILING = 40176
+# MCP-HONESTY CL1 (2026-11-26, PR #774): +184 B, every byte attributed — `memory_recall` and `batch` each declare `offset` (92 B
+#   per property entry, the lego/explore precedent): memory_recall's schema 500 -> 592 B, batch's 997 -> 1,089 B; descriptions
+#   unchanged at 15,141 B. Measured 40,170 -> 40,354 B (base 5f4b50415 vs the lane binary). Ceiling = measured + 30 B, the same
+#   margin. OWNER CALL flagged on the PR: the MCP-METADATA lane stacked on this one raises it again separately.
+CEILING = 40384
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
