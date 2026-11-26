@@ -271,4 +271,35 @@ different and weaker claim. This file is written first so none of them can happe
 
 ## ADDENDUM (append-only, after freeze)
 
-- *(empty: stage 0 has not run)*
+- **2026-11-26, A1: one common budget B\* for every arm (builder closure fix). No model episode had run.**
+  Stage 0 stopped at its first held-out instance with `PLACEBO UNBUILDABLE`: the lexical arm found no exact
+  18,048-byte closure. A $0 count on the 24 pilot TRAIN instances (no gold read, no model) then found
+  for-matched unbuildable on 9, placebo on 10, and lexical on 17. All four arms built on 7 of the 24.
+  - *Cause.* The ordered arms (for-matched, lexical) close with one try. Real rows have long attribute heads
+    and short signatures (16–95 chars). So the gap left after the greedy prefix (134 B in the measured case)
+    is often smaller than the next row's minimum size (331 B), and trimming at most two signatures cannot
+    close it. The original gate's fixture used long signatures and so never exercised this.
+  - *Rule.* The matched budget B (above) becomes the **requested** budget. Every derived arm (for-matched,
+    placebo, placebo-shuffle, lexical) is built at **B\* = the largest size ≤ B at which all four close
+    exactly**. All four are always built, so no payload depends on which arms a run requests. Each instance
+    records `requested_bytes` and `budget_shortfall = B − B*`, and the run reports their distribution. If no
+    common size exists at all, that is still `PLACEBO UNBUILDABLE` and still stops the round.
+  - *Why it cannot favour an arm.*
+    - B\* is one number applied to all arms, so every arm pays the same shortfall and the byte-equality
+      contract holds exactly.
+    - B\* is computed only from row byte lengths in ripwire's own exports and the BM25 file order. It takes
+      no gold argument, no score and no model output, so it is as gold-blind as the builders.
+    - It is the maximum of an intersection, so the order the arms are tried in cannot change it.
+    - A1 is still ripwire's own prefix in ripwire's order with at most two trimmed tail rows. The placebo
+      still excludes the answer's files. A1p (the shipped payload) is unchanged.
+    - Format identity, the legend bytes and the root attribute names are untouched. No pad, filler row or
+      non-ripwire element is added.
+  - *What it costs.* A1, A2, A3 and A2s are up to `budget_shortfall` bytes smaller than the shipped answer's
+    size. The shortfall is reported beside every byte figure, never folded into B.
+  - *Gate.* `test_placebo_arms.py` `test_short_signature_closure` uses a fixture with 16–95-char signatures
+    and checks 276 budgets. It is red on the original builder (194 of 276 budgets raised `PLACEBO UNBUILDABLE`;
+    6 checks fail) and green after the fix, with a largest shortfall of 510 B on that fixture.
+  - *Re-count on the 24 pilot TRAIN ids, fixed builder, /bin/zsh.* All four arms build on 24 of 24. The shortfall
+    B − B\* per instance: 0 B on 7, median 62.5 B, mean 373.0 B, above 500 B on 3. The largest are 4,586 B
+    (Happy-Algorithms-League__hal-cgp-180) and 2,422 B (alexa-pi__AlexaPi-188), both small repositories whose
+    unrelated-file pool cannot fill the full budget.
