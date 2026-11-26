@@ -167,19 +167,26 @@ rmut(){
     RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED=1 run rm.w warm "$@"
     if ! same rm.w rm.c; then ok "RM $label: answering a refused record as empty turns the identity red"; else no "RM $label: the EMPTYREFUSED mutant matched the reference"; fi
 }
-# invalidated LABEL INDEX TAG : the honest call after a change rebuilt (served=0 why=key built=1 wrote=1)
+# invalidated LABEL INDEX TAG : the honest calls after a change rebuilt. TAG.p, the first, is never served (if it re-parsed the
+# edited file the model has no snapshot identity yet, why=model and nothing written; if the parse cache already holds it, the
+# stored entry is another model's, why=key). One of TAG.p / TAG then refuses the stored entry as another model's (why=key)
+# and writes the fresh one.
 invalidated(){
-    if [ "$( field "$3" "$2" served )" = 0 ] && [ "$( field "$3" "$2" why )" = key ] && [ "$( field "$3" "$2" built )" = 1 ] && [ "$( field "$3" "$2" wrote )" = 1 ]; then
-        ok "$1: the stored $2 index is refused (why=key) and rebuilt"
+    local keyed=""
+    for t in "$3.p" "$3"; do
+        if [ -z "$keyed" ] && [ "$( field "$t" "$2" why )" = key ] && [ "$( field "$t" "$2" built )" = 1 ] && [ "$( field "$t" "$2" wrote )" = 1 ]; then keyed="$t"; fi
+    done
+    if [ "$( field "$3.p" "$2" served )" = 0 ] && [ "$( field "$3.p" "$2" built )" = 1 ] && [ -n "$keyed" ]; then
+        ok "$1: the stored $2 index is not served after the change (first call why=$( field "$3.p" "$2" why )) and is rebuilt (why=key wrote=1)"
     else
-        no "$1: expected served=0 why=key built=1 wrote=1, got '$( line "$3" "$2" )'"
+        no "$1: expected a first call served=0 built=1, then why=key built=1 wrote=1; got '$( line "$3.p" "$2" )' / '$( line "$3" "$2" )'"
     fi
 }
 
 # ── I1: an edit to a slotjoin input ───────────────────────────────────────────────────────────────────────────────
 printf '#define TABLE_ROWS 1\n' >"$FIX/c/table.h"
 kmut "I1 table.h stops including row.h" --for="$QS"
-statrun i1 --for="$QS"
+statrun i1.p --for="$QS"; statrun i1 --for="$QS"
 invalidated "I1 table.h edited" slotjoin i1
 if ident "I1" --for="$QS"; then
     if grep -q 'slot_by' "$TMP/id.w.out"; then no "I1 slot_by= still printed after the include went"; else ok "I1 identical, slot_by= gone with the include"; fi
@@ -190,7 +197,7 @@ run i1back warm --for="$QS"
 # ── I2: an edit to a regindex input ───────────────────────────────────────────────────────────────────────────────
 printf 'from core import signals\n\ndef close_db_connections(**kwargs):\n    pass\n\nsignals.request_finished.connect(close_db_connections)\n' >"$FIX/py/db/__init__.py"
 kmut "I2 a receiver renamed" --for="$QR"
-statrun i2 --for="$QR"
+statrun i2.p --for="$QR"; statrun i2 --for="$QR"
 invalidated "I2 db/__init__.py edited" regindex i2
 if ident "I2" --for="$QR"; then
     if grep -q 'close_db_connections' "$TMP/id.w.out" && ! grep -q 'sym="close_old_connections"' "$TMP/id.w.out"; then ok "I2 identical, the renamed receiver is listed"; else no "I2 the renamed receiver is not listed: $( regRow id.w )"; fi
@@ -200,7 +207,7 @@ fi
 mkdir -p "$FIX/py/extra"
 printf 'from core.signals import request_finished\n\ndef flush_logs(**kwargs):\n    pass\n\nrequest_finished.connect(flush_logs)\n' >"$FIX/py/extra/flush.py"
 kmut "I3 a receiver added" --for="$QR"
-statrun i3 --for="$QR"
+statrun i3.p --for="$QR"; statrun i3 --for="$QR"
 invalidated "I3 a receiver added" regindex i3
 if ident "I3" --for="$QR"; then
     if regRow id.w | grep -q 'n="3"' && grep -q 'flush_logs' "$TMP/id.w.out"; then ok "I3 identical, n=3 and flush_logs listed"; else no "I3 expected n=3 with flush_logs: $( regRow id.w )"; fi
@@ -209,7 +216,7 @@ fi
 # ── I4: remove one ────────────────────────────────────────────────────────────────────────────────────────────────
 rm -f "$FIX/py/core/cache.py"
 kmut "I4 a receiver removed" --for="$QR"
-statrun i4 --for="$QR"
+statrun i4.p --for="$QR"; statrun i4 --for="$QR"
 invalidated "I4 a receiver removed" regindex i4
 if ident "I4" --for="$QR"; then
     if regRow id.w | grep -q 'n="2"' && ! grep -q 'close_caches' "$TMP/id.w.out"; then ok "I4 identical, n=2 and close_caches gone"; else no "I4 expected n=2 without close_caches: $( regRow id.w )"; fi
@@ -217,9 +224,11 @@ fi
 
 # ── I5: a flag that changes the index ─────────────────────────────────────────────────────────────────────────────
 kmut "I5 --exclude=extra" --for="$QR" --exclude=extra
-statrun i5 --for="$QR" --exclude=extra
-if [ "$( field i5 regindex served )" = 0 ] && [ "$( field i5 regindex built )" = 1 ]; then ok "I5 --exclude=extra: the stored regindex is not served ($( line i5 regindex ))"
-else no "I5 --exclude=extra: expected served=0 built=1, got '$( line i5 regindex )'"; fi
+statrun i5.p --for="$QR" --exclude=extra; run i5.r warm --for="$QR" --exclude=extra; statrun i5 --for="$QR" --exclude=extra
+if [ "$( field i5.p regindex served )" = 0 ] && [ "$( field i5.p regindex built )" = 1 ]; then ok "I5 --exclude=extra: the stored regindex is not served under the new flag ($( line i5.p regindex ))"
+else no "I5 --exclude=extra: expected served=0 built=1 on the first call under the flag, got '$( line i5.p regindex )'"; fi
+if [ "$( field i5 regindex served )" = 1 ]; then ok "I5 the flag's own entry is served on its next call (the plain run's entry kept beside it)"
+else no "I5 the flag's own entry is not served on its next call: '$( line i5 regindex )'"; fi
 if ident "I5" --for="$QR" --exclude=extra; then
     if grep -q '<reg ' "$TMP/id.w.out"; then no "I5 a <reg> row printed with one registration left: $( regRow id.w )"; else ok "I5 identical, no <reg> row (one registration left)"; fi
 fi
