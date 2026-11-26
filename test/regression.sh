@@ -1203,6 +1203,7 @@ for _g in \
     warmpeakcheck \
     warmsnapcheck \
     weaksignalcheck \
+    whereisnographcheck \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
