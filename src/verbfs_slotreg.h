@@ -103,11 +103,10 @@ struct ModelId
 
 inline ModelId rowsOf( const IngestResult& ing ) noexcept
 {
-    ModelId id;
-    const void*       rows[]  = { ing.files.data(), ing.symbols.data(), ing.references.data(), ing.bindings.data(), ing.includes.data() };
-    const std::size_t sizes[] = { ing.files.size(), ing.symbols.size(), ing.references.size(), ing.bindings.size(), ing.includes.size() };
-    std::ranges::copy( rows, id.rows );
-    std::ranges::copy( sizes, id.sizes );
+    ModelId         id;
+    const ModelRows m = modelRowsOf( ing );   // the seam's one spelling of the identity (valuerefindex.h narrowFor reads it too)
+    std::ranges::copy( m.rows, id.rows );
+    std::ranges::copy( m.sizes, id.sizes );
     return id;
 }
 
@@ -171,6 +170,14 @@ inline std::uint64_t modelKeyOf( const IngestResult& ing, bool& found )
     const ModelId id  = notedModel().load();
     found = id.on && std::ranges::equal( id.rows, now.rows ) && std::ranges::equal( id.sizes, now.sizes );
     return found ? id.key : 0;
+}
+
+// seam (3): the noted model's key for `ing`, 0 when `ing` is not that model (a zero digest is read as 1: 0 means "none").
+inline std::uint64_t notedKeyOf( const IngestResult& ing )
+{
+    bool                found = false;
+    const std::uint64_t key   = modelKeyOf( ing, found );
+    return !found ? 0 : key == 0 ? 1 : key;
 }
 
 inline void statsLine( std::string_view index, const Serve& tried, std::string_view detail )
@@ -534,6 +541,7 @@ inline void arm() noexcept
     s.regKeep   = &keepReg;
     s.joinServe = &serveJoin;
     s.joinKeep  = &keepJoin;
+    s.modelKey  = &notedKeyOf;
 }
 
 }   // namespace rw::verbfs::slotreg
