@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package demo.expr;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "example.com/demo/expr;expr";
+
+// A node in an expression tree.
+message ExprNode {
+  message Leaf {
+    string name = 1;
+  }
+
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_ADD = 1;
+    TYPE_MUL = 2 [deprecated = true];
+  }
+
+  Type function_type = 1;
+  repeated ExprNode children = 2;
+  map<string, Leaf> leaves = 3;
+  google.protobuf.Timestamp at = 4;
+
+  oneof value {
+    int64 constant = 5;
+    string label = 6;
+  }
+
+  reserved 9, 10 to 12;
+  reserved "old_name";
+}
+
+service ExprService {
+  rpc Evaluate(ExprNode) returns (ExprNode);
+  rpc Stream(stream ExprNode) returns (stream ExprNode) {}
+}
