@@ -25,6 +25,9 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+# VERB-SLIM-1: this gate pins topk_default= and map_next= on the --expand <ctx> root, which the default posture leaves out; it pins the full answer
+# (RIPWIRE_VERB_SLIM=0, byte-identical to before), and test/verbslimcheck.sh pins the default posture.
+export RIPWIRE_VERB_SLIM=0
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/expandtopk0fix"
 MODEFIX="$ROOT/test/expandmodefix"

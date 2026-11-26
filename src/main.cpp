@@ -60,6 +60,7 @@
 #include "batchpage.h"             // CL1: the CLI --batch pages by whole <q> sub-answers under the output ceiling (cliBatchPage)
 #include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
+#include "verbslim.h"              // VERB-SLIM-1: the default posture's cut of --expand / --quality-delta (finishCompactCapture)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
 #include "wrap.h"
@@ -4543,6 +4544,28 @@ static int emitCapturedDoc( const std::string& doc, int rc )
     return rc != 0 ? rc : 1;
 }
 
+// VERB-SLIM-1 (src/verbslim.h): the default posture's cut of an --expand or --quality-delta answer, made BEFORE the compact
+// layer writes the legend, so the readings of what it removed leave with it. RIPWIRE_VERB_SLIM=0 skips it.
+// VERB-SLIM-1 serves the default posture (and an asked --legend=compact). The postures where the caller says which dictionary
+// entries it HOLDS (--legend-have= ref, --legend-seen=) reduce the legend against those entries, and the slim --expand purpose
+// is none of them, so those answers stay exactly as before.
+static void applyVerbSlim( const rw::Config& cfg, std::string_view hint, std::string& doc )
+{
+    if( !rw::verbslim::verbSlimOn() || !cfg.legendHave.empty() || cfg.legendSeenGiven )
+    {
+        return;
+    }
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    if( hint == "expand" && root.tag == "ctx" )
+    {
+        rw::verbslim::slimExpandAnswer( doc );
+    }
+    else if( root.tag == "quality-delta" )
+    {
+        rw::verbslim::slimQualityDeltaAnswer( doc );
+    }
+}
+
 static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc )
 {
     EXPECTS( cfg.legend == "compact", "only a compact-posture run is captured" );
@@ -4556,7 +4579,9 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
     const bool budgetIsSoft = cfg.tokenBudget > 0
                            && ( !cfg.forTask.empty() || ( !cfg.packTask.empty() && cfg.partitionCount == 0 ) || !cfg.fromTrace.empty() || !cfg.runTrace.empty() );
-    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg, doc ), budgetIsSoft ) )
+    const std::string_view hint = compactLegendHint( cfg, doc );   // a key from a static table: it outlives the rewrite below
+    applyVerbSlim( cfg, hint, doc );
+    switch( rw::applyCompactDialect( doc, hint, budgetIsSoft ) )
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:

@@ -21,6 +21,9 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+# VERB-SLIM-1: this gate reads acked= stale= at 0 off the root, which the default posture leaves out; it pins the full answer
+# (RIPWIRE_VERB_SLIM=0, byte-identical to before), and test/verbslimcheck.sh pins the default posture.
+export RIPWIRE_VERB_SLIM=0
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
