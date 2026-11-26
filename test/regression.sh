@@ -358,6 +358,7 @@ for _g in \
     buildtypestampcheck \
     builtinbindcheck \
     bundleidcheck \
+    c1stampcheck \
     cachefuzzcheck \
     cachehashcheck \
     cacheidentitycheck \
@@ -471,6 +472,7 @@ for _g in \
     deplangscheck \
     depsnographcheck \
     depsprecisecheck \
+    depsrereadcheck \
     det-gate \
     detailcheck \
     diagnoticecheck \
@@ -955,6 +957,7 @@ for _g in \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \
+    qmetricscheck \
     qoriginoraclecheck \
     qrevtokencheck \
     qrowlocatorcheck \
