@@ -1400,7 +1400,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
-                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut.\","
+                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut; an answer past 24,000 B pages (next_offset= -> offset).\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
                    "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files default to 'git diff HEAD'; files is a comma-separated STRING (an array is refused rather than read as absent). limit/offset page blast_radius and forgotten only (default: every row). " + std::string( kTestRowJsonShapeClause ) + "\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
@@ -1469,7 +1469,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals; add var (or SYM:VAR) for per-line rows. flow=back|fwd|both adds the TRANSITIVE data-flow slice, bounded by depth (1..32, default 8; flow_truncated discloses a cut). @FILE:LINE seeds resolve. reach=cfg (C-family, Python) or reach=linear elsewhere. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust; other languages refuse loudly. Single-root.\","
                    + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly; past 24,000 B it pages by whole sub-answers (next_offset= -> offset).\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             resp = mcpFilterToolsList( std::move( resp ), policy );   // --mcp-tools: the subset (unchanged without one)
@@ -2426,7 +2426,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // a 1500-token ceiling and disclosed none. recall.h's recallBytesForTokens owns it now.
                     const std::size_t recallTokens = budgetArg.isPresent ? std::size_t( budgetArg.value )
                                                                          : kDefaultRecallMaxTokens;
-                    resp = textResult( recallText( path, task, recallTopK, recallTokens, redactPtr ) );
+                    // CL1 (audit 2026-11-26 item 2): an answer over the output ceiling pages by its body bytes (recallPage)
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        RecallPage page = recallPage( recallText( path, task, recallTopK, recallTokens, redactPtr ), std::size_t( pg.offset ) );
+                        return page.refusal.empty() ? textResult( page.text ) : errResultMsg( -32602, page.refusal );
+                    } );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
                 {
@@ -3005,7 +3010,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                     }
                                 }
                             }
-                            resp = textResult( batchText( subs, requested, kBatchCap ) );
+                            // CL1 (audit 2026-11-26 item 2): the aggregate pages by whole <q> sub-answers (batchText)
+                            const McpPageParse pg = mcpPageArgs( args );
+                            const std::string  page = pg.refusal.empty() ? batchText( subs, requested, kBatchCap, std::size_t( pg.page.offset ), kOutputCeilingChars )
+                                                                         : std::string();
+                            resp = !pg.refusal.empty() ? errResultMsg( -32602, pg.refusal )
+                                 : page.empty()        ? errResultMsg( -32602, "offset=" + std::to_string( pg.page.offset ) + " is past the last of this batch's "
+                                                                               + std::to_string( subs.size() ) + " sub-answers — offset is the next_offset= a paged batch's root names, with the same queries" )
+                                                       : textResult( page );
                         }
                     }
                 }

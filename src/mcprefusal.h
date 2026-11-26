@@ -1069,14 +1069,14 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // paging arm, which derives the CLI set from kPagingHonoringVerbs rather than trusting this table.
     // --cochange is in that set, so its twin declares the same window.
     { "cochange",                 "path file limit offset" },
-    { "memory_recall",            "path task top_k budget_tokens" },
+    { "memory_recall",            "path task top_k budget_tokens offset" },   // CL1: offset continues a paged answer (recallPage)
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
     { "for",                      "path paths task budget_tokens no_route no_verb_route limit offset sections rows" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
     { "lego",                     "path paths type limit offset legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },
-    { "batch",                    "path queries legend" },
+    { "batch",                    "path queries legend offset" },   // CL1: offset continues a paged batch (batchText)
     // ── flagship-reflex verbs ──
     { "exemplar",                 "path paths kind task legend" },
     { "quality_delta",            "path show_stale" },

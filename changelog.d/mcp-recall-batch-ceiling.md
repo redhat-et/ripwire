@@ -1,0 +1,8 @@
+### Fixed — MCP `memory_recall` and `batch` page under the output ceiling instead of overflowing the host
+
+Claude Code saved a 153,394-character `memory_recall` answer and a 61,579-character `batch` answer to a file instead of showing them inline, so the agent had to read a file to see the answer. Both verbs now read the CL1 output ceiling (24,000 B), and each cuts its own unit:
+
+- `memory_recall` builds the answer exactly as asked (the default 8,000-token budget already fit; a larger `budget_tokens` did not). Past the ceiling it pages by body bytes. The header line adds `offset= shown_bytes= of_bytes= has_more= next_offset=`, and the new `offset` argument continues the answer. The pages' bodies, in order, are the whole answer's body byte for byte. A cut prefers a document separator, then a line end, and never splits a UTF-8 sequence.
+- `batch` pages by whole `<q>` sub-answers. The root adds `offset= shown= has_more= next_offset=`, and `offset` continues the same queries. A `<dup-of q=>` may name a sub-answer an earlier page carried. A single sub-answer larger than a page is served whole on its own page with `over_ceiling="1"`.
+
+An answer that fits is byte-identical to before. The CLI `--batch` and `--recall` are unchanged. `test/outputceilingcheck.sh` gains arms RC0–RC4 and BC1–BC4: the pages stay under the ceiling, the recall pages rebuild the CLI's whole answer, every `<q>` appears exactly once, and an `offset` past the end is refused.
