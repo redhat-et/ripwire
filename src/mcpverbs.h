@@ -651,8 +651,7 @@ inline std::string sweepEmptyCause( const std::string& root, std::string_view wh
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr,
-                                std::string* emptyCause = nullptr )
+                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -672,7 +671,6 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     if( !res.ok || res.blobsUnread )   // the CLI twin's refusals; a hit count over blobs never read is not an answer
     {
         if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }
-        if( emptyCause != nullptr && !res.blobsUnread ) { *emptyCause = sweepEmptyCause( root, "search" ); }
         return {};
     }
     res.seedSpec  = std::move( seedSpec );
@@ -1708,13 +1706,14 @@ inline std::string recallText( const std::string& root, const std::string& task,
 // so on its header line: offset= (this slice's first body byte), shown_bytes= of_bytes= (its size, the whole body's),
 // has_more= and next_offset=, the offset the next call passes with the same task, top_k and budget_tokens. est_tokens= and
 // the other header counts describe the WHOLE answer. An answer under the ceiling at offset 0 is returned byte-identical.
-struct RecallPage
+// One page of a CL1-paged MCP answer, or the refusal of a continuation that cannot be served (an offset past the end).
+struct McpPagedText
 {
     std::string text;
-    std::string refusal;   // offset past the body: the caller's continuation cannot be served
+    std::string refusal;
 };
 
-inline RecallPage recallPage( const std::string& whole, std::size_t offset, std::size_t ceiling = kOutputCeilingChars )
+inline McpPagedText recallPage( const std::string& whole, std::size_t offset, std::size_t ceiling = kOutputCeilingChars )
 {
     if( offset == 0 && whole.size() <= ceiling )
     {
@@ -7098,97 +7097,94 @@ inline void applyCompactToBatchSubs( std::vector<BatchSub>& subs )
     }
 }
 
-// CL1 for MCP `batch` (research audit 2026-11-26 item 2: Claude Code spilled a 61,579-character batch to a file). Each sub-verb
-// bounds its own answer; sixteen of them together did not. The unit is the <q> sub-answer, whole: a batch over `ceiling` serves
-// the sub-answers from `offset` that fit, and says so on the root — offset= shown= has_more= next_offset=, the offset the next
-// call passes with the same queries. Every page runs the whole batch (dedup needs every payload), so a <dup-of q=> may name a
-// sub-answer an EARLIER page carried. One sub-answer larger than a page by itself is served alone on its page, whole, and the
-// root says over_ceiling="1" rather than cut an answer it cannot continue. A batch under the ceiling at offset 0 is
-// byte-identical to before. The CLI --batch passes neither (no ceiling): its output is unchanged. "" ⇔ offset past the last q.
-inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t requested, std::size_t cap,
-                              std::size_t offset = 0, std::size_t ceiling = SIZE_MAX )
+// One <q> element per sub-answer, in order: ok=0 carries err=; a payload byte-identical to an earlier OK one is a <dup-of q=>.
+inline std::vector<std::string> batchRows( const std::vector<BatchSub>& subs )
 {
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view sv ) -> std::string { return std::string( escapeXml( sv, esc ) ); };
-
     std::vector<std::string> rows;
     rows.reserve( subs.size() );
-    std::size_t rowBytes = 0;
     for( std::size_t i = 0; i < subs.size(); ++i )
     {
         const BatchSub& sub = subs[i];
         std::string     row = "<q i=\"" + std::to_string( i ) + "\" verb=\"" + ex( sub.verb ) + "\" ok=\"" + ( sub.ok ? "1" : "0" ) + "\"";
         if( !sub.ok )
         {
-            row += " err=\"" + ex( sub.err ) + "\"/>";
+            rows.push_back( row + " err=\"" + ex( sub.err ) + "\"/>" );
+            continue;
         }
-        else
+        // dedup: first earlier OK sub-answer with an identical payload (exact byte match only).
+        std::size_t dupOf = i;
+        for( std::size_t j = 0; j < i; ++j )
         {
-            // dedup: first earlier OK sub-answer with an identical payload (exact byte match only).
-            std::size_t dupOf = i;
-            for( std::size_t j = 0; j < i; ++j )
-            {
-                if( subs[j].ok && subs[j].payload == sub.payload ) { dupOf = j; break; }
-            }
-            row += dupOf != i ? "><dup-of q=\"" + std::to_string( dupOf ) + "\"/></q>" : ">" + batchCdata( sub.payload ) + "</q>";
+            if( subs[j].ok && subs[j].payload == sub.payload ) { dupOf = j; break; }
         }
-        rowBytes += row.size();
-        rows.push_back( std::move( row ) );
+        rows.push_back( row + ( dupOf != i ? "><dup-of q=\"" + std::to_string( dupOf ) + "\"/></q>" : ">" + batchCdata( sub.payload ) + "</q>" ) );
     }
+    return rows;
+}
 
-    std::string out;
-    out += "<batch n=\"" + std::to_string( subs.size() )
-         + "\" requested=\"" + std::to_string( requested )
-         + "\" cap=\"" + std::to_string( cap ) + "\"";
-    if( requested > cap )
+// The <batch> open tag's fixed attributes (no '>') and the legend comment's text (no closing " -->").
+inline std::string batchRootOpen( std::size_t n, std::size_t requested, std::size_t cap )
+{
+    return "<batch n=\"" + std::to_string( n ) + "\" requested=\"" + std::to_string( requested ) + "\" cap=\"" + std::to_string( cap ) + "\""
+         + ( requested > cap ? " capped=\"1\"" : "" );
+}
+
+inline constexpr std::string_view kBatchLegend = "<!-- ripwire batch: N read sub-queries answered in one sweep. Each <q> carries i=index, "
+    "verb=sub-verb, ok=1|0; the sub-answer rides verbatim in CDATA (a mix of XML and JSON payloads); "
+    "<dup-of q=\"i\"/> means this payload is byte-identical to the one already emitted at index i; "
+    "ok=0 carries err= and no payload. Over-cap batches set capped=\"1\" with n<requested.";
+
+inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t requested, std::size_t cap )
+{
+    std::string out = batchRootOpen( subs.size(), requested, cap ) + ">";
+    out += kBatchLegend;
+    out += " -->";
+    for( const std::string& row : batchRows( subs ) ) { out += row; }
+    return out + "</batch>";
+}
+
+// CL1 for MCP `batch` (research audit 2026-11-26 item 2: Claude Code spilled a 61,579-character batch to a file). Each sub-verb
+// bounds its own answer; sixteen of them together did not. The unit is the <q> sub-answer, whole: a batch over `ceiling` serves
+// the sub-answers from `offset` that fit, and says so on the root — offset= shown= has_more= next_offset=, the offset the next
+// call passes with the same queries. Every page runs the whole batch (dedup needs every payload), so a <dup-of q=> may name a
+// sub-answer an EARLIER page carried. One sub-answer larger than a page by itself is served alone on its page, whole, and the
+// root says over_ceiling="1" rather than cut an answer it cannot continue. A batch under the ceiling at offset 0 is batchText,
+// byte for byte. The CLI --batch calls batchText: its output is unchanged.
+inline McpPagedText batchPage( const std::vector<BatchSub>& subs, std::size_t requested, std::size_t cap, std::size_t offset,
+                               std::size_t ceiling = kOutputCeilingChars )
+{
+    std::string whole = batchText( subs, requested, cap );
+    if( offset == 0 && whole.size() <= ceiling )
     {
-        out += " capped=\"1\"";
+        return { std::move( whole ), {} };
     }
-    const std::string_view legend = "<!-- ripwire batch: N read sub-queries answered in one sweep. Each <q> carries i=index, "
-           "verb=sub-verb, ok=1|0; the sub-answer rides verbatim in CDATA (a mix of XML and JSON payloads); "
-           "<dup-of q=\"i\"/> means this payload is byte-identical to the one already emitted at index i; "
-           "ok=0 carries err= and no payload. Over-cap batches set capped=\"1\" with n<requested.";
-    constexpr std::string_view kClose = " --></batch>";
-    if( offset == 0 && out.size() + 1 + legend.size() + kClose.size() + rowBytes <= ceiling )
-    {
-        out += '>';
-        out += legend;
-        out += " -->";
-        for( const std::string& row : rows ) { out += row; }
-        return out + "</batch>";
-    }
+    const std::vector<std::string> rows = batchRows( subs );
     if( offset >= rows.size() )
     {
-        return {};
+        return { {}, "offset=" + std::to_string( offset ) + " is past the last of this batch's " + std::to_string( rows.size() )
+                     + " sub-answers — offset is the next_offset= a paged batch's root names, with the same queries" };
     }
     constexpr std::string_view kPageLegend = " Paged under the output ceiling: offset= is the first <q> on this page, shown= how many "
            "it carries, has_more=1 with next_offset= the offset the next call passes with the same queries; a <dup-of q=> may name "
            "a <q> an earlier page carried; over_ceiling=1: one <q> larger than a page, served whole on its own.";
     constexpr std::size_t kPageAttrsReserve = 96;   // offset= shown= has_more= next_offset= over_ceiling= with their values
-    const std::size_t     fixed = out.size() + kPageAttrsReserve + legend.size() + kPageLegend.size() + kClose.size();
-    std::size_t           end   = offset;
-    std::size_t           used  = fixed;
+    std::string           out  = batchRootOpen( subs.size(), requested, cap );
+    std::size_t           used = out.size() + kPageAttrsReserve + kBatchLegend.size() + kPageLegend.size() + 12;   // 12: " --></batch>"
+    std::size_t           end  = offset;
     while( end < rows.size() && ( end == offset || used + rows[ end ].size() <= ceiling ) )
     {
-        used += rows[ end ].size();
-        ++end;
+        used += rows[ end++ ].size();
     }
     const bool more = end < rows.size();
-    out += " offset=\"" + std::to_string( offset ) + "\" shown=\"" + std::to_string( end - offset ) + "\" has_more=\"" + ( more ? "1" : "0" ) + "\"";
-    if( more )
-    {
-        out += " next_offset=\"" + std::to_string( end ) + "\"";
-    }
-    if( used > ceiling )
-    {
-        out += " over_ceiling=\"1\"";
-    }
-    out += '>';
-    out += legend;
+    out += " offset=\"" + std::to_string( offset ) + "\" shown=\"" + std::to_string( end - offset ) + "\" has_more=\"" + ( more ? "1" : "0" ) + "\""
+         + ( more ? " next_offset=\"" + std::to_string( end ) + "\"" : std::string() ) + ( used > ceiling ? " over_ceiling=\"1\"" : "" ) + ">";
+    out += kBatchLegend;
     out += kPageLegend;
     out += " -->";
     for( std::size_t i = offset; i < end; ++i ) { out += rows[ i ]; }
-    return out + "</batch>";
+    return { out + "</batch>", {} };
 }
 
 }   // namespace rw

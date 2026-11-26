@@ -1910,6 +1910,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // bad one once, and otherwise hand the validated window to the verb. Written as one shape rather
             // than as the same three-line if/else copied into three dispatch arms, because those copies ARE
             // the complexity — a --quality-delta pass reads three of them as exactly that, and it is right to.
+            // CL1 (audit 2026-11-26 item 2): a paged answer (recallPage / batchPage), or its continuation's refusal
+            const auto pagedTextResult = [ & ]( const McpPagedText& page )
+            {
+                return page.refusal.empty() ? textResult( page.text ) : errResultMsg( -32602, page.refusal );
+            };
             const auto pagedResult = [ & ]( auto&& buildWithPage ) -> std::string
             {
                 const McpPageParse pg = mcpPageArgs( args );
@@ -2429,8 +2434,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // CL1 (audit 2026-11-26 item 2): an answer over the output ceiling pages by its body bytes (recallPage)
                     resp = pagedResult( [ & ]( McpPageArgs pg )
                     {
-                        RecallPage page = recallPage( recallText( path, task, recallTopK, recallTokens, redactPtr ), std::size_t( pg.offset ) );
-                        return page.refusal.empty() ? textResult( page.text ) : errResultMsg( -32602, page.refusal );
+                        return pagedTextResult( recallPage( recallText( path, task, recallTopK, recallTokens, redactPtr ), std::size_t( pg.offset ) ) );
                     } );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
@@ -2521,9 +2525,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         bool              seedFault = false;
                         SweepFault        sweepFault = SweepFault::None;
-                        std::string       emptyCause;
                         const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &sweepFault,
-                                                            whereisFullText, redactPtr, &emptyCause );
+                                                            whereisFullText, redactPtr );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
@@ -2534,8 +2537,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
                         // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
-                        return t.empty() ? errResultMsg( -32602, emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to search" ) : emptyCause )
-                                         : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, sweepEmptyCause( path, "search" ) ) : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -3011,13 +3013,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                 }
                             }
                             // CL1 (audit 2026-11-26 item 2): the aggregate pages by whole <q> sub-answers (batchText)
-                            const McpPageParse pg = mcpPageArgs( args );
-                            const std::string  page = pg.refusal.empty() ? batchText( subs, requested, kBatchCap, std::size_t( pg.page.offset ), kOutputCeilingChars )
-                                                                         : std::string();
-                            resp = !pg.refusal.empty() ? errResultMsg( -32602, pg.refusal )
-                                 : page.empty()        ? errResultMsg( -32602, "offset=" + std::to_string( pg.page.offset ) + " is past the last of this batch's "
-                                                                               + std::to_string( subs.size() ) + " sub-answers — offset is the next_offset= a paged batch's root names, with the same queries" )
-                                                       : textResult( page );
+                            resp = pagedResult( [ & ]( McpPageArgs pg ) { return pagedTextResult( batchPage( subs, requested, kBatchCap, std::size_t( pg.offset ) ) ); } );
                         }
                     }
                 }
