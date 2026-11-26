@@ -12,6 +12,7 @@
 #        disclosure (the old 40-level substitution cap cut them silently). At 20,000 levels ingest itself takes 60-70 s
 #        (tree-sitter on the file, outside this card), so the gate stays at 5,000.
 #   (j)  --json on the subshell script: "shell_cut":1.
+#   (l)  LEGEND: --legend=full and --legend=compact define shell_cut= as a file whose defect-shape scan is discarded whole.
 #   (n1) UNDER THE BUDGET: a function ending in a case with no *) arm (unhandled-arm), 40 subshells deep: the unhandled-arm row is still found
 #        and there is no shell_cut= (the budget cut nothing real). Red on a build with a budget under 40.
 #   (n2) SHALLOW: the same file at depth 1: no shell_cut= (premise for n1: the row exists without nesting too).
@@ -70,6 +71,18 @@ R="$TMP/r-subshell-5000"
 cap60 "$BIN" "$R" --quality-delta --json --no-cache >"$TMP/j.json" 2>/dev/null; jrc=$?
 j="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("shell_cut","absent"))' "$TMP/j.json" 2>/dev/null || echo unparseable )"
 if { [ "$jrc" = 0 ] || [ "$jrc" = 2 ]; } && [ "$j" = 1 ]; then ok "(j) --json: \"shell_cut\":1"; else no "(j) --json: want rc 0/2 and \"shell_cut\":1, got rc=$jrc '$j'"; fi
+# (l) GE3-FOLLOWUP LEGEND: what shell_cut= counts is said the way the code does it. A cut tree is not judged at all — both Bash
+#     facets return no site for it ((v) and (u) below) — so the definition must say the file's scan is discarded whole, not
+#     that only the code past depth 64 went unjudged. Both legend forms are read: --legend=full's sentence and the compact
+#     dictionary line. RED on main f18bba967 ("what lies deeper was not judged" / "deeper code not judged").
+cap60 "$BIN" "$R" --quality-delta --legend=full --no-cache >"$TMP/l-full.xml" 2>/dev/null; lrc=$?
+cap60 "$BIN" "$R" --quality-delta --legend=compact --no-cache >"$TMP/l-compact.xml" 2>/dev/null; lcrc=$?
+for form in full compact; do
+    def="$( grep -oE 'shell_cut=N: [^.;]*[.;][^.]*' "$TMP/l-$form.xml" | head -1 )"
+    if [ "$( cutof "$TMP/l-$form.xml" )" = 1 ] && printf '%s' "$def" | grep -q 'discarded whole' && ! printf '%s' "$def" | grep -qE 'deeper'; then
+        ok "(l) --legend=$form defines shell_cut= as a scan discarded whole: $def"
+    else no "(l) --legend=$form: want shell_cut=\"1\" and a definition saying the scan is discarded whole (rc full=$lrc compact=$lcrc); got '${def:-none}'"; fi
+done
 
 for n in 40 1; do
     R="$( repo case "$n" )"

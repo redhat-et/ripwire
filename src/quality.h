@@ -6922,7 +6922,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         }
         else if( scan == DefectScan::Bash )
         {
-            bool cut = false;   // the shell nesting budget stopped a parse: the file's sites past it are not judged (shell_cut=)
+            bool cut = false;   // the shell nesting budget stopped a parse: the file's Bash sites are all discarded (shell_cut=)
             if( isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
             {
                 sites = defectshape::scanBashTestScript( src, fnSpans, &cut );
