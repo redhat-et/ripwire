@@ -9,7 +9,7 @@
 //     The whole index is query-independent. Part `regindex` keeps it.
 //   * spliceSlotJoinRows builds a NARROW ValueRefIndex (valuerefindex.h narrowFor: the shown functions' values and every
 //     slot store), so the value index itself is per question. Inside it, the first header-static question builds the
-//     C-family #include adjacency (includeChainAdj, reversed: header -> the files that include it) from the whole
+//     C-family #include adjacency (includeChainAdjOf, reversed: header -> the files that include it) from the whole
 //     IngestResult: ~40 % of the phase on llvm (sample profile, results/SLOTREG_1125). Part `slotjoin` keeps it, and every
 //     ValueRefIndex of the primary index (--uses, --callers, --callees as well) reads it through the same seam.
 //
@@ -87,12 +87,10 @@ inline const char* whyName( std::uint8_t why ) noexcept
     return why == kWhyKey ? "key" : why == kWhyModel ? "model" : why < std::size( kWhyNames ) ? kWhyNames[ why ] : "?";
 }
 
-// The fault switches of the mutation arms (test/slotregcheck.sh; constexpr false under NDEBUG).
-struct FaultSlotRegAnyKey;
-struct FaultSlotRegEmptyRefused;
-inline bool faultAnyKey() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegAnyKey>( "RIPWIRE_FAULT_SLOTREG_ANYKEY" ); }
-inline bool faultEmptyRefused() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegEmptyRefused>( "RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED" ); }
-inline const char* faultName() noexcept { return faultAnyKey() ? " fault=anykey" : faultEmptyRefused() ? " fault=emptyrefused" : ""; }
+inline const char* faultName() noexcept
+{
+    return faultAnyKey() ? " fault=anykey" : faultEmptyRefused() ? " fault=emptyrefused" : faultStaleRows() ? " fault=stalerows" : "";
+}
 
 // ── the model identity ──────────────────────────────────────────────────────────────────────────────────────────────
 struct ModelId
@@ -399,6 +397,10 @@ inline Serve serveReg( const IngestResult& ing, std::vector<RegKey>& keys, std::
         keys         = hit->keys;
         cut          = hit->cut;
         tried.served = true;
+        if( faultStaleRows() && !keys.empty() && !keys.back().sites.empty() )
+        {
+            keys.back().sites.pop_back();   // the mutant: rows that no longer match the model, as an in-place edit after ingest() would leave them
+        }
         statsLine( "regindex", tried, std::format( " keys={} cut={}", keys.size(), cut.size() ) );
     }
     else if( faultEmptyRefused() && refused( tried ) )
@@ -489,7 +491,8 @@ inline Serve serveJoin( const IngestResult& ing, FileAdjacency& includers )
         {
             std::fill( from.begin() + hit->off[ f ], from.begin() + hit->off[ f + 1 ], f );
         }
-        includers    = FileAdjacency::fromEdges( files, from, hit->tgt, /*dedup=*/false );   // the stored rows, in their stored order
+        const std::size_t edges = faultStaleRows() && !from.empty() ? from.size() - 1 : from.size();   // the mutant drops the last edge
+        includers               = FileAdjacency::fromEdges( files, std::span( from ).first( edges ), std::span( hit->tgt ).first( edges ), /*dedup=*/false );   // the stored rows, in their stored order
         tried.served = true;
         statsLine( "slotjoin", tried, std::format( " files={} edges={}", files, hit->tgt.size() ) );
     }

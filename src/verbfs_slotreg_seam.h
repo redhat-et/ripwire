@@ -9,6 +9,7 @@
 // Installed once, on the main thread, before any verb runs; read afterwards from any thread (thread start orders it).
 
 #include "infra/depwatch.h"   // Log / Armed — which files a build read, so a build that read one is never kept
+#include "infra/emit.h"       // faultSwitchOnOnce — the mutation arms' switches
 
 #include <algorithm>
 #include <cstdint>
@@ -49,6 +50,17 @@ inline Seams& seams() noexcept
     static Seams installed;
     return installed;
 }
+
+// The fault switches of the mutation arms (test/slotregcheck.sh; constexpr false under NDEBUG). ANYKEY and EMPTYREFUSED serve a
+// stale or empty index ON PURPOSE, so the plain build's served-vs-fresh check stands aside for them; STALEROWS serves rows that
+// differ from the model (what a pass editing the model after ingest() would leave) and is the case that check exists to catch.
+struct FaultSlotRegAnyKey;
+struct FaultSlotRegEmptyRefused;
+struct FaultSlotRegStaleRows;
+inline bool faultAnyKey() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegAnyKey>( "RIPWIRE_FAULT_SLOTREG_ANYKEY" ); }
+inline bool faultEmptyRefused() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegEmptyRefused>( "RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED" ); }
+inline bool faultStaleRows() noexcept { return rw::faultSwitchOnOnce<FaultSlotRegStaleRows>( "RIPWIRE_FAULT_SLOTREG_STALEROWS" ); }
+inline bool servesStaleOnPurpose() noexcept { return faultAnyKey() || faultEmptyRefused(); }
 
 // The files a build read, for the keep decision: the tree key pins the content of a crawled file, and nothing else. Arms the
 // process-wide dependency log only when the seams are installed and no other owner holds it (none does at verb time: the

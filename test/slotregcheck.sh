@@ -36,6 +36,8 @@
 #       I6..I8 mutant: EMPTYREFUSED (a refused record answers as an EMPTY index instead of a rebuild) differs from --no-cache
 #   E   an #include into another dialect (scope=all, the whole-corpus adjacency): served, same stats line, identical
 #   K   RIPWIRE_NO_VERBFS=1: no `[verbfs] slotreg` line at all; --no-cache: none either
+#   V   the plain build DASSERTs every served index equals a fresh build of the same IngestResult (the guard against a
+#       pass that edits the model in place after ingest()); STALEROWS (served rows one site / one edge short) must abort
 #   D   determinism: two served calls are byte-identical (stdout and stderr)   X  xmllint well-formed
 #
 # Usage:  bash test/slotregcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/slotregcheck.sh
@@ -286,6 +288,22 @@ run eback warm --for="$QR"; run eback2 warm --for="$QR"
 ( cd "$FIX" && RIPWIRE_STATS=1 "$BIN" "$FIX" --no-cache --for="$QR" </dev/null >/dev/null 2>"$TMP/k2.err" )
 if ! grep -q '^\[verbfs\] slotreg' "$TMP/k1.err" && ! grep -q '^\[verbfs\] slotreg' "$TMP/k2.err"; then ok "K RIPWIRE_NO_VERBFS=1 and --no-cache neither read nor write the record (no slotreg line)"
 else no "K a slotreg line under the kill switch or --no-cache: $( grep -h '^\[verbfs\] slotreg' "$TMP/k1.err" "$TMP/k2.err" | head -2 | tr '\n' ' ' )"; fi
+
+# ── V: the plain build proves every served index against a fresh build; an index that no longer matches the model fires ──
+# What it stands for: a pass that edited the model IN PLACE after ingest() returned (same arrays, same sizes) would keep the noted
+# identity and serve a stale index. Every served call of a plain-flavour run (every arm above) re-builds both indexes and DASSERTs
+# equality; STALEROWS serves rows one site / one edge short, which is what such an edit would leave, and must abort the call.
+VMUT=""
+for q in "$QR" "$QS"; do
+    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.p --for="$q"; RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v.r --for="$q"
+    RIPWIRE_FAULT_SLOTREG_STALEROWS=1 statrun v --for="$q"
+    if [ -z "$VMUT" ]; then grep -q 'fault=stalerows' "$TMP/v.p.err" "$TMP/v.r.err" "$TMP/v.err" && VMUT=1 || VMUT=0; fi
+    if [ "$VMUT" = 0 ]; then printf '  INFO  V this binary compiles fault switches out (NDEBUG): the served-vs-fresh check is a plain-build check\n'; break; fi
+    run v.h warm --for="$q"   # the same served call, honest: it answers (the check passes on an index that matches)
+    # 133 = 128 + SIGTRAP: the DASSERT's trap (its banner goes to the render's captured stream, so the status is the signal)
+    if [ "$( cat "$TMP/v.rc" )" = 133 ] && [ "$( cat "$TMP/v.h.rc" )" = 0 ]; then ok "V stale served rows trap the plain build (rc=133), the honest served call answers (rc=0)"
+    else no "V a served index that differs from the model was not caught (mutant rc=$( cat "$TMP/v.rc" ), honest rc=$( cat "$TMP/v.h.rc" ))"; fi
+done
 
 # ── D, X ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 statrun d0 --for="$QR"; run d1 warm --for="$QR"; run d2 warm --for="$QR"   # RIPWIRE_STATS prints memory readings: the pair runs without it

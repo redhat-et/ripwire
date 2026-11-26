@@ -1953,10 +1953,10 @@ private:
     // (`#include "gen.py"`), since the chain starts in it and each step is one resolved directive of the file before. So when
     // the narrowed build draws no such edge, every chain of the whole-corpus adjacency is in it and the answer is the same;
     // when it draws one, the whole-corpus adjacency is built instead. RIPWIRE_STATS prints which, and the directives resolved.
-    static FileAdjacency includeChainAdj( const IngestResult& ing )
+    static FileAdjacency includeChainAdjOf( const IngestResult& ing, bool& escapes )
     {
         FileAdjacency adj = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, nullptr, /*forCallNarrow=*/false, nullptr, nullptr, nullptr, /*cChainOnly=*/true ).first;
-        bool          escapes = false;
+        escapes           = false;
         for( std::uint32_t f = 0; f < adj.size() && !escapes; ++f )
         {
             escapes = std::ranges::any_of( adj[f], [ & ]( std::uint32_t t ) { return !cChainIncluder( rootRelPath( ing, t ) ); } );
@@ -1965,7 +1965,6 @@ private:
         {
             adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
         }
-        headerStaticAdjStats( ing, escapes );
         return adj;
     }
     static void headerStaticAdjStats( const IngestResult& ing, bool escapes )
@@ -1984,16 +1983,41 @@ private:
     // line describes the adjacency, so a served one prints the line its build printed: the build escaped the C-family set
     // exactly when some header outside it has an includer (the escaping edge is in the whole-corpus build too, and the
     // C-family build holds no edge into such a file, or it would have escaped).
+    static FileAdjacency includersBuilt( const IngestResult& ing, bool& escapes )
+    {
+        const FileAdjacency        fwd = includeChainAdjOf( ing, escapes );
+        std::vector<std::uint32_t> from, to;
+        for( std::uint32_t f = 0; f < fwd.size(); ++f )
+        {
+            for( const std::uint32_t t : fwd[f] )
+            {
+                from.push_back( t );   // reversed: header -> the files that include it
+                to.push_back( f );
+            }
+        }
+        return FileAdjacency::fromEdges( std::uint32_t( ing.files.size() ), from, to, /*dedup=*/true );
+    }
+    // The served adjacency is the one this index would build: the plain build's check behind a served includersAdj.
+    static bool includersMatchFresh( const IngestResult& ing, const FileAdjacency& served )
+    {
+        bool                escapes = false;
+        const FileAdjacency fresh   = includersBuilt( ing, escapes );
+        return fresh.size() == served.size() && fresh.edgeCount() == served.edgeCount()
+            && std::ranges::all_of( std::views::iota( std::size_t{ 0 }, fresh.size() ), [ & ]( std::size_t f ) { return std::ranges::equal( fresh[f], served[f] ); } );
+    }
     static FileAdjacency includersAdj( const IngestResult& ing )
     {
-        const verbfs::slotreg::Seams& seam  = verbfs::slotreg::seams();
+        const verbfs::slotreg::Seams& seam    = verbfs::slotreg::seams();
         FileAdjacency                 out;
-        const verbfs::slotreg::Serve  tried = seam.joinServe != nullptr ? seam.joinServe( ing, out ) : verbfs::slotreg::Serve{};
+        bool                          escapes = false;
+        const verbfs::slotreg::Serve  tried   = seam.joinServe != nullptr ? seam.joinServe( ing, out ) : verbfs::slotreg::Serve{};
         if( tried.served )
         {
+            // The plain build proves every served adjacency against a fresh one (release: not evaluated): see regindex.h regIndexOf.
+            DASSERT( verbfs::slotreg::servesStaleOnPurpose() || includersMatchFresh( ing, out ),
+                     "SLOTREG: the served include adjacency differs from a fresh build of this IngestResult (was the model edited after ingest()?)" );
             if( memstats::enabled() )
             {
-                bool escapes = false;
                 for( std::uint32_t h = 0; h < out.size() && !escapes; ++h )
                 {
                     escapes = !out[h].empty() && !cChainIncluder( rootRelPath( ing, h ) );
@@ -2003,19 +2027,8 @@ private:
             return out;
         }
         verbfs::slotreg::BuildWatch watch( seam.joinKeep != nullptr );
-        {
-            const FileAdjacency        fwd = includeChainAdj( ing );
-            std::vector<std::uint32_t> from, to;
-            for( std::uint32_t f = 0; f < fwd.size(); ++f )
-            {
-                for( const std::uint32_t t : fwd[f] )
-                {
-                    from.push_back( t );   // reversed: header -> the files that include it
-                    to.push_back( f );
-                }
-            }
-            out = FileAdjacency::fromEdges( std::uint32_t( ing.files.size() ), from, to, /*dedup=*/true );
-        }
+        out = includersBuilt( ing, escapes );
+        headerStaticAdjStats( ing, escapes );
         const bool pinned = watch.readsPinned( ing.files );
         if( seam.joinKeep != nullptr )
         {

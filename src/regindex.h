@@ -114,6 +114,8 @@ struct RegSite
     std::string   as;                       // TS: the provider field (useClass…); "" otherwise
     NodeId        key          = kNoNode;   // the key's one definition
     bool          test         = false;
+
+    bool operator==( const RegSite& ) const = default;   // SLOTREG's plain-build check: a served index equals a fresh build
 };
 
 struct RegKey
@@ -123,6 +125,8 @@ struct RegKey
     std::vector<RegSite>       sites;                 // source order (reference order)
     std::vector<NodeId>        consumers;             // enclosing symbols of a send / inject site, first-seen order
     std::vector<bool>          consumerTest;
+
+    bool operator==( const RegKey& ) const = default;
 };
 
 class RegIndex
@@ -850,6 +854,22 @@ struct RegIndexRows
     std::vector<std::string> cut;   // sorted
 };
 
+inline RegIndexRows regIndexBuilt( const IngestResult& ing )
+{
+    RegIndex     idx( ing );
+    RegIndexRows rows;
+    rows.keys = idx.build();      // build() before cutNames(): the cut names are found while resolving
+    rows.cut  = idx.cutNames();
+    return rows;
+}
+
+// The served rows are the ones this index would build: the plain build's check behind a served regIndexOf.
+inline bool regIndexMatchesFresh( const IngestResult& ing, const RegIndexRows& served )
+{
+    const RegIndexRows fresh = regIndexBuilt( ing );
+    return fresh.keys == served.keys && fresh.cut == served.cut;
+}
+
 inline RegIndexRows regIndexOf( const IngestResult& ing )
 {
     RegIndexRows                            rows;
@@ -857,14 +877,13 @@ inline RegIndexRows regIndexOf( const IngestResult& ing )
     const verbfs::slotreg::Serve            tried = seam.regServe != nullptr ? seam.regServe( ing, rows.keys, rows.cut ) : verbfs::slotreg::Serve{};
     if( tried.served )
     {
+        // The plain build proves every served index against a fresh one (release: not evaluated). The served entry is keyed on
+        // the model ingest() returned; a pass that later edited that model IN PLACE would serve a stale index, and this fires.
+        DASSERT( verbfs::slotreg::servesStaleOnPurpose() || regIndexMatchesFresh( ing, rows ), "SLOTREG: the served registrar index differs from a fresh build of this IngestResult (was the model edited after ingest()?)" );
         return rows;
     }
     verbfs::slotreg::BuildWatch watch( seam.regKeep != nullptr );
-    {
-        RegIndex idx( ing );
-        rows.keys = idx.build();      // build() before cutNames(): the cut names are found while resolving
-        rows.cut  = idx.cutNames();
-    }
+    rows = regIndexBuilt( ing );
     if( seam.regKeep != nullptr )
     {
         seam.regKeep( ing, tried, rows.keys, rows.cut, watch.readsPinned( ing.files ) );
