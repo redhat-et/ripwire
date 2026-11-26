@@ -4581,7 +4581,8 @@ inline void seedHeadSnapCache( const std::string& dir, const std::string& repoHe
     const auto newest = std::ranges::min_element( family, []( const CacheBlobStat& a, const CacheBlobStat& b )
                                                   { return a.mtime != b.mtime ? a.mtime > b.mtime : a.path < b.path; } );
     const std::string tmp = targetPath + ".seed." + std::to_string( os::getpid() );
-    std::error_code   copyEc, renameEc;
+    std::error_code   copyEc;
+    std::error_code   renameEc;
     fs::copy_file( fs::path( newest->path ), fs::path( tmp ), fs::copy_options::overwrite_existing, copyEc );
     if( !copyEc )
     {

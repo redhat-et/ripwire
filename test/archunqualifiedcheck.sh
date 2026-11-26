@@ -64,7 +64,7 @@ unknownArm(){
     case "$( root "$t" )" in *" unqualified=\"$n\""*) ok "$label: <arch unqualified=\"$n\">" ;; *) no "$label: root lacks unqualified=\"$n\": $( root "$t" )" ;; esac
     r="$( rulerow "$t" "$text" )"
     case "$r" in *'unqualified="'"$n"'"'*'verdict="unknown"'*) ok "$label: rule row $r" ;; *) no "$label: no <rule text=\"$text\" unqualified=\"$n\" verdict=\"unknown\"> row (got '${r:-none}')" ;; esac
-    grep -q 'UNKNOWN' "$TMP/$t.err" && ok "$label: stderr says the verdict is UNKNOWN" || no "$label: stderr carries no UNKNOWN line: $( head -c 300 "$TMP/$t.err" )"
+    if grep -q 'UNKNOWN' "$TMP/$t.err"; then ok "$label: stderr says the verdict is UNKNOWN"; else no "$label: stderr carries no UNKNOWN line: $( head -c 300 "$TMP/$t.err" )"; fi
 }
 cleanArm(){
     local label="$1" t="$2"
@@ -105,7 +105,7 @@ unknownArm "(P)" p "deny path ui/.* -> db/.*" 1
 echo "=== (V) a real violation beside the unjudged file ==="
 V="$TMP/viol"; tree "$V" 'deny ui -> db'; printf "$SCALA" >"$V/ui/Panel.scala"; printf '#include "../db/store.h"\nint ui() { return store(); }\n' >"$V/ui/view.cpp"
 run "$V" v --arch=rules.txt
-[ "$( rc v )" = 2 ] && ok "(V) exit 2: the C++ violation still gates" || no "(V) exit $( rc v ), expected 2"
+if [ "$( rc v )" = 2 ]; then ok "(V) exit 2: the C++ violation still gates"; else no "(V) exit $( rc v ), expected 2"; fi
 unknownArm "(V)" v "deny ui -> db" 1
 
 echo "=== (L) legends and well-formedness ==="
@@ -118,7 +118,7 @@ grep -q 'unqualified=N:' "$TMP/a.out" && grep -q 'verdict=unknown' "$TMP/a.out" 
 run "$T" af --arch=rules.txt --legend=full
 grep -q 'unqualified=N:' "$TMP/af.out" && grep -q 'verdict=unknown' "$TMP/af.out" \
     && ok "(L) the full legend defines unqualified= and the rule row" || no "(L) full legend lacks the unqualified= clause"
-cmp -s <( payload a | sed "s/ schema=\"[^\"]*\"//" ) <( payload af ) && ok "(L) payload byte-identical under both dialects" || no "(L) payload differs between compact and full"
+if cmp -s <( payload a | sed "s/ schema=\"[^\"]*\"//" ) <( payload af ); then ok "(L) payload byte-identical under both dialects"; else no "(L) payload differs between compact and full"; fi
 
 echo "=== (N) controls: nothing unjudged on a rule's FROM side ==="
 N1="$TMP/outside"; tree "$N1" 'deny ui -> db'; printf "$SCALA" >"$N1/docs/Panel.scala"

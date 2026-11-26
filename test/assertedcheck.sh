@@ -34,7 +34,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 echo "assertedcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0; passed=0; failed=0
-ok(){ printf '  PASS  %s\n' "$*"; passed=$(( passed + 1 )); return 0; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; failed=$(( failed + 1 )); printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; passed=$(( passed + 1 )); return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; failed=$(( failed + 1 )); }
 
 COR="$TMP/c"
@@ -447,12 +447,15 @@ answer "$TMP/py.col" --callers=py_leaf --format=columnar --legend=compact
 CF="$( grep -o '<cols [^>]*fields="[^"]*"' "$TMP/py.col" | sed 's/.*fields="//; s/"$//' )"
 CA="$( grep -o '<asserted>[^<]*</asserted>' "$TMP/py.col" | sed 's/<[^>]*>//g' )"
 CN="$( grep -o '<name>[^<]*</name>' "$TMP/py.col" | sed 's/<[^>]*>//g' )"
-python3 - "$CF" "$CA" "$CN" <<'PYC' && ok "(Co) columnar: fields= lists asserted last and <asserted> is 1 exactly on py_checked/py_helped/py_unit" || no "(Co) columnar asserted column wrong: fields=$CF asserted=$CA names=$CN"
+if python3 - "$CF" "$CA" "$CN" <<'PYC'
 import sys
 f, a, n = sys.argv[1].split( "," ), sys.argv[2].split( "," ), sys.argv[3].split( "," )
 want = { "py_checked", "py_helped", "py_unit" }
 sys.exit( 0 if f and f[-1] == "asserted" and len( a ) == len( n ) and { x for x, v in zip( n, a ) if v == "1" } == want else 1 )
 PYC
+then ok "(Co) columnar: fields= lists asserted last and <asserted> is 1 exactly on py_checked/py_helped/py_unit"
+else no "(Co) columnar asserted column wrong: fields=$CF asserted=$CA names=$CN"
+fi
 case "$( legend "$TMP/py.col" )" in *'<asserted> column:'*'none found'*) ok "(Co) compact defines the <asserted> column" ;; *) no "(Co) compact leaves the <asserted> column undefined" ;; esac
 answer "$TMP/none.col" --callers=cc_unchecked --format=columnar --legend=compact
 grep -Eq '<asserted>|fields="[^"]*asserted|<asserted> column' "$TMP/none.col" && no "(Co0) a columnar answer with no asserted row carries an asserted column or term" \

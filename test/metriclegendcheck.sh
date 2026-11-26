@@ -135,8 +135,8 @@ for f in docs/METHODOLOGY.md src/quality.h; do
     for n in "delta heuristics, not smell detectors" "MLCQ" "26 lines" "0.777" "2611.01636" "single author"; do
         case "$t" in *"$n"*) ;; *) miss="$miss '$n'" ;; esac
     done
-    [ -z "$miss" ] && ok "(D1) $f records the bars as delta heuristics with the MLCQ Long Method reference" || no "(D1) $f lacks:$miss"
+    if [ -z "$miss" ]; then ok "(D1) $f records the bars as delta heuristics with the MLCQ Long Method reference"; else no "(D1) $f lacks:$miss"; fi
 done
-grep -q '^### 9\.3 ' "$ROOT/docs/METHODOLOGY.md" && ok "(D1) the wording lives in METHODOLOGY §9 (a 9.3 addendum)" || no "(D1) docs/METHODOLOGY.md has no §9.3 addendum"
+if grep -q '^### 9\.3 ' "$ROOT/docs/METHODOLOGY.md"; then ok "(D1) the wording lives in METHODOLOGY §9 (a 9.3 addendum)"; else no "(D1) docs/METHODOLOGY.md has no §9.3 addendum"; fi
 
 [ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "FAILURES"; exit 1; }

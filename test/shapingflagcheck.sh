@@ -127,12 +127,16 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
 # lane/rt2-route ES (2026-11-18, 26->27): ONE new read, --for's. `forEarlyStopPage` (src/verbs_forroute.h) reads cfg.maxTokens only to
 # STAND ASIDE: a budgeted --for page 1 never ends early. A re-pin, not a column change.
+# lane/cli-batch-ceiling (#780, 2026-11-26, --top-k 15->16): ONE new read, the CLI --batch pager's. `batchReplayFlags` (src/main.cpp)
+# reads cfg.topKExplicit / cfg.topK only to REPLAY an explicit --top-k in a batch page's next= command, so the next page's sub-answers
+# are shaped exactly as this page's were. No verb starts or stops honouring --top-k, so kShapingVerbs' honorsTopK column is untouched
+# and this is a re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 [ "$MAXSITES" = 27 ] && ok "(A) --max-tokens has 27 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
                      || no "(A) --max-tokens read sites moved 27 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
-[ "$TOPSITES" = 15 ] && ok "(A) --top-k has 15 read sites outside cli.h" \
-                     || no "(A) --top-k read sites moved 15 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
+[ "$TOPSITES" = 16 ] && ok "(A) --top-k has 16 read sites outside cli.h" \
+                     || no "(A) --top-k read sites moved 16 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.
 # 2026-08-29 main.cpp split: src/verbs_*.h are SECTIONS of main.cpp's own TU (RIPWIRE_MAIN_TU-guarded),
 # so they count as main.cpp in this derivation — the counts above sweep them, the exclusion below too.
