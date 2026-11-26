@@ -24,7 +24,9 @@
 // attribute (serialize.h's `precAttr`/`rootsAttr`/`changedAttr`, abicheck.h's `ref_size` omission comment):
 // omit rather than print a value that reads as data.
 //
-// COST: two git subprocesses per call (`rev-parse` + `status --porcelain`). Every call site is an EXPLICIT
+// COST: two git subprocesses per call (`rev-parse` + `status --porcelain`). C1-STAMP: on a one-shot --for the status runs
+// early on a worker (DirtyPrefetch above) and the rev-parse / is-shallow answers come from the STAMP record
+// (gitstampcache.h) while the files they depend on are unchanged. Every call site is an EXPLICIT
 // verb invocation whose own computation already shells out to git for a diff/history/blame/staleness answer
 // (or is cheap enough — a doctor/quality-delta health check — that two more subprocess calls are noise next
 // to what it already pays). The one path this must NEVER touch is the bare default map (serialize.h's `<r>`
@@ -33,10 +35,163 @@
 
 #include "quality.h"   // gitHeadSha / gitOneLine — the SAME git plumbing --abi's own head= already uses
 
+#include <climits>
+#include <mutex>
 #include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
 
 namespace rw { namespace gitstamp
 {
+
+// ── THE DIRTY PROBE, started early (C1-STAMP) ────────────────────────────────────────────────────────────────────────
+// `git status --porcelain` is 95-99% of a served --for's git time (A1 warm profile 2026-11-25: 75.6 / 102.8 / 724.9 ms on
+// envoy / vscode / llvm-project) and it ran serially on the main thread inside stampAt, after the snapshot load. It reads
+// nothing the run produces, so main.cpp starts it on a worker beside the load (DirtyPrefetch, one per one-shot --for) and
+// stampAt joins it where the bit is consumed. The bit stays LIVE: the probe is the same command, run once per process for
+// that process's own answer — only when it starts moves. A prefetch for another root, a second stampAt in one process, a
+// probe that could not start and a worker that failed all take the inline probe below, which is exactly today's.
+//
+// What must hold for the early start to change nothing: no write of this run may land in the work tree before stampAt,
+// or the porcelain would depend on which of the two came first. main.cpp's caller only starts it when every cache this
+// run writes (the parse blob, the snapshot, the history record, a --cache file) sits OUTSIDE the repository's top level.
+inline std::string dirtyPorcelain( const std::string& root )
+{
+    return quality::gitOneLine( root, "status --porcelain --ignore-submodules=dirty 2>/dev/null" );
+}
+
+namespace stampdetail
+{
+struct DirtySlot
+{
+    std::mutex  lock;
+    std::string root;
+    std::thread worker;          // joinable: a probe is pending for `root`
+    std::string porcelain;       // written by the worker, read after its join
+    bool        isAnswered = false;
+};
+
+inline DirtySlot& dirtySlot()
+{
+    static DirtySlot slot;
+    return slot;
+}
+
+// The pending worker for `root`, handed to the caller (it joins); an empty thread when there is none for that root.
+inline std::thread takeWorker( const std::string* root )
+{
+    DirtySlot&                        slot = dirtySlot();
+    const std::lock_guard<std::mutex> guard( slot.lock );
+    if( !slot.worker.joinable() || ( root != nullptr && *root != slot.root ) )
+    {
+        return {};
+    }
+    return std::move( slot.worker );
+}
+}   // namespace stampdetail
+
+// The porcelain for `root`: the early probe's when one is pending for exactly this root, else a fresh inline probe.
+inline std::string dirtyPorcelainJoined( const std::string& root )
+{
+    std::thread worker = stampdetail::takeWorker( &root );
+    if( !worker.joinable() )
+    {
+        return dirtyPorcelain( root );
+    }
+    worker.join();
+    stampdetail::DirtySlot& slot = stampdetail::dirtySlot();
+    if( !slot.isAnswered )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the early status probe failed, so the same probe runs inline: same command, same bytes" );
+        return dirtyPorcelain( root );
+    }
+    return std::move( slot.porcelain );
+}
+
+// May the status probe start early? Only when every cache this run can write — the per-user cache directory (parse blob,
+// snapshot, history record, STAMP record) and an explicit --cache file — resolves OUTSIDE the work tree, so nothing the run
+// writes can be in the porcelain whichever finishes first. Anything that does not resolve says no: stampAt then probes
+// inline, as before.
+inline bool writesStayOutsideWorkTree( const std::string& root, std::string_view cacheFile )
+{
+    const std::string top = rw::enclosingGitWorkTree( root );
+    if( top.empty() )
+    {
+        return false;
+    }
+    const auto isOutside = [ &top ]( const std::string& dir )
+    {
+        char resolved[ PATH_MAX ];
+        if( os::realpath( dir.c_str(), resolved ) == nullptr )
+        {
+            return false;
+        }
+        const std::string_view real( resolved );
+        return top != "/" && real != top && !( real.starts_with( top ) && real.size() > top.size() && real[ top.size() ] == '/' );
+    };
+    if( !isOutside( quality::cacheDirLadder() ) )
+    {
+        return false;
+    }
+    if( cacheFile.empty() )
+    {
+        return true;
+    }
+    const std::size_t slash = cacheFile.rfind( '/' );
+    return isOutside( slash == std::string_view::npos ? std::string( "." ) : slash == 0 ? std::string( "/" ) : std::string( cacheFile.substr( 0, slash ) ) );
+}
+
+// RAII owner of the early probe: starts it (when `isWanted`), and joins it if nothing consumed it, so no worker outlives
+// the run that started it.
+class DirtyPrefetch
+{
+public:
+    DirtyPrefetch( const std::string& root, bool isWanted )
+    {
+        if( !isWanted )
+        {
+            return;
+        }
+        stampdetail::DirtySlot&           slot = stampdetail::dirtySlot();
+        const std::lock_guard<std::mutex> guard( slot.lock );
+        if( slot.worker.joinable() )
+        {
+            return;   // one probe per process
+        }
+        slot.root       = root;
+        slot.isAnswered = false;
+        try
+        {
+            slot.worker = std::thread( [ &slot, probeRoot = root ]()
+            {
+                try
+                {
+                    slot.porcelain  = dirtyPorcelain( probeRoot );
+                    slot.isAnswered = true;
+                }
+                catch( ... )   // a throw crossing this thread boundary would be std::terminate
+                {
+                    slot.isAnswered = false;
+                }
+            } );
+        }
+        catch( ... )   // no thread: stampAt probes inline, exactly as before
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the early status probe could not start a thread, so stampAt probes inline: same bytes" );
+        }
+    }
+    DirtyPrefetch( const DirtyPrefetch& )            = delete;
+    DirtyPrefetch& operator=( const DirtyPrefetch& ) = delete;
+    ~DirtyPrefetch()
+    {
+        std::thread worker = stampdetail::takeWorker( nullptr );
+        if( worker.joinable() )
+        {
+            worker.join();
+        }
+    }
+};
 
 // The stamp value itself: "<9-hex-char sha>[+dirty]", or "" when `root` is not a git repo with a resolvable
 // HEAD (the caller's job is to omit the attribute on empty, never to print a placeholder).
@@ -123,7 +278,7 @@ inline std::string stampAt( const std::string& root )
     {
         return {}; // not a git repo / no HEAD
     }
-    const bool dirty = !quality::gitOneLine( root, "status --porcelain --ignore-submodules=dirty 2>/dev/null" ).empty();
+    const bool dirty = !dirtyPorcelainJoined( root ).empty();   // C1-STAMP: the early probe's answer when one is pending (above)
     return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" ) + ( isShallow( root ) ? "+shallow" : "" );
 }
 

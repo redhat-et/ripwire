@@ -59,6 +59,7 @@
 #include "redact.h" // redactInPlace — a defining line is manifest text (a script can hold a token)
 #include "resolve.h" // trimWs
 #include "serialize.h" // escapeXml
+#include "verbfs_seam.h" // VERB-FS: a probed directory whose signature is unchanged answers its names' kinds from the record
 
 #include <algorithm>
 #include <array>
@@ -767,19 +768,38 @@ inline bool probedManifestReadable( const std::string& disk, const std::string& 
     return std::filesystem::is_regular_file( disk, ec );
 }
 
-// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name.
-inline void readUnindexedManifests( const std::string& rootPrefix, const std::vector<std::string_view>& dirs, ManifestSet& set )
+// Is the probed name a manifest to read? VERB-FS (src/verbfs.h): the record's answer when it vouches for this name — its directory's
+// own signature is unchanged since a run saw it — and the live probe otherwise (a link is always probed live).
+inline bool unindexedManifestReadable( verbfs::EntryKind kind, const std::string& disk, const std::string& rootPrefix, std::optional<std::string>& rootReal, ManifestSet& set )
 {
-    std::optional<std::string> rootReal;
-    for( const std::string_view d : dirs )
+    return kind == verbfs::EntryKind::Live ? probedManifestReadable( disk, rootPrefix, rootReal, set ) : kind == verbfs::EntryKind::Regular;
+}
+
+// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name, or,
+// on the primary index of a cached run, one lstat per directory whose names the record already knows.
+inline void readUnindexedManifests( const IngestResult& ing, const std::string& rootPrefix, const std::vector<std::string_view>& dirs, ManifestSet& set )
+{
+    std::vector<const ManifestFormat*> unindexed;
+    std::vector<std::string_view>      names;
+    for( const ManifestFormat& fmt : kManifestFormats )
     {
-        for( const ManifestFormat& fmt : kManifestFormats )
+        if( !fmt.indexed )
         {
-            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
-            if( !fmt.indexed && probedManifestReadable( rootPrefix + rel, rootPrefix, rootReal, set ) )
-            {
-                addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, set );
-            }
+            unindexed.push_back( &fmt );
+            names.push_back( fmt.name );
+        }
+    }
+    const verbfs::Seams&                 seam  = verbfs::seams();
+    const std::vector<verbfs::EntryKind> kinds = seam.entryKinds != nullptr ? seam.entryKinds( ing, rootPrefix, dirs, names ) : std::vector<verbfs::EntryKind>{};
+    std::optional<std::string>           rootReal;
+    for( std::size_t at = 0; at < dirs.size() * unindexed.size(); ++at )
+    {
+        const std::string_view d   = dirs[ at / unindexed.size() ];
+        const ManifestFormat&  fmt = *unindexed[ at % unindexed.size() ];
+        const std::string      rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
+        if( unindexedManifestReadable( kinds.empty() ? verbfs::EntryKind::Live : kinds[ at ], rootPrefix + rel, rootPrefix, rootReal, set ) )
+        {
+            addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, set );
         }
     }
 }
@@ -806,7 +826,7 @@ inline ManifestSet readManifests( const IngestResult& ing )
         }
     }
     sortutil::sortUnique( dirs, sortutil::svLess );
-    readUnindexedManifests( rootPrefix, dirs, docs );
+    readUnindexedManifests( ing, rootPrefix, dirs, docs );
     return docs;
 }
 

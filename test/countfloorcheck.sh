@@ -557,7 +557,9 @@ case "$OUT_P" in *reads_skipped*) no "(P/mem) near miss: an unstopped answer car
 mkdir -p "$W/tmpd"
 OUT_PK="$( cd "$W/pc" && TMPDIR="$W/tmpd" XDG_CACHE_HOME="$W/tmpd" "$BIN" . --cache="$W/named.bin" --grep=PC_NAMED_MARK 2>/dev/null )"
 [ "$( attr "$( enc_row "$OUT_PK" NAMED )" reads )" = 3 ] || no "(P/cache) premise: reads=\"3\" under --cache= (the second ingest ran)"
-STRAY_PK="$( find "$W/tmpd" -type f ! -name 'ripwire-warmsnap-*' 2>/dev/null | tr '\n' ' ' )"
+# The VERB-FS records (ripwire-verbfs-*, src/verbfs.h) are armed exactly where the snapshot is and live in the same own
+# cache directory under the same ruling, so they are that family too; anything else is still the N5 auto-cache.
+STRAY_PK="$( find "$W/tmpd" -type f ! -name 'ripwire-warmsnap-*' ! -name 'ripwire-verbfs-*' 2>/dev/null | tr '\n' ' ' )"
 if [ -z "$STRAY_PK" ] && [ -f "$W/named.bin" ]; then ok "(P/cache) --cache=F: F written, and nothing under TMPDIR but the warm-snapshot family"; else no "(P/cache) files under TMPDIR that are not a warm snapshot: $STRAY_PK (named.bin present: $( [ -f "$W/named.bin" ] && echo yes || echo no ))"; fi
 # Control: the exemption is a NAME, so a differently-named artifact must still be caught. Without this, narrowing
 # the predicate above could have quietly turned the arm into a no-op for every future cache family.

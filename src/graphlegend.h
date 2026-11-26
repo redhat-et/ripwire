@@ -622,6 +622,20 @@ inline constexpr const char* kTestedRowLegend =
 inline constexpr const char* kTestedColumnLegend =
     "tested= is a dense column in this form: fields= names tested, and <tested> holds one value per row: 1 = a non-test row an indexed test transitively reaches over call edges; reached, not asserted; 0 = none found, or a test row. ";
 
+// ASSERTED (lane asserted-signal): asserted="1" rides only beside tested="1" (graph.h radiusTierRowAttrXml), and the columnar
+// form's <asserted> column is present-only (columnar.h columnarAssertedPresent). The readings are PRESENT-ONLY too, emitted
+// exactly when a shown row carries the attribute (callhierarchy.h anyAssertedRowIn), so an answer with no asserted row is
+// byte-identical to before. Worded like the compact readings (compactlegend.h <s asserted=1>, the <asserted> column).
+// test/assertedcheck.sh (L2).
+inline constexpr const char* kAssertedRowLegend =
+    "asserted=\"1\" beside tested=\"1\": an ASSERTING test reaches it (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback, whose calls belong to its file; not proof it checks this row; omitted = none found). ";
+inline constexpr const char* kAssertedColumnLegend =
+    "<asserted> (when fields= names it): 1 = a tested row an ASSERTING test reaches (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback); 0 = none found, or not tested. ";
+inline constexpr const char* assertedLensLegend( bool isColumnar, bool present ) noexcept
+{
+    return !present ? "" : isColumnar ? kAssertedColumnLegend : kAssertedRowLegend;
+}
+
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
@@ -659,11 +673,11 @@ inline constexpr const char* testedLensLegend( bool isColumnar ) noexcept
 
 // The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
-inline std::string callHierarchyLegendOpen( bool wantCallers, bool nextUsesBareName, bool isColumnar, bool nextIsPage = false )
+inline std::string callHierarchyLegendOpen( bool wantCallers, bool nextUsesBareName, bool isColumnar, bool nextIsPage = false, bool anyAsserted = false )
 {
     const char* const callersNextClause = nextIsPage ? ( nextUsesBareName ? kCallersNextPageBareNameLegend : kCallersNextPageLegend )
                                                      : ( nextUsesBareName ? kCallersNextBareNameLegend : kCallersNextSelectorLegend );
-    const char* const testedClause = testedLensLegend( isColumnar );
+    const std::string testedClause = std::string( testedLensLegend( isColumnar ) ) + assertedLensLegend( isColumnar, anyAsserted );
     // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
     // P3 (L7): next= defined where the reader meets it — callers hand over the SITES (the uses verb on the same
     // selector, its @FILE:LINE spelling mirrored), callees the BODY whose callees these are (expand).
