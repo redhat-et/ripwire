@@ -405,6 +405,7 @@ for _g in \
     cochangecliocheck \
     cochangefloorcheck \
     cochangesurprisecheck \
+    cochangetailcheck \
     codexinstallhonestycheck \
     codexplugincheck \
     codexwrapcheck \
