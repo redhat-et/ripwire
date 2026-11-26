@@ -955,6 +955,7 @@ for _g in \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \
+    qmetricscheck \
     qoriginoraclecheck \
     qrevtokencheck \
     qrowlocatorcheck \
