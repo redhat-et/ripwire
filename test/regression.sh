@@ -1118,6 +1118,7 @@ for _g in \
     sincewindowcheck \
     singledefcheck \
     sitesatshortcheck \
+    situbulkcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \

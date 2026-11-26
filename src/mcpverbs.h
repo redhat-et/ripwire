@@ -1700,6 +1700,7 @@ inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn 
          + std::to_string( facts.coCommits )
          + ",\"cochange_floor\":" + std::to_string( kCoSupportFloor )   // the CLI [3] line's floor=
          + ( facts.coTail ? ",\"cochange_floor_tail\":\"corroborated\"" : "" )   // ...and its floor_tail=, present-only
+         + ( facts.coBulkSkipped > 0 ? ",\"cochange_bulk_skipped\":" + std::to_string( facts.coBulkSkipped ) : std::string() )   // the CLI [3] line's bulk_skipped=, present-only
          + ( facts.shallow ? ",\"shallow\":true" : "" );   // 0.6.7: the CLI [3] line's shallow="1" — present-only, the cochange twin's spelling
 }
 
