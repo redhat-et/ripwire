@@ -21,8 +21,8 @@ differ too: file sets, against GitCF's method-level elements.
 
 **Repositories and fixed tips.**
 - `ripwire` at `f7cfcec7a` (origin/main, 2026-11-26). Its history starts 2026-07-31, at the public cutover.
-- `kubernetes` at `3596eb69d` (`/Users/qgames/m5-work/repos/kubernetes`, read-only).
-- Every other repo under `/Users/qgames/m5-work/repos/` is a depth-1 shallow clone and has no history to
+- `kubernetes` at `3596eb69d` (`$REPOS/kubernetes`, read-only).
+- Every other repo under the lane corpus directory (`$REPOS`) is a depth-1 shallow clone and has no history to
   replay, so the brief's 2-3 external repos shrink to 1.
 - Kubernetes crawl root: the repository root. If a warm `--situ` call there takes more than 20 s, the root
   becomes `pkg/` and the RESULT says so. Either way, only files under the crawl root count, for every arm.
@@ -93,7 +93,7 @@ reported as a mean over tasks, with n.
 ## Running
 
 ```bash
-python3 bench/cochange/backtest.py --repo /Users/qgames/m5-work/repos/kubernetes --tip 3596eb69d \
+python3 bench/cochange/backtest.py --repo $REPOS/kubernetes --tip 3596eb69d \
     --since 2025-11-26 --n 200 --ripwire ./build/ripwire --work /tmp/cobt_k8s --out results/k8s.jsonl
 python3 bench/cochange/backtest.py --summarize results/k8s.jsonl
 python3 bench/cochange/backtest.py --self-test        # the metric arithmetic, no git
