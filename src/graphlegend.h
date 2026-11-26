@@ -906,14 +906,15 @@ inline const char* toValueRefsLegend( bool on ) noexcept { return on ? kToValueR
 // --skipped's extent_suspect_files=/macro_blanked_files= (root) and extent_suspect_syms=/macro_blanked= (<h> rows)
 // all spell through it, so the shape has one definition instead of a copy per verb.
 // `json` spells the same count as a key instead: `,"name":N` (imports_unresolved= is the one caller today).
-inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, bool json )
+// countField is the same spelling for a count that is present even at 0 (a pass that ran and found none).
+inline std::string countField( std::string_view name, std::size_t count, bool json )
 {
-    if( count == 0 )
-    {
-        return {};
-    }
     const std::string n = std::to_string( count );
     return json ? ",\"" + std::string( name ) + "\":" + n : " " + std::string( name ) + "=\"" + n + "\"";
+}
+inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, bool json )
+{
+    return count == 0 ? std::string() : countField( name, count, json );
 }
 inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
 {

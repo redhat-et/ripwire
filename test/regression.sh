@@ -351,6 +351,7 @@ for _g in \
     bodilessseedcheck \
     bodycalleefilecheck \
     bodydialectcheck \
+    bodyeditcheck \
     bodypointercheck \
     budgetmonotonecheck \
     budgetpolicycheck \
@@ -427,6 +428,7 @@ for _g in \
     constcheck \
     contextratiocheck \
     coplintcheck \
+    corelegendcheck \
     countfloorcheck \
     cppbenchcheck \
     cppextqualcheck \
@@ -459,6 +461,7 @@ for _g in \
     decltodefcheck \
     deeptailcheck \
     defaultceilingcheck \
+    defectackschemecheck \
     defectshapecheck \
     defoverdeclcheck \
     defslookupcheck \
@@ -593,6 +596,7 @@ for _g in \
     fornotesjsoncheck \
     foronesidecheck \
     forpagescheck \
+    forqsitescheck \
     forrankordercheck \
     forreadercallerscheck \
     forregrowcheck \
@@ -1086,6 +1090,7 @@ for _g in \
     shallowhistorycheck \
     shapingflagcheck \
     shellgateindexcheck \
+    shellnestcheck \
     showcasecapturecheck \
     shrinkpaircheck \
     sibliftcheck \

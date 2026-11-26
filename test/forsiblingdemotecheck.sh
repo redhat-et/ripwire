@@ -38,6 +38,9 @@
 #   (x)  MCP `for` (one renderer): (a) on the MCP answer and its RIPWIRE_NO_SIBLING_DEMOTE=1 twin (its <h> rows differ from the CLI's,
 #        so its K2 reads differ: the rule is checked on its own bytes)
 set -u
+# θ5 (src/forpages.h): this gate pins the FULL page-1 legend (every attribute defined in its own answer); the default's core legend
+# is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 # FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
 # one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
 # reads those rows as elements for another rule, so the line form is off here.

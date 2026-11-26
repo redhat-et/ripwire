@@ -246,6 +246,8 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     // link in root A pointing into root B is an escape from A; B's own copy is indexed under B, where it lives.
     relabel( part.crawlSkips.escaped,        m.crawlSkips.escaped );
     relabel( part.crawlSkips.untrackedBuild, m.crawlSkips.untrackedBuild );   // M1, per root like its siblings
+    relabel( part.crawlSkips.extensionless,  m.crawlSkips.extensionless );    // θ11, per root like its siblings
+    m.crawlSkips.extensionlessFiles += part.crawlSkips.extensionlessFiles;
 
     m.crawlSkips.escapedFiles     += part.crawlSkips.escapedFiles;
     m.crawlSkips.untrackedBuildFiles += part.crawlSkips.untrackedBuildFiles;

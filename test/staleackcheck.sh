@@ -296,4 +296,50 @@ else
     grep -o '<quality-delta[^>]*>\|<sa[^>]*/>' "$TMP/clean2"
 fi
 
+# ── (6) CR721 — the RANGE form's stale_next= replays the SAME answer: it names the two commits compared, not the symbolic
+#     range (HEAD~1..HEAD after HEAD moves compares another pair), and it keeps --quality-kinds (an unfiltered replay lists
+#     the other kinds' stale acks too). Fixture: knotty() + 60 uncalled helpers acked, all deleted, then a tweak commit, so
+#     HEAD~1..HEAD has no regression and 61 stale acks (enough for the fold to pay). PREMISE: the fold is there (stale_next=).
+#     RED before (rebased train tip 43be39fcd): stale_next="--quality-delta=HEAD~1..HEAD --show-stale" with and without
+#     --quality-kinds=dead-code; on 7905e958e (shas, no selector) the dead-code answer's replay lists 62 rows for its 61.
+REPO3="$( mktemp -d )"; trap 'rm -rf "$REPO" "$REPO2" "$REPO3" "$TMP"' EXIT
+run3(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$REPO3" "$@"; }
+G3=( git -C "$REPO3" -c user.email=x@y -c user.name=x -c commit.gpgsign=false )
+mkdir -p "$REPO3/src"; echo 'int stable( int a ) { return a + 1; }' >"$REPO3/src/lib.cpp"
+"${G3[@]}" init -q; "${G3[@]}" add -A; "${G3[@]}" commit -qm init
+cat >>"$REPO3/src/lib.cpp" <<'EOF'
+int knotty( int a, long b, int c ) {
+    int r = 0;
+    for( int i = 0; i < a; ++i ) {
+        if( i % 2 == 0 ) { if( i > b ) { r += i; } else { r -= 1; } }
+        else { for( int j = 0; j < b; ++j ) { if( j > c ) { r += j; } else { r--; } } }
+        while( r > c && r > b ) { r = r - 1; if( r % 3 == 0 ) { r += 2; } }
+    }
+    return r;
+}
+EOF
+for i in $( seq 1 60 ); do echo "int helper$i( int a ) { return a * $i + 7; }" >>"$REPO3/src/lib.cpp"; done
+run3 --quality-delta --quality-ack="fixture 3: accepted" >/dev/null 2>&1
+"${G3[@]}" add -A; "${G3[@]}" commit -qm knotty
+echo 'int stable( int a ) { return a + 1; }' >"$REPO3/src/lib.cpp"; "${G3[@]}" commit -qam gone
+echo 'int stable( int a ) { return a + 2; }' >"$REPO3/src/lib.cpp"; "${G3[@]}" commit -qam tweak
+b3="$( "${G3[@]}" rev-parse HEAD~1 )"; t3="$( "${G3[@]}" rev-parse HEAD )"
+for sel in "" "--quality-kinds=dead-code"; do
+    run3 --quality-delta=HEAD~1..HEAD ${sel:+"$sel"} --no-cache >"$TMP/range5" 2>/dev/null; r5=$?
+    want="--quality-delta=$b3..$t3${sel:+ $sel} --show-stale"
+    got="$( grep -oE 'stale_next="[^"]*"' "$TMP/range5" | head -1 | sed 's/^stale_next="//; s/"$//' )"
+    if [ "$r5" != 0 ] || [ -z "$got" ]; then no "(6) PREMISE '${sel:-all kinds}': want rc 0 and a folded range answer with stale_next=, got rc=$r5 '${got:-none}'"
+    elif [ "$got" = "$want" ]; then ok "(6) '${sel:-all kinds}': stale_next= names the compared commits${sel:+ and keeps $sel}"
+    else no "(6) '${sel:-all kinds}': want stale_next=\"$want\", got \"$got\""; fi
+done
+# the call stale_next= names, run as printed, lists what the folded answer counted: as many <sa> rows as its stale=
+run3 --quality-delta=HEAD~1..HEAD --quality-kinds=dead-code --no-cache >"$TMP/range5f" 2>/dev/null
+n5="$( grep -oE ' stale="[0-9]+"' "$TMP/range5f" | head -1 | grep -oE '[0-9]+' )"
+next5="$( grep -oE 'stale_next="[^"]*"' "$TMP/range5f" | head -1 | sed 's/^stale_next="//; s/"$//' )"
+read -r -a next5argv <<<"$next5"
+run3 "${next5argv[@]}" --no-cache >"$TMP/range5r" 2>/dev/null; rr5=$?
+rows5="$( grep -o '<sa ' "$TMP/range5r" | wc -l | tr -d ' ' )"
+if [ "$rr5" = 0 ] && [ -n "$n5" ] && [ "$n5" -gt 0 ] && [ "$rows5" = "$n5" ]; then ok "(6) the stale_next= call lists the $n5 stale rows the folded answer counted"
+else no "(6) the stale_next= call '${next5:-none}' (rc=$rr5) lists $rows5 <sa> rows, the folded answer counted '${n5:-none}'"; fi
+
 [ "$fail" -eq 0 ] && echo "staleackcheck: ALL PASS" || { echo "staleackcheck: SOME CHECKS FAILED"; exit 1; }

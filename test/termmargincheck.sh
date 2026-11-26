@@ -232,6 +232,34 @@ cmp -s "$TMP/a_on.xml" "$TMP/a_off.xml" \
     && no "(e) the armed and disarmed runs are byte-identical — the arm is inert, so every arm above is measuring nothing" \
     || ok "(e) armed and disarmed runs differ, so the arm is live"
 
+# ── (h) CR721 — the switch is 0 or 1: any other value is refused to the disarmed default with one stderr line ─────────
+#     RED before (rebased train tip 43be39fcd): RIPWIRE_TERMMARGIN=off ARMED the margin (every value not starting with '0'
+#     did), so its ranking was the armed one and stderr carried term-margin: traces, not a refusal.
+for v in off yes 2; do
+    runq "$v" "evict handler" "$TMP/h_$v.xml" "$TMP/h_$v.err"; hrc=$?
+    # CR721 r2: exactly ONE refusal line. A debug build's VALIDATE adds its own once-per-site "[validate] " notice (the
+    # house's input-rejection trace; a release build prints none), so that notice is the only other line allowed.
+    hlines="$( grep -vc '^\[validate\] ' "$TMP/h_$v.err" )"
+    if [ "$hrc" = 0 ] && cmp -s "$TMP/h_$v.xml" "$TMP/a_off.xml" && grep -q "ignoring RIPWIRE_TERMMARGIN=\"$v\"" "$TMP/h_$v.err" \
+       && [ "$hlines" = 1 ] && ! grep -q '^term-margin: ' "$TMP/h_$v.err"; then
+        ok "(h) RIPWIRE_TERMMARGIN=$v is refused: disarmed ranking, one stderr line, no margin trace"
+    else
+        no "(h) RIPWIRE_TERMMARGIN=$v: want rc 0, the disarmed ranking and exactly one refusal line; got rc=$hrc, ${hlines:-?} line(s), stderr: $( head -c 200 "$TMP/h_$v.err" )"
+    fi
+done
+#     CR721 r4: the refused value is percent-encoded (a control byte as %XX), so "off<newline>" is still ONE refusal line.
+#     RED before (51011272d): the newline was echoed verbatim and the refusal spanned two lines.
+runq $'off\n' "evict handler" "$TMP/h_nl.xml" "$TMP/h_nl.err"; hrc=$?
+hlines="$( grep -vc '^\[validate\] ' "$TMP/h_nl.err" )"
+if [ "$hrc" = 0 ] && cmp -s "$TMP/h_nl.xml" "$TMP/a_off.xml" && grep -qF 'ignoring RIPWIRE_TERMMARGIN="off%0A"' "$TMP/h_nl.err" && [ "$hlines" = 1 ]; then
+    ok "(h) RIPWIRE_TERMMARGIN=off<newline> is refused on one stderr line, the newline spelled %0A"
+else
+    no "(h) RIPWIRE_TERMMARGIN=off<newline>: want rc 0, the disarmed ranking and one refusal line with %0A; got rc=$hrc, ${hlines:-?} line(s), stderr: $( head -c 200 "$TMP/h_nl.err" )"
+fi
+runq "" "evict handler" "$TMP/h_empty.xml" "$TMP/h_empty.err"; hrc=$?
+if [ "$hrc" = 0 ] && cmp -s "$TMP/h_empty.xml" "$TMP/a_off.xml" && [ ! -s "$TMP/h_empty.err" ]; then ok "(h) an empty RIPWIRE_TERMMARGIN is the unset default, silently"
+else no "(h) an empty RIPWIRE_TERMMARGIN: want rc 0, the disarmed ranking and empty stderr; got rc=$hrc, stderr: $( head -c 200 "$TMP/h_empty.err" )"; fi
+
 # ── (f) determinism + scan/persisted-stats parity, with the arm ON ─────────────────────────────────
 runq 1 "evict handler" "$TMP/f_1.xml" "$TMP/f_1.err"
 runq 1 "evict handler" "$TMP/f_2.xml" "$TMP/f_2.err"

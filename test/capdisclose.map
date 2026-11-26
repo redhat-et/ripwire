@@ -13,7 +13,10 @@
 # by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
 # A new cap constant on the answer path needs a row here in the same commit.
 kAnswerPageBytesDefault	none:the default page stop the answer-first ORDER rules read (AF2 G, KB1 insertKeyBodies: a key body is added only when the answer block ends inside it): a block moves or is added, every row is still emitted once (answerFirst's size ENSURES; forkeybodycheck K3n); the page cut itself is disclosed by page= pages= withheld_bytes= next= (forpages.h)
+kBlockBytes	legend
 kImportSpecDepth	sink:atDepthCap
+kMaxSitesPerTok	legend
+kRareWordSites	legend
 kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
 kAliasHopMemberNames	sink:cut,shown
@@ -189,11 +192,13 @@ kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened t
 kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
 kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
 kMaxRestDepth	sink:noteCapped
+kMaxShellNest	sink:cut
 kMaxRestName	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxRestUnits	sink:noteCapped
 kMaxRoleBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxSkipRowsPerClass	pending:B43 disclosed elsewhere: the --skipped rows and grep unindexed_candidates_capped= state the row cap
 kMaxTrackedFiles	sink:truncated
+kMaxUnguardedSkips	none:an ASSUME bound on the shell skip trio's call graph (skipBrace -> skipQuote -> skipParen), not a cut: no frame past it is ever reached, and the nesting cut itself is kMaxShellNest's (shell_cut=)
 kMaxWorktreePaths	sink:DISCLOSE
 kMaxYamlNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kRadixThreshold	none:an algorithm switch (radix vs comparison sort), the bytes are identical

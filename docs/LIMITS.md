@@ -698,6 +698,14 @@ Discloses: `capped`
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
 | `kForThinMinFiles` | `3` | — | a ranked head over fewer files than this ⇒ thin |
 
+### `src/forqsites.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxSitesPerTok` | `150` | — | a token with more lines than this is not a lead |
+
 ### `src/forreadercallers.h`
 
 Discloses: **none**
@@ -1551,7 +1559,8 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kMaxSubDepth` | `40` | — | nested $( ) parsed past this depth are left unparsed (an empty list) |
+| `kMaxShellNest` | `64` | — | shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N |
+| `kMaxUnguardedSkips` | `2` | — | skipBrace -> skipQuote |
 
 ### `src/siblift.h`
 

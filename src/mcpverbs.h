@@ -30,6 +30,7 @@
 #include "forrowlines.h"   // MR1: rowlines::encodeRows — the CLI --for's row form, on the MCP `for` bundle
 #include "foractline.h"    // BR1: actline::insertActLine — the CLI --for's act line, on the MCP `for` bundle
 #include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
+#include "forqsites.h"     // θ11 (RIPWIRE_THETA11=1): the CLI --for's question-sites block, the same one inside this bundle's root
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
 #include "grepcarrier.h"    // L4: a grep enclosing row's carrier reads/vals (CLI and MCP share it)
@@ -3255,6 +3256,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
             insertActLineMcp( std::size_t( budgetTokens ) );   // BR1b: as below
             rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );   // MR1: last, as on the CLI (below)
+            (void)rw::qsites::insertBlock( out, rw::qsites::questionSitesBlock( ing, task, flRootArg ) );   // θ11: as below
             return out;
         }
         std::string verb;
@@ -3294,6 +3296,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // budget path). Gate: test/actlinecheck.sh (M).
     insertActLineMcp( budgetTokens > 0 ? std::size_t( budgetTokens ) : 0u );
     rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );
+    // θ11 (forqsites.h, RIPWIRE_THETA11=1): the CLI's page-1 block, inside the root, unpriced, under budget_tokens too (its own 1,000 B);
+    // this bundle is the whole answer (the file and candidate pages returned above), and the index it reads is the one loaded above
+    (void)rw::qsites::insertBlock( out, rw::qsites::questionSitesBlock( ing, task, flRootArg ) );
     return out;
 }
 
@@ -5187,6 +5192,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
                     + oc.historyJson
                     + rw::quality::ratchetAttrsJson( oc.extras )
+                    + countFieldOrEmpty( "shell_cut", oc.extras.shellCut, /*json=*/true )   // CR712-SHSTATUS-DEPTH (QdRootFields::shellCut)
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )

@@ -1477,14 +1477,14 @@ inline constexpr const char* kQdLegendCore =
     "score). THIRTEEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
     "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
-    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; report-only). "
+    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
     "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
-    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= count; "
-    "new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling, so exit 0 "
-    "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
+    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on a gating row (gating=): unacked, in-scope, major, and "
+    "preexisting-worse or a new-symbol exception — new-symbol rows never gate, except defect-shape format-arity, a new "
+    "function at the ceiling and a tangled new function. Exit 0 is no verdict on new or minor rows: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
     "whose target no longer applies. "
@@ -1496,6 +1496,12 @@ inline constexpr const char* kQdLegendCore =
     "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
     // P8 (L7): the threshold beside the number
     "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). ";
+
+// CR712-SHSTATUS-DEPTH — present-only: rides with shell_cut= on the root (QdRootFields::shellCut), absent at 0.
+inline constexpr const char* kQdShellCutLegend =
+    "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; what lies deeper was not judged. ";
+
+static_assert( rw::shstatus::kMaxShellNest == 64, "kQdShellCutLegend's and compactlegend.h's shell_cut= sentences say depth 64" );
 
 // The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
 // excluded something, because on a repo with no such macro the roster explains an empty set.
@@ -1647,7 +1653,10 @@ inline constexpr const char* kQdSchemeLegend =
     "written back under the new rule, which is the normal steady state rather than a failure. "
     "scheme_ambiguous= counts rows it REFUSED to move: the old key of a name that folded across N files "
     "maps to N new keys, so which symbol the ack was written for is unknowable from the ledger; those rows "
-    "keep their old key and surface under stale= rather than being fanned out to all N or guessed. ";
+    "keep their old key and surface under stale= rather than being fanned out to all N or guessed. "
+    "The same replay re-files a defect-shape ack written while a site value carried two facet bits "
+    "(v0.6.10 and earlier; three since the unchecked-status facet): the row's sites are re-hashed under the "
+    "two-bit rule and an ack at that key moves to the current one, counted in acks_rekeyed_by_scheme= too. ";
 
 // The sa ROW dictionary — emitted only when there are sa rows. The stale= axis itself is defined in the
 // core paragraph, because the counter is on the root of every report whether or not any row follows it.
@@ -1744,23 +1753,25 @@ inline constexpr const char* kQdFailureDefaultLegend =
 
 // QD-TANGLE — emitted only when a tangle row is in the document.
 inline constexpr const char* kQdTangleLegend =
-    "tangle rows are REPORT-ONLY (always sev=\"minor\", never gating). was= and now= are the score S = T x log2(loc/50), "
+    "a tangle row GATES when the function is new, crossed the bar or its score grew while over it (not a moved body, not test "
+    "code); a row an input rose on while the score did not grow is sev=\"minor\". was= and now= are the score S = T x log2(loc/50), "
     "T = nesting levels past 3 + deep%/5 + steering locals per 100 lines (deep%: the share of lines inside regions at nesting 4+, "
     "short arms of a flat switch or else-if chain of 4+ arms left out); bar= 6. Length only AMPLIFIES: a function of 50 lines or "
     "fewer, a long flat body and an orchestrator of named steps all score 0. A row means the change made it so: the function is "
-    "new, crossed the bar, or an input rose (nesting +1, deep lines +5, a new steering local); why= names those inputs, fix= the "
+    "new, crossed the bar, its score grew against the baseline while over the bar (the ratchet: a tenth counts), or an input rose "
+    "(nesting +1, deep lines +5, a new steering local); why= names the inputs that changed, fix= the "
     "shape the rise calls for with its lines, locals= the steering locals: a primitive local written again after its "
     "declaration and read by a branch condition 10 or more statements after that write. ";
 
 // D4 — present when the ratchet read its reference point (ratchet_ref= on the root). A ratchet= facet needs that read, so this one
 // sentence defines both.
 inline constexpr const char* kQdRatchetLegend =
-    "ratchet_ref= is the reference point the tangle ratchet read, the last tag reachable from HEAD: each function over the tangle bar "
-    "whose inputs this change moved is compared with its BEST since that tag (the lowest of each input and of the score over every first-parent "
+    "ratchet_ref= is the reference point the tangle rows' history read, the last tag reachable from HEAD: each tangle row on a function "
+    "that existed at the baseline is compared with its BEST since that tag (the lowest of each input and of the score over every first-parent "
     "version since it, or since the function's creation); ratchet_judged= counts those that had history, ratchet_unread= versions "
     "that could not be measured, ratchet_cut=\"1\" that only the 512 newest versions were read. ratchet=\"TAG\" on a tangle row: "
     "the score is above its best since TAG and an input rose over its minimum by the rise rule, so a function that crept up across "
-    "changes is named; why= then adds \"best since TAG: ...\", and on a row of its own was= is that best score. Report-only. ";
+    "changes says so; why= then adds \"best since TAG: ...\". A facet only: it makes no row and changes no severity. ";
 
 // QD-CREDIT-ROW — present when the document carries an <improved> section.
 inline constexpr const char* kQdImprovedLegend =
@@ -1895,6 +1906,7 @@ struct QualityDeltaLegendParts
     bool                                          staleTree               = false;   // D3 QD-STALE-HEADER: stale_tree= is on the root
     bool                                          ratchetRead             = false;   // D4: ratchet_ref= is on the root
     bool                                          anyImproved             = false;   // QD-CREDIT-ROW: the <improved> section is in the document
+    bool                                          shellCut                = false;   // CR712-SHSTATUS-DEPTH: shell_cut= is on the root
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -2122,6 +2134,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         rw::emitRaw( out, kQdImprovedLegend );   // QD-CREDIT-ROW
     }
+    if( p.shellCut )
+    {
+        rw::emitRaw( out, kQdShellCutLegend );   // CR712-SHSTATUS-DEPTH
+    }
 
     if( p.scoped )
     {
@@ -2166,15 +2182,12 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
 
 // F-13 — the one place both --dead-code and --quality-delta turn a RegisterMacroConfigDiagnostics into
 // output: the specific keys/names on stderr (never guessed at in the XML — a hand-edited config's tokens
-// are not free text an attribute repeats), and the shared `config-warnings="N"` attribute string, present
-// only when non-zero (this file's standing convention for every optional root attribute). One function so
-// the two verbs cannot report the same misconfiguration two different ways.
-inline std::string registerMacroConfigWarningAttr( const rw::quality::RegisterMacroConfigDiagnostics& diag )
+// are not free text an attribute repeats; emitRegisterMacroConfigWarnings), and the shared `config-warnings="N"`
+// attribute, present only when non-zero (this file's standing convention for every optional root attribute;
+// --quality-delta spells it as a QdRootField). One pair of functions so the two verbs cannot report the same
+// misconfiguration two different ways.
+inline void emitRegisterMacroConfigWarnings( const rw::quality::RegisterMacroConfigDiagnostics& diag )
 {
-    if( diag.total() == 0 )
-    {
-        return std::string();
-    }
     const auto joined = [] ( const std::vector<std::string>& v ) -> std::string
     {
         std::string out;
@@ -2195,7 +2208,13 @@ inline std::string registerMacroConfigWarningAttr( const rw::quality::RegisterMa
         rw::emitTo( stderr, "ripwire: .ripwire_config's register_macros= names a macro matching no indexed symbol (typo, or unused): {}\n",
                       joined( diag.inertNames ).c_str() );
     }
-    return " config-warnings=\"" + std::to_string( diag.total() ) + "\"";
+}
+
+// --dead-code's half of F-13: the stderr lines, then the attribute.
+inline std::string registerMacroConfigWarningAttr( const rw::quality::RegisterMacroConfigDiagnostics& diag )
+{
+    emitRegisterMacroConfigWarnings( diag );
+    return diag.total() == 0 ? std::string() : " config-warnings=\"" + std::to_string( diag.total() ) + "\"";
 }
 
 // H10 (capture-audit 2026-09-04): the --quality-ack run that has NOTHING to accept. It used to re-serialise
@@ -2294,7 +2313,7 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
         if( verdict.firstRow.empty() )
         {
             verdict.firstRow = r.kind + " " + quality::displaySym( r.sym, cfg.rootPath )
-                             + " (was=" + std::to_string( r.was ) + " now=" + std::to_string( r.now ) + ")";
+                             + " (was=" + quality::rowValueText( r, r.was ) + " now=" + quality::rowValueText( r, r.now ) + ")";   // CR721: tangle in display units
         }
     }
     return verdict;
@@ -2546,27 +2565,39 @@ inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, 
     // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
     // for display (quality::displaySym); this stderr line was the one caller that skipped it,
     // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-    // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
+    // a gating row on NEW code is defect-shape format-arity, a new function at the ceiling or a tangled new function (rowGates); the line names
     // either part only when there is one, so every run without them keeps its bytes.
     const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
                                                                            { return r.isNewSymbol && quality::rowGates( r ); } ) );
     const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
                                                                                { return r.ceiling != 0 && quality::rowGates( r ); } ) );
+    // a new-symbol tangle row gates under rule (b) (QD-LESSONS-2); was=/now= read as every surface prints them (a tangle score's tenths)
+    const std::size_t newTangleGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                                 { return r.isNewSymbol && r.kind == "tangle" && quality::rowGates( r ); } ) );
+    const std::string was = quality::rowValueText( *first, first->was ), now = quality::rowValueText( *first, first->now );
     if( ceilingGating != 0 )
     {
-        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
-                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
-                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+        const std::string tangled = newTangleGating == 0 ? std::string()
+                                                         : std::format( ", {} a tangled new function (tangle {} or more)", newTangleGating, quality::metricValueText( "tangle", rw::kTangleBar10 ) );
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines){}; first: {} {}{} (was={} now={})\n",
+                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ), tangled,
+                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
     else if( newGating == 0 )
     {
         rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
-                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
+    }
+    else if( newTangleGating != 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a tangled new function (tangle {} or more); first: {} {}{} (was={} now={})\n",
+                      gatingCount, newTangleGating, quality::metricValueText( "tangle", rw::kTangleBar10 ), first->kind.c_str(),
+                      quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
     else
     {
         rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
-                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
 }
 
@@ -2584,749 +2615,977 @@ inline std::string presentXmlAttr( std::string_view name, const std::string& v, 
     return v.empty() ? std::string() : " " + std::string( name ) + "=\"" + esc( v ) + "\"";
 }
 
+// ── --quality-delta, in phases: SCOPE + RATCHET, then either WRITE ACKS or COMPUTE the report and RENDER it ──────────────
+// GE-RUNQD: runQualityDelta used to compute the answer and render it in one 744-line body, with the JSON and XML row
+// emitters written twice inside it. The phases are now named functions: applyScopeAndAcks returns what the partition and
+// the ratchet decided (QdPartition); runQualityAckWrite is the --quality-ack arm; computeQdReport builds every count and
+// root disclosure once, silently (QdReport, with each root attribute a QdRootField spelled for both formats); the stderr
+// lines print from emitQdStderrLines; one row model (QdRowModel) decides each row's printed facts for both formats.
+
+// What the scope partition and the ack ratchet decided over basis.regs (applyScopeAndAcks): the rows that belong to someone
+// else, the acks suppressing a finding in a session other than the one that wrote them, and the two counts they feed.
+struct QdPartition
+{
+    std::vector<rw::quality::Regression> outOfScope;
+    std::vector<rw::quality::StaleAck>   foreignAcks;
+    std::size_t                          scopedOutGating = 0;   // out-of-scope rows that would have gated (would-gate=)
+    std::size_t                          ackedCount      = 0;   // in-scope rows the ack ledger suppressed (acked=)
+};
+
+// SCOPE + RATCHET — split basis.regs by --scope, then suppress what the ack ledger already accepted. basis.regs keeps only
+// the in-scope, unsuppressed rows.
+// Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
+// reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
+// magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
+// into that file instead of printing the report (accepting what previous acks already hid would be
+// a silent blanket ack — only what the agent can see right now is what it can accept).
+// R1 IDENTITY: the ledger was read and HEALED inside resolveDeltaBasis (it had to be — the baseline
+// half of the same healing has to precede computeDelta), so this step takes the already-current map
+// rather than re-reading the file and undoing it.
+QdPartition applyScopeAndAcks( const rw::quality::Scope& scope, DeltaBasis& basis )
+{
+    using namespace rw;
+    std::vector<quality::Regression>&                      regs = basis.regs;
+    const gtl::btree_map<std::string, quality::AckRecord>& acks = basis.acks;
+    QdPartition                                            out;
+    quality::countAckRescues( regs, acks, basis.healing.ackRemap, basis.healing.ackedByRename, basis.healing.ackedByContent );
+    // P1.4 PROVENANCE — the foreign-ack sweep reads the PRE-ratchet list on purpose (computeForeignAcks'
+    // header states why: the question is about acks that are suppressing something right now).
+    out.foreignAcks = quality::computeForeignAcks( regs, acks );
+    // P1 — the partition runs BEFORE the ratchet so acked="N" counts THIS scope's suppressions rather
+    // than the whole tree's (partitionByScope owns the rest of the rule).
+    out.scopedOutGating = partitionByScope( scope, regs, out.outOfScope, acks );
+    out.ackedCount      = quality::applyAckRatchet( regs, acks );
+    return out;
+}
+
+// --ack-only=SUBSTR[,SUBSTR]: ack a SUBSET instead of everything on screen. Without it, the only way to accept one
+// deliberate contract change was to accept the whole report — which is how a ratchet quietly becomes a rubber stamp. A
+// finding matches if a pattern occurs in its kind, its canonical id or its FACET (so "api-surface", "src/quality.h", one
+// exact id, or "format-arity" all work). The facet is what makes this precise enough to be honest: "api-surface" also
+// covers the never-gating new-symbol rows, so acking by kind would sweep in 59 findings to accept 8;
+// --ack-only=contract-change accepts exactly the deliberate ones. The pseudo-token "gating" selects whatever would
+// actually exit 2.
+// P1: `inScope` is a parameter because the predicate is asked about BOTH halves of the partition — once to choose what to
+// write, once to detect an ack selection that NAMES a row belonging to someone else. It is also what keeps `gating` honest
+// under a scope: an out-of-scope row does not gate, so `gating` must not select it.
+bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r, bool inScope )
+{
+    if( ackOnly.empty() )
+    {
+        return true;
+    }
+    const bool gates = rw::quality::rowGates( r ) && inScope;
+    // "gating" is RESERVED: the exact token answers only "would this row exit 2", never a substring of a symbol such as
+    // gatingHelper (CR721 — a substring hit acked a never-gating row, or refused the command on an out-of-scope one).
+    const auto patternSelects = [ & ]( std::string_view pat )
+    {
+        if( pat == "gating" )
+        {
+            return gates;
+        }
+        return !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos
+                                 || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) );
+    };
+    for( std::string_view rest = ackOnly; !rest.empty(); )
+    {
+        const std::size_t comma = rest.find( ',' );
+        if( patternSelects( rest.substr( 0, comma ) ) )
+        {
+            return true;
+        }
+        rest = comma == std::string_view::npos ? std::string_view() : rest.substr( comma + 1 );
+    }
+    return false;
+}
+
+// THE LEGACY-ACK BACKFILL's disclosure. A reconstructed row is a weaker claim than a measured one, so a reader is told how
+// many rows just changed confidence class and how many could not be healed at all. The unresolved count is a FLOOR on
+// what is missing, not a total of what is wrong: a member set that no longer clones in THIS tree is unanswerable here,
+// not proven gone. Silent when the backfill touched nothing.
+void discloseAckBackfill( const rw::quality::AckBackfill& backfilled )
+{
+    if( backfilled.resolved == 0 && backfilled.refreshed == 0 && backfilled.unverified == 0 && backfilled.unresolved == 0 )
+    {
+        return;
+    }
+    rw::emitTo( stderr, "ripwire: ack provenance backfill — {} clone row(s) reconstructed from the current tree, {} re-derived, {} left UNVERIFIED (their group was not found here — a floor, not proof it is gone), "
+                          "{} left legacy (member set not found cloning here — a floor, not proof it is gone), {} ineligible (no current-tree fact answers their kind), {} already measured (left alone). "
+                          "prov=recon is what the idiom is NOW, as of the last run that could check it — not what was measured when the row was accepted.\n",
+                  backfilled.resolved, backfilled.refreshed, backfilled.unverified, backfilled.unresolved, backfilled.ineligible, backfilled.measured );
+}
+
+// Fold ONE accepted finding into the ack ledger `acks`, then prove the re-score formula agrees with the live one. `cidByKey`
+// is the healing pre-pass's content-id index; `scopeSpec` is the --scope this run names (nullptr: none, so an existing row
+// keeps its `by`); `reason` is --quality-ack's text (empty: an existing row keeps its reason).
+void acceptFinding( gtl::btree_map<std::string, rw::quality::AckRecord>& acks, const gtl::btree_map<std::uint64_t, std::uint64_t>& cidByKey,
+                    const rw::quality::Regression& r, const std::string* scopeSpec, std::string_view reason )
+{
+    using namespace rw;
+    // P0.3: the ack IDENTITY is ackKindToken, not the bare kind — a zero-magnitude finding
+    // (was==now==0: dead-code, api-surface tier A) acks per ORIGIN, so acking the never-gating
+    // new-symbol row can no longer blank-check the gating contract-change row on the same symbol.
+    const std::string   ackKind = quality::ackKindToken( r );
+    quality::AckRecord& rec     = acks[ quality::ackMapKey( ackKind, r.key ) ];
+    // R1 IDENTITY: stamp the finding's SCRUBBED CONTENT ID alongside the key, so this ack can
+    // still be found after a move git records no rename for. Absent (0) for the two clone kinds —
+    // their key is a member-SET hash with no single body behind it — and the row is then written
+    // exactly as it is today. A REFRESH, not a preserve: re-acking a finding re-reads the body, so
+    // the stored cid always describes the code as accepted, never as it was two edits ago.
+    const auto          cidIt   = cidByKey.find( r.key );
+    const std::uint64_t cid     = ( cidIt == cidByKey.end() ) ? 0u : cidIt->second;
+    // P1.4 PROVENANCE: `by` follows the SAME rule the reason does one line down — set from this
+    // run when this run supplies one, PRESERVED otherwise. A later scope-less re-ack therefore
+    // refreshes the magnitude without erasing the record of who accepted the row originally,
+    // which is the only reading under which the foreign-ack sweep means anything.
+    // REASON CLOBBER FIX (round 2026-08-29): a re-ack that supplies a DIFFERENT reason no longer
+    // overwrites the row's existing one outright — composeAckReason folds it in as
+    // "<new> | prior: <old>" (capped at one hop; a no-op when the reason is unchanged), so a
+    // shared row re-acked by unrelated sessions keeps both justifications instead of the last
+    // writer silently erasing the one before it. See quality.h's composeAckReason for the rule.
+    // RE-SCORE PROVENANCE: was/now/facet/path/line are a REFRESH, not a preserve, same posture as
+    // cid= above — a re-ack re-reads the finding, so the stored triple always describes the row AS
+    // JUST ACCEPTED, never as it was some earlier run. See AckRecord's doc comment for what each
+    // one is and why a later run can re-score from them alone.
+    rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ), cid,
+                              scopeSpec != nullptr ? *scopeSpec : rec.by,
+                              r.was, r.now, r.facet, r.path, r.line, quality::AckProvenance::Measured,
+                              reason.empty() ? rec.reason : quality::composeAckReason( rec.reason, std::string( reason ) ) };
+    // SELF-CHECK, not a one-off test: every magnitude-bearing ack proves that the TABLE-DRIVEN
+    // re-score formula agrees with the LIVE one on the row it just built. NOT a full round trip —
+    // rescoreAckRecord runs here on the in-memory `rec` directly; it never goes through
+    // renderAckRecords/readAckRecords, so this does not exercise the ledger's text grammar (order-
+    // tolerant token parsing, splitAckLocator, the takeAckNamedToken family) at all — that half of
+    // the contract is what qackconcurrencycheck.sh's grammar arm (2) and byte-identity arm (7) pin
+    // instead, over the actual file. What THIS catches: rescoreNumericMajor's kMaterialityBars
+    // lookup (by kind name) silently drifting from the kMaterialityBars row perSymbolKind is handed
+    // by index (computeDelta; the static_assert beside the table pins the order) — two ways
+    // to reach the same constants that a future edit could break in only one place. A drift there means the live
+    // formula (numericRegressionIsMajor, via perSymbolKind) and the re-score formula
+    // (rescoreNumericMajor) have silently diverged — see quality.h's MaterialityBar table, the one
+    // place both are meant to agree. ENSURES, not ASSUME: this is this function's OWN postcondition
+    // on the row it just built, not a fact something else already guarantees.
+    const std::optional<bool> rescored      = quality::rescoreAckRecord( rec );
+    const bool                rescoreAgrees = !rescored.has_value() || *rescored == !r.isMinor;   // plain bool, so the promise below is a bare accessor-free read
+    ENSURES( rescoreAgrees,
+             "ack provenance re-score (in-memory, not a ledger round trip) must reproduce the just-computed severity" );
+}
+
+// An --ack-only that matched NO finding: refused with exit 1, and nothing accepted.
+// M1 FOLLOW-UP (round train-18, rv-ack-provenance-backfill.md): this refusal used to discard the backfill unconditionally —
+// `backfillCloneAckProvenance` already mutated `acks` in memory, but returning without ever calling writeAckRecords threw
+// that healing away, so a rubber-stamp-guarded --ack-only that (correctly) refused to accept anything ALSO silently un-did
+// an otherwise-independent repair to the ledger's provenance. Same canonical-bytes rule H10's ackNothingToAccept applies
+// when there is nothing to accept at all: a ledger already equal to its own canonical bytes is left untouched (no spurious
+// diff); a non-canonical one — including one this run's backfill just healed — is rewritten and the run says so. This
+// never accepts a finding and the refusal's exit code is unchanged.
+int refuseUnmatchedAckOnly( std::string_view ackOnly, const std::string& acksFile,
+                            const gtl::btree_map<std::string, rw::quality::AckRecord>& acks, std::size_t findingCount )
+{
+    using namespace rw;
+    const bool nonCanonical = !acks.empty()
+        && quality::renderAckRecords( acks ) != docparse::detail::readRegularFile( "the quality-acks ledger", acksFile ).value_or( std::string() );
+    if( !nonCanonical )
+    {
+        rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing written\n", ackOnly, findingCount );
+        return 1;
+    }
+    // A failed heal is said, not folded into "nothing written" (CodeRabbit on #331): the same "could not write"
+    // ackNothingToAccept prints for the same failure. writeAckRecords has already DISCLOSEd on its answerRefused sink; the
+    // exit code is 1 either way.
+    if( !quality::writeAckRecords( acksFile, acks ) )
+    {
+        rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing accepted; could not write {} "
+                              "(it was not in canonical form, and re-serialising it failed)\n",
+                      ackOnly, findingCount, acksFile.c_str() );
+        return 1;
+    }
+    rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing accepted, but {} was not in canonical form "
+                          "(ack provenance backfill / legacy rows) and has been re-serialised\n",
+                  ackOnly, findingCount, acksFile.c_str() );
+    return 1;
+}
+
+// What one --quality-ack run counted, for writeAcceptedAcks's report.
+struct QdAckTally
+{
+    std::size_t findings     = 0;       // visible findings this run could accept
+    std::size_t alreadyAcked = 0;       // suppressed by an earlier ack (acked=)
+    std::size_t accepted     = 0;
+    std::size_t skipped      = 0;       // visible but not selected by --ack-only
+    bool        narrowed     = false;   // --ack-only was given
+};
+
+// Rewrite the ledger with this run's accepted findings and say what was written. Returns the exit code.
+int writeAcceptedAcks( const std::string& acksFile, const gtl::btree_map<std::string, rw::quality::AckRecord>& acks, const QdAckTally& tally,
+                       const rw::quality::Scope& scope, std::size_t outOfScopeCount )
+{
+    using namespace rw;
+    if( !quality::writeAckRecords( acksFile, acks ) )
+    {
+        rw::emitTo( stderr, "ripwire: could not write {}\n", acksFile.c_str() );
+        return 1;
+    }
+    if( tally.narrowed )
+    {
+        rw::emitTo( stderr, "ripwire: acknowledged {} of {} finding(s) ({} left UNACKED by --ack-only, {} already acked) → {}\n",
+                      tally.accepted, tally.findings, tally.skipped, tally.alreadyAcked, acksFile.c_str() );
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: acknowledged {} finding(s) ({} already acked) → {}\n", tally.findings, tally.alreadyAcked, acksFile.c_str() );
+    }
+    // P1 — the skip is DISCLOSED, never silent: the count of rows this ack deliberately did not
+    // touch is the whole reason the caller passed a scope, and a quiet success would leave them
+    // believing the ledger now covers the report they were looking at.
+    if( scope.active() && outOfScopeCount != 0 )
+    {
+        rw::emitTo( stderr, "ripwire: {} finding(s) OUT OF SCOPE for --scope={} were left unacked — not yours to accept "
+                              "(they are still in the report, under the out-of-scope element)\n",
+                      outOfScopeCount, scope.spec.c_str() );
+    }
+    return 0;
+}
+
+// WRITE ACKS — the --quality-ack arm: fold the VISIBLE findings --ack-only selects into the ledger (basis.acks, then the
+// file) instead of printing the report. Returns the exit code.
+int runQualityAckWrite( const rw::Config& cfg, const rw::quality::Scope& scope, const QdPartition& part, DeltaBasis& basis,
+                        const std::string& acksFile )
+{
+    using namespace rw;
+    const std::string_view ackOnly  = cfg.qualityAckOnly;
+    const auto             selected = [ & ]( const quality::Regression& r, bool inScope ) { return ackOnlySelects( ackOnly, r, inScope ); };
+
+    // P1 — THE RUBBER-STAMP GUARD (refuseForeignAckSelection owns the rule and the message).
+    if( const std::optional<int> refused = refuseForeignAckSelection( cfg, scope, part.outOfScope, basis.deltaRoot, selected ) )
+    {
+        return *refused;
+    }
+
+    // THE LEGACY-ACK BACKFILL, run on the map this process already holds the write lock over and
+    // BEFORE this run's own acks are folded in, so a row healed here can still be overwritten by a
+    // live measurement of the same finding in the loop below — measured always beats reconstructed,
+    // and ordering is what guarantees it rather than a check. It runs even when this run accepts
+    // NOTHING: healing the ledger's provenance is the same class of forward repair the identity
+    // remap already performs on every ack, and H10's ackNothingToAccept re-renders and notices.
+    // quality::backfillCloneAckProvenance owns the rule, what it refuses to touch, and why.
+    discloseAckBackfill( quality::backfillCloneAckProvenance( basis.acks, basis.cloneIdioms ) );
+
+    const std::string* const scopeSpec = scope.active() ? &scope.spec : nullptr;
+    QdAckTally               tally{ .findings = basis.regs.size(), .alreadyAcked = part.ackedCount, .narrowed = !ackOnly.empty() };
+    for( const quality::Regression& r : basis.regs )
+    {
+        if( !selected( r, /*inScope=*/true ) )
+        {
+            ++tally.skipped;
+            continue;
+        }
+        ++tally.accepted;
+        acceptFinding( basis.acks, basis.healing.cids.cidByKey, r, scopeSpec, cfg.qualityAckReason );
+    }
+    if( tally.accepted == 0 && tally.narrowed )
+    {
+        return refuseUnmatchedAckOnly( ackOnly, acksFile, basis.acks, tally.findings );
+    }
+    // H10: nothing to accept — leave a canonical ledger alone, heal a non-canonical one (ackNothingToAccept)
+    if( basis.regs.empty() )
+    {
+        return ackNothingToAccept( acksFile, basis.acks, scope, part.outOfScope.size() );
+    }
+    return writeAcceptedAcks( acksFile, basis.acks, tally, scope, part.outOfScope.size() );
+}
+
+// r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
+//   minor      — the materiality tier (unchanged axis).
+//   newSymbol  — findings that exist only because the code is NEW (quality.h's origin axis).
+//   gating     — the EXIT PREDICATE (quality::rowGates): major AND preexisting-worse, or a defect-shape
+//                format-arity row of any origin. Emitted as gating= so the header alone tells you
+//                the exit code (it used to be "regressions > minor").
+// preexisting-worse = regressions − new-symbol by construction (the axis is a partition), so the two
+// header counters always sum to regressions= — an invariant the gate asserts.
+struct QdCounts
+{
+    std::size_t minor = 0, newSymbol = 0, gating = 0, preexisting = 0;
+};
+QdCounts countQdRows( const std::vector<rw::quality::Regression>& regs )
+{
+    QdCounts c;
+    for( const rw::quality::Regression& r : regs )
+    {
+        c.minor     += r.isMinor ? 1 : 0;
+        c.newSymbol += r.isNewSymbol ? 1 : 0;
+        c.gating    += rw::quality::rowGates( r ) ? 1 : 0;
+    }
+    c.preexisting = regs.size() - c.newSymbol;
+    return c;
+}
+
+// The finished comparison every report step reads, READ-ONLY: the floor and the delta (basis), the range form's trees
+// (refs), the scope and what the partition and the ratchet decided. Built once, after the last write to any of them.
+// Every path and symbol downstream is spelled against basis.deltaRoot rather than against `root` (DeltaBasis's header).
+struct QdComparison
+{
+    const rw::Config&         cfg;
+    const std::string&        root;
+    const RefPairDelta&       refs;
+    const DeltaBasis&         basis;
+    const rw::quality::Scope& scope;
+    const QdPartition&        part;
+    const rw::IngestResult&   judgedIndex;     // the JUDGED tree's index: tree B in the range form, else the working tree
+    bool                      refPair;         // the range form (--quality-delta=A..B)
+    std::size_t               diffFileCount;   // P1.2: files the reserved diff token expanded to (0 = not used)
+};
+
+// Which spelling of a root disclosure an emitter wants.
+enum class QdFormat : std::uint8_t
+{
+    Xml,
+    Json
+};
+
+// One optional root disclosure of the --quality-delta answer, decided ONCE and spelled for both formats: `xml` is spliced
+// into the root element, `json` into the top-level object. Both are empty when the fact is absent — absent means "never
+// happened" or "not run", never 0. A field the JSON object has never carried keeps `json` empty.
+struct QdRootField
+{
+    std::string xml, json;
+
+    const std::string& in( QdFormat format ) const noexcept { return format == QdFormat::Xml ? xml : json; }
+};
+
+// A count as a root disclosure: ` name="N"` / `,"name":N` (rw::countField) when `present`, else absent.
+QdRootField qdCountField( std::string_view name, std::size_t count, bool present )
+{
+    return present ? QdRootField{ rw::countField( name, count, /*json=*/false ), rw::countField( name, count, /*json=*/true ) } : QdRootField{};
+}
+
+// Every root disclosure, each built once (qdRootFieldsOf). `stale` and `registerMacroExcluded` sit between the fixed
+// counts; the rest form the root's tail in qdRootTail's order.
+struct QdRootFields
+{
+    // qd-memory-degrade: stale= and register-macro-excluded= are absent (never 0) when their pass did not run
+    QdRootField stale, registerMacroExcluded;
+    QdRootField at;                      // at=: commit+dirty state; the range form omits it in XML and says null in JSON
+    QdRootField rangeRefs;               // R-I: base_ref= target_ref= churn= (RefPairDelta::attrs / jsonAttrs)
+    QdRootField identity;                // R1 IDENTITY: renames and acks re-filed by rename or content (quality::identityDisclosure)
+    QdRootField scopeDisclosure;         // P1/P1.4: --scope, out-of-scope and foreign-ack counts (quality::scopeDisclosure)
+    QdRootField configWarnings;          // F-13: .ripwire_config keys/names that did nothing
+    QdRootField baselineAbsorbed;        // H11: debt the honored sidecar absorbed
+    QdRootField baselineBadLines, acksBadLines;   // 2026-09-06: unparseable sidecar lines skipped (XML only, as always)
+    QdRootField headBasis;               // #228: which basis produced a git-HEAD floor (absent = the archived HEAD tree)
+    QdRootField declinedCallExcluded, valueRefExcluded;   // dead-code exemptions, absent at zero
+    QdRootField kinds;                   // qd-memory-degrade: kinds not run, why, the replay, the peak (kindsDisclosure)
+    QdRootField history;                 // hwh-fix4 (N1): history a gating kind could not read (unread_history=)
+    QdRootField ratchet;                 // D4: the ratchet's reference point and what it could not read
+    QdRootField shellCut;                // CR712-SHSTATUS-DEPTH: shell files whose defect-shape scan the nesting budget cut
+};
+
+// The root's tail in one order for both formats. `foldAttrs` (XML only) is the stale fold's stale_by_kind=/stale_next=,
+// which sits between the exclusion counts and the kinds disclosure.
+std::string qdRootTail( const QdRootFields& f, QdFormat format, std::string_view foldAttrs )
+{
+    std::string out;
+    for( const QdRootField* field : { &f.at, &f.rangeRefs, &f.identity, &f.scopeDisclosure, &f.configWarnings, &f.baselineAbsorbed,
+                                      &f.baselineBadLines, &f.acksBadLines, &f.headBasis, &f.declinedCallExcluded, &f.valueRefExcluded } )
+    {
+        out += field->in( format );
+    }
+    out += foldAttrs;
+    for( const QdRootField* field : { &f.kinds, &f.history, &f.ratchet, &f.shellCut } )
+    {
+        out += field->in( format );
+    }
+    return out;
+}
+
+// Everything one --quality-delta answer renders, computed before the format is chosen (computeQdReport): the JSON and XML
+// emitters read only this and the comparison it points at, so the two formats cannot disagree about a fact.
+struct QdReport
+{
+    const QdComparison&                         c;
+    std::vector<rw::quality::StaleAck>          staleAcks;
+    std::vector<rw::quality::StaleAck>          saRows;             // stale + foreign acks: the one <sa> / "sa" list
+    QdCounts                                    counts;
+    std::size_t                                 baselineAbsorbed = 0;
+    rw::quality::RegisterMacroConfigDiagnostics configDiag;         // its stderr lines are emitQdStderrLines'
+    KindsDisclosure                             kd;
+    QdRootFields                                root;
+
+    // The exit code every rendering returns (qualityDeltaExit): r26 — only a PREEXISTING-worse AND major regression gates
+    // (== gating=); a changed-files answer, or one whose gating history could not be read, is partial.
+    int exitCode() const noexcept { return qualityDeltaExit( counts.gating, c.refs.degraded || c.basis.historyUnread.any() ); }
+};
+
+// Every root disclosure of `rep`, each decided here once for both formats.
+QdRootFields qdRootFieldsOf( const QdReport& rep )
+{
+    using namespace rw;
+    const QdComparison& c     = rep.c;
+    const DeltaBasis&   basis = c.basis;
+    const bool          deadRan = !c.refPair || quality::kindSelected( c.refs.kinds, "dead-code" );   // dead-code's side counts exist only when it ran
+    const auto          fromPair = []( std::pair<std::string, std::string> p ) { return QdRootField{ std::move( p.first ), std::move( p.second ) }; };
+    std::vector<char>   esc;
+    QdRootFields        f;
+    f.stale                 = qdCountField( "stale", rep.staleAcks.size(), !c.refs.degraded );
+    f.registerMacroExcluded = qdCountField( "register-macro-excluded", basis.registerMacroExcluded, deadRan );
+    // R-I: the range form's list was not computed "at" any working-tree state — base_ref= and target_ref= are its anchor, so
+    // XML omits at= and JSON says null (never a fake sha); a non-git root is null too.
+    const std::string atValue = c.refPair ? std::string() : gitstamp::stampAt( c.root );
+    f.at                    = { atValue.empty() ? std::string() : " at=\"" + atValue + "\"",
+                                ",\"at\":" + ( atValue.empty() ? std::string( "null" ) : "\"" + atValue + "\"" ) };
+    f.rangeRefs             = { c.refs.attrs, c.refs.jsonAttrs };
+    f.identity              = fromPair( quality::identityDisclosure( basis.healing ) );
+    f.scopeDisclosure       = fromPair( quality::scopeDisclosure( c.scope, c.part.outOfScope.size(), c.part.scopedOutGating, c.part.foreignAcks.size(), c.diffFileCount ) );
+    f.configWarnings        = qdCountField( "config-warnings", rep.configDiag.total(), rep.configDiag.total() != 0 );
+    f.baselineAbsorbed      = qdCountField( "baseline_absorbed", rep.baselineAbsorbed, rep.baselineAbsorbed != 0 );
+    f.baselineBadLines      = { qdCountField( "baseline_bad_lines", basis.baseSel.sidecarBadLines, basis.baseSel.sidecarBadLines != 0 ).xml, {} };
+    f.acksBadLines          = { qdCountField( "acks_bad_lines", basis.acksBadLines, basis.acksBadLines != 0 ).xml, {} };
+    if( basis.headBasis != nullptr )
+    {
+        f.headBasis = { std::string( " head_basis=\"" ) + basis.headBasis + "\"", std::string( ",\"head_basis\":\"" ) + basis.headBasis + "\"" };
+    }
+    f.declinedCallExcluded  = qdCountField( "declined-call-excluded", basis.declinedCallExcluded, basis.declinedCallExcluded != 0 );
+    f.valueRefExcluded      = qdCountField( "value-ref-excluded", basis.valueRefExcluded, basis.valueRefExcluded != 0 );
+    f.kinds                 = { rep.kd.xml, rep.kd.json };
+    f.history               = fromPair( quality::historyUnreadDisclosure( basis.historyUnread ) );
+    f.ratchet               = { quality::ratchetAttrsXml( basis.extras, [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); } ),
+                                quality::ratchetAttrsJson( basis.extras ) };
+    f.shellCut              = qdCountField( "shell_cut", basis.extras.shellCut, basis.extras.shellCut != 0 );
+    return f;
+}
+
+// COMPUTE — the counts, the <sa> rows and every root disclosure of one answer. Prints nothing: its stderr lines are
+// emitQdStderrLines'. `staleAcks` are the ledger rows the judged tree no longer supports (the caller computes them, since
+// the bare form's snapshot writes the shared tree passes).
+QdReport computeQdReport( const QdComparison& c, std::vector<rw::quality::StaleAck> staleAcks, const std::string& baselineFile )
+{
+    using namespace rw;
+    QdReport rep{ .c = c, .staleAcks = std::move( staleAcks ) };
+    // P1.4 — the <sa> family now carries THREE whys, and the third is counted SEPARATELY: stale= means
+    // "this ack no longer applies", and a foreign ack applies fine — it is the SESSION that was wrong,
+    // not the target. Merging the rows into one list keeps the two emitters from growing a second loop
+    // each; keeping the COUNTS apart keeps stale= meaning what it has always meant.
+    rep.saRows = rep.staleAcks;
+    rep.saRows.insert( rep.saRows.end(), c.part.foreignAcks.begin(), c.part.foreignAcks.end() );
+    // M21(a): name the rows the tree can still name, against the SAME tree computeStaleAcks judged
+    // (tree B in the ref-pair form) — naming a stale ack after the working tree would print an identity
+    // the verdict was never computed from. Costs one walk over the judged symbols, and only when there are rows.
+    quality::stampStaleAckIdentity( rep.saRows, c.judgedIndex, c.refPair ? std::string_view( c.refs.target().root ) : std::string_view( c.cfg.rootPath ) );
+
+    rep.counts = countQdRows( c.basis.regs );
+    // H11 — the absorbed-debt stamp on the honored sidecar, or 0. Read ONLY when the sidecar is the floor
+    // in force: on the git-HEAD and ref-pair floors there is no pin whose contents could have absorbed
+    // anything, and printing a 0 there would define an attribute about a file this run did not use.
+    rep.baselineAbsorbed = ( c.basis.baseSel.marker == std::string_view( "sidecar" ) ) ? quality::readBaselineAbsorbed( baselineFile ) : 0;
+    // F-13 — the .ripwire_config diagnosis. #387: the inert-name test reads the JUDGED tree's index, which in the ref-pair
+    // form is tree B — the working tree is not indexed there at all (runQualityDeltaRangeBeforeIngest).
+    // qd-memory-degrade: not over a changed-files index, which cannot tell an inert name from one the tree defines (also_skipped=)
+    rep.configDiag = c.refs.degraded ? quality::RegisterMacroConfigDiagnostics{} : quality::diagnoseRegisterMacroConfig( c.judgedIndex, c.root );
+    // qd-memory-degrade: the kinds this answer did not run, why, and the replay — plus the peak, read once now that the
+    // comparison is done (kindsDisclosure).
+    rep.kd   = kindsDisclosure( c.cfg, c.refs, c.basis, c.refPair );
+    rep.root = qdRootFieldsOf( rep );
+    return rep;
+}
+
+// The human channel's lines of one answer, in the order they have always printed, before stdout is written: a stdout
+// answer that is partial, ran past the memory limit or gates says so first on the channel a human reads.
+void emitQdStderrLines( const QdReport& rep )
+{
+    using namespace rw;
+    const QdComparison& c = rep.c;
+    if( std::getenv( "RIPWIRE_STATS" ) )   // QD-ENVOY-TIME cost bound: Type-3 passes this call ran (test/qdtype3oncecheck.sh)
+    {
+        rw::emitTo( stderr, "ripwire: quality-passes type3_runs={} type3_pairs={}\n", gType3PassRuns.load( std::memory_order_relaxed ),
+                    gType3PassPairs.load( std::memory_order_relaxed ) );
+    }
+    if( rep.counts.gating == 0 && c.basis.historyUnread.any() )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta: not a clean pass - git history a gating kind needs could not be read ({}; a partial clone "
+                            "does not download it), so a gating row may be missing: exit 6\n", rep.root.history.xml.substr( 1 ).c_str() );
+    }
+    emitRegisterMacroConfigWarnings( rep.configDiag );   // F-13: the specific keys and names, never guessed at in the attribute
+    emitMemoryLines( rep.kd, c.refs );
+    // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
+    // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
+    // `$?` gets a number with no subject; this puts the WHICH on the channel a human reads, without
+    // touching the XML contract. Names the first gating row in the already-sorted list (deterministic).
+    // §A4 (minor): emitted BEFORE the format fork — the line is about the EXIT CODE, which both formats share, so it
+    // belongs to neither (under --json the fork used to return first, and a script reading `$?` got no subject).
+    emitQdGatingLine( c.basis.regs, rep.counts.gating, c.basis.deltaRoot );
+}
+
+// ── the ROW MODEL: one --quality-delta row's printed facts, decided once for the XML and JSON emitters ─────────────────
+// P1: both formats print the in-scope rows and the disclosed out-of-scope rows with this one model — a disclosed row
+// carries the identical attribute set, because nothing about a finding changes by belonging to someone else. `gating` is
+// the one difference: an out-of-scope row is not what the exit code fires on, and claiming gating on it would contradict
+// the header's own gating counter inside the same document.
+struct QdRowModel
+{
+    // duplication carries a member LIST (members=) + token count; dead-code and an api-surface row whose counts did not
+    // change are sym-only; every other kind carries was/now.
+    // B10.2e: api-surface carries two shapes — a brand-new/newly-public symbol (was=now=0, no param comparison to show)
+    // and a param-count contract-change (was/now = the real counts). was/now print whenever they differ from each other,
+    // so the contract-change case's was=/now= is visible while the new-symbol case's meaningless was="0" now="0" is
+    // omitted, matching its old sym-only shape.
+    enum class RowShape : std::uint8_t { Members, SymOnly, WasNow };
+    RowShape    shape     = RowShape::WasNow;
+    std::string sym;                   // quality::displaySym, unescaped: members= for Members, sym= otherwise
+    bool        gating    = false;     // P2.5: the exit predicate (quality::rowGates), stated per row; never on a disclosed row
+    // B10.2 — the optional classification facet: its attribute NAME is chosen by kind (quality::facetAttrName, the ONE
+    // kind→name table for every emitter, MCP included); r.facet carries only the VALUE. nullptr = no facet attribute.
+    const char* facetName = nullptr;
+    // r26 — the ORIGIN axis (quality::originValue): present only on new-symbol rows (absent = preexisting-worse), the same
+    // "mark the exception" convention sev= uses. origin= is what the exit gate reads.
+    const char* origin    = nullptr;
+};
+QdRowModel qdRowModel( const rw::quality::Regression& r, bool gatingAllowed, std::string_view deltaRoot )
+{
+    using namespace rw;
+    QdRowModel m;
+    m.shape     = r.kind == "duplication" ? QdRowModel::RowShape::Members
+                : ( r.kind == "dead-code" || ( r.kind == "api-surface" && r.was == r.now ) ) ? QdRowModel::RowShape::SymOnly
+                                                                                               : QdRowModel::RowShape::WasNow;
+    m.sym       = quality::displaySym( r.sym, deltaRoot );
+    m.gating    = gatingAllowed && quality::rowGates( r );
+    m.facetName = r.facet.empty() ? nullptr : quality::facetAttrName( r.kind );
+    m.origin    = quality::originValue( r );
+    return m;
+}
+
+// P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified selector, so
+// a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment. Only the sym-carrying shapes ask:
+// a Members row (duplication) names a SET and has no single body to open; nor does new-clone-of-reused-helper, whose sym= is
+// the same member list (CR721: its "last :: segment" was "a | b", and p= belongs to the first member). Nor does a
+// FILE-anchored defect-shape row (top-level code: sym= is the path, and --expand=FILE:FILE matches no symbol). Empty when
+// the row offers no body.
+std::string qdExpandNextAttr( const rw::quality::Regression& r, const QdRowModel& m )
+{
+    if( !m.gating || r.path.empty() || r.kind == "new-clone-of-reused-helper" || ( r.kind == "defect-shape" && r.sym == r.path ) )
+    {
+        return std::string();
+    }
+    const std::size_t sep  = r.sym.rfind( "::" );
+    const std::string bare = sep == std::string::npos ? r.sym : r.sym.substr( sep + 2 );
+    return rw::nextAttrXml( rw::nextFlag( "--expand=", r.path + ":" + bare ) );
+}
+
+// One XML <r> row. The attribute order is the contract every gate reads: kind/sym (or members/tokens), was/now with bar=,
+// then sev= facet= origin= and the P2.5 pair p= gating= (appended after every pre-r27 attribute), then the per-kind tail.
+// `ex` is the document's XML escaper.
+template<class Escape>
+void emitQdXmlRow( std::FILE* out, const rw::quality::Regression& r, const QdRowModel& m, const Escape& ex )
+{
+    using namespace rw;
+    // sev="minor" marks a below-materiality delta (never gates); absent = major.
+    std::string common = r.isMinor ? " sev=\"minor\"" : "";
+    if( m.facetName != nullptr )
+    {
+        common += std::string( " " ) + m.facetName + "=\"" + ex( r.facet ) + "\"";   // escaped: a ratchet facet is a tag name
+    }
+    if( m.origin != nullptr )
+    {
+        common += std::string( " origin=\"" ) + m.origin + "\"";
+    }
+    // P2.5 — p="path:line": sym= is a canonical id whose display tail is often a bare one-letter local (`sym="cc"`), i.e.
+    // ungreppable. Omitted, never faked, when no locator was resolvable. gating="1" marks exactly the rows the header's
+    // gating= counts — until r27 a gating row was identifiable only by the ABSENCE of sev="minor" and origin=.
+    if( !r.path.empty() )
+    {
+        common += " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
+    }
+    common += m.gating ? " gating=\"1\"" : "";
+    switch( m.shape )
+    {
+        case QdRowModel::RowShape::Members:
+            rw::emitTo( out, "<r kind=\"duplication\" members=\"{}\" tokens=\"{}\"{}{}/>", ex( m.sym ), r.now, common,
+                        quality::tangleRowAttrs( r, /*json=*/false, ex ) );   // QD-IDIOM-ELEMTYPE: why= when the operand path demoted it
+            return;
+        case QdRowModel::RowShape::SymOnly:
+            rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\"{}{}/>", r.kind, ex( m.sym ), common, qdExpandNextAttr( r, m ) );
+            return;
+        case QdRowModel::RowShape::WasNow:
+            // P8 (L7): bar= is the threshold beside the number it judges, on the four numeric kinds (quality.h's
+            // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend. QD-ENTRY-CEILING: ceiling= is the
+            // ceiling a NEW function reached, beside the gating= it causes; QD-UNCHECKED-STATUS: call= is the call whose
+            // status a defect-shape unchecked-status row drops; QD-TANGLE: why= / fix= / locals=. All present-only.
+            rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}/>", r.kind, ex( m.sym ),
+                        quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ), qdBarAttrOf( r.kind ), common,
+                        r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string(), presentXmlAttr( "call", r.call, ex ),
+                        qdExpandNextAttr( r, m ), quality::tangleRowAttrs( r, /*json=*/false, ex ) );
+            return;
+    }
+}
+
+// One JSON row object: the keys mirror the XML attribute names, in the order the --json contract has always used.
+void emitQdJsonRow( std::FILE* out, const rw::quality::Regression& r, const QdRowModel& m )
+{
+    using namespace rw;
+    rw::emitTo( out, "{{\"kind\":\"{}\"", jsonStr( r.kind ) );
+    if( m.shape == QdRowModel::RowShape::Members )
+    {
+        rw::emitTo( out, ",\"members\":\"{}\",\"tokens\":{}", jsonStr( m.sym ), r.now );
+    }
+    else
+    {
+        rw::emitTo( out, ",\"sym\":\"{}\"", jsonStr( m.sym ) );
+    }
+    if( m.shape == QdRowModel::RowShape::WasNow )
+    {
+        rw::emitTo( out, ",\"was\":{},\"now\":{}", quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ) );
+    }
+    if( !r.path.empty() )
+    {
+        rw::emitTo( out, ",\"p\":\"{}:{}\"", jsonStr( r.path ), r.line ); // P2.5 locator
+    }
+    rw::emitRaw( out, m.gating ? ",\"gating\":true" : "" );   // P2.5 — the exit predicate, stated per row
+    rw::emitRaw( out, r.isMinor ? ",\"sev\":\"minor\"" : "" );
+    if( m.facetName != nullptr )
+    {
+        rw::emitTo( out, ",\"{}\":\"{}\"", m.facetName, jsonStr( r.facet ) );
+    }
+    if( m.origin != nullptr )
+    {
+        rw::emitTo( out, ",\"origin\":\"{}\"", m.origin ); // absent = preexisting-worse (mirrors the XML)
+    }
+    if( r.ceiling != 0 )
+    {
+        rw::emitTo( out, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
+    }
+    rw::emitRaw( out, presentJsonMember( "call", r.call ).c_str() );   // QD-UNCHECKED-STATUS (mirrors the XML)
+    std::fputs( quality::tangleRowAttrs( r, /*json=*/true, []( std::string_view s ) { return jsonStr( s ); } ).c_str(), out );   // QD-TANGLE (mirrors the XML)
+    rw::emitRaw( out, "}" );
+}
+
+// A comma-separated run of JSON rows (the "r" array's body, or "oos"'s).
+void emitQdJsonRows( std::FILE* out, const std::vector<rw::quality::Regression>& rows, bool gatingAllowed, std::string_view deltaRoot )
+{
+    bool first = true;
+    for( const rw::quality::Regression& r : rows )
+    {
+        rw::emitRaw( out, first ? "" : "," );
+        first = false;
+        emitQdJsonRow( out, r, qdRowModel( r, gatingAllowed, deltaRoot ) );
+    }
+}
+
+// RENDER, --json — same regressions, keys mirror the XML attr names (kind/sym/members/tokens/was/now/sev/churn/surface).
+// jsonUnsupportedVerb already refused --quality-baseline/--quality-ack, so reaching here with cfg.json means the plain
+// --quality-delta report. Every optional root member is the JSON spelling of a QdRootField.
+void emitQualityDeltaJson( const QdReport& rep )
+{
+    using namespace rw;
+    const QdComparison& c     = rep.c;
+    const DeltaBasis&   basis = c.basis;
+    rw::emitTo( stdout, "{{\"baseline\":\"{}\",\"regressions\":{},\"minor\":{},\"acked\":{}{},"
+                 "\"preexisting-worse\":{},\"new-symbol\":{},\"gating\":{}{},\"api-new-surface\":{}{},\"r\":[",
+                 jsonStr( basis.baseSel.marker ), basis.regs.size(), rep.counts.minor, c.part.ackedCount, rep.root.stale.json,
+                 rep.counts.preexisting, rep.counts.newSymbol, rep.counts.gating, rep.root.registerMacroExcluded.json, basis.apiNewSurface,
+                 qdRootTail( rep.root, QdFormat::Json, {} ) );
+    emitQdJsonRows( stdout, basis.regs, /*gatingAllowed=*/true, basis.deltaRoot );
+    rw::emitRaw( stdout, "]," );
+    if( c.scope.active() )
+    {
+        // The JSON sibling of the XML out-of-scope element: a SEPARATE array, never a flag on a row
+        // in "r", so a consumer that reads "r" and checks "gating" cannot accidentally count someone
+        // else's debt as this run's. Emitted (possibly empty) whenever a scope was given, so its
+        // absence means "no scope", never "no disclosed rows".
+        rw::emitRaw( stdout, "\"oos\":[" );
+        emitQdJsonRows( stdout, c.part.outOfScope, /*gatingAllowed=*/false, basis.deltaRoot );
+        rw::emitRaw( stdout, "]," );
+    }
+    std::fputs( quality::staleAcksJsonArray( rep.saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows
+    std::fputs( quality::improvedJson( basis.extras.improved, basis.deltaRoot ).c_str(), stdout );   // QD-CREDIT-ROW (absent when none)
+    rw::emitRaw( stdout, "}" );
+}
+
+// idea #11 — THE CLEAN-TREE PAYLOAD. A regression-free answer folds its stale-ack rows to counts (stale= and
+// stale_by_kind=), and stale_next= is the call that prints them; on a tree that IS its HEAD (head_basis="identity": the
+// floor is this tree's own snapshot) with nothing else to disclose, the verdict is the whole answer. Foreign-scope rows are
+// never folded: they are about findings suppressed RIGHT NOW. --show-stale restores today's document byte for byte, so
+// every folded row and attribute is one flag away (PROCESS rule 5).
+struct QdStaleFold
+{
+    bool        verdictOnly = false;   // the identity-tree VERDICT: the root line alone (qdNothingElseToDisclose)
+    std::string attrs;                 // stale_by_kind= + stale_next=, on the folded root
+};
+
+// The identity-tree verdict's precondition: a working-tree answer whose floor is this tree's own snapshot
+// (head_basis="identity") with no scope, foreign or accepted ack, config warning, absorbed debt, new public surface,
+// unreadable sidecar line or shell scan the nesting budget cut (shell_cut=, CR721) to disclose — so the root line alone
+// loses nothing.
+bool qdNothingElseToDisclose( const QdReport& rep )
+{
+    const QdComparison& c     = rep.c;
+    const DeltaBasis&   basis = c.basis;
+    return !c.refPair && basis.headBasis != nullptr && std::string_view( basis.headBasis ) == "identity"
+        && !c.scope.active() && c.part.foreignAcks.empty() && c.part.ackedCount == 0 && rep.configDiag.total() == 0 && rep.baselineAbsorbed == 0
+        && basis.apiNewSurface == 0 && basis.baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0 && basis.extras.shellCut == 0;
+}
+
+// The stale fold this answer could ship (whether it PAYS is emitQualityDeltaXml's to measure), or nullopt when it has a
+// regression, an out-of-scope row, no stale ack, or --show-stale.
+template<class Escape>
+std::optional<QdStaleFold> qdStaleFold( const QdReport& rep, const Escape& ex )
+{
+    using namespace rw;
+    const QdComparison& c = rep.c;
+    if( !c.basis.regs.empty() || !c.part.outOfScope.empty() || c.cfg.showStale || rep.staleAcks.empty() )
+    {
+        return std::nullopt;
+    }
+    const std::string kinds  = quality::staleByKindValue( rep.staleAcks );   // shared with the MCP twin (lane lean2b)
+    // A range replay names the two commits this answer compared (CR721), not the symbolic range: HEAD~1..HEAD followed after
+    // HEAD moved would compare another pair. It carries the --quality-kinds selector too, so the replay lists the stale acks
+    // of the kinds this answer counted and no others. The working-tree replay stays the bare verb.
+    std::string replay = c.refPair ? "--quality-delta=" + c.refs.baseSha + ".." + c.refs.targetSha : std::string( "--quality-delta" );
+    if( c.refPair && !c.cfg.qualityKinds.empty() )
+    {
+        replay += " " + rw::nextFlag( "--quality-kinds=", c.cfg.qualityKinds );
+    }
+    if( c.scope.active() )
+    {
+        replay += " " + rw::nextFlag( "--scope=", c.cfg.qualityScope );
+    }
+    return QdStaleFold{ .verdictOnly = qdNothingElseToDisclose( rep ),
+                        .attrs       = " stale_by_kind=\"" + ex( kinds ) + "\"" + rw::nextAttrXml( replay + " --show-stale", "stale_next" ) };
+}
+
+// The whole XML document over one FILE*: legend, root, rows, improvements, the out-of-scope disclosure and the <sa> rows.
+// `fold` null renders every stale row; otherwise only the foreign-scope rows, with fold->attrs on the root.
+void emitQdXmlDocument( std::FILE* out, const QdReport& rep, const QdStaleFold* fold )
+{
+    using namespace rw;
+    const QdComparison& c     = rep.c;
+    const DeltaBasis&   basis = c.basis;
+    const RefPairDelta& refs  = c.refs;
+    std::vector<char>   esc;
+    const auto          ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const std::vector<quality::StaleAck>& served = fold != nullptr ? c.part.foreignAcks : rep.saRows;
+    // the legend is passed the same values the root element below prints, so "the legend defines what the header emits" is
+    // read off one set of values rather than restated as a second condition that could drift from it
+    emitQualityDeltaLegend( { .marker = basis.baseSel.marker, .refPair = c.refPair, .identityAttrs = rep.root.identity.xml,
+                              .anySaRow = !served.empty(), .anyAcked = c.part.ackedCount > 0,
+                              .anyRegisterMacro = basis.registerMacroExcluded > 0, .anyRegisterMacroWarning = rep.configDiag.total() > 0,
+                              .rows = basis.regs, .disclosedRows = c.part.outOfScope,
+                              .scoped = c.scope.active() || !c.part.foreignAcks.empty(), .anyForeignAck = !c.part.foreignAcks.empty(),
+                              .baselineAbsorbed = rep.baselineAbsorbed, .headBasis = basis.headBasis,
+                              .anyDeclinedCallExcluded = basis.declinedCallExcluded > 0, .anyValueRefExcluded = basis.valueRefExcluded > 0,
+                              .staleCollapsed = fold != nullptr, .kindsSkipped = refs.kinds != quality::kAllKinds, .degraded = refs.degraded,
+                              .memoryStopped = !refs.memoryStop.empty(), .memoryPeak = rep.kd.peakOver != 0,
+                              .memorySkippedShare = rep.kd.memorySkipped != 0 && refs.selected != quality::kAllKinds,
+                              .historyUnread = basis.historyUnread.any(), .anyRustTestExcluded = basis.rustTestExcluded,
+                              .staleTree = refs.staleTree, .ratchetRead = !basis.extras.ratchetRef.empty(),
+                              .anyImproved = !basis.extras.improved.empty(), .shellCut = basis.extras.shellCut > 0 }, out );
+    // at= anchors this regression list to the commit (+dirty state) it was computed against (QdRootFields::at). R-I: the range
+    // form's base_ref= and target_ref= carry FULL shas because a wave measurement gets quoted into handoffs where a 9-char
+    // prefix is one collision from unverifiable.
+    rw::emitTo( out, "<quality-delta baseline=\"{}\" regressions=\"{}\" minor=\"{}\" acked=\"{}\"{} preexisting-worse=\"{}\" new-symbol=\"{}\" gating=\"{}\"{} api-new-surface=\"{}\"{}>",
+                 basis.baseSel.marker, basis.regs.size(), rep.counts.minor, c.part.ackedCount, rep.root.stale.xml, rep.counts.preexisting,
+                 rep.counts.newSymbol, rep.counts.gating, rep.root.registerMacroExcluded.xml, basis.apiNewSurface,
+                 qdRootTail( rep.root, QdFormat::Xml, fold != nullptr ? std::string_view( fold->attrs ) : std::string_view() ) );
+    for( const quality::Regression& r : basis.regs )
+    {
+        emitQdXmlRow( out, r, qdRowModel( r, /*gatingAllowed=*/true, basis.deltaRoot ), ex );
+    }
+    std::fputs( quality::improvedXml( basis.extras.improved, basis.deltaRoot, ex ).c_str(), out );   // QD-CREDIT-ROW: never a row, never gating
+    if( c.scope.active() )
+    {
+        // P1 — the DISCLOSURE half. Dropping these rows would make a scoped report a quieter lie than
+        // the unscoped one it replaces: the debt is real, it is in the same tree, and it will be in
+        // someone's report. So they are printed, in their own element, marked non-gating, with the one
+        // sentence a reader needs written where they meet it. Emitted even when EMPTY — an absent
+        // element then means "no scope was given", never "nobody else has anything open".
+        rw::emitTo( out, "<out-of-scope n=\"{}\" would-gate=\"{}\" note=\"not yours - do not ack: these rows lie outside the scope this run named. "
+                     "They are disclosed rather than hidden, they never gate this exit code, and the ack refuses to write them.\">",
+                     c.part.outOfScope.size(), c.part.scopedOutGating );
+        for( const quality::Regression& r : c.part.outOfScope )
+        {
+            emitQdXmlRow( out, r, qdRowModel( r, /*gatingAllowed=*/false, basis.deltaRoot ), ex );
+        }
+        rw::emitRaw( out, "</out-of-scope>" );
+    }
+    // L2 — one <sa> row per stale ack (quality::staleAcksXml). M21(a): the escaper is passed in because sym= carries a
+    // canonical id (corpus text), unlike the closed-vocabulary kind=/why=.
+    std::vector<char> saEsc;
+    std::fputs( quality::staleAcksXml( served, [ & ]( std::string_view t ) { return std::string( escapeXml( t, saEsc ) ); } ).c_str(), out );
+    rw::emitRaw( out, "</quality-delta>" );
+}
+
+// The identity-tree VERDICT (QdStaleFold::verdictOnly): the root line alone.
+void emitQdVerdict( std::FILE* out, const QdReport& rep, const QdStaleFold& fold )
+{
+    rw::emitTo( out, "<!-- ripwire quality-delta: the tracked files ARE their git HEAD (head_basis=\"identity\"), so the floor (baseline= "
+                     "names it) is this tree's own snapshot and nothing that existed can be worse: regressions= and gating= are 0, and this line stands in "
+                     "for the full document because it saves at least a quarter of the bytes. stale= counts ack "
+                     "ledger rows whose target no longer applies (never gating), by kind in stale_by_kind=; stale_next= is the call "
+                     "that prints them with the full header (its exclusion and rename counts included). at=: commit+dirty+shallow. -->"
+                     "<quality-delta baseline=\"{}\" regressions=\"0\" gating=\"0\" stale=\"{}\"{} head_basis=\"identity\"{}></quality-delta>",
+                rep.c.basis.baseSel.marker, rep.staleAcks.size(), rep.root.at.xml, fold.attrs );
+}
+
+// RENDER, XML.
+// §B7.1 (CA4) — the heading used to open "only what changed for the WORSE vs .ripwire_quality_baseline", which is FALSE in
+// every state but one: three of the five floors this verb can use are not that file, and in one of them the file was judged
+// stale and DELETED from the user's tree during this very run. The floor actually used is named by baseline= on the root,
+// so the heading points at that attribute instead of asserting a floor.
+// 2026-09-02 (lane B): the marker states are still defined on the first screen — the only place a reader meets them — but
+// ONE state per run, the one in force, rather than all five on every call (emitQualityDeltaLegend).
+// Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter
+// by its margin, as written AND as the compact layer delivers it). The whole XML document is one renderer over a FILE*,
+// so both candidates are rendered and measured, and the full document wins a fold that does not pay or a failed render
+// (fx, dirty tree, one stale ack: 1512 B folded vs 1481 B full).
+void emitQualityDeltaXml( const QdReport& rep )
+{
+    using namespace rw;
+    std::vector<char>                esc;
+    const std::optional<QdStaleFold> fold = qdStaleFold( rep, [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); } );
+    if( !fold )
+    {
+        emitQdXmlDocument( stdout, rep, /*fold=*/nullptr );
+        return;
+    }
+    const Rendered full   = renderToString( [ & ]( std::FILE* f ) { emitQdXmlDocument( f, rep, /*fold=*/nullptr ); } );
+    const Rendered folded = renderToString( [ & ]( std::FILE* f )
+                                            {
+                                                if( fold->verdictOnly ) { emitQdVerdict( f, rep, *fold ); }
+                                                else { emitQdXmlDocument( f, rep, &*fold ); }
+                                            } );
+    if( !full.ok || !folded.ok )
+    {
+        // renderToString DISCLOSEd the failed buffer; the full document is the superset, written straight to stdout
+        emitQdXmlDocument( stdout, rep, /*fold=*/nullptr );
+        return;
+    }
+    const std::string& chosen = foldPays( folded.text, full.text ) ? folded.text : full.text;   // compactlegend.h: the margin and why
+    std::fwrite( chosen.data(), 1, chosen.size(), stdout );
+}
+
+// --quality-baseline / --quality-delta (the convergence-loop oracle): snapshot ccx + clone groups + dead candidates to
+// .ripwire_quality_baseline; then report ONLY what a change made WORSE vs it. The "delta not absolute" discipline — a refine
+// loop targets the regression it introduced, not absolute numbers (the defense against metric-gaming). exit 2 if any new
+// debt, like --arch. The phases: resolve the floor and the delta (resolveDeltaBasis), the scope and the ack ratchet
+// (applyScopeAndAcks), then either WRITE ACKS (runQualityAckWrite) or COMPUTE the report (computeQdReport), print its
+// stderr lines (emitQdStderrLines) and RENDER it as JSON or XML.
 std::optional<int> runQualityDelta( const MainDispatch& d )
 {
     using namespace rw;
-    const Config&                     cfg          = d.cfg;
-    const IngestResult&               ing          = d.ing;
-    const Graph&                      g            = d.g;
-    const std::string&                root         = d.root;
-
-    // --quality-baseline / --quality-delta (the convergence-loop oracle): snapshot ccx + clone groups + dead
-    // candidates to .ripwire_quality_baseline; then report ONLY what a change made WORSE vs it. The "delta not
-    // absolute" discipline — a refine loop targets the regression it introduced, not absolute numbers (the
-    // defense against metric-gaming). exit 2 if any new debt, like --arch.
-    if( cfg.qualityBaseline || cfg.qualityDelta )
+    const Config& cfg = d.cfg;
+    if( !cfg.qualityBaseline && !cfg.qualityDelta )
     {
-        // D1 fix (HIGH): resolve BOTH sidecars against the analyzed ROOT, not the process CWD —
-        // see quality::rootQualifiedSidecar's comment for why a bare relative filename is unsafe here
-        // (a foreign cwd's sidecar could be silently rewritten, or even deleted by the stale-baseline
-        // self-heal below). Computed once; every read/write/remove site in this block uses it.
-        const std::string baselineFile = quality::baselinePath( root );
-        const std::string acksFile     = quality::acksPath( root );
-
-        if( cfg.qualityBaseline )
-        {
-            return runQualityBaselinePin( d, baselineFile, acksFile );
-        }
-
-        // Precedence for the baseline: (1) an explicit `.ripwire_quality_baseline` sidecar (from
-        // --quality-baseline) wins whenever it is pinned at the CURRENT HEAD — the mid-task convergence loop
-        // (baseline once, edit, re-check) is unchanged; (2) else — no sidecar, or a STALE one (see R3 below) —
-        // if the root is a git repo with a HEAD tree, auto-baseline against HEAD so the "before I push" loop
-        // works with no start-of-task ritual (T0.1); (3) else degrade to the exit-1 "run --quality-baseline
-        // first" guidance (non-git / unborn / detached-no-tree — unchanged).
-        //
-        // STALENESS + the self-heal now live in ONE place, quality::selectBaseline — R3 owner ruling
-        // (2026-07-29): a sidecar whose pinned sha != the CURRENT HEAD sha is STALE, full stop. The B10.1b
-        // "reachable ancestor is a deliberately-pinned floor" carve-out this arm used to apply (gitIsAncestor)
-        // is REVOKED: a parallel session's sidecar pinned at a commit that merely happened to be an ancestor of
-        // this session's HEAD made THIS arm report 31 phantom regressions while the MCP quality_delta verb —
-        // same binary, same repo, same second — correctly reported zero. That divergence was only possible
-        // because each arm carried its own copy of the test; there is now exactly one, in quality.h.
-        //
-        // What remains this arm's own POLICY is the `removeStaleFile=true` argument: the stale sidecar is
-        // silently UNLINKED (best-effort) so the NEXT run sees no file at all rather than rediscovering the
-        // same dead pin, and the ONLY record is the `baseline=` XML attribute ("git-HEAD (stale sidecar
-        // removed)") — no stderr spam, which is the B10.1b noise fix that survives the ruling intact. The
-        // read-only MCP arm passes false and reports "…ignored" instead. When the unlink FAILS (read-only
-        // parent dir) this arm degrades to the read-only story — marker "…ignored", one DISCLOSE
-        // from the seam — because the pin is still on disk; `baseSel.isStaleFileOnDisk()` is the fact, and the
-        // fatal message below words itself from it rather than from the intent.
-        // `refs` is declared HERE because it owns both materialized trees' teardown and they must outlive
-        // every read of `regs` (DeltaBasis's header states that rule, and why the emitters below spell every
-        // path and symbol against basis.deltaRoot rather than against `root`).
-        // F-04 (round-4 audit) — SERIALIZE THE ACK LEDGER'S READ-MODIFY-WRITE, cross-process.
-        //
-        // --quality-ack reads the whole ledger (inside resolveDeltaBasis just below — the heal has to happen
-        // before computeDelta), folds this run's accepted findings into that map, then rewrites the file from
-        // it. Nothing serialized that. Three sessions acking DISJOINT rows in one shared checkout — the exact
-        // scenario --scope exists for — lost two of the three acks on 8 of 8 measured runs, because whichever
-        // process rewrote last overwrote a map the other two had already published into.
-        //
-        // The lock therefore has to span the READ as well as the write, which is why it is taken HERE and not
-        // inside writeAckRecords: a lock held only around the final rewrite still lets two processes read the
-        // same stale map first and then take turns clobbering. Engaged ONLY under --quality-ack — a read-only
-        // --quality-delta never waits, never creates the lockfile, and is byte-for-byte the run it always was.
-        // RAII: released when this function returns, on every path including the refusals below. quality.h's
-        // SidecarWriteLock has the lockfile's location (per-user cache dir, never a repo-tree sidecar), the
-        // wait budget, and the honest limits.
-        std::optional<quality::SidecarWriteLock> ackLock;
-        if( cfg.qualityAck )
-        {
-            ackLock.emplace( acksFile );
-        }
-
-        const bool   refPair = !cfg.qualityDeltaRange.empty();
-        RefPairDelta refs;
-        DeltaBasis   basis;
-        if( const std::optional<int> refused = applyKindSelector( cfg, refs ) )
-        {
-            return refused;
-        }
-        if( const std::optional<int> refused = resolveDeltaBasis( d, baselineFile, refs, basis ) )
-        {
-            return refused;
-        }
-        const quality::BaselineSelection& baseSel   = basis.baseSel;
-        const std::string&                deltaRoot = basis.deltaRoot;
-        std::vector<quality::Regression>&  regs     = basis.regs;
-
-        // ── P1 SCOPE — the OWNERSHIP partition for a working tree with several writers in it ─────────────
-        quality::Scope                   scope = quality::parseScope( cfg.qualityScope );
-        std::vector<quality::Regression> outOfScope;
-        std::size_t                      diffFileCount = 0;   // P1.2: 0 = the reserved diff token was not used
-        const IngestResult&              judged        = refPair ? refs.target().ing : ing;
-        if( const std::optional<int> refused = expandScopeDiff( scope, refPair, judged, root, deltaRoot, diffFileCount ) )
-        {
-            return refused;
-        }
-        if( const std::optional<int> refused = refuseUnusableScope( cfg, scope, judged, deltaRoot, refs.scopeFiles() ) )
-        {
-            return refused;
-        }
-
-        // Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
-        // reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
-        // magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
-        // into that file instead of printing the report (accepting what previous acks already hid would be
-        // a silent blanket ack — only what the agent can see right now is what it can accept).
-        // R1 IDENTITY: the ledger was read and HEALED inside resolveDeltaBasis (it had to be — the baseline
-        // half of the same healing has to precede computeDelta), so this arm takes the already-current map
-        // rather than re-reading the file and undoing it.
-        gtl::btree_map<std::string, quality::AckRecord>& acks = basis.acks;
-        quality::countAckRescues( regs, acks, basis.healing.ackRemap,
-                                  basis.healing.ackedByRename, basis.healing.ackedByContent );
-        // P1.4 PROVENANCE — the foreign-ack sweep reads the PRE-ratchet list on purpose (computeForeignAcks'
-        // header states why: the question is about acks that are suppressing something right now).
-        const std::vector<quality::StaleAck> foreignAcks = quality::computeForeignAcks( regs, acks );
-        // P1 — the partition runs BEFORE the ratchet so acked="N" counts THIS scope's suppressions rather
-        // than the whole tree's (partitionByScope owns the rest of the rule).
-        const std::size_t scopedOutGating = partitionByScope( scope, regs, outOfScope, acks );
-        const std::size_t ackedCount = quality::applyAckRatchet( regs, acks );
-        if( cfg.qualityAck )
-        {
-            // --ack-only=SUBSTR[,SUBSTR]: ack a SUBSET instead of everything on screen. Without it, the only
-            // way to accept one deliberate contract change was to accept the whole report — which is how a
-            // ratchet quietly becomes a rubber stamp. A finding matches if a substring occurs in its kind or
-            // in its canonical id (so "api-surface", "src/quality.h", or one exact id all work).
-            // P1: `inScope` is a parameter rather than a capture because this predicate is asked about BOTH
-            // halves of the partition — once to choose what to write, once to detect an ack selection that
-            // NAMES a row belonging to someone else. It is also what keeps the `gating` pseudo-token honest
-            // under a scope: an out-of-scope row does not gate, so `gating` must not select it.
-            const auto ackSelected = [ & ]( const quality::Regression& r, bool inScope ) -> bool
-            {
-                if( cfg.qualityAckOnly.empty() )
-                {
-                    return true;
-                }
-                std::string_view rest = cfg.qualityAckOnly;
-                while( !rest.empty() )
-                {
-                    const std::size_t     comma = rest.find( ',' );
-                    const std::string_view pat  = rest.substr( 0, comma );
-                    // kind, canonical id, or FACET. The facet is what makes this precise enough to be honest:
-                    // "api-surface" also covers the never-gating new-symbol rows, so acking by kind would
-                    // sweep in 59 findings to accept 8. --ack-only=contract-change accepts exactly the
-                    // deliberate ones. The pseudo-token "gating" selects whatever would actually exit 2.
-                    const bool gates = quality::rowGates( r ) && inScope;
-                    if( !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) || ( pat == "gating" && gates ) ) )
-                    {
-                        return true;
-                    }
-                    if( comma == std::string_view::npos )
-                    {
-                        break;
-                    }
-                    rest = rest.substr( comma + 1 );
-                }
-                return false;
-            };
-
-            // P1 — THE RUBBER-STAMP GUARD (refuseForeignAckSelection owns the rule and the message).
-            if( const std::optional<int> refused = refuseForeignAckSelection( cfg, scope, outOfScope, deltaRoot, ackSelected ) )
-            {
-                return refused;
-            }
-
-            // THE LEGACY-ACK BACKFILL, run on the map this process already holds the write lock over and
-            // BEFORE this run's own acks are folded in, so a row healed here can still be overwritten by a
-            // live measurement of the same finding in the loop below — measured always beats reconstructed,
-            // and ordering is what guarantees it rather than a check. It runs even when this run accepts
-            // NOTHING: healing the ledger's provenance is the same class of forward repair the identity
-            // remap already performs on every ack, and H10's ackNothingToAccept re-renders and notices.
-            // quality::backfillCloneAckProvenance owns the rule, what it refuses to touch, and why.
-            const quality::AckBackfill backfilled = quality::backfillCloneAckProvenance( acks, basis.cloneIdioms );
-            // DISCLOSED, never silent: a reconstructed row is a weaker claim than a measured one, so a reader
-            // is told how many rows just changed confidence class and how many could not be healed at all.
-            // The unresolved count is a FLOOR on what is missing, not a total of what is wrong: a member set
-            // that no longer clones in THIS tree is unanswerable here, not proven gone.
-            if( backfilled.resolved > 0 || backfilled.refreshed > 0 || backfilled.unverified > 0 || backfilled.unresolved > 0 )
-            {
-                rw::emitTo( stderr, "ripwire: ack provenance backfill — {} clone row(s) reconstructed from the current tree, {} re-derived, {} left UNVERIFIED (their group was not found here — a floor, not proof it is gone), "
-                                      "{} left legacy (member set not found cloning here — a floor, not proof it is gone), {} ineligible (no current-tree fact answers their kind), {} already measured (left alone). "
-                                      "prov=recon is what the idiom is NOW, as of the last run that could check it — not what was measured when the row was accepted.\n",
-                              backfilled.resolved, backfilled.refreshed, backfilled.unverified, backfilled.unresolved, backfilled.ineligible, backfilled.measured );
-            }
-
-            std::size_t ackWritten = 0, ackSkipped = 0;
-            for( const quality::Regression& r : regs )
-            {
-                if( !ackSelected( r, /*inScope=*/true ) ) { ++ackSkipped;  continue; }
-                ++ackWritten;
-                // P0.3: the ack IDENTITY is ackKindToken, not the bare kind — a zero-magnitude finding
-                // (was==now==0: dead-code, api-surface tier A) acks per ORIGIN, so acking the never-gating
-                // new-symbol row can no longer blank-check the gating contract-change row on the same symbol.
-                const std::string   ackKind = quality::ackKindToken( r );
-                quality::AckRecord& rec     = acks[ quality::ackMapKey( ackKind, r.key ) ];
-                // R1 IDENTITY: stamp the finding's SCRUBBED CONTENT ID alongside the key, so this ack can
-                // still be found after a move git records no rename for. Absent (0) for the two clone kinds —
-                // their key is a member-SET hash with no single body behind it — and the row is then written
-                // exactly as it is today. A REFRESH, not a preserve: re-acking a finding re-reads the body, so
-                // the stored cid always describes the code as accepted, never as it was two edits ago.
-                const auto          cidIt   = basis.healing.cids.cidByKey.find( r.key );
-                const std::uint64_t cid     = ( cidIt == basis.healing.cids.cidByKey.end() ) ? 0u : cidIt->second;
-                // P1.4 PROVENANCE: `by` follows the SAME rule the reason does one line down — set from this
-                // run when this run supplies one, PRESERVED otherwise. A later scope-less re-ack therefore
-                // refreshes the magnitude without erasing the record of who accepted the row originally,
-                // which is the only reading under which the foreign-ack sweep means anything.
-                // REASON CLOBBER FIX (round 2026-08-29): a re-ack that supplies a DIFFERENT reason no longer
-                // overwrites the row's existing one outright — composeAckReason folds it in as
-                // "<new> | prior: <old>" (capped at one hop; a no-op when the reason is unchanged), so a
-                // shared row re-acked by unrelated sessions keeps both justifications instead of the last
-                // writer silently erasing the one before it. See quality.h's composeAckReason for the rule.
-                // RE-SCORE PROVENANCE: was/now/facet/path/line are a REFRESH, not a preserve, same posture as
-                // cid= above — a re-ack re-reads the finding, so the stored triple always describes the row AS
-                // JUST ACCEPTED, never as it was some earlier run. See AckRecord's doc comment for what each
-                // one is and why a later run can re-score from them alone.
-                rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ), cid,
-                                          scope.active() ? scope.spec : rec.by,
-                                          r.was, r.now, r.facet, r.path, r.line, quality::AckProvenance::Measured,
-                                          cfg.qualityAckReason.empty() ? rec.reason
-                                                                       : quality::composeAckReason( rec.reason, std::string( cfg.qualityAckReason ) ) };
-                // SELF-CHECK, not a one-off test: every magnitude-bearing ack proves that the TABLE-DRIVEN
-                // re-score formula agrees with the LIVE one on the row it just built. NOT a full round trip —
-                // rescoreAckRecord runs here on the in-memory `rec` directly; it never goes through
-                // renderAckRecords/readAckRecords, so this does not exercise the ledger's text grammar (order-
-                // tolerant token parsing, splitAckLocator, the takeAckNamedToken family) at all — that half of
-                // the contract is what qackconcurrencycheck.sh's grammar arm (2) and byte-identity arm (7) pin
-                // instead, over the actual file. What THIS catches: rescoreNumericMajor's kMaterialityBars
-                // lookup (by kind name) silently drifting from the kMaterialityBars row perSymbolKind is handed
-                // by index (computeDelta, above; the static_assert beside the table pins the order) — two ways
-                // to reach the same constants that a future edit could break in only one place. A drift there means the live
-                // formula (numericRegressionIsMajor, via perSymbolKind) and the re-score formula
-                // (rescoreNumericMajor) have silently diverged — see quality.h's MaterialityBar table, the one
-                // place both are meant to agree. ENSURES, not ASSUME: this is this function's OWN postcondition
-                // on the row it just built, not a fact something else already guarantees.
-                const std::optional<bool> rescored      = quality::rescoreAckRecord( rec );
-                const bool                rescoreAgrees = !rescored.has_value() || *rescored == !r.isMinor;   // plain bool, so the promise below is a bare accessor-free read
-                ENSURES( rescoreAgrees,
-                         "ack provenance re-score (in-memory, not a ledger round trip) must reproduce the just-computed severity" );
-            }
-            if( ackWritten == 0 && !cfg.qualityAckOnly.empty() )
-            {
-                // M1 FOLLOW-UP (round train-18, rv-ack-provenance-backfill.md): this refusal used to discard
-                // the backfill above unconditionally — `backfillCloneAckProvenance` already mutated `acks` in
-                // memory, but returning here without ever calling writeAckRecords threw that healing away,
-                // so a rubber-stamp-guarded --ack-only that (correctly) refused to accept anything ALSO
-                // silently un-did an otherwise-independent repair to the ledger's provenance. Same
-                // canonical-bytes rule H10's ackNothingToAccept applies when there is nothing to accept at
-                // all: a ledger already equal to its own canonical bytes is left untouched (no spurious
-                // diff); a non-canonical one — including one this run's backfill just healed — is rewritten
-                // and the run says so. This never accepts a finding and the refusal's exit code is unchanged.
-                const bool nonCanonical = !acks.empty()
-                    && quality::renderAckRecords( acks ) != docparse::detail::readRegularFile( "the quality-acks ledger", acksFile ).value_or( std::string() );
-                if( nonCanonical )
-                {
-                    // A failed heal is said, not folded into "nothing written" (CodeRabbit on #331): the same
-                    // "could not write" ackNothingToAccept prints for the same failure. writeAckRecords has already
-                    // DISCLOSEd on its answerRefused sink; the exit code is 1 either way.
-                    if( !quality::writeAckRecords( acksFile, acks ) )
-                    {
-                        rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing accepted; could not write {} "
-                                              "(it was not in canonical form, and re-serialising it failed)\n",
-                                      std::string_view( cfg.qualityAckOnly.data(), cfg.qualityAckOnly.size() ), regs.size(), acksFile.c_str() );
-                        return 1;
-                    }
-                    rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing accepted, but {} was not in canonical form "
-                                          "(ack provenance backfill / legacy rows) and has been re-serialised\n",
-                                  std::string_view( cfg.qualityAckOnly.data(), cfg.qualityAckOnly.size() ), regs.size(), acksFile.c_str() );
-                    return 1;
-                }
-                rw::emitTo( stderr, "ripwire: --ack-only={} matched none of the {} finding(s) — nothing written\n", std::string_view( cfg.qualityAckOnly.data(), cfg.qualityAckOnly.size() ), regs.size() );
-                return 1;
-            }
-            // H10: nothing to accept — leave a canonical ledger alone, heal a non-canonical one (ackNothingToAccept)
-            if( regs.empty() )
-            {
-                return ackNothingToAccept( acksFile, acks, scope, outOfScope.size() );
-            }
-            const bool wroteAcks = quality::writeAckRecords( acksFile, acks );
-            if( wroteAcks && !cfg.qualityAckOnly.empty() )
-            {
-                rw::emitTo( stderr, "ripwire: acknowledged {} of {} finding(s) ({} left UNACKED by --ack-only, {} already acked) → {}\n",
-                              ackWritten, regs.size(), ackSkipped, ackedCount, acksFile.c_str() );
-            }
-            else if( wroteAcks )
-            {
-                rw::emitTo( stderr, "ripwire: acknowledged {} finding(s) ({} already acked) → {}\n",
-                              regs.size(), ackedCount, acksFile.c_str() );
-            }
-            else
-            {
-                rw::emitTo( stderr, "ripwire: could not write {}\n", acksFile.c_str() );
-            }
-            // P1 — the skip is DISCLOSED, never silent: the count of rows this ack deliberately did not
-            // touch is the whole reason the caller passed a scope, and a quiet success would leave them
-            // believing the ledger now covers the report they were looking at.
-            if( wroteAcks && scope.active() && !outOfScope.empty() )
-            {
-                rw::emitTo( stderr, "ripwire: {} finding(s) OUT OF SCOPE for --scope={} were left unacked — not yours to accept "
-                                      "(they are still in the report, under the out-of-scope element)\n",
-                              outOfScope.size(), scope.spec.c_str() );
-            }
-            return wroteAcks ? 0 : 1;
-        }
-
-        // L2 — stale-ack disclosure (rationale: quality.h's computeStaleAcks). Checked against the CURRENT
-        // tree, not the baseline above, so it costs one more computeSnapshot; skipped when the ledger is
-        // empty. Reported, never gated — the exit code below reads `regs` alone.
-        // R-I: "the CURRENT tree" is the JUDGED tree, which in the ref-pair form is tree B — checking the
-        // ledger against the working tree there would report acks as stale because of edits that have nothing
-        // to do with the comparison being made.
-        // qd-memory-degrade: refPairStaleAcks owns the two range-form departures (a changed-files answer judges none; a
-        // kind selection judges its own kinds' acks only).
-        const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
-                                                         : refPair ? refPairStaleAcks( acks, refs )
-                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath, nullptr, {}, &basis.passes ) );
-        if( std::getenv( "RIPWIRE_STATS" ) )   // QD-ENVOY-TIME cost bound: Type-3 passes this call ran (test/qdtype3oncecheck.sh)
-        {
-            rw::emitTo( stderr, "ripwire: quality-passes type3_runs={} type3_pairs={}\n", gType3PassRuns.load( std::memory_order_relaxed ),
-                        gType3PassPairs.load( std::memory_order_relaxed ) );
-        }
-
-        // P1.4 — the <sa> family now carries THREE whys, and the third is counted SEPARATELY: stale= means
-        // "this ack no longer applies", and a foreign ack applies fine — it is the SESSION that was wrong,
-        // not the target. Merging the rows into one list keeps the two emitters from growing a second loop
-        // each; keeping the COUNTS apart keeps stale= meaning what it has always meant.
-        std::vector<quality::StaleAck> saRows = staleAcks;
-        saRows.insert( saRows.end(), foreignAcks.begin(), foreignAcks.end() );
-        // M21(a): name the rows the tree can still name, against the SAME tree computeStaleAcks judged
-        // (tree B in the ref-pair form) — naming a stale ack after the working tree would print an identity
-        // the verdict was never computed from. Costs one walk over ing.symbols, and only when there are rows.
-        quality::stampStaleAckIdentity( saRows, refPair ? refs.target().ing : ing,
-                                        refPair ? std::string_view( refs.target().root ) : std::string_view( cfg.rootPath ) );
-
-        // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
-        //   minorCount      — the materiality tier (unchanged axis).
-        //   newSymbolCount  — findings that exist only because the code is NEW (quality.h's origin axis).
-        //   gatingCount     — the EXIT PREDICATE (quality::rowGates): major AND preexisting-worse, or a defect-shape
-        //                     format-arity row of any origin. Emitted as gating= so the header alone tells you
-        //                     the exit code (it used to be "regressions > minor").
-        // preexisting-worse = regressions − new-symbol by construction (the axis is a partition), so the two
-        // header counters always sum to regressions= — an invariant the gate asserts.
-        std::size_t minorCount = 0, newSymbolCount = 0, gatingCount = 0;
-        for( const quality::Regression& r : regs )
-        {
-            if( r.isMinor )
-            {
-                ++minorCount;
-            }
-            if( r.isNewSymbol )
-            {
-                ++newSymbolCount;
-            }
-            if( quality::rowGates( r ) )
-            {
-                ++gatingCount;
-            }
-        }
-        const std::size_t preexistingCount = regs.size() - newSymbolCount;
-        // H11 — the absorbed-debt stamp on the honored sidecar, or 0. Read ONLY when the sidecar is the floor
-        // in force: on the git-HEAD and ref-pair floors there is no pin whose contents could have absorbed
-        // anything, and printing a 0 there would define an attribute about a file this run did not use.
-        const std::size_t baselineAbsorbed = ( baseSel.marker == std::string_view( "sidecar" ) )
-                                           ? quality::readBaselineAbsorbed( baselineFile ) : 0;
-        const std::string baselineAbsorbedAttr = baselineAbsorbed == 0 ? std::string()
-                                               : " baseline_absorbed=\"" + std::to_string( baselineAbsorbed ) + "\"";
-
-        // R1 IDENTITY — the disclosure, built ONCE for both emitters (quality::identityDisclosure). An ack
-        // that follows a rename is a claim about identity, and a claim is only honest if the reader can see
-        // what it rested on; building the XML and JSON halves in one place is what keeps the two surfaces
-        // from disclosing different things about the same run.
-        const auto [ identityAttrs, identityJson ] = quality::identityDisclosure( basis.healing );
-        // hwh-fix4 (N1): the history a gating kind could not read, one builder for every emitter (absent when all was read)
-        const auto [ historyAttrs, historyJson ] = quality::historyUnreadDisclosure( basis.historyUnread );
-        if( gatingCount == 0 && basis.historyUnread.any() )
-        {
-            rw::emitTo( stderr, "ripwire: --quality-delta: not a clean pass - git history a gating kind needs could not be read ({}; a partial clone "
-                                "does not download it), so a gating row may be missing: exit 6\n", historyAttrs.substr( 1 ).c_str() );
-        }
-
-        // P1/P1.4 — the scope disclosure, built once for both emitters (quality::scopeDisclosure).
-        const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size(), diffFileCount );
-
-        // F-13 — the .ripwire_config disclosure, built once for both emitters (see the header comment on
-        // registerMacroConfigWarningAttr just above runQualityViews for why the stderr wording lives there).
-        // #387: the inert-name test reads the JUDGED tree's index, which in the ref-pair form is tree B — the working tree
-        // is not indexed there at all (runQualityDeltaRangeBeforeIngest).
-        // qd-memory-degrade: not over a changed-files index, which cannot tell an inert name from one the tree defines (also_skipped=)
-        const rw::quality::RegisterMacroConfigDiagnostics configDiag = refs.degraded ? rw::quality::RegisterMacroConfigDiagnostics{}
-                                                                                     : rw::quality::diagnoseRegisterMacroConfig( judged, root );
-        const std::string configWarnAttr = registerMacroConfigWarningAttr( configDiag );
-        // qd-memory-degrade: the kinds this answer did not run, why, and the replay — plus the peak, read once now that the
-        // comparison is done (kindsDisclosure). Their stderr lines come first: an answer that is partial, or that ran past
-        // the limit, says so on the channel a human reads before anything else.
-        const KindsDisclosure kd = kindsDisclosure( cfg, refs, basis, refPair );
-        emitMemoryLines( kd, refs );
-        const bool deadRan = !refPair || quality::kindSelected( refs.kinds, "dead-code" );   // dead-code's side counts exist only when it ran
-
-        // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
-        // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
-        // `$?` gets a number with no subject; this puts the WHICH on the channel a human reads, without
-        // touching the XML contract. Names the first gating row in the already-sorted list (deterministic).
-        //
-        // §A4 (minor): emitted BEFORE the format fork, not after the XML tail — under --json the fork returned
-        // first, so exactly the caller most likely to be a script reading `$?` got the bare exit=2 with no
-        // subject. The line is about the EXIT CODE, which both formats share, so it belongs to neither.
-        emitQdGatingLine( regs, gatingCount, deltaRoot );
-
-        // L2: --json — same regressions, keys mirror the XML attr names (kind/sym/members/tokens/was/now/
-        // sev/churn/surface). jsonUnsupportedVerb already refused --quality-baseline/--quality-ack, so
-        // reaching here with cfg.json means the plain --quality-delta report.
-        if( cfg.json )
-        {
-            const char* baseMarkerJ = baseSel.marker;   // R3: the one spelling table lives in quality::selectBaseline — the XML/JSON twins cannot drift apart
-            // The JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root, and
-            // null in the ref-pair form too: the list was not computed "at" any working-tree state, and the
-            // two refs below ARE its anchor.
-            const std::string atValJ  = refPair ? std::string{} : gitstamp::stampAt( root );
-            const std::string atJsonJ = atValJ.empty() ? std::string( "null" ) : ( "\"" + atValJ + "\"" );
-            // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
-            // JSON. Empty for the bare form, so that object stays byte-identical to before.
-            // F-13: config-warnings is the JSON sibling of the XML config-warnings= attribute — omitted
-            // (never 0) when .ripwire_config carried nothing to disclose, same "absent means never happened,
-            // 0 means checked and clean" rule scopeJson/identityJson already follow.
-            const std::string configWarnJson = configDiag.total() == 0 ? std::string()
-                                              : ",\"config-warnings\":" + std::to_string( configDiag.total() );
-            // H11: the JSON twin of baseline_absorbed=, under the same absent-means-none rule as the XML half.
-            const std::string absorbedJson = baselineAbsorbed == 0 ? std::string()
-                                            : ",\"baseline_absorbed\":" + std::to_string( baselineAbsorbed );
-            // #228: the JSON twin of head_basis=, under the same absent-means-the-ordinary-archived-tree rule.
-            const std::string headBasisJson = ( basis.headBasis == nullptr ? std::string()
-                                              : std::string( ",\"head_basis\":\"" ) + basis.headBasis + "\"" )
-                                            + ( basis.declinedCallExcluded == 0 ? std::string()   // the XML twin's declined-call-excluded=, absent at zero
-                                              : ",\"declined-call-excluded\":" + std::to_string( basis.declinedCallExcluded ) )
-                                            + rw::countFieldOrEmpty( "value-ref-excluded", basis.valueRefExcluded, /*json=*/true );
-            // qd-memory-degrade: stale and register-macro-excluded are absent (never 0) when their pass did not run
-            const std::string staleJ = refs.degraded ? std::string() : ",\"stale\":" + std::to_string( staleAcks.size() );
-            const std::string rmeJ   = deadRan ? ",\"register-macro-excluded\":" + std::to_string( basis.registerMacroExcluded ) : std::string();
-            rw::emitTo( stdout, "{{\"baseline\":\"{}\",\"regressions\":{},\"minor\":{},\"acked\":{}{},"
-                         "\"preexisting-worse\":{},\"new-symbol\":{},\"gating\":{}{},\"api-new-surface\":{},\"at\":{}{}{}{}{}{}{}{},\"r\":[",
-                         jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleJ,
-                         preexistingCount, newSymbolCount, gatingCount, rmeJ, basis.apiNewSurface, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str(), headBasisJson.c_str(), kd.json + historyJson + quality::ratchetAttrsJson( basis.extras ) );
-            // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
-            // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
-            // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
-            // gating on it would contradict the exit code in the same document.
-            const auto emitJsonRow = [ & ]( const quality::Regression& r, bool gatingAllowed )
-            {
-                rw::emitTo( stdout, "{{\"kind\":\"{}\"", jsonStr( r.kind ).c_str() );
-                if( r.kind == "duplication" )
-                {
-                    rw::emitTo( stdout, ",\"members\":\"{}\",\"tokens\":{}", jsonStr( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now );
-                }
-                else
-                {
-                    rw::emitTo( stdout, ",\"sym\":\"{}\"", jsonStr( quality::displaySym( r.sym, deltaRoot ) ).c_str() );
-                    if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
-                    {
-                        rw::emitTo( stdout, ",\"was\":{},\"now\":{}", quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ) );
-                    }
-                }
-                if( !r.path.empty() )
-                {
-                    rw::emitTo( stdout, ",\"p\":\"{}:{}\"", jsonStr( r.path ).c_str(), r.line ); // P2.5 locator
-                }
-                if( gatingAllowed && quality::rowGates( r ) )
-                {
-                    rw::emitRaw( stdout, ",\"gating\":true" ); // P2.5 — the exit predicate, stated per row
-                }
-                if( r.isMinor )
-                {
-                    rw::emitRaw( stdout, ",\"sev\":\"minor\"" );
-                }
-                if( !r.facet.empty() )
-                {
-                    const char* facetName = quality::facetAttrName( r.kind );   // ONE kind→name table (quality.h)
-                    if( facetName )
-                    {
-                        rw::emitTo( stdout, ",\"{}\":\"{}\"", facetName, jsonStr( r.facet ).c_str() );
-                    }
-                }
-                if( const char* origin = quality::originValue( r ) )
-                {
-                    rw::emitTo( stdout, ",\"origin\":\"{}\"", origin ); // absent = preexisting-worse (mirrors the XML)
-                }
-                if( r.ceiling != 0 )
-                {
-                    rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
-                }
-                rw::emitRaw( stdout, presentJsonMember( "call", r.call ).c_str() );   // QD-UNCHECKED-STATUS (mirrors the XML)
-                std::fputs( quality::tangleRowAttrs( r, /*json=*/true, []( std::string_view s ) { return jsonStr( s ); } ).c_str(), stdout );   // QD-TANGLE (mirrors the XML)
-                rw::emitRaw( stdout, "}" );
-            };
-            bool firstR = true;
-            for( const quality::Regression& r : regs )
-            {
-                if( !firstR )
-                {
-                    rw::emitRaw( stdout, "," );
-                }
-                firstR = false;
-                emitJsonRow( r, /*gatingAllowed=*/true );
-            }
-            rw::emitRaw( stdout, "]," );
-            if( scope.active() )
-            {
-                // The JSON sibling of the XML out-of-scope element: a SEPARATE array, never a flag on a row
-                // in "r", so a consumer that reads "r" and checks "gating" cannot accidentally count someone
-                // else's debt as this run's. Emitted (possibly empty) whenever a scope was given, so its
-                // absence means "no scope", never "no disclosed rows".
-                rw::emitRaw( stdout, "\"oos\":[" );
-                bool firstO = true;
-                for( const quality::Regression& r : outOfScope )
-                {
-                    if( !firstO )
-                    {
-                        rw::emitRaw( stdout, "," );
-                    }
-                    firstO = false;
-                    emitJsonRow( r, /*gatingAllowed=*/false );
-                }
-                rw::emitRaw( stdout, "]," );
-            }
-            std::fputs( quality::staleAcksJsonArray( saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
-            std::fputs( quality::improvedJson( basis.extras.improved, deltaRoot ).c_str(), stdout );   // QD-CREDIT-ROW (absent when none)
-            rw::emitRaw( stdout, "}" );
-            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
-        }
-
-        std::vector<char> esc;
-        const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        // §B7.1 (CA4) — the heading used to open "only what changed for the WORSE vs
-        // .ripwire_quality_baseline", which is FALSE in every state but one: three of the five floors this
-        // verb can use are not that file, and in one of them the file was judged stale and DELETED from the
-        // user's tree during this very run. The floor actually used is named by baseline= on the element
-        // below, so the heading points at that attribute instead of asserting a floor.
-        //
-        // 2026-09-02 (lane B): the marker states are still defined on the first screen — the only place a
-        // reader meets them — but ONE state per run, the one in force, rather than all five on every call.
-        // emitQualityDeltaLegend above holds the section table and the reasoning; it is passed the same
-        // values the root element below prints, so "the legend defines what the header emits" is read off
-        // one set of values rather than restated as a second condition that could drift from it.
-        // idea #11 — THE CLEAN-TREE PAYLOAD. A regression-free answer collapses its stale-ack rows to counts (stale= and
-        // stale_by_kind=), and stale_next= is the call that prints them; on a tree that IS its HEAD (head_basis="identity":
-        // the floor is this tree's own snapshot) with nothing else to disclose, the verdict is the whole answer. Foreign-
-        // scope rows are never collapsed: they are about findings suppressed RIGHT NOW. --show-stale restores today's
-        // document byte for byte, so every collapsed row and attribute is one flag away (PROCESS rule 5).
-        const bool collapseStale = regs.empty() && outOfScope.empty() && !cfg.showStale && !staleAcks.empty();
-        std::string staleCollapseAttrs;
-        if( collapseStale )
-        {
-            const std::string kinds = quality::staleByKindValue( staleAcks );   // shared with the MCP twin (lane lean2b)
-            std::string replay = cfg.qualityDeltaRange.empty() ? std::string( "--quality-delta" ) : rw::nextFlag( "--quality-delta=", cfg.qualityDeltaRange );
-            if( scope.active() )
-            {
-                replay += " " + rw::nextFlag( "--scope=", cfg.qualityScope );
-            }
-            staleCollapseAttrs = " stale_by_kind=\"" + ex( kinds ) + "\"" + rw::nextAttrXml( replay + " --show-stale", "stale_next" );
-        }
-        const bool verdictOnly = collapseStale && !refPair && basis.headBasis != nullptr && std::string_view( basis.headBasis ) == "identity"
-                              && !scope.active() && foreignAcks.empty() && ackedCount == 0 && configDiag.total() == 0 && baselineAbsorbed == 0
-                              && basis.apiNewSurface == 0 && baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0;
-        // P1: ONE row emitter for both halves of the scope partition — a disclosed row carries the identical
-        // attribute set, because nothing about a finding changes by belonging to someone else. `gatingAllowed`
-        // is the one difference: an out-of-scope row is not what the exit code fires on, and a gating
-        // attribute on it would contradict the header's own gating counter inside the same document.
-        const auto emitRow = [ & ]( std::FILE* out, const quality::Regression& r, bool gatingAllowed )
-        {
-            // duplication carries a member LIST (members=) + token count; the per-symbol was/now kinds
-            // (complexity/verbosity/nesting/params) carry was/now; api-surface + dead-code are sym-only.
-            // sev="minor" marks a below-materiality delta (never gates); absent = major.
-            const char* sev = r.isMinor ? " sev=\"minor\"" : "";
-            // B10.2 — the optional classification facet: attribute NAME is chosen by kind (churn=
-            // short-horizon-churn's self/ambient split; surface= api-surface's new-symbol/contract-change
-            // tier; idiom= the duplication kind's recognized clone-body shape); r.facet carries only the
-            // VALUE, and quality::facetAttrName is the ONE table that maps kind → attribute name for all
-            // three emitters (this one, the --json twin above, and the MCP one).
-            std::string facetAttr;
-            if( !r.facet.empty() )
-            {
-                const char* facetName = quality::facetAttrName( r.kind );
-                if( facetName )
-                {
-                    facetAttr = std::string( " " ) + facetName + "=\"" + ex( r.facet ) + "\"";   // escaped: a ratchet facet is a tag name
-                }
-            }
-            // r26 — the ORIGIN axis, emitted LAST so the existing attribute order is untouched. Present only
-            // on new-symbol rows (absent = preexisting-worse), the same "mark the exception" convention sev=
-            // uses. api-surface's own surface="new-symbol" facet is the same fact narrowed to that kind; it
-            // stays for shape compatibility, and origin= is what the exit gate reads.
-            const char* origin = !r.isNewSymbol ? "" : r.isMoved ? " origin=\"moved\"" : " origin=\"new-symbol\"";   // quality::originValue
-            // P2.5 — the two attributes that make a row ACTIONABLE, appended last so every pre-r27 attribute
-            // keeps its position:
-            //   p="path:line" — sym= is a canonical id whose display tail is often a bare one-letter local
-            //     (`sym="cc"`), i.e. ungreppable. Omitted, never faked, when no locator was resolvable.
-            //   gating="1"    — marks exactly the rows the header's gating= counts and the exit code fires on.
-            //     Until now a gating row was identifiable ONLY by the ABSENCE of sev="minor" (and of
-            //     origin="new-symbol") — absence-as-signal is the least machine-friendly encoding available.
-            std::string locAttr;
-            if( !r.path.empty() )
-            {
-                locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
-            }
-            const char* gatingAttr = ( gatingAllowed && quality::rowGates( r ) ) ? " gating=\"1\"" : "";
-            // QD-ENTRY-CEILING: the ceiling a NEW function reached, beside the gating= it causes (present-only)
-            const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
-            // QD-UNCHECKED-STATUS: the call whose status a defect-shape unchecked-status row drops (present-only)
-            const std::string callAttr = presentXmlAttr( "call", r.call, ex );
-            // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
-            // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
-            const char* barAttr = qdBarAttrOf( r.kind );
-            const std::string tangleAttrs = quality::tangleRowAttrs( r, /*json=*/false, ex );   // QD-TANGLE: why= / fix= / locals=
-            // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
-            // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
-            // duplication rows name a SET (members=) and carry no single body to open, nor does a FILE-anchored
-            // defect-shape row (top-level code: sym= is the path, and --expand=FILE:FILE matches no symbol).
-            std::string nextAttr;
-            if( *gatingAttr && !r.path.empty() && r.kind != "duplication" && !( r.kind == "defect-shape" && r.sym == r.path ) )
-            {
-                const std::size_t    sep  = r.sym.rfind( "::" );
-                const std::string    bare = sep == std::string::npos ? r.sym : r.sym.substr( sep + 2 );
-                nextAttr = rw::nextAttrXml( rw::nextFlag( "--expand=", r.path + ":" + bare ) );
-            }
-            if( r.kind == "duplication" )
-            {
-                rw::emitTo( out, "<r kind=\"duplication\" members=\"{}\" tokens=\"{}\"{}{}{}{}{}{}/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr,
-                            tangleAttrs );   // QD-IDIOM-ELEMTYPE: why= when the operand path demoted it
-            }
-            else if( r.kind == "dead-code" )
-            {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\"{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
-            // B10.2e: api-surface now carries two shapes — a brand-new/newly-public symbol (was=now=0, no
-            // param comparison to show) and a param-count contract-change (was/now = the real counts). Print
-            // was/now whenever they differ from each other so the contract-change case's was=/now= is visible
-            // while the new-symbol case's meaningless was="0" now="0" is omitted, matching its old sym-only shape.
-            }
-            else if( r.kind == "api-surface" && r.was == r.now )
-            {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\"{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
-            }
-            else
-            {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(),
-                            quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ), barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr,
-                            ceilingAttr.c_str(), callAttr.c_str(), nextAttr.c_str(), tangleAttrs );
-            }
-        };
-        // Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter
-        // by its margin, as written AND as the compact layer delivers it). The whole XML document is one renderer over a FILE*,
-        // so both candidates are rendered and measured, and the full document wins a fold that does not pay or a failed render
-        // (fx, dirty tree, one stale ack: 1512 B folded vs 1481 B full).
-        // `collapse` picks the stale rows' form: true serves only the foreign-scope rows and the stale_by_kind=/stale_next= counts.
-        // R-I: at= is OMITTED for the ref-pair form (see the root below). Read ONCE: both candidates print the same stamp.
-        const std::string atAttrs = refPair ? std::string() : gitstamp::atAttr( root );
-        const auto emitDocument = [ & ]( std::FILE* out, bool collapse )
-        {
-            const std::vector<quality::StaleAck>& served = collapse ? foreignAcks : saRows;
-            emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !served.empty(), ackedCount > 0,
-                                      basis.registerMacroExcluded > 0, configDiag.total() > 0, regs, outOfScope,
-                                      scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
-                                      basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
-                                      refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
-                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
-                                      basis.rustTestExcluded, refs.staleTree, !basis.extras.ratchetRef.empty(), !basis.extras.improved.empty() }, out );
-            const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
-            // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
-            std::string sidecarHealthAttrs;
-            if( baseSel.sidecarBadLines > 0 ) { sidecarHealthAttrs += " baseline_bad_lines=\"" + std::to_string( baseSel.sidecarBadLines ) + "\""; }
-            if( basis.acksBadLines > 0 )      { sidecarHealthAttrs += " acks_bad_lines=\"" + std::to_string( basis.acksBadLines ) + "\""; }
-            // #228: present-only, and its absence is the ordinary archived HEAD tree — the floor every git-HEAD
-            // marker named on its own before this attribute existed.
-            if( basis.headBasis != nullptr )  { sidecarHealthAttrs += std::string( " head_basis=\"" ) + basis.headBasis + "\""; }
-            if( basis.declinedCallExcluded > 0 ) { sidecarHealthAttrs += " declined-call-excluded=\"" + std::to_string( basis.declinedCallExcluded ) + "\""; }
-            sidecarHealthAttrs += rw::countAttrXmlOrEmpty( "value-ref-excluded", basis.valueRefExcluded );   // absent at zero, beside its sibling
-            // at= anchors this regression list to the commit (+dirty state) it was computed against.
-            // qd-memory-degrade: stale= and register-macro-excluded= are absent (never 0) when their pass did not run
-            const std::string staleX = refs.degraded ? std::string() : " stale=\"" + std::to_string( staleAcks.size() ) + "\"";
-            const std::string rmeX   = deadRan ? " register-macro-excluded=\"" + std::to_string( basis.registerMacroExcluded ) + "\"" : std::string();
-            rw::emitTo( out, "<quality-delta baseline=\"{}\" regressions=\"{}\" minor=\"{}\" acked=\"{}\"{} preexisting-worse=\"{}\" new-symbol=\"{}\" gating=\"{}\"{} api-new-surface=\"{}\"{}{}{}{}{}{}{}>",
-                         baseMarker, regs.size(), minorCount, ackedCount, staleX, preexistingCount, newSymbolCount, gatingCount, rmeX, basis.apiNewSurface,
-                         // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
-                         // sha, which would anchor the list to a commit it was not computed from. base_ref= and
-                         // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
-                         // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
-                         atAttrs.c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                         scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + ( collapse ? staleCollapseAttrs : std::string() ) + kd.xml + historyAttrs + quality::ratchetAttrsXml( basis.extras, ex ) ).c_str() );
-            for( const quality::Regression& r : regs )
-            {
-                emitRow( out, r, /*gatingAllowed=*/true );
-            }
-            std::fputs( quality::improvedXml( basis.extras.improved, deltaRoot, ex ).c_str(), out );   // QD-CREDIT-ROW: never a row, never gating
-            if( scope.active() )
-            {
-                // P1 — the DISCLOSURE half. Dropping these rows would make a scoped report a quieter lie than
-                // the unscoped one it replaces: the debt is real, it is in the same tree, and it will be in
-                // someone's report. So they are printed, in their own element, marked non-gating, with the one
-                // sentence a reader needs written where they meet it. Emitted even when EMPTY — an absent
-                // element then means "no scope was given", never "nobody else has anything open".
-                rw::emitTo( out, "<out-of-scope n=\"{}\" would-gate=\"{}\" note=\"not yours - do not ack: these rows lie outside the scope this run named. "
-                             "They are disclosed rather than hidden, they never gate this exit code, and the ack refuses to write them.\">",
-                             outOfScope.size(), scopedOutGating );
-                for( const quality::Regression& r : outOfScope )
-                {
-                    emitRow( out, r, /*gatingAllowed=*/false );
-                }
-                rw::emitRaw( out, "</out-of-scope>" );
-            }
-            {   // L2 — one <sa> row per stale ack (quality::staleAcksXml). M21(a): the escaper is passed in
-                // because sym= carries a canonical id (corpus text), unlike the closed-vocabulary kind=/why=.
-                std::vector<char> saEsc;
-                std::fputs( quality::staleAcksXml( served, [ & ]( std::string_view t ) { return std::string( escapeXml( t, saEsc ) ); } ).c_str(), out );
-            }
-            rw::emitRaw( out, "</quality-delta>" );
-        };
-        // the identity-tree VERDICT (verdictOnly above): the root line alone
-        const auto emitVerdict = [ & ]( std::FILE* out )
-        {
-            rw::emitTo( out, "<!-- ripwire quality-delta: the tracked files ARE their git HEAD (head_basis=\"identity\"), so the floor (baseline= "
-                             "names it) is this tree's own snapshot and nothing that existed can be worse: regressions= and gating= are 0, and this line stands in "
-                             "for the full document because it saves at least a quarter of the bytes. stale= counts ack "
-                             "ledger rows whose target no longer applies (never gating), by kind in stale_by_kind=; stale_next= is the call "
-                             "that prints them with the full header (its exclusion and rename counts included). at=: commit+dirty+shallow. -->"
-                             "<quality-delta baseline=\"{}\" regressions=\"0\" gating=\"0\" stale=\"{}\"{} head_basis=\"identity\"{}></quality-delta>",
-                        baseSel.marker, staleAcks.size(), atAttrs, staleCollapseAttrs );
-        };
-        if( !collapseStale )
-        {
-            emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
-        }
-        const Rendered full   = renderToString( [ & ]( std::FILE* f ) { emitDocument( f, /*collapse=*/false ); } );
-        const Rendered folded = renderToString( [ & ]( std::FILE* f ) { if( verdictOnly ) { emitVerdict( f ); } else { emitDocument( f, /*collapse=*/true ); } } );
-        if( !full.ok || !folded.ok )
-        {
-            // renderToString DISCLOSEd the failed buffer; the full document is the superset, written straight to stdout
-            emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
-        }
-        const std::string& chosen = foldPays( folded.text, full.text ) ? folded.text : full.text;   // compactlegend.h: the margin and why
-        std::fwrite( chosen.data(), 1, chosen.size(), stdout );
-        return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
+        return std::nullopt;
     }
-    return std::nullopt;
+    // D1 fix (HIGH): resolve BOTH sidecars against the analyzed ROOT, not the process CWD —
+    // see quality::rootQualifiedSidecar's comment for why a bare relative filename is unsafe here
+    // (a foreign cwd's sidecar could be silently rewritten, or even deleted by the stale-baseline
+    // self-heal). Computed once; every read/write/remove site downstream uses it.
+    const std::string baselineFile = quality::baselinePath( d.root );
+    const std::string acksFile     = quality::acksPath( d.root );
+    if( cfg.qualityBaseline )
+    {
+        return runQualityBaselinePin( d, baselineFile, acksFile );
+    }
+
+    // Precedence for the baseline: (1) an explicit `.ripwire_quality_baseline` sidecar (from
+    // --quality-baseline) wins whenever it is pinned at the CURRENT HEAD — the mid-task convergence loop
+    // (baseline once, edit, re-check) is unchanged; (2) else — no sidecar, or a STALE one (see R3 below) —
+    // if the root is a git repo with a HEAD tree, auto-baseline against HEAD so the "before I push" loop
+    // works with no start-of-task ritual (T0.1); (3) else degrade to the exit-1 "run --quality-baseline
+    // first" guidance (non-git / unborn / detached-no-tree — unchanged).
+    //
+    // STALENESS + the self-heal now live in ONE place, quality::selectBaseline — R3 owner ruling
+    // (2026-07-29): a sidecar whose pinned sha != the CURRENT HEAD sha is STALE, full stop. The B10.1b
+    // "reachable ancestor is a deliberately-pinned floor" carve-out this arm used to apply (gitIsAncestor)
+    // is REVOKED: a parallel session's sidecar pinned at a commit that merely happened to be an ancestor of
+    // this session's HEAD made THIS arm report 31 phantom regressions while the MCP quality_delta verb —
+    // same binary, same repo, same second — correctly reported zero. That divergence was only possible
+    // because each arm carried its own copy of the test; there is now exactly one, in quality.h.
+    //
+    // What remains this arm's own POLICY is the `removeStaleFile=true` argument: the stale sidecar is
+    // silently UNLINKED (best-effort) so the NEXT run sees no file at all rather than rediscovering the
+    // same dead pin, and the ONLY record is the `baseline=` XML attribute ("git-HEAD (stale sidecar
+    // removed)") — no stderr spam, which is the B10.1b noise fix that survives the ruling intact. The
+    // read-only MCP arm passes false and reports "…ignored" instead. When the unlink FAILS (read-only
+    // parent dir) this arm degrades to the read-only story — marker "…ignored", one DISCLOSE
+    // from the seam — because the pin is still on disk; `baseSel.isStaleFileOnDisk()` is the fact, and the
+    // fatal message words itself from it rather than from the intent.
+    //
+    // F-04 (round-4 audit) — SERIALIZE THE ACK LEDGER'S READ-MODIFY-WRITE, cross-process.
+    //
+    // --quality-ack reads the whole ledger (inside resolveDeltaBasis just below — the heal has to happen
+    // before computeDelta), folds this run's accepted findings into that map, then rewrites the file from
+    // it. Nothing serialized that. Three sessions acking DISJOINT rows in one shared checkout — the exact
+    // scenario --scope exists for — lost two of the three acks on 8 of 8 measured runs, because whichever
+    // process rewrote last overwrote a map the other two had already published into.
+    //
+    // The lock therefore has to span the READ as well as the write, which is why it is taken HERE and not
+    // inside writeAckRecords: a lock held only around the final rewrite still lets two processes read the
+    // same stale map first and then take turns clobbering. Engaged ONLY under --quality-ack — a read-only
+    // --quality-delta never waits, never creates the lockfile, and is byte-for-byte the run it always was.
+    // RAII: released when this function returns, on every path including the refusals below. quality.h's
+    // SidecarWriteLock has the lockfile's location (per-user cache dir, never a repo-tree sidecar), the
+    // wait budget, and the honest limits.
+    std::optional<quality::SidecarWriteLock> ackLock;
+    if( cfg.qualityAck )
+    {
+        ackLock.emplace( acksFile );
+    }
+
+    // `refs` is declared HERE because it owns both materialized trees' teardown and they must outlive every read of the
+    // delta (QdComparison's header).
+    RefPairDelta refs;
+    DeltaBasis   basis;
+    if( const std::optional<int> refused = applyKindSelector( cfg, refs ) )
+    {
+        return refused;
+    }
+    if( const std::optional<int> refused = resolveDeltaBasis( d, baselineFile, refs, basis ) )
+    {
+        return refused;
+    }
+    const bool          refPair     = !cfg.qualityDeltaRange.empty();
+    const IngestResult& judgedIndex = refPair ? refs.target().ing : d.ing;   // the JUDGED tree's index: tree B in the range form
+
+    // ── P1 SCOPE — the OWNERSHIP partition for a working tree with several writers in it ─────────────
+    quality::Scope scope         = quality::parseScope( cfg.qualityScope );
+    std::size_t    diffFileCount = 0;   // P1.2: 0 = the reserved diff token was not used
+    if( const std::optional<int> refused = expandScopeDiff( scope, refPair, judgedIndex, d.root, basis.deltaRoot, diffFileCount ) )
+    {
+        return refused;
+    }
+    if( const std::optional<int> refused = refuseUnusableScope( cfg, scope, judgedIndex, basis.deltaRoot, refs.scopeFiles() ) )
+    {
+        return refused;
+    }
+    const QdPartition part = applyScopeAndAcks( scope, basis );
+    if( cfg.qualityAck )
+    {
+        return runQualityAckWrite( cfg, scope, part, basis, acksFile );
+    }
+
+    // L2 — stale-ack disclosure (rationale: quality.h's computeStaleAcks). Checked against the CURRENT tree, not the baseline,
+    // so it costs one more computeSnapshot; skipped when the ledger is empty. Reported, never gated — the exit code reads the
+    // rows alone. R-I: "the CURRENT tree" is the JUDGED tree, which in the range form is tree B — checking the ledger against
+    // the working tree there would report acks as stale because of edits that have nothing to do with the comparison.
+    // qd-memory-degrade: refPairStaleAcks owns the two range-form departures (a changed-files answer judges none; a kind
+    // selection judges its own kinds' acks only). The bare form's snapshot is the working tree's own (d.ing, d.g) and reuses
+    // the clone and construct passes the delta already ran (QD-IDENTITY-ONCE), so it writes basis.passes — here, in view.
+    std::vector<quality::StaleAck> staleAcks = basis.acks.empty() ? std::vector<quality::StaleAck>{}
+                                             : refPair            ? refPairStaleAcks( basis.acks, refs )
+                                                                  : quality::computeStaleAcks( basis.acks, quality::computeSnapshot( d.ing, d.g, cfg.rootPath, nullptr, {}, &basis.passes ) );
+    const QdComparison comparison{ .cfg = cfg, .root = d.root, .refs = refs, .basis = basis, .scope = scope, .part = part,
+                                   .judgedIndex = judgedIndex, .refPair = refPair, .diffFileCount = diffFileCount };
+    const QdReport     report = computeQdReport( comparison, std::move( staleAcks ), baselineFile );
+    emitQdStderrLines( report );
+    if( cfg.json )
+    {
+        emitQualityDeltaJson( report );
+    }
+    else
+    {
+        emitQualityDeltaXml( report );
+    }
+    return report.exitCode();
 }
 
 // #387: the range form compares two COMMITTED trees, each materialized and indexed by loadRefPairDelta, and reads the

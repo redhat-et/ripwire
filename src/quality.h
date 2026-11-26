@@ -1385,6 +1385,31 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
     return v;
 }
 
+// CR712-ACK-KEY-MASK — the site value as the two-bit facet scheme spelled it (v0.6.10 and before: four facets, `& ~3`).
+// QD-UNCHECKED-STATUS widened the facet bits to three, which moved every site value whose hash had bit 2 set, and with it the
+// defectRowKey of every row holding such a site: a released ack of a format-arity row stopped matching and the row gated
+// again. addDefectFacetSchemeAliases re-files such an ack to the current key; this is the old value it needs. A facet the
+// two-bit scheme never had (unchecked-status, unhandled-arm) has none (0).
+// The two-bit scheme's facet mask: facets 0..kLegacyFacetMask (format-arity, utf8-cut, dedup-first, vacuous-assert) had a site value.
+inline constexpr std::uint64_t kLegacyFacetMask = 3;
+
+inline std::uint64_t defectLegacySiteValue( defectshape::Facet f, std::string_view text )
+{
+    if( static_cast<std::uint64_t>( f ) > kLegacyFacetMask )
+    {
+        return 0;
+    }
+    std::string id( defectshape::facetName( f ) );
+    id.push_back( '\0' );
+    id.append( text );
+    std::uint64_t h = fnv1a64( id ) & ~kLegacyFacetMask;
+    if( h == 0 )
+    {
+        h = kLegacyFacetMask + 1;
+    }
+    return h | static_cast<std::uint64_t>( f );
+}
+
 // A defect-shape ROW's identity — the ack key: the anchor, the facet AND the identities of the anchor's sites of
 // that facet (each a defectSiteValue: facet + normalized offending text), so an ack covers exactly the defects it
 // named (checklist 16). A format-arity ack and a utf8-cut ack on one definition are two acks; and an ack of
@@ -1439,6 +1464,7 @@ struct DefectSiteAt
     std::uint32_t    line   = 0;
     std::string_view call;   // unchecked-status: the call whose status is dropped (defectshape's static spelling)
     std::string      why;    // unhandled-arm: what the classifier leaves without an outcome (defectshape's Site::why)
+    std::uint64_t    legacySite = 0;   // CR712-ACK-KEY-MASK: the site's value in the two-bit scheme (defectLegacySiteValue), 0 = none
 };
 
 
@@ -6740,8 +6766,9 @@ inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::st
 
 // `macroOverride`, when given, is the macro-name set to scan C++ files against instead of this index's own — the whole
 // tree's, when this index holds only some of its files (a degraded --quality-delta=A..B's changed files).
+// `shellCut`, when given, counts the shell files whose scan the nesting budget cut (shstatus kMaxShellNest): the answer's shell_cut=.
 inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline,
-                                                const std::vector<std::string>* macroOverride = nullptr )
+                                                const std::vector<std::string>* macroOverride = nullptr, std::uint32_t* shellCut = nullptr )
 {
     std::vector<DefectSiteAt> out;
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
@@ -6796,11 +6823,16 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         }
         else if( scan == DefectScan::Bash )
         {
+            bool cut = false;   // the shell nesting budget stopped a parse: the file's sites past it are not judged (shell_cut=)
             if( isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
             {
-                sites = defectshape::scanBashTestScript( src, fnSpans );
+                sites = defectshape::scanBashTestScript( src, fnSpans, &cut );
             }
-            defectshape::scanUnhandledArmBash( src, fnSpans, sites );   // any path: a case with no *) arm whose result is read
+            defectshape::scanUnhandledArmBash( src, fnSpans, sites, &cut );   // any path: a case with no *) arm whose result is read
+            if( cut && shellCut != nullptr )
+            {
+                ++*shellCut;
+            }
         }
         if( defectshape::looksGenerated( rel, src ) )   // unhandled-arm judges no generated switch: the fix is in the generator
         {
@@ -6812,7 +6844,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
             const std::uint64_t anchor = owner == kNoNode ? fileAnchor : qualityKey( ing, owner, root );
             const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
-            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why } );
+            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why, defectLegacySiteValue( st.facet, st.text ) } );
         }
     }
     std::stable_sort( out.begin(), out.end(), []( const DefectSiteAt& a, const DefectSiteAt& b ) { return a.key < b.key; } );
@@ -8262,6 +8294,7 @@ struct DeltaExtras
     BestSinceSource          bestSince;
     BaseBodySource           baseBodies;   // QD-SHRINK-PAIR (demoteShrinkOnlyClones): the base commit's bodies of the named files
     std::vector<Improvement> improved;
+    std::uint32_t            shellCut = 0;        // shell files whose defect-shape scan the nesting budget cut (shell_cut=)
     std::string              ratchetRef;          // the reference point the ratchet read ("" = not consulted: no candidate, or no source)
     std::uint32_t            ratchetJudged = 0;   // symbols judged against their best
     std::uint32_t            ratchetUnread = 0;   // history blobs that could not be measured
@@ -8351,9 +8384,12 @@ inline std::string rowValueText( const Regression& r, std::uint32_t v )
     return metricValueText( r.kind, v );
 }
 
+// A new-symbol tangle row is major only under rule (b) (tangleCauseGates: a new function at or over the bar, not moved, not
+// test code), so a major one gates like a ceiling row (QD-LESSONS-2, owner 11-21).
 inline bool rowGates( const Regression& r ) noexcept
 {
-    return !r.isMinor && ( !r.isNewSymbol || r.ceiling != 0 || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
+    return !r.isMinor
+        && ( !r.isNewSymbol || r.ceiling != 0 || r.kind == "tangle" || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
 }
 
 // B10.2 — kind → the ATTRIBUTE NAME its facet value is emitted under. `Regression::facet` carries only the
@@ -9742,6 +9778,59 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
 }
 
+// One (anchor, facet) row's key under the two-bit site values and under the current ones, from that anchor's sites;
+// {0, 0} when it has no site of the facet the two-bit scheme knew (a file record carries no legacySite, so it never counts).
+inline std::pair<std::uint64_t, std::uint64_t> defectRowKeysBothSchemes( std::span<const DefectSiteAt> anchorSites, defectshape::Facet f )
+{
+    std::vector<std::uint64_t> now, old;
+    for( const DefectSiteAt& d : anchorSites )
+    {
+        if( d.legacySite != 0 && defectFacetOf( d.key.site ) == f )
+        {
+            now.push_back( d.key.site );
+            old.push_back( d.legacySite );
+        }
+    }
+    if( now.empty() )
+    {
+        return { 0, 0 };
+    }
+    std::sort( now.begin(), now.end() );
+    std::sort( old.begin(), old.end() );
+    const std::uint64_t anchor = anchorSites.front().key.anchor;
+    return { defectRowKey( anchor, f, old ), defectRowKey( anchor, f, now ) };
+}
+
+// CR712-ACK-KEY-MASK — the defect-shape half of the SCHEME migration: for every current (anchor, facet) row whose key under the
+// two-bit site values (defectLegacySiteValue) differs from its key now, legacy key -> current key, fed into the same toCurrent
+// map addSchemeAliases fills, so remapAckIdentity re-files a released ack (acks_rekeyed_by_scheme=), computeStaleAcks reads it at
+// its current key, and --quality-ack writes it back healed. It scans the tree's defect sites once, and only when the ledger
+// holds a defect-shape ack. Add, never overwrite (a rename alias keeps precedence).
+inline void addDefectFacetSchemeAliases( IdentityAliases& al, const gtl::btree_map<std::string, AckRecord>& acks, const IngestResult& ing,
+                                         std::string_view root )
+{
+    if( std::none_of( acks.begin(), acks.end(), []( const auto& kv ) { return kv.second.kind.starts_with( "defect-shape" ); } ) )
+    {
+        return;
+    }
+    constexpr std::size_t           kTwoBitFacets = kLegacyFacetMask + 1;   // every facet the two-bit scheme had
+    const std::vector<DefectSiteAt> sites         = defectSitesOf( ing, root, nullptr );   // sorted by (anchor, site)
+    for( auto it = sites.begin(); it != sites.end(); )
+    {
+        const auto end = std::find_if( it, sites.end(), [ & ]( const DefectSiteAt& d ) { return d.key.anchor != it->key.anchor; } );
+        for( std::size_t f = 0; f < kTwoBitFacets; ++f )
+        {
+            const auto [ oldKey, newKey ] = defectRowKeysBothSchemes( { it, end }, static_cast<defectshape::Facet>( f ) );
+            if( oldKey != newKey && al.toCurrent.emplace( oldKey, newKey ).second )
+            {
+                al.schemeKeys.push_back( oldKey );
+            }
+        }
+        it = end;
+    }
+    std::sort( al.schemeKeys.begin(), al.schemeKeys.end() );
+}
+
 // The two transient rename facts the delta reads (Snapshot::renamedFrom, Snapshot::renamedKeys), from the RENAME aliases only and
 // BEFORE remapSnapshotIdentity: a key counts as re-filed only when the alias fills a hole (its source is in the baseline and its
 // target is not), so a file renamed long before the baseline (the ledger's 400-commit window) marks nothing.
@@ -10298,6 +10387,7 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
     if( treeWideRescues )
     {
         addSchemeAliases( h.aliases, ing, g, corpusRoot );
+        addDefectFacetSchemeAliases( h.aliases, acks, ing, corpusRoot );   // CR712-ACK-KEY-MASK: two-bit-era defect-shape acks
     }
     h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
 
@@ -11133,9 +11223,9 @@ inline void appendSimilarArgsRows( std::vector<Regression>& regs, const SimilarR
 template<class ExistedFn, class StampFn>
 inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const Snapshot& base,
                                    std::string_view root, ExistedFn&& existedAtBaseline, StampFn&& stampLoc,
-                                   const std::vector<std::string>* macroOverride = nullptr )
+                                   const std::vector<std::string>* macroOverride = nullptr, std::uint32_t* shellCut = nullptr )
 {
-    const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr, macroOverride );
+    const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr, macroOverride, shellCut );
     const auto isRealSite = []( std::uint64_t v ) { return v != kDefectFilePresent && v != kDefectFileUnreadable; };
     std::vector<std::uint64_t> baseVals, nowVals, baseUnreadable;
     for( const DefectSiteKey& d : base.defectSites )
@@ -11407,14 +11497,15 @@ inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured
     return gates ? ceilingAt : 0;
 }
 
-// ─── QD-TANGLE — the thirteenth kind, REPORT-ONLY (STAGE0 2; owner 11-19: length amplifies tangle, never stands alone) ───────────
+// ─── QD-TANGLE — the thirteenth kind (STAGE0 2; owner 11-19: length amplifies tangle, never stands alone; 11-21: rule (b) gates) ─
 //
 // A row when a function's tangle score (model.h tangleScore10) is at or over the bar (S >= 6) AND the change made it so: the function
-// is new, it crossed the bar, or an input rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. The trigger reads
-// the INPUTS, not the score, on purpose: the score is a share, so 12 deep lines added to a 4000-line function move it a tenth, and a
-// score trigger would let a monster grow forever (QD-MONSTER-GROWTH's lesson). Every row is sev="minor" and never gates in this
-// stage; why= names the inputs that rose, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function:
-// tangleDetailOf), locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
+// is new, it crossed the bar, its score grew against the range base while over the bar (the RATCHET, QD-RATCHET-BASE), or an input
+// rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. Rows on the score's growth catch a monster growing by a
+// tenth per change (12 deep lines in a 4000-line function), which a size floor would let grow forever (QD-MONSTER-GROWTH's lesson).
+// A new function, a crossing and a ratchet row GATE (owner 11-21: tangleCauseGates); every other row is sev="minor". why= names the
+// inputs that changed, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function: tangleDetailOf),
+// locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
 inline constexpr std::uint32_t kTangleDeepRise = 5;   // deep lines that count as a rise (STAGE0 2.5's "worse" tier)
 
 struct TangleRise
@@ -11560,6 +11651,50 @@ struct TangleDetailReader
     }
 };
 
+// What made a row over the bar (QD-LESSONS-2, owner 11-21): the function is new or crossed the bar (rule (b)); already over it,
+// its score grew against the range base (the RATCHET, QD-RATCHET-BASE); or an input rose by the rise rule while the score did
+// not grow. The caller has already left out a function under the bar now.
+enum class TangleCause : std::uint8_t
+{
+    None,      // over the bar before and after, the score did not grow and nothing rose: no row
+    New,       // a new function at or over the bar
+    Crossed,   // under the bar at the baseline, at or over it now
+    Grew,      // over the bar at the baseline and the score is higher now (a tenth is enough: log-length scaling keeps steps small)
+    Rose,      // over the bar at the baseline, the score not higher, an input rose (nest +1, deep +kTangleDeepRise, a steering local)
+};
+inline TangleCause tangleCauseOf( bool isNew, std::uint32_t was10, std::uint32_t now10, const TangleRise& rise ) noexcept
+{
+    if( isNew )
+    {
+        return TangleCause::New;
+    }
+    if( was10 < kTangleBar10 )
+    {
+        return TangleCause::Crossed;
+    }
+    if( now10 > was10 )
+    {
+        return TangleCause::Grew;
+    }
+    return rise.any() ? TangleCause::Rose : TangleCause::None;
+}
+
+// The inputs that grew at all (the fix= reading of a ratchet row, whose growth can be under the rise rule's steps).
+inline TangleRise tangleGrowth( const TangleInputs& was, const TangleInputs& now ) noexcept
+{
+    return { now.nest > was.nest, now.deep > was.deep, now.steer > was.steer };
+}
+
+// What gates (owner 11-21): rule (b), a new function at or over the bar or one that crossed it, and the ratchet, a function over the
+// bar whose score grew against the range base — except a moved body (its code is not new; the re-census found no such row) and test
+// code (the census's test-harness mains were its false class, and QD-ENTRY-CEILING exempts test drivers the same way). A row of a
+// rising input whose score did not grow stays sev="minor". `rel` = the root-relative path. Expected effect (replay 11-21): a change
+// that grows buildGraph, serialize or captureTagsFacts by a tenth blocks until it is acked or the function is split.
+inline bool tangleCauseGates( TangleCause cause, bool moved, std::string_view rel ) noexcept
+{
+    return ( cause == TangleCause::New || cause == TangleCause::Crossed || cause == TangleCause::Grew ) && !moved && !isTestPath( rel );
+}
+
 // QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell by the rise rule (tangleRise read backwards) and none rose, and the score is lower.
 inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) noexcept
 {
@@ -11568,20 +11703,19 @@ inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) n
     return tangleScore10( was ) >= kTangleBar10 && tangleRise( now, was ).any() && !tangleRise( was, now ).any() && tangleScore10( now ) < tangleScore10( was );
 }
 
-// D4 RATCHET (report-only): each `ratchetable` key — over the bar now, existing at the baseline, inputs moved by this change — against its
-// best since the reference point (extras.bestSince over those keys' files only). It fires when the score is above its best AND an input
-// rose over its minimum by the same rise rule the baseline row uses (nest +1 past the free levels, deep +kTangleDeepRise, a new steering
-// local): a function that crept up across merges, each step under the rise rule, is named once it has crept that far. On a key this
-// pass already rowed, the ratchet adds its facet (ratchet="<ref>") and its reading to why=; otherwise it is a row of its own, was= the
-// best score. A key the history never held (created in this working tree) is not judged.
-template<class Stamp>
-inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g,
-                                 const std::vector<std::pair<std::uint64_t, const TangleNow*>>& ratchetable, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
-                                 TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
+// D4 (QD-RATCHET-BASE: a facet, never a row of its own): each tangle row on a function that existed at the baseline, against its best
+// since the reference point (extras.bestSince over those rows' files only). When the score is above that best AND an input rose over
+// its minimum by the rise rule, the row gets ratchet="<ref>" and why= adds "best since <ref>: ...": the context of a function that
+// crept up across merges. Whether a function is judged at all is the range base's question (tangleCauseOf); replay 11-21: four of the
+// nine rows the tag-best compare made on its own were functions this change did not grow (buildGraph twice, serialize, and a
+// captureTagsFacts that fell 29.2 -> 29.1). A key the history never held (created after the tag) is not judged.
+inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing,
+                                 const std::vector<std::pair<std::uint64_t, const TangleNow*>>& rowed, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
+                                 std::string_view root, DeltaExtras& extras )
 {
     std::vector<std::string> paths;
-    paths.reserve( ratchetable.size() );
-    for( const auto& [ key, nowOfKey ] : ratchetable )
+    paths.reserve( rowed.size() );
+    for( const auto& [ key, nowOfKey ] : rowed )
     {
         paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowOfKey->at ].fileId ], root ) );
     }
@@ -11594,37 +11728,23 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     {
         return;
     }
-    for( const auto& [ key, nowOfKey ] : ratchetable )
+    for( const auto& [ key, nowOfKey ] : rowed )
     {
         const BestSinceRow* row = store.find( key );
-        if( row == nullptr )
+        const auto          at  = rowOfKey.find( key );
+        if( row == nullptr || at == rowOfKey.end() )
         {
             continue;
         }
         ++extras.ratchetJudged;
-        const TangleNow&    now   = *nowOfKey;
-        const TangleBest    best  = unpackTangleBest( row->value );
-        const std::uint32_t now10 = tangleScore10( now.in );
-        const TangleRise    rise  = tangleRise( best.minima, now.in );
-        if( now10 <= best.score10 || !rise.any() )
+        const TangleBest best = unpackTangleBest( row->value );
+        if( tangleScore10( nowOfKey->in ) <= best.score10 || !tangleRise( best.minima, nowOfKey->in ).any() )
         {
             continue;
         }
-        const std::string since = "best since " + store.ref + ": " + tangleWhy( best.minima, now.in, /*isNew=*/false );
-        if( const auto it = rowOfKey.find( key ); it != rowOfKey.end() )
-        {
-            Regression& r = regs[ it->second ];
-            r.facet       = store.ref;
-            r.why        += "; " + since;
-            continue;
-        }
-        const TangleDetailFacts detail = detailOf.of( ing.symbols[ now.at ] );
-        Regression r{ "tangle", g.canonId[ now.at ], best.score10, now10, key, /*isMinor=*/true, store.ref, /*isNewSymbol=*/false, /*isMoved=*/false };
-        r.why    = since;
-        r.fix    = tangleFix( rise, /*isNew=*/false, now.in, detail );
-        r.locals = tangleLocals( detail );
-        regs.push_back( std::move( r ) );
-        stamp( now.at );
+        Regression& r = regs[ at->second ];
+        r.facet       = store.ref;
+        r.why        += "; best since " + store.ref + ": " + tangleWhy( best.minima, nowOfKey->in, /*isNew=*/false );
     }
 }
 
@@ -11853,7 +11973,7 @@ inline void appendRepeatedDecisionFixes( std::vector<Regression>& regs, const In
 
 // The rows, appended to `regs` (stamped by the caller's `stamp( NodeId )`). `existed` and `movedAt` are computeDelta's own origin
 // oracles, so a tangle row's origin= reads exactly as every other per-symbol kind's. With `extras`, also the tangle credits and the
-// D4 ratchet (appendTangleRatchet).
+// D4 facet on the rows (appendTangleRatchet).
 // Judged only when the kind is selected and against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
 // reading every function as new would bury the answer in rows that are not about this change.
 template<class Existed, class MovedAt, class Stamp>
@@ -11868,7 +11988,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
     const gtl::btree_map<std::uint64_t, TangleNow> nowByKey = tangleNowByKey( ing, g, keyByNode );
     TangleDetailReader                             detailOf{ ing };
     gtl::btree_map<std::uint64_t, std::size_t>     rowOfKey;     // the row this pass emitted for a key (the ratchet adds its facet there)
-    std::vector<std::pair<std::uint64_t, const TangleNow*>> ratchetable;   // over the bar, existed, and the change moved its inputs (key, its nowByKey entry)
+    std::vector<std::pair<std::uint64_t, const TangleNow*>> rowed;   // the rows on functions that existed at the baseline (D4 reads their history)
     for( const auto& [ key, best ] : nowByKey )
     {
         const bool          isNew = !existed( key );
@@ -11883,27 +12003,30 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
         {
             continue;   // under the bar now: no row, whatever it was
         }
-        if( !isNew && packTangle( was ) != packTangle( best.in ) )
-        {
-            ratchetable.emplace_back( key, &best );
-        }
-        const TangleRise rise = tangleRise( was, best.in );
-        if( !isNew && was10 >= kTangleBar10 && !rise.any() )
+        const TangleRise  rise  = tangleRise( was, best.in );
+        const TangleCause cause = tangleCauseOf( isNew, was10, now10, rise );
+        if( cause == TangleCause::None )
         {
             continue;   // already over the bar and nothing rose: the change did not make it so
         }
+        const bool              moved  = isNew && movedAt( best.at );
+        const bool              gates  = tangleCauseGates( cause, moved, relForHash( ing.files[ ing.symbols[ best.at ].fileId ], root ) );
         const TangleDetailFacts detail = detailOf.of( ing.symbols[ best.at ] );
-        Regression r{ "tangle", g.canonId[ best.at ], isNew ? 0u : was10, now10, key, /*isMinor=*/true, {}, isNew, isNew && movedAt( best.at ) };
+        Regression r{ "tangle", g.canonId[ best.at ], isNew ? 0u : was10, now10, key, /*isMinor=*/!gates, {}, isNew, moved };
         r.why    = tangleWhy( was, best.in, isNew );
-        r.fix    = tangleFix( rise, isNew, best.in, detail );
+        r.fix    = tangleFix( cause == TangleCause::Grew ? tangleGrowth( was, best.in ) : rise, isNew, best.in, detail );
         r.locals = tangleLocals( detail );
         rowOfKey[ key ] = regs.size();
         regs.push_back( std::move( r ) );
         stamp( best.at );
+        if( !isNew )
+        {
+            rowed.emplace_back( key, &best );
+        }
     }
-    if( extras != nullptr && extras->bestSince && !ratchetable.empty() )
+    if( extras != nullptr && extras->bestSince && !rowed.empty() )
     {
-        appendTangleRatchet( regs, ing, g, ratchetable, rowOfKey, detailOf, stamp, root, *extras );
+        appendTangleRatchet( regs, ing, rowed, rowOfKey, root, *extras );
     }
 }
 
@@ -12587,7 +12710,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     if( kindSelected( scope.kinds, "defect-shape" ) )
     {
-        appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride );   // the twelfth kind (see its doc)
+        appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride, extras != nullptr ? &extras->shellCut : nullptr );   // the twelfth kind (see its doc)
     }
     if( kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 similar=: on by default, report-only (never gating)
     {

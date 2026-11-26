@@ -307,19 +307,32 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
                 std::string_view( row->installerFlags ) );
 }
 
-// HK2: the hook install's SubagentStart registration, DISCLOSED in the recipe for the agent that has one (the row with a
-// subagentBrief; SubagentStart is a Claude Code event). A comment, never a command, and it names neither the installer nor its
-// flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
-inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view agent )
+// What the hook install registers beyond the nudge, DISCLOSED in the recipe for the row it applies to. Comments, never commands,
+// and they name neither the installer nor its flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
+//   HK2: the SubagentStart note, for the row with a subagentBrief (SubagentStart is a Claude Code event).
+//   HOOK-DEDUP (2026-11-24): the SessionStart primer sends the paste block below and stays silent when a CLAUDE.md Claude Code loads
+//   already holds it word for word (hooks/ripwire-nudge.sh claudeMdHoldsBlurb): for the row whose context file is CLAUDE.md. The
+//   note does not offer the hook as a substitute for the paste: the meter's control arm (arm=auto, the default, half the sessions
+//   by session-id hash) never gets the primer (CodeRabbit #744 round 3). test/hookcheck.sh (3i6) holds it.
+inline void wrapPrintHookNotes( std::FILE* out, const std::string_view agent )
 {
     const AgentTarget* row = agentTarget( agent );
-    if( row == nullptr || row->subagentBrief.empty() || !row->hookSlot )
+    if( row == nullptr || !row->hookSlot )
     {
         return;
     }
-    rw::emitRaw( out, "# The hook install above also registers a SubagentStart note: under 400 B of routing context for each new Explore\n"
-                      "#   or Plan subagent, the two built-in types that do not load CLAUDE.md. It is a floor, not the lever: what a subagent\n"
-                      "#   acts on is its BRIEF, so paste the block the CLAUDE.md text below gives. RIPWIRE_SUBAGENT_ROUTE=0 turns the note off.\n" );
+    if( !row->subagentBrief.empty() )
+    {
+        rw::emitRaw( out, "# The hook install above also registers a SubagentStart note: under 400 B of routing context for each new Explore\n"
+                          "#   or Plan subagent, the two built-in types that do not load CLAUDE.md. It is a floor, not the lever: what a subagent\n"
+                          "#   acts on is its BRIEF, so paste the block the CLAUDE.md text below gives. RIPWIRE_SUBAGENT_ROUTE=0 turns the note off.\n" );
+    }
+    if( row->contextFile == "CLAUDE.md" )
+    {
+        rw::emitRaw( out, "# The hook install above also sends the block below at session start, and skips it when a CLAUDE.md Claude Code\n"
+                          "#   loads already holds it word for word. Pasting it is the reliable path: the hook sends it only in sessions where\n"
+                          "#   the primer is on, and by default about half of sessions are its control arm, which gets no primer.\n" );
+    }
 }
 
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
@@ -331,12 +344,16 @@ inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view a
 // own usage the whole-symbol edit verbs were never called there. For it the pair names the route that needs the fewest reads: a body
 // ripwire delivered is the verbatim text of its lines, so inside the working directory it is edited directly; a ranged Read is for
 // what was not delivered, and always for a file outside the working directory. Every other agent keeps the verbs.
+// θ17 (2026-11-24): the line no longer says "use your native Edit on it directly". On the M5 calibration traces (141 Claude Code
+// sessions, 2.1.209) the agent Read the file before editing in 37 of 37 cases where a delivered body sat in the edited file, and
+// Claude Code's Edit tool states it needs a prior Read; the line now says where the edit text comes from and that a ranged Read
+// of l..e is enough when a Read is needed.
 inline constexpr std::string_view kEditLinesSkipRead[ 2 ] = {
     "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
     "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand. Read listed ranges in ONE turn (parallel, ranged; a page's `<act read=>` lists its top ones); search only for what ripwire marks missing.",
 };
 inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
-    "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — inside your working directory, use your native Edit on it directly.",
+    "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — your native Edit's old_string can come from it; when that Edit needs a prior Read of the file, a ranged Read of `l`..`e` is enough.",
     "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. Read every listed range in ONE turn (parallel Read calls; a page's `<act read=>` lists its top ones); don't re-search what ripwire listed, search only for what it marks missing. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
 };
 
@@ -977,7 +994,7 @@ inline void wrapEmitAgent( const std::string_view agent, const WrapListing& aske
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
     wrapPrintSkillsLine( stdout, agent, executablePath );
     wrapPrintLegendSeenLine( stdout, agent );
-    wrapPrintSubagentRouteLine( stdout, agent );
+    wrapPrintHookNotes( stdout, agent );
 
     // context wiring: every recipe ends with the pasteable use-when blurb for the client's rules file.
     wrapPrintBlurb( stdout, agent );

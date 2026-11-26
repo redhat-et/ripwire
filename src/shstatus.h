@@ -24,6 +24,7 @@
 // Regular expressions are spelled as small hand matchers (the binary links no regex engine for this); each names the
 // Python pattern it implements.
 
+#include "infra/Diagnostics.h"  // ASSUME — the skip trio's recursion bound (UnguardedSkip)
 #include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
 #include "infra/shellword.h"   // trimView / shellIsRedirect — shared with darkflags.h
 #include "infra/sortutil.h"    // sortUnique / svLess
@@ -118,6 +119,43 @@ struct Tree
     std::vector<Node> nodes;
     std::vector<List> lists;
     std::uint32_t     top = kNone;
+    bool              cut = false;   // the nesting budget (kMaxShellNest) stopped the scan: what lies past it was not parsed
+};
+
+// ONE nesting budget for the lexer and the parser (CR712-SHSTATUS-DEPTH): every recursion of either — a quote or $( ) the
+// lexer skips through, a compound command or a substitution the parser descends into — takes a level, so a script nested
+// past kMaxShellNest is cut there (Tree::cut) instead of exhausting the stack (20,000 nested subshells crashed the scan).
+inline constexpr int kMaxShellNest = 64;   // shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N
+struct NestBudget
+{
+    int  depth     = 0;
+    int  unguarded = 0;   // skipQuote/skipBrace frames since the innermost NestLevel (UnguardedSkip)
+    bool cut       = false;
+};
+// One level of the budget for the scope of a recursion; `over` = the budget is spent (and the cut is recorded).
+class NestLevel
+{
+public:
+    explicit NestLevel( NestBudget& b ) noexcept : b_( b ), savedUnguarded_( b.unguarded )
+    {
+        b_.unguarded = 0;
+        over_  = b_.depth >= kMaxShellNest;
+        b_.cut = b_.cut || over_;   // the disclosure: Tree::cut, then the answer's shell_cut= (quality.h defectSitesOf)
+        ++b_.depth;
+    }
+    ~NestLevel()
+    {
+        --b_.depth;
+        b_.unguarded = savedUnguarded_;
+    }
+    NestLevel( const NestLevel& )            = delete;
+    NestLevel& operator=( const NestLevel& ) = delete;
+    bool over() const noexcept { return over_; }
+
+private:
+    NestBudget& b_;
+    int         savedUnguarded_;
+    bool        over_ = false;
 };
 
 namespace detail
@@ -462,9 +500,38 @@ inline bool isRedirOp( std::string_view o ) noexcept
     return o == "<" || o == ">" || o == ">>" || o == "&>" || o == "&>>" || o == ">&" || o == "<&" || o == "<>" || o == ">|" || o == "<<<" || o == "<<";
 }
 
-std::size_t skipParen( std::string_view s, std::size_t i );
-inline std::size_t skipQuote( std::string_view s, std::size_t i, char q )   // s[i] is the opening quote
+// s[i] is an opening backquote: the index past its closing one, or the end when it never closes.
+inline std::size_t pastBacktick( std::string_view s, std::size_t i ) noexcept
 {
+    const std::size_t j = s.find( '`', i + 1 );
+    return j == std::string_view::npos ? s.size() : j + 1;
+}
+
+// skipQuote and skipBrace carry no budget guard of their own: they stay bounded only because every cycle of the skip trio
+// passes through skipParen's NestLevel. skipBrace calls only skipQuote and skipQuote calls only skipParen, so at most
+// kMaxUnguardedSkips of their frames ever sit above one NestLevel. A new call that closes a cycle around skipParen would
+// recurse unbudgeted; this frame count is that invariant in code.
+inline constexpr int kMaxUnguardedSkips = 2;   // skipBrace -> skipQuote
+class UnguardedSkip
+{
+public:
+    explicit UnguardedSkip( NestBudget& b ) noexcept : b_( b )
+    {
+        ++b_.unguarded;
+        ASSUME( b_.unguarded <= kMaxUnguardedSkips, "skipQuote/skipBrace recurse only through skipParen's budget guard" );
+    }
+    ~UnguardedSkip() { --b_.unguarded; }
+    UnguardedSkip( const UnguardedSkip& )            = delete;
+    UnguardedSkip& operator=( const UnguardedSkip& ) = delete;
+
+private:
+    NestBudget& b_;
+};
+
+std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb );
+inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBudget& nb )   // s[i] is the opening quote
+{
+    const UnguardedSkip frame( nb );
     ++i;
     while( i < s.size() )
     {
@@ -476,13 +543,12 @@ inline std::size_t skipQuote( std::string_view s, std::size_t i, char q )   // s
         }
         if( q == '"' && c == '$' && startsAt( s, i, "$(" ) )
         {
-            i = skipParen( s, i + 1 );
+            i = skipParen( s, i + 1, nb );
             continue;
         }
         if( q == '"' && c == '`' )
         {
-            const std::size_t j = s.find( '`', i + 1 );
-            i = j == std::string_view::npos ? s.size() : j + 1;
+            i = pastBacktick( s, i );
             continue;
         }
         if( c == q )
@@ -493,8 +559,15 @@ inline std::size_t skipQuote( std::string_view s, std::size_t i, char q )   // s
     }
     return i;
 }
-inline std::size_t skipParen( std::string_view s, std::size_t i )   // s[i] == '('
+// The one budget guard of the skip trio: skipQuote and skipBrace recurse only through skipParen (UnguardedSkip), so each nesting level of
+// "$( … "$( … )" … )" or ${ … "$( … )" … } costs one level here.
+inline std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '('
 {
+    const NestLevel level( nb );
+    if( level.over() )
+    {
+        return s.size();   // past the budget: the rest is one unscanned word (Tree::cut says so)
+    }
     int depth = 0;
     while( i < s.size() )
     {
@@ -506,7 +579,7 @@ inline std::size_t skipParen( std::string_view s, std::size_t i )   // s[i] == '
         }
         if( c == '\'' || c == '"' )
         {
-            i = skipQuote( s, i, c );
+            i = skipQuote( s, i, c, nb );
             continue;
         }
         if( c == '#' && ( i == 0 || s[i - 1] == ' ' || s[i - 1] == '\t' || s[i - 1] == '\n' || s[i - 1] == ';' || s[i - 1] == '(' ) )
@@ -531,8 +604,9 @@ inline std::size_t skipParen( std::string_view s, std::size_t i )   // s[i] == '
     }
     return i;
 }
-inline std::size_t skipBrace( std::string_view s, std::size_t i )   // s[i] == '{' of a ${...}
+inline std::size_t skipBrace( std::string_view s, std::size_t i, NestBudget& nb )   // s[i] == '{' of a ${...}
 {
+    const UnguardedSkip frame( nb );
     int depth = 0;
     while( i < s.size() )
     {
@@ -544,7 +618,7 @@ inline std::size_t skipBrace( std::string_view s, std::size_t i )   // s[i] == '
         }
         if( c == '\'' || c == '"' )
         {
-            i = skipQuote( s, i, c );
+            i = skipQuote( s, i, c, nb );
             continue;
         }
         if( c == '{' )
@@ -567,7 +641,7 @@ inline std::size_t skipBrace( std::string_view s, std::size_t i )   // s[i] == '
 // A double-quoted text with its own single quotes blanked: they are literal there ("don't"), but a quote inside a $( )
 // or ` ` it holds is live ("$( grep -o '<r ' f )" keeps '<r ' one word, not a < redirect). exitstatus.py's
 // _dq_literal_quotes.
-inline std::string dqLiteralQuotes( std::string_view s )
+inline std::string dqLiteralQuotes( std::string_view s, NestBudget& nb )
 {
     std::string out( s );
     std::size_t i = 0;
@@ -581,13 +655,12 @@ inline std::string dqLiteralQuotes( std::string_view s )
         }
         if( startsAt( s, i, "$(" ) )
         {
-            i = skipParen( s, i + 1 );
+            i = skipParen( s, i + 1, nb );
             continue;
         }
         if( c == '`' )
         {
-            const std::size_t j = s.find( '`', i + 1 );
-            i                   = j == std::string_view::npos ? s.size() : j + 1;
+            i = pastBacktick( s, i );
             continue;
         }
         if( c == '\'' )
@@ -600,7 +673,7 @@ inline std::string dqLiteralQuotes( std::string_view s )
 }
 
 // Command substitutions $( ... ) and ` ... ` inside one word (outside single quotes), with their lines and positions.
-inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base, std::vector<Sub>& out )
+inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base, std::vector<Sub>& out, NestBudget& nb )
 {
     std::size_t i = 0;
     while( i < raw.size() )
@@ -613,17 +686,17 @@ inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base
         }
         if( c == '\'' )
         {
-            i = skipQuote( raw, i, '\'' );
+            i = skipQuote( raw, i, '\'', nb );
             continue;
         }
         if( startsAt( raw, i, "$((" ) )
         {
-            i = skipParen( raw, i + 1 );
+            i = skipParen( raw, i + 1, nb );
             continue;
         }
         if( startsAt( raw, i, "$(" ) )
         {
-            const std::size_t j = skipParen( raw, i + 1 );
+            const std::size_t j = skipParen( raw, i + 1, nb );
             out.push_back( { std::string( sliceOf( raw, i + 2, j - 1 ) ), static_cast<std::uint32_t>( line + countNl( raw, 0, i ) ), static_cast<std::uint32_t>( base + i + 2 ), kNone } );
             i = j;
             continue;
@@ -639,8 +712,13 @@ inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base
         if( c == '"' )
         {
             // descend: substitutions inside double quotes are live (single quotes inside them are not quotes)
-            const std::size_t j     = skipQuote( raw, i, '"' );
-            subsIn( dqLiteralQuotes( sliceOf( raw, i + 1, j - 1 ) ), static_cast<std::uint32_t>( line + countNl( raw, 0, i ) ), static_cast<std::uint32_t>( base + i + 1 ), out );
+            const std::size_t j     = skipQuote( raw, i, '"', nb );
+            const NestLevel   level( nb );   // the descent is a recursion of its own
+            if( level.over() )
+            {
+                return;
+            }
+            subsIn( dqLiteralQuotes( sliceOf( raw, i + 1, j - 1 ), nb ), static_cast<std::uint32_t>( line + countNl( raw, 0, i ) ), static_cast<std::uint32_t>( base + i + 1 ), out, nb );
             i = j;
             continue;
         }
@@ -703,7 +781,7 @@ inline std::size_t heredocDelim( std::string_view s, std::size_t k, std::string&
 class Lexer
 {
 public:
-    Lexer( std::string_view src, std::uint32_t line0, std::uint32_t base ) : src_( src ), n_( src.size() ), line_( line0 ), base_( base ) {}
+    Lexer( std::string_view src, std::uint32_t line0, std::uint32_t base, NestBudget& nb ) : src_( src ), n_( src.size() ), line_( line0 ), base_( base ), nb_( nb ) {}
 
     std::vector<Tok> run()
     {
@@ -725,6 +803,7 @@ private:
     std::size_t                               i_ = 0;
     std::uint32_t                             line_;
     std::uint32_t                             base_;
+    NestBudget&                               nb_;
     std::vector<std::pair<bool, std::string>> pending_;   // heredoc delimiters waiting for the end of this line
     bool                                      prevBlank_ = true;
     std::vector<Tok>                          toks_;
@@ -758,7 +837,7 @@ private:
         t.word.pos  = posAt( b );
         if( withSubs )
         {
-            subsIn( t.word.text, line_, t.word.pos, t.word.subs );
+            subsIn( t.word.text, line_, t.word.pos, t.word.subs, nb_ );
         }
         t.line = line_;
         t.pos  = t.word.pos;
@@ -933,36 +1012,34 @@ private:
         }
         if( d == '\'' || d == '"' )
         {
-            return skipQuote( src_, i, d );
+            return skipQuote( src_, i, d, nb_ );
         }
         if( d == '`' )
         {
-            const std::size_t j = src_.find( '`', i + 1 );
-            return j == std::string_view::npos ? n_ : j + 1;
+            return pastBacktick( src_, i );   // n_ == src_.size()
         }
         if( startsAt( src_, i, "$(" ) )
         {
-            return skipParen( src_, i + 1 );
+            return skipParen( src_, i + 1, nb_ );
         }
         if( startsAt( src_, i, "${" ) )
         {
-            return skipBrace( src_, i + 1 );
+            return skipBrace( src_, i + 1, nb_ );
         }
         if( d == '(' && i > start && src_[i - 1] == '=' )   // array assignment X=( ... )
         {
-            return skipParen( src_, i );
+            return skipParen( src_, i, nb_ );
         }
         return i + 1;
     }
 };
 
-inline std::vector<Tok> lex( std::string_view src, std::uint32_t line0, std::uint32_t base )
+inline std::vector<Tok> lex( std::string_view src, std::uint32_t line0, std::uint32_t base, NestBudget& nb )
 {
-    return Lexer( src, line0, base ).run();
+    return Lexer( src, line0, base, nb ).run();
 }
 
 // ── parser ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-inline constexpr int kMaxSubDepth = 40;   // nested $( ) parsed past this depth are left unparsed (an empty list)
 
 struct Stops
 {
@@ -976,7 +1053,7 @@ struct Stops
 class Parser
 {
 public:
-    Parser( Tree& tree, std::vector<Tok> toks, int depth ) : t_( std::move( toks ) ), tree_( tree ), depth_( depth ) {}
+    Parser( Tree& tree, std::vector<Tok> toks, NestBudget& nb ) : t_( std::move( toks ) ), tree_( tree ), nb_( nb ) {}
 
     std::uint32_t parseAll()
     {
@@ -1000,7 +1077,7 @@ private:
     std::vector<Tok> t_;
     std::size_t      i_ = 0;
     Tree&            tree_;
-    int              depth_;
+    NestBudget&      nb_;   // shared with the lexer and every nested Parser: one budget for the whole script
     Tok              eof_{};
 
     const Tok& peek() const noexcept
@@ -1057,11 +1134,12 @@ private:
     {
         for( Sub& s : w.subs )
         {
-            if( depth_ >= kMaxSubDepth )
+            const NestLevel level( nb_ );
+            if( level.over() )
             {
-                continue;
+                continue;   // past the budget: an empty list (Tree::cut says so)
             }
-            Parser p( tree_, lex( s.inner, s.line, s.pos ), depth_ + 1 );
+            Parser p( tree_, lex( s.inner, s.line, s.pos, nb_ ), nb_ );
             s.list = p.parseAll();
         }
     }
@@ -1146,6 +1224,12 @@ private:
     }
     std::uint32_t parseCommand( const Stops& stops )
     {
+        const NestLevel level( nb_ );   // every nested list (subshell, group, if, loop, case, function body) is reached through here
+        if( level.over() )
+        {
+            i_ = t_.size();   // past the budget: the rest of this token stream is not parsed (Tree::cut says so)
+            return kNone;
+        }
         const Tok& p = peek();
         if( p.kind == TokKind::Eof || stopped( stops ) )
         {
@@ -1453,8 +1537,10 @@ private:
 inline Tree parse( std::string_view src )
 {
     Tree           t;
-    detail::Parser p( t, detail::lex( src, 1, 0 ), 0 );
+    NestBudget     nb;
+    detail::Parser p( t, detail::lex( src, 1, 0, nb ), nb );
     t.top = p.parseAll();
+    t.cut = nb.cut;
     return t;
 }
 

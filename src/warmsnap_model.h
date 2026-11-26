@@ -32,7 +32,7 @@ namespace rw::warmsnap
 // Not stored: files / crawlRoot / crawlRootPrefixes / skippedOversize (the TREE section's), reparsedFiles (0: nothing was
 // re-extracted), memoryStop (a stopped ingest is never recorded), rustCrateRoots (derived on first use), and the five
 // multi-root vectors (a multi-root merge does not use the snapshot).
-static_assert( sizeof( IngestResult ) == 1176 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
+static_assert( sizeof( IngestResult ) == 1208 && sizeof( Symbol ) == 112 && sizeof( Reference ) == 64 && sizeof( Binding ) == 36 && sizeof( RefColdText ) == 20,
                "the model changed shape: store and load the new field in writeModel / readModel below, bump warmsnap::kVersion, then re-pin these sizes" );
 #endif
 

@@ -1277,6 +1277,76 @@ fi
 # `ripwire wrap <the running agent>` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
 # src/wrap.h (the single source of truth the wrap gate diffs across agents). If wrap refuses — e.g. a
 # CRITICAL skill-scan finding — the fence is absent, the blurb is empty, and this degrades to silence.
+# claudeMdHoldsBlurb DIR BLURB: true when a memory file Claude Code loads at session start already holds BLURB word for word,
+# so the primer would only repeat it. The files: the user-level one, the managed-policy ones, and CLAUDE.md, .claude/CLAUDE.md and
+# CLAUDE.local.md in DIR and each parent below `/`. Matched against what Claude Code injects: carriage returns ignored, HTML
+# comments removed (it strips them; a block inside one is not delivered). EXACT, not a heading grep: a stale or edited block is
+# not this version's text, so the primer still sends the current one. Kept CONSERVATIVE where loading is not modelled: an @import
+# is not followed, and claudeMdSettingsMayDrop (below) keeps the primer whenever a settings file may stop these files loading.
+# A file over 4 MiB is not matched: Claude Code skips such a file and loads none of it (https://code.claude.com/docs/en/memory,
+# "as long as the file is 4 MiB or smaller"), so its block is never delivered. test/hookcheck.sh (3i6) pins each case.
+# Cost: per file that exists, one `$(< FILE)` and, for a memory file, one `wc -c` (BSD and GNU wc answer -c on a regular file from
+# its size, not by reading). bash 3.2's `read -d ''` takes one syscall per byte (9 s for 4 MiB); `$(<)` reads in blocks.
+claudeMdRead() # FILE -> the caller's `text` (trailing newlines dropped); false when FILE is not a readable regular file
+{
+    [ -f "$1" ] && [ -r "$1" ] || return 1
+    text="$( < "$1" )"
+    return 0
+}
+# claudeMdSettingsMayDrop SETTINGS...: true when a readable settings file may keep a memory file from loading, so a match
+# cannot be trusted. Two keys (https://code.claude.com/docs/en/memory): claudeMdExcludes, which skips files by path or glob,
+# and the instruction mode pluginConfigs["cc-plugin-agents-md@builtin" or "agents-md@builtin"].options.instructionFiles, whose
+# `managed-only` value drops the project, local and user CLAUDE.md files. Any instructionFiles value except the default
+# "claude-md-or-agents-md", and any mention this text match cannot read as that default, counts. Files read: user, project,
+# local, and managed-settings.json plus managed-settings.d/*.json. Out of the hook's sight, so not honoured: a --settings file,
+# an MDM profile, server-managed settings.
+claudeMdSettingsMayDrop()
+{
+    local f text dflt='"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"'
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *claudeMdExcludes* ]] && return 0
+        while [[ "$text" =~ $dflt ]]
+        do
+            text="${text/"${BASH_REMATCH[0]}"/}"
+        done
+        [[ "$text" == *instructionFiles* ]] && return 0
+    done
+    return 1
+}
+claudeMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text rest size cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
+    local -a files=( "$cfg/CLAUDE.md" "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
+    local -a settings=( "$cfg/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json"
+                        "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json
+                        "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json )
+    while [ -n "$d" ]
+    do
+        files+=( "$d/CLAUDE.md" "$d/.claude/CLAUDE.md" "$d/CLAUDE.local.md" )
+        settings+=( "$d/.claude/settings.json" "$d/.claude/settings.local.json" )
+        d="${d%/*}"
+    done
+    claudeMdSettingsMayDrop "${settings[@]}" && return 1
+    for f in "${files[@]}"
+    do
+        [ -f "$f" ] || continue
+        size="$( wc -c < "$f" 2>/dev/null )"
+        [ -n "$size" ] && [ "$(( size ))" -le 4194304 ] || continue   # over 4 MiB, or unknown: Claude Code may load none of it
+        claudeMdRead "$f" || continue
+        [[ "$text" == *$'\r'* ]] && text="${text//$'\r'/}"   # only when present: bash 3.2 takes seconds on a MiB-sized text
+        while [[ "$text" == *"<!--"* ]]
+        do
+            rest="${text#*"<!--"}"
+            text="${text%%"<!--"*}"
+            [[ "$rest" == *"-->"* ]] && text+="${rest#*"-->"}"   # an unclosed comment runs to the end of the file
+        done
+        [[ "$text" == *"$want"* ]] && return 0
+    done
+    return 1
+}
+
 if [ "${1:-}" = "--session-start" ]
 then
     input="$( cat )"
@@ -1328,6 +1398,9 @@ then
     [ -n "$blurb" ] || [ "$meter_agent" = claude ] || blurb=$( ripwire wrap claude 2>/dev/null \
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
+    # HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND this hook installed, the same ~3.9 KB arrived
+    # twice on every request. Only for Claude, whose memory files are the ones checked; Codex's AGENTS.md is not.
+    [ "$meter_agent" = claude ] && claudeMdHoldsBlurb "$dir" "$blurb" && exit 0
 
     if command -v jq >/dev/null 2>&1
     then

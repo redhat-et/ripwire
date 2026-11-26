@@ -29,9 +29,9 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
-#include <cctype>
 #include <cerrno>
 
+#include "infra/strkern.h" // strkern::lowerFoldedEquals / lowerFoldedStartsWith — header names, the bearer scheme, media types
 #include "infra/os.h"      // rw::os — socket/bind/listen/accept/recv/send/setsockopt; struct timeval for SO_RCVTIMEO (slow-loris guard)
 
 namespace rw
@@ -74,23 +74,6 @@ inline bool constantTimeEquals( std::string_view a, std::string_view b ) noexcep
         diff |= static_cast<unsigned char>( a[i] ) ^ static_cast<unsigned char>( b[i] );
     }
     return diff == 0;
-}
-
-// case-insensitive ASCII compare for HTTP header names (RFC 7230 §3.2: field names are case-insensitive).
-inline bool iEquals( std::string_view a, std::string_view b ) noexcept
-{
-    if( a.size() != b.size() )
-    {
-        return false;
-    }
-    for( std::size_t i = 0; i < a.size(); ++i )
-    {
-        if( std::tolower( static_cast<unsigned char>( a[i] ) ) != std::tolower( static_cast<unsigned char>( b[i] ) ) )
-        {
-            return false;
-        }
-    }
-    return true;
 }
 
 inline std::string_view trim( std::string_view s ) noexcept
@@ -244,9 +227,9 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
         const std::size_t colon = hline.find( ':' );
         if( colon != std::string_view::npos )
         {
-            const std::string_view key = trim( hline.substr( 0, colon ) );
+            const std::string_view key = trim( hline.substr( 0, colon ) );   // RFC 7230 §3.2: field names are case-insensitive
             const std::string_view val = trim( hline.substr( colon + 1 ) );
-            if( iEquals( key, "content-length" ) )
+            if( strkern::lowerFoldedEquals( key, "content-length" ) )
             {
                 if( req.hasContentLength ) { badHeader = true; break; }
                 // parse a non-negative decimal; reject anything else (a bad length → treat as malformed later).
@@ -265,37 +248,37 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
                     badHeader = true;
                 }
             }
-            else if( iEquals( key, "authorization" ) )
+            else if( strkern::lowerFoldedEquals( key, "authorization" ) )
             {
                 if( req.hasAuthorization ) { badHeader = true; break; }
                 req.hasAuthorization = true;
                 req.authorization = std::string( val );
             }
-            else if( iEquals( key, "origin" ) )
+            else if( strkern::lowerFoldedEquals( key, "origin" ) )
             {
                 if( req.hasOrigin ) { badHeader = true; break; }
                 req.hasOrigin = true;
                 req.origin = std::string( val );
             }
-            else if( iEquals( key, "accept" ) )
+            else if( strkern::lowerFoldedEquals( key, "accept" ) )
             {
                 if( req.hasAccept ) { badHeader = true; break; }
                 req.hasAccept = true;
                 req.accept = std::string( val );
             }
-            else if( iEquals( key, "content-type" ) )
+            else if( strkern::lowerFoldedEquals( key, "content-type" ) )
             {
                 if( req.hasContentType ) { badHeader = true; break; }
                 req.hasContentType = true;
                 req.contentType = std::string( val );
             }
-            else if( iEquals( key, "mcp-protocol-version" ) )
+            else if( strkern::lowerFoldedEquals( key, "mcp-protocol-version" ) )
             {
                 if( req.hasProtocolVersion ) { badHeader = true; break; }
                 req.hasProtocolVersion = true;
                 req.protocolVersion = std::string( val );
             }
-            else if( iEquals( key, "transfer-encoding" ) )
+            else if( strkern::lowerFoldedEquals( key, "transfer-encoding" ) )
             {
                 req.hasTransferEncoding = true;
             }
@@ -335,20 +318,16 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
 // extract the bearer credential from an "Authorization: Bearer <token>" value ("" if not a bearer scheme).
 inline std::string_view bearerCredential( std::string_view auth ) noexcept
 {
-    constexpr std::string_view kBearer = "Bearer ";
+    constexpr std::string_view kBearer = "bearer ";   // the auth scheme is case-insensitive (RFC 9110 §11.1)
     auth = trim( auth );
-    if( auth.size() < kBearer.size() )
-    {
-        return {};
-    }
-    if( !iEquals( auth.substr( 0, kBearer.size() ), kBearer ) )
+    if( !strkern::lowerFoldedStartsWith( auth, kBearer ) )
     {
         return {};
     }
     return trim( auth.substr( kBearer.size() ) );
 }
 
-inline bool hasMediaType( std::string_view values, std::string_view wanted ) noexcept
+inline bool hasMediaType( std::string_view values, std::string_view wantedLowered ) noexcept
 {
     std::size_t offset = 0;
     while( offset <= values.size() )
@@ -359,7 +338,7 @@ inline bool hasMediaType( std::string_view values, std::string_view wanted ) noe
         {
             value = trim( value.substr( 0, semi ) );
         }
-        if( iEquals( value, wanted ) )
+        if( strkern::lowerFoldedEquals( value, wantedLowered ) )
         {
             return true;
         }
@@ -383,7 +362,7 @@ inline bool isJsonContentType( std::string_view contentType ) noexcept
     {
         contentType = contentType.substr( 0, semi );
     }
-    return iEquals( trim( contentType ), "application/json" );
+    return strkern::lowerFoldedEquals( trim( contentType ), "application/json" );
 }
 
 inline bool isAllowedOrigin( std::string_view origin, std::string_view host, int port, bool loopback )
