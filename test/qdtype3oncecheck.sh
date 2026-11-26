@@ -110,8 +110,9 @@ run_qd clean2
 # differ between two identical calls by design, and the phase list depends on whether a cache save ran. So D compares stderr
 # WITHOUT them. Premise: both calls must print at least one non-[mem] stats line, or the stderr compare would be vacuous.
 # The `[verbfs] …` lines (src/verbfs.h) report the per-index record's state: the first call computes and writes it, the next
-# serves it. They differ by design, as [mem] does; stdout, rc and every other stats line are still compared byte for byte.
-nomem(){ grep -v -e '^\[mem\] ' -e '^\[verbfs\] ' "$TMP/$1.err" > "$TMP/$1.err.nomem" || true; }
+# serves it. The `[warmsnap] …` lines (src/warmsnap*.h) likewise report that the second call was served from the warm snapshot.
+# Both differ by design, as [mem] does; stdout, rc and every other stats line are still compared byte for byte.
+nomem(){ grep -v -e '^\[mem\] ' -e '^\[verbfs\] ' -e '^\[warmsnap\] ' "$TMP/$1.err" > "$TMP/$1.err.nomem" || true; }
 nomem clean; nomem clean2
 if [ ! -s "$TMP/clean.err.nomem" ] || [ ! -s "$TMP/clean2.err.nomem" ]; then
     no "D: premise — a clean-tree call printed no stats line outside [mem] (the stderr compare would be vacuous)"
