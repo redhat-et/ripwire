@@ -9,8 +9,8 @@
 # TWICE: once with the payload spliced in (the answer's parse) and once AS IT IS ON DISK, only to read the
 # file's parse-error count before the edit — a number the warm index already holds (FileHealth.errNodes,
 # measured by the run's own ingest and carried by the content cache and the warm snapshot). On this repo's
-# 1.2 MB src/graph.h that second parse was a measured share of a 15 s preview whose plain --edit-check
-# answers in 0.25 s. Agents run the preview before every edit, so its cost is paid per edit.
+# 1.2 MB src/graph.h that second parse was about 0.33 s CPU of a warm preview whose plain --edit-check answers in
+# about 0.3 s (Release, measured 2026-11-26). Agents run the preview before every edit, so its cost is paid per edit.
 #
 # THE ARMS
 #   (I) identity — three fixtures, one per answer class: a contract change with no broken caller (chg11, a
@@ -28,9 +28,10 @@
 #       warm path, so reading the count off the index did not turn the delta into "no baseline, accept all".
 #   (W) the preview writes nothing to the warm index — a plain run after it still reparses 0 files.
 #   (H) after a one-file COMMIT, the first preview's HEAD-baseline ingest reparses 1 file, not the tree, and the
-#       answer is byte-identical to a fully cold run. This is where the measured 15 s actually went: the HEAD
-#       ingest cache is named by sha, so every commit used to start the baseline from nothing. Red on the base
-#       (reparsed= every committed file).
+#       answer is byte-identical to a fully cold run. The HEAD ingest cache is named by sha, so every commit
+#       used to start the baseline from nothing (on this repo: reparsed=4991 of 4,996, and the 10.11 s first
+#       plain --edit-check after a new HEAD the first-edit hook measured). Red on the base (reparsed= every
+#       committed file).
 #
 # Operates entirely on private temp git repos and a private TMPDIR (the cache ladder's first rung); never touches
 # the real repo or the user's caches. Needs git.
@@ -126,6 +127,7 @@ icase(){ # $1 id  $2 name  $3 file  $4 expected-class (change|unchanged|break)
         break)     { [ -n "$inc" ] && [ "$inc" != ' incompatible="0"' ]; } \
                        && ok "(I) $id: class holds — a new caller break ($st$inc)" \
                        || no "(I) $id: expected a flagged caller, got $st$inc" ;;
+        *)         no "(I) $id: unknown expected class '$want' — the arm asserted nothing" ;;
     esac
 }
 icase chg11 scale lib.h change

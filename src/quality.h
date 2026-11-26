@@ -4510,9 +4510,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //
 // The qheadsnap ingest cache is named by HEAD sha, so the first --edit-check, --edit-check --dry-run preview or
 // --quality-delta after ANY commit found no blob and re-parsed the whole committed tree: on this repo (4,996 files),
-// after a one-file commit, `cache-stats reparsed=4991 reused=5`. That is the 15.36 s "preview" the first-edit hook
-// measured; a plain --edit-check answers in 0.25 s once the blob exists. Nothing about a record is tied to the sha it
-// was written under: every record is validated per file on load (parser identity, content hash, and the stat gate's
+// after a one-file commit, `cache-stats reparsed=4991 reused=5`. The first-edit hook measured the first plain
+// --edit-check after a new HEAD at 10.11 s on a warm cache; once the blob exists it answers in 0.25 s. Nothing about a
+// record is tied to the sha it was written under: every record is validated per file on load (parser identity, content hash, and the stat gate's
 // ctime, which an extraction cannot forge — ingest_cache.h), and the blob is root-relative. So a record whose file the
 // commit did not change is exactly the record a cold parse of this commit would write, and one whose file did change
 // simply misses. When this HEAD's blob is absent, the newest blob of the SAME (repo, excludes) family is copied to its
