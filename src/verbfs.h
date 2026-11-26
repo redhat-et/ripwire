@@ -65,6 +65,7 @@
 
 #include "verbfs_seam.h"
 #include "clones.h"            // CloneGroup — the stored groups are the pass's own type
+#include "buildkey.h"          // kBuildKey — the compilation that wrote a record, in the layout key
 #include "warmsnap.h"          // StatSig / statSig, Out / In, writePaths / readPaths, parallelFor, kRacySlackNs — reused, not re-rolled
 #include "quality.h"           // cacheDirLadder / resolveCacheBlobPath / atomicWriteFile — the cache directory every family shares
 #include "pathguard.h"         // readRegularFileNoFollow — a record is read only as a regular file, never through a link
@@ -126,11 +127,13 @@ inline constexpr std::uint32_t kTrigramProbes       = 3;
 
 inline std::uint64_t layoutKey()
 {
-    // producer: the build that wrote the record, as warmsnap keys its own (quality::producerIdentityHash). A stored clone group
+    // producer: the sources that wrote the record, as warmsnap keys its own (quality::producerIdentityHash). A stored clone group
     // or manifest kind is the OUTPUT of this build's code, so another build's record is refused, never served as current.
-    return depwatch::digest64( std::format( "verbfs statsig={} little={} tri_bits={} tri_probes={} float={} producer={}", sizeof( warmsnap::StatSig ),
+    // build: which COMPILATION of those sources (buildkey.h kBuildKey), as warmsnap's own layoutKey folds it: a dev and a
+    // Release build of one tree share the producer, and neither serves the other's record (refused as why=shape).
+    return depwatch::digest64( std::format( "verbfs statsig={} little={} tri_bits={} tri_probes={} float={} producer={} build={}", sizeof( warmsnap::StatSig ),
                                             std::endian::native == std::endian::little ? 1 : 0, kTrigramBitsPerEntry, kTrigramProbes, sizeof( float ),
-                                            quality::producerIdentityHash() ) );
+                                            quality::producerIdentityHash(), depwatch::digest64( kBuildKey ) ) );
 }
 
 // ── arming ──────────────────────────────────────────────────────────────────────────────────────────────────────────

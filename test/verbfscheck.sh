@@ -41,6 +41,8 @@
 #       directory, the target deleted (dangling), a directory at the name, a link out of the root
 #   MM  MUTATION: RIPWIRE_FAULT_VERBFS_DIRS_NOSTAT=1 (serve without the directory check) turns M2..M9 red;
 #       RIPWIRE_FAULT_VERBFS_DIRS_LINKS=1 (store a link's resolved kind) turns M7 (the target became a directory) red
+#   KB  the BUILD: with RIPWIRE_BIN_OTHER (the other build type of this tree), neither build serves the other's grep
+#       record (why=shape) and the answer equals the serving build's --no-cache; SKIP without it
 #   D   determinism: two served calls are byte-identical
 #
 # Usage:  bash test/verbfscheck.sh [BIN]   |   RIPWIRE_BIN=build/ripwire bash test/verbfscheck.sh
@@ -341,6 +343,39 @@ mstep "M8 a directory at the name" '!acme/gizmo'
 rmdir "$FIX/pkg/go.mod"; ln -s "$TMP/outside/go.mod" "$FIX/pkg/go.mod"
 mstep "M9 a link out of the root" '!acme/outsider'
 [ "$DIRSMUT" = 1 ] || printf '  INFO  MM this binary compiles fault switches out (NDEBUG)\n'
+
+# ── KB: the BUILD that wrote a record ─────────────────────────────────────────────────────────────────────────────
+# The producer identity names the sources only, so a dev and a Release build of one tree shared every record. The warm
+# snapshot refuses the other build's file (warmsnap.h layoutKey, src/buildkey.h); a VERB-FS record is refused the same way
+# (verbfs.h layoutKey folds kBuildKey), as why=shape. Needs the other flavour of THIS tree: RIPWIRE_BIN_OTHER=<path>.
+# Premise: the two `--version` lines differ in the build type and in nothing else, so a refusal can only be the build's.
+OTHER="${RIPWIRE_BIN_OTHER:-}"
+[ -z "$OTHER" ] || [ "${OTHER#/}" != "$OTHER" ] || OTHER="$ROOT/$OTHER"
+if [ -z "$OTHER" ]; then
+    printf '  SKIP  KB needs the other build flavour of this tree: RIPWIRE_BIN_OTHER=<path> (a Release binary beside a dev one)\n'
+elif [ ! -x "$OTHER" ]; then no "KB RIPWIRE_BIN_OTHER=$OTHER is not an executable"
+else
+    kver(){ "$1" --version 2>/dev/null | head -1; }
+    kb_a="$( kver "$BIN" )"; kb_b="$( kver "$OTHER" )"
+    kb_ta="$( printf '%s' "$kb_a" | sed -n 's/^[^(]*(\([^,]*\),.*/\1/p' )"; kb_tb="$( printf '%s' "$kb_b" | sed -n 's/^[^(]*(\([^,]*\),.*/\1/p' )"
+    if [ -z "$kb_ta" ] || [ "$kb_ta" = "$kb_tb" ] || [ "${kb_a/"($kb_ta,"/(T,}" != "${kb_b/"($kb_tb,"/(T,}" ]; then
+        no "KB premise: the two binaries must be one tree in two build types: '$kb_a' vs '$kb_b'"
+    else
+        ok "KB premise: one tree, two builds ($kb_ta / $kb_tb)"
+        for kdir in fwd rev; do
+            kr="$BIN"; ks="$OTHER"; [ "$kdir" = rev ] && { kr="$OTHER"; ks="$BIN"; }
+            kc="$TMP/kb-$kdir.bin"
+            for kp in 1 2; do ( cd "$FIX" && "$kr" "$FIX" --cache="$kc" --grep=connection </dev/null >/dev/null 2>&1 ); done
+            ( cd "$FIX" && RIPWIRE_STATS=1 "$kr" "$FIX" --cache="$kc" --grep=connection </dev/null >"$TMP/kbp.out" 2>"$TMP/kbp.err" )
+            if [ "$( field kbp grep why )" != ok ]; then no "KB ($kdir) VACUOUS: the recording build never served its own record (why='$( field kbp grep why )')"; continue; fi
+            ( cd "$FIX" && RIPWIRE_STATS=1 "$ks" "$FIX" --cache="$kc" --grep=connection </dev/null >"$TMP/kbs.out" 2>"$TMP/kbs.err" ); echo $? >"$TMP/kbs.rc"
+            ( cd "$FIX" && "$ks" "$FIX" --no-cache --grep=connection </dev/null >"$TMP/kbf.out" 2>/dev/null ); echo $? >"$TMP/kbf.rc"
+            kw="$( field kbs grep why )"
+            if [ "$kw" = shape ]; then ok "KB ($kdir) the other build refuses the record (why=shape)"; else no "KB ($kdir) the other build's record was not refused as another build's: why='${kw:-absent}'"; fi
+            if same kbs kbf; then ok "KB ($kdir) ...and its answer == its own --no-cache"; else no "KB ($kdir) the answer differs from the serving build's --no-cache"; fi
+        done
+    fi
+fi
 
 # ── D: determinism ────────────────────────────────────────────────────────────────────────────────────────────────
 run d1 warm --for="$MT"; run d2 warm --for="$MT"
