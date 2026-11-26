@@ -3105,6 +3105,10 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
 // exists, but a --since window matched zero commits". popen failure degrades to false.
 inline bool gitRepoHasHistory( const std::string& root )
 {
+    if( gitRootProvablyNoRepo( root ) )
+    {
+        return false;   // git cannot find a repository from here, so it is not asked (gitrootfacts.h; re-read every call, never stale)
+    }
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " rev-parse --verify --quiet HEAD 2>/dev/null";
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );

@@ -461,6 +461,16 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
     PrContextMask result;
     result.mask.assign( ing.files.size(), 0 );
 
+    // A root git provably cannot see (gitrootfacts.h): the answer every git child below would have reached — the
+    // no-history degrade, ok=false and diffFailed=false, baseRefGiven as resolveDiffAnchor sets it — with no child
+    // started. An MCP edit builds this mask up to twice; on a non-git root each build started 3 failing children (4 on the
+    // root's first sighting).
+    if( gitRootProvablyNoRepo( root ) )
+    {
+        result.baseRefGiven = !baseRef.empty();
+        return result;
+    }
+
     // this work's own changed set, anchored per resolveDiffAnchor
     const DiffAnchor anchor = resolveDiffAnchor( root, baseRef );
     result.baseSha      = anchor.baseSha;
