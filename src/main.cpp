@@ -188,12 +188,11 @@ using rw::quality::deadCodeEligibleKind;
 // self-heals to a correct cold parse. STABLE per (user, root): same root + same env → same path, so
 // warm-cache reuse still works across runs.
 //
-// A4-P4: the cache file is SPLIT by verb class (lean vs rich). --for/--metrics/--uses/--exemplar
-// ingest "rich" (captureValueUses=true); everything else "lean". Both classes are parserVer-gated to
-// DIFFERENT versions (parserVerFor), so a single shared file forced a full re-parse + full rewrite on
-// every class switch (measured: plain-map-after --for 0.81 s vs 0.16 s warm). Suffixing the filename
-// with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
-// (The MCP server shares the rich file: mcpindex.h mcpCachePath, ONE-PARSE.)
+// ONE-PARSE (kCacheVersion 56, #729): one blob per root serves every verb class. A4-P4 had split it by class (lean vs rich,
+// two parser numbers) because one shared file was re-parsed and rewritten on every class switch; that split cost a second
+// cold parse instead (a --for straight after a map re-parsed every file). Every record is now the rich one and a lean ingest
+// drops the rich-only rows itself (ingest_cache.h, "ONE blob family"), so the classes share the file without a rewrite.
+// (The MCP server reads and writes the same file: mcpindex.h mcpCachePath.)
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
@@ -213,15 +212,15 @@ using rw::quality::deadCodeEligibleKind;
 // and can no longer truncate the shared blob. Gate: test/cacheoffsetcheck.sh.
 //
 // #334 follow-up — THE BUILD TAG. The name also carries (kCacheVersion, the class's parserVer):
-// `ripwire-<rootKey>-lean-c<format>p<parser>.bin`. Keyed by root and class alone, two builds of different formats that
+// `ripwire-<rootKey>-c<format>p<parser>.bin`. Keyed by root alone, two builds of different formats that
 // alternate on one tree (an installed release and a local build, or two installed versions) refused and rewrote
 // each other's blob on every run. This is NOT the reverted key change above: that one multiplied blobs per root
 // by CONFIGURATION inside one build, which every gate battery exercises; this one adds a blob per root only per
 // FORMAT that actually ran on it, the budget sweep unpins another build's blobs (quality.h evictBySizeBudget),
 // and the age pass retires a version nobody runs any more. See quality.h rootBlobTail.
-std::string defaultCachePath( const std::string& root, bool captureValueUses )
+std::string defaultCachePath( const std::string& root )
 {
-    return rw::quality::rootKeyedCachePath( root, captureValueUses ? rw::quality::RootBlobFamily::Rich : rw::quality::RootBlobFamily::Lean );
+    return rw::quality::rootKeyedCachePath( root, rw::quality::RootBlobFamily::Parse );
 }
 
 // computeHeadSnapshot / gitHeadSha / gitRepoHasHistory / cacheDirLadder now live in quality.h (the
@@ -6090,31 +6089,31 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         }
     }
 
-    // --index-out=BASE (both-families amendment): the CI generate-and-exit path.
-    // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ripwirecache and
-    // BASE.rich.ripwirecache, then exit 0 WITHOUT emitting a map. Both families ship because the flagship
-    // orientation verbs (--for/--exemplar/--metrics/--uses) ingest RICH and a lean-only artifact leaves
-    // them cold (measured: lean 1.46 MB, rich 2.80 MB on this repo). This is sugar over --cache, not a
-    // second write path — it reuses ingest()'s existing saveCache machinery, one ingest per explicit cache
-    // path. force-rebuild: an existing target is removed first so a stale warm file cannot shadow a fresh
-    // generate. --exclude shapes the crawl (fewer files → fewer symbols → smaller blob). The blobs are NOT
-    // byte-identical run-to-run — the v8 header stamps the blob write wall-time (the statgate racy rule) —
-    // so the gated contract is RESTORE-EQUIVALENCE (a --cache restore == a cold parse), not blob-byte-identity.
+    // --index-out=BASE (both-families amendment): the CI generate-and-exit path. It writes BASE.lean.ripwirecache and
+    // BASE.rich.ripwirecache, then exits 0 WITHOUT emitting a map. Since ONE-PARSE (kCacheVersion 56) the two are one blob
+    // family, so the tree is cold-parsed ONCE into the rich name and the same bytes are copied to the lean name: a CI job that
+    // consumes either name keeps working, and every verb class is warm on either file. This is sugar over --cache, not a
+    // second write path — it reuses ingest()'s existing saveCache machinery. force-rebuild: an existing target is removed
+    // first so a stale warm file cannot shadow a fresh generate. --exclude shapes the crawl (fewer files → fewer symbols →
+    // smaller blob). The blobs are NOT byte-identical run-to-run — the v8 header stamps the blob write wall-time (the
+    // statgate racy rule) — so the gated contract is RESTORE-EQUIVALENCE (a --cache restore == a cold parse), not
+    // blob-byte-identity.
     if( !cfg.indexOut.empty() )
     {
-        const std::string       base( cfg.indexOut );
-        struct Family { const char* suffix; bool rich; };
-        const Family families[2] = { { ".lean.ripwirecache", false }, { ".rich.ripwirecache", true } };
-
-        int rc = 0;
-        for( const Family& fam : families )
+        const std::string base( cfg.indexOut );
+        const std::string richPath = base + ".rich.ripwirecache";
+        const std::string leanPath = base + ".lean.ripwirecache";
+        rw::os::remove( richPath.c_str() );                     // force-rebuild: a stale warm file must not shadow the generate
+        rw::os::remove( leanPath.c_str() );
         {
-            const std::string path = base + fam.suffix;
-            rw::os::remove( path.c_str() );                     // force-rebuild: a stale warm file must not shadow the generate
-
-            IngestResult r = ingest( root.c_str(), cfg.excludes, path, cfg.maxFileBytes, fam.rich, {}, !cfg.noIgnore );
+            const IngestResult r = ingest( root.c_str(), cfg.excludes, richPath, cfg.maxFileBytes, /*captureValueUses=*/true, {}, !cfg.noIgnore );
             (void)r;
-
+        }
+        std::error_code copyEc;
+        std::filesystem::copy_file( std::filesystem::path( richPath ), std::filesystem::path( leanPath ), std::filesystem::copy_options::overwrite_existing, copyEc );
+        int rc = 0;
+        for( const auto& [ path, family ] : { std::pair<const std::string&, const char*>{ leanPath, "lean" }, { richPath, "rich" } } )
+        {
             std::error_code       ec;
             const std::uintmax_t  sz = std::filesystem::file_size( std::filesystem::path( path ), ec );
             if( ec || sz == 0 )
@@ -6124,8 +6123,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             }
             else
             {
-                rw::emitTo( stderr, "ripwire: --index-out wrote {} ({} bytes, {} family)\n",
-                              path.c_str(), static_cast<unsigned long long>( sz ), fam.rich ? "rich" : "lean" );
+                rw::emitTo( stderr, "ripwire: --index-out wrote {} ({} bytes, {} family)\n", path.c_str(), static_cast<unsigned long long>( sz ), family );
             }
         }
         return rc;
@@ -6187,7 +6185,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             std::string cachePath;
             if( !cfg.noCache )
             {
-                cachePath = defaultCachePath( r.arg, needsValueUses );
+                cachePath = defaultCachePath( r.arg );
             }
             parts.push_back( ingest( r.arg.c_str(), cfg.excludes, cachePath, cfg.maxFileBytes, needsValueUses,
                                      /*excludeLabel=*/r.label, /*respectGitignore=*/!cfg.noIgnore ) );
@@ -6211,7 +6209,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         std::string_view cacheArg = cfg.cacheFile;
         if( cacheArg.empty() && !cfg.noCache )
         {
-            autoCache = defaultCachePath( root, needsValueUses );
+            autoCache = defaultCachePath( root );
             cacheArg  = autoCache;
         }
         const rw::warmsnap::Armed armed( warmSnapArmed ? &warmSnap : nullptr );

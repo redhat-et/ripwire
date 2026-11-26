@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# indexoutcheck.sh — the --index-out committable-index WIRING gate (both-families).
+# indexoutcheck.sh — the --index-out committable-index WIRING gate (one parse blob under both names since cache 56).
 #
 # The ingest CORE (cache v8, kArtifactArch self-heal, drift observable) is proven by artifactcheck.sh. This
 # gate proves the CLI SURFACE that turns that core into the team artifact:
 #
-#   (a) GENERATE-AND-EXIT — `--index-out=BASE` writes BOTH BASE.lean.ripwirecache and BASE.rich.ripwirecache,
+#   (a) GENERATE-AND-EXIT — `--index-out=BASE` writes BASE.lean.ripwirecache and BASE.rich.ripwirecache (one blob),
 #       exits 0, and emits NO map on stdout (CI writes an artifact, it does not stream a map).
 #   (b) RESTORE-EQUIVALENCE from a COPIED checkout at a DIFFERENT path:
 #         - a map/nav verb restored via BASE.lean.ripwirecache == a cold run (byte-identical) + GENUINE warm
 #           hit (the lean blob bytes are untouched by the consume — a real reuse, not a disguised reparse);
 #         - the flagship `--for` restored via BASE.rich.ripwirecache == a cold `--for` (byte-identical) —
-#           the reason both families ship: --for ingests RICH, a lean-only artifact would leave it cold.
+#           --for reads the same blob (ONE-PARSE): either name serves it warm.
 #   (c) --exclude VARIATION — excludes shape the crawl, so an artifact built WITH an exclude differs in bytes
 #       from one built WITHOUT it, AND a map restored from the excluded artifact == a cold run under the same
 #       exclude (the excludes are baked into the blob content, per --help).
@@ -62,10 +62,11 @@ if [ "$rc_gen" -eq 0 ]; then ok "(a) --index-out exits 0"; else { no "(a) --inde
 [ ! -s "$TMP/gen.out" ] \
     && ok "(a) NO map on stdout (generate-and-exit, not a stream — $(wc -c <"$TMP/gen.out" | tr -d ' ')B)" \
     || no "(a) --index-out emitted $(wc -c <"$TMP/gen.out" | tr -d ' ')B on stdout (should be 0)"
-# rich carries more (value-uses capture) than lean — the whole reason both ship
-[ -s "$LEAN" ] && [ -s "$RICH" ] && [ "$(wc -c <"$RICH")" -gt "$(wc -c <"$LEAN")" ] \
-    && ok "(a) rich artifact is larger than lean (value-uses capture — both families justified)" \
-    || no "(a) rich is not larger than lean (family split may be a no-op)"
+# ONE-PARSE (kCacheVersion 56): one parse blob serves both verb classes, so the two names hold the same bytes. Until 56 the
+# rich family carried the value-use rows the lean one lacked, and this arm held rich > lean.
+[ -s "$LEAN" ] && [ -s "$RICH" ] && cmp -s "$LEAN" "$RICH" \
+    && ok "(a) the lean and rich artifacts are the one parse blob under two names ($(wc -c <"$RICH" | tr -d ' ') B)" \
+    || no "(a) the lean and rich artifacts differ (or one is empty) — two parses where one serves both"
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (b) RESTORE-EQUIVALENCE from a DIFFERENT checkout path — lean feeds the map, rich feeds --for.

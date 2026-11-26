@@ -234,15 +234,14 @@ CacheIdentity cacheIdentity() noexcept
 {
     CacheIdentity id;
     id.cacheVersion  = kCacheVersion;
-    id.parserVerLean = parserVerFor( false );
-    id.parserVerRich = parserVerFor( true );
+    id.parserVer     = kParserVer;
     id.artifactArch  = kArtifactArch;
     return id;
 }
 
-const char* cacheArtifactVerdict( const std::string& path, bool captureValueUses )
+const char* cacheArtifactVerdict( const std::string& path )
 {
-    return cacheRejectName( inspectCacheArtifact( path, captureValueUses ) );
+    return cacheRejectName( inspectCacheArtifact( path ) );
 }
 
 // Every prefix a cwd-spelled selector path can carry before its root-relative part (IngestResult::crawlRootPrefixes), in
@@ -461,11 +460,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         verbfs::arm( rootDir, snap->rootKey );                     // the same run, root and cache directory (src/verbfs.h)
         verbfs::armQMetrics();                                     // ... where that armed: the QMetrics / purity record (src/verbfs_qmetrics.h)
         verbfs::slotreg::arm();                                    // its SLOTREG seams, where VERB-FS armed (src/verbfs_slotreg.h)
-        snap->optionsKey = warmsnap::viewKeyOf( warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
-                                                                        kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits,
+        snap->optionsKey = warmsnap::viewKeyOf( warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, excludeLabel, respectGitignore,
+                                                                        kCacheVersion * 100000u + kParserVer, tlIngestWantsConstructHits,
                                                                         tlCrawlTreeAllTracked ),
-                                                snap->ignoreTests );
-        if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses ) )
+                                                snap->ignoreTests, captureValueUses );
+        if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath ) )
         {
             snap->path = warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId );
         }
@@ -549,7 +548,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     CacheLoadStats cacheStats;
     CacheRecords cache =
-        cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+        cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, result.files, cacheStats );
     // per-fileId scan arrays (language classify + hash/stat-gate + health slots) — ingest_prewarm.h
     IngestFileScan scan = makeFileScan( result.files );
 
@@ -562,7 +561,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         memWatch.rearmForParse();   // clears the crawl's stop flags: the second walk is measured on its own
         crawlInto();
         cacheStats = CacheLoadStats{};
-        cache      = cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+        cache      = cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, result.files, cacheStats );
         scan       = makeFileScan( result.files );
     }
     ENSURES( scan.lang.size() == result.files.size(), "the scan arrays describe the crawl the parse pool will read" );
@@ -711,7 +710,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // The snapshot is named after the blob, and the parse pool above has published the blob this run leaves behind
         // (saveCache, for a run that re-parsed or grew a record). Re-read its identity so what this run records is found
         // by the NEXT run rather than filed under the blob this one opened. No readable blob: nothing is recorded.
-        const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses );
+        const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath );
         snap->path = blobId ? warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId ) : std::string{};
         recordWarmModel( *snap, result, cacheStats );
         verbfs::slotreg::noteModel( result, *snap );   // the model this run recorded, when it recorded one

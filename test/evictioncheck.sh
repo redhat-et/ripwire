@@ -291,12 +291,13 @@ dirbytesof(){
     echo "$total"
 }
 
-# The names THIS build writes for a root's rich blob and MCP index. Read, never re-derived: rich_path= is
-# --doctor's own answer, and the MCP index carries the rich class's build tag (quality.h rootBlobTail, the RootBlobFamily::Mcp row), or
-# none on a binary from before build-keyed names — so every arm below seeds this binary's real sibling names.
-ownrichname(){ env -u XDG_CACHE_HOME TMPDIR="$1" "$BIN" "$2" --doctor 2>/dev/null | tr '<' '\n' | grep '^c n="index-cache"' \
-                 | grep -o ' rich_path="[^"]*"' | sed 's/^ rich_path="//; s/"$//' | xargs basename 2>/dev/null; }
-ownmcpname(){ local tag; tag="$( printf '%s' "$2" | sed -nE 's/.*-rich-(c[0-9]+p[0-9]+)\.bin$/\1/p' )"
+# The names THIS build writes for a root's sibling families. Since ONE-PARSE (format 56) a root has ONE parse blob, which
+# is the blob the run writes (keepPath) and so pinned by construction; the sibling the sweep must still not take is the
+# same root's warm snapshot (`ripwire-warmsnap-<rootKey>-<optionsKey>-<blobIdentity>.bin`, here under an options key
+# no run writes, so no run of this gate reads or rewrites it) and its MCP index, which carries the build tag read off
+# this build's own parse blob (quality.h rootBlobTail, the RootBlobFamily::Mcp row).
+ownsibname(){ printf 'ripwire-warmsnap-%s-00000000000000aa-00000000000000bb.bin' "$1"; }
+ownmcpname(){ local tag; tag="$( printf '%s' "$2" | sed -nE 's/^ripwire-[0-9a-f]{16}-(c[0-9]+p[0-9]+)\.bin$/\1/p' )"
               printf 'ripwire-mcp-%s%s.cache' "$1" "${tag:+-$tag}"; }
 
 # ---- (h) two roots, the MRU root's sibling family is the OLDEST blob in the dir --------------------
@@ -306,25 +307,22 @@ R3="$TMP3/repo"; mkdir -p "$R3"
 printf 'int pinme( void )\n{\n    return 1;\n}\n' > "$R3/f.cpp"
 
 env -u XDG_CACHE_HOME TMPDIR="$CB3" "$BIN" "$R3" >/dev/null 2>"$TMP3/prime.err"
-# -name 'ripwire-*-lean.bin', not 'ripwire-*.bin' (CodeRabbit #127 / 3985249724): the sed below only
-# matches the LEAN basename, and the priming run can leave a -rich.bin beside it. `head -1` over the wider
-# glob then returns whichever the filesystem happens to list first, ROOTHEX3 keeps the whole basename, and
-# the 16-hex check goes red for a directory-ordering reason. Arm (k) at the bottom of this file already
-# uses the precise pattern for the same job.
-OWN3="$( find "$CD3" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
-ROOTHEX3="$( basename "${OWN3:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+# The parse blob's exact shape (`ripwire-<16hex>-c<n>p<n>.bin`), not 'ripwire-*.bin' (CodeRabbit #127 / 3985249724): the
+# priming run also leaves a warm snapshot beside it, and `head -1` over the wider glob returns whichever the filesystem
+# lists first, so the 16-hex check would go red for a directory-ordering reason.
+OWN3="$( find "$CD3" -mindepth 1 -maxdepth 2 -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
+ROOTHEX3="$( basename "${OWN3:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-c[0-9]+p[0-9]+\.bin$/\1/' )"
 if printf '%s' "$ROOTHEX3" | grep -qE '^[0-9a-f]{16}$'; then
-    ok "(h) primed: this root's lean blob names root key $ROOTHEX3"
+    ok "(h) primed: this root's parse blob names root key $ROOTHEX3"
 else
     no "(h) could not read a 16-hex root key off the primed blob (own='$OWN3')"
 fi
 
 # the SIBLING family of the SAME root — seeded FLAT (the sweep must find it in either layout) and made
-# the OLDEST blob in the dir, which is exactly what the pre-change oldest-first sweep deletes first. Its name is
-# the one THIS build writes for the rich class (--doctor's rich_path=): since the #334 follow-up the auto names
-# carry a build tag, and a sibling under another build's name is exactly what the pin must NOT hold ((h2) below).
-SIB3="$CD3/$( ownrichname "$CB3" "$R3" )"
-[ -f "$SIB3" ] || case "$( basename "$SIB3" )" in ripwire-*-rich*.bin) ;; *) no "(h) could not name this build's rich sibling (got '$SIB3') — the seed below would test nothing";; esac
+# the OLDEST blob in the dir, which is exactly what the pre-change oldest-first sweep deletes first. Until format 56 it
+# was the other verb class's parse blob; since ONE-PARSE it is the root's warm snapshot (ownsibname). A sibling under
+# another build's name is exactly what the pin must NOT hold ((h2) below).
+SIB3="$CD3/$( ownsibname "$ROOTHEX3" )"
 truncate -s 1200M "$SIB3"
 # …and the SAME root's MCP index blob. It is the one family whose name is nothing but a root key, and it
 # is the only one that ends `.cache` rather than `-<something>.bin` — so quality.h::cacheBlobRootKey, which
@@ -332,7 +330,7 @@ truncate -s 1200M "$SIB3"
 # key. An empty key pins nothing: the sweep kept this root's lean and rich blobs and evicted the MCP index
 # of the very root it was serving, and the MCP server paid a full re-parse for it. Zero-size on purpose —
 # survival is the question, not bytes (CodeRabbit #127 / 3985249706).
-MCP3="$CD3/$( ownmcpname "$ROOTHEX3" "$( basename "$SIB3" )" )"
+MCP3="$CD3/$( ownmcpname "$ROOTHEX3" "$( basename "$OWN3" )" )"
 : > "$MCP3"
 sleep 1
 # a DIFFERENT root's blob, newer and bigger — the one an oldest-first sweep would keep, and the one the
@@ -377,15 +375,14 @@ CB7="$TMP7/cachebase"; CD7="$CB7/ripwire"; mkdir -p "$CD7"
 R7="$TMP7/repo"; mkdir -p "$R7"
 printf 'int twobuilds( void )\n{\n    return 1;\n}\n' > "$R7/f.cpp"
 env -u XDG_CACHE_HOME TMPDIR="$CB7" "$BIN" "$R7" >/dev/null 2>/dev/null
-OWN7="$( find "$CD7" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
-ROOTHEX7="$( basename "${OWN7:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+OWN7="$( find "$CD7" -mindepth 1 -maxdepth 2 -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
+ROOTHEX7="$( basename "${OWN7:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-c[0-9]+p[0-9]+\.bin$/\1/' )"
 if printf '%s' "$ROOTHEX7" | grep -qE '^[0-9a-f]{16}$'; then
     ok "(h2) primed: root key $ROOTHEX7"
 else
     no "(h2) could not read a 16-hex root key off the primed blob (own='$OWN7')"
 fi
-SIB7="$CD7/$( ownrichname "$CB7" "$R7" )"          # THIS build's rich sibling: oldest, must be kept
-[ -f "$SIB7" ] || case "$( basename "$SIB7" )" in ripwire-*-rich*.bin) ;; *) no "(h2) could not name this build's rich sibling (got '$SIB7') — the seed below would test nothing";; esac
+SIB7="$CD7/$( ownsibname "$ROOTHEX7" )"          # THIS build's warm-snapshot sibling: oldest, must be kept
 truncate -s 1200M "$SIB7"
 sleep 1
 LEGACY7="$CD7/ripwire-$ROOTHEX7-rich.bin"           # a release before the build tag wrote this root's rich blob
@@ -421,8 +418,8 @@ CB8="$TMP8/cachebase"; CD8="$CB8/ripwire"; mkdir -p "$CD8"
 R8="$TMP8/repo"; mkdir -p "$R8"
 printf 'int tiered( void )\n{\n    return 1;\n}\n' > "$R8/f.cpp"
 env -u XDG_CACHE_HOME TMPDIR="$CB8" "$BIN" "$R8" >/dev/null 2>/dev/null
-OWN8="$( find "$CD8" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
-ROOTHEX8="$( basename "${OWN8:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+OWN8="$( find "$CD8" -mindepth 1 -maxdepth 2 -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
+ROOTHEX8="$( basename "${OWN8:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-c[0-9]+p[0-9]+\.bin$/\1/' )"
 if printf '%s' "$ROOTHEX8" | grep -qE '^[0-9a-f]{16}$'; then
     ok "(h3) primed: root key $ROOTHEX8"
 else
@@ -455,10 +452,9 @@ R4="$TMP4/repo"; mkdir -p "$R4"
 printf 'int solo( void )\n{\n    return 1;\n}\n' > "$R4/f.cpp"
 
 env -u XDG_CACHE_HOME TMPDIR="$CB4" "$BIN" "$R4" >/dev/null 2>/dev/null
-OWN4="$( find "$CD4" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
-ROOTHEX4="$( basename "${OWN4:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
-SIB4="$CD4/$( ownrichname "$CB4" "$R4" )"
-[ -f "$SIB4" ] || case "$( basename "$SIB4" )" in ripwire-*-rich*.bin) ;; *) no "(i) could not name this build's rich sibling (got '$SIB4') — the seed below would test nothing";; esac
+OWN4="$( find "$CD4" -mindepth 1 -maxdepth 2 -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
+ROOTHEX4="$( basename "${OWN4:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-c[0-9]+p[0-9]+\.bin$/\1/' )"
+SIB4="$CD4/$( ownsibname "$ROOTHEX4" )"
 if printf '%s' "$ROOTHEX4" | grep -qE '^[0-9a-f]{16}$'; then
     truncate -s 2600M "$SIB4"   # this root's own sibling ALONE blows the 2 GB budget (llvm's rich blob is 1.19 GB; a second root doubles it)
     ok "(i) primed: root key $ROOTHEX4, sibling family seeded at 2600M (over budget on its own)"
@@ -583,14 +579,14 @@ primeallfamilies "$CB6" "$R6"
 # exists (mcpindex.h::mcpCachePath → quality::rootKeyedCachePath( root, RootBlobFamily::Mcp ), ripwire-mcp-<key>-<tag>.cache) and it is
 # the one whose key field is terminated by '.' rather than '-'. Without it in the dir the key-agreement arm
 # below never asked the question that #127/3985249706 answered.
-MCPKEY6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
-MCPKEY6="$( basename "${MCPKEY6:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+MCPBLOB6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
+MCPKEY6="$( basename "${MCPBLOB6:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-c[0-9]+p[0-9]+\.bin$/\1/' )"
 if printf '%s' "$MCPKEY6" | grep -qE '^[0-9a-f]{16}$'; then
-    MCPNAME6="$( ownmcpname "$MCPKEY6" "$( ownrichname "$CB6" "$R6" )" )"
+    MCPNAME6="$( ownmcpname "$MCPKEY6" "$( basename "$MCPBLOB6" )" )"
     : > "$CD6/$MCPNAME6"
     ok "(k) the MCP index family is present ($MCPNAME6) — the key field it ends with '.' or a build tag"
 else
-    no "(k) could not derive this root's key from its lean blob, so the MCP family could not be seeded"
+    no "(k) could not derive this root's key from its parse blob, so the MCP family could not be seeded"
 fi
 
 blobs6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*' 2>/dev/null | wc -l | tr -d ' ' )"
@@ -613,7 +609,7 @@ else
 fi
 
 # the qchurn blob must carry the SAME key as the main parse cache, by name — the specific gap P1-1 stated.
-lean6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+lean6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null | head -1 )"
 churn6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-qchurn-*' 2>/dev/null | head -1 )"
 if [ -n "$lean6" ] && [ -n "$churn6" ]; then
     kl6="$( blobrootkey "$lean6" )"; kc6="$( blobrootkey "$churn6" )"
