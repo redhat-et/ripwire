@@ -817,6 +817,7 @@ for _g in \
     mcpw2fixcheck \
     mcpw3fixcheck \
     mcpwatchercheck \
+    mcpwhereiscausecheck \
     mdembedcheck \
     mdsectioncheck \
     memceilingcheck \

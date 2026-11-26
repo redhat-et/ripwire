@@ -2467,8 +2467,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         bool              seedFault = false;
                         SweepFault        sweepFault = SweepFault::None;
+                        std::string       emptyCause;
                         const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &sweepFault,
-                                                            whereisFullText, redactPtr );
+                                                            whereisFullText, redactPtr, &emptyCause );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
@@ -2478,7 +2479,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
-                        return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to search" ) : textResult( t );
+                        // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
+                        return t.empty() ? errResultMsg( -32602, emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to search" ) : emptyCause )
+                                         : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -2487,13 +2490,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
                         SweepFault        sweepFault = SweepFault::None;
-                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault );
+                        std::string       emptyCause;
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault, &emptyCause );
                         if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
-                        return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to compare" ) : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause )
+                                         : textResult( t );
                     } );
                 }
                 else if( name == "flags" && !path.empty() )

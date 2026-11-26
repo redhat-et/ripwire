@@ -579,6 +579,49 @@ inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
     return blobsUnread ? SweepFault::BlobsUnread : SweepFault::None;
 }
 
+// The cause a git-sweep twin's empty answer names, MEASURED here rather than assumed (research audit 2026-11-26, item 4: the
+// host said "not a git repository (or no HEAD commit)" for every empty return, and on this project's own checkout neither was
+// true — popen() itself was failing, see mcpindex.h's descriptor budget). Two git probes, run only on the refusal path:
+// is `root` inside a repository at all, and does it have a HEAD commit. A probe that cannot START git says so, with errno, and
+// claims nothing about the repository; both probes passing means the sweep failed for a reason this does not know, and the
+// sentence says "cause unknown" instead of choosing one. `what` ends the sentence ("search" / "compare").
+inline std::string sweepEmptyCause( const std::string& root, std::string_view what )
+{
+    const auto probe = [ & ]( std::string_view tail, int& err ) -> GitCommandLines
+    {
+        errno = 0;
+        GitCommandLines r = gitCommandLines( gitCmd( " -C " ) + shSingleQuote( root ) + " " + std::string( tail ) + " 2>/dev/null" );
+        err = errno;
+        return r;
+    };
+    const auto noStart = [ & ]( int err )
+    {
+        return "git could not be started from this server (popen failed: " + std::string( err != 0 ? std::strerror( err ) : "no errno" )
+             + ") — no refs to " + std::string( what ) + "; the repository itself was not checked";
+    };
+    int                   err  = 0;
+    const GitCommandLines repo = probe( "rev-parse --git-dir", err );
+    if( !repo.isStarted )
+    {
+        return noStart( err );
+    }
+    if( decodedExitCode( repo.status ) != 0 )
+    {
+        return "not a git repository: git rev-parse --git-dir exited " + std::to_string( decodedExitCode( repo.status ) ) + " — no refs to " + std::string( what );
+    }
+    const GitCommandLines head = probe( "rev-parse --verify --quiet HEAD", err );
+    if( !head.isStarted )
+    {
+        return noStart( err );
+    }
+    if( decodedExitCode( head.status ) != 0 || head.lines.empty() )
+    {
+        return "a git repository with no HEAD commit — no refs to " + std::string( what );
+    }
+    return "no answer, cause unknown: git reads this repository and its HEAD now, but the sweep stopped before it read a ref — no refs to "
+         + std::string( what ) + " were read; retry the call";
+}
+
 // `whereis` verb: which ref's tree defines or mentions SYM. "" ⇒ not a git repo, or `fault` says why (the caller reports it).
 //
 // §A7 (0.6.6 command sweep, reversing the earlier "no index for a label" rule): this surface used to pass NO
@@ -607,7 +650,8 @@ inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr )
+                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr,
+                                std::string* emptyCause = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -627,6 +671,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     if( !res.ok || res.blobsUnread )   // the CLI twin's refusals; a hit count over blobs never read is not an answer
     {
         if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }
+        if( emptyCause != nullptr && !res.blobsUnread ) { *emptyCause = sweepEmptyCause( root, "search" ); }
         return {};
     }
     res.seedSpec  = std::move( seedSpec );
@@ -651,12 +696,18 @@ inline std::string whereisText( const std::string& root, const std::string& symb
 // M13: --stray-content is in cli.h's honorsPaging set — writeStrayContentPage is the entry point the
 // CLI already calls with cfg.pageLimit/cfg.pageOffset, so the twin passes the same pair rather than 0,0.
 inline std::string strayContentText( const std::string& root, const std::string& filter, std::size_t maxFiles,
-                                     McpPageArgs page = {}, SweepFault* fault = nullptr )
+                                     McpPageArgs page = {}, SweepFault* fault = nullptr, std::string* emptyCause = nullptr )
 {
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
     if( !res.ok )
     {
         if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }   // K75: named, not "not a git repository"
+        if( emptyCause != nullptr && !res.blobsUnread )
+        {
+            // a ref-name filter that matched no ref is its own refusal: the repository was read, the filter chose nothing
+            *emptyCause = res.filterMatchedNothing ? "no local ref name contains '" + filter + "' — no refs to compare; drop kind= to compare every ref"
+                                                   : sweepEmptyCause( root, "compare" );
+        }
         return {};
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContentPage( f, res, maxFiles, page.limit, page.offset ); } );
