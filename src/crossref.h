@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 
 
@@ -2719,7 +2720,7 @@ inline void scanBlobForSymbol( std::string_view bytes, std::string_view sym,
     std::uint32_t lineNo    = 1;
     for( std::size_t pos = bytes.find( sym ); pos != std::string_view::npos; pos = bytes.find( sym, lineStart ) )
     {
-        lineNo += std::uint32_t( std::count( bytes.begin() + std::ptrdiff_t( counted ), bytes.begin() + std::ptrdiff_t( pos ), '\n' ) );
+        lineNo += std::uint32_t( strkern::countByte( bytes.substr( counted, pos - counted ), '\n' ) );
         if( const std::size_t nl = bytes.rfind( '\n', pos ); nl != std::string_view::npos && nl >= counted )
         {
             lineStart = nl + 1;

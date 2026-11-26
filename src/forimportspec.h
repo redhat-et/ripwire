@@ -26,6 +26,7 @@
 // says found="0" and the definition-side chains of the package's directory print as before).
 
 #include "depdialect.h"          // dependencyDialect
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "docparse.h"            // detail::readWholeFile
 #include "infra/namesplit.h"     // isIdentChar
 #include "model.h"
@@ -261,7 +262,7 @@ inline std::string exportsTargetOf( const JsonNode& e, int depth = 0 )
 inline std::uint32_t lineOfKey( const std::string& text, std::string_view key )
 {
     const std::size_t at = text.find( "\"" + std::string( key ) + "\"" );
-    return at == std::string::npos ? 0 : std::uint32_t( std::ranges::count( std::string_view( text ).substr( 0, at ), '\n' ) ) + 1;
+    return at == std::string::npos ? 0 : std::uint32_t( strkern::countByte( std::string_view( text ).substr( 0, at ), '\n' ) ) + 1;
 }
 
 }   // namespace importspec_detail

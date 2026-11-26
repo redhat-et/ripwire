@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h" // strkern::countByte — the body / def-start line counts
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 // naminglens.h — identifier-naming quality lens v1: the naming-* built-in --lint rules.
@@ -908,14 +909,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameInformativenessInBytes" );
     {
         return;
     }
-    std::uint32_t bodyLines = 0;
-    for( std::uint32_t i = bodyA; i < bodyB; ++i )
-    {
-        if( bytes[i] == '\n' )
-        {
-            ++bodyLines;
-        }
-    }
+    const auto bodyLines = std::uint32_t( strkern::countByte( bytes.substr( bodyA, bodyB - bodyA ), '\n' ) );
     checkNameInformativeness( s, toks, corpus, bodyLines, sink );
 }
 
@@ -1165,14 +1159,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: getBytes whole-file read" );
                 const std::uint32_t defB = std::min( s.endByte,      std::uint32_t( bytes.size() ) );
                 if( defB > defA )
                 {
-                    std::uint32_t defStartLine = 1;
-                    for( std::uint32_t i = 0; i < defA; ++i )
-                    {
-                        if( bytes[i] == '\n' )
-                        {
-                            ++defStartLine;
-                        }
-                    }
+                    const std::uint32_t defStartLine = 1u + std::uint32_t( strkern::countByte( std::string_view( bytes ).substr( 0, defA ), '\n' ) );
                     const std::vector<LocalNameFact> locals = collectGatedLocalNames(
                         std::string_view( bytes ).substr( defA, defB - defA ), defStartLine, s.lang );
                     for( const LocalNameFact& local : locals )

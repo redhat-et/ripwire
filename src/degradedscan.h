@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 
 
 // degradedscan.h — THE ONE degraded-parse text scan behind every "that name resolved to nothing" refusal.
@@ -258,7 +259,7 @@ inline std::uint32_t firstLineWhere( std::string_view hay, std::string_view name
     std::size_t   counted = 0;
     for( std::size_t at = hay.find( name ); at != std::string_view::npos; )
     {
-        lineNo += std::uint32_t( std::count( hay.begin() + std::ptrdiff_t( counted ), hay.begin() + std::ptrdiff_t( at ), '\n' ) );
+        lineNo += std::uint32_t( strkern::countByte( hay.substr( counted, at - counted ), '\n' ) );
         counted                     = at;
         const std::size_t nl        = hay.rfind( '\n', at );
         const std::size_t lineStart = nl == std::string_view::npos ? 0 : nl + 1;

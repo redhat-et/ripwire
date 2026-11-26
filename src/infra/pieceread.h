@@ -14,6 +14,7 @@
 // the ones lying entirely inside the carried prefix (they were counted already). The memory bound is one window per
 // reader, whatever the stream's size.
 
+#include "strkern.h"   // strkern::countByte — the lines a piece holds
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -119,7 +120,7 @@ inline PieceRead readInPieces( std::size_t size, Read read, std::string& win, On
         {
             return PieceRead::Text;
         }
-        line += std::uint32_t( std::count( piece.begin(), piece.end(), '\n' ) );
+        line += std::uint32_t( rw::strkern::countByte( piece, '\n' ) );
         midLine = nextMid;
         carried = nextMid ? keep : 0;
         win.erase( 0, win.size() - keep );

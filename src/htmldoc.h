@@ -544,8 +544,7 @@ private:
     // Copy the newlines of html_[from, to) — the bytes of a tag, comment or skipped raw-text element.
     void newlinesIn( std::size_t from, std::size_t to )
     {
-        const auto first = html_.begin() + std::ptrdiff_t( from );
-        for( auto lineCount = std::count( first, first + std::ptrdiff_t( to - from ), '\n' ); lineCount > 0; --lineCount )
+        for( auto lineCount = strkern::countByte( std::string_view( html_ ).substr( from, to - from ), '\n' ); lineCount > 0; --lineCount )
         {
             newline();
         }

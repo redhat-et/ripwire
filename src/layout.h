@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h" // strkern::countByte — lineOf's newline count
 #include "infra/sortutil.h"   // sortUnique
 #include "infra/platform.h" // infra::platform::{add,sub,mul}Overflow — the checked constant-expression arithmetic
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -182,15 +183,7 @@ inline std::string flattenSpace( std::string_view s, std::size_t cap )
 
 inline std::uint32_t lineOf( std::string_view src, std::size_t at )
 {
-    std::uint32_t line = 1;
-    for( std::size_t i = 0; i < at && i < src.size(); ++i )
-    {
-        if( src[i] == '\n' )
-        {
-            ++line;
-        }
-    }
-    return line;
+    return 1u + std::uint32_t( strkern::countByte( src.substr( 0, at ), '\n' ) );
 }
 
 // Advance past the comment / string / character literal starting at src[i]; returns i unchanged when

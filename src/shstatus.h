@@ -25,6 +25,7 @@
 // Python pattern it implements.
 
 #include "infra/Diagnostics.h"  // ASSUME — the skip trio's recursion bound (UnguardedSkip)
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
 #include "infra/shellword.h"   // trimView / shellIsRedirect — shared with darkflags.h
 #include "infra/sortutil.h"    // sortUnique / svLess
@@ -189,7 +190,7 @@ inline bool startsAt( std::string_view s, std::size_t i, std::string_view p ) no
 inline std::size_t countNl( std::string_view s, std::size_t b, std::size_t e ) noexcept
 {
     e = std::min( e, s.size() );
-    return b >= e ? 0 : static_cast<std::size_t>( std::count( s.begin() + static_cast<std::ptrdiff_t>( b ), s.begin() + static_cast<std::ptrdiff_t>( e ), '\n' ) );
+    return b >= e ? 0 : strkern::countByte( s.substr( b, e - b ), '\n' );
 }
 inline std::string_view sliceOf( std::string_view s, std::size_t b, std::size_t e ) noexcept   // Python s[b:e], clamped
 {

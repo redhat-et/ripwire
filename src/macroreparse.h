@@ -47,6 +47,7 @@
 // second parse only when the scan names at least one candidate.
 
 #include "extentsuspect.h"        // extent::inSet — the declarative membership test this header's language set reads
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "infra/jsonesc.h"        // isJsonWs — horizontal space is its set minus the newline, plus \f and \v
 #include "infra/namesplit.h"      // namesplit::isIdentStart / isIdentChar — the ONE ASCII identifier byte class
 #include "model.h"
@@ -147,7 +148,7 @@ inline bool isPunct( const Token& t, char c ) noexcept
 
 inline std::uint32_t countNewlines( std::string_view src, std::uint32_t from, std::uint32_t to ) noexcept
 {
-    return std::uint32_t( std::count( src.begin() + std::ptrdiff_t( from ), src.begin() + std::ptrdiff_t( to ), '\n' ) );
+    return std::uint32_t( strkern::countByte( src.substr( from, to - from ), '\n' ) );
 }
 
 // A backslash-newline at pos (`\` LF or `\` CR LF): its length, or 0.

@@ -35,6 +35,7 @@
 // --signatures-only and --detail=N carry none. RIPWIRE_NO_EP_MANIFEST (any value) turns it off — the A/B handle.
 
 #include "docparse.h"     // readRegularFile — a fixed-name file in the tree, refused when it is not a regular file
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "darkflags.h"    // forEachLine — the one line splitter over raw file text (CR stripped)
 #include "flipimpact.h"   // SymbolLineIndex / innermostAtLine — the innermost def covering a line (the consumer's enclosing def)
 #include "infra/namesplit.h"   // isIdentChar
@@ -728,7 +729,7 @@ inline std::vector<std::vector<EpConsumer>> findGroupConsumers( const IngestResu
                 {
                     continue;
                 }
-                countedLines += std::uint32_t( std::count( text->begin() + std::ptrdiff_t( countedTo ), text->begin() + std::ptrdiff_t( lb ), '\n' ) );
+                countedLines += std::uint32_t( strkern::countByte( tv.substr( countedTo, lb - countedTo ), '\n' ) );
                 countedTo = lb;
                 const std::uint32_t line = 1 + countedLines;
                 if( line != lastLine )

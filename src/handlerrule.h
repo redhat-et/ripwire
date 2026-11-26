@@ -31,6 +31,7 @@
 // The hop is never a call edge: consumers print it via="name-key" with its width (cands=), never in reaches=/hops=.
 
 #include "darkflags.h"          // readWhole — the rule and the post site are read from the file text
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "filter.h"             // isTestPath — a test's reader does not make posters
 #include "model.h"
 #include "resolve.h"            // trimWs
@@ -619,7 +620,7 @@ private:
                 {
                     continue;
                 }
-                rule.readers.push_back( HandlerReader{ fn, std::uint32_t( 1 + std::ranges::count( t.substr( 0, at ), '\n' ) ) } );
+                rule.readers.push_back( HandlerReader{ fn, std::uint32_t( 1 + strkern::countByte( t.substr( 0, at ), '\n' ) ) } );
                 if( const NodeId owner = m_classes.ownerOf( fn ); owner != kNoNode )
                 {
                     readerClasses.push_back( owner );

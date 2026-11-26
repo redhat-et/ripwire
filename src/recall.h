@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -1495,7 +1496,7 @@ inline RecallSectionEmission emitRecallSectionUnits( const RecallSectionBody& se
         // substr rather than `kept.size() - 1`, because a size_t decrement that is merely provably safe
         // today is the shape -fsanitize=integer exists to catch tomorrow.
         const std::string_view served = kept.empty() ? kept : kept.substr( 0, kept.size() - 1 );
-        const std::uint32_t    keptHi = top.lineLo + std::uint32_t( std::count( served.begin(), served.end(), '\n' ) );
+        const std::uint32_t    keptHi = top.lineLo + std::uint32_t( strkern::countByte( served, '\n' ) );
         linesAttr    = std::to_string( top.lineLo ) + "-" + std::to_string( std::min( keptHi, top.lineHi ) );
         emittedCount = 1;
     }

@@ -30,6 +30,7 @@
 // DETERMINISM: a pure function of the body bytes; the first repeat in token order is the one named.
 
 #include "cloneidiom.h"   // IdiomTok, idiomCloseOf, idiomBracketStep — the token view and bracket matcher the idiom grammars use
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "clones.h"       // scanCodeTokens — THE one code scanner
 #include "model.h"
 
@@ -239,7 +240,7 @@ inline std::pair<TokSpan, TokSpan> firstRepeat( const std::vector<IdiomTok>& t, 
 // The 1-based line of a byte offset.
 inline std::uint32_t lineAt( const std::string& bytes, std::size_t offset ) noexcept
 {
-    return std::uint32_t( 1 + std::count( bytes.begin(), bytes.begin() + std::ptrdiff_t( std::min( offset, bytes.size() ) ), '\n' ) );
+    return std::uint32_t( 1 + strkern::countByte( std::string_view( bytes ).substr( 0, offset ), '\n' ) );
 }
 
 inline std::size_t offsetOf( const std::string& bytes, std::string_view w ) noexcept { return std::size_t( w.data() - bytes.data() ); }

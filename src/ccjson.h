@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h" // strkern::countByte — ccCountLoc's newline count
 #include "infra/sortutil.h"   // sortUnique
 
 
@@ -68,14 +69,8 @@ inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
     while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
     {
         sawByte = true;
-        for( std::size_t i = 0; i < n; ++i )
-        {
-            lastNl = ( buf[i] == '\n' );
-            if( lastNl )
-            {
-                ++lines;
-            }
-        }
+        lines += std::uint32_t( strkern::countByte( std::string_view( buf, n ), '\n' ) );
+        lastNl = buf[ n - 1 ] == '\n';   // n > 0: fread returned bytes
     }
     std::fclose( fp );
     if( sawByte && !lastNl )

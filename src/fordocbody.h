@@ -28,6 +28,7 @@
 // held="budget" held_bytes= on the root, f p= why="budget" held=N per file, next= the call without the budget. When not even
 // kForDocMinAllowance bytes fit it is held whole (the files named).
 #include "commentcoherence.h" // isCommentStopword — the general-English stoplist the subject words leave out
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "forpage.h" // FileTail — the answer's <t> rows
 #include "nextverb.h" // nextFlag / nextAttrXml
 #include "recall.h" // recallLensScores, buildSectionGranularBody, loadRecallBody, allocateRecallShares, admitRecallUnits
@@ -486,7 +487,7 @@ inline DocExcerpt excerptAroundTerms( std::string_view text, const std::vector<s
 
 inline std::uint32_t newlinesIn( std::string_view s ) noexcept
 {
-    return std::uint32_t( std::count( s.begin(), s.end(), '\n' ) );
+    return std::uint32_t( strkern::countByte( s, '\n' ) );
 }
 
 // How much of a unit's text a passage may take, and the task's words an excerpt is centred on
