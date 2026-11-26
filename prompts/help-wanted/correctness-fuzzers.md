@@ -46,9 +46,9 @@ fuzzer needs. This work turns "it didn't crash" into "it's right".
 
 Two gaps worth knowing before you start, both verified on `main`:
 
-- **`test/fuzz/run.sh` sweeps 15 of the 21 registered targets.** `toml`, `yaml`, `csharp`, `c`, `php`
-  and `lua` have targets and seeds but are not in its grammar list. `test/g1configcheck.sh` greps the
-  runner for its flags, not for its coverage.
+- **Closed by #765: `test/fuzz/run.sh` sweeps every registered target.** It reads the grammar list
+  from the `add_ripwire_fuzzer` lines in `CMakeLists.txt` (it once kept its own list and swept 17 of
+  25), and `test/g1configcheck.sh` compares `run.sh --list` with those lines.
 - **Nothing builds the CSR and PageRank property tests.** They exist only under
   `-DRIPWIRE_TESTS=ON`. No gate and no CI step builds `ripwire_test_csr` or `ripwire_test_pagerank`
   (only `ripwire_test_strkern` is built, by `test/strkerncheck.sh` and `test/emitescapecheck.sh`), yet
@@ -175,8 +175,8 @@ bash test/fuzz/run.sh fuzz 60                  # bounded local sweep: build dir,
    crash or oracle failure becomes a minimized replay input.
 5. **Every bug found** gets its minimized input committed to the replay corpus, and its fix lands
    separately with a red-first arm.
-6. **The sweep list stops drifting.** `test/fuzz/run.sh` covers every registered target, derived from
-   CMake rather than a hand list, or states why not; `test/g1configcheck.sh` asserts whichever you choose.
+6. **The sweep list stays derived.** `test/fuzz/run.sh` reads its list from CMake (#765) and
+   `test/g1configcheck.sh` asserts it; a new fuzzer kind keeps that property.
 7. **The property tests run.** The CSR and PageRank doctest targets are built and run by a gate, or the
    PR states why they should not be and CONTRIBUTING.md §2 is corrected.
 8. **Gates green in the foreground:** your new gate, `test/manifestcheck.sh`, `test/gatecountcheck.sh`,
