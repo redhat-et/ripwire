@@ -57,6 +57,7 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "batchpage.h"             // CL1: the CLI --batch pages by whole <q> sub-answers under the output ceiling (cliBatchPage)
 #include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
@@ -5027,6 +5028,62 @@ static int serveWholeAnswer( const rw::Config& cfg, Run&& run )
     return rc;
 }
 
+// The flags a CLI batch page's next= replays: the ones that shape its sub-answers (runBatchSub's topK/stable, the legend
+// posture applyCompactToBatchSubs reads, redaction) and the crawl scope, so the next page is a page of the SAME batch.
+static std::string batchReplayFlags( const rw::Config& cfg )
+{
+    std::string out;
+    out += cfg.topKExplicit ? " --top-k=" + std::to_string( cfg.topK ) : std::string();
+    out += cfg.stable ? " --order=stable" : "";
+    out += cfg.legendDefaulted ? std::string() : " " + rw::nextFlag( "--legend=", cfg.legend );
+    out += cfg.noRedact ? " --no-redact" : "";
+    return out + crawlScopeFlags( cfg );
+}
+
+// CL1 (batchpage.h) for the CLI --batch: a batch that fits at no --offset, or one asked whole with --page-bytes=0, prints as
+// batchText wrote it — the second with the over-ceiling size line --for's whole answer prints. Past the ceiling it prints the
+// page from --offset=K, whole <q> sub-answers only, and a <q> over the ceiling alone gets one stderr line. The fit is priced on
+// the bytes the legend posture delivers, as serveWholeAnswer prices a whole answer. A printed answer reports the batch's
+// redaction tally after it, as the batch arm always did; a refusal prints neither.
+static int printCliBatch( const rw::Config& cfg, const std::string& whole, const rw::RedactCounts& redacted )
+{
+    const std::size_t offset    = std::size_t( std::max( cfg.pageOffset, 0 ) );
+    const std::size_t delivered = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( whole, compactLegendHint( cfg, whole ) ) : whole.size();
+    const bool        asWhole   = rw::wholeAnswerAsked( cfg ) || ( offset == 0 && delivered <= rw::kOutputCeilingChars );
+    const std::optional<rw::BatchRowSplit> split = asWhole ? std::nullopt : rw::splitBatchRows( whole );
+    if( asWhole || !split )
+    {
+        if( !asWhole )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the whole batch is printed: every sub-answer arrives, only the size is over the ceiling",
+                      "printCliBatch: batchText's document did not split into <q> rows — printed whole" );
+            rw::emitTo( stderr, "ripwire: --batch: this answer is {} B, over the {} B output ceiling, and could not be split into its <q> "
+                                "sub-answers; it is printed whole\n", delivered, rw::kOutputCeilingChars );
+        }
+        noteWholeAnswerOverCeiling( cfg, delivered );
+        rw::emitTo( stdout, "{}\n", whole );
+        reportRedactions( stderr, redacted );
+        return 0;
+    }
+    const rw::CliBatchPage page = rw::cliBatchPage( *split, offset, rw::nextFlag( "--batch=", cfg.batchFile ), batchReplayFlags( cfg ) );
+    if( !page.refusal.empty() )
+    {
+        rw::emitTo( stderr, "ripwire: --batch: {}\n", page.refusal );
+        return 1;
+    }
+    if( page.overBytes > 0 )
+    {
+        const std::size_t pageBytes = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( page.text, compactLegendHint( cfg, page.text ) )
+                                                              : page.text.size();
+        rw::emitTo( stderr, "ripwire: --batch: sub-answer q={} is larger than a page, so this page carries it alone, whole: {} B, over the {} B "
+                            "output ceiling (an agent harness may show only a preview of it); narrow that sub-query to receive it inline\n",
+                    offset, pageBytes, rw::kOutputCeilingChars );
+    }
+    rw::emitTo( stdout, "{}\n", page.text );
+    reportRedactions( stderr, redacted );   // the whole batch ran, so its tally is every page's
+    return 0;
+}
+
 // --lint under --page-bytes=0: the whole answer through serveWholeAnswer; every other lint-family run as runLint serves it.
 static std::optional<int> runLintServed( const MainDispatch& d )
 {
@@ -5904,10 +5961,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         {
             rw::applyCompactToBatchSubs( subs );
         }
-        std::fputs( batchText( subs, requested, kBatchCap ).c_str(), stdout );
-        std::fputc( '\n', stdout );
-        reportRedactions( stderr, rc );
-        return 0;
+        return printCliBatch( cfg, batchText( subs, requested, kBatchCap ), rc );
     }
 
     // Wave-4 remote ergonomics: a git-URL positional (https:// or git@) is shallow-cloned to a per-URL
