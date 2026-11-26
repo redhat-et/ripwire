@@ -2397,6 +2397,8 @@ PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
 #        over the file (RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent)
 #   FE7  the Codex wrapper carries the same text
 #   FE8  bounded: the context is at most 1536 B; a Write of an existing file and a Write of a new one
+#   FE9  PLAIN FIRST: a preview that never answers (a ripwire whose --dry-run sleeps) still delivers the plain check
+#        (symbol + caller, "current tree vs HEAD") with the "preview did not finish" note, never the bare skip line
 # fe_run opts in (RIPWIRE_FIRST_EDIT=1) unless an arm overrides it; FE6 is the arm about the default.
 # The positive arms run the REAL binary with a generous deadline (RIPWIRE_FIRST_EDIT_MS=20000): they pin content,
 # FE4 pins the timeout. Without a built binary they are SKIPPED, never passed.
@@ -2524,8 +2526,38 @@ if [ -x "$FEREAL" ]; then
     fe_run "$HOOK" "$FEPATH" "$FET/fe8n.jsonl" fe8n Write '{"file_path":"'"$FEREPO"'/src/new.c","content":"int n( void ) { return 0; }\n"}'
     [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && ok "FE8 Write of a new file: silent (no existing definition to check)" \
         || no "FE8 Write of a new file: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE9 — plain first. A wrapper that sleeps on --dry-run (the preview) and runs the real binary for everything else.
+    mkdir -p "$FET/slowpreview"
+    printf '#!/bin/sh\ncase " $* " in *" --dry-run "*) echo $$ >>"$FE_STUB_PIDS"; exec sleep 30 ;; esac\nexec "%s" "$@"\n' "$FEREAL" \
+        >"$FET/slowpreview/ripwire"; chmod +x "$FET/slowpreview/ripwire"
+    FE_STUB_PIDS="$FET/stub9.pids"; : >"$FE_STUB_PIDS"; FEL9="$FET/fe9.jsonl"
+    FE9T0="$( fe_ms )"
+    fe_run "$HOOK" "$FET/slowpreview:$PATH" "$FEL9" fe9 Edit "$FE_SIG" RIPWIRE_FIRST_EDIT_MS=2500 FE_STUB_PIDS="$FE_STUB_PIDS"
+    FE9MS=$(( $( fe_ms ) - FE9T0 )); FECTX9="$( fe_ctx )"
+    echo "  (FE9 wall time with a 2500 ms deadline and a preview that never answers: ${FE9MS} ms)"
+    [ -s "$FE_STUB_PIDS" ] && ok "FE9 not vacuous: the preview was attempted (the --dry-run stub ran)" \
+        || no "FE9 vacuous: the --dry-run stub never ran, so the plain-first path was not exercised"
+    [ "$FERC" -eq 0 ] && printf '%s' "$FECTX9" | grep -q 'addTwo src/calc.c:1 fn: current tree vs HEAD: status=unchanged' \
+        && printf '%s' "$FECTX9" | grep -q 'useAdd src/calc.c:6' && printf '%s' "$FECTX9" | grep -q 'preview did not finish within 2500 ms' \
+        && ! printf '%s' "$FECTX9" | grep -q 'skipped: timeout' \
+        && ok "FE9 plain first: a stalled preview still delivers the plain check (symbol, caller) with the 'preview did not finish' note" \
+        || no "FE9 plain first: exit=$FERC ctx=[$( printf '%s' "$FECTX9" | head -c 400 )]"
+    [ "$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )" = "first-edit-plain/1" ] && ok "FE9 row: nudge=first-edit-plain nudged=1" \
+        || no "FE9 row: [$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )]"
+    FE9BYTES="$( printf '%s' "$FECTX9" | wc -c | tr -d ' ' )"
+    [ "$FE9MS" -lt 3900 ] && [ "$FE9BYTES" -le 1536 ] && ok "FE9 bounded: back in ${FE9MS} ms (deadline 2500, bound 3900), ${FE9BYTES} B" \
+        || no "FE9 bounded: ${FE9MS} ms, ${FE9BYTES} B"
+    FE9LEFT=""
+    for fe9p in $( tr '\n' ' ' <"$FE_STUB_PIDS" 2>/dev/null ); do
+        if kill -0 "$fe9p" 2>/dev/null; then
+            case "$( ps -o stat= -p "$fe9p" 2>/dev/null )" in Z*|'') ;; *) FE9LEFT="$FE9LEFT $fe9p" ;; esac
+        fi
+    done
+    [ -z "$FE9LEFT" ] && ok "FE9 timeout: the stalled preview is gone when the hook returns" \
+        || { no "FE9 timeout: preview pid(s)$FE9LEFT outlived the hook"; kill $FE9LEFT 2>/dev/null; }
 else
-    echo "  SKIP  FE1-FE3, FE5-FE8: no built binary at $FEREAL (they need the real --at/--edit-check/--affected)"
+    echo "  SKIP  FE1-FE3, FE5-FE9: no built binary at $FEREAL (they need the real --at/--edit-check/--affected)"
 fi
 
 # FE4 — a ripwire that never answers. Runs with the stub, so it needs no build.

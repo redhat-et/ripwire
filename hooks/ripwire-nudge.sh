@@ -2005,6 +2005,7 @@ fi
 # THE ARM AND THE METER. Treatment speaks; control is silent and records the same moment as `first-edit-control`, so
 # eligibility is measurable in both arms and the primer readout can cut every session at its first-edit row (before
 # it, the arms still differ by the primer alone). The row's `nudge`: `first-edit` (nudged=1, the check delivered),
+# `first-edit-plain` (nudged=1: the deadline fell inside the preview, so the current-tree check went out with a note),
 # `first-edit-timeout` (the skip line delivered), `first-edit-nosym` (the edit sits inside no indexed definition, or
 # the binary answered nothing: silent), `first-edit-control`. `post_nudge`/`post_sweep` are NOT touched: they stay
 # the retired tiers' counterfactual markers.
@@ -2015,13 +2016,15 @@ fi
 # is on, the arm split below applies.
 #
 # THE BOUNDS. Time: one hard deadline over the whole check (default 2000 ms; Codex registers this hook with a 3 s
-# timeout), enforced by one non-polling watchdog that kills the check's process group; past it, one honest line says
-# "skipped: timeout" and the edit proceeds untouched. Bytes: at most 2 definitions, 5 callers each, 3 tests, and a
+# timeout), enforced by one non-polling watchdog that kills the check's process group. The plain check (current tree)
+# is finished and saved BEFORE the slow preview starts, so a deadline inside the preview still delivers it, with a
+# "preview did not finish" note; only a deadline before the plain check is done gives the one "skipped: timeout" line.
+# Either way the edit proceeds untouched. Bytes: at most 2 definitions, 5 callers each, 3 tests, and a
 # 1536 B ceiling on the whole text (a cut is disclosed). Calls: one `git rev-parse`, then inside the deadline at most
-# 4 --at, 2 --edit-check (+1 fallback each) and 1 --affected. Once per session (an atomic mkdir marker); an edit to a
+# 4 --at, 2 plain --edit-check, 1 --affected, then up to 2 previews. Once per session (an atomic mkdir marker); an edit to a
 # non-source file, a missing file or a new file spends nothing. Never a permissionDecision (test/hookcheck.sh (15)).
 # The switch: `first_edit=1` in meter.conf or RIPWIRE_FIRST_EDIT=1 (default off); the deadline: RIPWIRE_FIRST_EDIT_MS /
-# `first_edit_ms`. Gated in test/hookcheck.sh (16), arms FE1-FE8, and PD5.
+# `first_edit_ms`. Gated in test/hookcheck.sh (16), arms FE1-FE9, and PD5.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 fe_ctx=""
 firstedit_eligible()
@@ -2055,27 +2058,23 @@ firstedit_attr()
     v="${v//&lt;/<}"; v="${v//&gt;/>}"; v="${v//&quot;/\"}"; v="${v//&apos;/\'}"; v="${v//&amp;/&}"
     printf '%s' "$v"
 }
-# firstedit_symline TARGET SYMNAME PREVIEWPAYLOAD — one edit-check, as one line on stdout
+# firstedit_symline TARGET SYMNAME [PAYLOAD] — one edit-check as one line on stdout. With PAYLOAD: the --dry-run preview
+# of the pending bytes, and status 1 (nothing printed) when the binary refuses it; without: the current tree vs HEAD.
 firstedit_symline()
 {
-    local x rc mode="current tree vs HEAD" root rest row line cs="" k=0
-    if [ -n "$3" ]
+    local x mode="current tree vs HEAD" root rest row line cs="" k=0
+    if [ -n "${3:-}" ]
     then
-        x="$( ripwire "$fe_root" --edit-check="$1" --edit-payload="$3" --dry-run --limit=5 --legend=compact 2>/dev/null )"; rc=$?
-        [ "$rc" -eq 0 ] && mode="preview of this edit"
-        [ "$rc" -eq 0 ] || mode="current tree vs HEAD (the preview was refused)"
+        x="$( ripwire "$fe_root" --edit-check="$1" --edit-payload="$3" --dry-run --limit=5 --legend=compact 2>/dev/null )" || return 1
+        mode="preview of this edit"
     else
-        rc=1
-    fi
-    if [ "$rc" -ne 0 ]
-    then
         x="$( ripwire "$fe_root" --edit-check="$1" --limit=5 --legend=compact 2>&1 )" || {
             printf '%s: edit-check refused: %s\n' "$2" "$( printf '%s' "$x" | head -n1 | cut -c1-160 )"; return 0; }
     fi
     # Anchored on the ROOT element, never on the legend comment before it: that comment spells `<c n= p= …>` itself, and
     # the <overwrite> CDATA (the current span, which the agent is editing anyway) can hold any text, `-->` included.
     # Root first, THEN the overwrite cut: the legend spells `<overwrite l= end= …>` too.
-    [[ "$x" == *"<edit-check "* ]] || return 0
+    [[ "$x" == *"<edit-check "* ]] || { [ -z "${3:-}" ]; return; }
     x="${x#*<edit-check }"
     x="${x%%<overwrite*}"
     root="${x%%>*}"
@@ -2096,11 +2095,12 @@ firstedit_symline()
     [ "$k" -gt 0 ] && [ "$( firstedit_attr "$root" callers )" != "$k" ] && line="$line ($k shown; the rest: --edit-check=$1)"
     printf '%s\n' "$line"
 }
-# firstedit_compute DIR — the whole check; runs in the background under the deadline, writes DIR/ctx then DIR/done
-firstedit_compute()
+# firstedit_locate DIR — the definitions the edit touches (at most 2): fills fe_syms[] and fe_pays[] (the preview
+# payload file for that definition, or empty) and fe_targets (FILE:SYM,...). Status 1 when the ranges cannot be read.
+firstedit_locate()
 {
-    local d="$1" s e ln at row n l el seen="" targets="" lines="" t pay tx ts tn tr te out tl k=0 tries=0
-    export LC_ALL=C
+    local d="$1" s e ln at row n l el seen="" k=0 tries=0
+    fe_syms=(); fe_pays=(); fe_targets=""
     # `max` with 1: an old_string at byte 0 leaves an EMPTY prefix, and jq splits "" into [] (length 0), not [""].
     jq -r --rawfile c "$fe_file" '
         def loc($o): if ($o | type) != "string" or $o == "" then empty
@@ -2111,7 +2111,7 @@ firstedit_compute()
             | (([range(0; ([($a | length), ($b | length)] | max))] | map(select($a[.] != $b[.])) | first) // empty) + 1
             | "\(.) \(.)"
         elif .tool_name == "MultiEdit" then (.tool_input.edits // [])[:4][] | loc(.old_string)
-        else loc(.tool_input.old_string) end' "$d/in.json" >"$d/ranges" 2>/dev/null || { : >"$d/done"; return 0; }
+        else loc(.tool_input.old_string) end' "$d/in.json" >"$d/ranges" 2>/dev/null || return 1
     while read -r s e
     do
         for ln in "$s" "$e"
@@ -2127,60 +2127,101 @@ firstedit_compute()
             [ -n "$n" ] || continue
             case " $seen " in *" $n@$l "*) break ;; esac
             seen="$seen $n@$l"
-            k=$(( k + 1 ))
-            pay=""
+            fe_syms[$k]="$n"; fe_pays[$k]=""
             if [ "$tool_name" = Edit ] && [ -n "$l" ] && [ -n "$el" ] && [ "$s" -ge "$l" ] && [ "$e" -le "$el" ]
             then
                 sed -n "${l},${el}p" "$fe_file" >"$d/span$k" 2>/dev/null
                 jq -j --rawfile sp "$d/span$k" '.tool_input as $t | ($sp | split($t.old_string)) as $p
                     | if ($p | length) < 2 then error("absent") elif $t.replace_all == true then $p | join($t.new_string)
                       else $p[0] + $t.new_string + ($p[1:] | join($t.old_string)) end' "$d/in.json" >"$d/payload$k" 2>/dev/null \
-                    && [ -s "$d/payload$k" ] && pay="$d/payload$k"
+                    && [ -s "$d/payload$k" ] && fe_pays[$k]="$d/payload$k"
             fi
-            tl="$( firstedit_symline "$fe_rel:$n" "$n" "$pay" )"
-            [ -n "$tl" ] && lines="$lines$tl"$'\n'
-            targets="$targets${targets:+,}$fe_rel:$n"
+            fe_targets="$fe_targets${fe_targets:+,}$fe_rel:$n"
+            k=$(( k + 1 ))
             break
         done
         [ "$k" -lt 2 ] && [ "$tries" -lt 4 ] || break
     done <"$d/ranges"
-    if [ -z "$lines" ]
+    return 0
+}
+# firstedit_tests — the "tests to run" line for fe_targets (--affected), or nothing when the binary answered nothing
+firstedit_tests()
+{
+    local tx tr tn ts="" te row k=0 t sg
+    tx="$( ripwire "$fe_root" --affected="$fe_targets" --legend=compact 2>/dev/null )"
+    [[ "$tx" == *"<affected "* ]] || return 0
+    tx="${tx#*<affected }"                                # past the legend, which spells `<test p= …>` itself
+    tr="${tx%%>*}"
+    tn="$( firstedit_attr "$tr" tests )"; sg="$( firstedit_attr "$tr" script_gates_unmodelled )"
+    te="$tx"
+    while [[ "$te" == *"<test "* ]] && [ "$k" -lt 3 ]
+    do
+        te="${te#*<test }"; row="${te%%>*}"; k=$(( k + 1 ))
+        ts="$ts${ts:+, }$( firstedit_attr "$row" p )"
+    done
+    t="tests to run (tests=$tn, a floor"
+    [ -n "$sg" ] && [ "$sg" != 0 ] && t="$t; $sg script gates unmodelled"
+    if [ -n "$ts" ]
     then
-        : >"$d/done"
-        return 0
+        t="$t): $ts"
+        [ "$k" != "$tn" ] && t="$t ($k shown; the rest: --affected=$fe_targets)"
+    else
+        t="$t): none found, which is not none exist"
     fi
-    tx="$( ripwire "$fe_root" --affected="$targets" --legend=compact 2>/dev/null )"
-    if [[ "$tx" == *"<affected "* ]]
+    printf '%s\n' "$t"
+}
+# firstedit_render CAP LINE... — the header, the non-empty LINEs, the follow-up; cut at CAP bytes, the cut disclosed
+firstedit_render()
+{
+    local cap="$1" out l tail; shift
+    out="ripwire before-first-edit check for $fe_rel (once per session, read-only, nothing was written):"
+    for l in "$@"
+    do
+        [ -n "$l" ] && out="$out"$'\n'"$l"
+    done
+    out="$out"$'\n'"after the edit: ripwire $fe_root --edit-check=${fe_targets%%,*} --legend=compact"
+    if [ "${#out}" -gt "$cap" ]
     then
-        tx="${tx#*<affected }"                            # past the legend, which spells `<test p= …>` itself
-        tr="${tx%%>*}"
-        tn="$( firstedit_attr "$tr" tests )"; ts=""; k=0
-        te="$tx"
-        while [[ "$te" == *"<test "* ]] && [ "$k" -lt 3 ]
-        do
-            te="${te#*<test }"; row="${te%%>*}"; k=$(( k + 1 ))
-            ts="$ts${ts:+, }$( firstedit_attr "$row" p )"
-        done
-        t="tests to run (tests=$tn, a floor"
-        [ "$( firstedit_attr "$tr" script_gates_unmodelled )" ] && [ "$( firstedit_attr "$tr" script_gates_unmodelled )" != 0 ] \
-            && t="$t; $( firstedit_attr "$tr" script_gates_unmodelled ) script gates unmodelled"
-        if [ -n "$ts" ]
+        tail="[cut at the $cap B ceiling; the full answer: --edit-check=${fe_targets%%,*}]"
+        out="${out:0:$(( cap - ${#tail} - 1 ))}"
+        out="${out%$'\n'*}"$'\n'"$tail"
+    fi
+    printf '%s' "$out"
+}
+# firstedit_compute DIR — the whole check; runs in the background under the deadline. PLAIN FIRST: the current-tree
+# answer (every definition's plain edit-check, then the tests) is renamed into DIR/ctx.plain BEFORE the preview starts,
+# because the preview re-derives the call graph and can take far longer (15.36 s measured on src/graph.h); a deadline
+# that falls inside the preview still delivers the plain answer. Then each definition with a payload is previewed, and
+# DIR/ctx + DIR/done are written last. The plain render is cut at 1360 B so the run's timeout note still fits in 1536.
+firstedit_compute()
+{
+    local d="$1" i=0 tests pl
+    local -a plain fin
+    export LC_ALL=C
+    firstedit_locate "$d" && [ "${#fe_syms[@]}" -gt 0 ] || { : >"$d/done"; return 0; }
+    while [ "$i" -lt "${#fe_syms[@]}" ]
+    do
+        plain[$i]="$( firstedit_symline "$fe_rel:${fe_syms[$i]}" "${fe_syms[$i]}" )"
+        i=$(( i + 1 ))
+    done
+    tests="$( firstedit_tests )"
+    firstedit_render 1360 "${plain[@]}" "$tests" >"$d/ctx.tmp" && mv "$d/ctx.tmp" "$d/ctx.plain"
+    i=0
+    while [ "$i" -lt "${#fe_syms[@]}" ]
+    do
+        fin[$i]="${plain[$i]}"
+        if [ -n "${fe_pays[$i]}" ]
         then
-            t="$t): $ts"
-            [ "$k" != "$tn" ] && t="$t ($k shown; the rest: --affected=$targets)"
-        else
-            t="$t): none found, which is not none exist"
+            if pl="$( firstedit_symline "$fe_rel:${fe_syms[$i]}" "${fe_syms[$i]}" "${fe_pays[$i]}" )" && [ -n "$pl" ]
+            then
+                fin[$i]="$pl"
+            else
+                fin[$i]="${plain[$i]/: current tree vs HEAD:/: current tree vs HEAD (the preview was refused):}"
+            fi
         fi
-        lines="$lines$t"$'\n'
-    fi
-    out="ripwire before-first-edit check for $fe_rel (once per session, read-only, nothing was written):"$'\n'"$lines"
-    out="${out}after the edit: ripwire $fe_root --edit-check=${targets%%,*} --legend=compact"
-    if [ "${#out}" -gt 1536 ]
-    then
-        out="${out:0:1480}"
-        out="${out%$'\n'*}"$'\n'"[cut at the 1536 B ceiling; the full answer: --edit-check=${targets%%,*}]"
-    fi
-    printf '%s' "$out" >"$d/ctx"
+        i=$(( i + 1 ))
+    done
+    firstedit_render 1536 "${fin[@]}" "$tests" >"$d/ctx"
     : >"$d/done"
     return 0
 }
@@ -2210,6 +2251,11 @@ firstedit_run()
     then
         [ -s "$tmp/ctx" ] && fe_ctx="$(<"$tmp/ctx")"
         if [ -n "$fe_ctx" ]; then nudge="first-edit"; nudged=1; else nudge="first-edit-nosym"; fi
+    elif [ -e "$tmp/timeout" ] && [ -s "$tmp/ctx.plain" ]
+    then
+        # The deadline fell inside the preview: the plain answer was already complete, so it is delivered, and said to be.
+        fe_ctx="$(<"$tmp/ctx.plain")"$'\n'"preview did not finish within $firstedit_ms ms (RIPWIRE_FIRST_EDIT_MS): each status above is the current tree vs HEAD, not the pending edit."
+        nudge="first-edit-plain"; nudged=1
     elif [ -e "$tmp/timeout" ]
     then
         fe_ctx="ripwire before-first-edit check for $fe_rel: skipped: timeout (no answer within $firstedit_ms ms, RIPWIRE_FIRST_EDIT_MS; nothing was checked and the edit is untouched). After the edit: ripwire $fe_root --edit-check=SYM --legend=compact"
