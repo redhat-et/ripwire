@@ -13,6 +13,7 @@
 #include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
 #include "warmsnap_model.h"    // the warm snapshot: ingest() replays the crawl from it, returns the stored model, and keys what main() stores
 #include "verbfs.h"            // VERB-FS: the index main() armed a snapshot for also arms the verb-time file-system record
+#include "verbfs_slotreg.h"    // SLOTREG: ... and the record of its two query-independent --for indexes, keyed on this model
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/tsparent.h"    // rw::parentOf - ts_node_parent answered from one cached root-descent path per file (parent-carry lane)
@@ -436,6 +437,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         maxFileBytes = kDefaultMaxFileBytes;
     }
 
+    // SLOTREG (verbfs_slotreg.h): no IngestResult is a vouched-for model until this call says which one it returns
+    verbfs::slotreg::forgetModel();
+
     // #350 layer 3: one memory watch for this ingest, shared by the crawl and the parse pool (memguard.h)
     memguard::Watch memWatch;
 
@@ -454,6 +458,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         snap->startNs    = wallClockNs();
         snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
         verbfs::arm( rootDir, snap->rootKey );                     // the same run, root and cache directory (src/verbfs.h)
+        verbfs::slotreg::arm();                                    // its SLOTREG seams, where VERB-FS armed (src/verbfs_slotreg.h)
         snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
                                                    kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits,
                                                    tlCrawlTreeAllTracked );
@@ -512,6 +517,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     else if( loadWarmModel( *snap, result ) )
     {
         memstats::mark( "model" );   // the model at rest, as the build path marks it
+        verbfs::slotreg::noteModel( result, *snap );   // the model the snapshot served
         return result;
     }
 
@@ -705,6 +711,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses );
         snap->path = blobId ? warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId ) : std::string{};
         recordWarmModel( *snap, result, cacheStats );
+        verbfs::slotreg::noteModel( result, *snap );   // the model this run recorded, when it recorded one
     }
     memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (src/memstats.h)
     if( result.memoryStop.isSet() )

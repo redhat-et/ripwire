@@ -8,6 +8,7 @@
 #include "resolve.h"           // includerDir, resolvePreciseInclude — a module path's file
 #include "infra/Diagnostics.h"   // EXPECTS/ENSURES — the window and index invariants
 #include "infra/sortutil.h"      // svLess: the method-name list slot_join::memberCalls binary-searches
+#include "verbfs_slotreg_seam.h"   // SLOTREG: a served index answers the includers adjacency from its record (src/verbfs_slotreg.h)
 #include "model.h"
 
 #include <algorithm>
@@ -1964,6 +1965,11 @@ private:
         {
             adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
         }
+        headerStaticAdjStats( ing, escapes );
+        return adj;
+    }
+    static void headerStaticAdjStats( const IngestResult& ing, bool escapes )
+    {
         if( memstats::enabled() )
         {
             const auto resolved = escapes ? std::ptrdiff_t( ing.includes.size() )
@@ -1971,7 +1977,51 @@ private:
                                             { return inc.fileId < ing.files.size() && cChainIncluder( rootRelPath( ing, inc.fileId ) ); } );
             rw::emitTo( stderr, "[stats] header_static_adj scope={} directives={} of={}\n", escapes ? "all" : "cfamily", resolved, ing.includes.size() );
         }
-        return adj;
+    }
+    // The includers adjacency headerStaticVisibleFrom walks (header -> the files that include it, rows sorted and unique), built
+    // from includeChainAdj. It reads the whole index and no question, so on a served index it is answered from the SLOTREG
+    // record when `ing` is the model the warm snapshot identifies (src/verbfs_slotreg.h); anything else builds it. The stats
+    // line describes the adjacency, so a served one prints the line its build printed: the build escaped the C-family set
+    // exactly when some header outside it has an includer (the escaping edge is in the whole-corpus build too, and the
+    // C-family build holds no edge into such a file, or it would have escaped).
+    static FileAdjacency includersAdj( const IngestResult& ing )
+    {
+        const verbfs::slotreg::Seams& seam  = verbfs::slotreg::seams();
+        FileAdjacency                 out;
+        const verbfs::slotreg::Serve  tried = seam.joinServe != nullptr ? seam.joinServe( ing, out ) : verbfs::slotreg::Serve{};
+        if( tried.served )
+        {
+            if( memstats::enabled() )
+            {
+                bool escapes = false;
+                for( std::uint32_t h = 0; h < out.size() && !escapes; ++h )
+                {
+                    escapes = !out[h].empty() && !cChainIncluder( rootRelPath( ing, h ) );
+                }
+                headerStaticAdjStats( ing, escapes );
+            }
+            return out;
+        }
+        verbfs::slotreg::BuildWatch watch( seam.joinKeep != nullptr );
+        {
+            const FileAdjacency        fwd = includeChainAdj( ing );
+            std::vector<std::uint32_t> from, to;
+            for( std::uint32_t f = 0; f < fwd.size(); ++f )
+            {
+                for( const std::uint32_t t : fwd[f] )
+                {
+                    from.push_back( t );   // reversed: header -> the files that include it
+                    to.push_back( f );
+                }
+            }
+            out = FileAdjacency::fromEdges( std::uint32_t( ing.files.size() ), from, to, /*dedup=*/true );
+        }
+        const bool pinned = watch.readsPinned( ing.files );
+        if( seam.joinKeep != nullptr )
+        {
+            seam.joinKeep( ing, tried, out, pinned );
+        }
+        return out;
     }
     // BX1 FIX 3 (test/verbfixcheck.sh F3): internal linkage is per TRANSLATION UNIT, not per file. A C-family `static` defined in a
     // file that is not a translation-unit source (a header: resolve.h cxxSourceFile is false) is in every unit that #includes it,
@@ -1990,17 +2040,7 @@ private:
         }
         if( m_includers.empty() )
         {
-            const FileAdjacency        fwd = includeChainAdj( m_ing );
-            std::vector<std::uint32_t> from, to;
-            for( std::uint32_t f = 0; f < fwd.size(); ++f )
-            {
-                for( const std::uint32_t t : fwd[f] )
-                {
-                    from.push_back( t );   // reversed: header -> the files that include it
-                    to.push_back( f );
-                }
-            }
-            m_includers = FileAdjacency::fromEdges( std::uint32_t( m_ing.files.size() ), from, to, /*dedup=*/true );
+            m_includers = includersAdj( m_ing );
         }
         auto it = m_reachesHeader.find( defFile );
         if( it == m_reachesHeader.end() )

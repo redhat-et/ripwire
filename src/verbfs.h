@@ -105,7 +105,7 @@ enum class Part : std::uint32_t
     Clones = 2,
     Dirs   = 3,
 };
-inline constexpr std::string_view kPartNames[] = { "", "grep", "clones", "dirs" };
+inline constexpr std::string_view kPartNames[] = { "", "grep", "clones", "dirs", "regindex", "slotjoin" };   // SLOTREG-PERSIST registers its two parts here (src/verbfs_slotreg.h finds them by name)
 
 // Why a record was not used: one word on the stats line.
 enum class Why : std::uint8_t
