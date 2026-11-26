@@ -29,6 +29,7 @@
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "forrowlines.h"   // MR1: rowlines::encodeRows — the CLI --for's row form, on the MCP `for` bundle
 #include "foractline.h"    // BR1: actline::insertActLine — the CLI --for's act line, on the MCP `for` bundle
+#include "foractedges.h"   // ACT-EDGES: insertActEdges — the CLI --for's EDGES line, on the MCP `for` bundle
 #include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "forqsites.h"     // θ11 (RIPWIRE_THETA11=1): the CLI --for's question-sites block, the same one inside this bundle's root
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
@@ -3237,10 +3238,20 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // BR1D: the act line re-prices through what this root was converged from (answerPrice, kept current by insertFileSyms), as the CLI's
     // does through its render's ledger — so it charges its own bytes only, never the blocks spliced after the price (<syms>, whose clause
     // says "not in est_tokens"). Re-pricing from the number alone charged those too: MEASURED +490 for 264 B on src/ (ceiling 106).
-    const auto insertActLineMcp = [&out, &answerPrice]( std::size_t limit )
+    const auto insertActLineMcp = [&out, &answerPrice, &ing, &ix, &flRootArg]( std::size_t limit )
     {
         rw::ForAnswerLedger ledger{ .priced = true, .markupBytes = answerPrice.markupBytes, .bodyTokens = answerPrice.bodyTokens };
-        (void)rw::actline::insertActLine( out, limit, &ledger );
+        if( !rw::actline::insertActLine( out, limit, &ledger ) )
+        {
+            return;
+        }
+        // ACT-EDGES (foractedges.h): the CLI's EDGES line, right after the act line, through the same ledger; under
+        // budget_tokens only while est_tokens= stays within it, as the act line is.
+        std::string was = limit > 0 ? out : std::string();
+        if( rw::actedges::insertActEdges( out, ing, ix.g, flRootArg, &ledger ) && limit > 0 && rw::actline::detail::rootEstTokens( out ) > limit )
+        {
+            out.swap( was );
+        }
     };
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there

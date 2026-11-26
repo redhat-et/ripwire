@@ -70,6 +70,7 @@
 #include <string_view>
 #include <vector>
 
+#include "foractedgesswitch.h"   // isLaneLine — the lane's lines, unsized like the act line (lane ACT-EDGES)
 #include "infra/sortutil.h"   // svLess — the one string_view order (portablebuildcheck #6b)
 #include "serialize.h"   // attrOf — the one reader of a printed tag's attribute value
 #include "infra/Diagnostics.h"
@@ -479,7 +480,10 @@ struct Layout
         if( l.ownerOf[ k ] != std::string_view::npos ) { l.sized[ l.ownerOf[ k ] ] += blocks[ k ].end - blocks[ k ].begin; }
         // BR1b (foractline.h): G measures page 1 as paging will cut it, and no page counts the act line (forpages.h markActLine) — so
         // neither does G. MEASURED without this, GA1 DEV ga-libzmq-11: the line's 114 B tipped the <fold> off page 1 (BODYn 27 -> 26).
-        if( !blocks[ k ].comment && blocks[ k ].name == "act" ) { l.sized[ k ] = 0; }
+        // ACT-EDGES (foractedgesswitch.h): nor the EDGES line, nor the wide act line's added ranges. Paging COUNTS those, so
+        // they come out of the bottom of page 1 (the tail rows past G's guarantee); G decides the order as if they were absent, so they
+        // never cost page 1 a promoted block (MEASURED with them counted here, GA1 DEV ga-black-07: the <fold> left page 1).
+        if( !blocks[ k ].comment && ( blocks[ k ].name == "act" || actedges::isLaneLine( blocks[ k ].name ) ) ) { l.sized[ k ] = 0; }
     }
     return l;
 }

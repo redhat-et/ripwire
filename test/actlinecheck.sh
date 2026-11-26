@@ -35,7 +35,8 @@ set -u
 # core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
 export RIPWIRE_NO_CORE_LEGEND=1
 # ACT-EDGES (src/foractedges.h): this gate pins the act line's top-3 rule, its 200 B clause and its dictionary entry; the default's
-# wide line (up to 8 ranges, the first 3 this gate's) is pinned by test/actedgescheck.sh, so the lane is switched off here.
+# wide line (up to 8 ranges, the first 3 this gate's) and the edges line are pinned by test/actedgescheck.sh, so the lane is
+# switched off here.
 export RIPWIRE_ACT_EDGES=0
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"

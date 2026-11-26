@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# actedgescheck.sh — LANE ACT-EDGES (src/foractedgesswitch.h, src/foractline.h ACT-8): on a `--for` page 1 the act line lists up to
-# 8 ranges (the top 3 sigs rows, then the next ranged ones). RIPWIRE_ACT_EDGES=0 is off.
-# ARMS (every one NEW: a binary without the lane writes at most 3 ranges, so A fails)
+# actedgescheck.sh — LANE ACT-EDGES (src/foractedgesswitch.h, src/foractedges.h, src/foractline.h ACT-8): on a `--for` page 1 the act
+# line lists up to 8 ranges (the top 3 sigs rows, then the next ranged ones), and right after it an EDGES line (callers and other-file
+# callees of the act line's first 3 symbols). RIPWIRE_ACT_EDGES=0 is off.
+# ARMS (every one NEW: a binary without the lane writes at most 3 ranges and no <edges>, so A/E fail)
 #   (A)  ACT-8: Q1's act read= holds 4..8 ranges, the first 3 the top 3 sigs <d> rows, none held by an earlier one; the full legend
 #        (--legend=full) carries the wide clause once
-#   (P)  BYTES FROM THE BOTTOM: ON page 1 is at most the OFF page 1 plus the core-legend clauses (200 B), and withholds at least the
-#        OFF page's rows less those clauses: the added ranges' bytes came out of the bottom of the page, not on top of it
+#   (E)  EDGES: Q1 has <edges>; each group "NAME: called by P:L N, ..; calls P:L N" names an act symbol; every P:L is a line of a real
+#        file whose text holds N; no P:L inside an act range; at most 2 callers and 2 callees shown per group
+#   (P)  BYTES FROM THE BOTTOM: at the default size no row is pulled onto ON page 1, and it grows by the lane's own bytes at most (they
+#        may use room page 1 had); at the smallest --page-bytes the OFF page 1 still holds its rows at, the ON page 1 withholds more
+#        and is at most the OFF page 1 plus the core-legend clauses (200 B): the lane's bytes are counted and come off the bottom
 #   (P2) NEVER FROM AN ITEM: at the smallest --page-bytes the OFF answer is served whole at (one page, found to the byte), the ON
 #        answer is served whole too: the lane's bytes never push a whole answer's last rows onto a page 2 (mf1-ninja-01 R3, measured)
-#   (K)  THE ARM: RIPWIRE_ACT_EDGES=1 is ACT-8, as the default
-#   (B)  BUDGET: a --token-budget the ON answer fits returns it with the wide act line; MCP `for` carries it
-#   (O)  OFF: RIPWIRE_ACT_EDGES=0 writes <= 3 ranges (more only in θ17's edit form, as main), no wide clause; with RIPWIRE_PARENT_BIN (a binary from before
+#   (K)  THE ARMS: RIPWIRE_ACT_EDGES=1 is ACT-8 alone (no <edges>), =2 EDGES alone (3 ranges)
+#   (B)  BUDGET: a --token-budget the ON answer fits returns it with the lines; MCP `for` carries the wide act line and <edges>
+#   (O)  OFF: RIPWIRE_ACT_EDGES=0 writes <= 3 ranges (more only in θ17's edit form, as main), no <edges>, no lane clause; with RIPWIRE_PARENT_BIN (a binary from before
 #        the lane) every OFF answer is the parent's byte for byte (Q1, Q2, Q1 page 2, Q1 whole, --legend=full, --legend=first, --json,
 #        --token-budget, MCP)
 #   (D)  well formed (xmllint) and deterministic (two ON runs)
-#   (M)  MUTATION NEGATIVE CONTROL: A's detector FAILS on the OFF page
+#   (M)  MUTATION NEGATIVE CONTROLS: A's and E's detectors FAIL on the OFF page
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -53,20 +57,51 @@ def mcp(args, env=None, binary=None):
     return ""
 OFF = {"RIPWIRE_ACT_EDGES": "0"}
 WIDE = "the act line: read= P:L-E of the top 3 sigs d rows by r=, then the next ranged ones, up to 8 ranges"
-LANE_CLAUSES = (WIDE,)
+LANE_CLAUSES = (WIDE, "the edges line:", "edges: per act symbol")
 prose = lambda t: re.sub(r'<!\[CDATA\[.*?\]\]>', '', t, flags=re.S)   # a clause outside the rows (a row may quote the source that defines it)
 def lane(t):
-    """the page's own act element -> its read= value, None when absent; anchored at the first <act/> OUTSIDE every CDATA section (a row may quote the source that writes them)"""
+    """the page's own act element and the line right after it -> (read= value, <edges> CDATA text), each None when absent; anchored at the first <act/> OUTSIDE every CDATA section (a row may quote the source that writes them)"""
     spans = [(m.start(), m.end()) for m in re.finditer(r'<!\[CDATA\[.*?\]\]>', t, re.S)]
     m = next((m for m in re.finditer(r'<act read="([^"]*)"/>', t) if not any(a <= m.start() < b for a, b in spans)), None)
-    return m.group(1) if m else None
+    if not m: return None, None
+    e = re.match(r'<edges><!\[CDATA\[(.*?)\]\]></edges>', t[m.end():], re.S)
+    return m.group(1), e.group(1) if e else None
 def act(t):
-    v = lane(t)
+    v = lane(t)[0]
     return [] if not v else [(x.rsplit(":", 1)[0], *map(int, x.rsplit(":", 1)[1].split("-"))) for x in v.split(",")]
+has_edges = lambda t: lane(t)[1] is not None
+def lane_len(t):   # the bytes of the page's act element and the lane lines after it
+    v, e = lane(t)
+    return ( len(v) + len('<act read=""/>') if v is not None else 0 ) + ( len(e) + len('<edges><![CDATA[]]></edges>') if e is not None else 0 )
 def held(rs, p, l, e): return any(q == p and a <= l and b >= e for q, a, b in rs)
 def act_ok(t):   # A's detector
     a = act(t)
     return 4 <= len(a) <= 8 and all(not held(a[:i], *a[i]) for i in range(len(a)))
+def edges_groups(t):
+    e = lane(t)[1]
+    return [] if e is None else e.split(" | ")
+def edge_refs(g):
+    return [(m.group(1), int(m.group(2)), m.group(3)) for m in re.finditer(r'([^\s,;:]+):(\d+) ([^\s,;()]+)', g.split(": ", 1)[1] if ": " in g else "")]
+def line_of(p, l, root="src"):
+    try:
+        with open(os.path.join(ROOT, root, p), errors="replace") as f:
+            for i, x in enumerate(f, 1):
+                if i == l: return x
+    except OSError: return None
+    return None
+def edges_ok(t, root="src"):   # E's detector
+    gs = edges_groups(t); a = act(t)
+    if not gs: return False
+    for g in gs:
+        refs = edge_refs(g)
+        if not refs: return False
+        cb = g.split("; calls")[0] if "called by" in g else ""
+        cl = g.split("calls", 1)[1] if re.search(r'(^|; )calls ', g.split(": ", 1)[1]) else ""
+        if len(re.findall(r':\d+ ', cb)) > 2 or len(re.findall(r':\d+ ', cl.split("(+")[0])) > 2: return False
+        for p, l, n in refs:
+            x = line_of(p, l, root)
+            if x is None or n not in x or held(a, p, l, l): return False
+    return True
 attr = lambda t, k: int((re.search(r' ' + k + r'="(\d+)"', t.split(">", 1)[0]) or [0, "0"])[1])
 A1, A2 = run(["--for=" + Q1]), run(["--for=" + Q2])
 O1, O2 = run(["--for=" + Q1], OFF), run(["--for=" + Q2], OFF)
@@ -82,11 +117,28 @@ if 'body_form="edit"' in A2.split(">", 1)[0] and all(not held(act(A2)[:i], *act(
     ok(f"(A) Q2 (edit form): {len(act(A2))} act ranges, none duplicated by the edit-file body ranges")
 elif 'body_form="edit"' not in A2.split(">", 1)[0]: ok("(A) Q2: no edit form on this tree (composition arm not reached)")
 else: no(f"(A) Q2: an act range is held by an earlier one: {act(A2)}")
+# E
+if edges_ok(A1): ok(f"(E) Q1: <edges> with {len(edges_groups(A1))} group(s), every P:L a real line holding N, none inside an act range")
+else: no(f"(E) Q1: <edges> missing or malformed: {edges_groups(A1)}")
 # P
-b_on, b_off = len(A1.encode()), len(O1.encode())
-if b_on <= b_off + 200 and attr(A1, "withheld_bytes") + 200 >= attr(O1, "withheld_bytes"):
-    ok(f"(P) Q1: page 1 {b_off} -> {b_on} B, withheld {attr(O1, 'withheld_bytes')} -> {attr(A1, 'withheld_bytes')}: the added ranges' bytes came from the bottom")
-else: no(f"(P) Q1: page 1 {b_off} -> {b_on} B, withheld {attr(O1, 'withheld_bytes')} -> {attr(A1, 'withheld_bytes')}: the added ranges grew the page")
+b_on, b_off, grow = len(A1.encode()), len(O1.encode()), lane_len(A1) - lane_len(O1)
+if b_on - b_off <= grow + 200 and attr(A1, "withheld_bytes") + 200 >= attr(O1, "withheld_bytes"):
+    ok(f"(P) Q1: page 1 {b_off} -> {b_on} B (lane {grow:+} B), withheld {attr(O1, 'withheld_bytes')} -> {attr(A1, 'withheld_bytes')}: no row pulled on")
+else: no(f"(P) Q1: page 1 {b_off} -> {b_on} B (lane {grow:+} B), withheld {attr(O1, 'withheld_bytes')} -> {attr(A1, 'withheld_bytes')}: rows pulled on or the page grew past the lane")
+withheld_at = lambda n, env=None: attr(run(["--for=" + Q1, f"--page-bytes={n}"], env), "withheld_bytes")
+lo, hi = 1000, 12000   # OFF withholds more at lo than at hi (the default size)
+w_hi = withheld_at(hi, OFF)
+if withheld_at(lo, OFF) > w_hi:
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if withheld_at(mid, OFF) > w_hi: lo = mid
+        else: hi = mid
+    t_on, t_off = run(["--for=" + Q1, f"--page-bytes={hi}"]), run(["--for=" + Q1, f"--page-bytes={hi}"], OFF)
+    wn, wf = attr(t_on, "withheld_bytes"), attr(t_off, "withheld_bytes")
+    if wn > wf and len(t_on.encode()) <= len(t_off.encode()) + 200:
+        ok(f"(P) at --page-bytes={hi}, the smallest the OFF page 1 holds its rows at: withheld {wf} -> {wn}, page 1 {len(t_off.encode())} -> {len(t_on.encode())} B: counted, off the bottom")
+    else: no(f"(P) at --page-bytes={hi}: withheld {wf} -> {wn}, page 1 {len(t_off.encode())} -> {len(t_on.encode())} B: the lane's bytes were not taken off the bottom")
+else: no("(P) premise: the OFF answer withholds no more at 1000 B than at 12000 B")
 # P2
 paged = lambda t: ' pages="' in t.split(">", 1)[0]
 lo, hi = 1000, 200000   # OFF is paged at lo, whole at hi
@@ -96,30 +148,32 @@ if paged(run(["--for=" + Q1, f"--page-bytes={lo}"], OFF)) and not paged(run(["--
         if paged(run(["--for=" + Q1, f"--page-bytes={mid}"], OFF)): lo = mid
         else: hi = mid
     on = run(["--for=" + Q1, f"--page-bytes={hi}"])
-    if not paged(on) and act_ok(on) and paged(run(["--for=" + Q1, f"--page-bytes={hi - 1}"], OFF)):
-        ok(f"(P2) at --page-bytes={hi}, the smallest the OFF answer is whole at, the ON answer is whole too, with its wide act line")
-    else: no(f"(P2) at --page-bytes={hi} the OFF answer is whole and the ON answer {'is paged' if paged(on) else 'lacks the wide act line'}")
+    if not paged(on) and has_edges(on) and paged(run(["--for=" + Q1, f"--page-bytes={hi - 1}"], OFF)):
+        ok(f"(P2) at --page-bytes={hi}, the smallest the OFF answer is whole at, the ON answer is whole too, with its lines")
+    else: no(f"(P2) at --page-bytes={hi} the OFF answer is whole and the ON answer {'is paged' if paged(on) else 'lacks <edges>'}")
 else: no("(P2) premise: the OFF answer is not paged at 1000 B and whole at 200000 B")
 # K
-k1 = run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "1"})
-if act_ok(k1) and k1 == A1: ok("(K) =1: ACT-8, the default's answer")
-else: no("(K) =1 is not the default's ACT-8 answer")
+k1, k2 = run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "1"}), run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "2"})
+if act_ok(k1) and not has_edges(k1): ok("(K) =1: ACT-8 alone")
+else: no("(K) =1 is not ACT-8 alone")
+if len(act(k2)) <= 3 and edges_ok(k2): ok("(K) =2: EDGES alone")
+else: no("(K) =2 is not EDGES alone")
 # B
 big = run(["--for=" + Q1, "--token-budget=60000"])
-if act_ok(big): ok("(B) a budget the answer fits carries the wide act line")
+if has_edges(big) and act_ok(big): ok("(B) a budget the answer fits carries the wide act line and <edges>")
 else: no("(B) a fitting budget lost a line")
 m1 = mcp({"task": QM})
-if len(act(m1)) >= 4: ok("(B) MCP for carries the wide act line")
-else: no("(B) MCP for lacks the wide act line")
+if has_edges(m1) and len(act(m1)) >= 4: ok("(B) MCP for carries the wide act line and <edges>")
+else: no("(B) MCP for lacks a lane line")
 # O
 off_args = [["--for=" + Q1], ["--for=" + Q2], ["--for=" + Q1, "--page-bytes=12000:2"], ["--for=" + Q1, "--page-bytes=0"], ["--for=" + Q1, "--legend=full"],
             ["--for=" + Q1, "--legend=first"], ["--for=" + Q1, "--json"], ["--for=" + Q1, "--token-budget=60000"]]
 offs = {" ".join(a): (a, run(a, OFF)) for a in off_args}
 offs["mcp"] = (None, mcp({"task": QM}, OFF))
 edit = lambda t: 'body_form="edit"' in t.split(">", 1)[0]   # θ17's edit form appends the edit file's body ranges on main too
-bad = [k for k, (_, t) in offs.items() if not (t and (len(act(t)) <= 3 or edit(t)) and not any(c in prose(t) for c in LANE_CLAUSES))]
-if not bad: ok(f"(O) RIPWIRE_ACT_EDGES=0: <= 3 ranges (edit form aside), no wide clause on {len(offs)} answers")
-else: no(f"(O) an OFF answer is empty or carries the wide line or its clause: {bad}")
+bad = [k for k, (_, t) in offs.items() if not (t and (len(act(t)) <= 3 or edit(t)) and not has_edges(t) and not any(c in prose(t) for c in LANE_CLAUSES))]
+if not bad: ok(f"(O) RIPWIRE_ACT_EDGES=0: <= 3 ranges (edit form aside), no <edges>, no lane clause on {len(offs)} answers")
+else: no(f"(O) an OFF answer is empty or carries a lane line or clause: {bad}")
 if PARENT:
     for k, (a, t) in offs.items():
         p = mcp({"task": QM}, binary=PARENT) if a is None else run(a, binary=PARENT)
@@ -133,7 +187,7 @@ for k, t in (("Q1", A1), ("Q2", A2), ("Q1 full", FULL)):
 if run(["--for=" + Q1]) == A1: ok("(D) two ON runs byte-identical")
 else: no("(D) two ON runs differ")
 # M
-if not act_ok(O1): ok("(M) mutation: A's detector fails on the OFF page")
+if not act_ok(O1) and not edges_ok(O1): ok("(M) mutation: A's and E's detectors fail on the OFF page")
 else: no("(M) a detector passed the OFF page")
 print("actedgescheck: " + ("PASS" if fail == 0 else "FAIL"))
 sys.exit(fail)

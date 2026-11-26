@@ -1,4 +1,5 @@
-// foractedgesswitch.h — the SWITCH of lane ACT-EDGES (11-26; foractline.h is the wide act line): ACT-8 on a `--for` page 1. Its own small header, as forrouteswitch.h is for ROUTING,
+// foractedgesswitch.h — the SWITCH of lane ACT-EDGES (11-26; foractedges.h is the EDGES line, foractline.h the wide act line):
+// ACT-8 and the EDGES line on a `--for` page 1. Its own small header, as forrouteswitch.h is for ROUTING,
 // because foranswerfirst.h and forpages.h (which count the act line's bytes) decide with it and must not include the act line's
 // encoder (it includes them).
 //
@@ -65,13 +66,25 @@ inline constexpr std::size_t kActShippedRanges = 3;
     return kOpen.size() + ( at - 1 ) + kClose.size();
 }
 
-// THE FULL-LEGEND BYTES THIS LANE ADDS to a page-1 document `view`: the wide act clause's extra over
+// The top-level element name of the line foractedges.h writes.
+[[nodiscard]] inline bool isLaneLine( std::string_view name ) noexcept
+{
+    return name == "edges";
+}
+
+// The clause of the line foractedges.h writes (here so forpages.h can measure it without that header).
+inline constexpr std::string_view kEdgesClause =
+    "<!-- the edges line: per act-line symbol (its first 3 ranges) NAME: called by P:L N (non-test callers), calls P:L N (callees in "
+    "other non-test files); exact-resolved first, then by name; not ones an act range holds; (+K) K more of that kind -->";
+
+// THE FULL-LEGEND BYTES THIS LANE ADDS to a page-1 document `view`: the edges clause and the wide act clause's extra over
 // the shipped one. θ5's refill (forpages.h coreEnds) sizes page 1 by the page the FULL legend would deliver; without this the long
-// clause would grow that target and pull rows ONTO page 1 under the core legend. With it, the target is the page before this lane,
+// clauses would grow that target and pull rows ONTO page 1 under the core legend. With it, the target is the page before this lane,
 // so the lines' bytes come out of the bottom of page 1 (owner rule "answers to the top, then cut the bottom").
 [[nodiscard]] inline std::size_t fullLegendExtraBytes( std::string_view view ) noexcept
 {
     std::size_t extra = 0;
+    extra += view.find( kEdgesClause ) != std::string_view::npos ? kEdgesClause.size() : 0;
     extra += view.find( actline::kActClauseWide ) != std::string_view::npos ? actline::kActClauseWide.size() - actline::kActClause.size() : 0;
     return extra;
 }
