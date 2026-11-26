@@ -49,13 +49,15 @@ One **global** file, all repos:
 | Default path | `~/.ripwire/substitution.jsonl` |
 | Override the directory | `RIPWIRE_HOME=/some/dir` → `/some/dir/substitution.jsonl` |
 | Override the file | `RIPWIRE_METER_LOG=/some/file.jsonl` |
-| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control\|treatment\|auto` / `sweep=0` / `sweep_n=N` / `dedup_cooldown=N` / `dedup_cap=N`, one `key=value` per line |
+| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control\|treatment\|auto` / `sweep=0` / `sweep_n=N` / `dedup_cooldown=N` / `dedup_cap=N` / `first_edit=1` / `first_edit_ms=N`, one `key=value` per line |
 | Turn counting off | `RIPWIRE_METER=0` (the nudge keeps working) |
 | Declare a test harness | `RIPWIRE_METER_FIXTURE=1` — see [Fixture isolation](#fixture-isolation) |
 | Turn the sweep escalation off | `RIPWIRE_SWEEP=0` (counting and the one-time nudges keep working) |
 | Change the sweep threshold | `RIPWIRE_SWEEP_N=4` (default 3) |
 | Change the dedup re-arm cooldown | `RIPWIRE_DEDUP_COOLDOWN=N` (default 20 — eligible observations of the same class since the last delivery before it can fire again) |
 | Change the per-class delivery cap | `RIPWIRE_DEDUP_CAP=N` (default 3 — per tier; see [Dedup/cooldown policy](#dedup-cooldown-policy)) |
+| Turn the before-the-first-edit check ON | `RIPWIRE_FIRST_EDIT=1` or `first_edit=1` (default **off**, pending an owner call; off, the first edit's row reads `nudge=none` exactly as before) |
+| Change its hard deadline | `RIPWIRE_FIRST_EDIT_MS=N` (default 2000; past it the agent gets one `skipped: timeout` line) |
 
 The hook is registered once per user but runs in whatever repository the session is in, so every row
 carries `repo` (absolute path) and `tag` (its basename). One file plus a repo field is what makes
@@ -180,7 +182,7 @@ guess.
 | `class` | string | Fine classification — the table below. |
 | `family` | string | `ripwire` · `native` · `edit` · `git` · `other` · `meta`. |
 | `nudged` | 0/1 | A nudge was actually **delivered** (text emitted) on this call. Always 0 in the `control` arm. |
-| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. |
+| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. Since 2026-11-26, with the opt-in `first_edit=1`, a native-edit row can also read `first-edit` (the before-the-first-edit check was delivered; `nudged=1`), `first-edit-timeout` (its deadline passed; the agent got the one-line skip), `first-edit-nosym` (no indexed definition held the edit; silent) or `first-edit-control` (the control arm's counterfactual of the same moment). At most one such row per session, in both arms, so a readout can cut each session at it. |
 | `post_nudge` | 0/1 | A nudge had **already** fired (or, in the control arm, would-have-fired) earlier in this session, before this call. |
 | `post_sweep` | 0/1 | A **sweep escalation** had already fired (or would-have-fired) earlier in this session. |
 | `arm` | string | `treatment` (default) or `control`. See [The A/B toggle](#the-ab-toggle) for how a session lands on one or the other. |
