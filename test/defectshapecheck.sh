@@ -2245,6 +2245,10 @@ EOF
 # test/falseedgefix/c/copy.c). No name set. The asan CI job runs this gate on the instrumented binary.
 printf '#pragma once\nauto kCompass = { "north", "south", "east" };\n' >"$WORK/cdr/src/first.h"
 for f in modes wrap ok prose gloss bare agg; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
+# A list whose last item is "an", shorter than the "and " separator it is tested against and a prefix of it: libstdc++'s
+# string_view compare( pos, n, s ) subtracted the lengths as unsigned there (G1 abort on the Linux asan leg only; libc++
+# does not). Also a negative: "two" and two items, no row.
+printf '# tail\n\nThe two modes: fast, an\n' >"$WORK/cdr/docs/tail.md"
 fx_commit cdr
 sed -i.bak 's/"triangle" }/"triangle", "hexagon" }/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
 printf 'The two modes: fast, slow and safe.\n' >>"$WORK/cdr/docs/modes.md"
@@ -2267,14 +2271,14 @@ row="$( ds_row_p count-drift docs/modes.md )"
 printf '%s' "$row" | grep -q 'why="says 2, lists 3"' && ok "$L: the self row says the count and the list's length" \
     || no "$L: the self row should carry why=\"says 2, lists 3\": ${row:-<no row>}"
 cpairs=0
-for nf in ok prose gloss bare agg; do
+for nf in ok prose gloss bare agg tail; do
     if [ "$QD_OK" = 1 ] && [ -n "$( ds_row_p count-drift docs/modes.md )" ]; then
         row="$( ds_row_p count-drift "docs/$nf.md" )"
         if [ -z "$row" ]; then ok "$L: no count-drift row in docs/$nf.md (twin docs/modes.md fires)"; cpairs=$(( cpairs + 1 )); else no "$L: false positive in docs/$nf.md: $row"; fi
     fi
 done
-[ "$cpairs" = 5 ] && ok "$L: all $cpairs negative docs print 0 count-drift rows beside a firing twin (agg: a struct aggregate is no name set)" \
-    || no "$L: $cpairs of 5 negative docs passed beside a firing twin (want all; zero means nothing was judged)"
+[ "$cpairs" = 6 ] && ok "$L: all $cpairs negative docs print 0 count-drift rows beside a firing twin (agg: a struct aggregate is no name set)" \
+    || no "$L: $cpairs of 6 negative docs passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 sed -i.bak 's/the three shapes: circle, square and triangle/the four shapes: circle, square, triangle and hexagon/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
 printf '# Shapes\n\nThe four shapes: circle, square, triangle and hexagon.\n' >"$WORK/cdr/docs/shapes.md"

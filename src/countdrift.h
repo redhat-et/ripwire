@@ -203,7 +203,10 @@ inline std::vector<std::string> listItems( std::string_view body )
             ++i;
             skipSpace();
         }
-        if( body.compare( i, 4, "and " ) == 0 || body.compare( i, 3, "or " ) == 0 )
+        // starts_with, not compare( i, 4, … ): libstdc++'s string_view compare subtracts the lengths as unsigned when a short
+        // tail ("a", "an") matches the separator's prefix, which G1's -fsanitize=integer aborts on (libc++ does not, so macOS
+        // cannot see it, and CMakeLists.txt's libstdc++ ignorelist covers basic_string's twin of the idiom, not string_view's)
+        if( body.substr( i ).starts_with( "and " ) || body.substr( i ).starts_with( "or " ) )
         {
             i += body[i] == 'a' ? 4 : 3;
         }
