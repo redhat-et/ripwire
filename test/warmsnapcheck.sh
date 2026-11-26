@@ -45,7 +45,14 @@
 #       plainly and once with its mtime put back; (d) a file added inside a new subdirectory; (e) a .gitignore changed;
 #       (f) a file added under a directory git reported ignored as a whole.
 #
+#   K   the key keeps apart what the count guards cannot: (KA0) premise — a test file that adds bindings only, so
+#       --ignore-tests leaves files/symbols/references equal; (KA1) a graph recorded without --ignore-tests is not
+#       served with it, (KA5) nor the reverse, each answer the full build's; (KA2-KA4) each view serves its own and
+#       both snapshots coexist; (KB) with RIPWIRE_BIN_OTHER set to the other build type of this tree, neither build
+#       serves the other's snapshot (why=producer). Without it KB prints SKIP.
+#
 #   RIPWIRE_BIN=./build/ripwire bash test/warmsnapcheck.sh
+#   RIPWIRE_BIN=./build/ripwire RIPWIRE_BIN_OTHER=./build-rel/ripwire bash test/warmsnapcheck.sh   # with arm KB
 #
 # Exits non-zero on any failure. Prints ALL PASS on success.
 
@@ -520,6 +527,80 @@ if command -v git >/dev/null 2>&1; then
     moved "(f) a file added under a directory git reported ignored as a whole" "$LF" "$TMP/lf.bin" surfaced surfaced.c
 else
     no "L(e)/(f): git is not on PATH — the ignore arms cannot run"
+fi
+
+# ── K: the two inputs the snapshot's key once missed (lane C1-KEYFIX) ──────────────────────────────
+# (KA) --ignore-tests. main() drops the test files' symbols, references and bindings between the model and the graph
+#      (filter.h applyIgnoreTests), and the GRAPH section's own guard is three counts. A test file that contributes
+#      BINDINGS ONLY (`let x: Foo;`, `export default helper;`, `using namespace std;`, `extern int counter;`) leaves
+#      all three equal, so a graph resolved from one view was served to the other. The flag is now in the options key
+#      (warmsnap.h optionsKeyOf): each view is its own configuration, and both keep their snapshot.
+KA="$TMP/ka"; mkdir -p "$KA/src" "$KA/test"
+printf 'export class Foo { go() { return 1; } }\nexport class Bar { go() { return 2; } }\n' >"$KA/src/types.ts"
+printf 'import { Foo } from "./types";\nexport function run( f: Foo ) { return f.go(); }\n' >"$KA/src/use.ts"
+printf 'let x: Foo;\nexport default helper;\n' >"$KA/test/view.ts"
+printf 'using namespace std;\nextern int counter;\n' >"$KA/test/view.cpp"
+printf 'int kept( void ) { return 1; }\n' >"$KA/src/kept.cpp"
+# KA0, the premise: the flag removes bindings and NOTHING the count guard reads, else the arms below test nothing new
+kcounts(){ RIPWIRE_NO_WARMSNAP=1 RIPWIRE_STATS=1 "$BIN" "$KA" --no-cache "$@" 2>&1 >/dev/null | sed -nE 's/^\[mem\] family (files|symbols|references|bindings) size=([0-9]+).*/\1=\2/p' | tr '\n' ' '; }
+ka_all="$( kcounts )"; ka_view="$( kcounts --ignore-tests )"
+ka_b0="$( printf '%s' "$ka_all" | sed -n 's/.*bindings=\([0-9]*\).*/\1/p' )"; ka_b1="$( printf '%s' "$ka_view" | sed -n 's/.*bindings=\([0-9]*\).*/\1/p' )"
+if [ -z "$ka_b0" ] || [ -z "$ka_b1" ]; then no "KA0 VACUOUS: no family counts under RIPWIRE_STATS ('$ka_all' / '$ka_view')"
+elif [ "${ka_all% bindings=*}" != "${ka_view% bindings=*}" ] || [ "$ka_b0" -le "$ka_b1" ]; then no "KA0 the fixture is not bindings-only: all=[$ka_all] view=[$ka_view]"
+else ok "KA0 premise: --ignore-tests drops $(( ka_b0 - ka_b1 )) binding(s) and leaves files/symbols/references equal ($ka_view)"; fi
+# kprime CACHE [flag] — record the snapshot under one view, leave the racy window, and prove it serves (else vacuous)
+kprime(){ run "$1" "$KA" "$TMP/ka.p1" ${2:+"$2"}; sleep 2; run "$1" "$KA" "$TMP/ka.p2" ${2:+"$2"}; run "$1" "$KA" "$TMP/ka.p3" ${2:+"$2"}
+          has "$TMP/ka.p3" 'graph=loaded' || no "KA VACUOUS: the ${2:-flagless} view never served its own graph ($( cat "$TMP/ka.p3.stats" ))"; }
+for kv in "" --callers=go; do
+    kl="${kv:-the map}"
+    rm -f "$TMP/ka1.bin"; kprime "$TMP/ka1.bin"
+    run "$TMP/ka1.bin" "$KA" "$TMP/ka1.out" --ignore-tests ${kv:+"$kv"}; full "$KA" "$TMP/ka1.full" --ignore-tests ${kv:+"$kv"}
+    refused "KA1 ($kl) a graph recorded WITHOUT --ignore-tests is not served WITH it" "$TMP/ka1.out" 'graph=loaded'
+    same    "KA1 ($kl) ...and the answer == the full --ignore-tests build's" "$TMP/ka1.out" "$TMP/ka1.full"
+    run "$TMP/ka1.bin" "$KA" "$TMP/ka2.out" --ignore-tests ${kv:+"$kv"}
+    if has "$TMP/ka2.out" 'graph=loaded'; then ok "KA2 ($kl) the --ignore-tests view then serves its OWN graph"; else no "KA2 ($kl) the --ignore-tests view never serves: $( cat "$TMP/ka2.out.stats" )"; fi
+    same    "KA2 ($kl) ...and that answer == the full --ignore-tests build's" "$TMP/ka2.out" "$TMP/ka1.full"
+    if [ "$( snapcount "$TMP/ka1.bin" )" = 2 ]; then ok "KA3 ($kl) the two views keep one snapshot EACH (no refuse-and-rewrite when a caller alternates)"
+    else no "KA3 ($kl) the two views share $( snapcount "$TMP/ka1.bin" ) snapshot(s), not 2"; fi
+    run "$TMP/ka1.bin" "$KA" "$TMP/ka4.out" ${kv:+"$kv"}; full "$KA" "$TMP/ka4.full" ${kv:+"$kv"}
+    if has "$TMP/ka4.out" 'graph=loaded'; then ok "KA4 ($kl) ...and the flagless view still serves its own"; else no "KA4 ($kl) the flagless snapshot did not survive: $( cat "$TMP/ka4.out.stats" )"; fi
+    same    "KA4 ($kl) ...and that answer == the full flagless build's" "$TMP/ka4.out" "$TMP/ka4.full"
+    rm -f "$TMP/ka5.bin"; kprime "$TMP/ka5.bin" --ignore-tests
+    run "$TMP/ka5.bin" "$KA" "$TMP/ka5.out" ${kv:+"$kv"}
+    refused "KA5 ($kl) a graph recorded WITH --ignore-tests is not served without it" "$TMP/ka5.out" 'graph=loaded'
+    same    "KA5 ($kl) ...and the answer == the full flagless build's" "$TMP/ka5.out" "$TMP/ka4.full"
+done
+
+# (KB) the BUILD. The producer identity names the sources, so a dev and a Release build of one tree shared it and served
+#      each other's snapshot — whose floats (ranks, prior weights, CSR values) they computed under -ffast-math with
+#      different inlining and LTO. The header's build field now carries the build key (src/buildkey.h). The arm needs
+#      the other flavour of THIS tree: RIPWIRE_BIN_OTHER=<path>. Premise: the two `--version` lines differ in the build
+#      type and in nothing else, so a refusal can only be the build's (a binary of other sources is refused anyway).
+OTHER="${RIPWIRE_BIN_OTHER:-}"
+if [ -z "$OTHER" ]; then
+    printf '  SKIP  KB needs the other build flavour of this tree: RIPWIRE_BIN_OTHER=<path> (a Release binary beside a dev one)\n'
+elif [ ! -x "$OTHER" ]; then no "KB RIPWIRE_BIN_OTHER=$OTHER is not an executable"
+else
+    kver(){ "$1" --version 2>/dev/null | head -1; }
+    kb_a="$( kver "$BIN" )"; kb_b="$( kver "$OTHER" )"
+    kb_ta="$( printf '%s' "$kb_a" | sed -n 's/^[^(]*(\([^,]*\),.*/\1/p' )"; kb_tb="$( printf '%s' "$kb_b" | sed -n 's/^[^(]*(\([^,]*\),.*/\1/p' )"
+    if [ -z "$kb_ta" ] || [ "$kb_ta" = "$kb_tb" ] || [ "${kb_a/"($kb_ta,"/(T,}" != "${kb_b/"($kb_tb,"/(T,}" ]; then
+        no "KB premise: the two binaries must be one tree in two build types: '$kb_a' vs '$kb_b'"
+    else
+        ok "KB premise: one tree, two builds ($kb_ta / $kb_tb)"
+        for kdir in fwd rev; do
+            kr="$BIN"; ks="$OTHER"; [ "$kdir" = rev ] && { kr="$OTHER"; ks="$BIN"; }
+            kc="$TMP/kb-$kdir.bin"; rm -f "$kc"
+            for kp in 1 2 3; do RIPWIRE_SNAPSHOT_STATS=1 "$kr" "$W" --cache="$kc" >"$TMP/kb.p" 2>"$TMP/kb.p.err"; [ "$kp" = 1 ] && sleep 2; done
+            grep -q 'graph=loaded' "$TMP/kb.p.err" || no "KB ($kdir) VACUOUS: the recording build never served its own graph ($( grep snapshot-stats "$TMP/kb.p.err" ))"
+            RIPWIRE_SNAPSHOT_STATS=1 "$ks" "$W" --cache="$kc" >"$TMP/kb.out" 2>"$TMP/kb.out.err"
+            grep '^ripwire: snapshot-stats ' "$TMP/kb.out.err" >"$TMP/kb.out.stats" || : >"$TMP/kb.out.stats"
+            "$ks" "$W" --no-cache >"$TMP/kb.full" 2>/dev/null
+            refused "KB ($kdir: $( kver "$kr" | sed -n 's/^[^(]*(\([^,]*\),.*/\1/p' ) recorded) the other build does not load its graph" "$TMP/kb.out" 'graph=loaded'
+            if has "$TMP/kb.out" 'why=producer'; then ok "KB ($kdir) ...refused as another build's (why=producer)"; else no "KB ($kdir) not refused as another build's: $( cat "$TMP/kb.out.stats" )"; fi
+            same "KB ($kdir) ...and the answer == the serving build's own full build" "$TMP/kb.out" "$TMP/kb.full"
+        done
+    fi
 fi
 
 echo

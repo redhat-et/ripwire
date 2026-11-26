@@ -7,7 +7,8 @@
 #   (t1) TANGLED NEW: a depth-6 function with a steering flag rows: kind="tangle" origin="new-symbol" gating="1" (rule (b)), why=
 #        names the nesting, fix= an extraction with its lines, locals= the flag.
 #   (b1) CROSSING: crossing was 100 flat lines (score 0) and now has tangled's body: a preexisting row (no origin=) with gating="1".
-#   (b2) TEST CODE: harnessmain, new under test/ with tangled's body: a row with sev="minor" and no gating= (premise: the row exists).
+#   (b2) TEST CODE: harnessmain, new under test/ with tangled's body: no tangle row at all (TANGLE-RULE F5: test code is exempt from the
+#        tangle kind; premise: harnessmain over the bar in --metrics, which scores every path).
 #   (p1) PIN UNITS: the dirty-tree --quality-baseline refusal names a tangle row as "was=10.5 now=10.9", like the delta row.
 #   (b3) EXIT: the answer exits 2 and the root's gating= counts at least t1 + b1; the stderr line names a tangled new function.
 #   (n1) LONG SEQUENTIAL, (n2) LONG ORCHESTRATOR, (n3) FLAT DISPATCHER, (n4) SHORT NESTED HELPER: no tangle row. Each counts its
@@ -38,7 +39,11 @@
 #   (j)  --json carries the same tangle rows (count) and "improved".
 #   (d)  determinism: the working-tree run twice is byte-identical.
 # Red before QD-LESSONS-2 (main 8861b0d4d): t1 b1 b3 (every tangle row minor), k1 (no row: no rise), k2 k3 (the tag-best rows); b2
-# is red only on a guard-off build (no test-path exemption).
+# is red only on a guard-off build (no test-path exemption); since TANGLE-RULE it wants no row (F5), red before (a minor row).
+# TANGLE-RULE (R-D block cap): the over-bar shapes keep their state updates INSIDE the deep loop (one top-level block), so the
+# cap (worst top-level block + 2 per cross local) leaves them as they were; a deep pocket then a flat top-level tail is WEAK under
+# R-D and scores the pocket alone (tanglecapcheck.sh). The reshaping moved no input: loc/nest/deep/steer/tangle byte-equal on
+# the pre-rule binary.
 # Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3 s4; before the replay fixes (11-19): r1 (wip best) r4.
 # Usage: test/tanglecheck.sh [BIN]
 set -u
@@ -102,10 +107,10 @@ r="$( trow crossing )"
 if [ -n "$r" ] && [ "$( attr "$r" gating )" = 1 ] && [ -z "$( attr "$r" origin )" ] && [ -z "$( attr "$r" sev )" ] && [ "$( attr "$r" was )" = 0.0 ]; then
     ok "(b1) crossing: preexisting gating row: $r"
 else no "(b1) crossing: want a gating tangle row with was=\"0.0\" and no origin=, got '${r:-none}'"; fi
-r="$( trow harnessmain )"
-if [ -z "$r" ]; then no "(b2) PREMISE: harnessmain (test/harness.cpp) has no tangle row"
-elif [ "$( attr "$r" sev )" = minor ] && [ -z "$( attr "$r" gating )" ]; then ok "(b2) harnessmain (test code): minor, not gating: $r"
-else no "(b2) harnessmain (test code): want sev=\"minor\" and no gating=, got $r"; fi
+mh="$( mrow harnessmain )"; th="$( attr "$mh" tangle )"
+if [ -z "$mh" ] || [ -z "$th" ] || [ "${th%.*}" -lt 6 ]; then no "(b2) PREMISE: harnessmain (test/harness.cpp) should be over the tangle bar in --metrics, got '${mh:-none}'"
+elif [ -z "$( trow harnessmain )" ]; then ok "(b2) harnessmain (test code, tangle=$th in --metrics): no tangle row"
+else no "(b2) harnessmain (test code): want no tangle row (F5), got $( trow harnessmain )"; fi
 rg="$( grep -oE '<quality-delta [^>]*' "$Q" | grep -oE ' gating="[0-9]+"' | grep -oE '[0-9]+' )"
 if [ "$rc" = 2 ] && [ "${rg:-0}" -ge 2 ] && grep -qF 'a tangled new function (tangle 6.0 or more)' "$Q.err"; then
     ok "(b3) exit 2, root gating=$rg, stderr: $( grep -F 'gating:' "$Q.err" | head -c 300 )"
@@ -203,6 +208,34 @@ first="$( tr '\n' ' ' <"$TMP/pin.err" | grep -oE 'First: [^)]*\)' )"
 if [ -z "$pr" ] || ! printf '%s %s' "$pw" "$pn" | grep -qE '^[0-9]+\.[0-9] [0-9]+\.[0-9]$'; then no "(p1) PREMISE: want a gating tangle row on grow1 with decimal was= and now=, got '${pr:-none}'"
 elif [ "$prc" = 1 ] && [ "$first" = "First: tangle grow1 (was=$pw now=$pn)" ]; then ok "(p1) the pin refusal names the tangle row in display units: $first"
 else no "(p1) want rc 1 and 'First: tangle grow1 (was=$pw now=$pn)', got rc=$prc '$first'"; fi
+
+# (k4) MEASURED, NOT EDITED (QD-RATCHET-BASE: credit only for a real code change): a floor pinned with --quality-baseline whose one
+#      tangle line is rewritten to deep +6 — what a floor written by a binary that measured the same body differently holds. The
+#      body is unchanged in the working tree (only another file is added): no <improved> entry and no row for it. Premise: exactly
+#      one tangle line rewritten, the answer says baseline="sidecar", frozen over the bar in --metrics. RED before the body-identity
+#      guard (#721 tip a5d3ad3ae: <i kind="tangle" sym="frozen"> for a score the code never had).
+F="$TMP/frozen"; mkdir -p "$F/src"; "${G[@]}" -C "$F" init -q
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import tanglefixtures as t; open(sys.argv[2], "w").write("#include <vector>\n" + t.overbar("frozen", 40, mult=29))' "$ROOT/test/lib" "$F/src/frozen.cpp"
+"${G[@]}" -C "$F" add -A && "${G[@]}" -C "$F" commit -qm v1
+"$BIN" "$F" --quality-baseline --no-cache >/dev/null 2>&1
+FS="$F/.ripwire_quality_baseline"
+fl="$( grep -cE '^tangle [0-9a-f]+ [0-9a-f]+$' "$FS" 2>/dev/null )"; fl="${fl:-0}"
+if [ "$fl" = 1 ]; then
+    python3 -c 'import re, sys
+p = sys.argv[1]; t = open(p).read()
+t = re.sub(r"^(tangle [0-9a-f]+) ([0-9a-f]+)$", lambda m: "%s %x" % (m.group(1), int(m.group(2), 16) + (6 << 8)), t, flags=re.M)
+open(p, "w").write(t)' "$FS"
+fi
+printf 'int other( int x )\n{\n    return x + 1;\n}\n' >"$F/src/other.cpp"
+FQ="$( "$BIN" "$F" --quality-delta --no-cache 2>/dev/null )"
+fm="$( "$BIN" "$F" --metrics --page-bytes=0 --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="frozen"' | head -1 )"
+fsrc="$( printf '%s' "$FQ" | grep -oE '<quality-delta [^>]*' | grep -oE ' baseline="[^"]*"' )"
+ft="$( attr "$fm" tangle )"   # an absent tangle= is no premise: [ "" -lt 6 ] would be an error the test reads as false
+if [ "$fl" != 1 ] || [ "$fsrc" != ' baseline="sidecar"' ] || [ -z "$fm" ] || [ -z "$ft" ] || [ "${ft%.*}" -lt 6 ]; then
+    no "(k4) PREMISE: tangle lines in the floor $fl (want 1), answer$fsrc (want baseline=\"sidecar\"), frozen over the bar: '${fm:-none}'"
+elif printf '%s' "$FQ" | grep -qE '<(i|r) kind="tangle" sym="[^"]*frozen"'; then
+    no "(k4) frozen (body unchanged, floor measured deep +6): want no row and no credit, got $( printf '%s' "$FQ" | grep -oE '<(i|r) kind="tangle" sym="[^"]*frozen"[^>]*>' )"
+else ok "(k4) frozen (body unchanged, floor measured deep +6, tangle=$( attr "$fm" tangle )): no row, no <improved> entry"; fi
 
 [ "$fail" = 0 ] && echo "tanglecheck: PASS" || echo "tanglecheck: FAIL"
 exit "$fail"

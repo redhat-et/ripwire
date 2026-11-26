@@ -2,6 +2,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "gitstampstore.h"  // C1-STAMP: the stored answers to the small git questions a served --for asks
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <format>            // gitWalkCutSentence
 
@@ -745,6 +746,25 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     return out;
 }
 
+// C1-STAMP (gitstampstore.h): the line reader for the few questions a STAMP record may answer. `dir` is the directory the
+// question is about, `isRecordable` judges git's answer, and only a well-formed success is ever recorded. Unless
+// gitstampcache.h armed the table for this root — a one-shot --for — this is gitCommandLines( cmd ) and nothing else.
+template <class IsRecordable>
+inline GitCommandLines gitCommandLinesStamped( std::string_view dir, const std::string& cmd, IsRecordable&& isRecordable )
+{
+    if( std::optional<gitstampstore::Answer> hit = gitstampstore::lookup( dir, cmd ) )
+    {
+        GitCommandLines served;
+        served.isStarted = true;
+        served.status    = hit->status;
+        served.lines     = std::move( hit->lines );
+        return served;
+    }
+    GitCommandLines res = gitCommandLines( cmd );
+    gitstampstore::offer( dir, cmd, res.isStarted && !res.abandoned && !res.timedOut && isRecordable( res ), res.status, res.lines );
+    return res;
+}
+
 // ── the ONE git-log record frame (audit finding #4): every --name-only consumer reads through here ──
 //
 // The old frame was a LINE frame: `--format=tformat:__C__…` printed a marker LINE, and the five
@@ -1326,7 +1346,8 @@ inline std::string gitRepoToplevel( const std::string& absDir )
         // the ONE git command in this file without `-c core.quotepath=false`, deliberately: that flag governs
         // how git renders PATHSPEC OUTPUT, and `rev-parse --show-toplevel` prints the directory verbatim —
         // measured on a root spelled "répo dïr", which comes back raw and joins correctly.
-        const GitCommandLines probe = gitCommandLines( gitCmd( " -C " ) + shSingleQuote( absDir ) + " rev-parse --show-toplevel 2>/dev/null" );
+        const GitCommandLines probe = gitCommandLinesStamped( absDir, gitCmd( " -C " ) + shSingleQuote( absDir ) + " rev-parse --show-toplevel 2>/dev/null",
+                                                              []( const GitCommandLines& r ) { return r.status == 0 && !r.lines.empty() && r.lines.front().starts_with( '/' ); } );
         if( probe.isStarted && probe.status == 0 && !probe.lines.empty() )
         {
             char resolved[ PATH_MAX ];
@@ -2181,11 +2202,18 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitWindowBoundarySha (cheap window-drift probe)" );
     // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. `| tail -1` already reduces
     // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                          + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
-                          + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
-                          + " --format=%H 2>/dev/null | tail -1";
-    const GitCommandLines res = gitCommandLines( cmd );
+    const std::string since = defaultWindowSince( root, coSince );   // F1: the probe must resolve the window it guards, by the same rule
+    const std::string cmd   = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                            + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( since )
+                            + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
+                            + " --format=%H 2>/dev/null | tail -1";
+    // C1-STAMP: recorded only for a HEAD-anchored window ("@<epoch>": a pure function of the history the record keys), and
+    // only when it names a commit — `| tail -1` exits 0 whatever git did, so an empty answer is never trusted to be one.
+    const bool            isAnchored = since.starts_with( '@' );
+    const GitCommandLines res        = gitCommandLinesStamped( root, cmd, [ isAnchored ]( const GitCommandLines& r )
+    {
+        return isAnchored && !r.lines.empty() && isBareCommitSha( r.lines.back() );
+    } );
     if( !res.isStarted || res.lines.empty() )
     {
         return {};
@@ -2305,7 +2333,10 @@ inline std::int64_t gitHeadCommitEpoch( const std::string& root )
     // G3: the shared reader. `log -1 --format=%ct` prints exactly one line, so the first is the whole
     // answer; gitCommandLines strips the CR/LF tail, and the trailing-space strip is kept for the value.
     const std::string     cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv -1 --format=%ct HEAD 2>/dev/null";
-    const GitCommandLines res = gitCommandLines( cmd );
+    const GitCommandLines res = gitCommandLinesStamped( root, cmd, []( const GitCommandLines& r )
+    {
+        return r.status == 0 && r.lines.size() == 1 && std::strtoll( r.lines.front().c_str(), nullptr, 10 ) > 0;
+    } );
     if( !res.isStarted || res.lines.empty() )
     {
         return 0;
@@ -3538,12 +3569,13 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
 // paths pay literally zero added cost. A hit does NOT guarantee usable history (a fresh or depth-1 clone
 // has none) — the support>=3 threshold in applyCoChangeBoost is the real inertness gate; this is only the
 // no-subprocess fast path. Pure filesystem reads; never spawns anything.
-inline bool hasEnclosingGitRepo( const std::string& root )
+// The directory whose `.git` bounds `root`, by the filesystem alone (realpath'd, walking up), or "" when there is none.
+inline std::string enclosingGitWorkTree( const std::string& root )
 {
     char resolved[ PATH_MAX ];
     if( !os::realpath( root.c_str(), resolved ) )
     {
-        return false; // unresolvable root → treat as no repo (degrade)
+        return {}; // unresolvable root → treat as no repo (degrade)
     }
     std::string dir{ resolved };   // brace-init: dir( resolved ) parses as a function declarator (vexing-parse lookalike) and would pollute the symbol map
 
@@ -3553,7 +3585,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
         os::stat_t st;
         if( os::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
         {
-            return true;
+            return dir;
         }
         if( dir == "/" )
         {
@@ -3566,7 +3598,12 @@ inline bool hasEnclosingGitRepo( const std::string& root )
         }
         dir.resize( slash == 0 ? 1 : slash );   // parent dir; "/" is its own parent → loop exit above
     }
-    return false;
+    return {};
+}
+
+inline bool hasEnclosingGitRepo( const std::string& root )
+{
+    return !enclosingGitWorkTree( root ).empty();
 }
 
 // ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────

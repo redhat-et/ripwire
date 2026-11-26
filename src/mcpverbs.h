@@ -2922,7 +2922,6 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // it; synthesize the same three-state tag verbs_for.h's routeTag carries so all three read one string.
     const char* const   mcpRouteTag        = noRoute ? "no-route" : ( rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
     const bool          mcpHomonymDecline = isAdaptiveHomonymDecline( isNameExactRouteTag( mcpRouteTag ), mcpForCut, 5 );
-    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, subjectRoute.anchorNoSource );   // CONFIDENCE-ANCHOR
     // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
     // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses. Hoisted
     // above the header (L-W): the thin verdict reads it.
@@ -2935,6 +2934,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
                [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
+    // CONFIDENCE-ANCHOR; ROUTING: the file-gap ground reads this resolved surface in rank order, as the CLI twin does
+    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, subjectRoute.anchorNoSource,
+                                                          headFileGapPct( lensRank, lensSurfaceIds, ing.symbols ) );
     // FRAME-HIGH-CONFIDENCE, the CLI twin's rule (verbs_for.h): on a name-exact route high needs the anchor at the head of the rows
     std::string mcpRouteNote = routeNoteOf( rc, shape, noRoute );
     // (the head is the row printed as r=1: code above docs moves Markdown rows below the code rows, routeEmittedHead)

@@ -358,6 +358,7 @@ for _g in \
     buildtypestampcheck \
     builtinbindcheck \
     bundleidcheck \
+    c1stampcheck \
     cachefuzzcheck \
     cachehashcheck \
     cacheidentitycheck \
@@ -471,6 +472,7 @@ for _g in \
     deplangscheck \
     depsnographcheck \
     depsprecisecheck \
+    depsrereadcheck \
     det-gate \
     detailcheck \
     diagnoticecheck \
@@ -955,6 +957,7 @@ for _g in \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \
+    qmetricscheck \
     qoriginoraclecheck \
     qrevtokencheck \
     qrowlocatorcheck \
@@ -1037,6 +1040,7 @@ for _g in \
     routeedgecheck \
     routehookcheck \
     routeoncecheck \
+    routingcheck \
     routingreportcheck \
     rowlinescheck \
     rubyargcheck \
@@ -1120,6 +1124,7 @@ for _g in \
     sliceflowcheck \
     sliceflowsenscheck \
     slotjoincheck \
+    snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \
     statgatecheck \
@@ -1140,6 +1145,7 @@ for _g in \
     swiftshapecheck \
     tagspredicatecheck \
     tailsymtermscheck \
+    tanglecapcheck \
     tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \
@@ -1190,6 +1196,7 @@ for _g in \
     vendorpatchcheck \
     verbdefrowscheck \
     verbfixcheck \
+    verbfscheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \

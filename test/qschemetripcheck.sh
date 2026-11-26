@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, #548 arm 2 merged with main (which carries lane tangle-rule, kCacheVersion 54 -> 55): RE-PINNED with
+#   UPDATE_GOLDEN=1 on the merged sources (hash d97049fac7…f729754d4a). kParserVer stays 344 (above main's 342), kCacheVersion
+#   and kIngestCacheVersionMirror take main's 55, kQSnapCacheScheme unchanged. Neither side's hash (366b3fa9c3…9030201c,
+#   e4355917b4…b71344719) can be right once both moves are in.
 # 2026-11-25, #548 arm 2 (Clojure `#(f %)`: an anonymous function literal's symbol head is a call; on main 591ca4804):
 #   RE-PINNED with UPDATE_GOLDEN=1 (hash 366b3fa9c3…9030201c). Watched text: kParserVer 342 -> 344 (rich file tag 345, above
 #   342's rich 343): queries/clojure/tags.scm gains an anon_fn_lit call pattern and src/ingest_clojure.h clojureListHead accepts
