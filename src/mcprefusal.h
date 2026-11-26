@@ -1726,14 +1726,16 @@ inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
 
     const bool readOnly    = effect == McpVerbFields::Effect::ReadOnly;
     const bool destructive = effect == McpVerbFields::Effect::Destructive;
-    // idempotentHint (audit 2026-11-26 item 8): a read repeats with no effect by construction; quality_baseline rewrites
-    // the same sidecar for the same HEAD, replace_symbol_body splices the same body over the same span (a renamed body
-    // refuses the repeat, file unchanged); only the two inserts insert again on every call.
+    // idempotentHint (audit 2026-11-26 item 8), OWNER RULING 2026-11-26: only on the WRITE tools. The spec calls it
+    // meaningful only when readOnlyHint is false, and a read repeats with no effect by construction, so the 29 read-only
+    // copies would be 638 B of every session's tools/list saying nothing. quality_baseline rewrites the same sidecar for
+    // the same HEAD, replace_symbol_body splices the same body over the same span (a renamed body refuses the repeat,
+    // file unchanged); only the two inserts insert again on every call.
     const bool idempotent  = effect != McpVerbFields::Effect::Appends;
     return "\"title\":\"" + std::string( toolTitleFor( verb ) ) + "\",\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
          + ",\"annotations\":{\"readOnlyHint\":" + ( readOnly ? "true" : "false" )
          + ",\"destructiveHint\":" + ( destructive ? "true" : "false" )
-         + ",\"idempotentHint\":" + ( idempotent ? "true" : "false" )
+         + ( readOnly ? "" : idempotent ? ",\"idempotentHint\":true" : ",\"idempotentHint\":false" )
          + ",\"openWorldHint\":false}";
 }
 

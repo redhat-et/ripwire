@@ -41,10 +41,14 @@ for tool in tools:
     assert ann.get("readOnlyHint") is (name not in write_tools), f"{name}: wrong readOnlyHint"
     assert ann.get("destructiveHint") is (name in destructive_tools), f"{name}: wrong destructiveHint"
     assert ann.get("openWorldHint") is False, f"{name}: openWorldHint must be false"
-    # MCP 2025-06-18 / audit 2026-11-26 item 8: idempotentHint on every tool. A read is idempotent by construction;
-    # quality_baseline rewrites the same sidecar for the same HEAD and replace_symbol_body splices the same body over
-    # the same span, so a repeat has no further effect; the two inserts insert AGAIN on every call.
-    assert ann.get("idempotentHint") is (name not in append_tools), f"{name}: wrong idempotentHint {ann.get('idempotentHint')!r}"
+    # MCP 2025-06-18 / audit 2026-11-26 item 8, OWNER RULING 2026-11-26: idempotentHint rides only the WRITE tools, the
+    # spec calling it meaningful only when readOnlyHint is false (a read is idempotent by construction, and the 29 copies
+    # cost 638 B a session). quality_baseline rewrites the same sidecar for the same HEAD and replace_symbol_body splices
+    # the same body over the same span, so a repeat has no further effect; the two inserts insert AGAIN on every call.
+    if name in write_tools:
+        assert ann.get("idempotentHint") is (name not in append_tools), f"{name}: wrong idempotentHint {ann.get('idempotentHint')!r}"
+    else:
+        assert "idempotentHint" not in ann, f"{name}: a read-only tool carries idempotentHint (the spec: meaningful only when readOnlyHint is false)"
     # `title` (2025-06-18, the display name a host shows instead of the snake_case name)
     title = tool.get("title")
     assert isinstance(title, str) and 0 < len(title) <= 32 and title != name, f"{name}: title missing or not a display name: {title!r}"
