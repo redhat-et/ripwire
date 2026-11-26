@@ -17,8 +17,9 @@
 #   --grep     matches (PG1): shown= has_more= next_offset= and next="--grep=… --offset=K"; the pages chain to both lists whole
 #   --clones   clone groups (PG1): the same window and next="--clones --offset=K"; the pages chain to every group once
 #   --expand=<many definitions> (PG1): unserved_next= (selectors, or past 16 of them --offset=K) serves each definition once
-#   MCP memory_recall   body bytes (audit 2026-11-26): offset= shown_bytes= of_bytes= has_more= next_offset= on the header line;
-#              the pages' bodies rebuild the CLI --recall's whole answer
+#   MCP memory_recall   an explicit budget_tokens is served whole (the --page-bytes=0 rule), its visible notes saying _over_ceiling;
+#              with offset it pages by body bytes (audit 2026-11-26): offset= shown_bytes= of_bytes= has_more= next_offset= on the
+#              header line, and the pages' bodies rebuild the CLI --recall's whole answer
 #   MCP batch  whole <q> sub-answers: offset= shown= has_more= next_offset= on the root; every <q> exactly once
 #   the map   file groups (and, inside a large inventory, its ls rows): page= pages= withheld_bytes= has_more= and
 #              next="--page-bytes=24000:K" (page_next= when the root already has a next=); the pages rebuild --page-bytes=0's map
@@ -466,6 +467,10 @@ say(len(pages) > 1 and joined == cli_whole.split("\n", 1)[1], "(RC2) [P] the pag
 rc, cli_default, _ = run(BIN, DOCS, ["--recall=" + TASK])
 say(payload(m) == cli_default and " offset=" not in payload(m).split("\n", 1)[0],
     "(RC3) [C] the DEFAULT memory_recall fits and is unchanged: byte-identical to the CLI --recall (%d B)" % len(payload(m)))
+(m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000})])
+notes = "".join(c.get("text", "") for c in m.get("result", {}).get("content", [])[1:])
+say(payload(m) == cli_whole and "_over_ceiling:" in notes and "offset=0" in notes,
+    "(RC5) [P] an explicit budget_tokens with no offset is served WHOLE (== the CLI, %d B) and its visible notes say it is over the ceiling and name offset=0" % len(payload(m)))
 (m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000, "offset": 10 ** 8})])
 say("past the end" in payload(m), "(RC4) [P] an offset past the body refuses, naming where offsets come from")
 
