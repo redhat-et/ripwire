@@ -214,7 +214,19 @@ mde = al.holm_mde_pp( 0.30, 3 )
 check( 8.8 <= mde <= 9.1, f"prereg power arithmetic reproduces: d=0.30, K=3 -> Holm MDE {mde:.2f} pp (prereg 8.9)" )
 check( al.holm_mde_pp( 0.30, 5 ) < mde, "K=5 lowers the MDE" )
 
-# ── 7. held-out refusal in main() ────────────────────────────────────────────
+# ── 7. cost guard and credential label ───────────────────────────────────────
+print( "cost guard" )
+cheap = [ dict( cost_usd_prereg_prices=0.009, input_tokens=78_000, output_tokens=3_000 ) ] * 12
+dear = [ dict( cost_usd_prereg_prices=0.020, input_tokens=190_000, output_tokens=3_000 ) ] * 12
+check( al.cost_guard( cheap, "claude-haiku-5-5", 2.0 )[0] is False, "cost guard passes at the central estimate (prereg-priced tokens)" )
+stop, summ = al.cost_guard( dear, "claude-haiku-5-5", 2.0 )
+check( stop and summ["multiple"] > 2.0 and summ["mean_input_tokens"] == 190_000, "cost guard STOPS above 2x the central estimate and reports tokens" )
+check( al.cost_guard( cheap[:11] + [ dict( cost_usd_prereg_prices=None, input_tokens=None, output_tokens=None ) ], "claude-haiku-5-5", 2.0 )[0],
+       "an unpriceable episode stops the run (unmeasured is not cheap)" )
+check( al.ClaudeCLI( "claude-haiku-5-5", credential="claude.ai subscription (CLI)" ).credential == "claude.ai subscription (CLI)",
+       "the run names its credential label" )
+
+# ── 8. held-out refusal in main() ────────────────────────────────────────────
 print( "held-out guard" )
 work = TMP / "work"; ( work / "datasets" ).mkdir( parents=True )
 hrow = dict( instance_id="h__x-1", repo=held[0], base_commit="0" * 40, problem_statement="q" )

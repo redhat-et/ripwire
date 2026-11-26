@@ -57,6 +57,27 @@ PRIMARY_ARMS = ( "A0", "A1", "A2", "A3" )
 # write/read are NOT in that table: the standard 1.25x / 0.10x input multipliers are ASSUMED and named here.
 PRICES = { "claude-haiku-5-5": dict( input=0.10, output=0.50, cache_write=0.125, cache_read=0.010 ) }
 PREREG_CENTRAL_USD_PER_EPISODE = { "claude-haiku-5-5": 0.0096 }
+# the same central estimate in tokens (PREREG "Live-round cost estimate": ~80K input, 3.2K output per episode)
+PREREG_CENTRAL_TOKENS = dict( input=80_000, output=3_200 )
+
+def cost_guard( records, model, multiple ):
+    """-> (stop: bool, summary dict). The realised per-episode usage priced at the PREREG's own table (tokens x
+    prereg prices, so a subscription run is judged on tokens, not on a bill) against multiple x the central
+    $/episode. Unpriceable usage (a cell unreported) stops the run: an unmeasured cost is not a cheap one."""
+    priced = [ r["cost_usd_prereg_prices"] for r in records ]
+    n = len( records )
+    ins = [ r["input_tokens"] for r in records if r["input_tokens"] is not None ]
+    outs = [ r["output_tokens"] for r in records if r["output_tokens"] is not None ]
+    summary = dict( episodes=n, mean_input_tokens=( sum( ins ) / len( ins ) if ins else None ),
+                    mean_output_tokens=( sum( outs ) / len( outs ) if outs else None ),
+                    central_input_tokens=PREREG_CENTRAL_TOKENS["input"], central_output_tokens=PREREG_CENTRAL_TOKENS["output"] )
+    central = PREREG_CENTRAL_USD_PER_EPISODE.get( model )
+    if not n or central is None or any( c is None for c in priced ):
+        summary["reason"] = "usage not priceable for every check episode"
+        return True, summary
+    per = sum( priced ) / n
+    summary.update( prereg_priced_usd_per_episode=per, central_usd_per_episode=central, multiple=per / central )
+    return per > multiple * central, summary
 
 SYSTEM_PROMPT = """You localize the code that must be edited to resolve a GitHub issue. The repository is checked out read-only at the commit the issue was filed against.
 
@@ -224,8 +245,10 @@ class ClaudeCLI:
     PATH. The credential is whatever the CLI is logged in with; it is named, never read."""
     credential = "claude-cli-login (headless claude -p)"
     tool_protocol = "text-json"
-    def __init__( self, model, effort="low", claude_bin="claude", timeout_s=600 ):
+    def __init__( self, model, effort="low", claude_bin="claude", timeout_s=600, credential=None ):
         self.model, self.effort, self.claude_bin, self.timeout_s = model, effort, claude_bin, timeout_s
+        if credential:
+            self.credential = credential
         self.cwd = tempfile.mkdtemp( prefix="plive_agentcwd_" )
     def argv( self, system ):
         return [ self.claude_bin, "-p", "--model", self.model, "--effort", self.effort, "--tools", "",
@@ -424,6 +447,7 @@ def main():
     ap.add_argument( "--model", default="claude-haiku-5-5" )
     ap.add_argument( "--effort", default="low" )
     ap.add_argument( "--claude-bin", default="claude" )
+    ap.add_argument( "--credential", default="", help="the billed credential's NAME for the record (never a value)" )
     ap.add_argument( "--out", required=True, help="results dir: episodes.jsonl + transcripts/" )
     ap.add_argument( "--cost-check-after", type=int, default=12 )
     ap.add_argument( "--cost-stop-multiple", type=float, default=2.0 )
@@ -448,16 +472,19 @@ def main():
         if iid not in sidecar:
             raise SystemExit( f"refused: {len( [ i for i in ids if i not in sidecar ] )} instance(s) have no seal row (zero-silent-skip)" )
     arms = [ x.strip() for x in a.arms.split( "," ) if x.strip() ]
-    backend = ClaudeCLI( a.model, a.effort, a.claude_bin )
+    backend = ClaudeCLI( a.model, a.effort, a.claude_bin, credential=a.credential or None )
     out = pathlib.Path( a.out ); out.mkdir( parents=True, exist_ok=True )
     digest, n_manifests = seal_digest( a.payloads )
     ( out / "run_meta.json" ).write_text( json.dumps( dict( model=a.model, effort=a.effort, backend=a.backend, credential=backend.credential,
         tool_protocol=backend.tool_protocol, arms=arms, seeds=a.seeds, instances=len( ids ), payload_seal_sha256=digest,
         payload_manifests=n_manifests, system_prompt_sha256=hashlib.sha256( SYSTEM_PROMPT.encode() ).hexdigest(),
         max_turns=MAX_TURNS, input_token_guard=INPUT_TOKEN_GUARD, tool_result_cap=TOOL_RESULT_CAP ), indent=2 ) )
-    done = 0
+    ep_path = out / "episodes.jsonl"
+    prior = [ json.loads( l ) for l in open( ep_path ) ] if ep_path.exists() else []
+    finished = { ( r["instance_id"], r["arm"], r["seed"] ) for r in prior }
+    done = len( prior )
     # episode order: instance-major, arms rotated by instance hash so no arm is always first (provider drift)
-    with open( out / "episodes.jsonl", "a" ) as fh:
+    with open( ep_path, "a" ) as fh:
         for iid in ids:
             inst = by_id[iid]
             repo = rl.checkout( inst["repo"], inst["base_commit"], pathlib.Path( a.work_dir ) / "repos" )
@@ -469,21 +496,19 @@ def main():
             rot = hashlib.sha256( iid.encode() ).digest()[0] % len( arms )
             for seed in range( 1, a.seeds + 1 ):
                 for arm in arms[rot:] + arms[:rot]:
+                    if ( iid, arm, seed ) in finished:
+                        continue
                     rec = run_episode( backend, dict( instance_id=iid, query=query ), arm, seed, a.payloads, repo, out / "transcripts", gold )
                     fh.write( json.dumps( rec ) + "\n" ); fh.flush()
                     done += 1
                     print( f"# episode {done}: arm={arm} turns={rec['turns']} stop={rec['stop']} cost_cli={rec['cost_usd_cli']}", file=sys.stderr )
                     if done == a.cost_check_after:
-                        recs = [ json.loads( l ) for l in open( out / "episodes.jsonl" ) ]
-                        costs = [ r["cost_usd_cli"] if r["cost_usd_cli"] is not None else r["cost_usd_prereg_prices"] for r in recs ]
-                        known = [ c for c in costs if c is not None ]
-                        central = PREREG_CENTRAL_USD_PER_EPISODE.get( a.model )
-                        if not known or central is None:
-                            raise SystemExit( "COST GUARD: no realised cost is measurable after the check episodes; stopping" )
-                        per = sum( known ) / len( known )
-                        print( f"# cost guard: {per:.5f} USD/episode over {len( known )} vs central {central}", file=sys.stderr )
-                        if per > a.cost_stop_multiple * central:
-                            raise SystemExit( f"COST GUARD STOP: {per:.5f} USD/episode > {a.cost_stop_multiple}x central {central}" )
+                        stop, summary = cost_guard( [ json.loads( l ) for l in open( ep_path ) ], a.model, a.cost_stop_multiple )
+                        ( out / "cost_guard.json" ).write_text( json.dumps( summary, indent=2 ) )
+                        print( f"# cost guard after {done} episodes: {json.dumps( summary )}", file=sys.stderr )
+                        if stop:
+                            print( "COST GUARD STOP", file=sys.stderr )
+                            return 3
     return 0
 
 if __name__ == "__main__":
