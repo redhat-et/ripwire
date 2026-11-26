@@ -402,3 +402,8 @@ different and weaker claim. This file is written first so none of them can happe
   - **Unchanged.** Models: Haiku 5.5 only, effort low, claude.ai subscription through the CLI. K = 3 on
     A0–A3 and K = 1 on A2s and A1p, giving 302 × 4 × 3 + 302 × 2 = 4,228 episodes. The bars B1–B3 are as
     frozen, and Holm runs over the one model.
+- **2026-11-26, correction to the n = 302 entry, before the first held-out episode.** That entry gave 6.69 pp
+  as the "Holm MDE (one model)", but 6.69 pp uses the three-model worst-step z = 2.128. Holm over one model
+  is the unadjusted one-sided α = 0.05 (z = 1.645). The corrected one-model MDE at n = 302, K = 3, d = 0.208
+  and assumed seed share 0.5 is **(1.645 + 0.842) × √(0.208 × (0.5 + 0.5/3)) × 1.051 / √302 = 5.61 pp**.
+  At the three-model z it is 6.69 pp. Both are below 10.0 pp, so K stays 3.
