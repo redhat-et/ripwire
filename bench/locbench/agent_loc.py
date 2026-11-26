@@ -429,20 +429,279 @@ def holm_mde_pp( d, k, seed_share=0.5, n=243, deff_sqrt=1.051, z_alpha=2.128, z_
     var = d * ( seed_share + ( 1.0 - seed_share ) / k )
     return 100.0 * ( z_alpha + z_power ) * ( var ** 0.5 ) * deff_sqrt / ( n ** 0.5 )
 
+# ── held-out run discipline (PREREG_PLACEBO.md ADDENDUM, owner rulings 2026-11-26) ──
+SECONDARY_ARMS = ( "A2s", "A1p" )
+PILOT_MEAN_INPUT_TOKENS = 33_525          # the TRAIN pilot's realised mean input per episode
+ROLLING_WINDOW = 50
+EXIT_COST_GUARD, EXIT_ROLLING, EXIT_PROVIDER = 3, 4, 5
+
+def plan_episodes( ids, arms, seeds, secondary_arms=(), secondary_seeds=1 ):
+    """Instance-major list of (instance_id, arm, seed). Arms rotate by instance hash so no arm is always first."""
+    plan = []
+    for iid in ids:
+        rot = hashlib.sha256( iid.encode() ).digest()[0] % len( arms )
+        for seed in range( 1, seeds + 1 ):
+            plan += [ ( iid, arm, seed ) for arm in arms[rot:] + arms[:rot] ]
+        for seed in range( 1, secondary_seeds + 1 ):
+            plan += [ ( iid, arm, seed ) for arm in secondary_arms ]
+    return plan
+
+def repo_groups( plan, repo_of ):
+    """plan -> [(repo, [episodes...])], first-appearance order. One repo's episodes run in ONE worker, in order,
+    because a checkout holds one base_commit at a time."""
+    groups = {}
+    for ep in plan:
+        groups.setdefault( repo_of[ep[0]], [] ).append( ep )
+    return list( groups.items() )
+
+def rolling_stop( records, window=ROLLING_WINDOW, limit=2 * PILOT_MEAN_INPUT_TOKENS ):
+    """-> (stop, mean) over the last `window` records' input tokens; never fires before `window` records.
+    An unreported input total counts as over the limit (unmeasured is not cheap)."""
+    if len( records ) < window:
+        return False, None
+    last = [ r.get( "input_tokens" ) for r in records[-window:] ]
+    if any( v is None for v in last ):
+        return True, None
+    mean = sum( last ) / window
+    return mean > limit, mean
+
+def attempt_episode( run_once ):
+    """Owner ruling: an episode that ends on a provider error is re-run ONCE and the error is never counted.
+    -> (record, None) on success, or (None, last_error_record) when the re-run also failed (the caller stops)."""
+    last = None
+    for attempt in range( 2 ):
+        rec = run_once()
+        if rec["stop"] != "provider_error":
+            rec["reruns"] = attempt
+            return rec, None
+        last = rec
+    return None, last
+
+class Runner:
+    """Thread pool over repo groups. Appends each finished record to episodes.jsonl under a lock, applies the
+    12-episode cost guard and the rolling token stop, and stops every worker after the episode in flight."""
+    def __init__( self, out, model, cost_check_after=12, cost_stop_multiple=2.0, window=ROLLING_WINDOW,
+                  rolling_limit=2 * PILOT_MEAN_INPUT_TOKENS ):
+        import threading
+        self.out, self.model = pathlib.Path( out ), model
+        self.lock, self.stop_code = threading.Lock(), 0
+        self.cost_check_after, self.cost_stop_multiple = cost_check_after, cost_stop_multiple
+        self.window, self.rolling_limit = window, rolling_limit
+        self.ep_path = self.out / "episodes.jsonl"
+        self.records = [ json.loads( l ) for l in open( self.ep_path ) ] if self.ep_path.exists() else []
+        self.finished = { ( r["instance_id"], r["arm"], r["seed"] ) for r in self.records }
+        self.run_count = 0          # episodes finished in THIS invocation (the guards look at this run's records)
+    def note( self, rec, err ):
+        with self.lock:
+            if err is not None:
+                with open( self.out / "provider_errors.jsonl", "a" ) as fh:
+                    fh.write( json.dumps( { k: err[k] for k in ( "instance_id", "arm", "seed", "stop", "turns" ) } ) + "\n" )
+                self.stop_code = self.stop_code or EXIT_PROVIDER
+                return
+            with open( self.ep_path, "a" ) as fh:
+                fh.write( json.dumps( rec ) + "\n" )
+            self.records.append( rec ); self.run_count += 1
+            print( f"# episode {len( self.records )}: arm={rec['arm']} seed={rec['seed']} turns={rec['turns']} stop={rec['stop']}", file=sys.stderr )
+            mine = self.records[-self.run_count:]
+            if self.run_count == self.cost_check_after:
+                stop, summary = cost_guard( mine, self.model, self.cost_stop_multiple )
+                ( self.out / "cost_guard.json" ).write_text( json.dumps( summary, indent=2 ) )
+                print( f"# cost guard after {self.run_count} episodes: {json.dumps( summary )}", file=sys.stderr )
+                if stop:
+                    self.stop_code = self.stop_code or EXIT_COST_GUARD
+            stop, mean = rolling_stop( mine, self.window, self.rolling_limit )
+            if stop:
+                ( self.out / "rolling_stop.json" ).write_text( json.dumps( dict( window=self.window, mean_input=mean, limit=self.rolling_limit ) ) )
+                self.stop_code = self.stop_code or EXIT_ROLLING
+    def run( self, groups, run_group_episode, workers=1 ):
+        """run_group_episode(episode) -> (rec, err); called in order within a group."""
+        from concurrent.futures import ThreadPoolExecutor
+        def work( group ):
+            for ep in group[1]:
+                if self.stop_code:
+                    return
+                if ep in self.finished:
+                    continue
+                rec, err = run_group_episode( ep )
+                self.note( rec, err )
+        with ThreadPoolExecutor( max_workers=max( 1, workers ) ) as pool:
+            list( pool.map( work, groups ) )
+        return self.stop_code
+
+# ── grading (the ONLY place gold is read) and the B1-B3 analysis ─────────────
+BOOT_SEED = "ripwire-placebo-v1"
+
+def grade_sidecar( inst, repo, rich_cache, dataset="locbench" ):
+    """Gold + coverage universe for one instance, exactly as run_locbench scores it. Never printed."""
+    query = " ".join( inst.get( "problem_statement", "" ).split() )[:1200]
+    gold_files, gold_funcs, _ = rl.gold_for_instance( inst, dataset )
+    uni_xml, _, rc = rl.run_ctx( repo, [ f"--query={query}", "--format=candidates", "--top-k=1000000000", f"--cache={rich_cache}" ] )
+    uni = rl.parse_candidates( uni_xml, repo ) if rc == 0 and uni_xml else []
+    if not uni:
+        raise SystemExit( f"{inst['instance_id']}: grading universe failed (zero-silent-skip)" )
+    universe_files = sorted( { c["path"] for c in uni } )
+    primary = sorted( f for f in gold_files if rl.norm_path( f ) in universe_files )
+    return dict( covered=rl.covered( uni, gold_funcs, universe_files ), primary_files=primary, universe_files=universe_files )
+
+def seed_means( records, key="func_hit10" ):
+    per = {}
+    for r in records:
+        per.setdefault( r["instance_id"], {} ).setdefault( r["arm"], [] ).append( r[key] )
+    return { i: { arm: sum( v ) / len( v ) for arm, v in arms.items() } for i, arms in per.items() }
+
+def cluster_bootstrap( diffs, repo_of, n_boot=10_000, seed=BOOT_SEED ):
+    """Repository-clustered paired bootstrap (the compare_runs.py house pattern). diffs: {instance: value}.
+    -> dict(mean, lb95_one_sided, ci95=(lo, hi)). Deterministic: one fixed-seed RNG, sorted repos."""
+    import random
+    ids = sorted( diffs )
+    repos = sorted( { repo_of[i] for i in ids } )
+    by_repo = { r: [ i for i in ids if repo_of[i] == r ] for r in repos }
+    rng = random.Random( seed )
+    boots = []
+    for _ in range( n_boot ):
+        vals = [ diffs[i] for r in ( rng.choice( repos ) for _ in repos ) for i in by_repo[r] ]
+        boots.append( sum( vals ) / len( vals ) )
+    boots.sort()
+    q = lambda p: boots[ min( len( boots ) - 1, max( 0, int( p * len( boots ) ) ) ) ]
+    return dict( mean=sum( diffs.values() ) / len( diffs ), lb95_one_sided=q( 0.05 ), ci95=( q( 0.025 ), q( 0.975 ) ),
+                 n=len( ids ), clusters=len( repos ) )
+
+def contrast( means, a, b, repo_of, subset=None, n_boot=10_000 ):
+    ids = [ i for i in sorted( means ) if a in means[i] and b in means[i] and ( subset is None or i in subset ) ]
+    return cluster_bootstrap( { i: means[i][a] - means[i][b] for i in ids }, repo_of, n_boot )
+
+def majority_misses( records, a="A0", b="A1" ):
+    """B3 counts: instances a hits in a seed-majority and b misses in a seed-majority, and the reverse."""
+    per = {}
+    for r in records:
+        per.setdefault( r["instance_id"], {} ).setdefault( r["arm"], [] ).append( r["func_hit10"] )
+    maj = lambda v: sum( v ) * 2 > len( v )
+    ab = sum( 1 for v in per.values() if a in v and b in v and maj( v[a] ) and not maj( v[b] ) )
+    ba = sum( 1 for v in per.values() if a in v and b in v and maj( v[b] ) and not maj( v[a] ) )
+    return ab, ba
+
+def analyze( records, repo_of, single_ids, n_boot=10_000 ):
+    """PREREG bars B1-B3 for one model (Holm over one model = the unadjusted one-sided 95% bound)."""
+    means = seed_means( records )
+    multi_ids = set( means ) - set( single_ids )
+    c = { f"{a}-{b}": contrast( means, a, b, repo_of, n_boot=n_boot )
+          for a, b in ( ( "A1", "A2" ), ( "A1", "A3" ), ( "A1", "A0" ), ( "A2", "A0" ), ( "A1", "A2s" ), ( "A1", "A1p" ) )
+          if any( a in m and b in m for m in means.values() ) }
+    s1 = contrast( means, "A1", "A2", repo_of, set( single_ids ), n_boot )
+    s2 = contrast( means, "A1", "A2", repo_of, multi_ids, n_boot )
+    b1 = c["A1-A2"]
+    b1_pass = b1["mean"] >= 0.03 and b1["lb95_one_sided"] > 0 and s1["lb95_one_sided"] > -0.02 and s2["lb95_one_sided"] > -0.02
+    b2 = c["A1-A3"]["lb95_one_sided"]
+    b2_verdict = "superior" if b2 > 0 else ( "non-inferior" if b2 > -0.03 else "loses" )
+    ab, ba = majority_misses( records )
+    b3_pass = ab <= ba and c["A1-A0"]["lb95_one_sided"] > -0.02
+    return dict( contrasts=c, strata=dict( single=s1, multi=s2 ),
+                 B1=dict( pass_=b1_pass, mean=b1["mean"], lb=b1["lb95_one_sided"], single_lb=s1["lb95_one_sided"], multi_lb=s2["lb95_one_sided"] ),
+                 B2=dict( verdict=b2_verdict, lb=b2 ), B3=dict( pass_=b3_pass, a0_hits_a1_misses=ab, a1_hits_a0_misses=ba, lb=c["A1-A0"]["lb95_one_sided"] ) )
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 def load_rows( work_dir ):
     cache = pathlib.Path( work_dir ) / "datasets" / "rows_czlll__Loc-Bench_V1_test_560.json"
     return json.loads( cache.read_text() )
 
+def parse_ids( spec ):
+    text = pathlib.Path( spec[1:] ).read_text() if spec.startswith( "@" ) else spec
+    return [ x.strip() for x in text.replace( ",", "\n" ).splitlines() if x.strip() ]
+
+def cmd_run( a, rows ):
+    by_id = { r["instance_id"]: r for r in rows }
+    sidecar = { x["instance_id"]: x for x in json.loads( pathlib.Path( a.seal_json ).read_text() )["instances"] } if a.seal_json else None
+    ids = parse_ids( a.instances ) if a.instances else sorted( p.parent.name for p in pathlib.Path( a.payloads ).glob( "*/manifest.json" ) )
+    for iid in ids:
+        if iid not in by_id:
+            raise SystemExit( "refused: an instance id is not in the dataset (zero-silent-skip)" )
+        if rl.frozen_partition( by_id[iid]["repo"] ) != "train" and not a.allow_heldout:
+            raise SystemExit( "refused: a held-out instance in a run without --allow-heldout" )
+        if sidecar is not None and iid not in sidecar:
+            raise SystemExit( "refused: an instance has no seal row (zero-silent-skip)" )
+    arms = [ x.strip() for x in a.arms.split( "," ) if x.strip() ]
+    sec = [ x.strip() for x in a.secondary_arms.split( "," ) if x.strip() ]
+    backend = ClaudeCLI( a.model, a.effort, a.claude_bin, credential=a.credential or None )
+    out = pathlib.Path( a.out ); out.mkdir( parents=True, exist_ok=True )
+    digest, n_manifests = seal_digest( a.payloads )
+    ( out / "run_meta.json" ).write_text( json.dumps( dict( model=a.model, effort=a.effort, backend=a.backend, credential=backend.credential,
+        tool_protocol=backend.tool_protocol, arms=arms, seeds=a.seeds, secondary_arms=sec, secondary_seeds=a.secondary_seeds,
+        instances=len( ids ), scored_at_run_time=sidecar is not None, payload_seal_sha256=digest, payload_manifests=n_manifests,
+        system_prompt_sha256=hashlib.sha256( SYSTEM_PROMPT.encode() ).hexdigest(), max_turns=MAX_TURNS, input_token_guard=INPUT_TOKEN_GUARD,
+        tool_result_cap=TOOL_RESULT_CAP, workers=a.workers, call_retries=a.call_retries ), indent=2 ) )
+    repo_of = { iid: by_id[iid]["repo"] for iid in ids }
+    groups = repo_groups( plan_episodes( ids, arms, a.seeds, sec, a.secondary_seeds ), repo_of )
+    runner = Runner( out, a.model, a.cost_check_after, a.cost_stop_multiple )
+    current = {}
+    def one( ep ):
+        iid, arm, seed = ep
+        inst = by_id[iid]
+        if current.get( inst["repo"] ) != inst["base_commit"]:
+            if rl.checkout( inst["repo"], inst["base_commit"], pathlib.Path( a.work_dir ) / "repos" ) is None:
+                raise SystemExit( f"{iid}: CHECKOUT FAIL (zero-silent-skip)" )
+            current[inst["repo"]] = inst["base_commit"]
+        repo = pathlib.Path( a.work_dir ) / "repos" / inst["repo"].replace( "/", "__" )
+        query = " ".join( inst.get( "problem_statement", "" ).split() )[:1200]
+        gold = None
+        if sidecar is not None:
+            sc = sidecar[iid]; gold = dict( covered=sc["covered"], primary_files=sc["primary_files"], universe_files=sc["universe_files"] )
+        return attempt_episode( lambda: run_episode( backend, dict( instance_id=iid, query=query ), arm, seed, a.payloads, repo,
+                                                     out / "transcripts", gold, max_retries=a.call_retries ) )
+    code = runner.run( groups, one, a.workers )
+    if code:
+        print( { EXIT_COST_GUARD: "COST GUARD STOP", EXIT_ROLLING: "ROLLING TOKEN STOP", EXIT_PROVIDER: "PROVIDER ERROR STOP (resume later)" }[code], file=sys.stderr )
+    return code
+
+def cmd_grade( a, rows ):
+    """Score an unscored run: gold is read HERE only, written into scored.jsonl as hit flags (no gold content)."""
+    by_id = { r["instance_id"]: r for r in rows }
+    out = pathlib.Path( a.out )
+    recs = [ json.loads( l ) for l in open( out / "episodes.jsonl" ) ]
+    ids = sorted( { r["instance_id"] for r in recs } )
+    single, side = [], {}
+    for iid in sorted( ids, key=lambda i: ( by_id[i]["repo"], i ) ):
+        inst = by_id[iid]
+        repo = rl.checkout( inst["repo"], inst["base_commit"], pathlib.Path( a.work_dir ) / "repos" )
+        cache = pathlib.Path( str( pathlib.Path( a.work_dir ) / "indexes" / iid.replace( "/", "__" ) ) + ".rich.ripwirecache" )
+        side[iid] = grade_sidecar( inst, repo, cache )
+        if len( side[iid]["primary_files"] ) == 1:
+            single.append( iid )
+    with open( out / "scored.jsonl", "w" ) as fh:
+        for r in recs:
+            g = side[r["instance_id"]]
+            r = dict( r, **score_submission( r["submitted_list"], g["covered"], g["primary_files"], g["universe_files"] ) )
+            fh.write( json.dumps( r ) + "\n" )
+    unindexable = sorted( i for i in ids if not side[i]["primary_files"] )
+    ( out / "strata.json" ).write_text( json.dumps( dict( single_file=single, unindexable=unindexable, n=len( ids ) ) ) )
+    print( f"# graded {len( recs )} episodes over {len( ids )} instances; unindexable={len( unindexable )}", file=sys.stderr )
+    return 0
+
+def cmd_analyze( a, rows ):
+    out = pathlib.Path( a.out )
+    repo_of = { r["instance_id"]: r["repo"] for r in rows }
+    strata = json.loads( ( out / "strata.json" ).read_text() )
+    drop = set( strata["unindexable"] )      # the prereg's indexability filter, applied in the grader's output only
+    recs = [ r for r in ( json.loads( l ) for l in open( out / "scored.jsonl" ) ) if r["instance_id"] not in drop ]
+    res = analyze( recs, repo_of, [ i for i in strata["single_file"] if i not in drop ], a.n_boot )
+    ( out / "analysis.json" ).write_text( json.dumps( res, indent=2 ) )
+    print( json.dumps( dict( B1=res["B1"], B2=res["B2"], B3=res["B3"] ) ) )
+    return 0
+
 def main():
     ap = argparse.ArgumentParser( description="LocBench placebo round agent driver (PREREG_PLACEBO.md)" )
-    ap.add_argument( "--work-dir", required=True, help="run_locbench.py work dir (dataset cache + repos)" )
+    ap.add_argument( "--work-dir", required=True, help="run_locbench.py work dir (dataset cache + repos + indexes)" )
     ap.add_argument( "--select-pilot", action="store_true", help="print the 24 pilot TRAIN instance ids and exit" )
+    ap.add_argument( "--grade", action="store_true", help="score --out's episodes (the only step that reads gold)" )
+    ap.add_argument( "--analyze", action="store_true", help="B1-B3 over --out's scored.jsonl" )
     ap.add_argument( "--payloads", default="", help="the --emit-payloads seal dir" )
-    ap.add_argument( "--seal-json", default="", help="run_locbench --json-out of the seal run (scoring sidecar)" )
-    ap.add_argument( "--instances", default="", help="@FILE or comma list; default: every instance in --seal-json" )
+    ap.add_argument( "--seal-json", default="", help="scoring sidecar for a TRAIN run; omit for held-out (graded after)" )
+    ap.add_argument( "--instances", default="", help="@FILE or comma list; default: every instance in the seal" )
     ap.add_argument( "--arms", default=",".join( PRIMARY_ARMS ) )
     ap.add_argument( "--seeds", type=int, default=1 )
+    ap.add_argument( "--secondary-arms", default="" )
+    ap.add_argument( "--secondary-seeds", type=int, default=1 )
+    ap.add_argument( "--workers", type=int, default=1, help="parallel repo groups (one repo never runs in two workers)" )
+    ap.add_argument( "--call-retries", type=int, default=0, help="per-call retries inside an episode; the episode itself is re-run once" )
     ap.add_argument( "--backend", default="claude-cli", choices=[ "claude-cli" ] )
     ap.add_argument( "--model", default="claude-haiku-5-5" )
     ap.add_argument( "--effort", default="low" )
@@ -451,65 +710,18 @@ def main():
     ap.add_argument( "--out", required=True, help="results dir: episodes.jsonl + transcripts/" )
     ap.add_argument( "--cost-check-after", type=int, default=12 )
     ap.add_argument( "--cost-stop-multiple", type=float, default=2.0 )
+    ap.add_argument( "--n-boot", type=int, default=10_000 )
     ap.add_argument( "--allow-heldout", action="store_true", help="refused unless set; the pilot never sets it" )
     a = ap.parse_args()
-
     rows = load_rows( a.work_dir )
     if a.select_pilot:
         print( "\n".join( select_pilot( rows ) ) )
         return 0
-    by_id = { r["instance_id"]: r for r in rows }
-    seal = json.loads( pathlib.Path( a.seal_json ).read_text() )
-    sidecar = { x["instance_id"]: x for x in seal["instances"] }
-    if a.instances:
-        spec = pathlib.Path( a.instances[1:] ).read_text() if a.instances.startswith( "@" ) else a.instances
-        ids = [ x.strip() for x in spec.replace( ",", "\n" ).splitlines() if x.strip() ]
-    else:
-        ids = sorted( sidecar )
-    for iid in ids:
-        if rl.frozen_partition( by_id[iid]["repo"] ) != "train" and not a.allow_heldout:
-            raise SystemExit( "refused: a held-out instance in a run without --allow-heldout" )
-        if iid not in sidecar:
-            raise SystemExit( f"refused: {len( [ i for i in ids if i not in sidecar ] )} instance(s) have no seal row (zero-silent-skip)" )
-    arms = [ x.strip() for x in a.arms.split( "," ) if x.strip() ]
-    backend = ClaudeCLI( a.model, a.effort, a.claude_bin, credential=a.credential or None )
-    out = pathlib.Path( a.out ); out.mkdir( parents=True, exist_ok=True )
-    digest, n_manifests = seal_digest( a.payloads )
-    ( out / "run_meta.json" ).write_text( json.dumps( dict( model=a.model, effort=a.effort, backend=a.backend, credential=backend.credential,
-        tool_protocol=backend.tool_protocol, arms=arms, seeds=a.seeds, instances=len( ids ), payload_seal_sha256=digest,
-        payload_manifests=n_manifests, system_prompt_sha256=hashlib.sha256( SYSTEM_PROMPT.encode() ).hexdigest(),
-        max_turns=MAX_TURNS, input_token_guard=INPUT_TOKEN_GUARD, tool_result_cap=TOOL_RESULT_CAP ), indent=2 ) )
-    ep_path = out / "episodes.jsonl"
-    prior = [ json.loads( l ) for l in open( ep_path ) ] if ep_path.exists() else []
-    finished = { ( r["instance_id"], r["arm"], r["seed"] ) for r in prior }
-    done = len( prior )
-    # episode order: instance-major, arms rotated by instance hash so no arm is always first (provider drift)
-    with open( ep_path, "a" ) as fh:
-        for iid in ids:
-            inst = by_id[iid]
-            repo = rl.checkout( inst["repo"], inst["base_commit"], pathlib.Path( a.work_dir ) / "repos" )
-            if repo is None:
-                raise SystemExit( f"{iid}: CHECKOUT FAIL (zero-silent-skip)" )
-            query = " ".join( inst.get( "problem_statement", "" ).split() )[:1200]
-            sc = sidecar[iid]
-            gold = dict( covered=sc["covered"], primary_files=sc["primary_files"], universe_files=sc["universe_files"] )
-            rot = hashlib.sha256( iid.encode() ).digest()[0] % len( arms )
-            for seed in range( 1, a.seeds + 1 ):
-                for arm in arms[rot:] + arms[:rot]:
-                    if ( iid, arm, seed ) in finished:
-                        continue
-                    rec = run_episode( backend, dict( instance_id=iid, query=query ), arm, seed, a.payloads, repo, out / "transcripts", gold )
-                    fh.write( json.dumps( rec ) + "\n" ); fh.flush()
-                    done += 1
-                    print( f"# episode {done}: arm={arm} turns={rec['turns']} stop={rec['stop']} cost_cli={rec['cost_usd_cli']}", file=sys.stderr )
-                    if done == a.cost_check_after:
-                        stop, summary = cost_guard( [ json.loads( l ) for l in open( ep_path ) ], a.model, a.cost_stop_multiple )
-                        ( out / "cost_guard.json" ).write_text( json.dumps( summary, indent=2 ) )
-                        print( f"# cost guard after {done} episodes: {json.dumps( summary )}", file=sys.stderr )
-                        if stop:
-                            print( "COST GUARD STOP", file=sys.stderr )
-                            return 3
-    return 0
+    if a.grade:
+        return cmd_grade( a, rows )
+    if a.analyze:
+        return cmd_analyze( a, rows )
+    return cmd_run( a, rows )
 
 if __name__ == "__main__":
     sys.exit( main() )

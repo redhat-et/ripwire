@@ -233,10 +233,85 @@ hrow = dict( instance_id="h__x-1", repo=held[0], base_commit="0" * 40, problem_s
 ( work / "datasets" / "rows_czlll__Loc-Bench_V1_test_560.json" ).write_text( json.dumps( [ hrow ] ) )
 seal_json = TMP / "seal.json"; seal_json.write_text( json.dumps( dict( instances=[ dict( instance_id="h__x-1", covered=[], primary_files=[], universe_files=[] ) ] ) ) )
 r = subprocess.run( [ sys.executable, os.path.join( HERE, "agent_loc.py" ), "--work-dir", str( work ), "--payloads", str( PAYLOADS ),
-                      "--seal-json", str( seal_json ), "--out", str( TMP / "out" ), "--claude-bin", str( TMP / "no_such_claude" ) ],
+                      "--seal-json", str( seal_json ), "--instances", "h__x-1", "--out", str( TMP / "out" ), "--claude-bin", str( TMP / "no_such_claude" ) ],
                     capture_output=True, text=True )
 check( r.returncode != 0 and "held-out" in ( r.stdout + r.stderr ) and not ( TMP / "out" / "episodes.jsonl" ).exists(),
        "main() refuses a held-out instance without --allow-heldout, before any episode" )
+
+# ── 9. held-out run discipline (ADDENDUM owner rulings) ──────────────────────
+print( "held-out discipline" )
+plan = al.plan_episodes( [ "i1", "i2" ], list( al.PRIMARY_ARMS ), 3, al.SECONDARY_ARMS, 1 )
+check( len( plan ) == 2 * 4 * 3 + 2 * 2 and len( set( plan ) ) == len( plan ), "plan: 2 instances x A0-A3 x K=3 + A2s/A1p x 1 = 28 unique episodes" )
+check( al.plan_episodes( [ "i1", "i2" ], list( al.PRIMARY_ARMS ), 3, al.SECONDARY_ARMS, 1 ) == plan, "the plan is deterministic" )
+check( len( al.plan_episodes( [ "x" ] * 0 + [ f"i{k}" for k in range( 302 ) ], list( al.PRIMARY_ARMS ), 3, al.SECONDARY_ARMS, 1 ) ) == 4228,
+       "the held-out plan is 302 x 14 = 4,228 episodes" )
+groups = al.repo_groups( plan, { "i1": "org/r", "i2": "org/r" } )
+check( len( groups ) == 1 and len( groups[0][1] ) == 28, "two instances of one repo share ONE worker group (one checkout at a time)" )
+def recs_with( v, n ):
+    return [ dict( input_tokens=v ) for _ in range( n ) ]
+check( al.rolling_stop( recs_with( 999_999, 49 ) ) == ( False, None ), "rolling stop never fires before 50 episodes" )
+check( al.rolling_stop( recs_with( 60_000, 50 ) )[0] is False and al.rolling_stop( recs_with( 67_051, 50 ) )[0] is True,
+       "rolling stop fires when the last-50 mean input exceeds 2 x 33,525 = 67,050" )
+check( al.rolling_stop( recs_with( 1000, 49 ) + [ dict( input_tokens=None ) ] )[0], "an unreported input in the window stops the run" )
+seq = iter( [ dict( stop="provider_error" ), dict( stop="submit" ) ] )
+rec, err = al.attempt_episode( lambda: dict( next( seq ) ) )
+check( rec is not None and rec["reruns"] == 1 and err is None, "a provider error is re-run ONCE; the re-run's record is kept (reruns=1)" )
+rec, err = al.attempt_episode( lambda: dict( stop="provider_error", instance_id="i", arm="A1", seed=1, turns=1 ) )
+check( rec is None and err is not None, "an error that survives its re-run returns no record (never a counted miss)" )
+# Runner end to end with a stub episode function: errors never reach episodes.jsonl, the run stops with exit 5
+rout = TMP / "runner"; rout.mkdir()
+calls = []
+def fake_episode( ep ):
+    calls.append( ep )
+    if ep[0] == "bad":
+        return al.attempt_episode( lambda: dict( instance_id=ep[0], arm=ep[1], seed=ep[2], stop="provider_error", turns=1, input_tokens=10 ) )
+    return al.attempt_episode( lambda: dict( instance_id=ep[0], arm=ep[1], seed=ep[2], stop="submit", turns=1, input_tokens=10, cost_usd_prereg_prices=0.001,
+                                             output_tokens=5 ) )
+runner = al.Runner( rout, "claude-haiku-5-5", cost_check_after=12 )
+code = runner.run( al.repo_groups( al.plan_episodes( [ "ok1", "bad" ], [ "A0", "A1" ], 1 ), { "ok1": "r1", "bad": "r2" } ), fake_episode, workers=1 )
+written = [ json.loads( l ) for l in open( rout / "episodes.jsonl" ) ]
+check( code == al.EXIT_PROVIDER and all( r["instance_id"] == "ok1" for r in written ) and ( rout / "provider_errors.jsonl" ).exists(),
+       "Runner: a persistent provider error is logged apart, never written as an episode, and stops the run (exit 5)" )
+runner2 = al.Runner( rout, "claude-haiku-5-5" )
+check( { ( r["instance_id"], r["arm"], r["seed"] ) for r in written } <= runner2.finished, "Runner resume: finished episodes are skipped" )
+rout2 = TMP / "runner2"; rout2.mkdir()
+heavy = lambda ep: al.attempt_episode( lambda: dict( instance_id=ep[0], arm=ep[1], seed=ep[2], stop="submit", turns=1, input_tokens=70_000,
+                                                     output_tokens=5, cost_usd_prereg_prices=0.001 ) )
+code = al.Runner( rout2, "claude-haiku-5-5", cost_check_after=10_000 ).run(
+    al.repo_groups( al.plan_episodes( [ f"h{k}" for k in range( 20 ) ], list( al.PRIMARY_ARMS ), 1 ), { f"h{k}": f"r{k}" for k in range( 20 ) } ), heavy, workers=3 )
+check( code == al.EXIT_ROLLING and ( rout2 / "rolling_stop.json" ).exists(), "Runner: the rolling token stop halts a 3-worker run (exit 4)" )
+
+# B1-B3 analysis on synthetic scored records (no model, no gold)
+def synth( pattern, n_repo=30, per_repo=2, k=3 ):
+    out, repo_of = [], {}
+    for rj in range( n_repo ):
+        for ij in range( per_repo ):
+            iid = f"r{rj}-i{ij}"; repo_of[iid] = f"org/r{rj}"
+            for arm in al.PRIMARY_ARMS:
+                for seed in range( 1, k + 1 ):
+                    out.append( dict( instance_id=iid, arm=arm, seed=seed, func_hit10=pattern( arm, rj, ij, seed ) ) )
+    return out, repo_of
+recs, repo_of = synth( lambda arm, rj, ij, seed: int( arm == "A1" or ( arm != "A1" and ( rj + ij ) % 2 == 0 ) ) )
+singles = [ i for i in repo_of if i.endswith( "-i0" ) ]
+res = al.analyze( recs, repo_of, singles, n_boot=2000 )
+check( res["B1"]["pass_"] and abs( res["B1"]["mean"] - 0.5 ) < 1e-9 and res["B1"]["lb"] > 0, "B1 passes when A1 beats the placebo by 50 pp" )
+check( res["B2"]["verdict"] == "superior" and res["B3"]["pass_"], "B2 superior, B3 passes, on that synthetic run" )
+lo, hi = res["contrasts"]["A1-A2"]["ci95"]
+check( lo <= res["contrasts"]["A1-A2"]["mean"] <= hi and res["contrasts"]["A1-A2"]["clusters"] == 30, "CI brackets the mean; clusters = repos" )
+check( al.analyze( recs, repo_of, singles, n_boot=2000 ) == res, "the clustered bootstrap is deterministic (fixed seed ripwire-placebo-v1)" )
+same, _ = synth( lambda arm, rj, ij, seed: int( ( rj + ij + seed ) % 2 == 0 ) )
+r0 = al.analyze( same, repo_of, singles, n_boot=2000 )
+check( not r0["B1"]["pass_"] and r0["B2"]["verdict"] == "non-inferior", "identical arms: B1 fails (no ranking signal), B2 non-inferior" )
+strat, _ = synth( lambda arm, rj, ij, seed: int( ( arm == "A1" ) == ( ij == 0 ) ) if arm in ( "A1", "A2" ) else 0 )
+r2 = al.analyze( strat, repo_of, singles, n_boot=2000 )
+check( not r2["B1"]["pass_"] and r2["B1"]["multi_lb"] < -0.02, "B1's loss bar: a stratum where A1 loses fails B1 even if the other wins" )
+worse, _ = synth( lambda arm, rj, ij, seed: int( arm == "A0" ) )
+r3 = al.analyze( worse, repo_of, singles, n_boot=2000 )
+check( not r3["B3"]["pass_"] and r3["B3"]["a0_hits_a1_misses"] == 60 and r3["B2"]["verdict"] == "non-inferior",
+       "B3 fails when A1 loses completions to A0 (60 majority losses)" )
+check( os.access( os.path.join( HERE, "run_heldout.sh" ), os.X_OK ) and "--allow-heldout" in open( os.path.join( HERE, "run_heldout.sh" ) ).read()
+       and "--seed-json" not in open( os.path.join( HERE, "run_heldout.sh" ) ).read() and "--seal-json" not in open( os.path.join( HERE, "run_heldout.sh" ) ).read(),
+       "run_heldout.sh passes --allow-heldout and loads NO scoring sidecar while the model runs" )
 
 shutil.rmtree( TMP, ignore_errors=True )
 print( f"\n{'FAILED' if failures else 'OK'}: {len( failures )} failure(s)" )
