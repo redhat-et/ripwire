@@ -829,7 +829,7 @@ REALGIT="$( command -v git )"
 cat > "$SHIM/git" <<EOF
 #!/bin/sh
 for a in "\$@"; do
-    if [ "\$a" = --name-only ]; then
+    if [ "\$a" = --raw ]; then   # the record walk's listing flag (--name-only before lane/history-honesty)
         : > "$SHIM/log-served"
         i=0
         while [ \$i -lt 60 ]; do echo "shim-line \$i" || exit 0; sleep 0.1; i=\$((i+1)); done

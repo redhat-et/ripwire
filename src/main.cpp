@@ -4600,6 +4600,37 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// The history-signal verbs (--hotspots, --rank-by=churn[-decay], --cochange, --situ, --quality-delta) say once, after the answer,
+// what their git walks left out (bot commits) and followed (exact moves) — gitmine.h WHOSE HISTORY. Other verbs that read history
+// for a secondary lens (the map's churn=, --for's co-change boost) apply the same policy and do not repeat the sentence.
+static bool historySignalVerb( const rw::Config& cfg ) noexcept
+{
+    return cfg.hotspots || cfg.cochange || cfg.situ || cfg.qualityDelta
+        || cfg.rankBy == rw::RankBy::Churn || cfg.rankBy == rw::RankBy::ChurnDecay;
+}
+
+static void discloseHistoryPolicy( const rw::Config& cfg, char** argv )
+{
+    if( !historySignalVerb( cfg ) )
+    {
+        return;
+    }
+    const std::string sentence = rw::gitHistoryPolicySentence();
+    if( sentence.empty() )
+    {
+        return;
+    }
+    // the same stream rule as history_cut (discloseGitWalkCuts): a comment where the answer can hold one, never on a protocol stream
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--{}-->\n", sentence.c_str() );
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
+    }
+}
+
 // Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
 // abstention (which prints without running the verb) both ask.
 static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
@@ -4867,6 +4898,7 @@ int main( int argc, char** argv )
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    rw::gGitIncludeBots.store( cfg.includeBots, std::memory_order_relaxed );   // the history walks' bot policy (gitmine.h WHOSE HISTORY), before any walk starts
     // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
     // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
     // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
@@ -4894,6 +4926,7 @@ static int finishMainRun( const rw::Config& cfg, char** argv )
     using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
+    discloseHistoryPolicy( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed

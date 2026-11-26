@@ -49,7 +49,9 @@ nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the
 # expensive walk gitRawCommitStreamCached guards). Any OTHER git call this run makes (rev-parse, HEAD
 # resolution, etc.) never contains "name-only", so this is a clean, argv-based signal — not a timing guess.
-name_only_count(){ grep -c "name-only" "$1" 2>/dev/null || true; }
+# Since lane/history-honesty (2026-11-26) the walk lists changes with --raw (gitmine.h gitLogRecordsCmd); the walk is still
+# the only git call carrying that flag, so the signal is the same argv test with the walk's current spelling.
+name_only_count(){ grep -cE "[ ']log[ '].*--raw" "$1" 2>/dev/null || true; }
 # run TRACEFILE ARGS... — invokes ripwire against $REPO with our private TMPDIR + a fresh GIT_TRACE file.
 run(){ local tf="$1"; shift; : > "$tf"; env TMPDIR="$QTMP" GIT_TRACE="$tf" "$BIN" "$REPO" "$@"; }
 
@@ -133,7 +135,7 @@ diff -q "$TMP/new.out" "$TMP/new2.out" >/dev/null \
 KSHIM="$TMP/kshim"; mkdir -p "$KSHIM"
 cat >"$KSHIM/git" <<KSHIMEOF
 #!/bin/sh
-case "\$*" in *name-only*) exit 128;; esac
+case "\$*" in *" --raw "*) exit 128;; esac
 exec "$( command -v git )" "\$@"
 KSHIMEOF
 chmod +x "$KSHIM/git"
