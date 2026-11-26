@@ -1071,7 +1071,8 @@ inline void dropRichOnlyFacts( RawFacts& raw )
 
 inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::string_view cacheFile, bool captureValueUses,
                               CacheRecords& cache, const CacheLoadStats& cacheStats,
-                              IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch = nullptr )
+                              IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch = nullptr,
+                              CacheSaveFacts* savedOut = nullptr )   // set: what the blob write published (RECORD-FIRST's cache-stats facts)
 {
     RawFacts raw;
     const bool needsCacheHash = !cacheFile.empty();
@@ -1268,8 +1269,12 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown } );
+            const CacheSaveFacts saved = saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown } );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
+            if( savedOut != nullptr )
+            {
+                *savedOut = saved;
+            }
         }
         if( parseRich && !captureValueUses )
         {

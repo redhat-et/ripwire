@@ -39,7 +39,9 @@
 //   * the header carries this build's SOURCE IDENTITY (quality::producerIdentity: the SHA-256 of src/ and queries/), the
 //     format version, the ABI, and a digest of every option, path spelling and environment variable the crawl, the
 //     ingest or the resolver reads. Any difference refuses the whole file.
-//   * one checksum covers every byte of the file. A flipped bit anywhere refuses the whole file.
+//   * the header carries its own digest and one per section (kVersion 12). A flipped bit in the header refuses the whole
+//     file; one in a section refuses that section the first time a run reads it (sectionIntact), and the run builds that
+//     stage as it would without a snapshot. A section a run never reads is never paged in.
 //   * GRAPH and MODEL are keyed on the TREE KEY: a digest of every crawled file's root-relative path and content hash,
 //     in crawl order. One changed, added or removed file moves it and refuses both.
 //   * GRAPH also lists every file the resolver read outside the parse cache (infra/depwatch.h); each read is repeated
@@ -49,9 +51,17 @@
 //     a change inside the timestamp granule of the recording could otherwise hide behind an equal signature).
 //
 // A refusal changes cost, never content: the run walks, decodes and resolves as it always did, then records again.
+//
+// WHEN IT IS RECORDED (RECORD-FIRST, kVersion 12). Every run records what it built: a run that parsed too, so the second
+// call is served (until 10, only a run that re-extracted nothing stored, and the third call was the first served one).
+// The MODEL and the GRAPH are keyed on content (the tree key), so they are recorded inside the racy window; the TREE
+// section's signatures are not, and wait for a run outside it. The file is MAPPED read-only, never copied into memory,
+// and WRITTEN as a stream, section by section, as each is produced (SnapWriter): neither a section nor the file is built
+// whole in memory (the MODEL's reference and binding row streams still are, before their frame is written).
 #include "model.h"
 #include "infra/depwatch.h"
 #include "infra/os.h"
+#include "infra/ownedfile.h"   // SnapWriter::out: the streamed write's FILE*, owned from the line that opens it
 #include "infra/statclock.h"   // saturatingNanoseconds
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"
@@ -62,9 +72,12 @@
 #include "infra/sortutil.h"  // svLess: string_view order without libstdc++'s length subtraction
 #include "gitcmd.h"    // rw::gitCmd — the hardened git prefix, for the one config listing a recording run asks for
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>    // the streamed write: fwrite through the temp file's FILE*, then one seek for the header
 #include <cstring>
+#include <memory>    // Session::writer: the temp file a recording run streams its sections to
 #include <format>      // the snapshot's name: its options key and the blob identity it is derived from
 #include <optional>    // readRegularFileNoFollow's answer: the file's bytes, or "there is none"
 #include <span>
@@ -79,10 +92,14 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 11;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 12;                       // bump on ANY layout change in the header or the three sections
                                                                     // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
                                                                     // 8-10: reserved (M2 slot table 11-26: #752, #754, M2 C1 stages)
                                                                     // 11: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig
+                                                                    // 12: lane c1-record-first (RECORD-FIRST, #729) — a SECTIONED header: a
+                                                                    //     table of {offset, length, digest} per section and a digest of the
+                                                                    //     header itself, sections on 16 KiB boundaries, each verified the first
+                                                                    //     time a run reads it (no whole-file checksum)
                                                                     // 6: lane theta11c — CrawlSkips gains the extensionless rows + count (θ11's grep population)
                                                                     // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
                                                                     // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
@@ -91,7 +108,13 @@ inline constexpr std::uint32_t kVersion = 11;                        // bump on 
                                                                     //    blob's identity is in this file's NAME, so that binding is structural
                                                                     //    and there is no field left to be wrong about it (see the note above).
                                                                     // 1: the `<cache>.snap` sidecar's layout.
-inline constexpr std::size_t   kHeaderBytes = 112;
+// The header: magic u64, version u32, section count u32, producer u64, layout u64, options u64, write stamp u64, tree
+// key u64, then per section {offset u64, length u64, digest u64}, then the header's own digest u64 over every byte
+// before it. The first section starts at kSectionAlign, and every section on a multiple of it (the arm64 macOS page),
+// so a later stage can map a section's rows in place.
+inline constexpr std::size_t   kSectionCount = 3;                   // TREE, MODEL, GRAPH, in this order in the file
+inline constexpr std::size_t   kHeaderBytes  = 56 + kSectionCount * 24 + 8;
+inline constexpr std::uint64_t kSectionAlign = 16384;
 inline constexpr long long     kRacySlackNs = 2'000'000'000ll;      // FAT keeps 2 s timestamps; nothing coarser is in use
 
 // Why the best fast path was not taken: one word on the snapshot-stats line.
@@ -110,11 +133,153 @@ static_assert( std::size( kWhyNames ) == std::size_t( Why::Count ), "every Why n
 template <class T>
 concept RawRow = std::is_trivially_copyable_v<T> && ( std::has_unique_object_representations_v<T> || std::is_floating_point_v<T> );   // a float row is its computed bit pattern
 
+// ── a section's digest ──────────────────────────────────────────────────────────────────────────────────────────────
+// Over fixed windows of kDigestWindow bytes from the section's first byte (the last one shorter), folded in order, then
+// the length. A writer that streams a section computes it window by window as the bytes leave, and a reader recomputes
+// it over the same windows the first time it reads the section (sectionIntact), so a run that never reads a section
+// never pages it in.
+inline constexpr std::size_t   kDigestWindow = std::size_t( 1 ) << 20;
+inline constexpr std::uint64_t kDigestSeed   = 0x5345'4354'494f'4e31ull;   // "SECTION1"
+inline std::uint64_t foldDigestWindow( std::uint64_t d, std::string_view window ) noexcept
+{
+    return hashutil::multiplyModulo64( d ^ depwatch::digest64( window ), 0x9e37'79b9'7f4a'7c15ull );
+}
+inline std::uint64_t finishDigest( std::uint64_t d, std::uint64_t length ) noexcept
+{
+    return hashutil::multiplyModulo64( d ^ length, 0xc2b2'ae3d'27d4'eb4full );
+}
+inline std::uint64_t sectionDigest( std::string_view section ) noexcept
+{
+    std::uint64_t d = kDigestSeed;
+    for( std::size_t at = 0; at < section.size(); at += kDigestWindow )
+    {
+        d = foldDigestWindow( d, section.substr( at, kDigestWindow ) );
+    }
+    return finishDigest( d, section.size() );
+}
+
+// The snapshot's temp file while a run writes it: sections go out in file order as each is produced, so no section and
+// no whole file is built in memory (STREAMED WRITE). `feed` holds at most one digest window; a feed of a window or more
+// starting on a window boundary goes straight to the stream.
+// The temp file's descriptor as a stream, owned from the line that opens it; a declined fdopen closes the descriptor
+// (the temp holder still removes the name).
+inline OwnedFile streamOf( pathguard::ExclTempFile& temp ) noexcept
+{
+    const int fd = temp.ok() ? temp.releaseFd() : -1;
+    if( fd < 0 )
+    {
+        return OwnedFile();
+    }
+    OwnedFile stream( os::fdopen( fd, "wb" ) );
+    if( !stream )
+    {
+        os::close( fd );
+    }
+    return stream;
+}
+
+struct SnapWriter
+{
+    pathguard::ExclTempFile temp;
+    OwnedFile               out;                  // the temp file's stream: saveSnapshot closes it before the rename, else its destructor does
+    std::uint64_t           at = 0;               // bytes written so far: the file offset of the next byte
+    bool                    ok = true;
+    // the section being streamed
+    std::uint64_t sectionFrom = 0;
+    std::uint64_t digest      = kDigestSeed;
+    std::string   window;
+    // the finished sections' table rows, and how many are finished (sections are written in order)
+    std::uint64_t spans[ kSectionCount * 3 ] = {};
+    std::size_t   finished = 0;
+
+    explicit SnapWriter( pathguard::ExclTempFile t ) : temp( std::move( t ) ), out( streamOf( temp ) ) { ok = static_cast<bool>( out ); }
+    SnapWriter( const SnapWriter& )            = delete;
+    SnapWriter& operator=( const SnapWriter& ) = delete;
+
+    void raw( const char* p, std::size_t n ) noexcept
+    {
+        ok = ok && std::fwrite( p, 1, n, out.file ) == n;
+        at += n;
+    }
+    void zeros( std::uint64_t upTo ) noexcept
+    {
+        static constexpr char kZero[ 4096 ] = {};
+        while( ok && at < upTo )
+        {
+            raw( kZero, std::size_t( std::min<std::uint64_t>( upTo - at, sizeof( kZero ) ) ) );
+        }
+    }
+    void chunk( const char* p, std::size_t n ) noexcept
+    {
+        digest = foldDigestWindow( digest, std::string_view( p, n ) );
+        raw( p, n );
+    }
+    void feed( const char* p, std::size_t n )
+    {
+        while( n != 0 )
+        {
+            if( window.empty() && n >= kDigestWindow )
+            {
+                chunk( p, kDigestWindow );
+                p += kDigestWindow;
+                n -= kDigestWindow;
+                continue;
+            }
+            const std::size_t take = std::min( kDigestWindow - window.size(), n );
+            window.append( p, take );
+            p += take;
+            n -= take;
+            if( window.size() == kDigestWindow )
+            {
+                chunk( window.data(), window.size() );
+                window.clear();
+            }
+        }
+    }
+    void beginSection() noexcept
+    {
+        zeros( ( at + kSectionAlign - 1 ) / kSectionAlign * kSectionAlign );
+        sectionFrom = at;
+        digest      = kDigestSeed;
+    }
+    void endSection()
+    {
+        if( !window.empty() )
+        {
+            chunk( window.data(), window.size() );
+            window.clear();
+        }
+        std::uint64_t* const row = spans + 3 * finished++;
+        row[ 0 ] = sectionFrom;
+        row[ 1 ] = at - sectionFrom;
+        row[ 2 ] = finishDigest( digest, at - sectionFrom );
+    }
+    // a section whose bytes are already in hand (a carried one, or the small TREE section)
+    void section( std::string_view bytes )
+    {
+        beginSection();
+        feed( bytes.data(), bytes.size() );
+        endSection();
+    }
+};
+
 struct Out
 {
     std::string bytes;
+    SnapWriter* sink = nullptr;   // set: the bytes stream to the snapshot's temp file instead of `bytes`
     // `n` rows as their object bytes: the one append every writer below goes through
-    template <RawRow T> void put( const T* p, std::size_t n ) { bytes.append( reinterpret_cast<const char*>( p ), n * sizeof( T ) ); }
+    template <RawRow T> void put( const T* p, std::size_t n )
+    {
+        const char* const at = reinterpret_cast<const char*>( p );
+        if( sink != nullptr )
+        {
+            sink->feed( at, n * sizeof( T ) );
+        }
+        else
+        {
+            bytes.append( at, n * sizeof( T ) );
+        }
+    }
     template <RawRow T> void pod( const T& v ) { put( &v, 1 ); }
     void u64( std::uint64_t v ) { pod( v ); }
     void u32( std::uint32_t v ) { pod( v ); }
@@ -620,11 +785,21 @@ struct Session
     bool          ignoreTests = false;  // main() drops the test files' symbols, references and bindings before the graph is
                                         // built (--ignore-tests), so the GRAPH is of another model: it is part of the options key (viewKeyOf)
 
-    // the file as read
-    std::string      file;
+    // the file as read: mapped read-only (clean file-backed pages, never a heap copy), or read into `fileCopy` where the
+    // platform refused the map
+    const char*      fileMap   = nullptr;
+    std::size_t      fileBytes = 0;
+    std::string      fileCopy;
     bool             fileOk = false;
     std::uint64_t    fileTreeKey = 0;
     std::string_view treeSection, modelSection, graphSection;
+    std::uint64_t    sectionDigestOf[ kSectionCount ] = {};   // the digest the header records for each section
+    std::uint8_t     sectionState[ kSectionCount ]    = {};   // 0 not yet checked, 1 intact, 2 refused (sectionIntact)
+
+    // the snapshot this run writes, streamed section by section (null until a section is recorded or the run saves)
+    std::unique_ptr<SnapWriter> writer;
+    bool modelFresh = false;   // this run streamed a MODEL section it built
+    bool graphFresh = false;   // ...and a GRAPH section
 
     // what this run did
     Why  why           = Why::Off;   // the FIRST guard that refused anything this run
@@ -640,7 +815,7 @@ struct Session
     // what this run learned, to store
     TreeCapture   capture;
     bool          treeSectionFresh = false;   // capture was turned into treeOut
-    std::string   treeOut, modelOut, graphOut;
+    std::string   treeOut;                    // the TREE section is small and known at the crawl; MODEL and GRAPH stream (writer)
     std::uint64_t treeKey      = 0;
     bool          treeKeyValid = false;       // false: some file's content is not pinned by a hash, so nothing keyed on it is stored or served
 
@@ -652,7 +827,31 @@ struct Session
     }
     void refuse( Why w ) noexcept { keepFirst( why, w ); }
     void unsaved( Why w ) noexcept { keepFirst( unsavedWhy, w ); }
+    // Give the file back: the views into it are not read again. Before a rename over the same path (Windows refuses to
+    // replace a mapped file) and when the run is done with the snapshot.
+    void releaseFile() noexcept
+    {
+        treeSection = modelSection = graphSection = {};
+        if( fileMap != nullptr )
+        {
+            os::file_unmap( fileMap, fileBytes );
+        }
+        fileMap   = nullptr;
+        fileBytes = 0;
+        std::string().swap( fileCopy );
+    }
+    Session() = default;
+    ~Session() { releaseFile(); }
+    Session( const Session& )            = delete;
+    Session& operator=( const Session& ) = delete;
 };
+
+// RECORD-FIRST (#729 stage 2). Every run that parses also records: MODEL at the end of its ingest, GRAPH when its graph
+// is built, so the next call is served, after an edit too (#794 covered only the run that opened with no blob). Each
+// streams into the snapshot's temp file as it is produced (STREAMED WRITE), in file order; saveSnapshot then adds what
+// is left, writes the header and renames. RIPWIRE_NO_RECORD_FIRST=1 is the kill switch: back to the edit rule below
+// (a run that parsed records only when it opened with no blob).
+inline bool recordFirst() noexcept { return std::getenv( "RIPWIRE_NO_RECORD_FIRST" ) == nullptr; }
 
 // May a run that re-parsed store the MODEL and the GRAPH it built? The edit rule (ingest.cpp recordWarmModel,
 // warmsnap_graph.h buildGraphRecorded): a run that parsed is, as a rule, the run after an edit, and the next edit
@@ -660,9 +859,10 @@ struct Session
 // changed, and the next run is on the same tree — so it stores. Without this, MEASURE-M5 (11-26, llvm-project) paid
 // calls 2 and 3 as full 24-32 s builds before call 4 was served: call 1 is cold, and call 2 re-reads the few files the
 // cold run left without a hash (ingest_parsepool.h: a binary-sniffed file), which counts as a re-parse too.
+// RECORD-FIRST lifts the rule (recordFirst above): the run after an edit stores too, so the call after it is served.
 inline bool recordsWhatItBuilt( const Session& s, std::size_t reparsedFiles ) noexcept
 {
-    return reparsedFiles == 0 || s.coldBlob;
+    return reparsedFiles == 0 || s.coldBlob || recordFirst();
 }
 
 // The gate both record sites share (ingest.cpp recordWarmModel, warmsnap_graph.h buildGraphRecorded): may what this run
@@ -795,80 +995,160 @@ inline std::string snapshotPath( std::string_view rootKey, std::uint64_t options
                                           std::format( "{}{:016x}.bin", snapshotFamilyPrefix( rootKey, optionsKey ), blobIdentity ) );
 }
 
-// The checksum's subject: the header up to the checksum field, then everything after the header.
-inline std::uint64_t sectionSum( std::string_view payload ) noexcept
+// The header's own digest: every header byte before the digest field. The sections carry their own (sectionIntact).
+inline std::uint64_t headerDigest( std::string_view file ) noexcept
 {
-    const std::uint64_t head = depwatch::digest64( payload.substr( 0, kHeaderBytes - 8 ) );
-    const std::uint64_t body = depwatch::digest64( payload.substr( kHeaderBytes ) );
-    return head ^ hashutil::multiplyModulo64( body, 0x9e37'79b9'7f4a'7c15ull );
+    return depwatch::digest64( file.substr( 0, kHeaderBytes - 8 ) );   // a writer passes exactly those bytes
 }
 
-// Read and validate the snapshot at `s.path` (empty: this run's blob has no identity, so there is none to read).
-// After this, `fileOk` says whether ANY section may be considered.
-inline void openSnapshot( Session& s )
+enum class Sec : std::uint8_t { Tree, Model, Graph };
+inline std::string_view& sectionView( Session& s, Sec k ) noexcept
 {
-    PROFILE_SCOPE_DESCRIBE( "warmsnap: read + validate the snapshot file" );
-    s.why      = Why::Ok;
-    s.coldBlob = s.path.empty();   // ingest() names the snapshot after the blob's identity; no name: there is no blob to hit
-    std::optional<std::string> bytes = s.path.empty() ? std::nullopt : pathguard::readRegularFileNoFollow( s.path );
-    if( !bytes )
+    return k == Sec::Tree ? s.treeSection : k == Sec::Model ? s.modelSection : s.graphSection;
+}
+
+// Verify section `k` against the digest the header recorded, the first time this run reads it; a section that fails is
+// dropped (its view emptied), so the run builds what it would have served and the other sections stay usable.
+inline bool sectionIntact( Session& s, Sec k ) noexcept
+{
+    const std::size_t i = std::size_t( k );
+    if( s.sectionState[ i ] == 0 )
     {
-        s.refuse( Why::Absent );
-        return;
+        PROFILE_SCOPE_DESCRIBE( "warmsnap: verify a section's digest (first read)" );
+        const bool intact = sectionDigest( sectionView( s, k ) ) == s.sectionDigestOf[ i ];
+        s.sectionState[ i ] = intact ? 1 : 2;
+        if( !VALIDATE( intact, "warmsnap: a section's digest does not match" ) )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "a snapshot section whose digest fails is not read; the run builds that stage as without one" );
+            sectionView( s, k ) = {};
+        }
     }
-    s.file = std::move( *bytes );
-    In in{ std::string_view( s.file ) };
-    const std::uint64_t magic    = in.u64();
-    const std::uint32_t version  = in.u32();
-    in.u32();
-    const std::uint64_t producer = in.u64();
-    const std::uint64_t layout   = in.u64();
-    const std::uint64_t options  = in.u64();
-    in.u64();                                   // the write stamp: diagnostic
-    const std::uint64_t treeKey  = in.u64();
-    std::uint64_t span[ 6 ];
-    for( std::uint64_t& v : span ) { v = in.u64(); }
-    const std::uint64_t sum      = in.u64();
-    if( !VALIDATE( in.ok && magic == kMagic, "warmsnap: not a snapshot file" ) )
+    return s.sectionState[ i ] == 1;
+}
+
+// The fixed header as read: every field the reader checks, in file order (kHeaderBytes in all).
+struct SnapHeader
+{
+    std::uint64_t magic = 0, producer = 0, layout = 0, options = 0, treeKey = 0, digest = 0;
+    std::uint32_t version = 0, sections = 0;
+    std::uint64_t span[ kSectionCount * 3 ] = {};   // per section: offset, length, digest
+    bool          ok = false;                       // every field was there to read
+};
+
+inline SnapHeader readHeader( std::string_view file ) noexcept
+{
+    In         in{ file };
+    SnapHeader h;
+    h.magic    = in.u64();
+    h.version  = in.u32();
+    h.sections = in.u32();
+    h.producer = in.u64();
+    h.layout   = in.u64();
+    h.options  = in.u64();
+    in.u64();   // the write stamp: diagnostic
+    h.treeKey = in.u64();
+    for( std::uint64_t& v : h.span ) { v = in.u64(); }
+    h.digest = in.u64();
+    h.ok     = in.ok;
+    return h;
+}
+
+// Why the header refuses the whole file, or Why::Ok: magic, format version, header digest, producer, options, in that
+// order (the first failing check names the refusal).
+inline Why headerVerdict( const SnapHeader& h, std::string_view file, std::uint64_t optionsKey )
+{
+    if( !VALIDATE( h.ok && h.magic == kMagic, "warmsnap: not a snapshot file" ) )
     {
-        s.refuse( Why::Checksum );
-        return;
+        return Why::Checksum;
     }
-    if( !VALIDATE( version == kVersion, "warmsnap: another format version" ) )
+    if( !VALIDATE( h.version == kVersion, "warmsnap: another format version" ) )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "a snapshot of another format version is not read; the run walks, decodes and resolves as without one" );
-        s.refuse( Why::Version );
+        return Why::Version;
+    }
+    if( !VALIDATE( h.sections == kSectionCount && h.digest == headerDigest( file ), "warmsnap: the header's digest does not match" ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot whose header digest fails is not read; the run walks, decodes and resolves as without one" );
+        return Why::Checksum;
+    }
+    if( !VALIDATE( h.producer == quality::producerIdentityHash() && h.layout == layoutKey(), "warmsnap: written by another build" ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot another build wrote is not read; the run walks, decodes and resolves as without one" );
+        return Why::Producer;
+    }
+    if( !VALIDATE( h.options == optionsKey, "warmsnap: recorded under other options" ) )
+    {
+        return Why::Options;
+    }
+    return Why::Ok;
+}
+
+// The file's bytes for the run: mapped (os::file_map), or read into `fileCopy` where mapping is refused. Empty with a
+// refusal recorded when there is no file, it is shorter than a header, or it cannot be read.
+inline std::string_view mapSnapshotFile( Session& s )
+{
+    std::optional<pathguard::RegularFileStream> opened = s.path.empty() ? std::nullopt : pathguard::openRegularFileNoFollow( s.path );
+    if( !opened )
+    {
+        s.refuse( Why::Absent );
+        return {};
+    }
+    if( !VALIDATE( opened->size >= kHeaderBytes && opened->size <= std::uint64_t( SIZE_MAX ), "warmsnap: shorter than a header" ) )
+    {
+        s.refuse( Why::Checksum );
+        return {};
+    }
+    s.fileBytes = std::size_t( opened->size );
+    s.fileMap   = os::file_map( opened->fd.get(), s.fileBytes );
+    if( s.fileMap == nullptr && !pathguard::readAllFromFd( opened->fd.get(), s.fileCopy ) )
+    {
+        s.fileBytes = 0;
+        s.refuse( Why::Absent );
+        return {};
+    }
+    return s.fileMap != nullptr ? std::string_view( s.fileMap, s.fileBytes ) : std::string_view( s.fileCopy );
+}
+
+// Point each section's view at its bytes; false (the file refused) when the table names bytes past the end.
+inline bool placeSections( Session& s, const SnapHeader& h, std::string_view file )
+{
+    for( std::size_t i = 0; i < kSectionCount; ++i )
+    {
+        const std::uint64_t off = h.span[ 3 * i ], len = h.span[ 3 * i + 1 ];
+        if( !VALIDATE( off <= file.size() && len <= file.size() - off, "warmsnap: a section lies outside the file" ) )
+        {
+            return false;   // a truncated file: the header names bytes it no longer has
+        }
+        sectionView( s, Sec( i ) ) = file.substr( off, len );
+        s.sectionDigestOf[ i ]     = h.span[ 3 * i + 2 ];
+    }
+    return true;
+}
+
+// Map and validate the snapshot at `s.path` (empty: this run's blob has no identity, so there is none to read).
+// After this, `fileOk` says whether ANY section may be considered; each section is still checked on its first read.
+inline void openSnapshot( Session& s )
+{
+    PROFILE_SCOPE_DESCRIBE( "warmsnap: map + validate the snapshot header" );
+    s.why                       = Why::Ok;
+    s.coldBlob                  = s.path.empty();   // ingest() names the snapshot after the blob's identity; no name: there is no blob to hit
+    const std::string_view file = mapSnapshotFile( s );
+    if( file.empty() )
+    {
         return;
     }
-    if( !VALIDATE( sum == sectionSum( s.file ), "warmsnap: checksum mismatch" ) )
+    const SnapHeader h = readHeader( file );
+    if( const Why refused = headerVerdict( h, file, s.optionsKey ); refused != Why::Ok )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot whose checksum fails is not read; the run walks, decodes and resolves as without one" );
+        s.refuse( refused );
+        return;
+    }
+    if( !placeSections( s, h, file ) )
+    {
         s.refuse( Why::Checksum );
         return;
     }
-    if( !VALIDATE( producer == quality::producerIdentityHash() && layout == layoutKey(), "warmsnap: written by another build" ) )
-    {
-        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot another build wrote is not read; the run walks, decodes and resolves as without one" );
-        s.refuse( Why::Producer );
-        return;
-    }
-    if( !VALIDATE( options == s.optionsKey, "warmsnap: recorded under other options" ) )
-    {
-        s.refuse( Why::Options );
-        return;
-    }
-    std::string_view* const sections[] = { &s.treeSection, &s.modelSection, &s.graphSection };
-    for( std::size_t i = 0; i < 3; ++i )
-    {
-        const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
-        if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )
-        {
-            s.refuse( Why::Checksum );
-            return;
-        }
-        *sections[ i ] = std::string_view( s.file ).substr( off, len );
-    }
-    s.fileTreeKey = treeKey;
+    s.fileTreeKey = h.treeKey;
     s.fileOk      = true;
 }
 
@@ -935,6 +1215,11 @@ inline void recordTree( Session& s, const IngestResult& crawl, const std::string
 inline bool replayTree( Session& s, IngestResult& out )
 {
     PROFILE_SCOPE_DESCRIBE( "warmsnap: replay the crawl (stat every watched path, no directory read, no git child)" );
+    if( s.fileOk && !sectionIntact( s, Sec::Tree ) )
+    {
+        s.refuse( Why::Checksum );
+        return false;
+    }
     if( !s.fileOk || s.treeSection.empty() )
     {
         s.refuse( s.fileOk ? Why::NoSection : s.why );
@@ -1045,58 +1330,107 @@ inline void setTreeKey( Session& s, const std::vector<std::string>& files, std::
 }
 
 // ── write ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-// Sections this run did not produce are carried over from the file it read, when that file is still the same tree's.
+// Sections this run did not produce are carried over from the file it read, when that file is still the same tree's and
+// the carried section passes its digest (a section carried unverified would be re-stamped with a fresh digest).
 //
-// `s.path` is named after the blob AS IT STANDS AT THE END OF THE RUN (ingest() re-reads its identity once the parse
+// `s.path` is named after the blob AS IT STANDS AT THE END OF THE INGEST (ingest() re-reads its identity once the parse
 // pool has published it), so a run that re-parsed stores under the blob it left behind, not the one it opened — and
 // the next run finds it. Empty means this run's blob has no identity to name a snapshot with: nothing is written.
+//
+
+inline bool sameTreeAsFile( const Session& s ) noexcept
+{
+    return s.fileOk && s.treeKeyValid && s.fileTreeKey == s.treeKey;
+}
+
+// The section `k` this run carries from the file it read: a replayed TREE, a MODEL or GRAPH of the same tree. Empty: none.
+inline std::string_view carriedSection( Session& s, Sec k ) noexcept
+{
+    if( k == Sec::Tree )
+    {
+        return s.treeSectionFresh ? std::string_view( s.treeOut ) : s.treeReplayed ? s.treeSection : std::string_view{};
+    }
+    return s.treeKeyValid && sameTreeAsFile( s ) && sectionIntact( s, k ) ? sectionView( s, k ) : std::string_view{};
+}
+
+// Open the temp file (once per run) and write every section before `k` in file order: carried, recorded, or empty.
+inline bool writeSectionsBefore( Session& s, Sec k )
+{
+    if( !s.on() || s.path.empty() )
+    {
+        return false;
+    }
+    if( s.writer == nullptr )
+    {
+        s.writer = std::make_unique<SnapWriter>( pathguard::createExclTempFile( s.path + ".tmp.", "", 0666 ) );
+        s.writer->zeros( kHeaderBytes );   // the header is written last, over these bytes
+    }
+    SnapWriter& w = *s.writer;
+    while( w.ok && w.finished < std::size_t( k ) )
+    {
+        w.section( carriedSection( s, Sec( w.finished ) ) );
+    }
+    return w.ok && w.finished == std::size_t( k );
+}
+
+// Stream section `k` through `write( Out& )`: the one way a MODEL or GRAPH section this run built reaches the file.
+template <class Fn>
+inline void recordSection( Session& s, Sec k, Fn&& write )
+{
+    if( !writeSectionsBefore( s, k ) )
+    {
+        return;
+    }
+    Out o;
+    o.sink = s.writer.get();
+    s.writer->beginSection();
+    write( o );
+    s.writer->endSection();
+    ( k == Sec::Model ? s.modelFresh : s.graphFresh ) = true;
+}
+
 inline void saveSnapshot( Session& s )
 {
-    PROFILE_SCOPE_DESCRIBE( "warmsnap: write the snapshot file (tmp, then rename)" );
+    PROFILE_SCOPE_DESCRIBE( "warmsnap: finish the snapshot file (last sections, header, rename)" );
     if( !s.on() || s.path.empty() )
     {
         return;
     }
-    const bool sameTree = s.fileOk && s.treeKeyValid && s.fileTreeKey == s.treeKey;
-    const std::string_view tree  = s.treeSectionFresh ? std::string_view( s.treeOut ) : s.treeReplayed ? s.treeSection : std::string_view{};
-    const std::string_view model = !s.treeKeyValid ? std::string_view{} : !s.modelOut.empty() ? std::string_view( s.modelOut ) : sameTree ? s.modelSection : std::string_view{};
-    const std::string_view graph = !s.treeKeyValid ? std::string_view{} : !s.graphOut.empty() ? std::string_view( s.graphOut ) : sameTree ? s.graphSection : std::string_view{};
-    const bool unchanged = s.fileOk && sameTree && !s.treeSectionFresh && s.modelOut.empty() && s.graphOut.empty() && tree.size() == s.treeSection.size();
-    if( unchanged || ( tree.empty() && model.empty() && graph.empty() ) )
+    // no section was recorded: write only when the TREE is news, and there is something to write at all
+    if( s.writer == nullptr && ( ( sameTreeAsFile( s ) && !s.treeSectionFresh && carriedSection( s, Sec::Tree ).size() == s.treeSection.size() ) ||
+                                 ( carriedSection( s, Sec::Tree ).empty() && carriedSection( s, Sec::Model ).empty() && carriedSection( s, Sec::Graph ).empty() ) ) )
     {
         return;   // the file on disk already says everything this run knows, or this run knows nothing worth a file
     }
-    Out o;
-    o.bytes.reserve( kHeaderBytes + tree.size() + model.size() + graph.size() + 24 );
-    o.u64( kMagic );
-    o.u32( kVersion );
-    o.u32( 0 );
-    o.u64( quality::producerIdentityHash() );
-    o.u64( layoutKey() );
-    o.u64( s.optionsKey );
-    o.u64( std::uint64_t( s.startNs ) );
-    o.u64( s.treeKeyValid ? s.treeKey : 0 );
-    std::uint64_t at = kHeaderBytes;
-    for( const std::string_view sec : { tree, model, graph } )
-    {
-        o.u64( at );
-        o.u64( sec.size() );
-        at += ( sec.size() + 7 ) & ~std::uint64_t( 7 );
-    }
-    o.u64( 0 );   // the checksum, patched below
-    ENSURES( o.bytes.size() == kHeaderBytes, "the header is the fixed 112 bytes the reader skips" );
-    for( const std::string_view sec : { tree, model, graph } )
-    {
-        o.bytes.append( sec );
-        o.bytes.append( ( 8 - sec.size() % 8 ) % 8, '\0' );
-    }
-    const std::uint64_t sum = sectionSum( o.bytes );
-    std::memcpy( o.bytes.data() + kHeaderBytes - 8, &sum, 8 );
-    if( !quality::atomicWriteFile( s.path, o.bytes ) )
+    if( !writeSectionsBefore( s, Sec( kSectionCount ) ) )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's snapshot is not there, and it walks and resolves as before" );
+        s.writer.reset();   // the holder removes the temp
         return;
     }
+    SnapWriter& w = *s.writer;
+    Out h;
+    h.u64( kMagic );
+    h.u32( kVersion );
+    h.u32( std::uint32_t( kSectionCount ) );
+    h.u64( quality::producerIdentityHash() );
+    h.u64( layoutKey() );
+    h.u64( s.optionsKey );
+    h.u64( std::uint64_t( s.startNs ) );
+    h.u64( s.treeKeyValid ? s.treeKey : 0 );
+    h.put( w.spans, std::size( w.spans ) );
+    h.u64( headerDigest( h.bytes ) );   // over every byte so far: the digest field is the last
+    ENSURES( h.bytes.size() == kHeaderBytes, "the header is the fixed size the reader parses" );
+    const bool written = w.ok && std::fseek( w.out.file, 0, SEEK_SET ) == 0 && std::fwrite( h.bytes.data(), 1, h.bytes.size(), w.out.file ) == h.bytes.size();
+    const bool closed  = w.out.close();
+    s.releaseFile();   // every carried byte is in the temp now; Windows will not rename over a mapped file
+    if( !written || !closed || !w.temp.commit( s.path ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's snapshot is not there, and it walks and resolves as before" );
+        s.writer.reset();
+        return;
+    }
+    s.writer.reset();
     s.saved = true;
     // One snapshot per (root, configuration): the blob identity in the name moves on every rewrite of the blob, so an
     // edit loop would otherwise leave one orphan per edit, each the size of a stored model and graph. The file just

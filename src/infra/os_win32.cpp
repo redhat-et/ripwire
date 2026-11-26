@@ -2902,6 +2902,23 @@ static std::uint64_t commitCharge( bool peak )
 }
 void* vm_map( std::size_t bytes ) noexcept { return ::VirtualAlloc( nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE ); }
 void  vm_unmap( void* p, std::size_t ) noexcept { ::VirtualFree( p, 0, MEM_RELEASE ); }
+const char* file_map( int fd, std::size_t bytes ) noexcept
+{
+    const HANDLE file = reinterpret_cast<HANDLE>( ::_get_osfhandle( fd ) );
+    if( bytes == 0 || file == INVALID_HANDLE_VALUE )
+    {
+        return nullptr;
+    }
+    const HANDLE mapping = ::CreateFileMappingW( file, nullptr, PAGE_READONLY, 0, 0, nullptr );
+    if( mapping == nullptr )
+    {
+        return nullptr;
+    }
+    const void* view = ::MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, bytes );
+    ::CloseHandle( mapping );   // the view holds the mapping open until UnmapViewOfFile
+    return static_cast<const char*>( view );
+}
+void file_unmap( const char* p, std::size_t ) noexcept { ::UnmapViewOfFile( p ); }
 std::uint64_t mem_footprint() { return commitCharge( false ); }
 std::uint64_t mem_footprint_peak() { return commitCharge( true ); }
 

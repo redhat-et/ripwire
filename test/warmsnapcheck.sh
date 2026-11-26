@@ -408,12 +408,17 @@ else no "S8 the run after the edit did not re-parse: $( grep -o 'cache-stats.*' 
 S8NEWID="$( blobid "$TMP/s8.bin" )"
 if [ "$S8NEWID" != "$S8OLDID" ]; then ok "S8 the republished blob has a NEW identity ($S8OLDID -> $S8NEWID), so the old tree's snapshot is not reachable from it"
 else no "S8 the blob kept its identity through a re-parse ($S8NEWID): a stale snapshot would still be named by it"; fi
-if ! hasSnap "$TMP/s8.bin"; then ok "S8 ...and that run stored nothing: the edit is INSIDE the racy window, so no signature it could record can be vouched for"
-else no "S8 a run one moment after an edit recorded a snapshot ($( snapfile "$TMP/s8.bin" )) — the racy rule must refuse to store a tree it cannot stand behind"; fi
+# RECORD-FIRST (warm snapshot v12): the run that parsed records the MODEL and the GRAPH, keyed on content (the tree key),
+# under the NEW blob's name; the crawl's signatures are inside the racy window, so the TREE is held back (asserted on the
+# next run, which walks and is still served the graph).
+if hasSnap "$TMP/s8.bin" && has "$TMP/s8.out" 'saved=1'; then ok "S8 ...and that run recorded under the NEW blob's name (record-first): $( sed 's/^ripwire: snapshot-stats //' "$TMP/s8.out.stats" )"
+else no "S8 the run that parsed recorded nothing reachable from its blob: $( cat "$TMP/s8.out.stats" ) snapshot=$( snapfile "$TMP/s8.bin" )"; fi
 alone "$TMP/s8.bin" || no "S8 a file was written beside the blob by the run after the edit"
 sleep 2
 run "$TMP/s8.bin" "$S8" "$TMP/s8.next"
-if hasSnap "$TMP/s8.bin" && has "$TMP/s8.next" 'saved=1'; then ok "S8 the first run outside that window records, under the NEW blob's name"
+if has "$TMP/s8.next" 'tree=walked' && has "$TMP/s8.next" 'graph=loaded'; then ok "S8 the next run walks (the racy run held its TREE back) and is served the graph the racy run recorded"
+else no "S8 the run after the racy one: expected tree=walked graph=loaded, got $( cat "$TMP/s8.next.stats" )"; fi
+if hasSnap "$TMP/s8.bin" && has "$TMP/s8.next" 'saved=1'; then ok "S8 the first run outside that window records the crawl, under the NEW blob's name"
 else no "S8 nothing was recorded on the clean run after the edit: $( cat "$TMP/s8.next.stats" ) snapshot=$( snapfile "$TMP/s8.bin" )"; fi
 if [ ! -e "$S8OLDSNAP" ]; then ok "S8 ...and the snapshot named after the OLD blob is gone with it: one per configuration, the rest evicted"
 else no "S8 the snapshot named after the old blob survived ($S8OLDSNAP) — an edit loop would leave one orphan per edit"; fi
@@ -424,25 +429,23 @@ same "S8 the answer after the whole edit-and-re-record cycle == built" "$TMP/s8.
 if has "$TMP/s8.third" 'saved=0'; then ok "S8 ...and a steady warm run writes no snapshot: the file already says it all"
 else no "S8 a steady warm run rewrote the snapshot: $( cat "$TMP/s8.third.stats" )"; fi
 
-# S8b: a run that re-parses and is OUTSIDE the racy window DOES record — the crawl, under the name of the blob it has
-#      just republished, so the next run replays the walk instead of making it. What it deliberately does NOT record
-#      is the model and the graph (warmsnap.h recordsWhatItBuilt, which buildGraphRecorded and recordWarmModel both
-#      ask: a run that parsed is followed, as a rule, by another edit, and must not pay to write what the next run
-#      refuses — unless it opened with no blob at all, arm N). The in-blob placement could not store even the crawl on
-#      such a run: recording meant a second whole-blob rewrite in a run that had already paid for one.
+# S8b: a run that re-parses and is OUTSIDE the racy window records EVERYTHING — the crawl, the model and the graph,
+#      under the name of the blob it has just republished — so the very next run is served (RECORD-FIRST, warm snapshot
+#      v12; until then warmsnap_graph.h buildGraphRecorded and ingest.cpp recordWarmModel stopped on
+#      ing.reparsedFiles != 0, and the second run after an edit rebuilt the model and the graph).
 printf 'package lib\n\nfunc Yello() int {\n\treturn 4\n}\n' >"$S8/gomod/lib/lib.go"
 sleep 2
 run "$TMP/s8.bin" "$S8" "$TMP/s8b.out"
 if grep -q 'cache-stats reparsed=[1-9]' "$TMP/s8b.out.err" && has "$TMP/s8b.out" 'saved=1' && hasSnap "$TMP/s8.bin"; then
     ok "S8b a re-parsing run records: $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/s8b.out.err" ), saved=1, and the snapshot is named after the blob it left behind"
 else no "S8b the re-parsing run stored nothing reachable from its own blob: $( cat "$TMP/s8b.out.stats" ), $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/s8b.out.err" ), snapshot=$( snapfile "$TMP/s8.bin" )"; fi
-if has "$TMP/s8b.out" 'unsaved_why=reparsed'; then ok "S8b ...and its stats line says why the model and the graph it built were held back (unsaved_why=reparsed)"
-else no "S8b the re-parsing run did not disclose why it held back what it built: $( cat "$TMP/s8b.out.stats" )"; fi
+if has "$TMP/s8b.out" 'unsaved_why=ok'; then ok "S8b ...and it held back nothing it built (unsaved_why=ok; RIPWIRE_NO_RECORD_FIRST=1 says reparsed, recordfirstcheck R2)"
+else no "S8b the re-parsing run held back part of what it built: $( cat "$TMP/s8b.out.stats" )"; fi
 run "$TMP/s8.bin" "$S8" "$TMP/s8b.next"; full "$S8" "$TMP/s8b.full"
 if has "$TMP/s8b.next" 'tree=replayed'; then ok "S8b ...so the very next run after the edit REPLAYS the crawl ($( sed 's/^ripwire: snapshot-stats //' "$TMP/s8b.next.stats" ))"
 else no "S8b the run after a re-parsing run walked the tree again: $( cat "$TMP/s8b.next.stats" )"; fi
-if has "$TMP/s8b.next" 'graph_why=no-section'; then ok "S8b ...and rebuilds the model and the graph, which a run that parsed deliberately did not store"
-else no "S8b the graph refusal on that run is not no-section: $( cat "$TMP/s8b.next.stats" )"; fi
+if has "$TMP/s8b.next" 'model=loaded' && has "$TMP/s8b.next" 'graph=loaded'; then ok "S8b ...and is served the model and the graph the re-parsing run recorded"
+else no "S8b the run after a re-parsing run rebuilt the model or the graph: $( cat "$TMP/s8b.next.stats" )"; fi
 same "S8b the answer one run after the edit == built" "$TMP/s8b.next" "$TMP/s8b.full"
 
 # S9: a SERVING run writes NOTHING — not the snapshot, not the blob. The in-blob placement could not have this arm at

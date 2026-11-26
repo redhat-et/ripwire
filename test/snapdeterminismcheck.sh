@@ -13,10 +13,9 @@
 # (warmsnap.h optionsKeyOf), so a one-worker recording and an every-core one name and key the same snapshot.
 #
 # Each configuration records in a FRESH cache directory at ONE path (the path is part of the options key, so two
-# directories could never compare equal): run 1 parses with the knob's worker count and, having opened with no blob,
-# records the tree, the model and the graph (warmsnap.h recordsWhatItBuilt); a later run is only made when a racy window
-# held a section back (the corpus is copied moments before), and is then a run that replays the parse cache blob.
-# The 8-byte write stamp (header offset 40) and the checksum that covers it (offset 104) are masked; nothing else is.
+# directories could never compare equal): run 1 parses and records (RECORD-FIRST, warm snapshot v12: the model and the
+# graph, and the tree when its signatures are past the racy window), run 2 adds what the racy window held back. The 8-byte write stamp (header offset 40) and the header digest that covers it
+# (offset 128, warm snapshot v12) are masked; nothing else is — the section digests are a function of the bytes alone.
 #
 # ARMS
 #   P   premise: the recording runs reported parse_threads=1 and parse_threads=8 (a binary without the knob runs every
@@ -67,7 +66,7 @@ record()
     local tag="$1"; shift
     rm -rf "$H"; mkdir -p "$H/tmp" "$H/xdg"
     local k s; : >"$TMP/$tag.err"
-    for k in 1 2 3; do   # run 1 records the tree, the model and the graph; runs 2-3 only when a racy window held a section back
+    for k in 1 2 3; do   # run 1 parses and records (RECORD-FIRST), run 2 is served; run 3 only when a racy window held a section back
         ( cd "$W" && env "$@" HOME="$H" TMPDIR="$H/tmp/" XDG_CACHE_HOME="$H/xdg" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 \
             "$BIN" . ${VERB[@]+"${VERB[@]}"} >"$TMP/$tag.out$k" 2>"$TMP/$tag.err$k" </dev/null )
         cat "$TMP/$tag.err$k" >>"$TMP/$tag.err"
@@ -76,7 +75,7 @@ record()
             && [ -s "$( section "$s" 1 >"$TMP/$tag.probe"; echo "$TMP/$tag.probe" )" ] && break   # the tree AND the model: D3 compares whole files
     done
     if [ -n "$s" ]; then
-        python3 -I -c 'import sys; b = bytearray( open( sys.argv[ 1 ], "rb" ).read() ); b[ 40:48 ] = bytes( 8 ); b[ 104:112 ] = bytes( 8 ); sys.stdout.buffer.write( b )' "$s" >"$TMP/$tag.snap"
+        python3 -I -c 'import sys; b = bytearray( open( sys.argv[ 1 ], "rb" ).read() ); b[ 40:48 ] = bytes( 8 ); b[ 128:136 ] = bytes( 8 ); sys.stdout.buffer.write( b )' "$s" >"$TMP/$tag.snap"
     else
         : >"$TMP/$tag.snap"
     fi
@@ -87,10 +86,11 @@ section()
 {
     python3 -I -c 'import struct, sys
 b = open( sys.argv[ 1 ], "rb" ).read()
-if len( b ) < 112: raise SystemExit( 0 )
-o, n = struct.unpack_from( "<QQ", b, 56 + 16 * int( sys.argv[ 2 ] ) ); sys.stdout.buffer.write( b[ o:o + n ] )' "$1" "$2"
+if len( b ) < 136: raise SystemExit( 0 )
+o, n = struct.unpack_from( "<QQ", b, 56 + 24 * int( sys.argv[ 2 ] ) ); sys.stdout.buffer.write( b[ o:o + n ] )' "$1" "$2"
 }
-threads(){ grep -o 'parse_threads=[0-9]*' "$TMP/$1.err" | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+# the worker counts of the runs that PARSED (reparsed>0); a served run replays its facts and reports parse_threads=0
+threads(){ grep 'cache-stats reparsed=[1-9]' "$TMP/$1.err" | grep -o 'parse_threads=[0-9]*' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
 
 VERB=()
 record one  RIPWIRE_PARSE_THREADS=1
@@ -124,7 +124,7 @@ cat >"$TMP/fam.py" <<'PYFAM'
 # One SNAP: per family, its row count and whether it is in fileId order. Two: per family, EQUAL / PERMUTATION / VALUES.
 import struct, sys
 def model( p ):
-    b = open( p, 'rb' ).read(); o, n = struct.unpack_from( '<QQ', b, 72 ); return b[ o:o + n ]
+    b = open( p, 'rb' ).read(); o, n = struct.unpack_from( '<QQ', b, 80 ); return b[ o:o + n ]
 def file_count( m ):
     at = 16; nb, = struct.unpack_from( '<Q', m, at ); at += 8
     for _ in range( nb ):
@@ -188,7 +188,7 @@ PYFAM
 
 same_model "D1 RIPWIRE_PARSE_THREADS=1 vs =8" one many
 same_model "D2 two every-core runs" defA defB
-if [ -s "$TMP/one.snap" ] && cmp -s "$TMP/one.snap" "$TMP/defA.snap"; then ok "D3 RIPWIRE_PARSE_THREADS=1 vs every core — the WHOLE snapshot files are cmp-equal ($( wc -c <"$TMP/one.snap" | tr -d ' ' ) B, stamp and checksum masked)"
+if [ -s "$TMP/one.snap" ] && cmp -s "$TMP/one.snap" "$TMP/defA.snap"; then ok "D3 RIPWIRE_PARSE_THREADS=1 vs every core — the WHOLE snapshot files are cmp-equal ($( wc -c <"$TMP/one.snap" | tr -d ' ' ) B, stamp and header digest masked)"
 else no "D3 RIPWIRE_PARSE_THREADS=1 vs every core — the snapshot files differ ($( cmp "$TMP/one.snap" "$TMP/defA.snap" 2>&1 | head -1 | sed 's/.* differ: //' ))"; fi
 
 # ── F: the families the merge orders, decoded ─────────────────────────────────────────────────────

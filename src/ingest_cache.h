@@ -3719,7 +3719,16 @@ struct ConstructHitsToSave
     const std::vector<std::uint8_t>&  known;
 };
 
-inline void saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
+// What a saveCache call left on disk, for the run that records a warm snapshot from it (ingest.cpp recordWarmModel): the
+// cache-stats line a later run served from that snapshot replays says what a warm run over this blob would read.
+struct CacheSaveFacts
+{
+    bool        written    = false;   // the blob was published (renamed into place)
+    std::size_t entries    = 0;       // offset-table entries: this crawl's records and the ones carried over
+    std::size_t ownRecords = 0;       // this crawl's records: what a warm run of this configuration reads
+};
+
+inline CacheSaveFacts saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
                        const std::vector<std::uint64_t>& fileHash,
                        const std::vector<long long>& fileSize, const std::vector<long long>& fileMtime,
                        const std::vector<long long>& fileCtime,     // v14: the third stat-gate discriminator, per fileId
@@ -3738,7 +3747,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     {
         DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
                   "ingest: cache path is not a regular file (directory/device/fifo) — cache not written" );
-        return;
+        return {};
     }
 
     const std::size_t      F  = files.size();
@@ -3810,7 +3819,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                   "ingest: saveCache could not open temp file for write — cache left unchanged" );
         rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
                       path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
-        return;
+        return {};
     }
     // C1 SAVE-STREAM (reports/mem-audit-fable-1111 §C1): the blob is no longer built whole in memory. `w` is a WINDOW: once it
     // holds kSaveWindowBytes at a record boundary it is written to the temp and cleared, `w.streamed` carrying the absolute offset
@@ -3832,7 +3841,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         w.b.clear();
     };
     CacheBlobIndex           index;
-    std::vector<CacheEntry>& table = index.table;
+    std::vector<CacheEntry>& table   = index.table;
+    std::size_t              carried = 0;   // records copied over from the previous blob (the superset contract)
     table.reserve( plan.size() );
 
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
@@ -3867,6 +3877,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 CacheEntry copied;
                 if( appendCarryRecord( w, prev.blob.fd, carry[ row.carryIndex ], carryBuf, copied ) )
                 {
+                    ++carried;
                     table.push_back( copied );
                 }
                 continue;
@@ -4051,7 +4062,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
                   "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
-        return;
+        return {};
     }
     if( !temp.commit( path ) )
     {
@@ -4059,7 +4070,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold", "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: cannot replace ({}) — old cache kept, this run was parsed from source\n",
                       path.c_str(), std::strerror( errno ) );
-        return;
+        return {};
     }
 
     // A5 (cache-dir hygiene): --doctor measured ~11,914 ripwire-* blobs / 2.4 GB accumulating in the cache-ladder
@@ -4068,6 +4079,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // policy + the concurrency-safety argument). `path` is the blob we just rename()'d into place, so it is
     // always the retained "keepPath" even if it happens to be the oldest survivor by mtime granularity.
     quality::sweepStaleCacheBlobsOnce( quality::cacheDirLadder(), path );
+    return CacheSaveFacts{ true, table.size(), table.size() - carried };
 }
 }   // namespace — ingest_cache.h section of ingest.cpp
 
