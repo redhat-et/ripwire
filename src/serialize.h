@@ -2805,10 +2805,15 @@ inline void appendExtentSuspectAttr( std::string& row, const Symbol& s )
 
 // QD-TANGLE (model.h tangleScore10): steer= the steering locals and tangle= the score --quality-delta's tangle kind judges (bar 6),
 // each ABSENT at 0 — both are 0 at 50 lines or fewer, where the score has no length to amplify. XML attributes, or JSON members.
-inline std::string tangleMetricAttrs( const Symbol& s, bool json )
+// TANGLE-RULE: tangle_raw= the score before the block cap, present only when the cap lowered a score at or over the bar — the
+// rows a reader would otherwise expect --quality-delta to flag, and the only ones where the legend's formula alone is not the
+// number shown.
+inline std::string tangleMetricAttrs( const Symbol& s, const std::vector<TangleBlockFacts>& blocks, bool json )
 {
     std::string         out;
-    const std::uint32_t tangle10 = tangleScore10( tangleInputsOf( s ) );
+    const TangleInputs  in       = tangleInputsOf( blocks, s );
+    const std::uint32_t tangle10 = tangleScore10( in );   // the block cap applied where the walk measured it (model.h)
+    const std::uint32_t raw10    = in.capped() ? tangleScore10( tangleWithoutCap( in ) ) : tangle10;
     if( s.steer > 0 )
     {
         out += json ? std::format( ",\"steer\":{}", unsigned( s.steer ) ) : std::format( " steer=\"{}\"", unsigned( s.steer ) );
@@ -2816,6 +2821,10 @@ inline std::string tangleMetricAttrs( const Symbol& s, bool json )
     if( tangle10 > 0 )
     {
         out += json ? std::format( ",\"tangle\":{}.{}", tangle10 / 10u, tangle10 % 10u ) : std::format( " tangle=\"{}.{}\"", tangle10 / 10u, tangle10 % 10u );
+    }
+    if( raw10 != tangle10 && raw10 >= kTangleBar10 )
+    {
+        out += json ? std::format( ",\"tangle_raw\":{}.{}", raw10 / 10u, raw10 % 10u ) : std::format( " tangle_raw=\"{}.{}\"", raw10 / 10u, raw10 % 10u );
     }
     return out;
 }
@@ -2825,7 +2834,9 @@ inline constexpr const char* kMetricsLegend =
     "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
     "steer=steering-locals(a primitive local rewritten, then read in a branch condition 10+ statements later) "
     "tangle=S, the quality-delta tangle score (bar 6): (nest past 3 + deep%/5 + steer per 100 lines) x log2(loc/50), short "
-    "flat-dispatch arms' depth left out; steer and tangle are absent at 0 and 0 at 50 lines or fewer "
+    "flat-dispatch arms' depth left out, capped at the worst top-level block's own S + 2 per local written in one block and read "
+    "in a later one (tangle_raw=S before that cap, present only when it lowered a score at or over the bar); steer and tangle "
+    "are absent at 0 and 0 at 50 lines or fewer "
     "(humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep "
     "throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — "
     "not-deep, never a hidden 0. deep counts LINES and humps counts REGIONS, and two regions can share a "
@@ -3642,6 +3653,7 @@ struct MapRowSources
     const std::vector<std::uint8_t>*  tested;
     const std::vector<std::uint32_t>* lcom4;
     const std::vector<std::uint32_t>* amp;
+    const std::vector<TangleBlockFacts>* tangleBlocks;   // IngestResult::tangleBlocks: the tangle= score's block cap
 };
 
 // ── the XML map's legend, as its ordered clause groups ───────────────────────────────────────────────────────────────
@@ -4168,6 +4180,9 @@ inline std::string rowRankAttr( const MapRowSources& src, NodeId id )
 // (safe from a buffer-overrun standpoint, but a truncated attr run is malformed XML, not a degrade worth shipping quietly).
 // 160 -> 192 (ppalt disclosure): ppalt="65535" (+14 B) put the summed fn/method worst case within a rounding error of 160; 192
 // restores the same real headroom. The fn/method group and lcom4 are mutually exclusive, so the size covers ONE group's worst case.
+// 192 -> 256 (TANGLE-RULE, CodeRabbit #743): the fn/method group at every field's maximum — loc/cbo/amp 10 digits, params and its
+// floor, nest, humps/deep and their floor, steer=, tangle= and tangle_raw= (7 characters each), locals and its floor, ppalt, tested — is
+// 248 B, past 191 since steer=/tangle= joined it; 255 covers it. rowMetricsAttrs' attr[352] then holds 26 + 40 + 11 + 255 = 332 B.
 class BoundedAttrRun
 {
 public:
@@ -4188,13 +4203,13 @@ public:
     const char* c_str() const noexcept { return buf_; }
 
 private:
-    char  buf_[ 192 ];
+    char  buf_[ 256 ];
     char* at_ = buf_;
 };
 
 // A function or method row's SHAPE attributes, --metrics only: params= (a floor when countParams saturated), nest= and its
 // profile, steer=/tangle=, locals=, ppalt=. Only fns/methods carry them, so a class/sec never carries a 0 it can't have.
-inline void appendFnShapeAttrs( BoundedAttrRun& run, const Symbol& s )
+inline void appendFnShapeAttrs( BoundedAttrRun& run, const Symbol& s, const std::vector<TangleBlockFacts>& tangleBlocks )
 {
     run.append( " params=\"{}\"", unsigned( s.params ) );
     if( s.params == std::numeric_limits<decltype( s.params )>::max() )
@@ -4210,7 +4225,7 @@ inline void appendFnShapeAttrs( BoundedAttrRun& run, const Symbol& s )
     {
         run.append( " humps=\"{}\" deep=\"{}\" deep_floor=\"1\"", unsigned( s.humps ), unsigned( s.deepLoc ) );
     }
-    run.append( "{}", tangleMetricAttrs( s, /*json=*/false ) );   // QD-TANGLE: steer= / tangle=, each absent at 0
+    run.append( "{}", tangleMetricAttrs( s, tangleBlocks, /*json=*/false ) );   // QD-TANGLE: steer= / tangle=, each absent at 0
     // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): locals= is ABSENT — never a bare "0" — for every def outside
     // model.h's localsCountedLang (MVP: C/C++ only), so a reader never mistakes "not counted for this language" for "counted,
     // and there are none". locals_floor="1" always rides alongside a present locals=: `int a,b;` counts as ONE
@@ -4238,7 +4253,7 @@ inline void appendQMetricAttrs( BoundedAttrRun& run, const Symbol& s, NodeId id,
     }
     if( s.kind == SymKind::Function || s.kind == SymKind::Method )
     {
-        appendFnShapeAttrs( run, s );
+        appendFnShapeAttrs( run, s, *src.tangleBlocks );
     }
     if( src.cbo && id < src.cbo->size() )
     {
@@ -4262,7 +4277,7 @@ inline void appendQMetricAttrs( BoundedAttrRun& run, const Symbol& s, NodeId id,
 // EQUIVALENCE (GE-SERIALIZE round 2): this run, amb=/lpin= and k= used to share one attr[352] buffer, so a run past its width
 // would have truncated across all three. None ever did: the widest is 26 B of literal + 4 × 10 digits + 11 B role + the
 // BoundedAttrRun's 191 + amb=/lpin=' 35 + k=' 23 = 326 B < 351 (test/fixedbufsweep.sh's attr row), so writing the three as
-// separate writes is byte-identical — and this buffer alone now has 83 B of headroom.
+// separate writes is byte-identical. With the run at 255 (TANGLE-RULE) this buffer alone holds 26 + 40 + 11 + 255 = 332 B < 351.
 inline std::string rowMetricsAttrs( const Symbol& s, NodeId id, const MapRowSources& src )
 {
     if( !src.metrics || !src.fanIn )
@@ -4604,7 +4619,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // already impose on themselves).
     const MapRowSources rowSources{ .rank = rank, .outOff = outOff, .outTargets = outTargets, .outProv = outProv, .outNameOnly = outNameOnly,
                                     .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .emitOrder = plan.emitOrder, .metrics = metrics,
-                                    .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp };
+                                    .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp, .tangleBlocks = &ing.tangleBlocks };
     std::vector<std::uint32_t> hedgedScratch;   // FE-B: writeMapCalleeRows' reused buffer
     const auto writeChildren = [ & ]( XmlWriter& w )
     {
@@ -11716,6 +11731,7 @@ struct JsonQMetrics
     const std::vector<std::uint8_t>*  tested;
     const std::vector<std::uint32_t>* lcom4;
     const std::vector<std::uint32_t>* amp;
+    const std::vector<TangleBlockFacts>* tangleBlocks;
 };
 
 inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
@@ -11756,7 +11772,7 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
             rw::formatTo( num, sizeof( num ), ",\"humps\":{},\"deep\":{},\"deep_floor\":true", unsigned( s.humps ), unsigned( s.deepLoc ) );
             w.write( num );
         }
-        w.write( tangleMetricAttrs( s, /*json=*/true ) );   // QD-TANGLE: the JSON siblings of the XML steer= / tangle= (same omission rule)
+        w.write( tangleMetricAttrs( s, *q.tangleBlocks, /*json=*/true ) );   // QD-TANGLE: the JSON siblings of the XML steer= / tangle= (same omission rule)
         // The JSON sibling of the XML ev=/ev_floor=/ev_why= triple — same omission rule (absent means
         // exactly 1 on a cx row; evCountedLang keeps an uncovered language absent, never a fabricated
         // number), floor spelled as JSON true like deep_floor/locals_floor. Composed on std::string via
@@ -12173,7 +12189,7 @@ inline void writeJsonMapRow( JsonWriter& w, const IngestResult& ing, const Overl
     if( src.metrics )
     {
         const std::uint32_t outDegree = src.outOff[ id + 1 ] - src.outOff[ id ];
-        writeJsonQMetrics( w, JsonQMetrics{ s, id, outDegree, src.fanIn, src.cbo, src.tested, src.lcom4, src.amp } );
+        writeJsonQMetrics( w, JsonQMetrics{ s, id, outDegree, src.fanIn, src.cbo, src.tested, src.lcom4, src.amp, src.tangleBlocks } );
     }
     w.write( ",\"c\":[" );
     writeJsonCalleeObjects( w, ing, src.outOff[ id ], src.outOff[ id + 1 ], src.outTargets, src.outProv, src.outNameOnly, esc );
@@ -12292,7 +12308,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     // then lost a write has already spent the rows, so the fallback must be able to write them again.
     const MapRowSources rowSources{ .rank = rank, .outOff = outOff, .outTargets = outTargets, .outProv = outProv, .outNameOnly = outNameOnly,
                                     .ambOut = ambOut, .locPinOut = locPinOut, .bind = bind, .emitOrder = plan.emitOrder, .metrics = metrics,
-                                    .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp };
+                                    .fanIn = fanIn, .cbo = cbo, .tested = tested, .lcom4 = lcom4, .amp = amp, .tangleBlocks = &ing.tangleBlocks };
     const auto writeRows = [ & ]( JsonWriter& w )
     {
         for( std::size_t i = 0; i < plan.groups.fileOrder.size(); ++i )

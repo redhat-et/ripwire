@@ -59,10 +59,10 @@ def shrink(deep):
                  "                    }\n                }\n            }\n")
     else:
         inner = "            total += x;\n"
-    tail = "".join(f"    total = total * 5 + {k};\n" for k in range(70))
+    tail = "".join(f"        total = total * 5 + {k};\n" for k in range(70))
     return ("int shrink( const std::vector<int>& xs )\n{\n    int total = 0;\n"
             "    for( int x : xs )\n    {\n        if( x > 1 )\n        {\n" + inner +
-            "        }\n    }\n" + tail + "    return total;\n}\n")
+            "        }\n" + tail + "    }\n    return total;\n}\n")
 
 
 def simplify(branches):
@@ -77,17 +77,17 @@ def nudge(deep):
 def overbar(name, deep, extra=0, mult=13, gt=2, mod=5):
     # nudge's shape under another name: for(1) if(2) for(3) if(4), `deep` lines at depth 4, a flat tail of 70 + extra lines
     inner = deep_block(deep, 20)
-    tail = "".join(f"    total = total * {mult} + {k};\n" for k in range(70 + extra))
+    tail = "".join(f"        total = total * {mult} + {k};\n" for k in range(70 + extra))
     return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = 0;\n"
             f"    for( int x : xs )\n    {{\n        if( x > {gt} )\n        {{\n"
             "            for( int y = 0; y < x; ++y )\n            {\n"
             f"                if( y % {mod} )\n                {{\n" + inner +
-            "                }\n            }\n        }\n    }\n" + tail + "    return total;\n}\n")
+            "                }\n            }\n        }\n" + tail + "    }\n    return total;\n}\n")
 
 
 def tangled(name="tangled"):
     deep = deep_block(25, 28)
-    seq = "".join(f"    total = total + {k};\n" for k in range(60))
+    seq = "".join(f"        total = total + {k};\n" for k in range(60))
     return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = 0;\n    bool found = false;\n"
             "    for( int x : xs )\n    {\n        if( x > 0 )\n        {\n"
             "            for( int y = 0; y < x; ++y )\n            {\n"
@@ -96,8 +96,8 @@ def tangled(name="tangled"):
             "                        if( total == 7 )\n                        {\n"
             "                            found = true;\n" + deep +
             "                        }\n                        total += 1;\n"
-            "                    }\n                }\n            }\n        }\n    }\n"
-            + seq + "    if( found )\n    {\n        total *= 2;\n    }\n    return total;\n}\n")
+            "                    }\n                }\n            }\n        }\n"
+            + seq + "    }\n    if( found )\n    {\n        total *= 2;\n    }\n    return total;\n}\n")
 
 
 def sequential(name="sequential", n=150):

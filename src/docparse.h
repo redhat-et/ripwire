@@ -298,6 +298,16 @@ inline std::optional<std::string> readWholeFile( const std::string& path )
         depwatch::note( depwatch::Seam::WholeFile, path, nullptr );
         return std::nullopt;
     }
+    // Only a REGULAR file has a whole to read. A directory opens on Linux and its seek can report LLONG_MAX (ext4 htree,
+    // overlayfs), so readAllOfStream sized a string to that and threw std::bad_alloc: a `go.mod` that is a directory took
+    // down a plain --no-cache run (graph.h GoModReads). Asked of the descriptor, so the name cannot be swapped in between;
+    // anything else reads as unreadable, exactly as a failed open does, in the answer and in the dependency log.
+    os::stat_t st{};
+    if( os::fstat( os::fileno( fp.file ), &st ) != 0 || !S_ISREG( st.st_mode ) )
+    {
+        depwatch::note( depwatch::Seam::WholeFile, path, nullptr );
+        return std::nullopt;
+    }
     std::optional<std::string> out      = readAllOfStream( fp.file );
     const bool                 closedOk = fp.close();
     if( !closedOk )

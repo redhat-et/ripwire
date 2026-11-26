@@ -422,6 +422,10 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.locals       = std::uint16_t( d.locals > 65535u ? 65535u : d.locals );   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang); u16 saturating (model.h)
         s.steer        = d.steer;    // QD-TANGLE steering locals (model.h Symbol::steer; 0 where langfacts.h steerDecl is None and at 50 lines or fewer)
         s.dispatchShare = tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut );   // QD-TANGLE (model.h)
+        if( d.maxBlock10 != kTangleNoCap )   // QD-TANGLE BLOCK FACTS: the side table, ascending id like aliasTargets
+        {
+            result.tangleBlocks.push_back( TangleBlockFacts{ s.id, std::uint16_t( std::min( d.maxBlock10, kTangleBlockMax10 ) ), d.cross, 0 } );
+        }
         s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.paramsMin    = std::uint8_t( d.paramsMin < 15 ? d.paramsMin : 15 );   // B2.2: fewest arguments a call can pass (0 = no bound); a 4-bit field — saturating LOWERS it, which only keeps candidates
