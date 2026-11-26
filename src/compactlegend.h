@@ -1345,6 +1345,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "files", "files=N: single-author files folded into this one row; detail=1 lists each", true, "uniform", MapHeaderRead::No, {}, "owners" },
     // pack-task: src/serialize.h pureFromSig + the impure lens (pureSig at the <d> row emitters)
     { "pure", "pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "pack-task" },
+    // pack-task <partners>: src/packtask.h packTaskPartnersSection / packTaskPartners (the co-change partners of the ranking's top files)
+    { "seeds", "<partners>: files sharing 3+ commits in window= (commits= read) with one of the ranking's first seeds= files, not those; partners_cut=N rows the budget cut", true, "partners", MapHeaderRead::No, {}, "pack-task" },   // also defines window= commits= partners_cut=
+    { "together", "f together=N: commits shared with its best seed", true, "f", MapHeaderRead::No, {}, "pack-task" },
+    { "shallow", "partners shallow=1: a depth-limited clone, so a floor", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bulk_skipped", "partners bulk_skipped=N: commits over 30 indexed files, left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bots_skipped", "partners bots_skipped=N: bot commits left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bots_included", "partners bots_included=N: bot commits kept (include-bots)", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "agent_commits", "partners agent_commits=N: kept commits an agent co-authored", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "renames", "partners renames=N: exact moves followed, not co-change", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "partners_none", "partners_none=: why no <partners>: no_git, no_history (no window commit touched an indexed file), shallow, multi_root, no_seed", false, {}, MapHeaderRead::No, {}, "pack-task" },
     // pr-context: src/prcontext.h (prAnchorAttr, prDirectionAttr, root tail format, per-file impact/cochange/owners, no-ref-work)
     { "anchor", "anchor=merge-base: diffed from merge base(base, HEAD); ref-tip-two-dot = no merge base, two-dot view", false, "pr-context", MapHeaderRead::No, {}, "pr-context" },
     { "base_sha", "base_sha=: the merge-base commit (9 hex) the diff is anchored at", false, "pr-context", MapHeaderRead::No, {}, "pr-context" },

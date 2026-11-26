@@ -2476,9 +2476,11 @@ inline void recordCommitFileSet( std::vector<std::uint32_t>& cur, std::size_t ma
     cur.clear();
 }
 
-// `outCensus` is optional and left alone when null; every caller that passes nothing is byte-identical.
+// `outCensus` is optional and left alone when null; every caller that passes nothing is byte-identical. `outHistory` (optional) receives
+// THIS walk's own WHOSE HISTORY census — the process sink keeps only the maximum over every walk, which a long-lived server never resets.
 inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string& root, const IngestResult& ing, const std::string& windowArgs, std::size_t maxFiles,
-                                                               std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
+                                                               std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr,
+                                                               GitHistoryCensus* outHistory = nullptr )
 {
     std::vector<std::vector<std::uint32_t>> sets;
 
@@ -2488,7 +2490,7 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
 
     std::vector<std::uint32_t> cur;
     const auto flush = [ & ]() { recordCommitFileSet( cur, maxFiles, sets, outCensus ); };
-    forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
+    const GitLogWalk walk = forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
     {
         for( const std::string& p : rec.paths )
         {
@@ -2500,6 +2502,10 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
         }
         flush();
     } );
+    if( outHistory )
+    {
+        *outHistory = walk.census;
+    }
     return sets;
 }
 
@@ -2521,10 +2527,11 @@ inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::str
 // checkouts (a repo pinned to a 2024 base commit has nothing inside a wall-clock window measured in 2026,
 // which is exactly the LocBench-eval shape). Degrades to empty on no-git / no-history, like every miner here.
 inline std::vector<std::vector<std::uint32_t>> gitRecentCommitFileSets( const std::string& root, const IngestResult& ing, std::uint32_t commitCount, std::size_t maxFiles,
-                                                                        std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
+                                                                        std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr,
+                                                                        GitHistoryCensus* outHistory = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitRecentCommitFileSets (co-change boost window)" );
-    return gitLogFileSets( root, ing, "-" + std::to_string( commitCount ) + " ", maxFiles, onlyRoot, outCensus );
+    return gitLogFileSets( root, ing, "-" + std::to_string( commitCount ) + " ", maxFiles, onlyRoot, outCensus, outHistory );
 }
 
 // git's approxidate for "<months> months ago" is calendar-month subtraction from the current local time

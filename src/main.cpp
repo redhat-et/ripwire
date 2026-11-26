@@ -4618,6 +4618,7 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
 // The history-signal verbs (--hotspots, --rank-by=churn[-decay], --cochange, --situ, --quality-delta) say once, after the answer,
 // what their git walks left out (bot commits) and followed (exact moves) — gitmine.h WHOSE HISTORY. Other verbs that read history
 // for a secondary lens (the map's churn=, --for's co-change boost) apply the same policy and do not repeat the sentence.
+// --pack-task states its own walk's counts as attributes on <partners>, inside its budget (packtask.h PackPartners).
 static bool historySignalVerb( const rw::Config& cfg ) noexcept
 {
     if( cfg.mcp || cfg.lsp || !cfg.listen.empty() )

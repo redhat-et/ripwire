@@ -379,6 +379,63 @@ inline constexpr std::size_t kSituPartnerFileRowsShown = 4;   // section [1] —
 inline constexpr std::uint32_t kSituCochangeProbeFiles = 20;  // section [3] — changed files probed for co-change (cut-fix E: disclosed)
 inline constexpr std::size_t kSituSiblingRowsShown = 8;      // section [1] — L-D lexical sibling rows; a raisable DEFAULT
 
+// ── THE co-change partners of a SEED SET, merged — one rule for --situ's [3], its MCP facts, and --pack-task's <partners> ──
+// Each seed (seedMask[f] != 0, file-id order, the first probeCap of them) is answered from the SAME mined commit sets
+// (cochangePartners' precomputed overload, A4-P10); a partner outside the mask keeps its BEST seed's degree — and that
+// seed's shared-commit count, so together= and deg= are one pair's numbers — and the rows sort (deg desc, path asc), a
+// total order. Was written out inline twice in this file (writeSituation, computeSituationFacts); --pack-task is the third
+// reader, so it is one function now rather than a third copy.
+struct SeedPartner
+{
+    std::uint32_t fileId   = 0;
+    double        deg      = 0.0;   // the best seed's degree: the fraction of that seed's commits the partner is also in
+    std::uint32_t together = 0;     // commits that seed and the partner share (3 or more: cochangePartners' support floor)
+};
+struct SeedPartners
+{
+    std::vector<SeedPartner>                             rows;          // partners NOT in the mask, (deg desc, path asc)
+    std::uint32_t                                        probed = 0;    // seeds probed: fewer than the mask holds ⇒ rows is a FLOOR
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> seedCommits;   // (seed, its own commits in the window), probe order
+};
+inline SeedPartners mergeSeedPartners( const IngestResult& ing, const std::vector<char>& seedMask,
+                                       const std::vector<std::vector<std::uint32_t>>& sets, std::uint32_t probeCap, CoCouplingCache& coupling )
+{
+    SeedPartners                        out;
+    HashMap<std::uint32_t, std::size_t> rowOf;   // partner file → its index in out.rows
+    const std::uint32_t                 F      = std::uint32_t( std::min( seedMask.size(), ing.files.size() ) );
+    const auto                          isSeed = [ & ]( std::uint32_t f ) { return f < seedMask.size() && seedMask[f] != 0; };
+    for( std::uint32_t f = 0; f < F && out.probed < probeCap; ++f )
+    {
+        if( !isSeed( f ) )
+        {
+            continue;
+        }
+        ++out.probed;
+        std::uint32_t commits = 0;
+        for( const CoPartner& p : cochangePartners( ing, ing.files[f], commits, sets, nullptr, &coupling ) )
+        {
+            if( isSeed( p.fileId ) )
+            {
+                continue;
+            }
+            const auto it = rowOf.find( p.fileId );
+            if( it == rowOf.end() )
+            {
+                rowOf[p.fileId] = out.rows.size();
+                out.rows.push_back( SeedPartner{ p.fileId, p.deg, p.together } );
+            }
+            else if( p.deg > out.rows[it->second].deg )
+            {
+                out.rows[it->second] = SeedPartner{ p.fileId, p.deg, p.together };
+            }
+        }
+        out.seedCommits.emplace_back( f, commits );
+    }
+    std::sort( out.rows.begin(), out.rows.end(), [ & ]( const SeedPartner& a, const SeedPartner& b )
+               { return a.deg != b.deg ? a.deg > b.deg : ing.files[a.fileId] < ing.files[b.fileId]; } );
+    return out;
+}
+
 // §B12.1 gave this the "showing N of M <noun>" form so a reader could see the gap without a second sentence;
 // C1 F-10 adds the machine half — pageview.h's shown=/total=/capped= spelled in prose, because --situ has no
 // XML root to carry attributes — and the exact pasteable follow-up. All of it appears ONLY on a cut section:
@@ -1220,37 +1277,19 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     CoCouplingCache                coCoupling( ing );   // prcontext-hoist: one include-coupling build for every probe
     const std::string              coWindow   = defaultWindowLabel( root, "18mo" );   // F2: see SituationFacts::coWindow
     const std::size_t              coCommits  = coSets.size();
-    HashMap<std::uint32_t, double> partnerDeg;
-    std::uint32_t                  probed = 0;
     std::size_t                    changedCount = 0;   // cut-fix E: the probe's denominator
     for( std::uint32_t f = 0; f < F; ++f )
     {
         changedCount += changedFile[f] ? 1u : 0u;
     }
-    for( std::uint32_t f = 0; f < F && probed < kSituCochangeProbeFiles; ++f )
+    const SeedPartners  merged = mergeSeedPartners( ing, changedFile, coSets, kSituCochangeProbeFiles, coCoupling );
+    const std::uint32_t probed = merged.probed;
+    std::vector<std::pair<std::uint32_t, double>> partners;
+    partners.reserve( merged.rows.size() );
+    for( const SeedPartner& p : merged.rows )
     {
-        if( !changedFile[f] )
-        {
-            continue;
-        }
-        ++probed;
-        std::uint32_t                commits = 0;
-        const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets, nullptr, &coCoupling );
-        for( const CoPartner& p : ps )
-        {
-            if( !changedFile[p.fileId] )
-            {
-                double& d = partnerDeg[p.fileId];
-                if( p.deg > d )
-                {
-                    d = p.deg;
-                }
-            }
-        }
+        partners.emplace_back( p.fileId, p.deg );
     }
-    std::vector<std::pair<std::uint32_t, double>> partners( partnerDeg.begin(), partnerDeg.end() );
-    std::sort( partners.begin(), partners.end(), [ & ]( const auto& a, const auto& b )
-               { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
     // §H6 (W3FIX): same undisclosed cap as [2] — 18 partners, 8 rows on this repo's own src/graph.h probe.
     // F2: window=/commits= ride on the header, so the count below is readable as a measurement — or as the
     // absence of one. --cochange, the component this composes, already emits both.
@@ -1412,37 +1451,20 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     facts.coWindow = defaultWindowLabel( root, "18mo" );   // F2: the composed zero's window travels WITH the zero
     facts.coCommits = coSets.size();
     facts.shallow   = gitstamp::isShallow( root );         // 0.6.7: ...and so does its qualification (the one probe)
-    HashMap<std::uint32_t, double> partnerDeg;
-    std::uint32_t                  probed = 0;
-    for( std::uint32_t f = 0; f < F && probed < 40; ++f )
+    const SeedPartners merged = mergeSeedPartners( ing, changedFile, coSets, /*probeCap=*/40, coCoupling );
+    for( const auto& [ f, commits ] : merged.seedCommits )
     {
-        if( !changedFile[f] )
-        {
-            continue;
-        }
-        ++probed;
-        std::uint32_t                commits = 0;
-        const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets, nullptr, &coCoupling );
-        for( const CoPartner& p : ps )
-        {
-            if( !changedFile[p.fileId] )
-            {
-                double& d = partnerDeg[p.fileId];
-                if( p.deg > d )
-                {
-                    d = p.deg;
-                }
-            }
-        }
         const std::uint64_t score = ccxSum[f] * std::uint64_t( commits );      // hotspot = complexity × churn
         if( score > 0 )
         {
             facts.hotspots.push_back( { f, score } );
         }
     }
-    facts.forgotten.assign( partnerDeg.begin(), partnerDeg.end() );
-    std::sort( facts.forgotten.begin(), facts.forgotten.end(), [ & ]( const auto& a, const auto& b )
-               { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
+    facts.forgotten.reserve( merged.rows.size() );
+    for( const SeedPartner& p : merged.rows )
+    {
+        facts.forgotten.emplace_back( p.fileId, p.deg );
+    }
     std::sort( facts.hotspots.begin(), facts.hotspots.end(), [ & ]( const auto& a, const auto& b )
                { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
 
