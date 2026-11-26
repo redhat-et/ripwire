@@ -1831,12 +1831,13 @@ struct PackPartners
     std::uint32_t            bulkSkipped = 0;   // commits the bulk cut left out (touched more than 30 indexed files): bulk_skipped=
     GitHistoryCensus         history;           // THIS walk's #777 policy counts: bots_skipped= (bots_included=), agent_commits=, renames=
     std::uint32_t            seeds   = 0;   // distinct seed files probed
+    bool                     tail    = false;   // one seed: the corroborated tail applied (floor_tail="corroborated", why= per row)
     bool                     shallow = false;
     bool                     mined   = false;   // the block renders
     std::string_view         none;              // why it does not, when it does not ("" on a --partition slice)
 };
 
-inline PackPartners packTaskPartners( const IngestResult& ing, const std::vector<NodeId>& order, const std::vector<float>& rank,
+inline PackPartners packTaskPartners( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& order, const std::vector<float>& rank,
                                       NodeId keyId, const PackTaskInputs& in )
 {
     PackPartners out;
@@ -1886,7 +1887,9 @@ inline PackPartners packTaskPartners( const IngestResult& ing, const std::vector
         return out;
     }
     CoCouplingCache coupling( ing );
-    out.rows  = mergeSeedPartners( ing, seedMask, sets, kCoBoostSeedCount, coupling ).rows;
+    SeedPartners merged = mergeSeedPartners( ing, seedMask, sets, kCoBoostSeedCount, coupling, &g );
+    out.rows  = std::move( merged.rows );
+    out.tail  = merged.tail;
     out.mined = true;
     return out;
 }
@@ -1923,7 +1926,8 @@ inline std::vector<std::string> packTaskPartnerRows( const IngestResult& ing, co
     for( const SeedPartner& p : pp.rows )
     {
         const std::string_view path = rootArg.empty() ? std::string_view( ing.files[ p.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ p.fileId ], prefix );
-        rows.push_back( "<f p=\"" + ex( path ) + "\" together=\"" + std::to_string( p.together ) + "\"/>" );
+        rows.push_back( "<f p=\"" + ex( path ) + "\" together=\"" + std::to_string( p.together ) + "\""
+                        + ( pp.tail ? " why=\"" + std::string( coWhyName( p.why ) ) + "\"" : std::string() ) + "/>" );
     }
     return rows;
 }
@@ -1937,7 +1941,8 @@ inline PackTaskSection packTaskPartnersSection( const PackPartners& pp, const st
         return {};
     }
     char extra[ 240 ];
-    rw::formatTo( extra, sizeof( extra ), " window=\"{} commits\" commits=\"{}\" seeds=\"{}\" floor=\"{}\"{}{}{}", kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor,
+    rw::formatTo( extra, sizeof( extra ), " window=\"{} commits\" commits=\"{}\" seeds=\"{}\" floor=\"{}\"{}{}{}{}", kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor,
+                  pp.tail ? " floor_tail=\"corroborated\"" : "",
                   pp.bulkSkipped > 0 ? " bulk_skipped=\"" + std::to_string( pp.bulkSkipped ) + "\"" : std::string(),
                   packTaskPartnersPolicyAttrs( pp.history, "=\"", "\"" ), gitstamp::shallowAttr( pp.shallow ) );
     const std::string cutAttr   = " partners_cut=\"" + std::to_string( rows.size() ) + "\"";
@@ -1969,8 +1974,8 @@ inline std::string packTaskPartnersJson( const IngestResult& ing, const PackPart
         return pp.none.empty() ? std::string() : ",\"partners_none\":\"" + std::string( pp.none ) + "\"";
     }
     std::string j;
-    { char b[ 264 ];  rw::formatTo( b, sizeof( b ), ",\"partners_window\":\"{} commits\",\"partners_commits\":{},\"partners_seeds\":{},\"partners_floor\":{},\"partners_total\":{},\"partners_kept\":{}{}{}",
-                                    kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor, pp.rows.size(), kept,
+    { char b[ 300 ];  rw::formatTo( b, sizeof( b ), ",\"partners_window\":\"{} commits\",\"partners_commits\":{},\"partners_seeds\":{},\"partners_floor\":{}{},\"partners_total\":{},\"partners_kept\":{}{}{}",
+                                    kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor, pp.tail ? ",\"partners_floor_tail\":\"corroborated\"" : "", pp.rows.size(), kept,
                                     pp.bulkSkipped > 0 ? ",\"partners_bulk_skipped\":" + std::to_string( pp.bulkSkipped ) : std::string(),
                                     pp.shallow ? ",\"partners_shallow\":true" : "" );  j += b; }
     j += packTaskPartnersPolicyAttrs( pp.history, "\":", "" );
@@ -1979,7 +1984,8 @@ inline std::string packTaskPartnersJson( const IngestResult& ing, const PackPart
     for( std::size_t i = 0; i < kept && i < pp.rows.size(); ++i )
     {
         const std::string_view path = rootArg.empty() ? std::string_view( ing.files[ pp.rows[i].fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ pp.rows[i].fileId ], prefix );
-        j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( path ) + "\",\"together\":" + std::to_string( pp.rows[i].together ) + "}";
+        j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( path ) + "\",\"together\":" + std::to_string( pp.rows[i].together )
+           + ( pp.tail ? ",\"why\":\"" + std::string( coWhyName( pp.rows[i].why ) ) + "\"" : std::string() ) + "}";
     }
     j += "]";
     return j;
@@ -2041,7 +2047,9 @@ inline void notePackPartners( const PackPartnersBlock& b, std::string& report, s
 inline constexpr std::string_view kPackPartnersLegend =
     " partners (after tests, before the tail): files that changed in the same commits as the ranking's first seeds= distinct "
     "files (not the seeds), the ones a change there usually also edits; <f p= together=>: together= commits it shares with its "
-    "best seed (floor= or more, 3), rows by that seed's share of commits; window= commits= the history read; bulk_skipped=N commits left out "
+    "best seed (floor= or more, 3), rows by that seed's share of commits; floor_tail=corroborated (one seed): the list is filled to 10 with partners sharing "
+    "2 commits that are corroborated, below every other row, and each row's why= says which: support (3+), confidence (in at least half the seed's commits) "
+    "or link (an include, import or call edge either way, a test-of pair, or the same directory of 20 files or fewer); window= commits= the history read; bulk_skipped=N commits left out "
     "for touching over 30 indexed files; bots_skipped=N (bots_included= under include-bots) bot-authored commits left out, "
     "agent_commits=N kept commits a coding agent co-authored, renames= the exact file moves followed (each present when nonzero); shallow=1 a depth-limited clone, so a floor; up to 3 pct of the budget, out of what the sections above left, then the tail's; "
     "partners_cut=N rows the budget cut. ";
@@ -2439,7 +2447,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     remaining = remaining > bodiesRoll.charge ? remaining - bodiesRoll.charge : 0;
 
     // ── <partners> (emitted after tests): mined here, granted its bytes just before the tail below (see PackPartners above) ──
-    PackPartnersBlock partners{ .data = packTaskPartners( ing, order, rank, keyId, in ) };
+    PackPartnersBlock partners{ .data = packTaskPartners( ing, g, order, rank, keyId, in ) };
     partners.rows = packTaskPartnerRows( ing, partners.data, in.rootArg, ex );
 
     // ── section 6 — the file-grain tail (PB1): filled LAST, with everything the sections above left, cut at a row boundary ──

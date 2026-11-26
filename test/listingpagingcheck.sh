@@ -375,7 +375,7 @@ d, a = ( open( p, errors="replace" ).read() for p in sys.argv[1:3] )
 blastCap, partnerCap = int( sys.argv[3] ), int( sys.argv[4] )
 fail = 0
 # COCHANGE-FLOOR 2026-11-26: a [3] row now ends "(co-edited in N% of commits, together=K)" — every row carries its
-# shared-commit count (test/cochangefloorcheck.sh).
+# shared-commit count (test/cochangefloorcheck.sh), and a one-seed list's rows ", why=W" (test/cochangetailcheck.sh).
 def rows( text, marker, rowPat ):
     # the indented "        path  (N dependent symbols)" rows of ONE section. Matched by their own shape,
     # not by indentation: the counts_floor / script-gates disclosure lines are indented exactly like a row
@@ -384,7 +384,7 @@ def rows( text, marker, rowPat ):
     return [ l for l in ( m.group( 1 ).splitlines() if m else [] ) if re.search( rowPat, l ) ]
 
 for label, marker, cap, rowPat in ( ( "[1] blast radius", "  [1] blast radius", blastCap,   r'\(\d+ dependent symbols\)$' ),
-                                    ( "[3] co-change",    "  [3] co-change",    partnerCap, r'\(co-edited in \d+% of commits, together=\d+\)$' ) ):
+                                    ( "[3] co-change",    "  [3] co-change",    partnerCap, r'\(co-edited in \d+% of commits, together=\d+(?:, why=\w+)?\)$' ) ):
     dn, an = len( rows( d, marker, rowPat ) ), len( rows( a, marker, rowPat ) )
     if an <= cap:
         print( "  FAIL  (D) crossing: %s has only %d rows uncapped — the fixture never reaches the %d cap" % ( label, an, cap ) ); fail = 1

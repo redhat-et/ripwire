@@ -1573,8 +1573,11 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     }
     std::uint32_t                commits    = 0;
     std::uint32_t                subWindows = 0;
-    const std::vector<CoPartner> ps         = cochangePartners( root, ing, file, commits, /*scope=*/nullptr,
-                                                                /*onlyRoot=*/UINT32_MAX, &subWindows );
+    CoCouplingCache              tailCoupling( ing );   // one file is one seed: the CLI's corroborated tail (situ.h)
+    const std::vector<CoPartner> ps         = coCorroboratedTail( ing, &ix.g, fid,
+                                                                  cochangePartners( root, ing, file, commits, /*scope=*/nullptr, /*onlyRoot=*/UINT32_MAX,
+                                                                                    &subWindows, kCoTailSupport ),
+                                                                  tailCoupling );
     // §P8 vocabulary: the JSON sibling of the XML at= anchor the CLI --cochange now carries — same spelling
     // and same null-on-a-non-git-root convention main.cpp's --quality-delta --json already established.
     const std::string atVal  = gitstamp::stampAt( root );
@@ -1599,7 +1602,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
          + ",\"window\":\"" + rw::defaultWindowLabel( root, "18mo" ) + "\",\"sub_windows\":" + std::to_string( subWindows )
          + ",\"partners\":" + std::to_string( ps.size() )
-         + ",\"floor\":" + std::to_string( kCoSupportFloor )   // the CLI root's floor=
+         + ",\"floor\":" + std::to_string( kCoSupportFloor ) + ",\"floor_tail\":\"corroborated\""   // the CLI root's floor= floor_tail=
          + pageDisclosure( ccPab, sizeof( ccPab ), ccPw.end - ccPw.begin, ps.size(), ccPw.end,
                            page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
          + ( gitstamp::isShallow( root ) ? ",\"shallow\":true" : "" )   // 0.6.6: the CLI root's shallow="1", present-only
@@ -1617,6 +1620,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
         // §A9.3: the JSON sibling of the XML dep_capable= tell — surprising is false for a pair that could
         // never have carried a static dependency, and dep_capable says WHY it is false.
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ccRel( p.fileId ) ) + "\",\"together\":" + std::to_string( p.together )
+             + ",\"why\":\"" + std::string( coWhyName( p.why ) ) + "\""   // the CLI row's why=
              + ",\"deg\":" + deg + ",\"surprising\":" + ( p.surprising ? "true" : "false" )
              + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" )
              + coPairNoEdgeKeyJson( p ) + "}";   // arch-honest: surprising is unknown where this key rides
@@ -1694,6 +1698,7 @@ inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn 
     return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
          + std::to_string( facts.coCommits )
          + ",\"cochange_floor\":" + std::to_string( kCoSupportFloor )   // the CLI [3] line's floor=
+         + ( facts.coTail ? ",\"cochange_floor_tail\":\"corroborated\"" : "" )   // ...and its floor_tail=, present-only
          + ( facts.shallow ? ",\"shallow\":true" : "" );   // 0.6.7: the CLI [3] line's shallow="1" — present-only, the cochange twin's spelling
 }
 
@@ -1905,7 +1910,8 @@ inline std::string situationDiffJson( const std::string& root, const std::string
             first = false;
             char d[ 16 ];  rw::formatTo( d, sizeof( d ), "{:.2f}", deg );
             out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"cochange_degree\":" + d
-                 + ",\"together\":" + std::to_string( facts.forgottenTogether[i] ) + "}";   // the CLI [3] row's together=
+                 + ",\"together\":" + std::to_string( facts.forgottenTogether[i] )   // the CLI [3] row's together=
+                 + ( facts.coTail ? ",\"why\":\"" + std::string( coWhyName( facts.forgottenWhy[i] ) ) + "\"" : std::string() ) + "}";
         }
     }
 

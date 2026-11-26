@@ -7,7 +7,7 @@
 # 2026-11-26: the support count and the floor ship regardless of any change to the floor itself, because they move no row.
 #
 # RED-FIRST: arms 1-6 fail on a binary without the disclosure (no together= on a [3] row, no floor= anywhere). Arm 7 is the
-# guard that the change moved no row: the partner lists are the floor-3 lists, so it holds on the base too. Arms 8-9
+# guard that the disclosure moved no support row, so it holds on the base too. Arms 8-9
 # (determinism, well-formedness) hold on any binary.
 #
 # The fixture (every pair also shares the "init" commit):
@@ -20,8 +20,9 @@
 #   4. --pack-task: <partners floor="3"> and the JSON twin's partners_floor 3; the compact and full legends define floor=
 #   5. MCP situational_awareness(a.c): "cochange_floor":3 and each forgotten row's "together" (c.c 3)
 #   6. MCP cochange(a.c): "floor":3
-#   7. no row moved: one-seed and two-seed lists are c.c alone (b.c, g.c, h.c are under the floor), in --situ, --cochange,
-#      <partners> and MCP alike
+#   7. no SUPPORT row moved: every list starts with c.c, the one partner at the floor, in --situ, --cochange, <partners> and
+#      MCP alike; two-seed lists are c.c alone. (COCHANGE-TAIL 2026-11-26: a one-seed list may add corroborated 2-commit rows
+#      after it — b.c, 2 of a.c's 4 commits — which test/cochangetailcheck.sh owns.)
 #   8. deterministic: two runs of each answer are byte-identical
 #   9. every XML answer is well-formed
 #
@@ -75,7 +76,7 @@ situ_rows(){ sed -n '/^  \[3\] co-change/,/^  next:/p' "$1" | python3 -c '
 import re, sys
 rows = []
 for line in sys.stdin.read().splitlines()[1:]:
-    m = re.match( r"^        (\S+)  \(co-edited in \d+% of commits(?:, together=(\d+))?\)$", line )
+    m = re.match( r"^        (\S+)  \(co-edited in \d+% of commits(?:, together=(\d+))?(?:, why=\w+)?\)$", line )
     if m:
         rows.append( "%s:%s" % ( m.group( 1 ), m.group( 2 ) or "?" ) )
 print( " ".join( rows ) or "NONE" )'; }
@@ -94,7 +95,7 @@ has_file(){ ! lacks_file "$1" "$2"; }
 
 # 1
 run --situ=a.c > "$TMP/s1.txt"; S1="$( situ_rows "$TMP/s1.txt" )"
-if [ "$S1" = "c.c:3" ] && situ_head "$TMP/s1.txt" | grep -q ' floor="3"'; then ok "1. --situ=a.c: the [3] row says together=3 and the header floor=\"3\" ($S1)"
+if [ "${S1%% *}" = "c.c:3" ] && situ_head "$TMP/s1.txt" | grep -q ' floor="3"'; then ok "1. --situ=a.c: the [3] row says together=3 and the header floor=\"3\" ($S1)"
 else no "1. --situ=a.c: rows '$S1', header '$( situ_head "$TMP/s1.txt" )'"; fi
 # 2
 run --situ=a.c,e.c > "$TMP/s2.txt"; S2="$( situ_rows "$TMP/s2.txt" )"
@@ -130,7 +131,7 @@ mcp cochange '"file":"a.c"' | mtext > "$TMP/m3.json"
 if python3 - "$TMP/m1.json" <<'PY_EOF'
 import json, sys
 d = json.load( open( sys.argv[1] ) )
-sys.exit( 0 if d.get( 'cochange_floor' ) == 3 and [ ( r.get( 'file' ), r.get( 'together' ) ) for r in d.get( 'forgotten', [] ) ] == [ ( 'c.c', 3 ) ] else 1 )
+sys.exit( 0 if d.get( 'cochange_floor' ) == 3 and [ ( r.get( 'file' ), r.get( 'together' ) ) for r in d.get( 'forgotten', [] ) ][:1] == [ ( 'c.c', 3 ) ] else 1 )
 PY_EOF
 then ok "5. MCP situational_awareness(a.c): cochange_floor 3, forgotten [c.c together 3]"
 else no "5. MCP situational_awareness: $( grep -oE '"cochange_floor":[0-9]+|"forgotten":\[[^]]*\]' "$TMP/m1.json" | tr '\n' ' ' )"; fi
@@ -140,12 +141,14 @@ else no "6. MCP cochange: $( head -c 200 "$TMP/m3.json" )"; fi
 run --pack-task='fix `alpha_widget_resize` in a.c and `echo_gadget_rotate` in e.c' > "$TMP/p2.xml"
 mv7="$( python3 - "$TMP/m1.json" "$TMP/m2.json" <<'PY_EOF'
 import json, sys
-print( " ".join( ",".join( r['file'] for r in json.load( open( p ) ).get( 'forgotten', [] ) ) or "NONE" for p in sys.argv[1:] ) )
+f = [ [ r['file'] for r in json.load( open( p ) ).get( 'forgotten', [] ) ] for p in sys.argv[1:] ]
+print( ( f[0] or [ "NONE" ] )[0], ",".join( f[1] ) or "NONE" )
 PY_EOF
 )"
-if [ "$( situ_rows "$TMP/s1.txt" | sed 's/:[0-9?]*//g' )" = c.c ] && [ "$( situ_rows "$TMP/s2.txt" | sed 's/:[0-9?]*//g' )" = c.c ] \
-   && [ "$( rows_of cochange "$TMP/c1.xml" )" = c.c:3 ] && [ "$( rows_of partners "$TMP/p1.xml" )" = c.c:3 ] && [ "$( rows_of partners "$TMP/p2.xml" )" = c.c:3 ] \
-   && [ "$mv7" = "c.c c.c" ]; then ok "7. no row moved: c.c alone on every surface, one seed and two"
+first(){ echo "${1%% *}"; }
+if [ "$( first "$( situ_rows "$TMP/s1.txt" )" )" = c.c:3 ] && [ "$( situ_rows "$TMP/s2.txt" )" = c.c:3 ] \
+   && [ "$( first "$( rows_of cochange "$TMP/c1.xml" )" )" = c.c:3 ] && [ "$( first "$( rows_of partners "$TMP/p1.xml" )" )" = c.c:3 ] && [ "$( rows_of partners "$TMP/p2.xml" )" = c.c:3 ] \
+   && [ "$mv7" = "c.c c.c" ]; then ok "7. no support row moved: c.c first on every surface, and alone with two seeds"
 else no "7. rows moved: situ '$S1' / '$S2', cochange '$( rows_of cochange "$TMP/c1.xml" )', partners '$( rows_of partners "$TMP/p1.xml" )' / '$( rows_of partners "$TMP/p2.xml" )', mcp '$mv7'"; fi
 # 8
 det=1
