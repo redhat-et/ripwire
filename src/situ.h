@@ -991,8 +991,16 @@ inline void writeSituSiblingRows( std::FILE* out, const SituSiblings& sibs, Path
 
 // F2: the two causes the old "(none, or no git history)" conflated, told apart by the only fact that
 // separates them — how many commits the window actually contained.
-inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits )
+// `bulkSkipped`: the window's commits the 30-file cut left out. A window whose every commit was bulk mined 0 sets, and that zero is
+// the cut's, not missing history, so the line says which.
+inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits, std::uint32_t bulkSkipped = 0 )
 {
+    if( coCommits == 0 && bulkSkipped > 0 )
+    {
+        rw::emitTo( out, "        (the window above held {} commits, every one over 30 indexed files and left out as bulk — this zero is NOT a "
+                         "measurement of coupling)\n", bulkSkipped );
+        return;
+    }
     if( coCommits == 0 )
     {
         rw::emitRaw( out, "        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)\n" );
@@ -1216,7 +1224,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // (3) co-change partners NOT in the diff — "you usually edit these together; did you forget?"
     // A4-P10: mine the commit file-sets ONCE (not one `git log` popen per probed file) and answer every probe
     // from the shared sets — identical result (mining is deterministic for a fixed HEAD), no subprocess storm.
-    const auto                     coSets     = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    CommitWindowCensus             coCensus;   // SITU-BULK: a commit over 30 indexed files is dropped, and the drop is disclosed below
+    const auto                     coSets     = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot, &coCensus );
     CoCouplingCache                coCoupling( ing );   // prcontext-hoist: one include-coupling build for every probe
     const std::string              coWindow   = defaultWindowLabel( root, "18mo" );   // F2: see SituationFacts::coWindow
     const std::size_t              coCommits  = coSets.size();
@@ -1264,13 +1273,15 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         : std::string();
     // 0.6.7 shallow tail: the window was mined from THIS root's fetched history; on a depth-limited clone the line carries the
     // shallow="1" the cochange verb's root carries (the at: line's +shallow suffix names the state, this names the measurement).
-    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}{}:\n",
-                  partners.size(), coWindow.c_str(), coCommits, gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
+    // SITU-BULK: commits= counts the kept sets; bulk_skipped= the commits the 30-file cut left out (present only when some were).
+    const std::string bulkCut = coCensus.bulkDropped > 0 ? " bulk_skipped=\"" + std::to_string( coCensus.bulkDropped ) + "\"" : std::string();
+    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}{}{}:\n",
+                  partners.size(), coWindow.c_str(), coCommits, bulkCut.c_str(), gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
                   situShowingNote( partnerShown, partners.size(), "files",
                                    situNextInvocation( page.selector, partners.size() ) ).c_str() );
     if( partners.empty() )
     {
-        writeSituEmptyCochangeLine( out, coCommits );
+        writeSituEmptyCochangeLine( out, coCommits, coCensus.bulkDropped );
     }
     for( std::size_t i = partnerPage.begin; i < partnerPage.end; ++i )
     {
@@ -1311,6 +1322,7 @@ struct SituationFacts
     std::string                                   coWindow;      // the window label its co-change was mined in ("18mo@HEAD"), empty only if never mined
     std::size_t                                   coCommits = 0; // commits that window actually contained — 0 ⇒ the zero above is not a measurement
     bool                                          shallow = false; // 0.6.7: the root is a depth-limited clone — coCommits and hotspots' churn count only the fetched commits
+    std::uint32_t                                 coBulkSkipped = 0; // SITU-BULK: the window's commits over 30 indexed files, left out of coCommits and every partner
     std::vector<std::pair<std::uint32_t, std::uint64_t>> hotspots; // (changed file, cx×churn score) for high-risk changed files (score desc, path asc)
     std::vector<std::string>                      modulesTouched; // distinct TOP-LEVEL directory of each changed file (sorted)
     // THE SYMBOL-GRANULAR CHANGE SET's own facts (situ.h computeSymbolChangeSet) — carried on the FACTS, not
@@ -1405,12 +1417,14 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     //     changed file once (capped), deterministically.
     // A4-P10: mine the commit file-sets ONCE and answer every probe from the shared sets (was one `git log`
     // popen per probed file — up to 40 — the O(files)-subprocess storm). Deterministic for a fixed HEAD.
-    const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30 );
+    CommitWindowCensus             coCensus;   // SITU-BULK: the 30-file cut's drops travel with the window (coBulkSkipped)
+    const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, UINT32_MAX, &coCensus );
     CoCouplingCache                coCoupling( ing );   // prcontext-hoist: one include-coupling build for every probe
     facts.declDef  = declDefPartners( ing, changedFile );  // F3: same relationship, same rule, one implementation
     facts.siblings = lexicalSiblings( ing, changedFile );   // L-D: the same list the CLI report's [1] prints
     facts.coWindow = defaultWindowLabel( root, "18mo" );   // F2: the composed zero's window travels WITH the zero
     facts.coCommits = coSets.size();
+    facts.coBulkSkipped = coCensus.bulkDropped;
     facts.shallow   = gitstamp::isShallow( root );         // 0.6.7: ...and so does its qualification (the one probe)
     HashMap<std::uint32_t, double> partnerDeg;
     std::uint32_t                  probed = 0;

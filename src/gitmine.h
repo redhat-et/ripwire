@@ -2486,11 +2486,12 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
 // `scope`: nullptr (default) reproduces the pre-flag behavior byte-for-byte — `--since=<since>` (a fixed
 // default date) is used exactly as before; a non-null *inactive* scope ALSO falls back to `<since>`; a
 // non-null *active* scope overrides `since` with the resolved --since=REV|DATE window (sinceLogArgs).
+// `outCensus` (optional) receives what the window held and what the maxFiles cut dropped, for a caller that discloses it.
 inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::string& root, const IngestResult& ing, const char* since, std::size_t maxFiles, const SinceScope* scope = nullptr,
-                                                                  std::uint32_t onlyRoot = UINT32_MAX )
+                                                                  std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitCommitFileSets (git log --name-only popen)" );
-    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot );
+    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot, outCensus );
 }
 
 // B3 (co-change prior boost): per-commit changed-file sets over the LAST `commitCount` commits reachable
