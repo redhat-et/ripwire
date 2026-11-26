@@ -1185,7 +1185,8 @@ struct McpVerbFields
 {
     const char* verb;
     const char* fields;   // space-separated, in inputSchema order
-    enum class Effect : std::uint8_t { ReadOnly, Writes, Destructive };
+    // Writes = a repeat with the same arguments has no further effect (idempotentHint); Appends = it writes AGAIN.
+    enum class Effect : std::uint8_t { ReadOnly, Writes, Destructive, Appends };
     Effect      effect = Effect::ReadOnly;
 };
 
@@ -1257,8 +1258,8 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "slice",                    "path symbol var flow depth legend" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },
-    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
-    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
+    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Appends },
+    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Appends },
 };
 
 // Dispatch-only ALIASES of advertised tools: a name tools/call answers that gets no separate tools/list
@@ -1650,6 +1651,61 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
 // annotations Codex uses when selecting and approving tools. The effect lives on kMcpVerbFields so a new
 // advertised verb cannot acquire a second, hand-maintained side-effect list. All ripwire tools are local to
 // the caller's workspace: none reaches an external/open-world service.
+// MCP 2025-06-18's `title`: the display name a host shows in place of the snake_case `name`. One row per advertised
+// tool; the consteval floor below fails the build when a kMcpVerbFields tool has none.
+struct McpToolTitle { const char* verb; const char* title; };
+
+inline constexpr McpToolTitle kMcpToolTitles[] = {
+    { "analyze", "Architecture map" },               { "rank_by", "Map by ranking signal" },
+    { "find_symbol", "Symbol neighborhood" },        { "find_referencing_symbols", "Direct callers" },
+    { "grep", "Literal search" },                    { "cochange", "Co-change partners" },
+    { "memory_recall", "Recall docs for a task" },   { "situational_awareness", "Diff situation report" },
+    { "mentions", "Docs naming a symbol" },          { "for", "Building blocks for a task" },
+    { "lego", "Interface implementors" },            { "owners", "File ownership" },
+    { "fetch_body", "Fetch symbol source" },         { "batch", "Batch read sweep" },
+    { "exemplar", "Exemplar to imitate" },           { "quality_delta", "Quality regressions" },
+    { "quality_baseline", "Pin quality baseline" },  { "impact", "Blast radius" },
+    { "uses", "Use sites" },                         { "affected", "Tests to run" },
+    { "path_between", "Call path A to B" },          { "connect", "Connect symbols" },
+    { "explore", "Task orientation bundle" },        { "from_trace", "Map a stack trace" },
+    { "edit_check", "Edit contract check" },         { "whereis", "Content across branches" },
+    { "stray_content", "Unmerged branch content" },  { "flags", "Built but dark features" },
+    { "doc_drift", "False doc claims" },             { "slice", "Variable def-use slice" },
+    { "replace_symbol_body", "Replace symbol body" },{ "insert_before_symbol", "Insert before symbol" },
+    { "insert_after_symbol", "Insert after symbol" },
+};
+
+consteval bool everyMcpToolHasTitle()
+{
+    for( const McpVerbFields& row : kMcpVerbFields )
+    {
+        bool found = false;
+        for( const McpToolTitle& t : kMcpToolTitles )
+        {
+            found = found || std::string_view( t.verb ) == std::string_view( row.verb );
+        }
+        if( !found )
+        {
+            return false;
+        }
+    }
+    return std::size( kMcpToolTitles ) == std::size( kMcpVerbFields );
+}
+static_assert( everyMcpToolHasTitle(), "a kMcpVerbFields tool has no kMcpToolTitles row (or a title row names no tool): tools/list would "
+                                       "advertise it without the display name every other tool carries" );
+
+inline std::string_view toolTitleFor( std::string_view verb )
+{
+    for( const McpToolTitle& t : kMcpToolTitles )
+    {
+        if( verb == std::string_view( t.verb ) )
+        {
+            return t.title;
+        }
+    }
+    return verb;
+}
+
 inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
 {
     McpVerbFields::Effect effect = McpVerbFields::Effect::ReadOnly;
@@ -1664,9 +1720,14 @@ inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
 
     const bool readOnly    = effect == McpVerbFields::Effect::ReadOnly;
     const bool destructive = effect == McpVerbFields::Effect::Destructive;
-    return "\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
+    // idempotentHint (audit 2026-11-26 item 8): a read repeats with no effect by construction; quality_baseline rewrites
+    // the same sidecar for the same HEAD, replace_symbol_body splices the same body over the same span (a renamed body
+    // refuses the repeat, file unchanged); only the two inserts insert again on every call.
+    const bool idempotent  = effect != McpVerbFields::Effect::Appends;
+    return "\"title\":\"" + std::string( toolTitleFor( verb ) ) + "\",\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
          + ",\"annotations\":{\"readOnlyHint\":" + ( readOnly ? "true" : "false" )
          + ",\"destructiveHint\":" + ( destructive ? "true" : "false" )
+         + ",\"idempotentHint\":" + ( idempotent ? "true" : "false" )
          + ",\"openWorldHint\":false}";
 }
 
