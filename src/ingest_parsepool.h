@@ -904,8 +904,51 @@ inline void mergeFamily( std::vector<RawFacts>& tFacts, std::vector<Row> RawFact
     }
 }
 
-// merge per-thread results into one RawFacts (cross-thread order is irrelevant — everything is
-// re-sorted by the model-build tail), one family at a time (mergeFamily).
+// The parse pool's worker count: one per core, or RIPWIRE_PARSE_THREADS=<n> workers (1 <= n <= kMaxParseWorkers). The
+// knob exists for the determinism gate (test/snapdeterminismcheck.sh): a one-worker run and a many-worker run of one
+// build must write the same bytes, and only a run that picks its worker count can show it. n may exceed the cores,
+// so a small CI runner still interleaves several workers. A value that is not a whole number in range is refused
+// with one stderr line, and the pool keeps one worker per core.
+inline constexpr unsigned kMaxParseWorkers = 256;
+inline unsigned parsePoolWorkers()
+{
+    const unsigned hw = std::max( std::thread::hardware_concurrency(), 1u );
+    const char* const text = std::getenv( "RIPWIRE_PARSE_THREADS" );
+    if( text == nullptr || *text == '\0' )
+    {
+        return hw;
+    }
+    const char* const end = text + std::strlen( text );
+    unsigned          n   = 0;
+    const auto [ ptr, ec ] = std::from_chars( text, end, n );
+    if( ec == std::errc{} && ptr == end && n >= 1 && n <= kMaxParseWorkers )
+    {
+        return n;
+    }
+    rw::emitTo( stderr, "ripwire: ignoring RIPWIRE_PARSE_THREADS=\"{}\" (not a whole number in 1..{}) — one worker per core\n", text, kMaxParseWorkers );
+    return hw;
+}
+
+// DET-INCLUDES: the families the model-build tail does NOT re-sort (ingest.cpp moves includes, constant opens and
+// construct hits into the IngestResult as they are) are put in fileId order here, once, after the merge. A worker
+// emits one file's rows in one deterministic sequence (a cache hit replays the record, which stored that sequence),
+// but the threads' interleave of FILES depends on the work-stealing schedule, so the merged order changed from run
+// to run and the warm snapshot's MODEL bytes with it. The sort is stable, so (fileId, capture position) is the total
+// order: equal-file rows keep the sequence their worker emitted. It is the (fileId, ...) order every other per-file
+// table already has (editpreview.h splices at the fileId seam on that assumption). A single-thread pool usually
+// merges in order already, and the is_sorted pass then costs one read.
+template <typename Row>
+inline void orderByFile( std::vector<Row>& rows )
+{
+    if( !std::ranges::is_sorted( rows, {}, &Row::fileId ) )
+    {
+        std::ranges::stable_sort( rows, {}, &Row::fileId );
+    }
+}
+
+// merge per-thread results into one RawFacts, one family at a time (mergeFamily). The cross-thread order is the
+// schedule's: refs, defs, binds, FFI aliases and both route families are re-sorted by the model-build tail
+// (ingest_model.h), and the three it keeps as they are get their fileId order here (orderByFile).
 inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: merge per-thread facts" );
@@ -919,14 +962,18 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     mergeFamily( tFacts, &RawFacts::routeUses, raw.routeUses );
     mergeFamily( tFacts, &RawFacts::constOpens, raw.constOpens );
     mergeFamily( tFacts, &RawFacts::constructs, raw.constructs );
+    orderByFile( raw.incs );
+    orderByFile( raw.constOpens );
+    orderByFile( raw.constructs );
     return raw;
 }
 
 // 2) parse every file IN PARALLEL — one TSParser per worker thread (parsers aren't thread-safe),
 //    per-thread raw lists merged after. Determinism is preserved: defs/refs are re-sorted by the
-//    model-build tail, so collection order is irrelevant. Also owns the two flags that ride the
-//    pool (the Win-2 dirty flag and the A1 reparsed counter), the install/gate-open moment, and
-//    the dirty-gated saveCache — everything between the prewarm launch and the doc post-pass.
+//    model-build tail, and the families it keeps as they are are put in fileId order at the merge
+//    (orderByFile). Also owns the two flags that ride the pool (the Win-2 dirty flag and the A1
+//    reparsed counter), the install/gate-open moment, and the dirty-gated saveCache — everything
+//    between the prewarm launch and the doc post-pass.
 // WARM-DIRECT: after the pool join, parse the hits whose cached record failed in a worker (CacheRecords::decode: a short
 // read, a torn record, a corrupt body, a key that moved). The prewarm counted them as hits, so their grammar may not be
 // compiled; the pool is joined, so installing it here is the single-writer moment compiledQueryCache() needs. They run
@@ -1039,12 +1086,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // Entries pre-filled by the prewarm miss-detection pass (cache-present files that were read+hashed
         // there) stay as-is. Workers fill the remaining 0-valued entries for files they process.
         ASSUME( scan.hash.size() == nfiles );
-        unsigned hw = std::thread::hardware_concurrency();
-        if( hw == 0 )
-        {
-            hw = 1;
-        }
-        const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
+        const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( parsePoolWorkers(), nfiles ) );
 
         std::vector<RawFacts>   tFacts( nthreads );
         std::vector<const CachedRecordHead*> cacheCandidateFacts( nfiles, nullptr );
@@ -1191,10 +1233,10 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )
         {
             const std::size_t reparsed = reparsedCount.load( std::memory_order_relaxed );
-            rw::emitTo( stderr, "ripwire: cache-stats reparsed={} reused={} files={} cached_records={} blob_entries={} warm_growths={}\n",
+            rw::emitTo( stderr, "ripwire: cache-stats reparsed={} reused={} files={} cached_records={} blob_entries={} warm_growths={} parse_threads={}\n",
                           reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles,
                           cacheStats.recordsRead - std::min( lateMisses, cacheStats.recordsRead ), cacheStats.blobEntries,
-                          warmGrowths.load( std::memory_order_relaxed ) );
+                          warmGrowths.load( std::memory_order_relaxed ), nthreads );
         }
 
         // Win 2: rewrite cache only when at least one file changed (dirty flag set by workers above).

@@ -1121,6 +1121,7 @@ for _g in \
     sliceflowcheck \
     sliceflowsenscheck \
     slotjoincheck \
+    snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \
     statgatecheck \

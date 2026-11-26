@@ -180,6 +180,7 @@ kHeldAskedHitsMax	pending:B43 grep held-row bound, not audited yet (LARGE-PARTIA
 kMaxAffixSet	pending:B43 search affix-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
 kMaxAstQueryNesting	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxEditDistance	none:the did-you-mean edit-distance threshold, a suggestion and never an answer row
+kMaxParseWorkers	none:the ceiling of the RIPWIRE_PARSE_THREADS knob (parse-pool worker count); the merge orders every family, so the answer does not depend on it (snapdeterminismcheck), and no row is cut
 kMaxExactLen	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
 kMaxExactSet	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
 kMaxGitWorkers	sink:DISCLOSE
