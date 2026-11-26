@@ -56,7 +56,7 @@ One **global** file, all repos:
 | Change the sweep threshold | `RIPWIRE_SWEEP_N=4` (default 3) |
 | Change the dedup re-arm cooldown | `RIPWIRE_DEDUP_COOLDOWN=N` (default 20 — eligible observations of the same class since the last delivery before it can fire again) |
 | Change the per-class delivery cap | `RIPWIRE_DEDUP_CAP=N` (default 3 — per tier; see [Dedup/cooldown policy](#dedup-cooldown-policy)) |
-| Turn the before-the-first-edit check ON | `RIPWIRE_FIRST_EDIT=1` or `first_edit=1` (default **off**, pending an owner call; off, the first edit's row reads `nudge=none` exactly as before) |
+| Force the before-the-first-edit check | `RIPWIRE_FIRST_EDIT=1\|0` or `first_edit=1\|0` (env over file; logged `first_edit=forced-on\|forced-off`). Unforced: randomized per session while counting is on, off while counting is off — see [The 2x2](#the-2x2) |
 | Change its hard deadline | `RIPWIRE_FIRST_EDIT_MS=N` (default 2000; past it the agent gets one `skipped: timeout` line) |
 
 The hook is registered once per user but runs in whatever repository the session is in, so every row
@@ -136,9 +136,14 @@ baseline recomputation actually needs.
 Rerun `bench/substitution_report.py` against the cleaned copy; any baseline taken before the scrub is
 a reading off a contaminated instrument.
 
-## The row schema (v3)
+## The row schema (v4)
 
 One JSON object per line. Field order is stable; new fields are added at the end and bump `v`.
+
+**v3 → v4 (2026-11-26, §FACTORIAL).** Two fields after `arm`: `primer` (the same value as `arm`, named for what it
+now means) and `first_edit` (the session's first-edit CHECK arm: `on` · `off` · `forced-on` · `forced-off`). Every
+v3 field is unchanged, and so is every session's `arm`: the primer hash was not touched. A v3 row has no
+`first_edit`, so it sits outside the 2x2 and inside the primer comparison exactly as before.
 
 **v2 → v3 (2026-09-05, terminality round A).** Three fields added at the end — `agent`, `surface`,
 `target` — and two things became VISIBLE that no v2 row could see, which is the real boundary:
@@ -172,7 +177,7 @@ guess.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `v` | int | Schema version. `3`. |
+| `v` | int | Schema version. `4`. |
 | `ts` | string | ISO-8601 UTC, **second** resolution. Not a tiebreaker — see `seq`. |
 | `seq` | int | Per-session monotonic counter, 1-based. The ordering key. |
 | `session` | string | The agent's session id, or `ppid<N>` when the payload carries none. |
@@ -182,10 +187,12 @@ guess.
 | `class` | string | Fine classification — the table below. |
 | `family` | string | `ripwire` · `native` · `edit` · `git` · `other` · `meta`. |
 | `nudged` | 0/1 | A nudge was actually **delivered** (text emitted) on this call. Always 0 in the `control` arm. |
-| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. Since 2026-11-26, with the opt-in `first_edit=1`, a native-edit row can also read `first-edit` (the before-the-first-edit check was delivered; `nudged=1`), `first-edit-plain` (`nudged=1`: the deadline fell inside the preview, so the current-tree check was delivered with a "preview did not finish" note), `first-edit-timeout` (the deadline passed before even the current-tree check finished; the agent got the one-line skip), `first-edit-nosym` (no indexed definition held the edit; silent) or `first-edit-control` (the control arm's counterfactual of the same moment). At most one such row per session, in both arms, so a readout can cut each session at it. |
+| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. Since 2026-11-26 a native-edit row can also read `first-edit` (the before-the-first-edit check was delivered; `nudged=1`), `first-edit-plain` (`nudged=1`: the deadline fell inside the preview, so the current-tree check was delivered with a "preview did not finish" note), `first-edit-timeout` (the deadline passed before even the current-tree check finished; the agent got the one-line skip), `first-edit-nosym` (no indexed definition held the edit; silent) or `first-edit-control` (a hashed check-off session's counterfactual of the same moment; since §FACTORIAL this is the CHECK arm's control, not the primer's). At most one such row per session, in both check arms, so a readout can cut each session at it. |
 | `post_nudge` | 0/1 | A nudge had **already** fired (or, in the control arm, would-have-fired) earlier in this session, before this call. |
 | `post_sweep` | 0/1 | A **sweep escalation** had already fired (or would-have-fired) earlier in this session. |
 | `arm` | string | `treatment` (default) or `control`. See [The A/B toggle](#the-ab-toggle) for how a session lands on one or the other. |
+| `primer` | string | v4. The PRIMER arm, the same value as `arm`. |
+| `first_edit` | string | v4. The first-edit CHECK arm, independent of the primer: `on` / `off` (hashed, while counting is on), `forced-on` / `forced-off` (`first_edit=1\|0` or `RIPWIRE_FIRST_EDIT`). See [The 2x2](#the-2x2). |
 | `detail` | string | The command line, file path, or pattern — control characters stripped, 200 chars. An MCP row: the verb's `symbol` (else `task` / `query` / `pattern`) argument, with ` post_check=0` appended when an edit twin was called with `post_check:false` — the MCP spelling of `--no-post-check`. |
 | `agent` | string | v3. The runner that drove the hook: `claude` (the Claude Code hook's default), `codex` (`hooks/ripwire-codex-nudge.sh` exports `RIPWIRE_METER_AGENT=codex`), or whatever `RIPWIRE_METER_AGENT` names — `bench/agentloop` rows carry their runner (`codex`, `opencode`, `claude`). |
 | `surface` | string | v3. How the call was made: `cli` (the Bash tool), `mcp` (a `mcp__ripwire__*` verb), `native` (a built-in file tool: Read/Grep/Glob/Edit/…), `meta` (a session boundary). |
@@ -658,6 +665,29 @@ credited — concentration (skill and `CLAUDE.md` text), never the PreToolUse ho
 from here is primer-vs-no-primer, and the PreToolUse path is byte-identical in both arms.
 `RIPWIRE_SWEEP` / `sweep=` still resolve, and still gate the sweep tier's **counters**; they no longer
 gate any delivery, because there is none left to gate.
+
+## The 2x2: primer arm x first-edit check arm {#the-2x2}
+
+Since 2026-11-26 (owner ruling) a session carries two INDEPENDENT assignments, so there are four cells: neither,
+primer only, check only, both.
+
+| | how a session is assigned | forced by | logged as |
+| --- | --- | --- | --- |
+| primer | `cksum` of the session id, mod 100, `< 50` = control — **unchanged**, so every id keeps its historical arm | `arm=treatment\|control` / `RIPWIRE_METER_ARM` | `arm`, `primer` |
+| first-edit check | 32-bit FNV-1a of `ripwire-first-edit/v1:` + session id, mod 100, `< 50` = off — only while counting is on; off while it is off | `first_edit=1\|0` / `RIPWIRE_FIRST_EDIT` | `first_edit` = `on`/`off`/`forced-on`/`forced-off` |
+
+**Why a different hash, not just a salt.** `cksum` is a CRC, and a CRC is linear: CRC(salt‖id) and CRC(id) differ by an
+XOR constant that depends only on the lengths, so a salted CRC would be correlated with the primer's. FNV-1a's
+multiply breaks the linearity. Over 1,000 fixed UUID-shaped ids the cells are 233 / 257 / 255 / 255 (control-off,
+control-on, treatment-off, treatment-on), which `test/hookcheck.sh` FX2 holds to 250 ± 60. That bound is 4.4 binomial
+standard deviations at p = 0.25, and the ids are fixed, so the counts are a fixed property of the two hashes, not a
+sample. `hooks/ripwire-nudge.sh --arm-cells` prints the assignment for any list of ids.
+
+**Reading it.** `bench/substitution_report.py` prints the table (sessions per cell) after the `by arm` block, plus a
+pooled-call rate per cell. Forced check sessions are counted apart, never in a randomized cell. A session whose rows
+disagree on a label is dropped. The PRIMER comparison every earlier readout used is still the `by arm` block: it reads
+`arm` and so pools over the check arm, which is a valid primer comparison because the check arm is independent of
+it. The CHECK effect is the column difference, pooled over the primer.
 
 ## The A/B toggle {#the-ab-toggle}
 
