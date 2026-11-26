@@ -152,7 +152,7 @@ else
     no "C counter: rows='${rows:-absent}' read='${rd:-absent}' probed='${pr:-absent}' skipped='${sk:-absent}' (main has no [warmsnap] deps line)"
 fi
 n_dep_lines="$( grep -c '^\[warmsnap\] deps ' "$TMP/out/base.3.err" )"
-[ "$n_dep_lines" = 1 ] && ok "C one [warmsnap] deps line per served call" || no "C expected one [warmsnap] deps line on the served call, saw $n_dep_lines"
+if [ "$n_dep_lines" = 1 ]; then ok "C one [warmsnap] deps line per served call"; else no "C expected one [warmsnap] deps line on the served call, saw $n_dep_lines"; fi
 if [ -n "$(cat "$TMP/out/base.1.err" | grep '^\[warmsnap\] deps ')" ]; then no "C the cold run (no snapshot) printed a deps line"; else ok "C the cold run (nothing stored) prints no deps line"; fi
 
 # ── I: byte identity of the served answer ───────────────────────────────────────────────────────────────────────
@@ -163,8 +163,7 @@ ident(){
     local v; v="$( verdict id.w )"
     if [ "$v" != "graph=loaded graph_why=ok" ]; then no "I $label: not served ($v)"; return; fi
     if [ "$( cat "$TMP/out/id.c.rc" )" != 0 ]; then no "I $label: the --no-cache reference exited $( cat "$TMP/out/id.c.rc" )"; return; fi
-    same id.w id.c && ok "I $label: served == --no-cache ($( wc -c <"$TMP/out/id.w.out" | tr -d ' ' ) B, skipped=$( dep id.w skipped ))" \
-                   || no "I $label: served differs from --no-cache: $( diff "$TMP/out/id.w.out" "$TMP/out/id.c.out" | head -3 | tr '\n' ' ' )"
+    if same id.w id.c; then ok "I $label: served == --no-cache ($( wc -c <"$TMP/out/id.w.out" | tr -d ' ' ) B, skipped=$( dep id.w skipped ))"; else no "I $label: served differs from --no-cache: $( diff "$TMP/out/id.w.out" "$TMP/out/id.c.out" | head -3 | tr '\n' ' ' )"; fi
 }
 ident "map"
 ident "--for" --for="where is the greeting of module a returned"
@@ -191,13 +190,13 @@ done
 expect="graph=built graph_why=dep"
 for a in R N T G A L; do
     v="$( verdict "h$a.4" )"
-    [ "$v" = "$expect" ] && ok "$a refused as main refuses ($v)" || no "$a expected '$expect', got '$v'"
-    same "h$a.4" "h$a.c" && ok "$a the answer after the edit equals --no-cache" || no "$a the answer after the edit differs from --no-cache"
+    if [ "$v" = "$expect" ]; then ok "$a refused as main refuses ($v)"; else no "$a expected '$expect', got '$v'"; fi
+    if same "h$a.4" "h$a.c"; then ok "$a the answer after the edit equals --no-cache"; else no "$a the answer after the edit differs from --no-cache"; fi
 done
 v="$( verdict hU.4 )"
-[ "$v" = "graph=loaded graph_why=ok" ] && ok "U touched, bytes kept: still served ($v), as main serves it" || no "U expected the graph served, got '$v'"
-[ "$( dep hU.4 read )" = $(( rd + 1 )) ] && ok "U the touched file was read again (read=$( dep hU.4 read ))" || no "U expected read=$(( rd + 1 )), got '$( dep hU.4 read )'"
-same hU.4 hU.c && ok "U the served answer equals --no-cache" || no "U the served answer differs from --no-cache"
+if [ "$v" = "graph=loaded graph_why=ok" ]; then ok "U touched, bytes kept: still served ($v), as main serves it"; else no "U expected the graph served, got '$v'"; fi
+if [ "$( dep hU.4 read )" = $(( rd + 1 )) ]; then ok "U the touched file was read again (read=$( dep hU.4 read ))"; else no "U expected read=$(( rd + 1 )), got '$( dep hU.4 read )'"; fi
+if same hU.4 hU.c; then ok "U the served answer equals --no-cache"; else no "U the served answer differs from --no-cache"; fi
 
 # R's counter: the racy row is read, every other settled row still skipped
 if [ "$( dep hR.3 read )" = $(( rd + 1 )) ] && [ "$( dep hR.3 skipped )" = $(( sk - 1 )) ]; then
@@ -209,15 +208,14 @@ fi
 # ── REF: main's verdicts, and an older-format snapshot ─────────────────────────────────────────────────────────
 if [ -n "$REF" ]; then
     for a in $ARMS; do
-        [ "$( verdict "r$a.4" )" = "$( verdict "h$a.4" )" ] && ok "REF $a verdict equals main's ($( verdict "r$a.4" ))" \
-                                                              || no "REF $a: main says '$( verdict "r$a.4" )', this binary '$( verdict "h$a.4" )'"
+        if [ "$( verdict "r$a.4" )" = "$( verdict "h$a.4" )" ]; then ok "REF $a verdict equals main's ($( verdict "r$a.4" ))"; else no "REF $a: main says '$( verdict "r$a.4" )', this binary '$( verdict "h$a.4" )'"; fi
     done
     run vref.4 vref "$BIN"; nocache vref.c vref
     case "$( grep '^ripwire: snapshot-stats ' "$TMP/out/vref.4.err" | tail -1 )" in
         *why=version*) ok "REF a snapshot main wrote is refused here as why=version" ;;
         *) no "REF main's snapshot was not refused by version: $( grep '^ripwire: snapshot-stats ' "$TMP/out/vref.4.err" | tail -1 )" ;;
     esac
-    same vref.4 vref.c && ok "REF the answer over main's snapshot equals --no-cache" || no "REF the answer over main's snapshot differs from --no-cache"
+    if same vref.4 vref.c; then ok "REF the answer over main's snapshot equals --no-cache"; else no "REF the answer over main's snapshot differs from --no-cache"; fi
 else
     printf '  INFO  REF arms not run: set RIPWIRE_REF_BIN to main'"'"'s binary to measure its verdicts beside these\n'
 fi
@@ -235,8 +233,7 @@ if [ "$FAULTS" = 1 ]; then
         mutate "m$a"; run "m$a.4" "m$a" "$BIN"
         v="$( verdict "m$a.4" )"
         # red = the WRONG acceptance itself: the edited dependency served as if unchanged (anything else is not this mutant)
-        [ "$v" = "graph=loaded graph_why=ok" ] && ok "M$a RIPWIRE_FAULT_WARMSNAP_DEPS_$f turns $a red (the edited graph is served: $v)" \
-                                              || no "M$a the $f mutant did not serve the stale graph ($v): $a cannot see that rule"
+        if [ "$v" = "graph=loaded graph_why=ok" ]; then ok "M$a RIPWIRE_FAULT_WARMSNAP_DEPS_$f turns $a red (the edited graph is served: $v)"; else no "M$a the $f mutant did not serve the stale graph ($v): $a cannot see that rule"; fi
     done
 else
     printf '  SKIP  mutants: this %s binary compiles fault switches out (NDEBUG); the plain-flavour leg proves them\n' "$FLAVOUR"
