@@ -1142,6 +1142,7 @@ for _g in \
     swiftshapecheck \
     tagspredicatecheck \
     tailsymtermscheck \
+    tanglecapcheck \
     tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \
