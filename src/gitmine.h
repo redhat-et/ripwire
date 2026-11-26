@@ -899,15 +899,26 @@ inline void noteGitHistoryCensus( const GitHistoryCensus& c )
     sink.most.agentCommits = std::max( sink.most.agentCommits, c.agentCommits );
     sink.most.exactMoves   = std::max( sink.most.exactMoves, c.exactMoves );
 }
-inline GitHistoryCensus gitHistoryCensusSeen()
+// A long-lived server answers many requests: each one starts the sink empty (mcp.h, beside the _history_cut mark), so its
+// _history_policy says what THAT request's walks read, never a count left over from an earlier call on another root.
+// What the sink holds; `andReset` empties it in the same lock (resetGitHistoryCensus).
+inline GitHistoryCensus gitHistoryCensusSeen( bool andReset = false )
 {
     GitHistoryCensusSink&             sink = gitHistoryCensusSink();
     const std::lock_guard<std::mutex> hold{ sink.lock };
-    return sink.most;
+    const GitHistoryCensus            seen = sink.most;
+    if( andReset )
+    {
+        sink.most = GitHistoryCensus{};
+    }
+    return seen;
 }
+inline void resetGitHistoryCensus() { gitHistoryCensusSeen( true ); }
 
-// The one sentence the CLI prints after a history-signal verb's answer. "" when the walks left nothing out and followed
-// nothing: a zero is "none found", and an answer with nothing to qualify carries no clause.
+// The one sentence the CLI prints after a history-signal verb's answer, and the MCP envelope's _history_policy. "" when the walks
+// left nothing out and followed nothing: a zero is "none found", and an answer with nothing to qualify carries no clause. It rides
+// inside an XML comment, where `--` is not well-formed, so it names the flag without its dashes ("the include-bots flag"), and
+// main.cpp still passes it through xmlCommentText so no later edit can break the document.
 inline std::string gitHistoryPolicySentence()
 {
     const GitHistoryCensus seen   = gitHistoryCensusSeen();
@@ -920,9 +931,9 @@ inline std::string gitHistoryPolicySentence()
     }
     const std::string botPart = gitIncludeBots()
         ? std::format( "bots_included={}: bot-authored commits (a [bot] name or email, or a listed automation account) were KEPT in churn and "
-                       "co-change, as --include-bots asks", bots )
+                       "co-change, as the include-bots flag asks", bots )
         : std::format( "bots_skipped={}: bot-authored commits (a [bot] name or email, or a listed automation account) were left out of churn "
-                       "and co-change; --include-bots keeps them", bots );
+                       "and co-change; the include-bots flag keeps them", bots );
     return std::format( "history_policy {}. agent_commits={}: kept commits whose Co-Authored-By trailer names a coding agent. renames={}: exact "
                         "file moves, which add no churn or co-change, and each moved file's older history is followed to its current path; a "
                         "block of lines moved inside or between files is one edit of each file it touches. Each count is the most any one "

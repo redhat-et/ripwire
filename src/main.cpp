@@ -4605,6 +4605,10 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
 // for a secondary lens (the map's churn=, --for's co-change boost) apply the same policy and do not repeat the sentence.
 static bool historySignalVerb( const rw::Config& cfg ) noexcept
 {
+    if( cfg.mcp || cfg.lsp || !cfg.listen.empty() )
+    {
+        return false;   // a server answers per request: the MCP envelope's _history_policy (mcp.h), never one line at exit
+    }
     return cfg.hotspots || cfg.cochange || cfg.situ || cfg.qualityDelta
         || cfg.rankBy == rw::RankBy::Churn || cfg.rankBy == rw::RankBy::ChurnDecay;
 }
@@ -4623,7 +4627,7 @@ static void discloseHistoryPolicy( const rw::Config& cfg, char** argv )
     // the same stream rule as history_cut (discloseGitWalkCuts): a comment where the answer can hold one, never on a protocol stream
     if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
     {
-        rw::emitTo( stdout, "<!--{}-->\n", sentence.c_str() );
+        rw::emitTo( stdout, "<!--{}-->\n", rw::xmlCommentText( sentence ) );   // `--` is not well-formed in a comment
     }
     else
     {

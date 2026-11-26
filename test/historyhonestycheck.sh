@@ -38,6 +38,8 @@
 #  11. determinism: two --hotspots runs byte-identical.
 #  12. the combined-diff walk asks git for no rename/copy detection, --follow, -B, pickaxe or --diff-filter (source
 #      AND received argv, with a mutant per flag), and kGitLogRecordFormat is pinned.
+#  13. every verb that prints the history_policy sentence passes xmllint (a `--` inside the comment broke them all).
+#  14. MCP: two cochange calls in one session on different roots; the second carries none of the first's counts.
 set -u
 export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -255,6 +257,47 @@ done
 [ "$mut_src_ok" = "$nmut" ] && [ "$mut_argv_ok" = "$nmut" ] \
     && ok "mutation control: each of the $nmut forbidden flags, injected into the source and into the argv, is refused" \
     || no "mutation control: only $mut_src_ok/$nmut source and $mut_argv_ok/$nmut argv mutants were refused — the arm above can pass blind"
+
+# ── 13. every verb that prints the history_policy sentence still prints a well-formed document ──────────────────
+# The sentence rides in an XML comment, where `--` is not well-formed: it once named the flag with its dashes and every one
+# of these answers failed xmllint whenever it printed (found by the PACK-PARTNERS lane on #777). Each arm requires the
+# sentence to be PRESENT, so a verb that stopped printing it cannot pass by saying nothing. --situ answers in prose, not XML
+# (its first line is a heading), so it is not an xmllint subject; arm 8 holds its sentence.
+if command -v xmllint >/dev/null 2>&1; then
+    ( cd "$R1" && printf '// dirty\n' >> human1.cpp )   # --quality-delta reads the working tree vs HEAD; one human edit
+    for v in "--hotspots" "--cochange" "--rank-by=churn" "--rank-by=churn-decay" "--quality-delta" "--hotspots --include-bots"; do
+        # shellcheck disable=SC2086
+        "$BIN" "$R1" $v > "$TMP/x.out" 2>/dev/null
+        if ! grep -q 'history_policy' "$TMP/x.out"; then
+            no "xmllint: $v printed no history_policy sentence (the arm would be vacuous)"
+        elif xmllint --noout "$TMP/x.out" 2>"$TMP/x.err"; then
+            ok "xmllint: $v is well-formed with the history_policy sentence in it"
+        else
+            no "xmllint: $v is not well-formed: $( head -c 200 "$TMP/x.err" )"
+        fi
+    done
+    git -C "$R1" checkout -q -- human1.cpp
+else
+    no "xmllint not found — the well-formedness arm cannot run"
+fi
+
+# ── 14. a long-lived MCP server reports each request's own counts ────────────────────────────────────────────────
+# The census is a process-wide maximum; a server that never reset it would answer a later request on a bot-free root with
+# the earlier root's bots_skipped=50. Two cochange calls in ONE session: the bot fixture, then a clean repo.
+R2="$TMP/clean"; mkdir -p "$R2"; git -C "$R2" init -q -b main
+for i in 1 2 3; do mkfn "clean${i}Fn" > "$R2/c$i.cpp"; printf '// e\n' >> "$R2/c1.cpp"; ( cd "$R2" && GIT_AUTHOR_NAME=Cleo GIT_AUTHOR_EMAIL=c@x.com GIT_COMMITTER_NAME=Cleo GIT_COMMITTER_EMAIL=c@x.com git add -A && GIT_AUTHOR_NAME=Cleo GIT_AUTHOR_EMAIL=c@x.com GIT_COMMITTER_NAME=Cleo GIT_COMMITTER_EMAIL=c@x.com git commit -qm "c$i" ); done
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"cochange\",\"arguments\":{\"path\":\"$R1\",\"file\":\"botfile.cpp\"}}}" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"cochange\",\"arguments\":{\"path\":\"$R2\",\"file\":\"c1.cpp\"}}}" \
+  | ( cd "$R1" && perl -e 'alarm 120; exec @ARGV' "$BIN" "$R1" --mcp > "$TMP/mcp.out" 2>/dev/null )
+MCP1="$( grep '"id":2' "$TMP/mcp.out" )"; MCP2="$( grep '"id":3' "$TMP/mcp.out" )"
+[ -n "$MCP1" ] && [ -n "$MCP2" ] && ok "mcp: both cochange calls answered in one session" || no "mcp: missing answers (id2='${MCP1:0:80}' id3='${MCP2:0:80}')"
+printf '%s' "$MCP1" | grep -q '"_history_policy":"[^"]*bots_skipped=50' \
+    && ok "mcp: the bot-fixture call's envelope carries _history_policy with bots_skipped=50" \
+    || no "mcp: the bot-fixture call's envelope has no _history_policy bots_skipped=50"
+printf '%s' "$MCP2" | grep -q '_history_policy' \
+    && no "mcp: the clean-root call carries a _history_policy — a count left over from the earlier call: $( printf '%s' "$MCP2" | grep -o '_history_policy[^,]*' | head -c 160 )" \
+    || ok "mcp: the clean-root call carries no _history_policy (its walks left nothing out; nothing from the first call leaks)"
 
 [ "$fail" = 0 ] && echo "historyhonestycheck: ALL PASS" || echo "historyhonestycheck: FAILURES"
 exit "$fail"
