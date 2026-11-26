@@ -303,3 +303,21 @@ different and weaker claim. This file is written first so none of them can happe
     B − B\* per instance: 0 B on 7, median 62.5 B, mean 373.0 B, above 500 B on 3. The largest are 4,586 B
     (Happy-Algorithms-League__hal-cgp-180) and 2,422 B (alexa-pi__AlexaPi-188), both small repositories whose
     unrelated-file pool cannot fill the full budget.
+- **2026-11-26, Stage 0 re-run under A1: stopped again. No seal is recorded and no model episode has run.**
+  - The re-run stopped at its fifth held-out instance, `avantifellows__quiz-backend-84`. The A1 rule does not
+    cover this case: the `--for` answer names every file in the indexed universe, so the unrelated-file
+    placebo pool is empty and no common size exists.
+  - A $0 count followed, with no model and no gold field read. It covered all 306 rows of the held-out
+    partition (88 repos) and ignored the harness's gold-based unindexable filter, so it is a superset of the
+    243 instances. Result: 302 build under A1, and 4 do not.
+    - Empty placebo pool: `avantifellows__quiz-backend-84`, `duncanscanga__VDRS-Solutions-73`,
+      `rapidsai__dask-cuda-98`.
+    - No common exact size at or below 13,726 B: `SYSTRAN__faster-whisper-1198`.
+  - Shortfall B − B\* over the 302 that build: 0 B on 89, median 66 B, mean 137.8 B, 90th percentile 234 B,
+    above 1,000 B on 3, maximum 5,938 B.
+  - The payload-only metrics were not computed or read.
+  - Per the stopping rule, these 4 need a rule here before any model call. Choosing that rule is an owner
+    call.
+  - The pilot's TRAIN payloads are sealed and are not the held-out seal: 24 manifests,
+    SHA-256 `69b32fc028aef30b4906ba086776b9bfb5dbe3bfeef3548643c6692f269949f1`, binary
+    `ripwire 0.7.0-dev.20+gfe40f1d71`, every arm built on 24 of 24.
