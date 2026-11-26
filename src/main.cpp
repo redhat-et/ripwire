@@ -6146,6 +6146,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // a census this file does not store), under --max-memory (the guard watches the crawl and the parse a load would skip:
     // a run asked to stop at a limit must do the work the limit is about), or when RIPWIRE_NO_WARMSNAP is set.
     rw::warmsnap::Session warmSnap;
+    warmSnap.ignoreTests = cfg.ignoreTests;   // the view applyIgnoreTests gives the graph below: keyed, never shared (warmsnap.h viewKeyOf)
     const bool warmSnapArmed = !multiRoot && cfg.scipIndex.empty() && cfg.pinCensus.empty() && cfg.maxMemoryBytes == 0 && std::getenv( "RIPWIRE_NO_WARMSNAP" ) == nullptr;
     if( multiRoot )
     {
@@ -6261,6 +6262,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         family( "fields", ing.fields );
         family( "aliasTargets", ing.aliasTargets );
         family( "fnLocalScopes", ing.fnLocalScopes );
+        family( "tangleBlocks", ing.tangleBlocks );
         family( "cloneKeys", ing.cloneKeys );
         family( "references", ing.references );
         family( "includes", ing.includes );

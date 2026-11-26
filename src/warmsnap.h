@@ -56,6 +56,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"
 #include "pathguard.h"
+#include "buildkey.h"  // kBuildKey: which compilation of the sources wrote a snapshot
 #include "quality.h"   // producerIdentity, atomicWriteFile, cacheDirLadder / resolveCacheBlobPath / evictOldCacheFamily
 #include "infra/jsonesc.h"   // rw::shSingleQuote
 #include "infra/sortutil.h"  // svLess: string_view order without libstdc++'s length subtraction
@@ -78,8 +79,10 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 7;                        // bump on ANY layout change in the three sections
-                                                                    // 7: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig
+inline constexpr std::uint32_t kVersion = 11;                        // bump on ANY layout change in the three sections
+                                                                    // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
+                                                                    // 8-10: reserved (M2 slot table 11-26: #752, #754, M2 C1 stages)
+                                                                    // 11: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig
                                                                     // 6: lane theta11c — CrawlSkips gains the extensionless rows + count (θ11's grep population)
                                                                     // 5: lane m1b-tracked-dirs — CrawlSkips gains the untracked-build rows + count (TREE and MODEL)
                                                                     // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
@@ -613,6 +616,8 @@ struct Session
     std::string   rootKey;              // quality::cacheRootKeyHex of this run's root: the field the sweep pins a family by
     std::uint64_t optionsKey = 0;
     long long     startNs    = 0;       // wall clock before the crawl: the racy rule's reference
+    bool          ignoreTests = false;  // main() drops the test files' symbols, references and bindings before the graph is
+                                        // built (--ignore-tests), so the GRAPH is of another model: it is part of the options key (viewKeyOf)
 
     // the file as read
     std::string      file;
@@ -654,17 +659,22 @@ public:
     Armed& operator=( const Armed& ) = delete;
 };
 
+// The header's build field: the ABI (six sizes and the byte order) and the BUILD KEY (buildkey.h). The producer identity
+// beside it names the sources only, so without the key a dev build and a Release build of one tree served each other's
+// stored floats — computed under -ffast-math with different inlining, and so not promised to be the same bits. A
+// mismatch is refused as Why::Producer, with its disclose line ("a snapshot another build wrote is not read").
 inline std::uint64_t layoutKey() noexcept
 {
     const std::uint64_t parts[] = { sizeof( Symbol ), sizeof( IngestResult ), sizeof( std::string ), sizeof( void* ), sizeof( StatSig ),
-                                    std::uint64_t( std::endian::native == std::endian::little ) };
+                                    std::uint64_t( std::endian::native == std::endian::little ), depwatch::digest64( kBuildKey ) };
     return depwatch::digest64( std::string_view( reinterpret_cast<const char*>( parts ), sizeof( parts ) ) );
 }
 
 // Every input of the crawl, the ingest and the resolver that is not a file's content: the options, both spellings of
 // the root, where the process stands, and the environment those stages read. Environment: every RIPWIRE_* variable but
 // the pure observers (so a test seam or a kill switch never meets a snapshot recorded without it), every GIT_* one, and
-// the four that decide which git runs and which configuration it reads.
+// the four that decide which git runs and which configuration it reads. RIPWIRE_PARSE_THREADS is an observer: it picks
+// the parse pool's worker count, and the model a run builds does not depend on it (test/snapdeterminismcheck.sh).
 inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes, bool captureValueUses,
                                    std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits,
                                    bool crawlTreeAllTracked )
@@ -683,7 +693,8 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     o.u32( extractionStamp );
     o.u8( wantConstructHits ? 1 : 0 );
     o.u8( crawlTreeAllTracked ? 1 : 0 );   // M1: a materialized commit tree crawls build-output names the working tree may prune
-    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE" };
+    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE",
+                                                       "RIPWIRE_PARSE_THREADS=" };
     static constexpr std::string_view kExact[]     = { "HOME=", "PATH=", "PWD=", "XDG_CONFIG_HOME=" };
     std::vector<std::string_view> read;
     for( char** env = os::environment(); env != nullptr && *env != nullptr; ++env )
@@ -701,6 +712,23 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     {
         o.str( var );
     }
+    return depwatch::digest64( o.bytes );
+}
+
+// The options key of the VIEW the graph is built from. --ignore-tests is applied by main() between the model and the graph
+// (filter.h applyIgnoreTests), and the GRAPH section's own guard is three counts (symbols, files, references): a test file
+// that contributes bindings only — `let x: Foo;`, `using namespace std;`, `extern int x;` — leaves all three equal, so a
+// graph resolved from one view was served to the other. Each view is now its own configuration (its own name, its own
+// eviction group), and the flagless key is returned unchanged, so no flagless snapshot is renamed.
+inline std::uint64_t viewKeyOf( std::uint64_t optionsKey, bool ignoreTests )
+{
+    if( !ignoreTests )
+    {
+        return optionsKey;
+    }
+    Out o;
+    o.u64( optionsKey );
+    o.str( "--ignore-tests" );
     return depwatch::digest64( o.bytes );
 }
 
