@@ -401,6 +401,7 @@ for _g in \
     cloneoperandcheck \
     clonepersistcheck \
     clsrecvcheck \
+    cochangebacktestcheck \
     cochangeboostcheck \
     cochangecliocheck \
     cochangesurprisecheck \
