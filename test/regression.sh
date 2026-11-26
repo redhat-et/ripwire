@@ -980,6 +980,7 @@ for _g in \
     qualnamecheck \
     qualnewcheck \
     qualnscallcheck \
+    querycachereusecheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \
