@@ -358,6 +358,7 @@ for _g in \
     buildtypestampcheck \
     builtinbindcheck \
     bundleidcheck \
+    c1stampcheck \
     cachefuzzcheck \
     cachehashcheck \
     cacheidentitycheck \

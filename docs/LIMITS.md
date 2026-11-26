@@ -809,6 +809,14 @@ Discloses: **none**
 | `kMaxProbeCommits` | `40000` | INDEXING | walk bound — past it, misses are "unknown", never "never" |
 | `kMinNameLen` | `4` | BOUNDARY | — |
 
+### `src/gitstampcache.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxRows` | `4096` | — | — |
+
 ### `src/graph.h`
 
 Discloses: `files_capped`, `importers_capped`
