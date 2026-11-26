@@ -50,7 +50,8 @@
 #include "legenddict.h"      // detail::aboutPointer — the ref posture's closing pointer
 #include "forpagelegend.h"   // LD1: a clause only a later page uses travels with that page
 #include "nextverb.h"        // nextAttrXml — the ONE next= spelling
-#include "forrowlines.h"     // θ5: encodeRows — page 1's refill is measured in the default row form (rows as lines)
+#include "forrowlines.h"     // θ5: encodeRows — page 1's refill, and SIZE-PAGE's budget, are measured in the default row form (rows as lines)
+#include "graphlegend.h"     // SIZE-PAGE: kForBudgetBytesNote / kForBudgetBytesTargetNote — budget_bytes='s reading, re-read as the page cap
 
 namespace rw::forpages
 {
@@ -67,6 +68,12 @@ struct PageAsk
     std::size_t      page      = 1;
     std::string_view call;
     bool             coreLegend = false;   // θ5: page 1 carries the core legend and refills with rows (the defaulted CLI posture)
+    // SIZE-PAGE (forpagebudgetswitch.h): page 1 is cut so EVERYTHING it serves fits the cap — root, rows, legend, and the `reserveBytes` the
+    // caller appends after paging (the question-sites block). The cap is `capBytes`, or `capPercent` of TODAY'S page 1 (the full legend,
+    // the default row page, no cap) when capBytes is 0; pageAnswer resolves it to bytes. Both 0: no cap (today's page).
+    std::size_t      capBytes     = 0;
+    std::size_t      capPercent   = 0;
+    std::size_t      reserveBytes = 0;
 };
 
 struct PageResult
@@ -135,7 +142,8 @@ inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
 // and without the act line, markActLine), so the
 // page the group starts on (page 1 at the default size, forkeybody.h) ends at the row it ended at without it, the group is never split
 // across pages, and every other page holds the same rows.
-// θ5: `firstEnd` (when not npos) is page 1's last cut, chosen by coreEnds; every later page is measured as before from its end.
+// θ5: `firstEnd` (when not npos) is page 1's last cut, chosen by coreEnds (and SIZE-PAGE's capPlan); every later page is measured as
+// before from its end.
 inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes, std::size_t firstEnd = std::string_view::npos )
 {
     std::vector<std::size_t> ends;
@@ -415,6 +423,43 @@ inline void markActLine( Stream& st )
     return a;
 }
 
+// SIZE-PAGE (forpagebudgetswitch.h). Under a cap, page 1's budget_bytes= states the cap.
+// The full legend's own budget_bytes= reading says so (kPageCapNote, shorter than the target reading it replaces). The core legend (θ5)
+// adds no clause: main's core page 1 defines no budget_bytes= reading either (it is one pointer away, --legend=last), and a clause
+// made page 1 larger than main's (measured: +48 B on every capped core page, DEV run D).
+inline constexpr std::string_view kPageCapNote = " [budget_bytes= caps every byte page 1 serves, this legend included; rows past it are on page 2]";
+[[nodiscard]] inline std::string pageOneRoot( std::string_view rootOpen, const PageAsk& ask )
+{
+    std::string root( rootOpen );
+    if( ask.capBytes == 0 )
+    {
+        return root;
+    }
+    // the cap replaces the budget_bytes= the answer states; an answer that states none gains none (measured: the added attribute
+    // made page 1 20 B larger than main's on mf1-kysely-01 and mf1-fzf-04), and its cut is disclosed by page= pages= withheld_bytes=
+    if( const std::string_view old = rootAttr( root, "budget_bytes" ); !old.empty() )
+    {
+        root.replace( root.find( old ), old.size(), " budget_bytes=\"" + std::to_string( ask.capBytes ) + "\"" );
+    }
+    return root;
+}
+// The legend's budget_bytes= reading names the payload target; under a cap the attribute is the page's cap, so its reading says so.
+[[nodiscard]] inline std::string capLegend( std::string legend, const PageAsk& ask )
+{
+    if( ask.capBytes == 0 )
+    {
+        return legend;
+    }
+    for( const std::string_view note : { kForBudgetBytesTargetNote, kForBudgetBytesNote } )
+    {
+        if( const std::size_t at = legend.find( note ); at != std::string::npos )
+        {
+            legend.replace( at, note.size(), kPageCapNote );
+        }
+    }
+    return legend;
+}
+
 // Page 1: the whole root plus the page disclosure, rows [0, end), the close of a section left open, the document legend less the
 // clauses that travel with a later page (LD1, forpagelegend.h: `gone`), and the page clause.
 // θ5: under ask.coreLegend the core legend and no page clause (coreLegend above).
@@ -424,13 +469,13 @@ inline void markActLine( Stream& st )
     const std::size_t      legendAt = st.blocks[ st.streamBlocks - 1 ].end;
     std::string out;
     out.reserve( end.at + ( st.closeAt - legendAt ) + 1024 );
-    out.append( v.substr( 0, st.openEnd ) );
+    out.append( pageOneRoot( v.substr( 0, st.openEnd ), ask ) );
     const std::string sections = sectionAttrs( st, end );
     out += pageAttrs( ask, { .page = 1, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
-    const std::string legend = scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone );   // less what travels
+    const std::string legend = capLegend( scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone ), ask );   // less what travels
     out += ask.coreLegend ? coreLegend( legend, true ) : legend + pageClause( ask.pageBytes );   // θ5: the core legend, its short page clause
     out.append( v.substr( st.closeAt ) );
     return out;
@@ -586,6 +631,74 @@ struct PagePlan
     st.gone = shedFor( st, plan.ends );
     return plan;
 }
+// SIZE-PAGE THE PAGE BUDGET (forpagebudgetswitch.h). Page 1 as the default DELIVERS it when it ends at cut `last` (npos: the plan's own whole
+// answer): paged, priced, rows as lines (ALWAYS the line form, so the cut does not depend on --rows=), plus what the caller appends after
+// paging (reserveBytes).
+[[nodiscard]] inline std::size_t deliveredWhole( const Stream& st, const PageAsk& ask )
+{
+    std::string w( st.view );
+    if( ask.coreLegend )
+    {
+        coreWhole( w, st );
+    }
+    (void)rowlines::encodeRows( w, rowlines::kRowsLines );
+    return w.size() + ask.reserveBytes;
+}
+[[nodiscard]] inline std::size_t deliveredBytes( Stream& st, const PageAsk& ask, std::size_t last )
+{
+    const std::vector<std::size_t> ends = pageEnds( st.cuts, ask.pageBytes, last );
+    return ends.size() == 1 ? deliveredWhole( st, ask ) : deliveredFirstPage( st, ask, ends ) + ask.reserveBytes;
+}
+// TODAY'S page 1 as delivered: the full legend, the default row page (pageEnds without a first end), no cap, plus reserveBytes — the
+// page 1 the answer is served without the page budget (a whole answer when it is one page). Leaves `st.gone` stale (capPlan resets it).
+[[nodiscard]] inline std::size_t todayBytes( Stream& st, const PageAsk& ask )
+{
+    PageAsk today    = ask;
+    today.coreLegend = false;
+    today.capBytes   = 0;
+    today.capPercent = 0;
+    return deliveredBytes( st, today, std::string_view::npos );   // npos: the default row page, no first end
+}
+// The cap in bytes: capBytes, else capPercent of today's page 1 (never 0: a cap that rounds to nothing still holds the first cut).
+[[nodiscard]] inline std::size_t capOf( Stream& st, const PageAsk& ask )
+{
+    return ask.capBytes > 0 ? ask.capBytes : std::max<std::size_t>( 1, todayBytes( st, ask ) * ask.capPercent / 100 );
+}
+// Page 1 of `plan` as served under `ask` (its cap stated), with reserveBytes; a fixed point, since the cap's digits are
+// bytes of the page. Leaves `st.gone` as plan.ends shed.
+[[nodiscard]] inline std::size_t plannedFirstBytes( Stream& st, const PageAsk& ask, const PagePlan& plan )
+{
+    PageAsk a = ask;
+    for( std::size_t n = deliveredFirstPage( st, a, plan.ends ) + ask.reserveBytes; n > a.capBytes; n = deliveredFirstPage( st, a, plan.ends ) + ask.reserveBytes )
+    {
+        a.capBytes = n;
+    }
+    st.gone = shedFor( st, plan.ends );
+    return a.capBytes;
+}
+// The plan under the cap: page 1 ends at the LAST cut whose delivered page fits capBytes (at least the first cut: a unit larger than the
+// cap is served whole, as a unit larger than a page is), and never later than it ends without the cap. An answer served whole that does
+// not fit is paged. Deterministic in the document and the ask, so every page of one answer computes the same ends. Leaves `st.gone` as
+// the returned ends shed (LD1).
+[[nodiscard]] inline PagePlan capPlan( Stream& st, const PageAsk& ask, PagePlan plan )
+{
+    const bool        whole  = plan.ends.size() == 1 || plan.wholeFirst;
+    const std::size_t maxCut = whole ? st.cuts.size() - 1 : plan.ends[ 0 ];
+    if( ( whole ? deliveredWhole( st, ask ) : deliveredBytes( st, ask, maxCut ) ) <= ask.capBytes )
+    {
+        st.gone = shedFor( st, plan.ends );
+        return plan;
+    }
+    std::size_t lo = 0, hi = maxCut;   // the answer: the largest cut in [0, maxCut) that fits, or 0
+    while( lo + 1 < hi )
+    {
+        const std::size_t mid = lo + ( hi - lo ) / 2;
+        ( deliveredBytes( st, ask, mid ) <= ask.capBytes ? lo : hi ) = mid;
+    }
+    PagePlan capped{ .ends = pageEnds( st.cuts, ask.pageBytes, lo ) };
+    st.gone = shedFor( st, capped.ends );
+    return capped;
+}
 // The answer served whole: unchanged, or under the core posture with the core legend (θ5).
 [[nodiscard]] inline PageResult servedWhole( std::string& doc, const Stream& st, const PageAsk& ask, std::size_t pages )
 {
@@ -637,12 +750,47 @@ struct PagePlan
     return out;
 }
 
-// Cut one finished answer-first --for document to the asked page, in place. See the header.
-inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
+namespace detail
 {
-    std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
+// SIZE-PAGE: the plan of `st` and the ask it is served under. The cap in bytes is the number the root's budget_bytes= states. It caps
+// PAGED answers only: an answer the default serves WHOLE is not capped and keeps the payload target its budget_bytes= states (measured:
+// a percent cap cut whole 5-6 KB answers and lost their items, mf1-fastify-02, mf1-fzf-05). At the default share (100 %) the cap is
+// today's page 1, or the plan's page 1 as served with the cap stated when it is larger, so the cap never removes a row today serves
+// (measured: any share below lost θ5's refill rows, RESUME step 9). Below 100 % (a measurement arm) the cap cuts.
+[[nodiscard]] inline std::pair<PagePlan, PageAsk> budgetedPlan( Stream& st, const PageAsk& asked )
+{
+    PageAsk ask    = asked;
+    ask.capBytes   = 0;
+    ask.capPercent = 0;
+    PagePlan plan  = planPages( st, ask );
+    const bool atDefault = asked.capBytes == 0 && asked.capPercent >= 100;
+    const bool whole = plan.ends.size() == 1 || plan.wholeFirst;
+    if( ( asked.capBytes == 0 && asked.capPercent == 0 ) || ( whole && asked.capBytes == 0 ) )
+    {
+        return { std::move( plan ), ask };
+    }
+    ask.capBytes = capOf( st, asked );
+    if( atDefault )
+    {
+        ask.capBytes = std::max( ask.capBytes, plannedFirstBytes( st, ask, plan ) );
+    }
+    plan = capPlan( st, ask, std::move( plan ) );   // page 1 fits the page budget
+    if( !atDefault && plan.ends.size() > 1 && !plan.wholeFirst )
+    {
+        // an arm's cap below the first cut cannot hold: page 1 is that cut, served whole as a unit larger than a page is, and the
+        // stated cap is raised to it so budget_bytes= stays true (CR #759); a cap a cut fits is unchanged
+        ask.capBytes = std::max( ask.capBytes, plannedFirstBytes( st, ask, plan ) );
+    }
+    return { std::move( plan ), ask };
+}
+}   // namespace detail
+
+// Cut one finished answer-first --for document to the asked page, in place. See the header.
+inline PageResult pageAnswer( std::string& doc, const PageAsk& asked )
+{
+    std::optional<detail::Stream> st = asked.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
     if( !st ) { return {}; }
-    const detail::PagePlan          plan  = detail::planPages( *st, ask );
+    const auto [ plan, ask ] = detail::budgetedPlan( *st, asked );
     const std::vector<std::size_t>& ends  = plan.ends;
     const std::size_t               pages = ends.size();
     if( ask.page == 0 || ask.page > pages || ( pages == 1 && ask.page != 1 ) ) { return { PageResult::Outcome::PastLast, pages }; }

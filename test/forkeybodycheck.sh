@@ -20,7 +20,7 @@
 #         happens to serve — it is red only when a backticked name does not ride. Rule E2 (the last code-shaped span leads) is
 #         pinned the same way, from the question's own span order.
 #   (K3n) unrouted coverage: ON minus the group == the twin (est_tokens= masked); the comparison CAN fail (one byte dropped)
-#   (K4)  pages: at the default 12 KB page, every page of ON minus the group == the twin's page (est_tokens= masked), the page count
+#   (K4)  pages: at the default 12 KB page, every page of ON minus the group == the twin's page (est_tokens= / budget_bytes= masked), the page count
 #         is the twin's and the group rides page 1: a body pushes no row to a later page
 #   (K5)  ceiling (routed): a body over 4000 B is cut at a line end and says so — truncated="1" lines="1-K/T", next= the --expand of the rest
 #   (K6)  cap (routed): three named symbols -> all three ride at CB1's cap of 5 (shown="3" total="3"), rule E2's symbol first
@@ -181,7 +181,8 @@ def say(ok, msg):
 KEY = re.compile(r'<bodies of="key"[^>]*>.*?</bodies>', re.S)
 LEG = re.compile(r'<!-- bodies of=key:.*?-->', re.S)
 READING = re.compile(r' bodies of=key: [^.]*?\(longer: truncated=1 lines= next=\)\.')
-mask = lambda d: re.sub(r' est_tokens="\d+"', ' est_tokens="#"', d)
+# SIZE-PAGE (src/forpages.h): a paged page 1's budget_bytes= is its cap, which counts the group's bytes as est_tokens= prices them
+mask = lambda d: re.sub(r' budget_bytes="\d+"', ' budget_bytes="#"', re.sub(r' est_tokens="\d+"', ' est_tokens="#"', d))
 BODYRE = re.compile(r'<b ([^>]*)>(.*?)</b>', re.S)
 def bodyrows(block):
     """every <b> of a bodies block as (name, path, line, cdata) -- the identity ruling 87 reasons about is (path, line)"""

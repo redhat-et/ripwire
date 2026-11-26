@@ -24,6 +24,7 @@
 #include "forrowsform.h" // rw::rowlines::kRowsLines / defaultRowsName — --rows= and the rows= of --version
 #include "foractlineswitch.h" // rw::actline::defaultActName — the act= of --version
 #include "fortinyshapeswitch.h" // rw::tinyshape::defaultTinyName — the tiny= of --version
+#include "forpagebudgetswitch.h" // rw::pagebudget::defaultPageBudgetName — the pagebudget= of --version
 #include "forbodiesform.h" // rw::bodyptr::kBodiesInline / kBodiesPointer — --bodies='s closed set (NB1)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
@@ -2956,6 +2957,11 @@ inline constexpr char kHelpTail[] =
         "                               spends the freed bytes on <tail> rows, never growing past the full-legend page 1;\n"
         "                               --legend=last, MCP and RIPWIRE_NO_CORE_LEGEND=1 keep the whole legend there. A later page\n"
         "                               re-sends none and ends <about legend=\"ref\" have=\"page1\"/>.\n"
+        "                               PAGE BUDGET (SIZE-PAGE): a PAGED answer's budget_bytes= caps EVERYTHING its page 1 serves\n"
+        "                               (root, rows, legend, the question-sites block); the cap is the page 1 served without it, so\n"
+        "                               no row leaves.\n"
+        "                               RIPWIRE_PAGE_BUDGET=0 turns it off (the answer before it, byte for byte); 1-100 = that\n"
+        "                               percent of the page 1 served without it, >100 = that many bytes.\n"
         "                               Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first\n"
         "                               (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.\n"
         "                               ROWS AS LINES: the answer-first answer serves the rows of <sigs> and <tail> as text lines in\n"
@@ -6211,10 +6217,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
             // tiny= (THETA6, fortinyshapeswitch.h) names whether a --for answer may take the tiny named-location shape in THIS
             // environment: on by default, off under RIPWIRE_TINY_SHAPE=0.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, tiny={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::tinyshape::defaultTinyName(),
-                        rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
-                        kRipwireGitStamp );
+            // pagebudget= (SIZE-PAGE, forpagebudgetswitch.h) names whether a --for page 1 is cut to its page budget in THIS environment.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, tiny={}, pagebudget={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::tinyshape::defaultTinyName(), rw::pagebudget::defaultPageBudgetName(),
+                        rw::actline::defaultActName(), rw::rowlines::defaultRowsName(), kRipwireGitStamp );
             std::exit( 0 );
         }
 

@@ -903,6 +903,7 @@ for _g in \
     packtaskmonotoncheck \
     packtaskquotacheck \
     padscalecheck \
+    pagebudgetcheck \
     pagelegendcheck \
     paginationcheck \
     pagingsweepcheck \

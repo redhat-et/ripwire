@@ -17,6 +17,7 @@
 #include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
+#include "forpagebudgetswitch.h"   // SIZE-PAGE: the page budget knob (RIPWIRE_PAGE_BUDGET)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
@@ -5942,14 +5943,18 @@ inline std::string forPageCall( const rw::Config& cfg )
     }
     return call;
 }
-inline bool serveForPage( const rw::Config& cfg, std::string& doc )
+// SIZE-PAGE (forpagebudgetswitch.h): page 1 is cut so everything it serves — plus `reserveBytes`, what the caller appends after paging
+// (the question-sites block) — fits the page budget, and the root states the cap (budget_bytes=).
+inline bool serveForPage( const rw::Config& cfg, std::string& doc, std::size_t reserveBytes = 0 )
 {
     if( !forPagingApplies( cfg ) )
     {
         return true;
     }
-    const std::string call = forPageCall( cfg );
-    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ) };
+    const std::string                    call = forPageCall( cfg );
+    const rw::pagebudget::PageBudgetKnob knob = rw::pagebudget::pageBudgetKnob();   // SIZE-PAGE: every page plans with page 1's reserve: one plan
+    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call, .coreLegend = rw::forpages::detail::coreLegendOn( cfg.legendDefaulted ),
+                                     .capBytes = knob.bytes, .capPercent = knob.percent, .reserveBytes = reserveBytes };
     const rw::forpages::PageResult res = rw::forpages::pageAnswer( doc, ask );
     const bool exists = res.outcome == rw::forpages::PageResult::Outcome::Paged || cfg.forPage == 1;
     if( !exists )
@@ -6095,7 +6100,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
             }
-            if( !serveForPage( d.cfg, doc ) )
+            const std::size_t sitesBytes = r.ledger.questionSites.empty() ? 0 : r.ledger.questionSites.size() + 1;   // insertBlock's newline
+            if( !serveForPage( d.cfg, doc, sitesBytes ) )
             {
                 return 1;
             }

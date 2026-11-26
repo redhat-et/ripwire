@@ -326,6 +326,7 @@ FAILFAST = {
     "nextaposcheck.sh":         ( "python3 heredoc's rc captured into `rc` and re-exited as 0/1; FORCED on the main binary (19 FAIL lines), rc 1 read, not inferred", 1 ),
     "mcptwinclaimscheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED on the pre-fix binary (6 checks fail), rc read, not inferred", 1 ),
     "mcpmanifestcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED by appending a bogus routing-sentence pin, rc read, not inferred", 1 ),
+    "pagebudgetcheck.sh":        ( "verdict is a TRAILING python3 heredoc (sys.exit(1 if fails)); its rc IS the script's. rc READ, not inferred: run against two intermediate lane binaries (SIZE-PAGE final5: 5 arms red; final6: (P) red), rc 1 both times", 1 ),
     "mcplisttrimcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED on the pre-trim base binary 82ed4c8bf (ceiling arm (2) fails), rc 1 read, not inferred", 1 ),
     # type3clonecheck.sh was pinned here until 2026-08-11, when its PART 2 (clone grouping + duplication
     # %) gained a real accumulator (`p2fail`) so every drifted attribute is named in one run instead of

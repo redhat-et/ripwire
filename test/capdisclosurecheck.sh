@@ -298,9 +298,24 @@ done < <( grep -E '^B[0-9] ' "$TMP/b_for.res" )
 echo "-- (C) default --for payload ceiling (kForPayloadBudgetBytes)"
 FORQ="rank symbols by pagerank"
 FORPAYLOAD=7500          # kForPayloadBudgetBytes, src/serialize.h
-run "$BIG" --for="$FORQ" > "$TMP/c_default.xml"
+# SIZE-PAGE (src/forpages.h): a PAGED CLI page 1 states its page cap in budget_bytes= instead (C2b below); the payload target
+# this section pins, and its parity with the MCP surface (which serves the answer whole, as main does), is the RIPWIRE_PAGE_BUDGET=0 answer.
+RIPWIRE_PAGE_BUDGET=0 run "$BIG" --for="$FORQ" > "$TMP/c_default.xml"
+run "$BIG" --for="$FORQ" > "$TMP/c_default_on.xml"
 SIGSTAG="$( grep -o '<sigs[^>]*>' "$TMP/c_default.xml" | head -1 )"
 CTXTAG="$(  grep -o '<ctx[^>]*>'  "$TMP/c_default.xml" | head -1 )"
+ONTAG="$(   grep -o '<ctx[^>]*>'  "$TMP/c_default_on.xml" | head -1 )"
+ONCAP="$( printf '%s' "$ONTAG" | grep -o ' budget_bytes="[0-9]*"' | tr -dc '0-9' )"
+ONSIZE="$( wc -c < "$TMP/c_default_on.xml" | tr -d ' ' )"
+case "$ONTAG" in
+    *' page="1"'*)
+        if [ -n "$ONCAP" ] && [ "$ONSIZE" -le "$ONCAP" ] && ! grep -q '\[budget_bytes= is the default BYTE target' "$TMP/c_default_on.xml"; then
+            ok "C2b the default (paged) page 1 names its cap budget_bytes=\"$ONCAP\" >= the $ONSIZE B it serves; no legend reads it as the payload target"
+        else
+            no "C2b the default page 1 serves $ONSIZE B against budget_bytes=\"${ONCAP:-none}\", or its legend reads it as the payload target"
+        fi ;;
+    *) no "C2b probe broken: the default --for answer is not paged — $ONTAG" ;;
+esac
 case "$SIGSTAG" in
     *'capped="1"'*) ok "C1 crossing: the default run really is capped — $SIGSTAG" ;;
     *) no "C1 crossing: the default --for was not capped (probe broken) — ${SIGSTAG:-<no sigs element>}" ;;

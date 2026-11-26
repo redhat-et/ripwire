@@ -14,10 +14,10 @@
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
-#   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1, and its
-#        withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
+#   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1 (today's: the
+#        page budget off), and its withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
 #   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte, but for the --legend=compact its next= names (C9)
-#        and the root's est_tokens= that prices it; --page-bytes=0 is unchanged by the core
+#        and the root's est_tokens= / budget_bytes= digits that price and cap it; --page-bytes=0 is unchanged by the core
 #   (C5) ROW IDENTITY under the core: following next= to the last page, every page's <d>/<t> rows joined equal the
 #        --page-bytes=0 answer's rows in order; (C5n) dropping one row makes it fail
 #   (C6) a one-page default answer carries the core legend too, and every default page is well-formed XML
@@ -54,7 +54,9 @@ RIPWIRE_NO_CORE_LEGEND=1 "$BIN" . --for="$TASK"          >"$WORK/knob_1.xml" 2>/
 RIPWIRE_NO_CORE_LEGEND=1 "$BIN" . --for="$TASK" --page-bytes=0 >"$WORK/whole_knob.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=100000000            >"$WORK/onepage.xml" 2>/dev/null
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK"                 >"$WORK/lines_1.xml" 2>/dev/null
-env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --legend=last   >"$WORK/lines_last_1.xml" 2>/dev/null
+# (C3) reads TODAY'S full-legend page 1: SIZE-PAGE (src/forpages.h capLegend) shortens the full legend's budget_bytes= reading on a
+# capped page, a clause the core legend never carries, so the ON --legend=last page is smaller than the page the refill fills to
+env -u RIPWIRE_NO_ROWLINES RIPWIRE_PAGE_BUDGET=0 "$BIN" . --for="$TASK" --legend=last   >"$WORK/lines_last_1.xml" 2>/dev/null
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --page-bytes=100000000 >"$WORK/lines_onepage.xml" 2>/dev/null
 for p in compact dict; do "$BIN" . --for="$TASK" --legend=$p >"$WORK/${p}_1.xml" 2>/dev/null; done
 follow(){   # follow next= from $WORK/$1_1.xml to the last page (pasteable shell: shlex, never by hand); pages served -> $1.n
@@ -126,9 +128,10 @@ say(len(lc.encode()) <= len(ll.encode()) and cw is not None and lw is not None a
     f"(C3) refill: page 1 as served {len(lc.encode())} B <= {len(ll.encode())} B; withheld_bytes {cw} <= {lw}")
 def unposture(t):   # --legend=last's page 1 less the posture its next= names and the est_tokens= digits that price those bytes
     t = re.sub(r'(<ctx\b[^>]*?\snext="[^"]*?) --legend=compact', r"\1", t, count=1)
+    t = re.sub(r'(<ctx\b[^>]*?\sbudget_bytes=")\d+', r"\g<1>N", t, count=1)   # SIZE-PAGE: the page cap counts those bytes too
     return re.sub(r'(<ctx\b[^>]*?\sest_tokens=")\d+', r"\g<1>N", t, count=1)
 say(knob != last and unposture(knob) == unposture(last),
-    "(C4) RIPWIRE_NO_CORE_LEGEND=1 page 1 == --legend=last page 1, byte for byte but for next='s --legend=compact and est_tokens=")
+    "(C4) RIPWIRE_NO_CORE_LEGEND=1 page 1 == --legend=last page 1, byte for byte but for next='s --legend=compact and the est_tokens= / budget_bytes= digits")
 say(rd(W + "/whole.xml") == rd(W + "/whole_knob.xml"), "(C4) --page-bytes=0 is untouched by the core legend")
 ROW = re.compile(r"<d\b[^>]*>.*?</d>|<t\b[^>]*/>", re.S)
 def rows(t): return ROW.findall(re.sub(r"<!--.*?-->", "", t, flags=re.S))

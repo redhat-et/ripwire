@@ -706,6 +706,14 @@ Discloses: `capped`
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
 | `kForThinMinFiles` | `3` | — | a ranked head over fewer files than this ⇒ thin |
 
+### `src/forpagebudgetswitch.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kPageCapPercent` | `100` | OUTPUT | % of today's page 1; a cut row is on page 2 (root next=), disclosed by budget_bytes= page= withheld_bytes= |
+
 ### `src/forqsites.h`
 
 Discloses: **none**
