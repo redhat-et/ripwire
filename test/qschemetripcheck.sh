@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, lane asserted-signal (stacked on #770, 790ff59b5): RE-PINNED with UPDATE_GOLDEN=1. kCacheVersion and
+#   kIngestCacheVersionMirror 54 -> 57 (the M5's ingest slot): queries/python/tags.scm records the `assert` statement as a call
+#   reference named `assert`, so a v54 .py blob lacks those references. No record shape change; kParserVer 342 and
+#   kQSnapCacheScheme 38 unchanged (the qsnap key carries the producer identity). Hash 159a79d30b…bd8253dc on the lane's
+#   own base. RE-PINNED AGAIN on the merge with origin/main f18bba967 (#756 merged; main had moved kCacheVersion to 55, lane
+#   tangle-rule, pin e4355917b4…b71344719): 57 stays above it, and both histories ride the mirror comment. Hash de4fefdaf4…5339dcdc.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

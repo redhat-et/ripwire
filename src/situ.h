@@ -1533,9 +1533,9 @@ inline int testGateExitCode( const TestGateResult& r ) noexcept
 // this repo's 5763 symbols) computes it ONCE and hands it in, instead of paying N redundant full forward
 // traversals. Every pre-existing call site keeps its own inline computation via the default argument below,
 // so their bytes are unchanged.
-// A6: the seed-collection loop now lives in graph.h::seedForwardReachIf, shared with
-// testSymbolForwardReach's isTestSymbol seeding — same traversal shape, deliberately different predicate
-// (see that function's banner for why isTestPath, not isTestSymbol, is the right one here).
+// A6: the seed-collection loop lives in graph.h::seedForwardReachIf. testSymbolForwardReach seeds by isTestSymbol
+// instead — same traversal shape, deliberately different predicate (see that function's banner for why isTestPath,
+// not isTestSymbol, is the right one here).
 inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Graph& g )
 {
     return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestPath( rootRelPath( ing, ing.symbols[i].fileId ) ); } );
