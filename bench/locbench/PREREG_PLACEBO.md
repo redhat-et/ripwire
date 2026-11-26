@@ -344,3 +344,23 @@ different and weaker claim. This file is written first so none of them can happe
   - *Gate.* `test_placebo_arms.py`'s offline `main()` run on a fixture whose answer names every file now
     requires exclusion by id, n = 0 in every arm, and no sealed payload. Two checks are red on the A1 tip
     `315b057f1`, which aborts; all three are green after.
+- **2026-11-26, Stage 0 sealed under A1 + A2. No held-out model episode has run.**
+  - Run: `run_locbench.py --n 560 --split=heldout --arms=for,for-matched,placebo,placebo-shuffle,lexical,query --emit-payloads`
+    at commit `464a902b7`, binary `ripwire 0.7.0-dev.20+gfe40f1d71 (dev, AppleClang 21.0.0.21000101,
+    emit=std::print, act=on, rows=lines, built_from=fe40f1d71)`.
+  - The 560-row hash check passed. Exit 0.
+  - **Excluded by rule A2:** 4 instances, computed by the rule, not by name.
+    - 3 with an empty unrelated-file pool: `avantifellows__quiz-backend-84`, `duncanscanga__VDRS-Solutions-73`,
+      `rapidsai__dask-cuda-98`.
+    - 1 with no common exact size at or below 13,726 B: `SYSTRAN__faster-whisper-1198`.
+    - The other exclusion counters are all 0: nonpy, checkout, ctx and unindexable.
+  - **Payload seal:** 302 instance manifests. SHA-256 of their sorted concatenation:
+    **`4bc5f5114d4c8518a684eaaa62a61d3af60d3262a66833290414fe866eaf5a17`**.
+  - The payload-only metrics were written to a file nobody has read. Only the header's `n_scored` and
+    exclusion counts were read.
+  - **Discrepancy with the text above (owner call).**
+    - The held-out partition this harness selects is **306 rows over 88 repos**, so the scored n is
+      **302**. The "243 instances over 78 repos" written above does not match this harness at this seal.
+    - The 306 count was made with no gold read. It is also consistent with the train side: 560 − 254 = 306.
+    - The power arithmetic is reported at the realised n = 302 beside the frozen 243, and n is not changed
+      silently.
