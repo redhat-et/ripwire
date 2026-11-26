@@ -3144,6 +3144,7 @@ struct ForConfidence
     std::string note;       // the legend clause defining both (legend-coverage contract)
     const char* level = ""; // "high" | "low" — the JSON dialect's key value
     int         marginPct = 0;
+    int         fileGapPct = -1;   // the file_gap_pct= shown, whole percent, when the file-gap ground made the level high; else -1
 };
 
 // ── THE FILE-GAP GROUND (lane ROUTING, 11-25; switch forrouteswitch.h, RIPWIRE_ROUTING=0 off) ──────────────────────────────────
@@ -3153,15 +3154,16 @@ struct ForConfidence
 // statistic over the head (AUC 0.71 for "the r=1 file is a gold file", against 0.64 for today's level), and as a ground beside the
 // cliff, "high" goes from 59 rows (73 % right) to 71 rows (73 % right), recall 0.46 -> 0.55 at the same precision. The threshold is
 // the cliff's own 20 % (kMinCliffDrop), not a tuned number: 0.15-0.25 move it by a few rows either way.
-// WHAT. The relative gap between the top score and the best score of a row in a different file, over the served head in rank order;
-// -1 when the head holds no second file (nothing to compare: no ground).
-inline constexpr int kForFileGapMinPct = 20;
+// WHAT. The relative gap between the top score and the best score of a row in a different file, over the served head in rank order,
+// in percent and UNROUNDED (the threshold compares it as measured; only the shown value is rounded); -1 when the head holds no
+// second file (nothing to compare: no ground).
+inline constexpr double kForFileGapMinPct = 20.0;
 
-[[nodiscard]] inline int headFileGapPct( const std::vector<float>& rank, std::span<const NodeId> head, const std::vector<Symbol>& symbols ) noexcept
+[[nodiscard]] inline double headFileGapPct( const std::vector<float>& rank, std::span<const NodeId> head, const std::vector<Symbol>& symbols ) noexcept
 {
     if( head.empty() || head[0] >= rank.size() || head[0] >= symbols.size() || !( rank[ head[0] ] > 0.f ) )
     {
-        return -1;
+        return -1.0;
     }
     const double      top     = double( rank[ head[0] ] );
     const std::uint32_t topFile = symbols[ head[0] ].fileId;
@@ -3169,10 +3171,10 @@ inline constexpr int kForFileGapMinPct = 20;
     {
         if( id < symbols.size() && id < rank.size() && symbols[id].fileId != topFile )
         {
-            return int( 100.0 * ( top - double( std::max( rank[id], 0.f ) ) ) / top + 0.5 );
+            return 100.0 * ( top - double( std::max( rank[id], 0.f ) ) ) / top;
         }
     }
-    return -1;
+    return -1.0;
 }
 
 // The legend clause of file_gap_pct= (present-only: the attribute rides only on a root the ground made high). No "--" (XML comment).
@@ -3191,7 +3193,7 @@ inline constexpr std::string_view kForCompactFileGapClause = " [file_gap_pct=: o
 // fileGapPct (headFileGapPct; -1 = not measured): the FILE-GAP ground above — a head with no cliff is still high when the best row of
 // another file trails r=1 by kForFileGapMinPct or more. Never over a decline or an unproven anchor. Only when routing::routingOn().
 inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false,
-                                          int fileGapPct = -1 )
+                                          double fileGapPct = -1.0 )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
@@ -3209,7 +3211,8 @@ inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int served
     if( fileGround && !homonymDecline && !anchorUnproven )
     {
         // present-only: a root the cliff made high (or that stayed low) is byte-identical to the pre-ground one
-        rw::formatTo( attrBuf, sizeof( attrBuf ), " file_gap_pct=\"{}\"", fileGapPct );
+        out.fileGapPct = int( fileGapPct + 0.5 );   // shown rounded; the ground above compared the unrounded gap (CodeRabbit #753)
+        rw::formatTo( attrBuf, sizeof( attrBuf ), " file_gap_pct=\"{}\"", out.fileGapPct );
         out.attrs += attrBuf;
         out.note += kForFileGapNote;
     }

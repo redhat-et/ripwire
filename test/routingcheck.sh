@@ -10,7 +10,8 @@
 #   (G2)  PRESENT ONLY WHEN IT GROUNDS: a low answer and a sharp/complete high answer carry no file_gap_pct= and no clause
 #   (O)   OFF SWITCH: RIPWIRE_ROUTING=0 answers carry no file_gap_pct=, no clause, no body_form="edit"; with RIPWIRE_PARENT_BIN set (a
 #         binary from before the switch) every OFF answer is the parent's default byte for byte (GAP, LOW, NAMED, EDIT, EDIT page 2,
-#         EDIT whole, GAP --legend=compact, GAP --legend=full, GAP over MCP)
+#         EDIT whole, GAP --legend=compact, GAP --legend=full, GAP over MCP, GAP --json)
+#   (J)   --json: the header carries "file_gap_pct":N, the XML value, on the GAP answer; none on LOW, NAMED or RIPWIRE_ROUTING=0
 #   (T)   θ17 default: the EDIT question's default page has body_form="edit"; RIPWIRE_ROUTING=0 has none
 #   (D)   well formed (xmllint) and deterministic (two ON runs)
 #   (M)   MUTATION NEGATIVE CONTROLS: G1's detector FAILS on the OFF GAP page; G2's detector FAILS on the ON GAP page
@@ -39,12 +40,17 @@ def no(m):
 def run(argv, off=False, binary=None):
     env = dict(os.environ)
     if off: env["RIPWIRE_ROUTING"] = "0"
-    return subprocess.run([binary or BIN, "src", "--no-cache"] + argv, capture_output=True, env=env, stdin=subprocess.DEVNULL).stdout.decode("utf8", "replace")
+    p = subprocess.run([binary or BIN, "src", "--no-cache"] + argv, capture_output=True, env=env, stdin=subprocess.DEVNULL)
+    if p.returncode != 0:   # a crash or refusal fails here, with its stderr, not later as a confusing missing attribute
+        no(f"{argv} exited {p.returncode}: {p.stderr.decode('utf8', 'replace').strip()[:400]}")
+    return p.stdout.decode("utf8", "replace")
 def mcp(args, off=False, binary=None):
     env = dict(os.environ)
     if off: env["RIPWIRE_ROUTING"] = "0"
     req = [{"jsonrpc": "2.0", "id": 0, "method": "initialize"}, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "for", "arguments": args}}]
     p = subprocess.run([binary or BIN, "src", "--mcp"], input="".join(json.dumps(r) + "\n" for r in req).encode(), capture_output=True, env=env)
+    if p.returncode != 0:
+        no(f"--mcp {args} exited {p.returncode}: {p.stderr.decode('utf8', 'replace').strip()[:400]}")
     for line in p.stdout.decode("utf8", "replace").splitlines():
         try: r = json.loads(line)
         except ValueError: continue
@@ -67,6 +73,8 @@ gapf, gapf_off = run(["--for=" + GAP, "--legend=full"]), run(["--for=" + GAP, "-
 gapm, gapm_off = mcp({"task": GAP}), mcp({"task": GAP}, off=True)
 p2, p2_off = run(["--for=" + EDIT, "--page-bytes=12000:2"]), run(["--for=" + EDIT, "--page-bytes=12000:2"], off=True)
 wh_off = run(["--for=" + EDIT, "--page-bytes=0"], off=True)
+J = {k: run(["--for=" + q, "--json"]) for k, q in (("gap", GAP), ("low", LOW), ("named", NAMED))}
+gapj_off = run(["--for=" + GAP, "--json"], off=True)
 # G0
 if attr(O["gap"], "confidence") == "low" and attr(A["gap"], "confidence") == "high": ok("(G0) GAP: low with the switch off, high with it on")
 else: no(f"(G0) vacuous: GAP off={attr(O['gap'], 'confidence')} on={attr(A['gap'], 'confidence')}")
@@ -77,7 +85,8 @@ if grounded(gapf): ok("(G1) GAP --legend=full: the full definition once")
 else: no("(G1) GAP --legend=full: the full definition is missing or repeated")
 if grounded(gapc, compact=True): ok("(G1) GAP --legend=compact: the compact clause once")
 else: no("(G1) GAP --legend=compact: the compact clause is missing or repeated")
-if re.search(r' file_gap_pct="\d+"', gapm) and attr(A["gap"], "file_gap_pct") in gapm: ok("(G1) GAP over MCP carries file_gap_pct= (same value)")
+mcpgap = re.search(r' file_gap_pct="(\d+)"', gapm)
+if mcpgap and mcpgap.group(1) == attr(A["gap"], "file_gap_pct"): ok("(G1) GAP over MCP carries file_gap_pct= (same value)")
 else: no("(G1) GAP over MCP has no file_gap_pct= (or another value)")
 # G2
 for k in ("low", "named"):
@@ -86,7 +95,7 @@ for k in ("low", "named"):
 if attr(A["named"], "confidence") == "high": ok("(G2) NAMED is high on its own (the present-only arm is not vacuous)")
 else: no("(G2) NAMED is not high: the present-only arm on a high answer is vacuous")
 # O
-offs = list(O.values()) + [gapc_off, gapf_off, gapm_off, p2_off, wh_off]
+offs = list(O.values()) + [gapc_off, gapf_off, gapm_off, p2_off, wh_off, gapj_off]
 if all(absent(t) and 'body_form="edit"' not in t for t in offs) and all(t for t in offs): ok("(O) RIPWIRE_ROUTING=0: no file_gap_pct=, no clause, no edit form")
 else: no("(O) an OFF answer is empty or carries a routing default")
 if PARENT:
@@ -94,11 +103,18 @@ if PARENT:
     pairs = [(k, O[k], P[k]) for k in P] + [("gap compact", gapc_off, run(["--for=" + GAP, "--legend=compact"], binary=PARENT)),
              ("gap full", gapf_off, run(["--for=" + GAP, "--legend=full"], binary=PARENT)),
              ("gap mcp", gapm_off, mcp({"task": GAP}, binary=PARENT)), ("edit p2", p2_off, run(["--for=" + EDIT, "--page-bytes=12000:2"], binary=PARENT)),
-             ("edit whole", wh_off, run(["--for=" + EDIT, "--page-bytes=0"], binary=PARENT))]
+             ("edit whole", wh_off, run(["--for=" + EDIT, "--page-bytes=0"], binary=PARENT)),
+             ("gap json", gapj_off, run(["--for=" + GAP, "--json"], binary=PARENT))]
     for k, a, b in pairs:
         if a and a == b: ok(f"(O) {k}: the OFF answer is the parent's default byte for byte")
         else: no(f"(O) {k}: the OFF answer moved against the parent")
 else: ok("(O) no RIPWIRE_PARENT_BIN: parent comparison skipped (the lane runs it)")
+# J
+jgap = re.search(r'"file_gap_pct":(\d+)', J["gap"])
+if jgap and jgap.group(1) == attr(A["gap"], "file_gap_pct"): ok(f"(J) GAP --json: \"file_gap_pct\":{jgap.group(1)}, the XML value")
+else: no("(J) GAP --json: no file_gap_pct key, or another value than the XML root")
+if all(t and "file_gap_pct" not in t for t in (J["low"], J["named"], gapj_off)): ok("(J) LOW, NAMED, OFF --json: no file_gap_pct key")
+else: no("(J) a --json answer carries file_gap_pct where it does not ground the level (or is empty)")
 # T
 if 'body_form="edit"' in root(A["edit"]) and 'body_form="edit"' not in root(O["edit"]): ok("(T) EDIT: the edit-file form is the default, off under RIPWIRE_ROUTING=0")
 else: no("(T) EDIT: the edit-file form is not the default (or not off under the switch)")

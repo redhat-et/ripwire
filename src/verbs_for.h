@@ -548,6 +548,7 @@ struct ForLensNotes
     const char*        confidence;  // "high" | "low"
     int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
     int                coveragePct; // L-W: the XML root's coverage= (-1 = absent: nothing scored)
+    int                fileGapPct;  // ROUTING: the XML root's file_gap_pct= (-1 = absent: the file-gap ground did not make it high)
     bool               weak;
     // M10: gitstamp::stampAt(root) — the raw sha[+dirty] value, "" on multi-root/non-git (never "null" as
     // a STRING; the JSON emitter below distinguishes empty-string-absent from a real value the same way
@@ -1373,6 +1374,10 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     if( notes.coveragePct >= 0 )
     {
         h += ",\"coverage\":" + std::to_string( notes.coveragePct );   // L-W: the XML root's third ranking fact, same presence rule
+    }
+    if( notes.fileGapPct >= 0 )
+    {
+        h += ",\"file_gap_pct\":" + std::to_string( notes.fileGapPct );   // ROUTING: present-only, as on the XML root (CodeRabbit #753)
     }
     // the adaptive cut's own counts — the abstention round-2 instrumentation described on ForLensNotes.
     // ALWAYS present (a count of zero is a measurement: "nothing scored", never "the field was dropped"),
@@ -4342,7 +4347,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                                               docMentionNote, lr.anchorLifts, lr.docMentionCount,
                                                                                               adaptiveNote, floorNote,
                                                                                               forConf.level,
-                                                                                              forConf.marginPct, forCoverageOn ? forCoverage : -1, forWeak,
+                                                                                              forConf.marginPct, forCoverageOn ? forCoverage : -1, forConf.fileGapPct, forWeak,
                                                                                               forAtStamp,
                                                                                               // abstention round 2: forCut is the SAME
                                                                                               // cut the confidence facts above derive
