@@ -56,6 +56,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"
 #include "pathguard.h"
+#include "buildkey.h"  // kBuildKey: which compilation of the sources wrote a snapshot
 #include "quality.h"   // producerIdentity, atomicWriteFile, cacheDirLadder / resolveCacheBlobPath / evictOldCacheFamily
 #include "infra/jsonesc.h"   // rw::shSingleQuote
 #include "infra/sortutil.h"  // svLess: string_view order without libstdc++'s length subtraction
@@ -612,6 +613,8 @@ struct Session
     std::string   rootKey;              // quality::cacheRootKeyHex of this run's root: the field the sweep pins a family by
     std::uint64_t optionsKey = 0;
     long long     startNs    = 0;       // wall clock before the crawl: the racy rule's reference
+    bool          ignoreTests = false;  // main() drops the test files' symbols, references and bindings before the graph is
+                                        // built (--ignore-tests), so the GRAPH is of another model: it is part of the options key (viewKeyOf)
 
     // the file as read
     std::string      file;
@@ -653,10 +656,14 @@ public:
     Armed& operator=( const Armed& ) = delete;
 };
 
+// The header's build field: the ABI (six sizes and the byte order) and the BUILD KEY (buildkey.h). The producer identity
+// beside it names the sources only, so without the key a dev build and a Release build of one tree served each other's
+// stored floats — computed under -ffast-math with different inlining, and so not promised to be the same bits. A
+// mismatch is refused as Why::Producer, with its disclose line ("a snapshot another build wrote is not read").
 inline std::uint64_t layoutKey() noexcept
 {
     const std::uint64_t parts[] = { sizeof( Symbol ), sizeof( IngestResult ), sizeof( std::string ), sizeof( void* ), sizeof( StatSig ),
-                                    std::uint64_t( std::endian::native == std::endian::little ) };
+                                    std::uint64_t( std::endian::native == std::endian::little ), depwatch::digest64( kBuildKey ) };
     return depwatch::digest64( std::string_view( reinterpret_cast<const char*>( parts ), sizeof( parts ) ) );
 }
 
@@ -700,6 +707,23 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     {
         o.str( var );
     }
+    return depwatch::digest64( o.bytes );
+}
+
+// The options key of the VIEW the graph is built from. --ignore-tests is applied by main() between the model and the graph
+// (filter.h applyIgnoreTests), and the GRAPH section's own guard is three counts (symbols, files, references): a test file
+// that contributes bindings only — `let x: Foo;`, `using namespace std;`, `extern int x;` — leaves all three equal, so a
+// graph resolved from one view was served to the other. Each view is now its own configuration (its own name, its own
+// eviction group), and the flagless key is returned unchanged, so no flagless snapshot is renamed.
+inline std::uint64_t viewKeyOf( std::uint64_t optionsKey, bool ignoreTests )
+{
+    if( !ignoreTests )
+    {
+        return optionsKey;
+    }
+    Out o;
+    o.u64( optionsKey );
+    o.str( "--ignore-tests" );
     return depwatch::digest64( o.bytes );
 }
 
