@@ -83,6 +83,13 @@ inline const char*        kBaselineFile  = ".ripwire_quality_baseline";
 constexpr std::uint32_t   kMinCloneTokens = 18;     // matches the --clones default (so both verbs see the same clones)
 constexpr std::uint32_t   kCcxBar         = 15;     // P8 (L7): situ.h spells this as kTestGateCcxBarMirror (test-gate root ccx_bar=) — the static_assert below the constants keeps them equal     // SonarSource cognitive-complexity bar — a regression must end up OVER this
 
+// WHAT A BAR IS (lane metric-labels, 2026-11-26; docs/METHODOLOGY.md §9.3). kCcxBar, kLocBar, kNestBar and kParamBar are
+// delta heuristics, not smell detectors: a row says a change made a function worse AND left it past a bar, never that the
+// function is a Long Method or any other labelled smell, and a function under every bar is not certified clean. None was
+// fitted to human smell labels. The one human-labelled length reference on record is MLCQ Long Method >= 26 lines, MCC 0.777
+// (arXiv 2611.01636, single author, preprint; reviewers' own cutoffs ran 17 to 34 lines), and on five Java systems no single
+// size/complexity threshold separated the files later refactored (SPLASH 2026 SRC). Recorded as a reference point only:
+// kLocBar stays 60 and no default moves on a citation — a bar moves on a measurement of this tool's own rows.
 // Q1 — bars for the MEASURED agent-code failure modes: agent code runs 2.3×
 // verbose, erodes structure in 77% of trajectories, drifts contracts. Each per-symbol kind mirrors ccx's
 // "grew AND now over a bar" discipline (`now > was && now > BAR`) — a bar so a benign +1 line / +1 nest of an

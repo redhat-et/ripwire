@@ -607,8 +607,12 @@ inline constexpr const char* kTestedLensBlindSpotLegend =
 // the identical sentence is exactly the echo-site drift class this file exists to prevent). tested="1" only
 // (never a literal 0) reuses the SAME absence-meaningful convention every other tested= site already follows
 // (serialize.h/verbs_for.h): an untested row costs 0 legend-defined bytes, a tested one costs one attribute.
+// REACHED, NOT ASSERTED (lane metric-labels, 2026-11-26): the predicate is graph reach (graph.h isTestedByReach), and a test that
+// reaches a function need not check anything it returns. Veritas (arXiv 2610.33708; 11 Java projects, 51,382 branch outcomes)
+// found 18% of covered branch outcomes could change with no test failing, so the reading says which of the two it is. The
+// compact twins (compactlegend.h <s>/<d> tested=1 and the <tested> column) say it in the same words. test/metriclegendcheck.sh.
 inline constexpr const char* kTestedRowLegend =
-    "tested=\"1\" on a row means an indexed test transitively reaches it (never 0, omitted when it does not). ";
+    "tested=\"1\" on a row means an indexed test transitively reaches it over call edges; reached, not asserted (never 0, omitted when it does not). ";
 
 // The same lens in the COLUMNAR form (2026-09-12). A parallel array cannot omit a false entry, so --callers/--callees/--impact
 // --format=columnar carry it as a dense <tested> column (columnar.h emitColumnarTestedColumn): 1 where graph.h isTestedByReach
@@ -616,7 +620,7 @@ inline constexpr const char* kTestedRowLegend =
 // zeros (test/fixture's --callers=distance read <tested>0,0</tested>), so they read the column instead, in the words of
 // compactlegend.h's compact column reading. Gate: test/impactpartitioncheck.sh arm (5).
 inline constexpr const char* kTestedColumnLegend =
-    "tested= is a dense column in this form: fields= names tested, and <tested> holds one value per row: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row. ";
+    "tested= is a dense column in this form: fields= names tested, and <tested> holds one value per row: 1 = a non-test row an indexed test transitively reaches over call edges; reached, not asserted; 0 = none found, or a test row. ";
 
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
