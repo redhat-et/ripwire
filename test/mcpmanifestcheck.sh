@@ -364,7 +364,14 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #   per property entry, the lego/explore precedent): memory_recall's schema 500 -> 592 B, batch's 997 -> 1,089 B; descriptions
 #   unchanged at 15,141 B. Measured 40,170 -> 40,354 B (base 5f4b50415 vs the lane binary). Ceiling = measured + 30 B, the same
 #   margin. OWNER CALL flagged on the PR: the MCP-METADATA lane stacked on this one raises it again separately.
-CEILING = 40384
+# MCP-METADATA (2026-11-26, stacked on #774), OWNER CALL: 40,384 -> 41,701, measured 41,671 B (from 40,354 B on the merged
+#   base 6c1890314). +1,317 B, every byte attributed: title on all 33 tools +971 B (MCP 2025-06-18); idempotentHint on the
+#   4 write tools only +90 B (owner ruling 2026-11-26: the spec calls it meaningful only when readOnlyHint is false, so
+#   the 29 read-only tools carry none); schemas 20,648 -> 20,836 B (+188 B: property descriptions by meaning, path and
+#   paths on all 33 now say absolute root and the default, the type text the other rows dropped pays most of it back);
+#   descriptions +68 B (15,141 -> 15,219 characters, +78; the dropped em dashes are 6 bytes each in this metric) from the
+#   16 routing sentences front-loaded with the moment to use the tool. Ceiling = measured + 30 B, the same margin.
+CEILING = 41701
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
