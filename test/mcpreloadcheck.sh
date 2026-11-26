@@ -23,7 +23,7 @@
 #   2. CONTENT-EDIT hot-reload in the SAME server: rename a symbol (content edit), the next verb reflects it
 #      (the always-run per-file mtime+size sweep catches it — no restart).
 #   3. fetch_body range: lines L..M byte-match the exact source lines of the def.
-#   4. out-of-range start_line → a clean -32602 error, no body (never OOB).
+#   4. out-of-range start_line → a clean isError refusal (SEP-1303), no body (never OOB).
 #   5. UTF-8 safety: a range over a def containing multibyte characters returns a valid-UTF-8 slice that does
 #      not split a codepoint, and byte-matches the intended source lines.
 #   6. two-process determinism: two independent servers give byte-identical range output.
@@ -67,6 +67,8 @@ inner_for_id() {
     grep -E "\"id\":$2[,}]" "$1" | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERROR__:" + r["error"].get("message",""))
 else:            print(r["result"]["content"][0]["text"])
 '
@@ -75,6 +77,7 @@ stamp_for_id() {
     grep -E "\"id\":$2[,}]" "$1" | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin); print(r.get("result",{}).get("_index",""))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 '
 }
 wait_for_id() {
@@ -90,6 +93,8 @@ handle_of_symbol() {
     tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
 print(json.loads(r["result"]["content"][0]["text"])["symbol"]["handle"])
 '
@@ -193,8 +198,10 @@ fetch_range() {
         | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r:
-    e = r["error"]; print("__ERR__:%d:%s" % (e.get("code"), e.get("message","")))
+    e = r["error"]; print("__ERR__:%s:%s" % (e.get("code"), e.get("message","")))
 else:
     print(r["result"]["content"][0]["text"])
 '
@@ -240,12 +247,12 @@ print("CLAMP_OK" if (b["end_line"] == b["total_lines"] and b["start_line"] == 8)
        if grep -q CLAMP_OK "$TMP/clampchk"; then ok "end_line=999 clamped to the last line"; else no "end clamp wrong: $( cat "$TMP/clampchk" )"; fi;;
 esac
 
-# --- 4. start_line past EOF → clean -32602 error, no body ---
+# --- 4. start_line past EOF → clean isError refusal, no body ---
 echo
 echo "--- 4. out-of-range start_line → clean error, no body ---"
 OOB_JSON="$( fetch_range 999 "" )"
 case "$OOB_JSON" in
-    __ERR__:-32602:*) ok "out-of-range start_line=999 refused with -32602 (no body): ${OOB_JSON#__ERR__:-32602:}";;
+    __ERR__:isError:*) ok "out-of-range start_line=999 refused (isError) (no body): ${OOB_JSON#__ERR__:isError:}";;
     __ERR__*)         no "out-of-range returned the WRONG error code: $OOB_JSON";;
     *)                no "out-of-range start_line=999 returned a BODY instead of an error (OOB risk): $( echo "$OOB_JSON" | head -c 100 )";;
 esac
@@ -294,6 +301,8 @@ else
         | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
 b = json.loads(r["result"]["content"][0]["text"])
 body = b["body"]

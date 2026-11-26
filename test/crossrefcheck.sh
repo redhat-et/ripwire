@@ -745,12 +745,13 @@ for line in sys.stdin:
     line=line.strip()
     if not line: continue
     d=json.loads(line); c=d.get("result",{}).get("content")
-    if c: print(c[0].get("text",""),end="")
+    if d.get("result",{}).get("isError"): print("ISERROR",end="")
+    elif c: print(c[0].get("text",""),end="")
     elif "error" in d: print("ERROR",d["error"].get("code"),end="")'; }
 if command -v python3 >/dev/null 2>&1; then
     [ "$( mcpw '' )" = "$( lw zqLean )" ] && [ "$( mcpw ',"listing":"all"' )" = "$( lw zqLean --whereis-listing=all )" ] \
-        && [ "$( mcpw ',"listing":"refs"' )" = "$( lw zqLean --whereis-listing=refs )" ] && [ "$( mcpw ',"listing":"bogus"' )" = "ERROR -32602" ] \
-        && ok "LEAN (L10): MCP whereis default / listing:all / listing:refs are byte-identical to the CLI; listing:bogus refuses -32602" \
+        && [ "$( mcpw ',"listing":"refs"' )" = "$( lw zqLean --whereis-listing=refs )" ] && [ "$( mcpw ',"listing":"bogus"' )" = "ISERROR" ] \
+        && ok "LEAN (L10): MCP whereis default / listing:all / listing:refs are byte-identical to the CLI; listing:bogus refuses (an isError result, SEP-1303)" \
         || no "LEAN (L10): the MCP twin differs from the CLI"
     # (L10b) CodeRabbit 5468003465: a NON-STRING listing refuses through the shared shape gate and echoes the value SENT.
     # `listing` used to be read inside the whereis arm, after that gate, so listing:5 decoded to "" and the closed-set
@@ -762,12 +763,13 @@ for line in sys.stdin:
     if not line: continue
     d=json.loads(line)
     if "error" in d: print("ERROR",d["error"].get("code"),d["error"].get("message",""),end="")
+    elif d.get("result",{}).get("isError"): print("ISERROR","".join(x.get("text","") for x in d["result"]["content"]),end="")
     elif d.get("result",{}).get("content"): print("ANSWER",end="")'; }
     for arm in '5|5' '["all"]|["all"]' '{"v":1}|{"v":1}' 'true|true' '"bogus"|bogus'; do
         val="${arm%%|*}"; echo_="${arm#*|}"
         m="$( mcpwmsg ",\"listing\":$val" )"
         case "$m" in
-            "ERROR -32602 invalid value for field: listing"*"got '$echo_'"*) ok "LEAN (L10b): MCP whereis listing:$val refuses -32602 and echoes '$echo_'" ;;
+            "ISERROR invalid value for field: listing"*"got '$echo_'"*) ok "LEAN (L10b): MCP whereis listing:$val refuses (isError, SEP-1303) and echoes '$echo_'" ;;
             *) no "LEAN (L10b): MCP whereis listing:$val — want a -32602 refusal echoing '$echo_', got: ${m:-nothing}" ;;
         esac
     done
@@ -834,7 +836,8 @@ for line in sys.stdin:
     line=line.strip()
     if not line: continue
     d=json.loads(line); c=d.get("result",{}).get("content")
-    if c: print(c[0].get("text",""),end="")
+    if d.get("result",{}).get("isError"): print("ISERROR",end="")
+    elif c: print(c[0].get("text",""),end="")
     elif "error" in d: print("ERROR",d["error"].get("code"),end="")'; }
 if command -v python3 >/dev/null 2>&1; then
     TT="$TMP/tie$(( 1 + TD ))"
@@ -1629,9 +1632,10 @@ for line in sys.stdin:
     if not line: continue
     d=json.loads(line)
     if "error" in d: print("ERROR",d["error"].get("code"),d["error"].get("message",""),end="")
+    elif d.get("result",{}).get("isError"): print("ISERROR","".join(x.get("text","") for x in d["result"]["content"]),end="")
     elif d.get("result",{}).get("content"): print("ANSWER",end="")' )"
             case "$m" in
-                "ERROR -32602 invalid value for field: full_text"*"got '$echo_'"*) ok "whereis (preview): MCP full_text:$val refuses -32602 and echoes '$echo_'" ;;
+                "ISERROR invalid value for field: full_text"*"got '$echo_'"*) ok "whereis (preview): MCP full_text:$val refuses (isError, SEP-1303) and echoes '$echo_'" ;;
                 *) no "whereis (preview): MCP full_text:$val — want a -32602 refusal echoing '$echo_', got: ${m:-nothing}" ;;
             esac
         done

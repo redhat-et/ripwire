@@ -51,6 +51,8 @@ import sys, json
 r = json.load(sys.stdin)
 if "error" in r:
     print("__ERROR__:" + str(r["error"].get("code")))
+elif r["result"].get("isError"):   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now
+    print("__ERROR__:isError")
 else:
     print(r["result"]["content"][0]["text"])
 '
@@ -148,8 +150,9 @@ if diff -q "$TMP/ex_a" "$TMP/ex_b" >/dev/null; then ok "exemplar: deterministic"
 BAD_EX="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exemplar","arguments":{"path":"'"$REPO"'","kind":"iface"}}}' \
-    | tail -1 | python3 -c 'import sys,json;r=json.load(sys.stdin);print("ERR:"+str(r["error"]["code"]) if "error" in r else "OK")' )"
-if [ "$BAD_EX" = "ERR:-32602" ]; then ok "exemplar: no-candidate kind → -32602 (not a silent empty)"; else no "exemplar: no-candidate did not error: $BAD_EX"; fi
+    | tail -1 | python3 -c 'import sys,json;r=json.load(sys.stdin);print("ERR:"+str(r["error"]["code"]) if "error" in r else "ERR:isError" if r["result"].get("isError") else "OK")' )"
+# SEP-1303 (lane mcp-metadata): the refusal is an isError result now, not -32602; the arm still asserts a refusal, not an empty answer
+if [ "$BAD_EX" = "ERR:isError" ]; then ok "exemplar: no-candidate kind → an isError refusal (not a silent empty)"; else no "exemplar: no-candidate did not error: $BAD_EX"; fi
 
 # ─── 3. quality_delta — baseline marker + regressions array ──────────────────
 echo
@@ -283,23 +286,30 @@ if echo "$PB_INNER" | grep -q '<path '; then ok "path_between: result contains <
 if echo "$PB_INNER" | grep -q 'reachable="1"'; then ok "path_between(top->leaf): reachable=1"; else no "path_between(top->leaf): not reachable — got: $( echo "$PB_INNER" | head -c 200 )"; fi
 if diff -q "$TMP/pb_a" "$TMP/pb_b" >/dev/null; then ok "path_between: deterministic"; else no "path_between: non-deterministic"; fi
 
-# ─── 6. bad symbol → standard -32602 not-found (never a silent empty) ────────
+# ─── 6. bad symbol → the standard not-found answer (never a silent empty) ────
+# SEP-1303 (lane mcp-metadata): a not-found was a -32602 error; it is a found=0 ANSWER now (zero means none found), a plain
+# result whose content[0] is the found=0 document and content[1] the refusal sentence. The arm keeps its meaning: never a
+# silent empty, always the not-found named.
 echo
-echo "=== 6. bad symbol → standard -32602 not-found error (not a silent empty) ==="
+echo "=== 6. bad symbol → the found=0 not-found answer with its refusal sentence (not a silent empty) ==="
 
 err_code() {
-    tail -1 "$1" | python3 -c 'import sys,json;r=json.load(sys.stdin);print(r["error"]["code"] if "error" in r else "NO_ERROR")'
+    tail -1 "$1" | python3 -c 'import sys,json
+r=json.load(sys.stdin)
+c=r.get("result",{}).get("content",[])
+nf=len(c)>1 and "found=\"0\"" in c[0].get("text","") and "not found" in c[1].get("text","")
+print(r["error"]["code"] if "error" in r else "NOTFOUND" if nf else "NO_ERROR")'
 }
 
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"impact","arguments":{"path":"'"$REPO"'","symbol":"zzz_no_such"}}}' >"$TMP/imp_bad"
-if [ "$( err_code "$TMP/imp_bad" )" = "-32602" ]; then ok "impact(bad symbol): -32602 not-found"; else no "impact(bad symbol): expected -32602, got $( err_code "$TMP/imp_bad" )"; fi
+if [ "$( err_code "$TMP/imp_bad" )" = "NOTFOUND" ]; then ok "impact(bad symbol): the found=0 not-found answer"; else no "impact(bad symbol): expected the not-found answer, got $( err_code "$TMP/imp_bad" )"; fi
 
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path_between","arguments":{"path":"'"$REPO"'","from":"zzz_no_such","to":"leaf"}}}' >"$TMP/pb_bad"
-if [ "$( err_code "$TMP/pb_bad" )" = "-32602" ]; then ok "path_between(bad endpoint): -32602 not-found"; else no "path_between(bad endpoint): expected -32602, got $( err_code "$TMP/pb_bad" )"; fi
+if [ "$( err_code "$TMP/pb_bad" )" = "NOTFOUND" ]; then ok "path_between(bad endpoint): the found=0 not-found answer"; else no "path_between(bad endpoint): expected the not-found answer, got $( err_code "$TMP/pb_bad" )"; fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo

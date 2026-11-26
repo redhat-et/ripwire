@@ -84,8 +84,8 @@ elif printf '%s' "$LASTLINE" | python3 -c 'import sys,json; json.load(sys.stdin)
     printf '%s' "$LASTLINE" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
-if "error" in r:
-    sys.exit(0)   # a clean refusal is fine
+if "error" in r or r["result"].get("isError"):
+    sys.exit(0)   # a clean refusal is fine (an isError result since SEP-1303, lane mcp-metadata)
 b = json.loads(r["result"]["content"][0]["text"])
 assert "body" in b or "partial" in b or "start_line" in b, "malformed success payload"
 ' && ok "A4-F6: response payload is coherent (either a clean refusal, or a well-formed body result)" \

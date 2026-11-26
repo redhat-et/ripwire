@@ -43,6 +43,7 @@ mcp_text() {
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r: print("__ERROR__:" + r["error"].get("message",""))
 else:            print(r["result"]["content"][0]["text"])
 '
@@ -54,6 +55,7 @@ batch_sub() {
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json, re, html
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r: print("__ERROR__:" + r["error"].get("message","")); raise SystemExit
 t = r["result"]["content"][0]["text"]
 m = re.search(r"<q i=\"0\" verb=\"[^\"]*\" ok=\"0\" err=\"([^\"]*)\"", t)
@@ -390,8 +392,8 @@ def rpc(name, args):
     out = subprocess.run([BIN, "--mcp"], input=inp, capture_output=True, text=True).stdout.strip().split("\n")
     return json.loads(out[-1])
 
-def err(r):
-    return r["error"]["message"] if "error" in r else ""
+def err(r):   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now
+    return r["error"]["message"] if "error" in r else "".join(c.get("text", "") for c in r["result"]["content"]) if r.get("result", {}).get("isError") else ""
 
 tools    = json.load(open(TOOLS))["result"]["tools"]
 problems = []
@@ -448,6 +450,7 @@ def err(name, args):
     req = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":%s}' % json.dumps({"name": name, "arguments": args})
     inp = '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' + req + "\n"
     r = json.loads(subprocess.run([BIN, "--mcp"], input=inp, capture_output=True, text=True).stdout.strip().split("\n")[-1])
+    r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
     return r["error"]["message"] if "error" in r else ""
 n = len(json.load(open(TOOLS))["result"]["tools"])
 m = err("packtask", {"path": ROOT, "task": "x"})
@@ -531,7 +534,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     "$( call grep '{"path":"'"$ROOT"'","pattern":"x","limit":"'"$( python3 -c 'print("é"*200)' )"'"}' )" \
     | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
-m = json.load(sys.stdin)["error"]["message"]
+r = json.load(sys.stdin)   # SEP-1303 (lane mcp-metadata): the bad-value refusal is an isError result now
+m = r["error"]["message"] if "error" in r else r["result"]["content"][0]["text"]
 print("OK" if "\ufffd" not in m and "\u2026" in m else "GOT:" + repr(m[-40:]))
 ' >"$TMP/nitutf8.res" 2>&1
 [ "$( cat "$TMP/nitutf8.res" )" = "OK" ] \

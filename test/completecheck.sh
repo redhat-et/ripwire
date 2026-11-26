@@ -576,9 +576,12 @@ TRF="$( "$BIN" "$TR" --whereis=helper --no-cache 2>/dev/null | sed 's/<!--.*-->/
     && ok 'whereis (18n): a test-scope def in a source file sorts after the production def (test_local="1")' \
     || { no 'whereis (18n): a test-scope def still leads the production def'; printf '%s\n' "$TRF"; }
 
-# 18o) the MCP twins keep their -32602 refusal and carry the same answer document in error.data.answer
+# 18o) the MCP twins answer the not-found: the same answer document and the refusal sentence, both in content.
+#      SEP-1303 (lane mcp-metadata): a found=0 answer was a -32602 error with the document in error.data.answer; it is a
+#      plain result now (zero means none found, an answer), content[0] the document, content[1] the refusal sentence. The
+#      arm keeps its meaning: every twin still serves the document AND the refusal, and the rename clause rides it.
 if command -v python3 >/dev/null 2>&1; then
-    python3 - "$BIN" "$WT" <<'PY' && ok 'MCP (18o): all five twins (find_referencing_symbols, find_symbol, uses, impact, path_between) refuse -32602 AND carry the answer; batch names the rename' \
+    python3 - "$BIN" "$WT" <<'PY' && ok 'MCP (18o): all five twins (find_referencing_symbols, find_symbol, uses, impact, path_between) answer found=0 AND carry the refusal; batch names the rename' \
                                || no 'MCP (18o): the twins do not carry the not-found answer'
 import json, subprocess, sys
 BIN, WT = sys.argv[1], sys.argv[2]
@@ -601,12 +604,15 @@ for line in p.stdout.splitlines():
 bad = 0
 for i, ( n, a, want1, want2 ) in enumerate( calls ):
     d = byId.get( 10 + i, {} )
-    e = d.get( "error", {} )
-    ans = e.get( "data", {} ).get( "answer", "" )
-    if e.get( "code" ) != -32602 or want1 not in ans or want2 not in ans:
+    res = d.get( "result", {} )
+    content = res.get( "content", [] )
+    ans = content[ 0 ].get( "text", "" ) if content else ""
+    if "error" in d or res.get( "isError" ) or len( content ) < 2 or " not found" not in content[ 1 ].get( "text", "" ) \
+       or want1 not in ans or want2 not in ans:
         print( "  MCP %s: %s" % ( n, json.dumps( d )[ :300 ] ) ); bad = 1
 for k in ( 10, 11, 12 ):
-    rn = byId.get( k, {} ).get( "error", {} ).get( "message", "" )
+    rc = byId.get( k, {} ).get( "result", {} ).get( "content", [] )
+    rn = rc[ 1 ].get( "text", "" ) if len( rc ) > 1 else ""
     if "renamed in the working tree: did you mean 'zqNewName'" not in rn:
         print( "  MCP rename clause missing (id %d): %s" % ( k, rn ) ); bad = 1
 # the batch arm (review M6): each answering sub-verb's err= names the rename first

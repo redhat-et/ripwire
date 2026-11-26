@@ -116,8 +116,9 @@ mcp_situ() { # $1 = files value → the LAST JSON-RPC line of a two-request stdi
 }
 
 OUT="$( mcp_situ "$BAD" )"
-if printf '%s' "$OUT" | python3 -c 'import sys,json; r=json.load(sys.stdin); sys.exit(0 if "error" in r else 1)' 2>/dev/null; then
-    ok "E MCP situational_awareness files=$BAD → JSON-RPC error"
+# SEP-1303 (lane mcp-metadata): the refusal is an isError result now (was a JSON-RPC error); still a refusal, never empty arrays
+if printf '%s' "$OUT" | python3 -c 'import sys,json; r=json.load(sys.stdin); sys.exit(0 if "error" in r or r.get("result",{}).get("isError") else 1)' 2>/dev/null; then
+    ok "E MCP situational_awareness files=$BAD → a refusal (isError)"
 else
     no "E MCP situational_awareness files=$BAD → no error (empty arrays read as 'nothing depends on your edit'): $OUT"
 fi

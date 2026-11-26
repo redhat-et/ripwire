@@ -70,7 +70,9 @@ import sys, json
 d = sys.stdin.buffer.read()
 try:    r = json.loads( d.decode( "utf-8" ) )
 except Exception as e: print( "__BADLINE__:" + type( e ).__name__ ); raise SystemExit
-if "error" in r: print( "%d|%s" % ( r["error"]["code"], r["error"]["message"] ) )
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; it reads as "isError|MESSAGE", a protocol error as "CODE|MESSAGE"
+r = { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r
+if "error" in r: print( "%s|%s" % ( r["error"]["code"], r["error"]["message"] ) )
 else:            print( "OK" )
 '; }
 
@@ -384,7 +386,9 @@ for verb, argstub in rows:
                        "params": { "name": verb, "arguments": args } } )
         try:                   r = json.loads( line.decode( "utf-8" ) )
         except Exception as e: v = "__BADLINE__:" + type( e ).__name__
-        else:                  v = "%d|%s" % ( r["error"]["code"], r["error"]["message"] ) if "error" in r else "OK"
+        else:
+            r = { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r   # SEP-1303 (lane mcp-metadata)
+            v = "%s|%s" % ( r["error"]["code"], r["error"]["message"] ) if "error" in r else "OK"
         # one row per probe, so the shell classifier below is unchanged apart from where it reads from.
         # tab/newline are the row's own delimiters — neutralised so a message can never split a row.
         print( "%s\t%s\t%s" % ( verb, cond, v.replace( "\t", " " ).replace( "\r", " " ).replace( "\n", " " ) ) )
@@ -394,9 +398,9 @@ missCount=0; fileCount=0; missBad=""; fileBad=""
 while IFS="$( printf '\t' )" read -r verb cond V; do
     [ -n "$verb" ] || continue
     if [ "$cond" = missing ]; then
-        case "$V" in -32602\|"path does not exist"*) missCount=$(( missCount + 1 ));; *) missBad="$missBad $verb($V)";; esac
+        case "$V" in isError\|"path does not exist"*) missCount=$(( missCount + 1 ));; *) missBad="$missBad $verb($V)";; esac
     else
-        case "$V" in -32602\|"path is a FILE"*)      fileCount=$(( fileCount + 1 ));; *) fileBad="$fileBad $verb($V)";; esac
+        case "$V" in isError\|"path is a FILE"*)      fileCount=$(( fileCount + 1 ));; *) fileBad="$fileBad $verb($V)";; esac
     fi
 done <"$TMP/verbverdicts.txt"
 [ "$missCount" = "$VERBS" ] \
@@ -421,11 +425,11 @@ esac
 # (E4) the SECOND arm: the batch verb's own chain shares the batch's root, so the same two conditions must
 # arrive with the same two causes there.
 case "$( batch_verdict "$BADPATH" '{"verb":"grep","pattern":"x"}' )" in
-    -32602\|"path does not exist"*) ok "(E4) batch arm: a nonexistent root names the condition";;
+    isError\|"path does not exist"*) ok "(E4) batch arm: a nonexistent root names the condition";;
     *) no "(E4) batch arm nonexistent root: $( batch_verdict "$BADPATH" '{"verb":"grep","pattern":"x"}' )";;
 esac
 case "$( batch_verdict "$FILEPATH" '{"verb":"grep","pattern":"x"}' )" in
-    -32602\|"path is a FILE"*) ok "(E4) batch arm: a FILE root names the condition";;
+    isError\|"path is a FILE"*) ok "(E4) batch arm: a FILE root names the condition";;
     *) no "(E4) batch arm file root: $( batch_verdict "$FILEPATH" '{"verb":"grep","pattern":"x"}' )";;
 esac
 
@@ -469,7 +473,7 @@ WS="$( mktemp -d "$TMP/ws.XXXXXX" )"; mkdir -p "$WS/r1" "$WS/r2"
 cp "$FIX/geometry.cpp" "$WS/r1/"; cp "$FIX/app.py" "$WS/r2/"
 G="$( call_verdict quality_baseline '{"paths":["'"$WS/r1"'","'"$WS/r2"'"]}' )"
 case "$G" in
-    -32602\|*single-root*) ok "(G) quality_baseline over \`paths\` → -32602 (a caller usage error), naming that it is single-root";;
+    isError\|*single-root*) ok "(G) quality_baseline over \`paths\` → an isError refusal (a caller usage error, SEP-1303), naming that it is single-root";;
     -32603*) no "(G) still -32603 'internal error' for a caller usage error: $G";;
     *) no "(G) quality_baseline multi-root verdict: $G";;
 esac
@@ -496,6 +500,7 @@ WQ="$( mktemp -d "$TMP/wq.XXXXXX" )"; cp -R "$FIX/"* "$WQ/"
 marker(){ printf '%s\n' "$( call quality_delta '{"path":"'"$WQ"'"}' )" | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load( sys.stdin )
+r = { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r   # SEP-1303 (lane mcp-metadata)
 if "error" in r: print( "__ERROR__:" + r["error"]["message"][:80] ); raise SystemExit
 print( json.loads( r["result"]["content"][0]["text"] )["baseline"] )
 '; }
@@ -737,7 +742,8 @@ class Server:
         try:
             self.p.stdin.write( json.dumps( obj ).encode() + b"\n" ); self.p.stdin.flush()
             line = self.p.stdout.readline().decode( "utf-8", "replace" ).strip()
-            return json.loads( line ) if line else {}
+            r = json.loads( line ) if line else {}
+            return { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r   # SEP-1303 (lane mcp-metadata): a tool refusal reads as error code "isError"
         except Exception:
             return {}
     def close( self ):
@@ -803,7 +809,7 @@ echo "=== (K) F2 — the DERIVED blank-code-point table, probed at every range B
 #   off-by-one in a `lo` silently un-refuses one code point, and no class-based arm would ever notice.
 #
 # ASSERTED PER REFUSAL PROBE, because these verbs delete code when they are wrong:
-#   • JSON-RPC error -32602 whose message names the field AND spells the offending code point `U+XXXX`
+#   • an isError refusal (SEP-1303; a JSON-RPC -32602 before) whose message names the field AND spells the offending code point `U+XXXX`
 #     (F2's echo half: the refusal must show WHICH invisible thing was sent, and must never echo the raw
 #     byte into a client-facing message — that is §B4's defect and F3's cousin);
 #   • the target file's identity quadruple — sha256 + size + mtime_ns + inode — is byte-for-byte unchanged;
@@ -914,7 +920,8 @@ class StdioServer:
         self.p.stdin.write( line.encode() + b"\n" ); self.p.stdin.flush()
         return self.p.stdout.readline().decode( "utf-8", "replace" ).strip()
     def send( self, obj ):
-        return json.loads( self.sendRaw( json.dumps( obj ) ) )
+        r = json.loads( self.sendRaw( json.dumps( obj ) ) )
+        return { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r   # SEP-1303 (lane mcp-metadata): a tool refusal reads as error code "isError"
     def close( self ):
         try:
             self.p.stdin.close(); self.p.wait( 15 )
@@ -951,7 +958,7 @@ for verb, field in WRITE_VERBS:
         r = srv.send( editFrame( verb, field, chr( cp ), corpus ) )
         if "error" not in r:                                          missedRefusal.append( cp )
         else:
-            if r[ "error" ].get( "code" ) != -32602:                   badCode.append( cp )
+            if r[ "error" ].get( "code" ) != "isError":                badCode.append( cp )
             msg = r[ "error" ].get( "message", "" )
             if ( "U+%04X" % cp ) not in msg or field not in msg:       noSpelling.append( ( cp, msg ) )
             clause = " and no " + myNoun + ":"
@@ -1017,7 +1024,7 @@ for verb, field in WRITE_VERBS:
 
     check( not missedRefusal, "(K1) %-20s all %d range lo/hi code points REFUSED (%d applied)"
                               % ( verb, len( inSet ), len( missedRefusal ) ) )
-    check( not badCode,       "(K1) %-20s every refusal is -32602 (%d were not)" % ( verb, len( badCode ) ) )
+    check( not badCode,       "(K1) %-20s every refusal is an isError result (%d were not)" % ( verb, len( badCode ) ) )
     check( not noSpelling,    "(K1) %-20s every refusal names %s and SPELLS the code point (%d did not)"
                               % ( verb, field, len( noSpelling ) ) )
     for cp, msg in wrongNoun[ :3 ]:
@@ -1078,7 +1085,8 @@ else:
                     noAnswer.append( ( verb, cp, str( e ) ) )
                     continue
                 if s != h:                          differ.append( ( verb, cp, s[ :90 ], h[ :90 ] ) )
-                if '"error"' not in h:              remoteApplied.append( ( verb, cp ) )
+                # SEP-1303 (lane mcp-metadata): over HTTP too, a tool refusal is an isError result now
+                if '"error"' not in h and '"isError":true' not in h: remoteApplied.append( ( verb, cp ) )
     finally:                                        # a raise anywhere above, setup included, must not orphan the listener:
         try:                                        # stdio is closed only if it was created, and the listener is
             if stdio is not None:                   # terminated and reaped even when that close raises

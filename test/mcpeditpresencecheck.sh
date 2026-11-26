@@ -17,7 +17,7 @@
 # was missed — and only on the two fields whose omission writes to disk.
 #
 # WHAT IS ASSERTED (the contract, not the sentence):
-#   (a) each of the three edit verbs, payload field OMITTED → JSON-RPC error -32602 naming the VERB, the
+#   (a) each of the three edit verbs, payload field OMITTED → an isError refusal (SEP-1303; was -32602) naming the VERB, the
 #       FIELD, the problem and an EXAMPLE — and the target file's sha256 is byte-identical before/after.
 #       The HASH is the assertion that matters: a gate that only reads the response cannot tell a refusal
 #       from a refusal-that-also-wrote.
@@ -110,16 +110,17 @@ errOrOk()
 import sys, json
 r = json.load(sys.stdin)
 if "error" in r: print("__ERR__%d:%s" % (r["error"].get("code", 0), r["error"].get("message", "")))
+elif r["result"].get("isError"): print("__ERR__isError:" + r["result"]["content"][0]["text"].replace("\n", " "))   # SEP-1303 (lane mcp-metadata): an edit verb refusal is an isError result now, not -32602
 else:           print("__OK__:" + r["result"]["content"][0]["text"].replace("\n", " "))
 ' <"$1"
 }
 
-# assert: a refusal that is -32602, names the verb, names the field, states the problem, shows an example.
+# assert: a refusal (an isError result since SEP-1303; -32602 before), names the verb, names the field, states the problem, shows an example.
 assertRefusal()
 {
     local label="$1" msg="$2" verb="$3" field="$4"
     case "$msg" in
-        __ERR__-32602:*) ok "$label: refused with -32602";;
+        __ERR__isError:*) ok "$label: refused (isError)";;
         __OK__:*)        no "$label: SUCCEEDED — the verb served an empty payload: $( printf '%.140s' "${msg#__OK__:}" )"; return;;
         *)               no "$label: wrong error code/shape: $( printf '%.140s' "$msg" )"; return;;
     esac
@@ -330,6 +331,7 @@ def call(verb, args):
     last = [l for l in out.splitlines() if l.strip()][-1]
     r = json.loads(last)
     if "error" in r: return ("err", r["error"].get("code"), r["error"].get("message", ""))
+    if r["result"].get("isError"): return ("err", "isError", r["result"]["content"][0]["text"])   # SEP-1303 (lane mcp-metadata): an edit verb refusal is an isError result now, not -32602
     return ("ok", 0, r["result"]["content"][0]["text"][:160].replace("\n", " "))
 
 fails = 0
@@ -355,8 +357,8 @@ for verb in verbs:
         before = corpus_hash()
         kind, code, msg = call(verb, [(f, VAL[f]) for f in present])
         first = omitted.split("/")[0]
-        check(kind == "err" and code == -32602,
-              "(e) %-24s omitting %-14s → -32602 refusal  [%s]" % (verb, omitted, msg[:70]))
+        check(kind == "err" and code == "isError",
+              "(e) %-24s omitting %-14s → isError refusal  [%s]" % (verb, omitted, msg[:70]))
         if kind == "err":
             check("missing required field" in msg and first in msg,
                   "(e) %-24s omitting %-14s → the refusal NAMES the field" % (verb, omitted))

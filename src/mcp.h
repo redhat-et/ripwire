@@ -1523,6 +1523,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // `arguments` means every argument read below is about the wrong scope, so naming an argument first
             // would send the caller to fix the wrong thing.
             std::string shapeRefusal = !nameArg.refusal.empty() ? nameArg.refusal : argsArg.refusal;
+            // SEP-1303: those two seed faults are the request's own SHAPE (a CallToolRequest that names no tool, or carries
+            // its arguments as something other than an object), a Protocol Error; every argument fault after them is the
+            // named tool's input validation, a Tool Execution Error (toolErrorResult below).
+            const bool callShapeFault = !shapeRefusal.empty();
             const auto  strArg = [ & ]( const char* field ) -> std::string
             {
                 const McpStringArg a = mcpStringArg( args, field );
@@ -1856,19 +1860,36 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 const std::string note = memguard::peakNoteOnIncrease( "this request finished with the error above" );
                 return note.empty() ? note : "; " + note;
             };
-            const auto errResult = [ & ]( int code, const char* msg )
+            // SEP-1303 (MCP 2025-11-25; audit 2026-11-26 item 3). A tools/call that NAMED a tool this server serves and
+            // then failed inside it (a missing or bad argument, a not-found, a business-logic refusal) is a Tool Execution
+            // Error: a RESULT with isError:true and the explanation in content, which a client SHOULD show the model. A
+            // JSON-RPC error is a Protocol Error, which a client MAY drop. Claude Code happens to show both (6 of 6 sampled
+            // -32602s arrived as is_error), so the gain is every other client and the spec. The message bytes are the same
+            // in either envelope; only the envelope moves. The protocol half is protocolErrMsg below.
+            // A name with no declared field set is no tool this server serves (aliases resolve to their target's row), so
+            // every refusal of such a call, whatever check composed it, is the protocol error: the request reached no tool.
+            const bool namesServedTool = !mcprefuse::declaredFieldsFor( name ).empty();
+            const auto toolErrorResult = [ & ]( const std::string& text )
             {
-                const std::string suffix = memoryStopSuffix( msg ) + memoryPeakSuffix( msg );
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg
-                     + mcpdetail::jsonEscape( suffix ) + "\"}}";
+                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+                     + mcpdetail::jsonEscape( text ) + "\"}],\"isError\":true}}";
             };
-            // dynamic-message variant (edit verbs build refusal messages that embed symbol names / candidate
-            // file:line lists) — JSON-escape so a path with a quote or a control byte can't corrupt the response.
-            const auto errResultMsg = [ & ]( int code, const std::string& msg )
+            // The request never reached a tool: an unknown or --mcp-tools-hidden name, a missing or wrong-typed `name`, a
+            // wrong-typed `arguments`. These, and the server faults (-32000 the memory hard line, -32601 remote edits off,
+            // -32603 internal), stay JSON-RPC errors.
+            const auto protocolErrMsg = [ & ]( int code, const std::string& msg )
             {
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
                      + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) + "\"}}";
             };
+            // dynamic-message variant (edit verbs build refusal messages that embed symbol names / candidate
+            // file:line lists) — JSON-escape so a path with a quote or a control byte can't corrupt the response.
+            // -32602 (invalid params) is the tool's own input validation or business logic here, so it travels as isError.
+            const auto errResultMsg = [ & ]( int code, const std::string& msg )
+            {
+                return code == -32602 && namesServedTool ? toolErrorResult( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) : protocolErrMsg( code, msg );
+            };
+            const auto errResult = [ & ]( int code, const char* msg ) { return errResultMsg( code, std::string( msg ) ); };
             // §B6 M8: the shared not-found renderers, bound to THIS request's index. Seven verbs on both
             // arms answered a bare "symbol not found" — no echo of what the caller typed, no near-miss —
             // while the CLI twin has carried both since A3-F16a and the `flags` verb below carries both
@@ -1880,8 +1901,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             { return mcprefuse::notFound( getIndex( path ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( name, "symbol" ) ); };
             const auto notFoundKind = [ & ]( std::string_view noun, std::string_view spelling ) -> std::string
             { return mcprefuse::notFound( getIndex( path ).ing, noun, spelling ); };
-            // Fix list #2 (2026-10-01), the CLI twin's parity: a not-found keeps its -32602 refusal and ALSO carries the
-            // answer document the CLI prints on stdout (selectorrefuse.h writeNotFoundAnswer) in error.data.answer, with a
+            // Fix list #2 (2026-10-01), the CLI twin's parity: a not-found carries its refusal sentence AND the answer
+            // document the CLI prints on stdout (selectorrefuse.h writeNotFoundAnswer), both in content (SEP-1303), with a
             // working-tree rename offered first in both the message and the document. `msg` is the verb's own refusal
             // sentence; the rename clause goes right after its quoted echo. The document's echo is cappedEcho'd like the
             // message's, so a 400 KB selector cannot mint a 400 KB frame (mcpw3fixcheck NIT [symbol]).
@@ -1892,8 +1913,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 answer.text.mcpKeys = true;                            // ... their JSON rows in MCP's "file" / "line" keys
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
                 while( !doc.empty() && doc.back() == '\n' ) { doc.pop_back(); }
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""
-                     + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) ) + "\",\"data\":{\"answer\":\"" + mcpdetail::jsonEscape( doc ) + "\"}}}";
+                // SEP-1303 / non-negotiable 3: found=0 is an ANSWER ("none found"), so it is a plain result, not an error of
+                // either kind: the answer document first, the refusal sentence (echo, near-miss, rename) as the second block.
+                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+                     + mcpdetail::jsonEscape( doc ) + "\"},{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) ) + "\"}]}}";
             };
             const auto notFoundNearOf = [ & ]( std::string_view spelling ) -> NotFoundNear
             {
@@ -1942,7 +1965,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             if( !hiddenToolRefusal.empty() )
             {
                 DISCLOSE( Diagnostics::answerRefused, "a tools/call of a tool --mcp-tools left out answers an MCP error naming the flag that enables it" );
-                resp = errResultMsg( -32602, hiddenToolRefusal );
+                resp = protocolErrMsg( -32602, hiddenToolRefusal );   // SEP-1303: a tool this server does not serve is a protocol error
             }
             bool pathsUsageError = !hiddenToolRefusal.empty();
             if( !pathsUsageError )
@@ -2094,7 +2117,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // stdio default-root rebind must have happened before `path` is judged present.
             if( !pathsUsageError && !shapeRefusal.empty() )
             {
-                resp = errResultMsg( -32602, shapeRefusal );
+                resp = callShapeFault ? protocolErrMsg( -32602, shapeRefusal ) : errResultMsg( -32602, shapeRefusal );   // SEP-1303: name/arguments shape is the request's
                 pathsUsageError = true;   // reuse the skip-flag: no dispatch, no getIndex(), and for an edit verb no byte written
             }
             // P1 (L7): `legend` is a closed set on every verb that declares it — an unknown value is refused,
@@ -3027,7 +3050,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::string missing = missingArgMsg();
                     if( !missing.empty() )
                     {
-                        resp = errResultMsg( -32602, missing );
+                        resp = errResultMsg( -32602, missing );   // SEP-1303: isError for a served tool, else the protocol error
                     }
                     else
                     {
@@ -3048,7 +3071,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         // code stays -32602 (what this arm has always sent for an unknown tool); the FIX
                         // here is the message, and changing the code too would break callers switching on it
                         // for a reason unrelated to the finding.
-                        resp = errResultMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );
+                        resp = protocolErrMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );   // SEP-1303: unknown tool
                     }
                 }
             }

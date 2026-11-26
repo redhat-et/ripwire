@@ -1922,6 +1922,7 @@ mcp_text() {   # mcp_text VERB '<json-arguments>' → the text payload, or __ERR
 import sys, json
 r = json.load( sys.stdin )
 if "error" in r: print( "__ERROR__:" + str( r["error"].get( "code" ) ) + ":" + r["error"].get( "message", "" ) )
+elif r["result"].get( "isError" ): print( "__ERROR__:isError:" + r["result"]["content"][0]["text"] )   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, not a JSON-RPC error; same marker, same meaning
 else: sys.stdout.write( r["result"]["content"][0]["text"] )
 '
 }

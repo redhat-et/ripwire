@@ -38,6 +38,7 @@ result_text() {
 import sys, json
 r = json.load(sys.stdin)
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
+if r.get("result", {}).get("isError"): print("__ERR__:isError:" + r["result"]["content"][0]["text"]); sys.exit(0)   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, not a JSON-RPC error; same marker, same meaning
 print(r["result"]["content"][0]["text"])
 '
 }
@@ -180,8 +181,9 @@ assert_err() { # $1 = arguments body ; $2 = label
     printf '%s' "$OUT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
-assert "error" in r, ("expected a JSON-RPC error, got: %r" % r)
-' 2>/dev/null && ok "hostile: $2 → clean JSON-RPC error (no crash)" \
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, not a JSON-RPC error; same marker, same meaning
+assert "error" in r or r.get("result", {}).get("isError") is True, ("expected a refusal, got: %r" % r)
+' 2>/dev/null && ok "hostile: $2 → clean refusal, an isError result (no crash)" \
              || no "hostile: $2 did not yield a clean error: $OUT"
 }
 assert_err "\"path\":\"$FIX\""                        "queries absent"

@@ -2385,7 +2385,7 @@ mcp_for_text(){   # $1 task, $2 extra JSON arguments (may be empty) → the tool
         | ( cd "$ROOT" && rwcall --mcp 2>/dev/null ) | tail -1 | python3 -c '
 import sys, json
 r = json.load( sys.stdin )
-sys.stdout.write( r["result"]["content"][0]["text"] if "result" in r else "" )
+sys.stdout.write( r["result"]["content"][0]["text"] if "result" in r and not r["result"].get( "isError" ) else "" )   # SEP-1303: a refusal is an isError result
 '
 }
 LEGARG=""

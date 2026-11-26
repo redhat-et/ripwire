@@ -15,7 +15,7 @@
 #   (5)  depth: honored + disclosed when it cuts; out-of-band and flow-less depth refused
 #   (6)  unknown flow direction refused naming back|fwd|both
 #   (7)  @FILE:LINE seed: pre-pick + disclosure; a faulted seed refuses with the at-diagnosis
-#   (8)  not-found and ambiguity refusals (-32602, spellings listed) — never a silent pick
+#   (8)  not-found and ambiguity refusals (isError, spellings listed) — never a silent pick
 #   (9)  unknown var refused listing the sliceable locals
 #   (10) unserved language refused naming the served list
 #   (11) determinism (x2, byte-identical payload)
@@ -83,6 +83,8 @@ call_slice() {   # call_slice '<json-arguments-object>' — path "." resolves ag
         | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r:
     print("__ERROR__:" + str(r["error"].get("code")) + ":" + r["error"].get("message",""))
 else:
@@ -95,6 +97,8 @@ LIST="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"
 printf '%s' "$LIST" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 tools = { t["name"]: t.get("description","") for t in r["result"]["tools"] }
 print("COUNT:%d" % len(tools))
 d = tools.get("slice","")
@@ -173,9 +177,9 @@ printf '%s' "$E7" | grep -q '^__ERROR__' && printf '%s' "$E7" | grep -q 'has onl
 
 # ── (8) not-found and ambiguity — never a silent pick ───────────────────────────────────────────────
 E8a="$( call_slice '{"path":".","symbol":"nosuchsym"}' )"
-printf '%s' "$E8a" | grep -q '^__ERROR__:-32602' \
-    && ok "(8) unknown symbol refuses -32602" \
-    || { no "(8) expected -32602 for an unknown symbol"; printf '%s\n' "$E8a"; }
+printf '%s' "$E8a" | grep -q '^__ERROR__:isError' \
+    && ok "(8) unknown symbol refuses (isError)" \
+    || { no "(8) expected an isError refusal for an unknown symbol"; printf '%s\n' "$E8a"; }
 E8b="$( call_slice '{"path":".","symbol":"helper"}' )"
 printf '%s' "$E8b" | grep -q '^__ERROR__' && printf '%s' "$E8b" | grep -q 'a.cpp' && printf '%s' "$E8b" | grep -q 'b.cpp' \
     && ok "(8) a 2-definition symbol refuses listing the spellings that pick one" \
@@ -206,7 +210,8 @@ E12="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"slice\",\"arguments\":{\"paths\":[\".\",\"$TMP/r2\"],\"symbol\":\"pipeline\"}}}" \
     | tail -1 )"
-printf '%s' "$E12" | grep -q 'single' && printf '%s' "$E12" | grep -q 'error' \
+# SEP-1303 (lane mcp-metadata): the refusal is an isError result now (was a JSON-RPC error)
+printf '%s' "$E12" | grep -q 'single' && printf '%s' "$E12" | grep -qE 'error|"isError":true' \
     && ok "(12) a paths workspace refuses: slice is single-root (per-root re-parse)" \
     || { no "(12) expected the single-root refusal on a 2-root workspace"; printf '%s\n' "$E12" | head -c 300; echo; }
 
