@@ -10,6 +10,8 @@
 #include "infra/sortutil.h"   // sortUnique
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on the Type-3 pair-cap guard (never throw)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/depwatch.h"     // digest64 — a path's bytes in the clone pass's input digest
+#include "verbfs_seam.h"        // VERB-FS: the groups of an unchanged input are served from the record (src/verbfs.h)
 
 #include <algorithm>
 #include <array>
@@ -425,11 +427,18 @@ inline std::uint64_t cloneBodyKey( const std::string& src, std::uint32_t a, std:
     return ( hash & ~kCloneKeyTokenMask ) | ( std::uint64_t( 1 ) << 63 ) | tokenField;
 }
 
+// VERB-FS: while findClones offers its result to the record, every file the exact pass opens is listed here (this thread only).
+inline thread_local std::vector<std::uint32_t>* tlCloneReads = nullptr;
+
 // Read one indexed file whole, the way both clone passes always have. false (and `bytes` empty) when it cannot be
 // opened or read, or is empty: such a file contributes no bodies (never a crash).
 inline bool readCloneSourceFile( const IngestResult& ing, std::uint32_t fileId, std::string& bytes )
 {
     bytes.clear();
+    if( tlCloneReads != nullptr )
+    {
+        tlCloneReads->push_back( fileId );
+    }
     std::FILE* fp = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
     if( !fp )
     {
@@ -506,10 +515,14 @@ struct VerifyRow
 // — this excludes prototypes AND the most-vexing-parse phantoms (block-scope `Type name(args);` variable decls the
 // grammar shapes like a function declarator have no body, so sigEndByte==endByte). We compare the BODY, so
 // same-implementation / different-name still matches.
+inline SymbolsByFile cloneCandidates( const IngestResult& ing )
+{
+    return symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
+}
+
 inline std::vector<KeyRow> keyBodies( const IngestResult& ing, int minTokens )
 {
-    const SymbolsByFile byFile = symbolsByFileInIdOrder(
-        ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
+    const SymbolsByFile byFile = cloneCandidates( ing );
     const bool keysFit = ing.cloneKeys.size() == ing.symbols.size();
     std::vector<KeyRow> rows;
     std::string         bytes;
@@ -644,10 +657,83 @@ inline void sortGroups( const IngestResult& ing, std::vector<CloneGroup>& groups
         return sx.line != sy.line ? sx.line < sy.line : x.members[0] < y.members[0];
     } );
 }
+// VERB-FS: a digest of EVERY input the pass takes from the model — the threshold; whether the stored keys line up with the symbols;
+// for each file holding a candidate body its id, the path a read opens and the path sortGroups orders by; for each candidate its
+// id, line, body span, comment rule and stored key. With the files it read unchanged (their signatures, checked by the record),
+// an equal digest is the same computation on the same inputs. The candidates are keyBodies' own (cloneCandidates).
+inline std::uint64_t cloneInputDigest( const IngestResult& ing, int minTokens )
+{
+    const SymbolsByFile byFile  = cloneCandidates( ing );
+    const bool    keysFit = ing.cloneKeys.size() == ing.symbols.size();
+    std::uint64_t h       = hashutil::hashMix( hashutil::packPair( std::uint32_t( minTokens ), keysFit ? 1u : 0u ) );
+    const auto    absorb  = [ &h ]( std::uint64_t v ) { h = hashutil::hashMix( h ^ v ); };
+    absorb( hashutil::packPair( std::uint32_t( ing.files.size() ), std::uint32_t( ing.symbols.size() ) ) );
+    for( std::uint32_t f = 0; f < byFile.size(); ++f )
+    {
+        if( byFile[f].empty() )
+        {
+            continue;
+        }
+        absorb( f );
+        absorb( depwatch::digest64( diskPath( ing, f ) ) );
+        absorb( depwatch::digest64( ing.files[f] ) );
+        for( const NodeId id : byFile[f] )
+        {
+            const Symbol& s = ing.symbols[id];
+            absorb( hashutil::packPair( id, s.line ) );
+            absorb( hashutil::packPair( s.sigEndByte, s.endByte ) );
+            absorb( usesHashLineComments( s.lang ) ? 1u : 0u );
+            absorb( keysFit ? ing.cloneKeys[id] : kCloneKeyNone );
+        }
+    }
+    return h;
+}
+
+// Lists every file readCloneSourceFile opens on this thread for its lifetime (findClones' VERB-FS offer).
+class CloneReadLog
+{
+public:
+    explicit CloneReadLog( std::vector<std::uint32_t>& reads ) noexcept : outer_( tlCloneReads ) { tlCloneReads = &reads; }
+    ~CloneReadLog() { tlCloneReads = outer_; }
+    CloneReadLog( const CloneReadLog& )            = delete;
+    CloneReadLog& operator=( const CloneReadLog& ) = delete;
+
+private:
+    std::vector<std::uint32_t>* outer_;
+};
 }   // namespace clonepass
 
+inline std::vector<CloneGroup> findClonesComputed( const IngestResult& ing, int minTokens );
+
 // Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
+// VERB-FS (src/verbfs.h): on the primary index of a cached run, the groups of an input digest whose read files all still carry
+// their stored signatures are the stored ones; otherwise the pass runs exactly as it always did and offers its result.
 inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
+{
+    const verbfs::Seams& seam = verbfs::seams();
+    if( seam.cloneServe == nullptr || seam.cloneKeep == nullptr )
+    {
+        return findClonesComputed( ing, minTokens );
+    }
+    const std::uint64_t      digest = clonepass::cloneInputDigest( ing, minTokens );
+    std::vector<CloneGroup>  out;
+    const verbfs::CloneServe served = seam.cloneServe( ing, minTokens, digest, out );
+    if( served.served )
+    {
+        return out;
+    }
+    std::vector<std::uint32_t> reads;
+    {
+        const clonepass::CloneReadLog log( reads );
+        out = findClonesComputed( ing, minTokens );
+    }
+    sortutil::sortUnique( reads );
+    seam.cloneKeep( ing, minTokens, digest, out, reads, served.startNs );
+    return out;
+}
+
+// The exact pass itself: key, verify, group, order.
+inline std::vector<CloneGroup> findClonesComputed( const IngestResult& ing, int minTokens )
 {
     std::vector<clonepass::VerifyRow> shared = clonepass::sharedKeyRows( clonepass::keyBodies( ing, minTokens ) );
     clonepass::normalizeShared( ing, minTokens, shared );

@@ -32,6 +32,7 @@
 #include "model.h"
 #include "darkflags.h"          // wholeWordAt — a word-bounded literal pattern (FOR θ11) keeps its whole-word sites in the read
 #include "regexguard.h"         // THE owner of a user's regex: the screens, the compile, and the guarded match
+#include "verbfs_seam.h"        // VERB-FS: a served index's per-file trigram filters let the scan skip files no pattern can occur in
 
 #include <algorithm>
 #include <atomic>
@@ -40,6 +41,7 @@
 #include <cstring>
 #include <filesystem>           // R-H: the span-tier byte budget prices a hit file BEFORE parsing it
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -1556,6 +1558,10 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
     // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
     const TriQuery prefilterQuery = ( regex && !noPrefilter ) ? RegexAnalyzer( pats[0] ).analyze() : TriQuery::all();
 
+    // VERB-FS (src/verbfs.h): on the primary index of a cached run, a file whose stored trigram filter PROVES no pattern occurs in it,
+    // and whose stat signature still matches, is not read; every other file is, as before. Null everywhere else.
+    const std::unique_ptr<verbfs::GrepSieve> sieve = verbfs::seams().grepSieve != nullptr ? verbfs::seams().grepSieve( ing, pats, regex, noPrefilter ) : nullptr;
+
     // ── pass 1: parallel scan, one worker per hardware thread, one file at a time, every pattern per file ────
     std::vector<std::vector<std::vector<GrepMatchSite>>> perPatternSites( pats.size(), std::vector<std::vector<GrepMatchSite>>( fileCount ) );   // [k][f] written by exactly one worker
     std::vector<char>                       perFileAbandoned( regex ? fileCount : 0, 0 );   // slot f: the engine abandoned a match in f
@@ -1582,10 +1588,18 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
                 // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
                 // it left an empty `contents` entry rather than dropping the file from the corpus) — but
                 // COUNT it (T1): a scan that skipped a file's bytes may not claim completeness.
+                if( sieve != nullptr && sieve->skip( f ) )
+                {
+                    continue;   // no pattern can occur in it: the full scan would collect no site here
+                }
                 std::optional<std::string> fileBytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
                 if( !fileBytes )
                 {
                     unreadableCount.fetch_add( 1, std::memory_order_relaxed );
+                }
+                if( sieve != nullptr )
+                {
+                    sieve->noteRead( f, fileBytes );
                 }
                 const std::string text = std::move( fileBytes ).value_or( std::string() );
                 if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
@@ -1627,6 +1641,11 @@ inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std
         {
             scanStackBytes = runOnStackThreads( workerCount, stackBytes, fileWorker, &isScanStackRefusedByFault );
         }
+    }
+
+    if( sieve != nullptr )
+    {
+        sieve->finish();
     }
 
     // ── pass 2, per pattern ───────────────────────────────────────────────────────────────────────────

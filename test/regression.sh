@@ -1193,6 +1193,7 @@ for _g in \
     vendorpatchcheck \
     verbdefrowscheck \
     verbfixcheck \
+    verbfscheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \
