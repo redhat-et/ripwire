@@ -669,6 +669,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // array cannot omit a false entry, so unlike the <s> attribute this prints 0, and an answer over a tree with no test carries a
     // column of zeros: the term reads the COLUMN (a <cols fields=> that lists tested), never a 1. compactlegendcheck (D34)/(D35).
     { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches over call edges; reached, not asserted; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
+    // Lane asserted-signal (columnar.h columnarAssertedPresent): present-only, the last column, 1 where isAssertedByReach holds
+    { "fields",            "<asserted> column: 1 = a tested row an ASSERTING test reaches (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback); 0 = none found, or not tested", true, "cols", MapHeaderRead::No, "asserted" },
     // TIER-FOLLOWUP (columnar.h ColumnarRowExtras::testRow): present-only, when a shown row is a test definition
     { "fields",            "<test> column: 1 = a test or fixture definition row, counted apart from production; 0 = a production row", true, "cols", MapHeaderRead::No, "test" },
     { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
@@ -680,6 +682,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches over call edges; reached, not asserted (absent otherwise, never 0)", true, "s" },
+    // Lane asserted-signal (graph.h isAssertedByReach, via radiusTierRowAttrXml): only beside tested=1, on the --callers/--callees/
+    // --impact rows. The scope is the test's: its own body or a test-scoped helper it calls (graph.h assertingTestSymbols). An
+    // assertion call there does not prove it checks THIS row, and a miss is name-based, so the reading says both. test/assertedcheck.sh.
+    { "asserted",          "<s asserted=1>: beside tested=1, an ASSERTING test reaches the row (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback, whose calls belong to its file; not proof it checks this row); absent = none found, never none exists", true, "s" },
     // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
     { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-

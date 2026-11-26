@@ -270,7 +270,9 @@ for seed_i, name in enumerate(seed_names):
     # attributes the row, never adds or removes one, so the count this invariance reads takes it like via= above.
     # IMPACT-TEST-TIER: a test definition's row carries test="1" in tested='s slot (the two never co-occur) and is counted
     # in radius_tests=, so the invariance below is tested + untested + tests == reaches=.
-    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?(?: test="1")?(?: via="name")?(?: of_def="[^"]*")?/>', doc)
+    # lane asserted-signal: asserted="1" rides right after tested="1" (graph.h radiusTierRowAttrXml) — it qualifies the tested row,
+    # never adds or removes one, so the count this invariance reads takes it like via= above.
+    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?(?: asserted="1")?(?: test="1")?(?: via="name")?(?: of_def="[^"]*")?/>', doc)
     reaches = int(attrs.get("reaches", "-1"))
     if len(rows) != reaches:
         row_count_ok = False

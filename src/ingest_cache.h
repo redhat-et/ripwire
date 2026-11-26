@@ -167,7 +167,11 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
+constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signal (the M5's ingest slot) — queries/python/tags.scm records the `assert`
+                                                      //    STATEMENT as a call reference named `assert`, so a v54 blob of a .py file lacks those references.
+                                                      //    No record shape changes; the slot is taken because a lane holds no kParserVer number (the train may
+                                                      //    fold it into one). 55/56 are other lanes' slots.
+                                                      // 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
                                                       // 53: lane rust-self-chain — LocalBindKind RecvCall (appended; readBind's kind bound moves).
                                                       // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.

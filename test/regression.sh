@@ -330,6 +330,7 @@ for _g in \
     ariseshimcheck \
     aritycheck \
     artifactcheck \
+    assertedcheck \
     astqueryregexcheck \
     astrocheck \
     atcheck \

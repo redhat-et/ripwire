@@ -18281,6 +18281,10 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 //   tested[i] — Q2: 1 iff symbol i is transitively reachable from ANY test-path symbol over the resolved
 //               out-edge call graph. This is the same coverage set --exercises and --seams use. Dynamic
 //               dispatch, unbound callbacks and subprocess-driven shell tests remain outside the graph.
+//   asserted[i] — 1 iff tested[i] AND at least one test that reaches i ASSERTS: its own body, or a test-scoped
+//               helper it calls, makes a call from its language's assertion vocabulary (langfacts.h assertionCalls).
+//               Reached is not checked (arXiv 2610.33708); 0 = none found, never none exists. No emitter reads
+//               it yet: the map/--metrics/--for rows are serialize.h's and verbs_for.h's (lane asserted-signal).
 //   lcom4[i]  — Q4 class cohesion (LCOM4 = # connected components of the method graph, edge = two methods
 //               CALL each other OR SHARE a field). Emitted ONLY for Class/Struct/Interface WITH ≥1 method
 //               (kLcom4NA = "not applicable" for free functions / method-less types — we NEVER fabricate 1).
@@ -18292,6 +18296,7 @@ struct QMetrics
 {
     std::vector<std::uint32_t> cbo;          // distinct in-repo dependency targets per symbol
     std::vector<std::uint8_t>  tested;       // 1 = transitively reachable from a test-path symbol, else 0
+    std::vector<std::uint8_t>  asserted;     // 1 = tested AND an ASSERTING test reaches it (testSymbolForwardReach), else 0
     std::vector<std::uint32_t> lcom4;        // # connected components (class-kinds w/ methods); kLcom4NA otherwise
     std::vector<std::uint32_t> callerCount;  // |direct callers| (in-edge CSR) — the symbol-level half of change-amplification
 };
@@ -18300,6 +18305,12 @@ inline constexpr std::uint32_t kLcom4NA = 0xFFFFFFFFu;   // LCOM4 not applicable
 // Defined with the other reachability helpers below. QMetrics uses the same traversal as --exercises and
 // --seams so every surface answers the same question about whether an indexed test reaches a symbol.
 inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds );
+
+// ASSERTED (lane asserted-signal): the mask's VALUE carries a second fact. 0 = no indexed test reaches the node; 1 = one does, and
+// none of the tests that reach it asserts anything (none found); 2 = at least one reaching test asserts (assertingTestSymbols
+// below). Every reader that asks only "is it reached" tests the mask for non-zero, so it reads exactly what it read before.
+inline constexpr char kReachedByTest      = 1;
+inline constexpr char kReachedByAssertion = 2;
 
 // A6 (tested/untested partition): the isTestSymbol-seeded forwardReach computeQMetrics' tested[] column
 // runs, factored out so a caller that wants ONLY this lens (--safe-delete, --impact, --callers) is not
@@ -18316,6 +18327,12 @@ inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const 
 inline bool isTestedByReach( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
 {
     return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n );
+}
+
+// asserted=1's predicate: tested, and an asserting test is among the tests that reach it (the mask's value 2, above).
+inline bool isAssertedByReach( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
+{
+    return isTestedByReach( ing, testReach, n ) && testReach[n] == kReachedByAssertion;
 }
 
 // IMPACT-TEST-TIER: the transitive radius in THREE tiers, not two. isTestedByReach never counts a test symbol (a test is a
@@ -18351,14 +18368,14 @@ inline RadiusTiers radiusTiers( const IngestResult& ing, const std::vector<char>
 
 // The per-row half of the same three tiers on an --impact XML row (CLI and MCP twin): tested="1" on a covered production row,
 // test="1" on a test definition (radius_tests= counts them), nothing on an untested production row. The two never co-occur:
-// isTestedByReach excludes a test symbol.
+// isTestedByReach excludes a test symbol. asserted="1" rides only beside tested="1" (isAssertedByReach).
 inline const char* radiusTierRowAttrXml( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
 {
     if( isTestSymbol( ing, n ) )
     {
         return " test=\"1\"";
     }
-    return isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
+    return isAssertedByReach( ing, testReach, n ) ? " tested=\"1\" asserted=\"1\"" : isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
 }
 
 // cut-fix C (2026-09-23): the RELEVANCE WEIGHT the navigation lists rank by before a cap (filter.h rankBeforeCap) — a
@@ -18418,6 +18435,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
     QMetrics q;
     q.cbo.assign( S, 0u );
     q.tested.assign( S, 0u );
+    q.asserted.assign( S, 0u );
     q.lcom4.assign( S, kLcom4NA );
     q.callerCount.assign( S, 0u );
 
@@ -18469,10 +18487,8 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
     const std::vector<char> testReach = testSymbolForwardReach( ing, g );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        if( isTestedByReach( ing, testReach, i ) )
-        {
-            q.tested[i] = 1u;
-        }
+        q.tested[i]   = isTestedByReach( ing, testReach, i ) ? 1u : 0u;
+        q.asserted[i] = isAssertedByReach( ing, testReach, i ) ? 1u : 0u;   // lane asserted-signal: only ever beside tested
     }
 
     // ── LCOM4: per class-kind symbol, components of its method graph. Group methods by their enclosing class
@@ -20072,16 +20088,18 @@ inline std::string depthRunAttrXml( std::span<const NodeId> show, const std::vec
 // symbols transitively reachable FROM `seeds` via OUT-edges (everything the seeds call, transitively) — the
 // forward dual of transitiveCallers. Returns a per-node mask (seeds included). Used by --seams as testReach:
 // a cross-module edge u→v is exercised by a test iff testReach[u] (a test transitively reaches the caller).
-inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds )
+// The traversal forwardReach and testSymbolForwardReach share: every node reachable from `seeds` over OUT-edges that `seen` does
+// not already hold is set to `mark`. A node already held is not re-entered: after every call `seen` is closed under out-edges, so its
+// whole forward closure is held too. That is what lets testSymbolForwardReach mark the asserting tests' reach first and the rest after.
+inline void forwardReachMark( const Graph& g, std::span<const NodeId> seeds, std::vector<char>& seen, char mark )
 {
-    const std::size_t   N = g.wOutDeg.size();
-    std::vector<char>   seen( N, 0 );
+    const std::size_t   N = seen.size();
     std::vector<NodeId> q;
     for( NodeId s : seeds )
     {
         if( s < N && !seen[s] )
         {
-            seen[s] = 1;
+            seen[s] = mark;
             q.push_back( s );
         }
     }
@@ -20089,16 +20107,21 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
     {
         const NodeId u = q[ head ];
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
-        { const NodeId v = g.outTargets[k]; if( v < N && !seen[v] ) { seen[v] = 1; q.push_back( v ); } }
+        { const NodeId v = g.outTargets[k]; if( v < N && !seen[v] ) { seen[v] = mark; q.push_back( v ); } }
     }
+}
+
+inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds )
+{
+    std::vector<char> seen( g.wOutDeg.size(), 0 );
+    forwardReachMark( g, seeds, seen, 1 );
     return seen;
 }
 
-// The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, shared by
-// testSymbolForwardReach below (isTestSymbol) and situ.h's testSeedForwardReach (isTestPath) — two
-// DIFFERENT predicates over the SAME traversal shape (the L8 comment on computeQMetrics's tested[] loop
-// explains why the predicates must stay different), so the loop that collects seeds and calls forwardReach
-// belongs in ONE place rather than two near-identical copies (--quality-delta's duplication kind).
+// The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, read by situ.h's
+// testSeedForwardReach (isTestPath). testSymbolForwardReach below (isTestSymbol) collected its seeds here too
+// until lane asserted-signal split them into asserting and other tests; the two predicates must still stay
+// different (the L8 comment on computeQMetrics's tested[] loop explains why).
 template<class Pred>
 inline std::vector<char> seedForwardReachIf( const IngestResult& ing, const Graph& g, Pred&& isSeed )
 {
@@ -20114,10 +20137,103 @@ inline std::vector<char> seedForwardReachIf( const IngestResult& ing, const Grap
     return forwardReach( g, seeds );
 }
 
-// See the forward declaration above for why this is factored out of computeQMetrics.
+// ASSERTED: the receiver an assertion vocabulary row names (langfacts.h AssertionCall::receiver), as the call site wrote it: the
+// member chain's root (Go `assert.Equal`, JS `assert.strictEqual`), else the receiver variable, else the language's own instance
+// receiver for a call on it (Python `self.fail`), else the explicit qualifier (C# `Assert.Equal`, Java `Assert.assertTrue`).
+inline std::string_view assertionReceiverOf( const Reference& r ) noexcept
+{
+    if( !r.memberRoot.empty() )
+    {
+        return r.memberRoot.str();
+    }
+    if( !r.recvVar.empty() )
+    {
+        return r.recvVar.str();
+    }
+    return r.recv == RecvKind::ThisObj ? langFacts( r.lang ).instanceReceiver : std::string_view( r.qualifier.str() );
+}
+
+// ASSERTED: which test symbols ASSERT. Scope (stated, test/assertedcheck.sh): a test asserts when its OWN body makes a call (or a
+// macro site, Rust `assert_eq!`) from its language's assertion vocabulary, or when it calls, over test symbols only and
+// transitively, a test-scoped helper whose own body does. An assertion in production code on the path never counts: the check
+// must be the test's. Name-based, like every call edge: a framework call the extractor records under another name, or a helper
+// outside the test partition, is a miss, so a 0 reads "none found". One pass over the references, one over the in-edges.
+// NEVER A FILE SCOPE (isAssertionUnit): an anonymous test callback (Jest/Vitest/Mocha `test( …, () => … )`, RSpec `it`, busted
+// `it`, clojure.test `deftest`) has no symbol of its own, so its calls belong to the file's module scope, which then stands in for
+// EVERY example in the file. Counting its assertions would mark a row an asserting sibling example reaches but the reaching one
+// never checks: an over-claim. So a module scope never asserts, here or through a helper; its rows stay tested=1 without asserted
+// (none found), the floor the readings name. A NAMED test function in those languages still counts.
+inline bool isAssertionUnit( const IngestResult& ing, const std::vector<char>& isTest, NodeId n ) noexcept
+{
+    return n < isTest.size() && isTest[n] && ing.symbols[n].kind != SymKind::ModuleScope;
+}
+
+// A call (or macro) site from its language's assertion vocabulary (langfacts.h assertionCalls); an IX-1 slot record never is one.
+inline bool isAssertionSite( const Reference& r ) noexcept
+{
+    return ( r.role == RefRole::Call || r.role == RefRole::Macro ) && !isSlotJoinRecord( r )
+        && langFacts( r.lang ).isAssertionCall( r.calleeName.str(), assertionReceiverOf( r ) );
+}
+
+inline std::vector<char> assertingTestSymbols( const IngestResult& ing, const Graph& g, const std::vector<char>& isTest )
+{
+    const std::size_t   S = isTest.size();
+    std::vector<char>   asserts( S, 0 );
+    std::vector<NodeId> q;
+    for( const Reference& r : ing.references )
+    {
+        const NodeId from = r.fromSymbol;
+        if( isAssertionUnit( ing, isTest, from ) && !asserts[from] && isAssertionSite( r ) )
+        {
+            asserts[from] = 1;
+            q.push_back( from );
+        }
+    }
+    const std::uint32_t* inRo = g.inEdges.rowOffsets();
+    const auto*          inCi = g.inEdges.colIndices();
+    if( inRo == nullptr || g.inEdges.rows() < S )
+    {
+        return asserts;   // no in-edge CSR: the own-body reading alone (a floor of the helper scope)
+    }
+    for( std::size_t head = 0; head < q.size(); ++head )   // the helper half: a test that calls an asserting test symbol asserts
+    {
+        const NodeId v = q[ head ];
+        for( std::uint32_t k = inRo[v]; k < inRo[v + 1]; ++k )
+        {
+            const NodeId u = NodeId( inCi[k] );
+            if( isAssertionUnit( ing, isTest, u ) && !asserts[u] )
+            {
+                asserts[u] = 1;
+                q.push_back( u );
+            }
+        }
+    }
+    return asserts;
+}
+
+// See the forward declaration above for why this is factored out of computeQMetrics. The asserting tests' reach is marked first
+// (kReachedByAssertion), then every other test's reach fills what is left (kReachedByTest): one traversal's worth of edges.
 inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const Graph& g )
 {
-    return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestSymbol( ing, i ); } );
+    const std::size_t S = ing.symbols.size();
+    std::vector<char> isTest( S, 0 );
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        isTest[i] = isTestSymbol( ing, i ) ? 1 : 0;
+    }
+    const std::vector<char> asserts = assertingTestSymbols( ing, g, isTest );
+    std::vector<NodeId>     asserting, rest;
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        if( isTest[i] )
+        {
+            ( asserts[i] ? asserting : rest ).push_back( i );
+        }
+    }
+    std::vector<char> reach( g.wOutDeg.size(), 0 );
+    forwardReachMark( g, asserting, reach, kReachedByAssertion );
+    forwardReachMark( g, rest, reach, kReachedByTest );
+    return reach;
 }
 
 // ---- minimal connecting subgraph (--connect=A,B,C): metric-closure 2-approx Steiner ------------------------
