@@ -144,18 +144,24 @@ grep -q 'check_cxx_source_compiles' "$CMAKE" && grep -q 'LLVMFuzzerTestOneInput'
     && grep -q 'same upstream LLVM installation' "$CMAKE" \
     && ok "libFuzzer availability uses a real link probe with remediation" || no "libFuzzer link probe/remediation missing"
 
+# The grammar fuzzer list lives ONCE in CMakeLists.txt, as the NAME of each add_ripwire_fuzzer( NAME LANGUAGE KEY ) call.
+# The configured-model arm, the seed arm and test/fuzz/run.sh all read it from there; none keeps its own copy (#765: a
+# hand-kept list in run.sh swept 17 of the 25 targets, and this gate's own copy said 24).
+grammarList="$( sed -n 's/^[[:space:]]*add_ripwire_fuzzer([[:space:]]*\([A-Za-z0-9_]*\)[[:space:]].*/\1/p' "$CMAKE" | sort | tr '\n' ' ' )"
+grammarCount="$( printf '%s' "$grammarList" | wc -w | tr -d ' ' )"
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/build/.cmake/api/v1/query"
 touch "$TMP/build/.cmake/api/v1/query/codemodel-v2"
 if cmake -S "$ROOT" -B "$TMP/build" -DRIPWIRE_FUZZ=ON >"$TMP/configure.log" 2>&1; then
-    if python3 - "$TMP/build/.cmake/api/v1/reply" "$CMAKE" <<'PY'
+    if python3 - "$TMP/build/.cmake/api/v1/reply" "$CMAKE" "$grammarList" <<'PY'
 import json, pathlib, sys
 reply = pathlib.Path(sys.argv[1])
 index = json.loads(next(reply.glob('index-*.json')).read_text())
 model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
-expected = {'ripwire_fuzz_' + name for name in
-            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua dart kotlin gdscript clojure'.split()}
+expected = {'ripwire_fuzz_' + name for name in sys.argv[3].split()}
+assert len(expected) >= 25, expected
 cmake_text = pathlib.Path(sys.argv[2]).read_text()
 readers = cmake_text.split('set(RIPWIRE_FUZZ_READERS', 1)[1].split(')', 1)[0].split()
 expected_readers = {'ripwire_fuzz_reader_' + name for name in readers}
@@ -171,7 +177,7 @@ for config in model['configurations']:
 print(len(readers))
 PY
     then
-        ok "configured model contains all 24 grammar fuzz executables and one ripwire_fuzz_reader_<name> per RIPWIRE_FUZZ_READERS entry"
+        ok "configured model contains all $grammarCount grammar fuzz executables and one ripwire_fuzz_reader_<name> per RIPWIRE_FUZZ_READERS entry"
     else
         no "configured grammar or reader fuzz executable set differs from the grammar list / RIPWIRE_FUZZ_READERS"
     fi
@@ -190,8 +196,39 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && grep -q 'DETECT_LEAKS=0' "$RUNNER" && grep -q 'DETECT_LEAKS=1' "$RUNNER" \
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
-seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-if [ "$seedCount" = 24 ]; then ok "all 24 grammars have valid seeds"; else no "expected 24 grammar seeds, found $seedCount"; fi
+# The sweep runs every registered grammar fuzzer (#765). Ask the runner which grammars it would sweep (`--list` needs no
+# fuzz build) and compare the set with the add_ripwire_fuzzer lines; the premise (>= 25 lines) keeps an empty parse
+# from passing as agreement. The override arm proves the runner still narrows to one grammar and refuses an unknown one.
+# A runner without --list is read for the hand-kept GRAMMARS="..." line it used to carry, so the FAIL names the gap.
+if grep -q -- '"--list"' "$RUNNER"; then
+    sweepList="$( bash "$RUNNER" --list 2>/dev/null | sort | tr '\n' ' ' )"
+else
+    sweepList="$( sed -n 's/^GRAMMARS="\(.*\)"$/\1/p' "$RUNNER" | tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' )"
+fi
+if [ "$grammarCount" -ge 25 ] && [ "$sweepList" = "$grammarList" ]; then
+    ok "fuzz runner sweeps all $grammarCount add_ripwire_fuzzer grammars (its --list equals CMakeLists.txt's)"
+else
+    no "fuzz runner's sweep list differs from CMakeLists.txt's $grammarCount add_ripwire_fuzzer grammars:" \
+        "only in CMake: $( comm -23 <( printf '%s\n' $grammarList ) <( printf '%s\n' $sweepList ) | tr '\n' ' ' )" \
+        "only in run.sh: $( comm -13 <( printf '%s\n' $grammarList ) <( printf '%s\n' $sweepList ) | tr '\n' ' ' )"
+fi
+grep -q 'RIPWIRE_FUZZ_GRAMMARS' "$RUNNER" \
+    && RIPWIRE_FUZZ_GRAMMARS=no_such_grammar bash "$RUNNER" "$TMP/nofuzz" 1 >/dev/null 2>&1; overrideRc=$?
+if grep -q 'RIPWIRE_FUZZ_GRAMMARS' "$RUNNER" && [ "$overrideRc" -eq 2 ]; then
+    ok "fuzz runner takes a grammar override (RIPWIRE_FUZZ_GRAMMARS) and refuses a name CMake does not register"
+else
+    no "fuzz runner override missing, or an unregistered grammar name was not refused (exit $overrideRc, want 2)"
+fi
+
+seedMissing=""
+for grammar in $grammarList; do
+    [ -s "$ROOT/test/fuzz/seeds/$grammar/valid" ] || seedMissing="$seedMissing $grammar"
+done
+if [ "$grammarCount" -ge 25 ] && [ -z "$seedMissing" ]; then
+    ok "all $grammarCount registered grammars have valid seeds"
+else
+    no "grammar fuzzers without test/fuzz/seeds/<name>/valid ($grammarCount registered):$seedMissing"
+fi
 
 # ── the nightly workflow: the TSan build runs against main once a day, and nothing about it can quietly widen ─────────
 # ThreadSanitizer is not a per-PR leg (owner decision, 2026-09-17): it runs from .github/workflows/nightly.yml. These
