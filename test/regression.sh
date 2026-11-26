@@ -472,6 +472,7 @@ for _g in \
     deplangscheck \
     depsnographcheck \
     depsprecisecheck \
+    depsrereadcheck \
     det-gate \
     detailcheck \
     diagnoticecheck \
