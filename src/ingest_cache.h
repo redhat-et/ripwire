@@ -395,7 +395,12 @@ constexpr std::uint32_t kCacheVersion = 55;           // 55: lane tangle-rule �
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 348;          // bump on any grammar/.scm/extraction change
+                                                      // 348 = 2026-11-26 (lane objcxx-std-qualified, PLACEHOLDER: drafts #769 holds 344 and the RESOLVER lane may
+                                                      //   take 346, so the landing train renumbers; rich file tag 349): an ObjC++ (.mm, Lang::ObjC) call written
+                                                      //   `std::X()` now carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore), so a v342
+                                                      //   blob holds the same ref UNQUALIFIED — an extraction change. kCacheVersion stays 55.
+                                                      // --- history: 342 ---
                                                       // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
                                                       //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
                                                       //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.

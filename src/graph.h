@@ -1491,7 +1491,7 @@ inline bool cppCandidateScopeIsStd( const Symbol& sym, bool namespaceMember, Nam
 // true whenever the def's FULL enclosing-namespace chain roots at std regardless of how many levels sit
 // between (`std::ranges::contains`, `std::__1::ranges::contains`). The three IMMEDIATE-scope tests are kept
 // as a floor alongside `scopeRootsStd`, never replaced by it: they still catch a def whose enclosing-chain
-// walk cannot run (ObjC++'s stated floor below) the same way they always did. The call side is symmetric:
+// walk cannot run (an ObjC++ def, whose grammar has no namespace_definition) the same way they always did. The call side is symmetric:
 // `namesStd(r.qualifier)` is #134's original IMMEDIATE-qualifier test (`std::move`, `::std::move` and
 // `std::__1::move` arrive as "std", "std" and "__1"), widened by Reference::qualifierRootsStd, which reads
 // the call's ENTIRE written chain (ingest_names.h cppQualifiedChainRootsStd) so `std::ranges::move` — whose
@@ -1515,10 +1515,11 @@ inline bool cppCandidateScopeIsStd( const Symbol& sym, bool namespaceMember, Nam
 //     own TRAPS section): the call's written qualifier is "sr" or empty, neither of which names std at all, so
 //     it never reaches this guard — test/stdqualcheck.sh §8's alias arm and §11's `using namespace` control
 //     pin that it stays on today's ladder, unchanged, not silently refused;
-//   * ObjC++ (Lang::ObjC, .mm): tree-sitter-objc parses `std::move( x )` as an ERROR node spelling `std::` beside
-//     a bare `move( x )` call (measured), and ingest sets no qualifier for Lang::ObjC, so the reference arrives
-//     unqualified and the guard cannot see it (the Phase-5 veto still refuses table names such as move). The
-//     Lang::ObjC arm below is live the day extraction supplies a qualifier;
+//   * ObjC++ (Lang::ObjC, .mm) is CLOSED for a std-rooted chain (lane objcxx-std-qualified): tree-sitter-objc parses
+//     `std::move( x )` as an ERROR node spelling `std::` beside a bare `move( x )` call, and ingest_names.h
+//     objcxxStdQualifierBefore reads the chain back (only when its nearest `::` lies in error recovery), so the
+//     Lang::ObjC arm below is live. A NON-std ObjC++ chain (`vendor::f()`) still arrives unqualified — a floor,
+//     harmless to this guard (std-only by design), pinned by stdqualcheck §16's vendor:: controls;
 //   * Lang::C is unaffected by construction: C has no `::`, and ingest sets a call qualifier for Lang::Cpp only.
 //     CUDA (.cu/.cuh) and Metal (.metal) ARE Lang::Cpp, so they take this guard exactly as .cpp does.
 //   * LANGUAGE NEUTRALITY (checked, not fixed here): Rust's own qualified-call guard
