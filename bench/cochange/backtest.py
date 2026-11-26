@@ -73,15 +73,23 @@ def months_before_epoch( epoch, months ):
     return int( datetime.datetime( day0.year, day0.month, day0.day, tzinfo=datetime.timezone.utc ).timestamp() ) + sec_of_day
 
 
+def pin_date( value ):
+    """A bare YYYY-MM-DD pinned to 00:00:00 UTC. git reads a bare date as that day AT THE CURRENT TIME OF DAY,
+    so an unpinned window boundary moves with the wall clock (measured: 4,501 vs 4,544 commits on one tip)."""
+    if value and re.fullmatch( r"\d{4}-\d{2}-\d{2}", value ):
+        return value + " 00:00:00 +0000"
+    return value
+
+
 def under_root( path, root ):
     return root == "" or path.startswith( root )
 
 
 def eligible_commits( repo, tip, since, until, root ):
     """Non-merge commits reachable from tip in [since, until], <=30 paths, >=2 'M' paths under root."""
-    args = [ "log", tip, "--no-merges", "--no-renames", "--name-status", "--format=@@%H %P %ct", "--since=" + since ]
+    args = [ "log", tip, "--no-merges", "--no-renames", "--name-status", "--format=@@%H %P %ct", "--since=" + pin_date( since ) ]
     if until:
-        args.append( "--until=" + until )
+        args.append( "--until=" + pin_date( until ) )
     out = []
     cur = None
 
@@ -262,7 +270,7 @@ def run( args ):
     picked = sample_commits( commits, args.n, args.seed )
     clone = prepare_clone( args.repo, args.work )
     meta = { "meta": { "repo": os.path.basename( os.path.abspath( args.repo ) ), "tip": git( args.repo, "rev-parse", args.tip ).strip(),
-                       "since": args.since, "until": args.until, "root": args.root, "eligible": len( commits ),
+                       "since": pin_date( args.since ), "until": pin_date( args.until ), "root": args.root, "eligible": len( commits ),
                        "sampled": len( picked ), "seed": args.seed, "leak_future": args.leak_future,
                        "ripwire_version": subprocess.run( [ binary, "--version" ], capture_output=True, text=True ).stdout.strip() } }
     done = set()
@@ -350,6 +358,8 @@ def self_test():
              "        lib/x y.c  (co-edited in 7% of commits)\n"
              "  next: --test-gate\n" )
     check( "parse situ partners", parse_situ_partners( situ ), [ "src/b.c", "lib/x y.c" ] )
+    check( "pin bare date", pin_date( "2026-09-30" ), "2026-09-30 00:00:00 +0000" )
+    check( "pin leaves a timestamp", pin_date( "2026-09-30 12:00:00 +0000" ), "2026-09-30 12:00:00 +0000" )
     check( "parse situ unused", parse_situ_unused( "unused: 1 listed item(s) not used\n  unused item=t/x y.tsv reason=not_indexed\n" ), [ "t/x y.tsv" ] )
     check( "parse situ empty", parse_situ_partners( "  [3] co-change (0):\n        (none, or no git history)\n" ), [] )
     try:

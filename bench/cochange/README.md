@@ -30,8 +30,8 @@ differ too: file sets, against GitCF's method-level elements.
   and checks out each parent commit there.
 
 **Eval window.**
-- ripwire: committer date 2026-09-30 to the tip. That leaves each eval commit at least two months of history.
-- kubernetes: committer date 2025-11-26 to the tip.
+- ripwire: committer date 2026-09-30 00:00:00 UTC to the tip. That leaves each eval commit at least two months of history.
+- kubernetes: committer date 2025-11-26 00:00:00 UTC to the tip. (A bare date is pinned to midnight UTC: git reads it at the current time of day, which moved the eligible count between two runs on one tip.)
 
 **Eligible commits.** A commit is eligible when all of these hold:
 - it is a non-merge commit with exactly one parent, reachable from the tip;
