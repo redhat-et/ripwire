@@ -28,10 +28,10 @@ The server exposes **33 MCP verbs**: 17 read verbs, 13 flagship-reflex verbs and
 
 ## Choosing the verb mid-task
 
-Start with `explore`; an error → `from_trace`; before changing a symbol `impact` + `uses`; after an edit `edit_check`;
-before done `quality_delta`; several independent reads → `batch`. Every verb takes `path` (the repo root; a split
-checkout passes `paths: [dir1, dir2]`). `find_symbol` and `find_referencing_symbols` return a stable `handle=`, not the
-body — `fetch_body` it only when you need it.
+Tools are named `ripwire:<verb>` (server:tool). Start with `ripwire:explore`; an error → `ripwire:from_trace`; before changing a symbol `ripwire:impact` + `ripwire:uses`; after an edit `ripwire:edit_check`;
+before done `ripwire:quality_delta`; several independent reads → `ripwire:batch`. Every verb takes `path` (the repo root; a split
+checkout passes `paths: [dir1, dir2]`). `ripwire:find_symbol` and `ripwire:find_referencing_symbols` return a stable `handle=`, not the
+body — `ripwire:fetch_body` it only when you need it.
 
 ## Tool health — is the answer trustworthy?
 

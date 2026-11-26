@@ -54,6 +54,37 @@ In the lexical arm, one frozen test row moved from write-tests to quality-bar, a
 no client routes on body text. Description edits that saved more bytes cost real lexical rows in drafts: a first draft
 at −505 characters lost 16 of 214. Only the edits that cost nothing were kept.
 
+## Consistency over k = 2 runs, and balance (added after the audit's item 10)
+
+The corpus is not balanced: 214 positives against 68 negatives. A plain hit rate would reward a rater that fires on
+everything, so `bench/skillrater/passk.py` also reports balanced accuracy, (hit rate on positives + quiet rate on
+negatives) / 2. pass^2 counts the rows a rater gets right in BOTH runs.
+
+| arm | model | hit@1 per run | negatives quiet per run | balanced per run | pass^2 positives | pass^2 negatives |
+|---|---|---|---|---|---|---|
+| before | Haiku | 208, 207 | 68, 68 | 0.986, 0.984 | 207/214 | 68/68 |
+| final (shipped) | Haiku | 208, 208 | 68, 68 | 0.986, 0.986 | 207/214 | 68/68 |
+| C2 (rejected) | Haiku | 206, 207 | 68, 68 | 0.981, 0.984 | 205/214 | 68/68 |
+| before | Sonnet | 204, 208 | 68, 67 | 0.977, 0.979 | 204/214 | 67/68 |
+| final (shipped) | Sonnet | 207, 206 | 68, 67 | 0.984, 0.974 | 204/214 | 67/68 |
+| C2 (rejected) | Sonnet | 207, 207 | 66, 66 | 0.969, 0.969 | 206/214 | 66/68 |
+
+The shipped text holds pass^2 exactly for both models.
+
+**C2, the audit's description rules taken literally, was measured and rejected.** It removed every "you/your" (audit
+d.1) and the nine cross-routing clauses such as "Code QUALITY → quality-bar" (d.2), for 4,970 characters against
+5,277. Its rule was written down before any rating (`PREREG_C2.txt`), and it fails twice: Haiku's pass^2 drops 207 →
+205, and Sonnet fires on 2 negatives in each run where the rule allows 1. Lexically it scores 142/214 against 147, and
+removing the cross-routing clauses alone accounts for 5 of those rows. Its text is in `desc_c2_rejected.tsv`.
+
+All of Sonnet's negative fires, in every arm, land on the same two prompts: "slow, nothing measured yet" questions,
+routed to perf-target. C2 did not change perf-target's description, so the evidence against C2 is weak in either
+direction. The rule still decided. The soft spot is perf-target's boundary for slowness nobody has measured. Both rows
+are in the dev split, so they are fair to tune on. That belongs in its own round with its own rater runs, not in this
+one.
+
+The audit's "~6 KB" for the cross-routing clauses is overstated: the nine clauses come to about 300 B in all.
+
 ## Sizes (`bench/skillsize.py`; tokens = bytes/4, an estimate, not a tokenizer count)
 
 | tier | when an agent pays it | before | after |

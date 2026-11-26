@@ -158,3 +158,6 @@ use it.
   of 214, judged 100 → 100 of 160. Blind raters, Haiku 208 and 207 → 208 of 214, Sonnet 204 and 208 → 207 of 214. No
   rater fired on any of the 68 negatives after the change.
 - Fixed in passing: the router said quality-delta covers 12 kinds, and the binary says 13.
+- The mcp skill names its tools in the qualified `ripwire:<verb>` form the guidance asks for. Descriptions with no second
+  person and no cross-skill pointers were measured and rejected: Sonnet fired on 2 negatives per run, and Haiku's
+  pass^2 fell 207 → 205. The cross-skill pointers stay.
