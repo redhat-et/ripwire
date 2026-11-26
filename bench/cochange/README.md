@@ -100,3 +100,24 @@ python3 bench/cochange/backtest.py --self-test        # the metric arithmetic, n
 ```
 
 The gate: `bash test/cochangebacktestcheck.sh` (it needs `build/ripwire`, or `RIPWIRE_BIN`).
+
+## Result, 2026-11-26 (binary `f7cfcec7a`, harness `9e5c76d73`)
+
+The raw rows are in `results/` (`kubernetes.s0..s3.jsonl` are the four disjoint shards of one sample). The
+headline is Hit@10 over all tasks, n = 200 commits per repo:
+
+| repo | protocol | ripwire | cofreq | cofreq3 | samedir |
+|---|---|---|---|---|---|
+| ripwire | L1O | 0.475 (95) | 0.495 (99) | 0.405 (81) | 0.040 (8) |
+| ripwire | SEED1 | 0.505 (101) | 0.720 (144) | 0.565 (113) | 0.085 (17) |
+| kubernetes | L1O | 0.515 (103) | 0.595 (119) | 0.485 (97) | 0.375 (75) |
+| kubernetes | SEED1 | 0.500 (100) | 0.750 (150) | 0.535 (107) | 0.560 (112) |
+
+Run `backtest.py --summarize results/*.jsonl` for every protocol, population and k.
+
+- **With several seeds (L1O),** ripwire is level with a plain co-commit count. It beats the same count held
+  to ripwire's support floor of 3: 20 tasks won and 6 lost on ripwire's repo, 14 won and 8 lost on kubernetes.
+- **With one seed (SEED1),** it trails the count by 21.5 and 25 points of Hit@10. The losses come from the
+  floor. Ripwire returned no partner at all on 46 and 72 tasks, and the floorless count found a target on 37
+  and 40 of those. Against `cofreq3` the gap shrinks to 6.0 and 3.5 points.
+- **This is not GitCF's 0.322.** The populations and the query grain differ (see above).
