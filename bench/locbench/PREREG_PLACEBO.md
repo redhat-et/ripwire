@@ -379,3 +379,26 @@ different and weaker claim. This file is written first so none of them can happe
   - The 302-manifest seal above covers the `ripwire-a7-v2` held-out set, not the 243.
   - The owner needs to rule on which split is the held-out one, and on what the 10 pilot-touched instances
     mean, before any held-out episode.
+- **2026-11-26, owner ruling: the held-out set is `ripwire-a7-v2`, n = 302. No held-out model episode had
+  run when this was written.**
+  - **n.** The held-out set is the current `ripwire-a7-v2` split: 306 tasks over 88 repos, **302 after rule
+    A2**. It is exactly the Stage 0 seal above (`4bc5f511…5a17`, 302 manifests).
+  - **The 243 is superseded.** The text above saying "243 instances over 78 repos", and every 243 in the
+    power section, describes the pre-rename split.
+  - **Why.** Commit `3315fb19d` (2026-07-31) renamed the salt from `ctxpack-a7-v2` to `ripwire-a7-v2`, which
+    changed the split. Every tuning run since then used the new train side. That makes the old 243 the
+    contaminated set: 105 of its instances sat on that train side during tuning, and 10 of them were seen by
+    the TRAIN pilot. The new held-out side was touched by neither post-07-31 tuning nor the pilot.
+  - **Power restated at n = 302.** The pilot measured d = 0.208 for A1–A2. The seed share stays at the
+    assumed 0.5. The design effect √ stays 1.051.
+    - K = 3: Holm MDE **6.69 pp** (one model). K = 5 would give 6.35 pp.
+    - Both are below 10.0 pp, so K stays **3**, decided from variance only.
+  - **Provider errors (owner ruling, replaces stopping rule 2's "persistent failure scores as a miss").** An
+    episode that ends on a provider error (a 429 or any CLI error) is re-run once. A provider error is never
+    counted as a miss. If the re-run also fails, the run stops and resumes later; the episode is never dropped
+    silently.
+  - **Rolling token stop.** The run stops and reports if the mean input tokens of the last 50 episodes exceed
+    2 × 33,525. That figure is the pilot's mean input per episode.
+  - **Unchanged.** Models: Haiku 5.5 only, effort low, claude.ai subscription through the CLI. K = 3 on
+    A0–A3 and K = 1 on A2s and A1p, giving 302 × 4 × 3 + 302 × 2 = 4,228 episodes. The bars B1–B3 are as
+    frozen, and Holm runs over the one model.
