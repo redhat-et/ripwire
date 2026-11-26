@@ -921,7 +921,7 @@ inline unsigned parsePoolWorkers()
     const char* const end = text + std::strlen( text );
     unsigned          n   = 0;
     const auto [ ptr, ec ] = std::from_chars( text, end, n );
-    if( ec == std::errc{} && ptr == end && n >= 1 && n <= kMaxParseWorkers )
+    if( VALIDATE( ec == std::errc{} && ptr == end && n >= 1 && n <= kMaxParseWorkers, "RIPWIRE_PARSE_THREADS is a whole number in 1..256" ) )
     {
         return n;
     }

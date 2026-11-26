@@ -39,7 +39,8 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )" && [ -n "$TMP" ] && [ -d "$TMP" ] || { echo "snapdeterminismcheck: mktemp -d failed"; exit 2; }
+trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -52,6 +53,10 @@ unset RIPWIRE_PARSE_THREADS
 W="$TMP/w"; mkdir -p "$W"
 for d in "$ROOT"/test/*fix; do cp -R "$d" "$W/" 2>/dev/null; done
 echo "snapdeterminismcheck: corpus $( find "$W" -type f | wc -l | tr -d ' ' ) files"
+# The racy rule (warmsnap.h kRacySlackNs): no tree is recorded while any file, directory or the git index is younger
+# than two seconds before the recording crawl began, by mtime OR ctime. The corpus was just written, so wait it out
+# (ctime cannot be backdated). A fast runner otherwise records no snapshot in the first configuration (CI, #760).
+sleep 3
 
 # record TAG [VAR=value...] — two runs of `"$BIN" . "${VERB[@]}"` in a fresh cache dir at ONE path ($TMP/home); the
 # masked snapshot lands at $TMP/TAG.snap, both runs' stderr at $TMP/TAG.err
@@ -60,13 +65,14 @@ record()
 {
     local tag="$1"; shift
     rm -rf "$H"; mkdir -p "$H/tmp" "$H/xdg"
-    local k
-    for k in 1 2; do
+    local k s; : >"$TMP/$tag.err"
+    for k in 1 2 3; do   # run 1 records the tree, run 2 the model; run 3 only when a racy window held a section back
         ( cd "$W" && env "$@" HOME="$H" TMPDIR="$H/tmp/" XDG_CACHE_HOME="$H/xdg" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 \
             "$BIN" . ${VERB[@]+"${VERB[@]}"} >"$TMP/$tag.out$k" 2>"$TMP/$tag.err$k" </dev/null )
+        cat "$TMP/$tag.err$k" >>"$TMP/$tag.err"
+        s="$( find "$H" -name 'ripwire-warmsnap-*.bin' 2>/dev/null | head -1 )"
+        [ "$k" -ge 2 ] && [ -n "$s" ] && [ -s "$( section "$s" 1 >"$TMP/$tag.probe"; echo "$TMP/$tag.probe" )" ] && break
     done
-    cat "$TMP/$tag.err1" "$TMP/$tag.err2" >"$TMP/$tag.err"
-    local s; s="$( find "$H" -name 'ripwire-warmsnap-*.bin' 2>/dev/null | head -1 )"
     if [ -n "$s" ]; then
         python3 -I -c 'import sys; b = bytearray( open( sys.argv[ 1 ], "rb" ).read() ); b[ 40:48 ] = bytes( 8 ); b[ 104:112 ] = bytes( 8 ); sys.stdout.buffer.write( b )' "$s" >"$TMP/$tag.snap"
     else
@@ -202,6 +208,7 @@ done
 # ── Q: the construct hits, under --quality-delta ──────────────────────────────────────────────────
 ( cd "$W" && git init -q && git add -A && git -c user.name=gate -c user.email=gate@example.invalid -c commit.gpgsign=false commit -qm corpus ) \
     || no "Q  could not commit the corpus to a git repo"
+sleep 3   # the racy rule again: git init and the commit made the root directory and the index young
 VERB=( --quality-delta )
 record qdone  RIPWIRE_PARSE_THREADS=1
 record qdmany RIPWIRE_PARSE_THREADS=8
