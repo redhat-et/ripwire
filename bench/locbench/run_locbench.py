@@ -22,6 +22,13 @@
 #   for     — `ripwire <repo> --for="<title+body>"`   the flagship task lens (routed by default)
 #   query   — `ripwire <repo> --query="<title+body>"` pure lexical BM25 (no compose/quality framing)
 #   anchor  — `ripwire <repo> --for=... --anchor`      EXPERIMENTAL lexically-anchored graph expansion
+# MATCHED-BUDGET CONTROL ARMS (PREREG_PLACEBO.md; derived from the `for` answer, all EXACTLY the same bytes —
+# the production --for payload's size — and in the identical --format=candidates format):
+#   for-matched     — ripwire's own --for rows, in ripwire's order, cut to the budget (the treatment)
+#   placebo         — ripwire-rendered rows drawn (seeded) from files the real answer does NOT name
+#   placebo-shuffle — the for-matched rows permuted (same bytes, same content, no order)
+#   lexical         — file-level BM25 over whole files (identifier-split), each file's rows in universe order
+#   --emit-payloads=DIR freezes every arm's payload + a sha256 manifest per instance for an agent round.
 #
 # METRICS (match the LocAgent paper's, arXiv 2503.09089 §4.1):
 #   file-level     Acc@1 / Acc@5 / Acc@10   — a gold FILE within the top-k ranked files
@@ -291,6 +298,316 @@ def covered( universe_candidates, gold_funcs, universe_files ):
     ranks = func_ranks( universe_candidates, gold_funcs, universe_files )
     return [ g for g, r in zip( gold_funcs, ranks ) if r is not None ]
 
+# ── matched-budget control arms: placebo + fair lexical baseline (PREREG_PLACEBO.md) ──
+#
+# WHY. METHODOLOGY.md §8: a ranking win and a "having a tool answer at all" win raise the same number. The
+# only way to tell them apart is an arm of the SAME FORMAT and the SAME BYTE COST that carries no ranking
+# signal. Bellam (arXiv 2610.33958) ran that arm and found the graph added little; this is the replication.
+#
+# THE CONTRACT every derived arm keeps (gated by test/locbenchplacebocheck.sh):
+#   * format-identical: the same `<!-- … -->` legend bytes, the same `<candidates …>` root attribute NAMES,
+#     and every row is a `<cand>` that ripwire itself rendered (taken from the coverage-universe export),
+#     with only r=, s= and the final row's <sig> text rewritten;
+#   * byte-exact: every derived arm is EXACTLY `target` bytes (UTF-8), or construction raises
+#     PlaceboUnbuildable — the run aborts or counts it; it never scores a near-miss silently;
+#   * gold-blind: no builder takes gold as an argument. The unrelated placebo excludes the files the REAL
+#     answer names (so it cannot be the real answer re-ordered), never the gold files (so its chance hit
+#     rate is the honest chance rate);
+#   * deterministic: every permutation is a sort on sha256(salt, instance, row identity) — no RNG state.
+PLACEBO_SALT = "ripwire-placebo-v1"
+DERIVED_ARMS = ( "for-matched", "placebo", "placebo-shuffle", "lexical" )
+ROOT_RE = re.compile( r'<candidates\b[^>]*>' )
+CAND_RE = re.compile( r'<cand\b.*?</cand>', re.S )
+ATTR_RE = re.compile( r'\s([A-Za-z_][\w-]*)="([^"]*)"' )
+ELLIPSIS = "…"
+
+class PlaceboUnbuildable( Exception ):
+    pass
+
+def xml_text_escape( s ):
+    return ( s.replace( "&", "&amp;" ).replace( "<", "&lt;" ).replace( ">", "&gt;" )
+              .replace( '"', "&quot;" ).replace( "'", "&apos;" ) )
+
+def xml_text_unescape( s ):
+    return ( s.replace( "&lt;", "<" ).replace( "&gt;", ">" ).replace( "&quot;", '"' )
+              .replace( "&apos;", "'" ).replace( "&amp;", "&" ) )
+
+def nbytes( s ):
+    return len( s.encode( "utf-8" ) )
+
+def split_candidates_doc( xml ):
+    # -> (head, root_open, rows, tail). head = legend comment; tail = `</candidates>` + trailing bytes.
+    # Fails closed when the body between the root tags is not exactly a concatenation of <cand> rows.
+    m = ROOT_RE.search( xml )
+    end = xml.rfind( "</candidates>" )
+    if not m or end < m.end():
+        raise PlaceboUnbuildable( "not a --format=candidates document" )
+    body = xml[m.end():end]
+    rows = CAND_RE.findall( body )
+    if "".join( rows ) != body:
+        raise PlaceboUnbuildable( "candidates body is not a bare row sequence" )
+    return xml[:m.start()], m.group( 0 ), rows, xml[end:]
+
+def row_attr( row, name ):
+    head = row[: row.index( ">" )]
+    for k, v in ATTR_RE.findall( head ):
+        if k == name: return v
+    return ""
+
+def set_attr( tag, name, value ):
+    # Rewrite one attribute inside the FIRST tag only. Attribute values never hold a raw `"`, so a
+    # space-anchored `name="…"` cannot match inside another attribute's value.
+    cut = tag.index( ">" )
+    head, rest = tag[:cut], tag[cut:]
+    new, n = re.subn( r'(?<=\s)' + re.escape( name ) + r'="[^"]*"', f'{name}="{value}"', head, count=1 )
+    if n != 1: raise PlaceboUnbuildable( f"row has no {name}= attribute" )
+    return new + rest
+
+def row_with_sig( row, text ):
+    a, b = row.find( "<sig>" ), row.rfind( "</sig>" )
+    if a < 0 or b < a: raise PlaceboUnbuildable( "row has no <sig> to trim" )
+    return row[: a + 5] + xml_text_escape( text ) + row[b:]
+
+def row_sig_text( row ):
+    a, b = row.find( "<sig>" ), row.rfind( "</sig>" )
+    return xml_text_unescape( row[a + 5:b] ) if 0 <= a < b else ""
+
+def render_candidates( head, root_open, tail, rows, scores ):
+    # r= is the 1-based position; s= is the arm's score list in position order (the last value repeats
+    # past its end). count= tracks the row count, so its digit width is part of the byte arithmetic.
+    out = []
+    for i, row in enumerate( rows ):
+        s = scores[min( i, len( scores ) - 1 )] if scores else row_attr( row, "s" )
+        out.append( set_attr( set_attr( row, "r", str( i + 1 ) ), "s", s ) )
+    return head + set_attr( root_open, "count", str( len( rows ) ) ) + "".join( out ) + tail
+
+def ranked_row( row, i, scores ):
+    s = scores[min( i, len( scores ) - 1 )] if scores else row_attr( row, "s" )
+    return set_attr( set_attr( row, "r", str( i + 1 ) ), "s", s )
+
+def trimmed_to( row, need ):
+    # The prefix of `row`'s sig text (closed by an ellipsis, as ripwire's own truncations are) whose row is
+    # exactly `need` bytes, or None. Byte length is non-decreasing in the prefix length, so bisect.
+    if nbytes( row ) == need: return row
+    full = row_sig_text( row )
+    lo, hi = 0, len( full )
+    while lo <= hi:
+        mid = ( lo + hi ) // 2
+        cand = row_with_sig( row, full[:mid] + ELLIPSIS )
+        got = nbytes( cand )
+        if got == need: return cand
+        if got < need: lo = mid + 1
+        else: hi = mid - 1
+    return None
+
+def fit_to_bytes( head, root_open, tail, pool, scores, target, tries=1 ):
+    # Greedy prefix of `pool` (already in the arm's rank order), then close the residual gap EXACTLY by
+    # trimming the next row's <sig>. `tries` > 1 lets an UNORDERED arm (the placebo) close with a later row;
+    # ordered arms keep tries=1 so no row is ever skipped. If that fails, drop up to 3 tail rows; then trim
+    # the last kept row too (escaped text grows in entity-sized steps, so one row can straddle the target).
+    # Raises PlaceboUnbuildable rather than return a document of any other size.
+    if not pool: raise PlaceboUnbuildable( "empty row pool" )
+    fixed = lambda n: nbytes( head ) + nbytes( set_attr( root_open, "count", str( n ) ) ) + nbytes( tail )
+    rendered = [ ranked_row( r, i, scores ) for i, r in enumerate( pool ) ]
+    prefix = [ 0 ]
+    for r in rendered: prefix.append( prefix[-1] + nbytes( r ) )
+    finish = lambda rows: render_candidates( head, root_open, tail, rows, scores )
+    k = 0
+    while k < len( pool ) and fixed( k + 1 ) + prefix[k + 1] <= target: k += 1
+    if k and fixed( k ) + prefix[k] == target: return finish( pool[:k] )
+    def close( base, base_bytes, start ):
+        need = target - fixed( len( base ) + 1 ) - base_bytes
+        for j in range( start, min( len( pool ), start + tries ) ):
+            fit = trimmed_to( ranked_row( pool[j], len( base ), scores ), need )
+            if fit is not None: return finish( base + [ fit ] )
+        return None
+    for drop in range( 0, min( 3, k ) + 1 ):
+        doc = close( pool[:k - drop], prefix[k - drop], k - drop )
+        if doc is not None: return doc
+    for keep in range( k, max( 0, k - 2 ), -1 ):
+        last = rendered[keep - 1]; full = row_sig_text( last )
+        for c in range( len( full ) - 1, -1, -1 ):
+            short = row_with_sig( last, full[:c] + ELLIPSIS )
+            base_bytes = prefix[keep - 1] + nbytes( short )
+            if fixed( keep + 1 ) + base_bytes >= target: continue
+            doc = close( pool[:keep - 1] + [ short ], base_bytes, keep )
+            if doc is not None: return doc
+    raise PlaceboUnbuildable( f"no exact {target}-byte closure (pool={len( pool )}, greedy={k})" )
+
+def seeded_order( rows, instance_id, tag ):
+    key = lambda r: hashlib.sha256( "\0".join( ( PLACEBO_SALT, tag, instance_id, row_attr( r, "id" ),
+                                                 row_attr( r, "p" ), row_attr( r, "l" ) ) ).encode() ).hexdigest()
+    return sorted( rows, key=key )
+
+def build_for_matched( for_xml, target ):
+    # A1 at the matched budget: ripwire's own --for rows, in ripwire's order, cut/closed to `target` bytes.
+    head, root, rows, tail = split_candidates_doc( for_xml )
+    return fit_to_bytes( head, root, tail, rows, [ row_attr( r, "s" ) for r in rows ], target )
+
+def build_placebo_unrelated( for_xml, universe_xml, instance_id, target ):
+    # Bellam's "random entities": ripwire-rendered rows drawn uniformly (seeded) from files the real answer
+    # does NOT name. Score strings are the real answer's, in order — the score column carries no signal.
+    head, root, real, tail = split_candidates_doc( for_xml )
+    named = { row_attr( r, "p" ) for r in real }
+    _, _, uni, _ = split_candidates_doc( universe_xml )
+    pool = seeded_order( [ r for r in uni if row_attr( r, "p" ) not in named ], instance_id, "unrelated" )
+    return fit_to_bytes( head, root, tail, pool, [ row_attr( r, "s" ) for r in real ], target, tries=64 )
+
+def build_placebo_shuffle( matched_xml, instance_id ):
+    # The real matched answer with its rows permuted and r=/s= re-dealt in position order: the same bytes
+    # (same multiset of r and s strings), the same content, no ranking. Secondary control: ORDER only.
+    head, root, rows, tail = split_candidates_doc( matched_xml )
+    scores = [ row_attr( r, "s" ) for r in rows ]
+    out = render_candidates( head, root, tail, seeded_order( rows, instance_id, "shuffle" ), scores )
+    if nbytes( out ) != nbytes( matched_xml ): raise PlaceboUnbuildable( "shuffle changed the byte count" )
+    return out
+
+LEX_TOKEN_RE = re.compile( r'[A-Za-z][a-z]+|[A-Z]+(?![a-z])|[0-9]+' )
+
+def lexical_tokens( text ):
+    # Whole-word + camelCase/snake_case subtokens, lower-cased: the identifier-aware split a fair code BM25
+    # needs (Xue et al., arXiv 2611.20455: a BM25 that cannot split identifiers is the handicapped one).
+    return [ t.lower() for t in LEX_TOKEN_RE.findall( text ) ]
+
+def bm25_rank_files( repo_path, files, query, k1=1.2, b=0.75, max_bytes=2_000_000 ):
+    # FILE-LEVEL BM25 over whole files (not chunks — the artefact 2611.20455 names). Files over max_bytes
+    # are scored as empty and COUNTED, never dropped from the ranking silently. -> (ranked [(path, score)], n_oversize)
+    docs, oversize = {}, 0
+    for f in files:
+        p = pathlib.Path( repo_path ) / f
+        try:
+            if p.stat().st_size > max_bytes: oversize += 1; docs[f] = []; continue
+            docs[f] = lexical_tokens( p.read_text( encoding="utf-8", errors="replace" ) )
+        except OSError:
+            docs[f] = []
+    n = len( docs ) or 1
+    avgdl = ( sum( len( d ) for d in docs.values() ) / n ) or 1.0
+    q = sorted( set( lexical_tokens( query ) ) )
+    df = { t: 0 for t in q }
+    tfs = {}
+    for f, toks in docs.items():
+        tf = {}
+        for t in toks:
+            if t in df: tf[t] = tf.get( t, 0 ) + 1
+        tfs[f] = tf
+        for t in tf: df[t] += 1
+    scored = []
+    for f, toks in docs.items():
+        s = 0.0
+        for t, c in tfs[f].items():
+            idf = math.log( 1.0 + ( n - df[t] + 0.5 ) / ( df[t] + 0.5 ) )
+            s += idf * c * ( k1 + 1 ) / ( c + k1 * ( 1 - b + b * len( toks ) / avgdl ) )
+        scored.append( ( f, s ) )
+    scored.sort( key=lambda x: ( -x[1], x[0] ) )
+    return scored, oversize
+
+def build_lexical( for_xml, universe_xml, ranked_files, target ):
+    # A3: files in BM25 order; within a file, its symbols in the universe export's own order. Rows are
+    # ripwire-rendered universe rows, so the format is identical; s= is the file's BM25 score.
+    head, root, _, tail = split_candidates_doc( for_xml )
+    _, _, uni, _ = split_candidates_doc( universe_xml )
+    by_file = {}
+    for r in uni: by_file.setdefault( row_attr( r, "p" ), [] ).append( r )
+    pool, scores = [], []
+    for f, s in ranked_files:
+        for r in by_file.get( f, [] ):
+            pool.append( r ); scores.append( f"{s:.6f}" )
+    return fit_to_bytes( head, root, tail, pool, scores, target )
+
+def format_signature( xml ):
+    # What "format-identical" means, as a value two documents can be compared on: the legend bytes, the
+    # root tag and its attribute NAMES in order, and the set of per-row (tag, attribute-names, child tags)
+    # shapes. Well-formedness is part of it (ElementTree must parse the document).
+    head, root_open, rows, tail = split_candidates_doc( xml )
+    ET.fromstring( xml[len( head ):] )
+    shapes = set()
+    for r in rows:
+        el = ET.fromstring( r )
+        shapes.add( ( el.tag, tuple( el.attrib ), tuple( c.tag for c in el ) ) )
+    return dict( head=head, root=tuple( k for k, _ in ATTR_RE.findall( root_open ) ), tail=tail, shapes=frozenset( shapes ) )
+
+def build_derived_arms( for_xml, universe_xml, production_bytes, instance_id, repo_path, query, universe_files, wanted=DERIVED_ARMS ):
+    # -> {arm: xml}, target, meta. target = min(production --for bytes, the full --for candidates export):
+    # the matched budget is what the shipped answer COSTS, never more than ripwire can fill. for-matched is
+    # always built (it is the reference the others are checked against); the rest only when `wanted`.
+    target = min( production_bytes, nbytes( for_xml ) )
+    matched = build_for_matched( for_xml, target )
+    docs, meta = { "for-matched": matched }, dict( target_bytes=target )
+    if "placebo" in wanted: docs["placebo"] = build_placebo_unrelated( for_xml, universe_xml, instance_id, target )
+    if "placebo-shuffle" in wanted: docs["placebo-shuffle"] = build_placebo_shuffle( matched, instance_id )
+    if "lexical" in wanted:
+        ranked, meta["bm25_oversize_files"] = bm25_rank_files( repo_path, universe_files, query )
+        docs["lexical"] = build_lexical( for_xml, universe_xml, ranked, target )
+    ref = format_signature( matched )
+    for arm, doc in docs.items():
+        sig = format_signature( doc )
+        if nbytes( doc ) != target or sig["head"] != ref["head"] or sig["root"] != ref["root"] or sig["tail"] != ref["tail"]:
+            raise PlaceboUnbuildable( f"{arm}: byte/format contract broken ({nbytes( doc )} vs {target})" )
+    return docs, target, meta
+
+def emit_payloads( out_dir, instance_id, docs, production_xml ):
+    # Freeze every arm's payload to disk with its sha256 BEFORE any model sees one; the manifest is the seal
+    # an agent round verifies (PREREG_PLACEBO.md "seal"). Production --for is kept beside, unmatched.
+    d = pathlib.Path( out_dir ) / instance_id.replace( "/", "__" )
+    d.mkdir( parents=True, exist_ok=True )
+    manifest = {}
+    for arm, doc in sorted( list( docs.items() ) + [ ( "for-production", production_xml ) ] ):
+        data = doc.encode( "utf-8" )
+        ( d / f"{arm}.xml" ).write_bytes( data )
+        manifest[arm] = dict( bytes=len( data ), sha256=hashlib.sha256( data ).hexdigest() )
+    ( d / "manifest.json" ).write_text( json.dumps( manifest, indent=2, sort_keys=True ) )
+    return manifest
+
+def score_accuracy( m, candidates, primary_files, gold_files, universe_files, cov ):
+    # One arm's ranked candidates -> accumulate strict/lenient Acc@k + first-hit MRR into `m`; return the
+    # per-instance rank record. Shared by the shipped arms and the derived control arms (same scoring).
+    rf = ranked_files_from_candidates( candidates )
+    franks = file_ranks( rf, primary_files, universe_files )
+    all_franks = file_ranks( rf, gold_files, universe_files )
+    nranks = func_ranks( candidates, cov, universe_files ) if cov else []
+    m["primary_gold_files"] += len( primary_files ); m["all_gold_files"] += len( gold_files )
+    m["f1"] += acc_all_at( franks, 1 ); m["f3"] += acc_all_at( franks, 3 )      # file-level Acc@k (strict ALL)
+    m["f5"] += acc_all_at( franks, 5 ); m["f10"] += acc_all_at( franks, 10 )
+    m["allf10"] += acc_all_at( all_franks, 10 )
+    m["fn5"] += acc_all_at( nranks, 5 ); m["fn10"] += acc_all_at( nranks, 10 )  # function-level strict + MRR
+    fh = first_hit( nranks )
+    if fh is not None: m["mrr"] += 1.0 / ( fh + 1 )
+    ff = first_hit( franks )                                                    # lenient any-hit@10, apart
+    m["anyf10"]  += ( ff is not None and ff < 10 )
+    m["anyfn10"] += ( fh is not None and fh < 10 )
+    complete = lambda rk: max( rk ) if rk and all( r is not None for r in rk ) else None
+    return dict( file_first=ff, file_worst=complete( franks ), all_file_worst=complete( all_franks ), func_first=fh )
+
+def run_for_pair( repo_path, query, top_k, rich_cache, extra_args ):
+    # The shipped `for` arm's (candidates export, production payload) when only derived arms were requested.
+    flags = [ f"--for={query}", f"--top-k={top_k}", f"--cache={rich_cache}" ] + extra_args
+    cand, _, rc1 = run_ctx( repo_path, flags + [ "--format=candidates" ] )
+    prod, _, rc2 = run_ctx( repo_path, flags )
+    if rc1 != 0 or rc2 != 0 or not cand or not prod:
+        raise SystemExit( f"for-pair run failed rc={rc1}/{rc2} (zero-silent-skip contract)" )
+    return cand, prod
+
+def score_derived_arms( acc, arms, shipped_for, uni_xml, instance_id, repo_path, query, universe_files, gold, emit_dir ):
+    # Build the matched-budget control arms from the `for` answer and score them with the same scorer. An
+    # unbuildable placebo aborts the run (zero-silent-skip): a control that quietly went missing on the
+    # hard instances would bias exactly the comparison it exists to make.
+    primary_files, gold_files, cov = gold
+    for_xml, production_xml = shipped_for
+    try:
+        docs, target, meta = build_derived_arms( for_xml, uni_xml, nbytes( production_xml ), instance_id,
+                                                 repo_path, query, universe_files, set( arms ) )
+    except PlaceboUnbuildable as e:
+        raise SystemExit( f"{instance_id}: PLACEBO UNBUILDABLE: {e} (zero-silent-skip contract)" )
+    if emit_dir: emit_payloads( emit_dir, instance_id, docs, production_xml )
+    out = {}
+    for arm in ( x for x in arms if x in DERIVED_ARMS ):
+        m = acc[arm]; m["n"] += 1
+        m["output_bytes"] += target; m["candidate_bytes"] += target
+        m["output_tokens_ceiling"] += estimated_output_tokens( docs[arm] )
+        out[arm] = dict( **score_accuracy( m, parse_candidates( docs[arm], repo_path ), primary_files, gold_files,
+                                           universe_files, cov ), output_bytes=target, **meta )
+    return out
+
 # ── main ─────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser( description="ripwire localization accuracy on LocBench / SWE-bench-Lite" )
@@ -299,7 +616,8 @@ def main():
     ap.add_argument( "--work-dir", required=True, help="scratch dir for dataset cache + cloned repos (NOT the ripwire repo)" )
     ap.add_argument( "--top-k", type=int, default=200, help="symbols per --for/--anchor arm run (they self-limit to a ~40-symbol focused bundle)" )
     ap.add_argument( "--query-chars", type=int, default=1200, help="chars of the issue problem_statement used as the query (deterministic prefix)" )
-    ap.add_argument( "--arms", default="for,query,anchor" )
+    ap.add_argument( "--arms", default="for,query,anchor",
+                     help="shipped: for,query,anchor,subtoken,subtoken-anchor; matched-budget controls: " + ",".join( DERIVED_ARMS ) )
     ap.add_argument( "--split", default="all", choices=[ "all", "train", "heldout" ],
                      help="frozen A7 repository-disjoint split selected by salted SHA-256(repo), independent of row order" )
     ap.add_argument( "--max-scored", type=int, default=0,
@@ -318,6 +636,9 @@ def main():
     ap.add_argument( "--measure-cold", action="store_true", help="also time one production-bundle --no-cache run per arm" )
     ap.add_argument( "--measure-index", action="store_true", help="also rebuild/time a throwaway rich index per instance" )
     ap.add_argument( "--json-out", default="", help="write per-instance results JSON here" )
+    ap.add_argument( "--emit-payloads", default="",
+                     help="with a derived arm (for-matched/placebo/placebo-shuffle/lexical): write every arm's payload "
+                          "+ a sha256 manifest per instance under this dir — the seal an agent round verifies" )
     ap.add_argument( "--verbose", action="store_true" )
     a = ap.parse_args()
 
@@ -406,7 +727,7 @@ def main():
             print( f"[{idx+1}/{len(rows)}] {inst['instance_id']}: NO INDEXABLE GOLD FILE (all-patch secondary only)", file=sys.stderr )
             continue
 
-        arm_out = {}
+        arm_out = {}; shipped_for = None
         # Rotate the measured arm order by instance hash. Each arm still runs the requested sample count.
         rot = hashlib.sha256( inst["instance_id"].encode() ).digest()[0] % len( arms )
         run_arms = arms[rot:] + arms[:rot]
@@ -432,10 +753,7 @@ def main():
             try: candidates = parse_candidates( candidate_xml, repo_path )
             except Exception as e:
                 raise SystemExit( f"[{idx+1}/{len(rows)}] {inst['instance_id']}: XML FAIL arm={arm}: {e} (zero-silent-skip contract)" )
-            rf = ranked_files_from_candidates( candidates )
-            franks = file_ranks( rf, primary_files, universe_files )
-            all_franks = file_ranks( rf, gold_files, universe_files )
-            nranks = func_ranks( candidates, cov, universe_files ) if cov else []
+            if arm == "for": shipped_for = ( candidate_xml, payloads[0] )
             wall_med = statistics.median( walls )
             wall_p95 = sorted( walls )[ max( 0, math.ceil( 0.95 * len( walls ) ) - 1 ) ]
             m = acc[arm]; m["n"] += 1; m["wall"] += wall_med; m["p95"] += wall_p95
@@ -448,25 +766,16 @@ def main():
                 cold_payload, cold_wall, cold_rc = run_ctx( repo_path, cold_flags )
                 if cold_rc != 0 or not cold_payload: raise SystemExit( f"cold production run failed arm={arm} rc={cold_rc}" )
                 m["cold_wall"] += cold_wall
-            m["primary_gold_files"] += len( primary_files ); m["all_gold_files"] += len( gold_files )
-            # file-level Acc@k (strict ALL)
-            m["f1"] += acc_all_at( franks, 1 ); m["f3"] += acc_all_at( franks, 3 )
-            m["f5"] += acc_all_at( franks, 5 ); m["f10"] += acc_all_at( franks, 10 )
-            m["allf10"] += acc_all_at( all_franks, 10 )
-            # function-level Acc@k (strict ALL) + first-hit MRR
-            m["fn5"] += acc_all_at( nranks, 5 ); m["fn10"] += acc_all_at( nranks, 10 )
-            fh = first_hit( nranks )
-            if fh is not None: m["mrr"] += 1.0 / ( fh + 1 )
-            # lenient any-hit@10 (recall flavor, reported apart)
-            ff = first_hit( franks )
-            m["anyf10"]  += ( ff is not None and ff < 10 )
-            m["anyfn10"] += ( fh is not None and fh < 10 )
-            arm_out[arm] = dict( file_first=ff, file_worst=( max( franks ) if franks and all( r is not None for r in franks ) else None ),
-                                 all_file_worst=( max( all_franks ) if all_franks and all( r is not None for r in all_franks ) else None ),
-                                 func_first=fh, wall_median=round( wall_med, 4 ), wall_p95=round( wall_p95, 4 ),
+            arm_out[arm] = dict( **score_accuracy( m, candidates, primary_files, gold_files, universe_files, cov ),
+                                 wall_median=round( wall_med, 4 ), wall_p95=round( wall_p95, 4 ),
                                  cold_wall=round( cold_wall, 4 ), index_wall=round( index_wall, 4 ),
                                  output_bytes=len( payloads[0].encode( "utf-8" ) ), output_tokens_ceiling=estimated_output_tokens( payloads[0] ),
                                  candidate_bytes=len( candidate_xml.encode( "utf-8" ) ) )
+
+        if any( x in DERIVED_ARMS for x in arms ):
+            if shipped_for is None: shipped_for = run_for_pair( repo_path, query, a.top_k, rich_cache, extra_args )
+            arm_out.update( score_derived_arms( acc, arms, shipped_for, uni_xml, inst["instance_id"], repo_path, query,
+                                                universe_files, ( primary_files, gold_files, cov ), a.emit_payloads ) )
 
         if not arm_out: continue
 

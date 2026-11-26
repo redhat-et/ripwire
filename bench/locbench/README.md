@@ -44,6 +44,16 @@ queries do zero per-file reads — property-gated), exhaustive-identical MaxScor
 rank-adaptive payload budget. Gates: `test/postingscheck.sh`, `test/routecheck.sh`,
 `test/retrievalqualitycheck.sh`, `test/knownitemcheck.sh`.
 
+## Matched-budget control arms (placebo + fair lexical) — registered, not yet run
+
+[`PREREG_PLACEBO.md`](PREREG_PLACEBO.md) registers the METHODOLOGY §8 placebo replication of Bellam
+(arXiv 2610.33958) with ripwire as the structural arm. The harness side is here: `--arms` takes
+`for-matched`, `placebo`, `placebo-shuffle` and `lexical`. Each is derived from the `for` answer, is exactly
+the production `--for` payload's byte size, and is rendered in the identical `--format=candidates` format.
+`--emit-payloads=DIR` freezes every arm's payload with a sha256 manifest for an agent round. The property is
+gated by `test/locbenchplacebocheck.sh`. No number exists yet: the agent driver and the live round wait on
+the owner's approval.
+
 ---
 
 ## What it measures
