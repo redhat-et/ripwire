@@ -94,7 +94,7 @@ mkfix(){
 
 # The mutant of a copy: every RIPWIRE_* variable is keyed into the snapshot's options (warmsnap.h optionsKeyOf), so a
 # fault switch is set on EVERY run of its copy — recording and served alike — never on one run alone.
-fault_of(){ case "$1" in R) echo RACY ;; N|T|L) echo SIZEMTIME ;; G) echo GONE ;; A) echo NOSIG ;; esac; }
+fault_of(){ case "$1" in R) echo RACY ;; N|T|L) echo SIZEMTIME ;; G) echo GONE ;; A) echo NOSIG ;; *) echo "fault_of: no mutant for arm $1" >&2; return 1 ;; esac; }
 faultenv(){ case "$1" in m?) echo "RIPWIRE_FAULT_WARMSNAP_DEPS_$( fault_of "${1#m}" )=1" ;; *) echo "RIPWIRE_DEPSREREAD_GATE=1" ;; esac; }
 # run TAG COPY BINARY ARGS... : a cached run of COPY with its own cache dir; stdout/stderr/rc to $TMP/out/TAG.*
 run(){

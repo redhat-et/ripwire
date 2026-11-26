@@ -1,0 +1,9 @@
+### Changed — a served warm run no longer re-reads every file the call graph was resolved from
+
+A warm run that serves the stored call graph first checks that every file the resolver read outside the parse cache still says what it said. Until now it re-read and digested each of those files, one after another, on every call: 7,838 files on llvm-project (mostly headers the C++ contract checks read), 1,123 on envoy, 243 on vscode.
+
+Each such file's stat signature (device, inode, size, modification and change times) is now stored beside what its read answered, and only when it was settled: both times at least 2 seconds older than the run that recorded it, the same rule the parse cache and the crawl replay already use. A later run skips the read when the signature is unchanged, and reads and compares exactly as before otherwise: a file that moved in any way, one recorded inside the 2-second window, one that is gone or newly present, and every read that found nothing. A changed file still refuses the stored graph, and the answer is the one a `--no-cache` run gives.
+
+Measured on an Apple M-series machine, Release build, served warm `--for` and warm map, 5 interleaved runs each against the previous build: the check itself went from 119 ms to 6 ms on llvm-project, 13.7 ms to 2.5 ms on envoy and 3.0 ms to 0.7 ms on vscode. Wall time on llvm-project went from 5.015 s to 4.913 s for `--for` and from 1.079 s to 0.978 s for the map. On envoy and vscode the change is within a few milliseconds. Every output was byte-identical to the previous build's and to `--no-cache`.
+
+`RIPWIRE_STATS=1` now prints one `[warmsnap] deps rows= read= probed= skipped=` line per check. The warm snapshot's format version moves from 6 to 7, so the first run after upgrading rebuilds its snapshot once. Gate: `test/depsrereadcheck.sh`.
