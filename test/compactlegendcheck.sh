@@ -445,6 +445,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # files_first 6 -> 3, est_tokens 2415 -> 2460, and the hops serve diagonal (sub/consumer.cpp) beside the first owner (shown 1 -> 2,
 # noedge 5 -> 4). Checked mechanically: the SAME binary with RIPWIRE_BASENAME_W=2 prints the previous pin byte for byte (at= masked),
 # so every changed byte is the ranking's. Captured with the arm's own setup (same git fixture, HOME, warm cache). 6242 -> 6354 B.
+# RE-ANCHORED BY HAND 2026-11-26 (lane metric-labels, TESTED-REACHED, by design; gate test/metriclegendcheck.sh (T4)), callers.xml
+# and impact.xml only: graphlegend.h kTestedRowLegend now says how a test reaches the row and that reaching is not asserting
+# ("transitively reaches it" -> "transitively reaches it over call edges; reached, not asserted"), string for string, nothing
+# else. Checked mechanically: the reverse replacement of that one phrase gives the previous pin byte for byte. +39 B each.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

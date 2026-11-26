@@ -324,6 +324,7 @@ for _g in \
     archcheck \
     archhonestcheck \
     archmetricscheck \
+    archunqualifiedcheck \
     argvdiffcheck \
     arisefollowupcheck \
     ariseshimcheck \
@@ -831,6 +832,7 @@ for _g in \
     mergescoutlonglinecheck \
     metalcheck \
     meterdisclosurecheck \
+    metriclegendcheck \
     metricscheck \
     modifierguardcheck \
     moduleconstcheck \
