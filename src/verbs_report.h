@@ -1204,7 +1204,10 @@ inline constexpr const char* kCochangeRepoLegend =
 
 inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
-    "together= is the number of commits in window= that touched BOTH this file and the partner (3 or more, or the partner is not reported); "
+    "together= is the number of commits in window= that touched BOTH this file and the partner (floor= or more, or the partner is not reported); "
+    "floor= is that support floor, 3 shared commits; floor_tail=corroborated: one file is one seed, so the list is filled to 10 with partners "
+    "sharing 2 commits that are corroborated, below every 3-commit row; why= says which: support (3+), confidence (in at least half this file's commits) "
+    "or link (an include, import or call edge either way, a test-of pair, or the same directory of 20 files or fewer); "
     "deg= is that count over commits=, THIS file's own commit count — a different denominator from the repo-wide pair form, which divides by the less-changed side. "
     "deg= is therefore already DIRECTIONAL here (this file => partner: of your commits, the fraction that also touched the partner); conf_rev= is the other direction, "
     "that same count over the PARTNER's own commit count. deg=1.00 means you never touch this file alone; conf_rev=1.00 means the partner never moves without you. "
@@ -1723,8 +1726,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const rw::SinceScope fidScope = multiRoot ? rw::resolveSinceScope( fidRepo, cfg.since ) : sinceScope;
             std::uint32_t                commits    = 0;
             std::uint32_t                subWindows = 0;
-            std::vector<CoPartner>       ps         = cochangePartners( fidRepo, ing, cfg.cochangeFile, commits,
-                                                                        cfg.since.empty() ? nullptr : &fidScope, fidRoot, &subWindows );
+            // one file is one seed: the corroborated tail fills the list (situ.h coCorroboratedTail; floor_tail= and why= below)
+            CoCouplingCache              tailCoupling( ing );
+            std::vector<CoPartner>       ps         = coCorroboratedTail( ing, &d.g, fid,
+                                                                          cochangePartners( fidRepo, ing, cfg.cochangeFile, commits, cfg.since.empty() ? nullptr : &fidScope,
+                                                                                            fidRoot, &subWindows, kCoTailSupport ),
+                                                                          tailCoupling );
             // §CLIO: --cochange-recur=K drops the partners whose co-change does not RECUR across the mined
             // window's sub-windows. Applied BEFORE partners= is counted, so partners= keeps meaning "the rows
             // this run is reporting" and reconciles with shown=/capped= exactly as it always has; the reason
@@ -1747,9 +1754,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
             // verb already calls, placed LAST on the element to match --hotspots' existing attribute order.
-            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\"{}{}{}{}>",
+            // floor=: the shared commits a partner needed (gitmine.h kCoSupportFloor)
+            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\" floor=\"{}\" floor_tail=\"corroborated\"{}{}{}{}>",
                          ex( mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[fid], mvRootPrefix ) : std::string_view( ing.files[fid] ) ).c_str(),
-                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(),
+                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(), kCoSupportFloor,
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          mvRootAttr.c_str(),                // R-E fix: root= before at= — at= stays LAST (r26)
@@ -1759,10 +1767,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 const std::string_view rp = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ ps[ partnerIndex ].fileId ], mvRootPrefix )
                                                           : std::string_view( ing.files[ ps[ partnerIndex ].fileId ] );
-                rw::emitTo( stdout, "<f p=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_rev=\"{:.2f}\" recur=\"{}\"{}/>",
+                rw::emitTo( stdout, "<f p=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_rev=\"{:.2f}\" recur=\"{}\" why=\"{}\"{}/>",
                              ex( rp ).c_str(), ps[ partnerIndex ].together,
                              ps[ partnerIndex ].deg, ps[ partnerIndex ].degRev, ps[ partnerIndex ].recur,
-                             coPairAttr( ps[ partnerIndex ] ) );
+                             coWhyName( ps[ partnerIndex ].why ), coPairAttr( ps[ partnerIndex ] ) );
             }
             rw::emitTo( stdout, "</cochange>" );
             return 0;
