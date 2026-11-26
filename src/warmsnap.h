@@ -670,7 +670,8 @@ inline std::uint64_t layoutKey() noexcept
 // Every input of the crawl, the ingest and the resolver that is not a file's content: the options, both spellings of
 // the root, where the process stands, and the environment those stages read. Environment: every RIPWIRE_* variable but
 // the pure observers (so a test seam or a kill switch never meets a snapshot recorded without it), every GIT_* one, and
-// the four that decide which git runs and which configuration it reads.
+// the four that decide which git runs and which configuration it reads. RIPWIRE_PARSE_THREADS is an observer: it picks
+// the parse pool's worker count, and the model a run builds does not depend on it (test/snapdeterminismcheck.sh).
 inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes, bool captureValueUses,
                                    std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits,
                                    bool crawlTreeAllTracked )
@@ -689,7 +690,8 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     o.u32( extractionStamp );
     o.u8( wantConstructHits ? 1 : 0 );
     o.u8( crawlTreeAllTracked ? 1 : 0 );   // M1: a materialized commit tree crawls build-output names the working tree may prune
-    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE" };
+    static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE",
+                                                       "RIPWIRE_PARSE_THREADS=" };
     static constexpr std::string_view kExact[]     = { "HOME=", "PATH=", "PWD=", "XDG_CONFIG_HOME=" };
     std::vector<std::string_view> read;
     for( char** env = os::environment(); env != nullptr && *env != nullptr; ++env )
