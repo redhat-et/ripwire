@@ -444,7 +444,9 @@ inline void recordTangle( Snapshot& snap, std::uint64_t key, const TangleInputs&
 // A callable's record (recordTangle); any other kind has no tangle.
 inline void recordTangleOf( Snapshot& snap, std::uint64_t key, const IngestResult& ing, const Symbol& s )
 {
-    if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+    // Test code is never judged (appendTangleRows), so it never wins a key's record either: a `#[cfg(test)]` overload outranking its
+    // `#[cfg(not(test))]` twin would hide the source body's rise (CodeRabbit #743). tangleNowByKey skips it the same way.
+    if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && !isTestSymbol( ing, s.id ) )
     {
         recordTangle( snap, key, tangleInputsOf( ing, s ) );
     }
@@ -11722,15 +11724,20 @@ inline gtl::btree_map<std::uint64_t, TangleNow> tangleNowByKey( const IngestResu
         {
             continue;
         }
-        const TangleInputs in   = tangleInputsOf( ing, s );
-        TangleNow&         slot = nowByKey[ keyByNode[i] ];
-        ++slot.defs;
+        TangleNow& slot = nowByKey[ keyByNode[i] ];
+        ++slot.defs;   // every overload: the body guard's "one definition" reads the baseline's defsBySym, which counts them all
+        if( isTestSymbol( ing, i ) )
+        {
+            continue;   // test code never supplies a key's inputs (recordTangleOf)
+        }
+        const TangleInputs in = tangleInputsOf( ing, s );
         if( slot.at == kNoNode || ( capKnown ? tangleOutranks( in, slot.in ) : tangleOutranks( tangleWithoutCap( in ), tangleWithoutCap( slot.in ) ) ) )
         {
             slot.in = in;
             slot.at = i;
         }
     }
+    gtl::erase_if( nowByKey, []( const auto& kv ) { return kv.second.at == kNoNode; } );   // keys with test overloads only
     return nowByKey;
 }
 

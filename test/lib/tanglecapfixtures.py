@@ -45,6 +45,9 @@ both twins must report the same cross count):
                 walk dropped the deep one's root.
   gostep / goassign        — Go: `r.n++` (an inc_statement on a selector) vs `r.n = r.n + 1`.
   csstep / csassign        — C#: `r.Value++` (a postfix unary on a member access) vs `r.Value = r.Value + 1`.
+TEST OVERLOAD (CodeRabbit #743 round 2):
+  clock.rs    — Rust `tick` twice under one key: #[cfg(not(test))] (the source; 2.5 at v1, 8.0 in wt: it crosses the bar) and
+                #[cfg(test)] (fixed at 10.8). The test overload must not supply the key's score on either side.
 HISTORY (v1 -> wt), the rise and ratchet arms:
   crossgrow   — REAL, over the bar with the cap not binding; wt threads one more local across blocks by editing an existing
                 line (no line added): the score is unchanged, crossLocals +1 is the rise (a minor row, why= names cross).
@@ -299,6 +302,18 @@ def csstep(name, step):
             + "        }\n" + lines(6, 8, "total = total * 9 + {k};") + "        total = total * 9 + r.Value;\n        return total;\n    }\n}\n")
 
 
+# ── a test overload beside its source twin ──────────────────────────────────────────────────────────────────────────────────
+def rusttick(deep, attr):
+    return (f"{attr}\npub fn tick(xs: &[i32]) -> i32 {{\n    let mut total = 0;\n"
+            "    for &x in xs {\n        if x > 0 {\n            for y in 0..x {\n                if y % 3 != 0 {\n"
+            + lines(deep, 20, "total += y * {k} + 3;") +
+            "                }\n            }\n        }\n" + lines(30, 8, "total = total * 7 + {k};") + "    }\n    total\n}\n")
+
+
+def clock(stage):
+    return rusttick(40 if stage == "wt" else 20, "#[cfg(not(test))]") + "\n" + rusttick(50, "#[cfg(test)]")
+
+
 # ── a small tangled body, moved ─────────────────────────────────────────────────────────────────────────────────────────────
 def smallmove(name="smallmove", lit=1):
     return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = {lit};\n"
@@ -318,6 +333,7 @@ def main():
     write(d, "src/ruleflat.cpp", hdr + lambdasteps("ruleflat", extra=4 if stage == "wt" else 0))
     write(d, "src/ruleworse.cpp", hdr + deepmono("ruleworse", deep=46 if stage == "wt" else 40))
     write(d, "src/capworse.cpp", hdr + twoarms("capworse", deepx=7 if stage == "wt" else 1))
+    write(d, "src/clock.rs", clock(stage))
     if stage != "wt":
         write(d, "src/smallmove.cpp", "#include <vector>\n" + smallmove())
         return

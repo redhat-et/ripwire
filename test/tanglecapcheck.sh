@@ -44,6 +44,9 @@
 #   (c1) CROSS-LOCAL WRITE FORMS (CodeRabbit #743 round 2): each twin pair reports the same cross count in its row's why=, the
 #        control at least 1 (premise): deepchain (a 20-access member target) = shallowchain (3), gostep (Go `r.n++`) = goassign,
 #        csstep (C# `r.Value++`) = csassign. Red on e3b7c3145 (one cross local fewer on each form under test).
+#   (f5) TEST OVERLOAD (CodeRabbit #743 round 2): clock.rs's #[cfg(not(test))] tick crosses the bar (2.5 -> 8.0) beside a
+#        #[cfg(test)] tick fixed at 10.8 under the same key (premise: both in --metrics, the test one higher): a gating row on the
+#        source overload. Red on e3b7c3145 (the test overload won the key, and the key was skipped as test code).
 #   (m1) MUST KEEP, main's sources: the 6 #721 parents (captureTagsFacts, lexicalScoresTiered, serialize, runQualityDelta,
 #        compressBody, serializeJson) plus buildGraph and dispatchMcpLine stay over the bar on ripwire main 696d57a67 (the
 #        labelled commit). Premise: the commit is reachable (CI clones with fetch-depth 0) and each name has a tangle= row.
@@ -162,6 +165,16 @@ for pair in deepchain:shallowchain gostep:goassign csstep:csassign; do
     elif [ "$fc" = "$cc" ]; then ok "(c1) $f: cross $fc, the same as its control $c"
     else no "(c1) $f: cross ${fc:-none}, want $cc as its control $c (a write form the cross count missed)"; fi
 done
+# (f5) a #[cfg(test)] overload beside its source twin under one key
+mt="$( printf '%s' "$M" | tr '>' '\n' | grep 'n="tick"' | grep -oE ' tangle="[0-9.]+"' | sed -E 's/[^0-9.]//g' | sort -n | tr '\n' ' ' )"
+lo="${mt%% *}"; hi="$( printf '%s' "$mt" | awk '{print $NF}' )"
+if [ "$( printf '%s' "$mt" | wc -w | tr -d ' ' )" != 2 ] || ! over "$lo" || [ "${hi%.*}${hi#*.}" -le "${lo%.*}${lo#*.}" ]; then
+    no "(f5) PREMISE: two tick overloads in --metrics, the source over the bar and the test one higher, got '$mt'"
+else
+    r="$( trow "$Q" tick )"
+    if [ -n "$r" ] && [ "$( attr "$r" gating )" = 1 ] && [ "$( attr "$r" now )" = "$lo" ]; then ok "(f5) tick: the #[cfg(not(test))] overload's crossing to $lo gates beside a #[cfg(test)] one at $hi: $r"
+    else no "(f5) tick: want a gating row at the source overload's $lo (the #[cfg(test)] one at $hi never supplies the key), got '${r:-none}'"; fi
+fi
 
 # (q4) the old floor: pin v1 with --quality-baseline, strip its block facts, judge the working tree
 O="$TMP/old"; mkdir -p "$O"; "${G[@]}" -C "$O" init -q
@@ -178,7 +191,7 @@ if [ "$prc" = 0 ] && [ -f "$SC" ]; then grep -v '^tanglecap' "$SC" | sed -E "s/^
 left="$( grep -c '^tanglecap' "$SC" 2>/dev/null )"; left="${left:-0}"
 python3 "$FX" wt "$O" || { echo "fixture writer failed"; exit 2; }
 Q4="$TMP/qd4.xml"
-"$BIN" "$O" --quality-delta --no-cache >"$Q4" 2>/dev/null
+"$BIN" "$O" --quality-delta --no-cache >"$Q4" 2>/dev/null; rc4=$?
 src="$( grep -oE '<quality-delta [^>]*' "$Q4" | grep -oE ' baseline="[^"]*"' )"
 mc="$( mrow capworse )"
 if [ "$prc" != 0 ] || [ "$capl" -lt 1 ] || [ "$left" != 0 ] || [ "$src" != ' baseline="sidecar"' ] || [ "$hit" != 1 ]; then
@@ -186,6 +199,7 @@ if [ "$prc" != 0 ] || [ "$capl" -lt 1 ] || [ "$left" != 0 ] || [ "$src" != ' bas
 elif [ -z "$mc" ] || over "$( attr "$mc" tangle )" || ! over "$( attr "$mc" tangle_raw )"; then
     no "(q4a) PREMISE: capworse should be under the bar capped and over it uncapped in wt, got '${mc:-none}'"
 else
+    if [ "$rc4" != 2 ]; then no "(q4a) quality-delta exit status $rc4 against the old floor, want 2 (gating rows exist)"; fi
     r="$( trow "$Q4" capworse )"
     if [ -n "$r" ] && [ "$( attr "$r" gating )" = 1 ]; then ok "(q4a) capworse (+6 deep lines, capped $( attr "$mc" tangle ) in wt) against the old floor: a gating row: $r"
     else no "(q4a) capworse against the old floor: want a gating row (scored uncapped on both sides), got '${r:-none}'"; fi
