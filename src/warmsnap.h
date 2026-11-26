@@ -665,6 +665,27 @@ inline bool recordsWhatItBuilt( const Session& s, std::size_t reparsedFiles ) no
     return reparsedFiles == 0 || s.coldBlob;
 }
 
+// The gate both record sites share (ingest.cpp recordWarmModel, warmsnap_graph.h buildGraphRecorded): may what this run
+// built be stored? A refusal says why on the stats line (unsavedWhy), except a memory stop, which has its own line.
+inline bool mayStoreBuilt( Session& s, std::size_t reparsedFiles, bool memoryStopped ) noexcept
+{
+    if( memoryStopped )
+    {
+        return false;
+    }
+    if( !s.treeKeyValid )
+    {
+        s.unsaved( Why::Racy );   // keyWarmSnapshot found a file too young to pin
+        return false;
+    }
+    if( !recordsWhatItBuilt( s, reparsedFiles ) )
+    {
+        s.unsaved( Why::Reparsed );
+        return false;
+    }
+    return true;
+}
+
 inline thread_local Session* tlSession = nullptr;
 
 class Armed
