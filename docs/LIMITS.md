@@ -96,6 +96,19 @@ The second one is the transferable lesson. "The bound trips 97 times" reads like
 not one — a fidelity cap is judged by whether re-derivation changes the ANSWER, never by whether
 the bound trips. A tripping counter is a hypothesis; the re-derivation is the measurement.
 
+## `--brief` is opt-in — what the held-out check showed
+
+`--brief="TASK"` is an orientation page for a fresh subagent. It is **opt-in**: agents call it by name,
+`--for` stays the default route and its output is unchanged. Held-out check on 8 repos (axum, django,
+fmt, gin, nest, pydantic, textual, trpc; 24 E / 32 S / 24 T / 32 B items): `--brief` hit 9 / 24 / 12 / 19
+= 64 items in 25,483 B; `--for` hit 13 / 23 / 6 / 16 = 58 items in 121,072 B; the same verb without the
+co-change and unit-build sections hit 62. Only 1 of 8 repos met every per-class bar, so it is not a
+replacement for `--for`. By language (items, `--brief` vs `--for`): Python 23 vs 16, TypeScript 17 vs 10,
+Go 10 vs 11, C++ 9 vs 12, Rust 5 vs 9. **Entry points are its limit:** 9 of 24 found, `--for` 13 of 24.
+The co-change roles need at least 10 kept commits in the walk (`history="1"`); a 1-commit clone gets
+none. Off switches: `RIPWIRE_BRIEF_COCHANGE=0` (history roles) and `RIPWIRE_BRIEF_UNITBUILD=0` (the
+unit's build file).
+
 ## Not caps — ranking and apportionment parameters
 
 These decide **how** something is weighted or apportioned, not **how many** of it survive, so
