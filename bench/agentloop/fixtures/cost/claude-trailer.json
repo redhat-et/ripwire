@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":false,"session_id":"fixture-session-1","num_turns":7,"duration_ms":61000,"total_cost_usd":0.4321,"usage":{"input_tokens":1234,"cache_creation_input_tokens":20000,"cache_read_input_tokens":150000,"output_tokens":4321}}
