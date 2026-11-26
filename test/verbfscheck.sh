@@ -131,7 +131,11 @@ same(){ cmp -s "$TMP/$1.out" "$TMP/$2.out" && cmp -s "$TMP/$1.rc" "$TMP/$2.rc"; 
 ident(){
     local label="$1"; shift
     run "id.w" warm "$@"; run "id.n" novfs "$@"; run "id.c" nocache "$@"
-    if [ "$( cat "$TMP/id.c.rc" )" != 0 ]; then no "$label: the --no-cache reference exited $( cat "$TMP/id.c.rc" )"; return 1; fi
+    if [ "$( cat "$TMP/id.c.rc" )" != 0 ]; then
+        no "$label: the --no-cache reference exited $( cat "$TMP/id.c.rc" )"
+        printf '        stderr tail: %s\n' "$( tail -c 600 "$TMP/id.c.err" 2>/dev/null | tr '\n' ' ' )"   # an abort's reason, in the CI log
+        return 1
+    fi
     if same id.w id.c && same id.n id.c; then return 0; fi
     no "$label: served / no-verbfs / no-cache differ: $( diff "$TMP/id.w.out" "$TMP/id.c.out" | head -4 | tr '\n' ' ' )"
     return 1
