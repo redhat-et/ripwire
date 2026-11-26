@@ -1,0 +1,5 @@
+### Fixed — MCP truncation and assumption disclosures reach the model, not only the JSON-RPC client
+
+An MCP result carried its disclosures beside `content`: `_assumed_root` (no `path` was given), `_memory_stop` (the memory guard cut the index), `_memory_peak`, `_history_cut` (a git history walk was cut) and `_fresh:"reindexed"` with its two counts. A host hands the model `content` only. In 102 sampled Claude Code results, none carried `_index` or `_fresh`, so for the agent "every truncation is disclosed" did not hold. A result that carries any of these now adds a second text block to `content`, one `[<key>] <sentence>` line per key, with the same sentence as the machine copy. The verb's own payload in the first block is unchanged, so a JSON payload still parses, and a result with nothing to disclose is byte-identical to before. The machine copies stay where they were.
+
+`test/mcpenvelopevisiblecheck.sh` forces each key. On the parent, 5 of its 12 arms fail (every visibility arm); on this change all 12 pass.

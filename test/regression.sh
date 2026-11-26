@@ -786,6 +786,7 @@ for _g in \
     mcpeditmodecheck \
     mcpeditpresencecheck \
     mcpeditracecheck \
+    mcpenvelopevisiblecheck \
     mcpflagshipcheck \
     mcpforparitycheck \
     mcpforroutecheck \

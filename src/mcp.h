@@ -680,6 +680,49 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
     return ",\"" + std::string( key ) + "\":\"" + mcpdetail::jsonEscape( note ) + "\"";
 }
 
+// Research audit 2026-11-26 item 1: an MCP host hands the MODEL `content` and nothing else — 0 of 102 sampled Claude Code
+// results carried `_index` or `_fresh` — so an envelope sibling alone discloses a cut to the JSON-RPC client and not to
+// the agent. Every non-empty note is therefore said again in a SECOND content block, one "[<key>] <sentence>" line per
+// key, the same sentence as the machine copy. A second block and not a suffix of the first: several verbs answer JSON, and
+// a trailing line would make it unparseable (the reason the notes were siblings in the first place). "" when nothing is
+// disclosed, so such a result is byte-identical to before. Gate: test/mcpenvelopevisiblecheck.sh.
+struct McpEnvelopeNotes
+{
+    std::string_view assumedRoot;
+    std::string_view memoryStop;
+    std::string_view memoryPeak;
+    std::string_view historyCut;
+    bool             reindexed    = false;   // `_fresh:"reindexed"`, with the two counts mcpFreshFields emits beside it
+    std::size_t      staleFiles   = 0;
+    std::size_t      changedFiles = 0;
+};
+
+inline std::string mcpVisibleNotesBlock( const McpEnvelopeNotes& n )
+{
+    std::string lines;
+    const auto add = [ & ]( std::string_view key, std::string_view sentence )
+    {
+        if( sentence.empty() )
+        {
+            return;
+        }
+        lines += lines.empty() ? "[" : "\n[";
+        lines.append( key );
+        lines += "] ";
+        lines.append( sentence );
+    };
+    add( "_assumed_root", n.assumedRoot );
+    add( "_memory_stop", n.memoryStop );
+    add( "_memory_peak", n.memoryPeak );
+    add( "_history_cut", n.historyCut );
+    if( n.reindexed )
+    {
+        add( "_fresh", "reindexed: files changed on disk since this server last read the tree, so the index was rebuilt before "
+                       "this answer (_stale_files=" + std::to_string( n.staleFiles ) + " _changed_files=" + std::to_string( n.changedFiles ) + ")" );
+    }
+    return lines.empty() ? lines : ",{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( lines ) + "\"}";
+}
+
 // is `candidatePath` the workspace root itself, or STRICTLY inside it — a path-COMPONENT prefix, so a
 // sibling directory that merely shares a text prefix (root "/repo" vs candidate "/repo-foo") never matches.
 // `canonRoot` must already be canonicalized (mcpCanonRoot); `candidatePath` is canonicalized here so callers
@@ -1761,11 +1804,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     legenddict::openSessionWith( *body, *legendSession );   // served as-is; opens the session when reducible
                 }
+                const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
+                const McpIndex&   slot     = mcpIndexSlot();
+                const std::string visible  = mcpVisibleNotesBlock( McpEnvelopeNotes{ assumedRootNote, memoryStopNote, peakNote, cutNote,
+                                                                                     mcpRefreshedThisRequest( passesAtEntry ),
+                                                                                     slot.lastStaleFiles, slot.lastChangedFiles } );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
+                     + mcpdetail::jsonEscape( *body ) + "\"}" + visible + "],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
-                     + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
+                     + mcpEnvelopeNoteField( "_memory_peak", peakNote )
                      + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
