@@ -1195,6 +1195,40 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
+// ─── SEP-1303 (MCP 2025-11-25; audit 2026-11-26 item 3): which failures are RESULTS ─────────────────────────────
+// A tools/call that NAMED a tool this server serves and then failed inside it (a missing or bad argument, a not-found, a
+// business-logic refusal) is a Tool Execution Error: a RESULT with isError:true and the explanation in content, which a
+// client SHOULD show the model. A JSON-RPC error is a Protocol Error, which a client MAY drop: it stays for a request that
+// reached no tool (an unknown or --mcp-tools-hidden name, a missing or wrong-typed `name`, a wrong-typed `arguments`) and
+// for the server faults (-32000 the memory hard line, -32601 remote edits off, -32603 internal). Claude Code shows both (6
+// of 6 sampled -32602s arrived as is_error), so the gain is every other client and the spec. The message bytes are the
+// same in either envelope; only the envelope moves. Gate: test/mcpiserrorcheck.sh.
+inline bool mcpIsToolExecutionError( int code, std::string_view name )
+{
+    // a name with no declared field set is no tool this server serves (aliases resolve to their target's row)
+    return code == -32602 && !mcprefuse::declaredFieldsFor( name ).empty();
+}
+
+inline std::string mcpToolErrorFrame( const std::string& id, const std::string& text )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+         + mcpdetail::jsonEscape( text ) + "\"}],\"isError\":true}}";
+}
+
+inline std::string mcpProtocolErrorFrame( const std::string& id, int code, const std::string& text )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
+         + mcpdetail::jsonEscape( text ) + "\"}}";
+}
+
+// found=0 is an ANSWER ("none found", non-negotiable 3), so it is a plain result, not an error of either kind: the CLI's
+// answer document first, the refusal sentence (echo, near-miss, rename, next call) as the second block.
+inline std::string mcpFoundZeroFrame( const std::string& id, const std::string& doc, const std::string& sentence )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+         + mcpdetail::jsonEscape( doc ) + "\"},{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( sentence ) + "\"}]}}";
+}
+
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the
@@ -1527,10 +1561,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // `arguments` means every argument read below is about the wrong scope, so naming an argument first
             // would send the caller to fix the wrong thing.
             std::string shapeRefusal = !nameArg.refusal.empty() ? nameArg.refusal : argsArg.refusal;
-            // SEP-1303: those two seed faults are the request's own SHAPE (a CallToolRequest that names no tool, or carries
-            // its arguments as something other than an object), a Protocol Error; every argument fault after them is the
-            // named tool's input validation, a Tool Execution Error (toolErrorResult below).
-            const bool callShapeFault = !shapeRefusal.empty();
+            const bool callShapeFault = !shapeRefusal.empty();   // SEP-1303: the request's own shape, a protocol error; argument faults after it are isError
             const auto  strArg = [ & ]( const char* field ) -> std::string
             {
                 const McpStringArg a = mcpStringArg( args, field );
@@ -1865,40 +1896,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 const std::string note = memguard::peakNoteOnIncrease( "this request finished with the error above" );
                 return note.empty() ? note : "; " + note;
             };
-            // SEP-1303 (MCP 2025-11-25; audit 2026-11-26 item 3). A tools/call that NAMED a tool this server serves and
-            // then failed inside it (a missing or bad argument, a not-found, a business-logic refusal) is a Tool Execution
-            // Error: a RESULT with isError:true and the explanation in content, which a client SHOULD show the model. A
-            // JSON-RPC error is a Protocol Error, which a client MAY drop. Claude Code happens to show both (6 of 6 sampled
-            // -32602s arrived as is_error), so the gain is every other client and the spec. The message bytes are the same
-            // in either envelope; only the envelope moves. The protocol half is protocolErrMsg below.
-            // A name with no declared field set is no tool this server serves (aliases resolve to their target's row), so
-            // every refusal of such a call, whatever check composed it, is the protocol error: the request reached no tool.
-            const bool namesServedTool = !mcprefuse::declaredFieldsFor( name ).empty();
-            const auto toolErrorResult = [ & ]( const std::string& text )
-            {
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( text ) + "\"}],\"isError\":true}}";
-            };
-            // The request never reached a tool: an unknown or --mcp-tools-hidden name, a missing or wrong-typed `name`, a
-            // wrong-typed `arguments`. These, and the server faults (-32000 the memory hard line, -32601 remote edits off,
-            // -32603 internal), stay JSON-RPC errors.
+            // SEP-1303: a served tool's own refusal is an isError result, every other failure a JSON-RPC error (mcpToolErrorFrame)
             const auto protocolErrMsg = [ & ]( int code, const std::string& msg )
-            {
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
-                     + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) + "\"}}";
-            };
+            { return mcpProtocolErrorFrame( id, code, msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ); };
             // dynamic-message variant (edit verbs build refusal messages that embed symbol names / candidate
             // file:line lists) — JSON-escape so a path with a quote or a control byte can't corrupt the response.
-            // -32602 (invalid params) is the tool's own input validation or business logic here, so it travels as isError.
             const auto errResultMsg = [ & ]( int code, const std::string& msg )
             {
-                if( code != -32602 || !namesServedTool )
-                {
-                    return protocolErrMsg( code, msg );
-                }
-                // the next call (mcprefusal.h kNextCallLead): a renderer's own, else the tool's minimal well-formed call
-                const std::string withNext = mcprefuse::withNextCallFor( msg, name );
-                return toolErrorResult( withNext + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) );
+                return !mcpIsToolExecutionError( code, name ) ? protocolErrMsg( code, msg )
+                     : mcpToolErrorFrame( id, mcprefuse::withNextCallFor( msg, name ) + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) );
             };
             const auto errResult = [ & ]( int code, const char* msg ) { return errResultMsg( code, std::string( msg ) ); };
             // §B6 M8: the shared not-found renderers, bound to THIS request's index. Seven verbs on both
@@ -1920,18 +1926,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto notFoundAnswered = [ & ]( std::string msg, NotFoundAnswer answer, bool json ) -> std::string
             {
                 msg = withRenameClause( std::move( msg ), answer.near, answer.missing );   // the batch arm's rule too
-                // a refusal sentence its renderer gave no next call (path_between's endpoints, uses' selector) greps the
-                // spelling that matched nothing: the textual hits are the step this server can take
-                const auto& missEcho = answer.missing == "to" && answer.echo.size() > 1 ? answer.echo[ 1 ] : answer.echo.front();
-                msg = mcprefuse::withNextCall( std::move( msg ), "grep", "pattern=" + mcprefuse::nextCallValue( missEcho.second ) );
+                msg = mcprefuse::withGrepNextOf( std::move( msg ), answer );   // the next call a renderer did not give (mcprefusal.h)
                 attachNotFoundText( getIndex( path ).ing, answer );   // BX2 FIX 9: the CLI twin's plain-text occurrences (callers / uses / impact)
                 answer.text.mcpKeys = true;                            // ... their JSON rows in MCP's "file" / "line" keys
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
                 while( !doc.empty() && doc.back() == '\n' ) { doc.pop_back(); }
-                // SEP-1303 / non-negotiable 3: found=0 is an ANSWER ("none found"), so it is a plain result, not an error of
-                // either kind: the answer document first, the refusal sentence (echo, near-miss, rename) as the second block.
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( doc ) + "\"},{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) ) + "\"}]}}";
+                return mcpFoundZeroFrame( id, doc, msg + memoryStopSuffix( msg ) );   // SEP-1303: found=0 is an answer
             };
             const auto notFoundNearOf = [ & ]( std::string_view spelling ) -> NotFoundNear
             {
@@ -1945,10 +1945,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 // an edit refusal's next step is a READ of the target (its candidates, handles and files), never a
                 // placeholder edit: the minimal call of an edit verb carries the table's example body
-                return oc.ok ? textResult( oc.resultJson )
-                     : symbol.empty() ? errResultMsg( oc.errCode, oc.message )
-                     : errResultMsg( oc.errCode, mcprefuse::withNextCall( oc.message, "find_symbol",
-                                                                          mcprefuse::minimalCallArgs( "find_symbol", "symbol=" + mcprefuse::nextCallValue( symbol ) ) ) );
+                return oc.ok ? textResult( oc.resultJson ) : errResultMsg( oc.errCode, mcprefuse::withReadNext( oc.message, symbol ) );
             };
 
             // The envelope EVERY paged verb shares (grep / impact / whereis): read the window once, refuse a
@@ -2278,9 +2275,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // #350: from a home/system launch directory the missing path has a cause worth naming
                     // the next call cannot know the root (the server has none to offer), so it names the field to fill: an
                     // ABSOLUTE root, which a relative one resolved against this server's own launch directory is not
-                    return ( policy.noRootReason.empty() ? mcprefuse::missingPathRefusal()
-                                                         : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason )
-                         + mcprefuse::nextCallClause( name, mcprefuse::minimalCallArgs( name, "path=\"/abs/repo/root\"" ) );
+                    return ( policy.noRootReason.empty() ? mcprefuse::missingPathRefusal() : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason )
+                         + mcprefuse::missingPathNextCall( name );
                 }
                 return mcprefuse::missingFieldRefusal( name, argPresent );
             };
@@ -2406,14 +2402,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     if( rbMode != "pagerank" && rbMode != "authority" && rbMode != "hub" && rbMode != "rrf"
                         && rbMode != "churn" && rbMode != "churn-decay" )
                     {
-                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)"
-                                                     + mcprefuse::nextCallClause( "rank_by", "rank_by=\"authority\"" ) );
+                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)" + mcprefuse::kRankByNext );
                     }
                     else if( rbMode == "churn" || rbMode == "churn-decay" )
                     {
                         resp = errResultMsg( -32602, "rank_by=" + rbMode + " is not available over MCP yet — it mines git history through the CLI's "
-                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode
-                                                     + mcprefuse::nextCallClause( "rank_by", "rank_by=\"authority\"" ) );
+                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode + mcprefuse::kRankByNext );
                     }
                     else
                     {
@@ -2505,8 +2499,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         const std::string j = listRefusal.empty() ? situationDiffJson( path, src, pg ) : std::string();
                         return !listRefusal.empty() ? errResultMsg( -32602, listRefusal )
-                             : j.empty()            ? errResultMsg( -32602, "no changed files given and no git diff"
-                                                                         + mcprefuse::nextCallClause( "situational_awareness", mcprefuse::valueExampleFor( "files" ) ) )
+                             : j.empty()            ? errResultMsg( -32602, "no changed files given and no git diff" + mcprefuse::situationNextCall() )
                                                     : textResult( j );
                     } );
                 }
@@ -2591,9 +2584,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
                         // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
-                        return t.empty() ? errResultMsg( -32602, mcprefuse::withNextCall( sweepEmptyCause( path, "search" ), "grep",
-                                                                                          "pattern=" + mcprefuse::nextCallValue( symbol ) ) )
-                                         : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withGrepNext( sweepEmptyCause( path, "search" ), symbol ) ) : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -2610,8 +2601,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
                         // with no refs to compare there is no branch question to ask; the map of this tree is what is answerable
-                        return t.empty() ? errResultMsg( -32602, mcprefuse::withNextCall( emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause,
-                                                                                          "analyze", {} ) )
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withMapNext( emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause ) )
                                          : textResult( t );
                     } );
                 }
@@ -2686,8 +2676,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
                         return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
                                                 : symbol.empty()
-                                                ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
-                                                  + mcprefuse::nextCallClause( "analyze", {} )
+                                                ? mcprefuse::withMapNext( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );
                     } );
@@ -2700,8 +2689,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::string arg = !kind.empty() ? kind : task;
                     const std::optional<std::string> answer = exemplarText( path, arg, redactPtr );
                     resp = !answer        ? errResult( -32603, "internal error: the exemplar answer buffer lost bytes — no answer served" )
-                         : answer->empty() ? errResultMsg( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)"
-                                                                     + mcprefuse::nextCallClause( "exemplar", "kind=\"fn\"" ) )
+                         : answer->empty() ? errResultMsg( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)" + mcprefuse::kExemplarNext )
                                            : textResult( *answer );
                 }
                 else if( name == "impact" && !path.empty() && !symbol.empty() )
@@ -2758,12 +2746,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, "affected: '" + r.badItem + "' matches no indexed file path (as a path pattern) and no indexed "
                                               "symbol (as a symbol name; file:name and path::scope::name also accepted)" + afNearPath
                                               + ( afNearPath.empty() ? selectorFaultClause( afIng, r.badItem, "--affected=" ) : std::string() )
-                                              + affectedNoneResolvedClause( r.unusedCount )   // AF5: as the CLI
-                                              + mcprefuse::nextCallClause( "grep", "pattern=" + mcprefuse::nextCallValue( r.badItem ) ) );
+                                              + affectedNoneResolvedClause( r.unusedCount ) + mcprefuse::grepNextCall( r.badItem ) );   // AF5: as the CLI
                     }
                     else if( r.noSeeds )
                     {
-                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files + mcprefuse::nextCallClause( "grep", "pattern=" + mcprefuse::nextCallValue( files ) ) );
+                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files + mcprefuse::grepNextCall( files ) );
                     }
                     else
                     {
@@ -2882,8 +2869,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     const FromTraceResult r = fromTraceText( path, trace, budgetTokens, redactPtr );
                     resp = r.isBufferLost ? errResult( -32603, "internal error: a from_trace buffer lost bytes — the bundle is withheld, not served without its blocks" )
-                         : !r.ok          ? errResultMsg( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map"
-                                                          + mcprefuse::nextCallClause( "for", "task=" + mcprefuse::nextCallValue( trace ) ) )
+                         : !r.ok          ? errResultMsg( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map" + mcprefuse::traceNextCall( trace ) )
                                           : textResult( r.xml );
                 }
                 // L4: `edit_check` — did SYM's contract (params/publicness) change vs git HEAD (editCheckBundleText,

@@ -24,6 +24,7 @@
 #include "didyoumean.h"    // §B6 M8: the ONE near-miss suggester (lifted out of main.cpp so this is reachable)
 #include "degradedscan.h"  // degradedTextHit — the ONE degraded-parse text scan (selectorrefuse.h words the same facts for the CLI)
 #include "selectorrefuse.h" // the @FILE:LINE at-diagnosis (atSeedFaultClause) — ONE set of fault sentences for both surfaces
+#include "infra/tablelookup.h" // findByField / findIndexByField — the table lookups the next-call and title rows share
 #include "mcpjson.h"       // §H3: mcpdetail::FrameShape — the framing verdict this file words (mcpjson is upstream of everything MCP; no cycle)
 
 #include <algorithm>       // std::find — the declared-field membership tests (M4)
@@ -506,17 +507,16 @@ inline std::string nextCallValue( std::string_view v )
     return out + "\"";
 }
 
-// The table's runnable example for `field` ("limit=40"), or "" when the field has no value row.
-inline std::string_view valueExampleFor( std::string_view field )
+// `tool`'s minimal well-formed call with `field` set to the value table's own runnable example for it ("limit=40"). A
+// field with no value row (an envelope key) has no example to type, and the call is the plain minimal one.
+inline std::string minimalCallArgsWithField( std::string_view tool, std::string_view field )
 {
+    std::string_view part;
     for( const McpValueSpec& row : kMcpValueFields )
     {
-        if( field == std::string_view( row.field ) )
-        {
-            return row.example;
-        }
+        part = field == std::string_view( row.field ) ? std::string_view( row.example ) : part;
     }
-    return {};
+    return minimalCallArgs( tool, part );
 }
 
 // The envelope's backstop (mcp.h errResultMsg, the batch arm's sub-query error): a refusal no renderer gave a next
@@ -529,15 +529,12 @@ inline std::string withNextCallFor( std::string msg, std::string_view tool )
         return msg;
     }
     constexpr std::string_view kBadValue = "invalid value for field: ";
-    std::string_view           part;
+    std::string_view           field;
     if( std::string_view( msg ).starts_with( kBadValue ) )
     {
-        const std::string_view rest  = std::string_view( msg ).substr( kBadValue.size() );
-        const std::string_view field = rest.substr( 0, rest.find( ' ' ) );
-        if( field != "path" && field != "paths" )
-        {
-            part = valueExampleFor( field );
-        }
+        const std::string_view rest = std::string_view( msg ).substr( kBadValue.size() );
+        field = rest.substr( 0, rest.find( ' ' ) );
+        field = field == "path" || field == "paths" ? std::string_view() : field;
     }
     // an edit verb's refusal names a READ next: its minimal call carries the table's example body, which is no step to
     // run blind (a missing or bad edit FIELD already names the edit itself, through its renderer)
@@ -545,13 +542,44 @@ inline std::string withNextCallFor( std::string msg, std::string_view tool )
     {
         return msg + nextCallClause( "find_symbol", minimalCallArgs( "find_symbol" ) );
     }
-    return msg + nextCallClause( tool, minimalCallArgs( tool, part ) );
+    return msg + nextCallClause( tool, minimalCallArgsWithField( tool, field ) );
 }
 
 // A refusal whose minimal call would only repeat it names the call its dispatch site knows to help instead.
 inline std::string withNextCall( std::string msg, std::string_view tool, std::string_view args )
 {
     return hasNextCall( msg ) ? msg : msg + nextCallClause( tool, args );
+}
+
+// The dispatch sites' own next calls, for refusals the tool's minimal call would only repeat (mcp.h):
+inline const std::string kRankByNext   = nextCallClause( "rank_by", "rank_by=\"authority\"" );   // the signals this server serves
+inline const std::string kExemplarNext = nextCallClause( "exemplar", "kind=\"fn\"" );           // the commonest kind
+inline std::string grepNextCall( std::string_view spelling ) { return nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) ); }
+inline std::string withGrepNext( std::string msg, std::string_view spelling ) { return hasNextCall( msg ) ? msg : msg + grepNextCall( spelling ); }
+// a git-less tree has no branch or history question to answer; the map of the tree is what still answers
+inline std::string withMapNext( std::string msg ) { return withNextCall( std::move( msg ), "analyze", {} ); }
+inline std::string traceNextCall( std::string_view trace ) { return nextCallClause( "for", "task=" + nextCallValue( trace ) ); }
+inline std::string situationNextCall() { return nextCallClause( "situational_awareness", minimalCallArgsWithField( "situational_awareness", "files" ) ); }
+// the root is the one thing the server cannot see, so the call names the field to fill with an ABSOLUTE root
+inline std::string missingPathNextCall( std::string_view tool ) { return nextCallClause( tool, minimalCallArgs( tool, "path=\"/abs/repo/root\"" ) ); }
+
+// An edit verb's refusal (mcpedit.h's Outcome) names a READ of the target next: find_symbol lists the candidates, their
+// handles and files. With no symbol to name, the refusal is left to the envelope's backstop.
+inline std::string withReadNext( std::string msg, std::string_view symbol )
+{
+    return symbol.empty() ? msg : withNextCall( std::move( msg ), "find_symbol", minimalCallArgs( "find_symbol", "symbol=" + nextCallValue( symbol ) ) );
+}
+
+// A found=0 answer's refusal sentence that its renderer gave no next call (path_between's endpoints, uses' selector) greps
+// the spelling that matched nothing: the textual hits are the step this server can take.
+inline std::string withGrepNextOf( std::string msg, const NotFoundAnswer& answer )
+{
+    if( answer.echo.empty() )
+    {
+        return msg;
+    }
+    const auto& miss = answer.missing == "to" && answer.echo.size() > 1 ? answer.echo[ 1 ] : answer.echo.front();
+    return withNextCall( std::move( msg ), "grep", "pattern=" + nextCallValue( miss.second ) );
 }
 
 // ─── G5: an edit verb's PAYLOAD field, and the noun a refusal calls it by ────────────────────────────────
@@ -1100,6 +1128,20 @@ inline std::string atSeedClause( const IngestResult& ing, std::string_view spell
     return atSeedFaultClause( ing, resolveAtSeed( ing, spelling.substr( 1 ) ) );
 }
 
+// The not-found's next call: the near-miss retried on `nextTool` (an edit verb's is a READ of it, find_symbol: a
+// placeholder body is no step to run blind), else a grep of the spelling.
+inline std::string notFoundNextCall( std::string_view noun, std::string_view spelling, std::string_view near, std::string_view nextTool )
+{
+    if( near.empty() || near == spelling || nextTool.empty() )
+    {
+        return nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) );
+    }
+    const bool             edits = nextTool == "replace_symbol_body" || nextTool == "insert_before_symbol" || nextTool == "insert_after_symbol";
+    const std::string_view tool  = edits ? std::string_view( "find_symbol" ) : nextTool;
+    const std::string      part  = std::string( edits ? std::string_view( "symbol" ) : noun ) + "=" + nextCallValue( near );
+    return nextCallClause( tool, minimalCallArgs( tool, part ) );
+}
+
 // `nextTool` (the tool that refused; "" on a path with no tool to name) gets the near-miss retry as the next call;
 // with no near-miss the next call greps the spelling. `noun` is the field the spelling came in (symbol / type).
 inline std::string notFound( const IngestResult& ing, std::string_view noun, std::string_view spelling,
@@ -1119,14 +1161,7 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
     msg += defHit.found ? defNote : degradedParseNote( ing, spelling ) + defNote;   // a capped scan adds its note after the degraded one
-    if( !near.empty() && near != spelling && !nextTool.empty() )
-    {
-        // an edit verb's next step is a READ of the near-miss (its handle, its file): a placeholder body is no step to run blind
-        const bool        edits = nextTool == "replace_symbol_body" || nextTool == "insert_before_symbol" || nextTool == "insert_after_symbol";
-        const std::string part  = ( edits ? std::string( "symbol" ) : std::string( noun ) ) + "=" + nextCallValue( near );
-        return msg + nextCallClause( edits ? std::string_view( "find_symbol" ) : nextTool, minimalCallArgs( edits ? "find_symbol" : nextTool, part ) );
-    }
-    return msg + nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) );
+    return msg + notFoundNextCall( noun, spelling, near, nextTool );
 }
 
 // The FILE-spelling variant (`cochange`, `situational_awareness`). didYouMean's pool is symbol names, which
@@ -1371,7 +1406,7 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
                std::vector<std::string_view>( declared.begin(), declared.end() ), ", " );
     // the next call types the near-miss with the table's example; a far typo gets the plain minimal call
     const bool rootField = near == "path" || near == "paths";
-    return msg + nextCallClause( verb, minimalCallArgs( verb, isNear && !rootField ? valueExampleFor( near ) : std::string_view() ) );
+    return msg + nextCallClause( verb, minimalCallArgsWithField( verb, isNear && !rootField ? std::string_view( near ) : std::string_view() ) );
 }
 
 // The batch verb's SUB-QUERY item schema (the `queries` items properties, verbatim from the batch stanza).
@@ -1685,12 +1720,7 @@ consteval bool everyMcpToolHasTitle()
 {
     for( const McpVerbFields& row : kMcpVerbFields )
     {
-        bool found = false;
-        for( const McpToolTitle& t : kMcpToolTitles )
-        {
-            found = found || std::string_view( t.verb ) == std::string_view( row.verb );
-        }
-        if( !found )
+        if( findIndexByField( kMcpToolTitles, &McpToolTitle::verb, std::string_view( row.verb ) ) == std::size( kMcpToolTitles ) )
         {
             return false;
         }
@@ -1702,14 +1732,8 @@ static_assert( everyMcpToolHasTitle(), "a kMcpVerbFields tool has no kMcpToolTit
 
 inline std::string_view toolTitleFor( std::string_view verb )
 {
-    for( const McpToolTitle& t : kMcpToolTitles )
-    {
-        if( verb == std::string_view( t.verb ) )
-        {
-            return t.title;
-        }
-    }
-    return verb;
+    const McpToolTitle* t = findByField( kMcpToolTitles, &McpToolTitle::verb, verb );
+    return t != nullptr ? std::string_view( t->title ) : verb;
 }
 
 inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
