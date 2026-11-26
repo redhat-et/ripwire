@@ -468,9 +468,10 @@ rc, cli_default, _ = run(BIN, DOCS, ["--recall=" + TASK])
 say(payload(m) == cli_default and " offset=" not in payload(m).split("\n", 1)[0],
     "(RC3) [C] the DEFAULT memory_recall fits and is unchanged: byte-identical to the CLI --recall (%d B)" % len(payload(m)))
 (m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000})])
-notes = "".join(c.get("text", "") for c in m.get("result", {}).get("content", [])[1:])
-say(payload(m) == cli_whole and "_over_ceiling:" in notes and "offset=0" in notes,
-    "(RC5) [P] an explicit budget_tokens with no offset is served WHOLE (== the CLI, %d B) and its visible notes say it is over the ceiling and name offset=0" % len(payload(m)))
+whole_t = payload(m)
+notes = whole_t[len(cli_whole):]
+say(whole_t.startswith(cli_whole) and notes.startswith("\n_over_ceiling: ") and "offset=0" in notes,
+    "(RC5) [P] an explicit budget_tokens with no offset is served WHOLE (the CLI's %d B, then a trailing _over_ceiling: line naming offset=0)" % len(cli_whole))
 (m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000, "offset": 10 ** 8})])
 say("past the end" in payload(m), "(RC4) [P] an offset past the body refuses, naming where offsets come from")
 

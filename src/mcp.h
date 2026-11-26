@@ -682,14 +682,19 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
 
 // Research audit 2026-11-26 item 1: an MCP host hands the MODEL `content` and nothing else — 0 of 102 sampled Claude Code
 // results carried `_index` or `_fresh` — so an envelope sibling alone discloses a cut to the JSON-RPC client and not to
-// the agent. Every non-empty note is therefore said again in a SECOND content block, one "<key>: <sentence>" line per
-// key, the same sentence as the machine copy. A second block and not a suffix of the first: several verbs answer JSON, and
-// a trailing line would make it unparseable (the reason the notes were siblings in the first place); a line never opens
-// with '[' or '{', so no reader takes the block for a JSON payload. "" when nothing is disclosed, so such a result is
-// byte-identical to before. Gate: test/mcpenvelopevisiblecheck.sh.
-// `_memory_peak` is NOT said here, on purpose: the answer it rides is whole (the run finished and answered), its number is
-// the process's peak footprint — different run to run — and the CLI says it on stderr, never in a verb's answer (memguard.h).
-// It stays the machine copy only, so an answer that is meant to be byte-identical across runs still is.
+// the agent. Every non-empty note is therefore said again INSIDE the answer, in the answer's own form, the same sentence as
+// the machine copy, and only when there is one (an answer with nothing to disclose is byte-identical):
+//   XML   a <notes><n k="KEY">sentence</n>…</notes> child of the root, after its rows and before its trailing comments and
+//         ref-posture <about> (which stays the root's LAST child) — so the answer is still ONE well-formed document for a
+//         client that joins blocks;
+//   JSON  a "_notes":{"KEY":"sentence",…} member of the top-level object, so the payload still parses;
+//   text  trailing "KEY: sentence" lines (memory_recall, the one plain-text answer).
+// It is not a second content block: CI #774 measured that one breaking every gate (and client) that joins the text blocks
+// into one document. `_memory_peak` is NOT said here, on purpose: the answer it rides is whole (the run finished and
+// answered), its number is the process's peak footprint — different run to run — and the CLI says it on stderr, never in a
+// verb's answer (memguard.h). It stays the machine copy only. So does `_memory_stop`'s GENERIC sentence (a stop elsewhere in
+// the process during the request, the background snapshot's included: timing- and pressure-dependent, and it cannot say the
+// answer used it); the index-cut sentence, about the index that answered, is said. Gate: test/mcpenvelopevisiblecheck.sh.
 struct McpEnvelopeNotes
 {
     std::string_view assumedRoot;
@@ -701,19 +706,12 @@ struct McpEnvelopeNotes
     std::size_t      changedFiles = 0;
 };
 
-inline std::string mcpVisibleNotesBlock( const McpEnvelopeNotes& n )
+inline std::vector<std::pair<std::string_view, std::string>> mcpVisibleNotes( const McpEnvelopeNotes& n )
 {
-    std::string lines;
+    std::vector<std::pair<std::string_view, std::string>> notes;
     const auto add = [ & ]( std::string_view key, std::string_view sentence )
     {
-        if( sentence.empty() )
-        {
-            return;
-        }
-        lines += lines.empty() ? "" : "\n";
-        lines.append( key );
-        lines += ": ";
-        lines.append( sentence );
+        if( !sentence.empty() ) { notes.emplace_back( key, std::string( sentence ) ); }
     };
     add( "_assumed_root", n.assumedRoot );
     add( "_memory_stop", n.memoryStop );
@@ -724,7 +722,74 @@ inline std::string mcpVisibleNotesBlock( const McpEnvelopeNotes& n )
         add( "_fresh", "reindexed: files changed on disk since this server last read the tree, so the index was rebuilt before "
                        "this answer (_stale_files=" + std::to_string( n.staleFiles ) + " _changed_files=" + std::to_string( n.changedFiles ) + ")" );
     }
-    return lines.empty() ? lines : ",{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( lines ) + "\"}";
+    return notes;
+}
+
+// Splice the notes into `payload` in its own form (above). Returns false when there was nothing to say (payload untouched).
+inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes )
+{
+    if( notes.empty() )
+    {
+        return false;
+    }
+    const std::size_t end = payload.find_last_not_of( " \n" );
+    const char        last = end == std::string::npos ? '\0' : payload[ end ];
+    if( !payload.empty() && payload.front() == '{' && last == '}' )
+    {
+        std::string member = "\"_notes\":{";
+        for( std::size_t i = 0; i < notes.size(); ++i )
+        {
+            member += ( i ? ",\"" : "\"" ) + std::string( notes[i].first ) + "\":\"" + mcpdetail::jsonEscape( notes[i].second ) + "\"";
+        }
+        member += "}";
+        const bool emptyObject = payload.find_first_not_of( " \n", 1 ) == end;
+        payload.insert( end, emptyObject ? member : "," + member );
+        return true;
+    }
+    const std::size_t close = last == '>' ? payload.rfind( "</", end ) : std::string::npos;
+    if( !payload.empty() && payload.front() == '<' && close != std::string::npos && payload.find( '<', close + 2 ) == std::string::npos )
+    {
+        std::vector<char> esc;
+        std::string       element = "<notes>";
+        for( const auto& [ key, sentence ] : notes )
+        {
+            element += "<n k=\"" + std::string( key ) + "\">";
+            element.append( escapeXml( sentence, esc ) );   // serialize.h's one XML escaper
+            element += "</n>";
+        }
+        element += "</notes>";
+        // before the root's TRAILING comments and <about/> pointer: the ref posture's pointer stays the root's LAST child
+        // (legenddict.h), and a verb's closing legend clause stays last before its close (the `for` rows clause)
+        std::size_t at = close;
+        for( ;; )
+        {
+            const std::string_view head( payload.data(), at );
+            if( head.ends_with( "-->" ) )
+            {
+                const std::size_t open = head.rfind( "<!--" );
+                if( open == std::string::npos ) { break; }
+                at = open;
+            }
+            else if( head.ends_with( "/>" ) && head.rfind( "<about " ) != std::string::npos && head.find( '<', head.rfind( "<about " ) + 1 ) == std::string::npos )
+            {
+                at = head.rfind( "<about " );
+            }
+            else
+            {
+                break;
+            }
+        }
+        payload.insert( at, element );
+        return true;
+    }
+    for( const auto& [ key, sentence ] : notes )
+    {
+        payload += "\n";
+        payload.append( key );
+        payload += ": ";
+        payload += sentence;
+    }
+    return true;
 }
 
 // is `candidatePath` the workspace root itself, or STRICTLY inside it — a path-COMPONENT prefix, so a
@@ -1765,6 +1830,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // stamp FIRST, then the pass count: on a verb that never touched the index, building the
                 // stamp is what forces the rebuild, and one `+` chain would not sequence those two reads.
                 const std::string stamp = indexStamp( path );
+                // the index answering THIS request was cut: said inside the answer too (McpEnvelopeNotes). The generic sentence below
+                // is machine-only: a stop somewhere in this process during the request (the background snapshot included) "may"
+                // touch the answer, it cannot say which, and whether it happens depends on timing and machine pressure.
+                const std::string visibleStopNote = memoryStopNote;
                 if( memoryStopNote.empty() && memguard::stopCounts().recorded.load( std::memory_order_relaxed ) > stopsAtEntry )
                 {
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
@@ -1811,11 +1880,21 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
                 const McpIndex&   slot     = mcpIndexSlot();
-                const std::string visible  = mcpVisibleNotesBlock( McpEnvelopeNotes{ assumedRootNote, memoryStopNote, cutNote, overCeilingNote,
-                                                                                     mcpRefreshedThisRequest( passesAtEntry ),
-                                                                                     slot.lastStaleFiles, slot.lastChangedFiles } );
+                // a verb that runs its OWN ingest inside the tool answers from it: there the generic sentence is about this answer
+                const bool        ownIngest = name == "quality_delta" || name == "quality_baseline" || name == "edit_check";
+                const auto        notes    = mcpVisibleNotes( McpEnvelopeNotes{ assumedRootNote, ownIngest ? memoryStopNote : visibleStopNote,
+                                                                                cutNote, overCeilingNote,
+                                                                                mcpRefreshedThisRequest( passesAtEntry ),
+                                                                                slot.lastStaleFiles, slot.lastChangedFiles } );
+                std::string noted;
+                if( !notes.empty() )
+                {
+                    noted = *body;
+                    mcpSpliceNotes( noted, notes );
+                    body = &noted;
+                }
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( *body ) + "\"}" + visible + "],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
+                     + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
                      + mcpEnvelopeNoteField( "_memory_peak", peakNote )

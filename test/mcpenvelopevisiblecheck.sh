@@ -10,8 +10,10 @@
 # An MCP host hands the model `content` only: the audit sampled 102 Claude Code results and found 0 carrying `_index` or
 # `_fresh`. So "every truncation is disclosed" held for the JSON-RPC client and failed for the agent.
 #
-# THE RULE. When a result carries any of those keys, `content` carries a second text block that says the same sentence,
-# key by key, one "<key>: <sentence>" line each (never opening with '[' or '{': no reader may take it for a JSON payload).
+# THE RULE. When a result carries any of those keys, the answer itself says the same sentence, key by key, in its own
+# form: XML gains a final <notes><n k="KEY">…</n></notes> child (still ONE well-formed document — CI #774 showed a second
+# plain-text block breaking every client and gate that joins the blocks), JSON gains a "_notes" member, plain text gains
+# trailing "KEY: sentence" lines. content[] stays ONE block.
 # `_memory_peak` is the one exception, and the gate pins it: the answer it rides is whole, its number differs run to run,
 # and the CLI says it on stderr only — so it stays machine-only, and a deterministic answer stays byte-identical. The verb's own payload (the first block) is untouched, so a JSON payload stays parseable. A result that carries
 # none of them is byte-identical to before: one content block.
@@ -23,8 +25,8 @@
 #   (V3) [C] _memory_peak       RIPWIRE_TEST_MEMGUARD=peak:1 under --max-memory=64M: in the envelope, NOT in content[]
 #   (V4) [P] _history_cut       RIPWIRE_GIT_WALK_COMMITS=100 over a 130-commit history (historywalkcheck's M1 recipe)
 #   (V5) [P] _fresh:"reindexed" a file edited between two calls; the block names both counts with the envelope's values
-#   (V6) [C] a result with no disclosure has exactly one content block, and the first block of a disclosing result still
-#            parses as the verb's JSON (the payload was not touched)
+#   (V6) [C] a result with no disclosure has exactly one content block, and a disclosing JSON payload still parses
+#   (V7) [P] an XML answer that discloses (impact with path= omitted) is ONE well-formed document, <notes> inside the root
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -32,6 +34,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "  FAIL  no ripwire binary at $BIN"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "mcpenvelopevisiblecheck: python3 required"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "mcpenvelopevisiblecheck: git required"; exit 2; }
+command -v xmllint >/dev/null 2>&1 || { echo "mcpenvelopevisiblecheck: xmllint required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "mcpenvelopevisiblecheck: BIN=$BIN"
 
@@ -82,9 +85,25 @@ def blocks(m):
     return [c.get("text", "") for c in m.get("result", {}).get("content", [])]
 
 
+def said(text, key):
+    """What the answer itself says for `key`, in its own form (XML <n k=>, JSON _notes, or a trailing text line)."""
+    import html, re
+    try:
+        j = json.loads(text)
+        return j.get("_notes", {}).get(key, "") if isinstance(j, dict) else ""
+    except ValueError:
+        pass
+    m = re.search(r'<n k="%s">(.*?)</n>' % re.escape(key), text, re.S)
+    if m:
+        return html.unescape(m.group(1))
+    m = re.search(r"^%s: (.*)$" % re.escape(key), text, re.M)
+    return m.group(1) if m else ""
+
+
 def visible(m, key, sentence):
-    """The envelope's sentence for `key`, said in a content block other than the payload."""
-    return any(sentence in b and key in b for b in blocks(m)[1:])
+    """The envelope's sentence for `key`, said inside the one content block."""
+    b = blocks(m)
+    return len(b) == 1 and said(b[0], key) == sentence
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -128,7 +147,8 @@ except (ValueError, IndexError):
 (r,) = mcp([("grep", {"path": small, "pattern": "perimeter"})], extra=["--max-memory=64M"], env={"RIPWIRE_TEST_MEMGUARD": "peak:1"})
 note = r.get("result", {}).get("_memory_peak", "")
 say(bool(note), "(V3) [C] a run over its memory limit is disclosed in the envelope (_memory_peak present)")
-say(bool(note) and len(blocks(r)) == 1, "(V3) [C] ...and it stays machine-only: one content block, no run-dependent peak in the answer (blocks: %d)" % len(blocks(r)))
+say(bool(note) and len(blocks(r)) == 1 and "_memory_peak" not in blocks(r)[0],
+    "(V3) [C] ...and it stays machine-only: no run-dependent peak in the answer (blocks: %d)" % len(blocks(r)))
 
 # ── (V4) _history_cut ────────────────────────────────────────────────────────────────────────────────────────────────
 (r,) = mcp([("cochange", {"path": hist, "file": "m1.c"})], cwd=hist, env={"RIPWIRE_GIT_WALK_COMMITS": "100"})
@@ -143,16 +163,20 @@ r1, r2 = mcp([("grep", {"path": small, "pattern": "area"}), ("grep", {"path": sm
 env2 = r2.get("result", {})
 say(env2.get("_fresh") == "reindexed", "(V5) [C] the edit between two calls is disclosed in the envelope (_fresh=%s)" % env2.get("_fresh"))
 want = ["reindexed", "_stale_files=%s" % env2.get("_stale_files"), "_changed_files=%s" % env2.get("_changed_files")]
-say(env2.get("_fresh") == "reindexed" and any(all(w in b for w in want) and "_fresh" in b for b in blocks(r2)[1:]),
+say(env2.get("_fresh") == "reindexed" and len(blocks(r2)) == 1 and all(w in said(blocks(r2)[0], "_fresh") for w in want),
     "(V5) [P] ...and content[] says reindexed with both counts (%s)" % " ".join(want))
 
 # ── (V6) controls ────────────────────────────────────────────────────────────────────────────────────────────────────
 say(env2.get("_fresh") != "reindexed" or len(blocks(r1)) == 1,
     "(V6) [C] a result with no disclosure (_fresh=%s) has exactly one content block (%d)" % (r1.get("result", {}).get("_fresh"), len(blocks(r1))))
 say(payload_ok, "(V6) [C] the first block of a disclosing result is still the verb's own JSON payload")
-notes = [b for m in (r2,) for b in blocks(m)[1:]]
-say(bool(notes) and all(not ln.lstrip()[:1] in ("[", "{") for b in notes for ln in b.split("\n")),
-    "(V6) [C] no visible-notes line opens with '[' or '{' (a JSON-sniffing reader must not take it for a payload)")
+# (V7) an XML answer that discloses stays ONE well-formed document, with the notes a child of its root
+(rx,) = mcp([("impact", {"symbol": "perimeter"})], cwd=small)
+tx = blocks(rx)[0] if blocks(rx) else ""
+wf = subprocess.run(["xmllint", "--noout", "-"], input=tx.encode(), capture_output=True).returncode == 0 if tx else False
+say(bool(rx.get("result", {}).get("_assumed_root")) and said(tx, "_assumed_root") == rx["result"]["_assumed_root"] and wf
+    and tx.rstrip().endswith("</impact>"),
+    "(V7) [P] an XML answer carries its note as a <notes> child and is still one well-formed document (xmllint %s)" % ("ok" if wf else "FAILS"))
 print("mcpenvelopevisiblecheck: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 sys.exit(1 if bad else 0)
 PY
