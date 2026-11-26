@@ -795,6 +795,7 @@ for _g in \
     mcpgrepdegradedcheck \
     mcphandlecheck \
     mcpincrementalcheck \
+    mcplegendrecoverycheck \
     mcplisttrimcheck \
     mcpmanifestcheck \
     mcponeparsecheck \

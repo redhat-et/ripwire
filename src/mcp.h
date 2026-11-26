@@ -1062,7 +1062,8 @@ inline constexpr std::string_view kMcpLegendDictFullUri = "ripwire://legend-dict
 inline legenddict::LegendSession& mcpStdioLegendSession()
 {
     ASSUME_SAME_THREAD( "the stdio request loop is the one thread that dispatches, and so the one that reads or writes the session" );
-    static legenddict::LegendSession session;
+    // audit 2026-11-26 item 6: a ref answer names the resource that recovers its definitions, not the CLI command
+    static legenddict::LegendSession session{ .dictPointer = kMcpLegendDictFullUri };
     return session;
 }
 
