@@ -5294,42 +5294,32 @@ inline bool batchPagedVerbAsked( const Config& c ) noexcept
     return !c.batchFile.empty() && !c.mcp && !c.lsp && c.listen.empty();
 }
 
-// wholeOnlyConflict's --batch arm — N == 0 alone, and not beside --offset=K (a page of the batch, where 0 asks for all of it).
-[[nodiscard]] inline const char* batchWholeConflict( const Config& c, std::size_t bytes ) noexcept
+// A whole-only verb's --page-bytes refusal: N > 0 is a second paging grammar beside the verb's own unit (`bytesWhy`), and
+// N == 0 beside the verb's own page size or window is two answers to one question (`sizeWhy`); nullptr when neither applies.
+[[nodiscard]] constexpr const char* wholeOnlyRefusal( std::size_t bytes, bool sizeGiven, const char* bytesWhy, const char* sizeWhy ) noexcept
 {
-    if( bytes != 0 )
-    {
-        return "takes 0 only beside --batch (the whole answer): --batch pages by whole <q> sub-answers — follow the root's next= (--offset=K)";
-    }
-    if( c.pageOffset > 0 )
-    {
-        return "=0 (the whole answer) does not combine with --offset=K, one page of the batch — pass one";
-    }
-    return nullptr;
+    return bytes != 0 ? bytesWhy : ( sizeGiven ? sizeWhy : nullptr );
 }
 
 // PG1: wholeOnlyConflict's --grep / --clones arm — N == 0 alone, and not beside --limit=N (their own page size).
 [[nodiscard]] inline const char* rowPagedWholeConflict( const Config& c, std::size_t bytes ) noexcept
 {
-    if( bytes != 0 )
-    {
-        return c.clones ? "takes 0 only beside --clones (the whole answer): --clones pages by clone groups — follow the root's next= (--offset=K), or --limit=N"
-                        : "takes 0 only beside --grep (the whole answer): --grep pages by matches — follow the root's next= (--offset=K), or --limit=N";
-    }
-    if( c.pageLimit > 0 )
-    {
-        return c.clones ? "=0 (the whole answer) does not combine with --limit=N, --clones' own page size — pass one"
-                        : "=0 (the whole answer) does not combine with --limit=N, --grep's own page size — pass one";
-    }
-    return nullptr;
+    return c.clones ? wholeOnlyRefusal( bytes, c.pageLimit > 0,
+                                        "takes 0 only beside --clones (the whole answer): --clones pages by clone groups — follow the root's next= (--offset=K), or --limit=N",
+                                        "=0 (the whole answer) does not combine with --limit=N, --clones' own page size — pass one" )
+                    : wholeOnlyRefusal( bytes, c.pageLimit > 0,
+                                        "takes 0 only beside --grep (the whole answer): --grep pages by matches — follow the root's next= (--offset=K), or --limit=N",
+                                        "=0 (the whole answer) does not combine with --limit=N, --grep's own page size — pass one" );
 }
 
 // Why --page-bytes=N cannot shape a --batch / --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
 [[nodiscard]] inline const char* wholeOnlyConflict( const Config& c, std::size_t bytes ) noexcept
 {
-    if( batchPagedVerbAsked( c ) )
+    if( batchPagedVerbAsked( c ) )   // CL1 (batchpage.h): N == 0 alone, and not beside --offset=K, one page of the batch
     {
-        return batchWholeConflict( c, bytes );
+        return wholeOnlyRefusal( bytes, c.pageOffset > 0,
+                                 "takes 0 only beside --batch (the whole answer): --batch pages by whole <q> sub-answers — follow the root's next= (--offset=K)",
+                                 "=0 (the whole answer) does not combine with --offset=K, one page of the batch — pass one" );
     }
     if( lintPagedVerbAsked( c ) )
     {

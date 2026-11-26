@@ -12,7 +12,7 @@
 //     has_more= and, when more follow, next_offset= and next="--batch=FILE --offset=E …" (the call that serves the rest);
 //   * a sub-answer is never split. One larger than a page by itself is served alone and whole, over_ceiling="1" on the root
 //     and one stderr line naming its size, as --for --page-bytes=0 does for a whole answer;
-//   * --page-bytes=0 is the whole batch by request (cli.h batchWholeConflict), with the same stderr line when it is over.
+//   * --page-bytes=0 is the whole batch by request (cli.h wholeOnlyConflict), with the same stderr line when it is over.
 // Every page runs the whole batch, since dedup needs every payload, so a <dup-of q=> may name a <q> an earlier page carried.
 //
 // WHY THE ROWS ARE READ BACK OUT OF batchText. batchText (mcpverbs.h) is the one writer of the <q> row format, and the MCP

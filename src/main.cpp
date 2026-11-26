@@ -5025,8 +5025,9 @@ static std::string batchReplayFlags( const rw::Config& cfg )
 // CL1 (batchpage.h) for the CLI --batch: a batch that fits at no --offset, or one asked whole with --page-bytes=0, prints as
 // batchText wrote it — the second with the over-ceiling size line --for's whole answer prints. Past the ceiling it prints the
 // page from --offset=K, whole <q> sub-answers only, and a <q> over the ceiling alone gets one stderr line. The fit is priced on
-// the bytes the legend posture delivers, as serveWholeAnswer prices a whole answer.
-static int printCliBatch( const rw::Config& cfg, const std::string& whole )
+// the bytes the legend posture delivers, as serveWholeAnswer prices a whole answer. A printed answer reports the batch's
+// redaction tally after it, as the batch arm always did; a refusal prints neither.
+static int printCliBatch( const rw::Config& cfg, const std::string& whole, const rw::RedactCounts& redacted )
 {
     const std::size_t offset    = std::size_t( std::max( cfg.pageOffset, 0 ) );
     const std::size_t delivered = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( whole, compactLegendHint( cfg, whole ) ) : whole.size();
@@ -5043,6 +5044,7 @@ static int printCliBatch( const rw::Config& cfg, const std::string& whole )
         }
         noteWholeAnswerOverCeiling( cfg, delivered );
         rw::emitTo( stdout, "{}\n", whole );
+        reportRedactions( stderr, redacted );
         return 0;
     }
     const rw::CliBatchPage page = rw::cliBatchPage( *split, offset, rw::nextFlag( "--batch=", cfg.batchFile ), batchReplayFlags( cfg ) );
@@ -5060,6 +5062,7 @@ static int printCliBatch( const rw::Config& cfg, const std::string& whole )
                     offset, pageBytes, rw::kOutputCeilingChars );
     }
     rw::emitTo( stdout, "{}\n", page.text );
+    reportRedactions( stderr, redacted );   // the whole batch ran, so its tally is every page's
     return 0;
 }
 
@@ -5940,12 +5943,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         {
             rw::applyCompactToBatchSubs( subs );
         }
-        if( const int printed = printCliBatch( cfg, batchText( subs, requested, kBatchCap ) ); printed != 0 )
-        {
-            return printed;
-        }
-        reportRedactions( stderr, rc );
-        return 0;
+        return printCliBatch( cfg, batchText( subs, requested, kBatchCap ), rc );
     }
 
     // Wave-4 remote ergonomics: a git-URL positional (https:// or git@) is shallow-cloned to a per-URL
