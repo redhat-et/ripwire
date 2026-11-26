@@ -134,6 +134,24 @@ def opencode_accounting( ndjson_text ):
         out.update( tool_calls=tools, model_calls=steps )
     return out
 
+def opencode_headline( ndjson_text ):
+    """opencode's tokens_in / tokens_out / cost_usd: part.tokens.input, part.tokens.output and part.cost,
+    SUMMED over every step_finish (each carries that step's usage only). Until 2026-11-26 the runner kept
+    the LAST step, which undercounts every multi-step run. tokens_in is opencode's `input`, which already
+    excludes cache read and write, so it equals split_uncached_in; uncached + cache_read + cache_write does
+    NOT equal it. tokens_out excludes reasoning, which split_output includes. None until a step reports."""
+    out = dict( tokens_in=None, tokens_out=None, cost_usd=None )
+    for event in _events( ndjson_text ):
+        part = event.get( "part" ) or {}
+        if event.get( "type" ) != "step_finish" or not isinstance( part, dict ):
+            continue
+        tokens = part.get( "tokens" ) or {}
+        _add( out, "tokens_in", _int_or_none( tokens.get( "input" ) ) )
+        _add( out, "tokens_out", _int_or_none( tokens.get( "output" ) ) )
+        cost = part.get( "cost" )
+        _add( out, "cost_usd", cost if isinstance( cost, ( int, float ) ) and not isinstance( cost, bool ) else None )
+    return out
+
 def accounting_from_text( harness, text, transcript_text=None ):
     """The accounting fields for one run of `harness`, from its retained stdout (and, for claude, the
     session transcript beside the trailer)."""

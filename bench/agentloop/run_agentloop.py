@@ -650,7 +650,7 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
     """Token/command accounting from opencode's `--format json` NDJSON event stream.
 
     Every line is {"type":..,"timestamp":..,"sessionID":..,"part":{..}}. Tokens and cost arrive on
-    `step_finish` (part.tokens.{input,output,reasoning,cache{read,write}} and part.cost); every shell
+    `step_finish` (part.tokens.{input,output,reasoning,cache{read,write}} and part.cost, per step, summed); every shell
     command arrives as a `tool_use` whose part.tool == "bash", with the command in part.state.input.
     Returns nulls rather than raising on schema drift — opencode ships releases daily and the
     retained transcript is the evidence of record either way."""
@@ -664,12 +664,6 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             continue
         part = event.get( "part" ) or {}
         etype = event.get( "type" )
-        if etype == "step_finish":
-            usage = part.get( "tokens" ) or {}
-            # last step wins: these are cumulative per-turn totals, same convention as the codex parser
-            tokens_in  = usage.get( "input", tokens_in )
-            tokens_out = usage.get( "output", tokens_out )
-            cost       = part.get( "cost", cost )
         if etype in ( "step_start", "step_finish" ):
             model_id = part.get( "modelID" ) or event.get( "modelID" ) or model_id
         if etype == "tool_use":
@@ -689,6 +683,11 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             # one a shim on PATH can never see, since no subprocess is spawned.
             elif classify_native_read( tool_name=tool ):
                 native_read_calls += 1
+    # Summed over every step_finish (cost_accounting.opencode_headline()): each step carries its OWN usage —
+    # opencode 1.x adds part.cost into the message total step by step. Until 2026-11-26 this kept the last
+    # step, an undercount on every multi-step run.
+    headline = cost_accounting.opencode_headline( stdout )
+    tokens_in, tokens_out, cost = headline["tokens_in"], headline["tokens_out"], headline["cost_usd"]
     return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands, native_read_calls
 
 def parse_claude_session_metrics( transcript_text, ripwire_bin ):

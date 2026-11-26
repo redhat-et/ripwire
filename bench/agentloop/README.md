@@ -135,6 +135,10 @@ fair per-repo cap is smaller — see the honest count in `tasks.lock` and the no
   `model_calls` (the harness's request count) sit beside them. A cell the transcript lacks is `None`,
   never 0; codex reports no cache-write count. `analyze.py` prints them per arm and per task beside the
   totals above and re-derives them from `events_path` for older records.
+- opencode's `tokens_in` / `tokens_out` / `cost_usd` are sums over every `step_finish` (each step carries
+  its own usage; until 2026-11-26 the last step alone was kept). opencode's `input` excludes the cache, so
+  its `tokens_in` equals `split_uncached_in`. `analyze.py` re-derives older opencode records from their
+  transcript and labels the value a last-step floor when none survives.
 - **pass^k** — beside each arm's single-trial rate, the chance that all k trials of a task succeed
   (C(c,k)/C(n,k)), for every k from 2 to the largest trial count, with each k's task count.
 

@@ -520,6 +520,18 @@ make them.
   n/a on every codex run. The -9.2% output-token figure above is a `tokens_out` figure; it says nothing
   about cache reads, which this tranche did not split. `test/agentloopaccountingcheck.sh` pins the split
   on hand-set fixture usage for all three harnesses.
+- *opencode's headline columns are sums now.* Each opencode `step_finish` carries that step's own
+  usage, but the runner kept only the last step for `tokens_in`, `tokens_out` and `cost_usd`, so it
+  undercounted every multi-step run. On the two-step fixture it read 100 / 200 / 0.17 where the run spent
+  1,000 / 500 / 0.42. All three now sum over every step, in `run_agentloop.py` and so in
+  `run_editsuite.py`, which calls the same parser. For opencode `tokens_in` equals `split_uncached_in`,
+  because opencode's `input` field already excludes the cache. The identity uncached + cache read + cache
+  write = `tokens_in` therefore does not hold (31,000 against 1,000 on the fixture). `analyze.py`
+  re-derives an older opencode record's three columns from its transcript. Without a transcript it keeps
+  the old value but labels it a last-step floor, never a total. Claude and codex columns are unchanged.
+  **Published opencode numbers computed the old way: none found.** A grep of `docs/`, `README.md`,
+  `CHANGELOG.md` and `bench/agentloop/*.md` finds no opencode token or cost figure; results directories
+  were not opened.
 - *pass^k beside pass@1.* For each arm, the per-task single-trial rate and pass^k, the chance that all
   k trials succeed (estimated as C(c,k)/C(n,k)), for every k from 2 to the largest trial count, each
   with its task count. Only ok-status scored runs are trials; the rest are counted as excluded, not as

@@ -160,17 +160,45 @@ def mean_substitution( recs ):
 ROLLUP_FIELDS = ( "tokens_in", "tokens_out", "cost_usd" ) + cost_accounting.SPLIT_FIELDS + (
     "wall_seconds", "tool_calls", "model_calls" )
 
-def run_accounting( rec, results_dir=None ):
-    """The accounting fields of one record. A record written by today's runner carries them; an older
-    record is re-derived from its retained transcript (events_path, or the same file name under
-    <results dir>/events/ when the results moved machines). Fields neither source has stay None."""
-    if any( rec.get( f ) is not None for f in cost_accounting.ACCOUNTING_FIELDS ):
-        return { f: rec.get( f ) for f in cost_accounting.ACCOUNTING_FIELDS }
+def _events_path( rec, results_dir=None ):
+    """events_path, or the same file name under <results dir>/events/ when the results moved machines."""
     path = rec.get( "events_path" )
     if path and not pathlib.Path( path ).exists() and results_dir is not None:
         moved = pathlib.Path( results_dir ) / "events" / pathlib.Path( path ).name
         path = str( moved ) if moved.exists() else path
-    return cost_accounting.accounting_from_events( rec.get( "harness" ), path )
+    return path
+
+def _is_old_record( rec ):
+    """Written before 2026-11-26: the runner filled the accounting fields on every record from then on."""
+    return all( rec.get( f ) is None for f in cost_accounting.ACCOUNTING_FIELDS )
+
+def run_accounting( rec, results_dir=None ):
+    """The accounting fields of one record. A record written by today's runner carries them; an older
+    record is re-derived from its retained transcript. Fields neither source has stay None."""
+    if not _is_old_record( rec ):
+        return { f: rec.get( f ) for f in cost_accounting.ACCOUNTING_FIELDS }
+    return cost_accounting.accounting_from_events( rec.get( "harness" ), _events_path( rec, results_dir ) )
+
+HEADLINE_FIELDS = ( "tokens_in", "tokens_out", "cost_usd" )
+
+def normalize_headline( rec, results_dir=None ):
+    """An OLD opencode record's tokens_in/tokens_out/cost_usd came from the last step_finish only (the runner
+    kept the last step until 2026-11-26), an undercount on every multi-step run. With its transcript, they
+    are re-derived as sums over every step; without one, the old values are kept but marked
+    headline_floor=True, a last-step floor and never a total. Every other record is returned unchanged:
+    claude and codex headline columns never moved."""
+    if rec.get( "harness" ) != "opencode" or not _is_old_record( rec ):
+        return rec
+    try:
+        text = pathlib.Path( _events_path( rec, results_dir ) or "" ).read_text( errors="replace" )
+    except OSError:
+        text = ""
+    sums = cost_accounting.opencode_headline( text )
+    if any( v is not None for v in sums.values() ):
+        return dict( rec, **sums )
+    if any( rec.get( f ) is not None for f in HEADLINE_FIELDS ):
+        return dict( rec, headline_floor=True )
+    return rec
 
 def cost_rollup( recs, results_dir=None ):
     """{field: {"sum", "n"}} over recs. n counts the runs that MEASURED the field; sum is None when n is 0,
@@ -190,7 +218,8 @@ def cost_rollup( recs, results_dir=None ):
             cell["n"] += 1
         if any( vals.get( f ) is None for f in ( "split_uncached_in", "split_cache_read", "split_output" ) ):
             unmeasured += 1
-    row.update( runs=len( recs ), n_split_unmeasured=unmeasured )
+    row.update( runs=len( recs ), n_split_unmeasured=unmeasured,
+                n_headline_floor=sum( 1 for r in recs if r.get( "headline_floor" ) ) )
     return row
 
 def cost_accounting_report( records, results_dir=None ):
@@ -232,6 +261,7 @@ def consistency( records, field ):
     return out
 
 def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1", results_dir=None ):
+    records = [ normalize_headline( r, results_dir ) for r in records ]
     paired, incomplete = pair_by_task_seed( records )
     repos = sorted( { repo for _, repo, *_ in paired } )
     # Contamination count (arm-isolation fix, 2026-08-20 outcome-harness-fixes lane): a baseline record
@@ -248,6 +278,7 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     # Added sections (2026-11-26). Computed before the no-pairs early return: neither needs a pair.
     out["cost_by_arm"], out["cost_by_task"] = cost_accounting_report( records, results_dir )
     out["consistency"] = { f: consistency( records, f ) for f in ( "resolved", "localization_hit" ) }
+    out["n_headline_floor_runs"] = sum( 1 for r in records if r.get( "headline_floor" ) )
     if not paired:
         out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
@@ -325,7 +356,9 @@ def _cell( row, f, fmt="{:,}" ):
 def _cost_line( label, row ):
     return ( f"{label} runs={row['runs']} "
              f"tokens_in={_cell( row, 'tokens_in' )} tokens_out={_cell( row, 'tokens_out' )} "
-             f"cost_usd={_cell( row, 'cost_usd', '{}' )} | "
+             f"cost_usd={_cell( row, 'cost_usd', '{}' )}"
+             + ( f" [floor: {row['n_headline_floor']} of {row['runs']} opencode run(s) last-step only]" if row.get( "n_headline_floor" ) else "" )
+             + " | "
              f"uncached_in={_cell( row, 'split_uncached_in' )} cache_write={_cell( row, 'split_cache_write' )} "
              f"cache_read={_cell( row, 'split_cache_read' )} output={_cell( row, 'split_output' )} | "
              f"wall_s={_cell( row, 'wall_seconds', '{}' )} tool_calls={_cell( row, 'tool_calls' )} "
@@ -343,6 +376,10 @@ def print_cost_accounting( out ):
             print( f"      ^ {row['n_split_unmeasured']} of {row['runs']} {arm} run(s) carry no cache split"
                    f" (no usable transcript): their totals are not priceable under a cache schedule" )
     print( "    cache_write is n/a on codex runs by construction: codex reports no cache-write count." )
+    if out.get( "n_headline_floor_runs" ):
+        print( f"    ** {out['n_headline_floor_runs']} opencode run(s) predate the per-step sum and have no transcript:"
+               f" their tokens_in/tokens_out/cost_usd are LAST-STEP FLOORS, not totals, and enter every sum and"
+               f" ratio in this report as such **" )
     print( "  per task (instance, arm):" )
     for row in out.get( "cost_by_task" ) or ():
         print( "    " + _cost_line( f"{row['instance_id']} {row['arm']}", row ) )
