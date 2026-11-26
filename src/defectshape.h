@@ -1,6 +1,6 @@
 #pragma once
 
-// defectshape.h — the scanners behind --quality-delta's defect-shape kind: eight shapes of a REAL defect that
+// defectshape.h — the scanners behind --quality-delta's defect-shape kind: nine shapes of a REAL defect that
 // review keeps finding by hand and that a deterministic syntactic check finds at write time.
 //
 //   format-arity    C++: a literal std::format / format_to / format_to_n / print / println, fmt::format /
@@ -36,6 +36,8 @@
 //                   runs' status may be read: exit 0 with an empty answer passes the status check too.
 //   count-drift     Markdown and C/C++ string literals (countdrift.h): a count word that introduces a list of
 //                   names, wrong against the list or against the tree's string-literal array of those names.
+//   silent-cap      C++ (silentcap.h): a loop or walk that stops at a constant limit and leaves no trace — no flag,
+//                   no count beside it, no total, and no other function of the tree that names the limit.
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -84,10 +86,11 @@ enum class Facet : std::uint8_t
     UnhandledArm    = 5,
     ZeroEvidence    = 6,
     CountDrift      = 7,
+    SilentCap       = 8,
 };
-inline constexpr std::size_t kFacetCount = 8;
+inline constexpr std::size_t kFacetCount = 9;
 inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status",
-                                                                           "unhandled-arm", "zero-evidence", "count-drift" };
+                                                                           "unhandled-arm", "zero-evidence", "count-drift", "silent-cap" };
 
 inline constexpr std::string_view facetName( Facet f ) noexcept
 {
@@ -105,7 +108,7 @@ inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 // The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition: one bit
 // per facet.
 inline constexpr unsigned kSiteFacetBits = ( 1u << static_cast<unsigned>( Facet::UncheckedStatus ) ) | ( 1u << static_cast<unsigned>( Facet::UnhandledArm ) )
-                                         | ( 1u << static_cast<unsigned>( Facet::CountDrift ) );
+                                         | ( 1u << static_cast<unsigned>( Facet::CountDrift ) ) | ( 1u << static_cast<unsigned>( Facet::SilentCap ) );
 inline constexpr bool facetNamesSite( Facet f ) noexcept
 {
     return ( ( kSiteFacetBits >> static_cast<unsigned>( f ) ) & 1u ) != 0;

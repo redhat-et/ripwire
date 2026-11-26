@@ -83,6 +83,11 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
 #   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
 #   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
+# 2026-11-25, lane silent-cap2 (on lane/cr-qd3 f814e59d1): RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf now also runs the
+#   silent-cap scan over C++ files and resolves its pending sites against the tree's name sets, and defectSiteValue spells
+#   facets 7 and 8 with the extension mark (count-drift's site values move), so a cached snapshot gains sites of a ninth
+#   facet and holds stale count-drift values: kQSnapCacheScheme 39 -> 41 in the same diff (40 is #743's). kCacheVersion and
+#   kParserVer unchanged (no extraction change). Hash 581fcbc939…7ff05632.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

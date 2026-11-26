@@ -2316,6 +2316,211 @@ if [ "$QD_OK" = 1 ]; then
     if [ "$n" = 0 ]; then ok "$L: the fixed texts print no count-drift row"; else no "$L: the fixed texts printed $n count-drift rows: $( ds_rows | grep 'defect="count-drift"' | head -3 )"; fi
 fi
 
+# ── 4g) SILENT-CAP (SILENT-CAP-2): a stop at a constant limit that leaves no trace ───────────────────────────────
+#   Baseline: every function as a stub. The edit gives each its body. Three positives, one per reported shape (a bare stop,
+#   a loop condition beside another one, a substr cut), each on a constant nothing else names. Eight negatives, each
+#   judged only beside the firing positive and counted (zero judged = FAIL): a flag the stop branch sets and the caller
+#   that prints it, a caller that names the limit, a total counted beside the keep, a static_assert that ties the limit, a
+#   limit that is the caller's parameter, a bare number (a stated miss: 0 real in 81 on this project's tree), a stop
+#   that returns a value the function returns nowhere else. Then the fix (a caller names the limit) quiets that row alone.
+fx_init scap
+mkdir -p "$WORK/scap/src"
+SCAP_HDR='#include <cstddef>
+#include <cstdio>
+#include <string>
+#include <vector>
+inline constexpr std::size_t kStopCap = 3;
+inline constexpr std::size_t kLoopCap = 3;
+inline constexpr std::size_t kCutCap = 8;
+inline constexpr std::size_t kFlagCap = 3;
+inline constexpr std::size_t kCallerCap = 3;
+inline constexpr std::size_t kTotalCap = 3;
+inline constexpr std::size_t kLegendCap = 3;
+inline constexpr std::size_t kStatusCap = 3;
+static_assert( kLegendCap == 3, "the legend says three rows" );
+struct Out { std::vector<int> rows; bool capped = false; std::size_t total = 0; };
+'
+{ printf '%s' "$SCAP_HDR"; cat <<'EOF'
+std::vector<int> silentStop( const std::vector<int>& in ) { return in; }
+std::vector<int> silentLoop( const std::vector<int>& in ) { return in; }
+std::string silentCut( const std::string& line ) { return line; }
+Out flagStop( const std::vector<int>& in ) { return Out{ in }; }
+void flagCaller( const std::vector<int>& in ) { (void)in; }
+std::vector<int> callerStop( const std::vector<int>& in ) { return in; }
+bool callerSays( const std::vector<int>& in ) { return in.empty(); }
+Out totalKeep( const std::vector<int>& in ) { return Out{ in }; }
+std::vector<int> legendStop( const std::vector<int>& in ) { return in; }
+std::vector<int> requestedStop( const std::vector<int>& in, std::size_t limit ) { (void)limit; return in; }
+std::vector<int> numberStop( const std::vector<int>& in ) { return in; }
+int statusStop( const std::vector<int>& in ) { return int( in.size() ); }
+EOF
+} >"$WORK/scap/src/caps.cpp"
+fx_commit scap
+{ printf '%s' "$SCAP_HDR"; cat <<'EOF'
+std::vector<int> silentStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kStopCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> silentLoop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( std::size_t i = 0; i < in.size() && i < kLoopCap; ++i )
+    {
+        out.push_back( in[i] );
+    }
+    return out;
+}
+std::string silentCut( const std::string& line )
+{
+    std::string text = line.substr( 0, kCutCap );
+    return text;
+}
+Out flagStop( const std::vector<int>& in )
+{
+    Out out;
+    for( const int v : in )
+    {
+        if( out.rows.size() >= kFlagCap )
+        {
+            out.capped = true;
+            break;
+        }
+        out.rows.push_back( v );
+    }
+    return out;
+}
+void flagCaller( const std::vector<int>& in )
+{
+    const Out o = flagStop( in );
+    std::fputs( o.capped ? "capped=\"1\"" : "", stdout );
+}
+std::vector<int> callerStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kCallerCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+bool callerSays( const std::vector<int>& in )
+{
+    return callerStop( in ).size() >= kCallerCap;
+}
+Out totalKeep( const std::vector<int>& in )
+{
+    Out out;
+    for( const int v : in )
+    {
+        ++out.total;
+        if( out.rows.size() < kTotalCap )
+        {
+            out.rows.push_back( v );
+        }
+    }
+    return out;
+}
+std::vector<int> legendStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kLegendCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> requestedStop( const std::vector<int>& in, std::size_t limit )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= limit )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> numberStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= 3 )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+int statusStop( const std::vector<int>& in )
+{
+    std::size_t kept = 0;
+    for( const int v : in )
+    {
+        if( kept >= kStatusCap )
+        {
+            return -1;
+        }
+        kept += v != 0 ? 1 : 1;
+    }
+    return int( kept );
+}
+EOF
+} >"$WORK/scap/src/caps.cpp"
+fx_run scap
+L="silent-cap"
+ds_has "$L" silent-cap silentStop minor
+ds_has "$L" silent-cap silentLoop minor
+ds_has "$L" silent-cap silentCut  minor
+row="$( ds_row silent-cap silentStop )"
+printf '%s' "$row" | grep -q 'why="the stop at kStopCap leaves no trace' && ok "$L: why= names the limit" \
+    || no "$L: the row should carry why=\"the stop at kStopCap leaves no trace ...\": ${row:-<no row>}"
+spairs=0
+spair(){  # NEGATIVE WHY — judged only when the bare-stop positive fired in this same run
+    [ "$QD_OK" = 1 ] && [ -n "$( ds_row silent-cap silentStop )" ] || return 0
+    local r; r="$( ds_row silent-cap "$1" )"
+    if [ -z "$r" ]; then ok "$L: no silent-cap row on $1 ($2; twin silentStop fires)"; spairs=$(( spairs + 1 )); else no "$L: false positive on $1 ($2): $r"; fi
+}
+spair flagStop      "the stop branch sets out.capped, which flagCaller prints"
+spair flagCaller    "it only reads the flag"
+spair callerStop    "callerSays calls it and names kCallerCap"
+spair totalKeep     "++out.total counts beside the keep"
+spair legendStop    "a static_assert ties kLegendCap"
+spair requestedStop "the limit is the caller's parameter"
+spair numberStop    "a bare number is not reported (a stated miss)"
+spair statusStop    "the stop returns -1, which the function returns nowhere else"
+[ "$spairs" = 8 ] && ok "$L: all $spairs negative functions print 0 silent-cap rows beside a firing twin" \
+    || no "$L: $spairs of 8 negative functions passed beside a firing twin (want all; zero means nothing was judged)"
+gating_split "$L" 0
+printf 'bool stopSays( const std::vector<int>& in )\n{\n    return silentStop( in ).size() >= kStopCap;\n}\n' >>"$WORK/scap/src/caps.cpp"
+fx_run scap
+if [ "$QD_OK" = 1 ]; then
+    if [ -z "$( ds_row silent-cap silentStop )" ]; then ok "$L: once a caller names kStopCap, silentStop prints no silent-cap row"
+    else no "$L: the disclosed stop still prints: $( ds_row silent-cap silentStop )"; fi
+    if [ -n "$( ds_row silent-cap silentLoop )" ]; then ok "$L: the undisclosed loop keeps its row beside the fix (the quiet is the fix's)"
+    else no "$L: silentLoop lost its row, so the fix arm's quiet proves nothing"; fi
+fi
+
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
 #   D2: format-arity is the one exception to "new-symbol rows never gate", and every surface that states the
 #   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.

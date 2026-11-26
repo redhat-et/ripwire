@@ -6377,6 +6377,52 @@ and is not published here.
   (80e60ca7d), and it is found at both sites. This tree at the PR head has 0 sites. `test/defectshapecheck.sh` §4f pins
   the self, name-set, C++-literal and wrapped-list positives, five premise-counted negatives and the quiet-on-fix arm. Precision
   beyond the fixture and the seed is not measured.
+
+### SILENT-CAP-2 (2026-11-25): the `silent-cap` facet, measured
+
+CR-QD-3 left the "disclose this cap" class (45 of 1,240 CodeRabbit items since #501, the largest class an algorithm can reach) without a
+facet: its prototype matched named `k*` constants and looked for a disclosure word in the body, and measured recall 3/43 at 40 % / 55 %
+precision. `silent-cap` (src/silentcap.h) finds the site by structure and decides silence by what the code does after the stop. The rule,
+its eleven trace tests and the stated misses are in the legend (`--quality-delta` prints it beside a row) and in the file header.
+
+**Recall.** The 43 `src/` seeds replayed at their reviewed commit (the other 2 of the 45 are docs-table items), matched by hand on
+function and limit, since a review anchor is rarely the cap's own line:
+
+| seed subtype (how the limit is written at the site) | seeds | found |
+| --- | --- | --- |
+| named constant: a row, reader or byte cap | 14 | 6 |
+| literal or fixed array: a number, `sizeof`, `std::size`, a `char buf[192]` | 8 | 2 |
+| budget: files, bytes or nodes visited | 4 | 2 |
+| depth | 4 | 2 |
+| no cap site of its own: a cut flag a caller drops, a cap applied in the wrong order, `capped` set too eagerly | 13 | 0 |
+| **all `src/` seeds** | **43** | **12** |
+| docs-table | 2 | not a code shape |
+
+Every found seed that has a fix commit (6 of the 12) prints no row on the fix tree.
+
+**Precision.** Every row hand read, three labels: real (silent, and reachable on an input the tool accepts), guard (silent, a
+runaway guard not reachable in practice), false (disclosed in a way the check does not read, or a work bound that cuts no answer).
+
+| tree | files | rows | real | guard | unsure | false | real / rows | Wilson 95 % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| this project's `src/` | 326 | 23 | 11 | 1 | 2 | 9 | 48 % | [0.29, 0.67] |
+| envoy (non-test) | 4,313 | 4 | 2 | 0 | 0 | 2 | 50 % | [0.15, 0.85] |
+| dgl (non-test) | 265 | 0 | - | - | - | - | - | - |
+
+The false classes, by count on this tree: a work bound that cuts no answer row (4: a fold's scope, a seed window, a boost's top-k, a
+line's kept hits), a list sample beside a count the check does not connect (3), a continuation handle refused by design when it is too
+long (1), a cache whose completeness is tested after the loop through the list's last element (1). On envoy both false rows are protocol
+refusals that return an error. Below 80 %, so the facet is report-only and its legend states the measured share.
+
+**What the measurement removed.** A bare number as the limit: 81 such sites on this tree; of the 13 hand read none was real (7
+line windows or grammar bounds, 6 runaway guards), so a number is not reported. A `std::min( x.size(), kMax )` clamp: 15 rows, most
+with the uncut list kept beside. "One hop" as direct callers only: with it and with number limits the rule printed 111 rows on this
+tree and found 14 seeds; letting ANY other function that names the limit outside a silent stop disclose it left 23 rows and 12 seeds.
+
+**Against `test/capdisclose.map`** (212 rows, kept): of its 13 rows hand-marked `SILENT CUT`, the rule reports 5 by itself; 2 more are
+bounded searches (the probe exemption) and 6 have no stop shape the rule reads. It reports 11 limits the map does not hold (the map
+covers answer-path files and named constants): two scan budgets, a cone cap, a use-tree depth, two fixed arrays among them.
+
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
