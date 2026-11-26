@@ -2267,6 +2267,10 @@ PDCASES="$PDT/cases.tsv"
     printf 'UserPromptSubmit\t-\t{"prompt":"who calls fooBar in src/fooBar.c?"}\n'
     printf 'SessionStart\t-\t{"source":"startup"}\n'
     printf 'SubagentStart\t-\t{"agent_id":"a1","agent_type":"general-purpose"}\n'
+    # LAST, so the SPOKE_GREP/SPOKE_COMPOUND indices above do not move: the first source edit, where the nudge's
+    # §FIRSTEDIT block speaks (PD5 below requires it to, so PD1 is a verdict about that text too). §FIRSTEDIT is OPT-IN,
+    # so every sweep run exports RIPWIRE_FIRST_EDIT=1: the sweep covers the text an opted-in install can produce.
+    printf 'PreToolUse\tEdit\t{"file_path":"%s/src/fooBar.c","old_string":"return x + 1;","new_string":"return x + 2;"}\n' "$PDREPO"
 } >"$PDCASES"
 
 pd_payload()
@@ -2306,15 +2310,15 @@ for pdh in "$ROOT"/hooks/*.sh; do
                 if [ "$pdarm" = unset ]; then
                     out="$( printf '%s' "$payload" | env -u RIPWIRE_METER_ARM -u RIPWIRE_AGENT_BRIEF_DECISION HOME="$PDT/home" \
                         PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
-                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
                 elif [ "$pdarm" = briefallow ]; then
                     out="$( printf '%s' "$payload" | env RIPWIRE_AGENT_BRIEF_DECISION=allow RIPWIRE_METER_ARM=treatment HOME="$PDT/home" \
                         PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
-                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
                 else
                     out="$( printf '%s' "$payload" | env -u RIPWIRE_AGENT_BRIEF_DECISION RIPWIRE_METER_ARM="$pdarm" HOME="$PDT/home" \
                         PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
-                        CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
                 fi
                 spoke=0; [ -n "$out" ] && spoke=1
                 echo "RUN|$spoke|$pdname"
@@ -2326,6 +2330,10 @@ for pdh in "$ROOT"/hooks/*.sh; do
                     && printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
                     [ "$pdi" -eq 1 ] && echo "SPOKE_GREP|$sid"
                     [ "$pdi" -eq 2 ] && echo "SPOKE_COMPOUND|$sid"
+                fi
+                if [ "$pdname" = ripwire-nudge.sh ] && [ -z "$pdmode" ] && [ "$pdarm" = treatment ] && [ "$pdtn" = Edit ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
+                    echo "SPOKE_FIRSTEDIT|$sid"
                 fi
                 [ "$pdarm" = briefallow ] && [ "$pdtn" = Agent ] \
                     && printf '%s' "$out" | jq -e '.hookSpecificOutput.updatedInput.prompt | length > 0' >/dev/null 2>&1 \
@@ -2363,9 +2371,225 @@ if grep -q '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log"; then
 else
     no "PD4 vacuous: no --agent-brief run answered an updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported, so PD1 says nothing about the removed knob"
 fi
+if grep -q '^SPOKE_FIRSTEDIT|' "$PDT/sweep.log"; then
+    ok "PD5 not vacuous: the nudge's treatment arm answered additionalContext on the first source edit (§FIRSTEDIT)"
+else
+    no "PD5 vacuous: ripwire-nudge.sh's treatment arm said nothing on the first source edit, so PD1 says nothing about §FIRSTEDIT"
+fi
 PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
 [ -z "$PDJS" ] && ok "PD3 opencode plugin: no hooks/opencode/*.js names permissionDecision" \
     || no "PD3 opencode plugin: $PDJS names permissionDecision"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (16) §FIRSTEDIT — the before-the-first-edit check (lane FIRST-EDIT-HOOK, 2026-11-26)
+#
+# The one PreToolUse moment where the nudge speaks again: the first Edit/Write/MultiEdit of a session that targets
+# an EXISTING source file in a git work tree. Its additionalContext carries a compact edit-check of the symbol(s)
+# the edit touches (contract status, previewed against the pending bytes when the edit sits inside one definition;
+# the callers; the tests that reach them). The arms, every one of them through a fresh session id:
+#   FE1  the first Edit inside a fixture function names the symbol AND its caller AND the test that reaches it
+#   FE1b the edit that adds a parameter is PREVIEWED: status=contract-change before a byte is written
+#   FE2  a second edit in the same session says nothing; the rows say which call was the moment
+#   FE3  an edit to a non-source file says nothing and does not spend the session's one check (FE3b)
+#   FE4  a ripwire that never answers: the disclosed "skipped: timeout" line, exit 0, well inside the deadline+1 s
+#   FE5  the control arm is silent and records the counterfactual moment (first-edit-control)
+#   FE6  OFF BY DEFAULT: unconfigured is silent (nudge=none); first_edit=1 in meter.conf turns it on; the env wins
+#        over the file (RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent)
+#   FE7  the Codex wrapper carries the same text
+#   FE8  bounded: the context is at most 1536 B; a Write of an existing file and a Write of a new one
+#   FE9  PLAIN FIRST: a preview that never answers (a ripwire whose --dry-run sleeps) still delivers the plain check
+#        (symbol + caller, "current tree vs HEAD") with the "preview did not finish" note, never the bare skip line
+# fe_run opts in (RIPWIRE_FIRST_EDIT=1) unless an arm overrides it; FE6 is the arm about the default.
+# The positive arms run the REAL binary with a generous deadline (RIPWIRE_FIRST_EDIT_MS=20000): they pin content,
+# FE4 pins the timeout. Without a built binary they are SKIPPED, never passed.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(16) §FIRSTEDIT: the before-the-first-edit check"
+FET="$TMP/fe"; mkdir -p "$FET/tmp" "$FET/slowbin"
+FEREPO="$FET/repo"; mkdir -p "$FEREPO/src" "$FEREPO/test"
+printf 'int addTwo( int a, int b )\n{\n    return a + b;\n}\n\nint useAdd( int x )\n{\n    return addTwo( x, 1 );\n}\n' >"$FEREPO/src/calc.c"
+printf 'int addTwo( int a, int b );\nint main( void )\n{\n    return addTwo( 1, 2 ) == 3 ? 0 : 1;\n}\n' >"$FEREPO/test/calc_test.c"
+printf '# notes\n' >"$FEREPO/README.md"
+git -C "$FEREPO" init -q
+git -C "$FEREPO" -c user.email=dev@x.com -c user.name=Dev add -A
+git -C "$FEREPO" -c user.email=dev@x.com -c user.name=Dev commit -qm init
+# The stub records its own pid, then becomes `sleep 30` under that same pid (exec), so FE4 can ask the kernel whether
+# THAT process outlived the hook — `kill -0 PID` — instead of matching command lines.
+printf '#!/bin/sh\necho $$ >>"$FE_STUB_PIDS"\nexec sleep 30\n' >"$FET/slowbin/ripwire"; chmod +x "$FET/slowbin/ripwire"
+FEREAL="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${FEREAL#/}" = "$FEREAL" ] && FEREAL="$ROOT/$FEREAL"
+fe_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+fe_payload()
+{
+    # fe_payload SID TOOL TOOL_INPUT_JSON -> one PreToolUse payload
+    jq -cn --arg sid "$1" --arg tn "$2" --argjson ti "$3" --arg cwd "$FEREPO" \
+        '{session_id:$sid, cwd:$cwd, hook_event_name:"PreToolUse", tool_name:$tn, tool_input:$ti}'
+}
+fe_run()
+{
+    # fe_run HOOKFILE PATHVAL LOG SID TOOL TOOL_INPUT_JSON [ENV=VAL...] -> stdout; sets FERC
+    local h="$1" p="$2" l="$3" sid="$4" tn="$5" ti="$6"; shift 6
+    FEOUT="$( fe_payload "$sid" "$tn" "$ti" | env RIPWIRE_METER_ARM=treatment RIPWIRE_FIRST_EDIT=1 RIPWIRE_FIRST_EDIT_MS=20000 "$@" \
+        RIPWIRE_METER_LOG="$l" PATH="$p" TMPDIR="$FET/tmp" bash "$h" )"; FERC=$?
+}
+fe_ctx() { printf '%s' "$FEOUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+FE_BODY='{"file_path":"'"$FEREPO"'/src/calc.c","old_string":"    return a + b;","new_string":"    return b + a;"}'
+FE_SIG='{"file_path":"'"$FEREPO"'/src/calc.c","old_string":"int addTwo( int a, int b )\n{","new_string":"int addTwo( int a, int b, int c )\n{"}'
+FE_README='{"file_path":"'"$FEREPO"'/README.md","old_string":"# notes","new_string":"# Notes"}'
+
+if [ -x "$FEREAL" ]; then
+    FEBIN="$FET/realbin"; mkdir -p "$FEBIN"; ln -sf "$FEREAL" "$FEBIN/ripwire"
+    FEPATH="$FEBIN:$PATH"
+    "$FEBIN/ripwire" "$FEREPO" --at=src/calc.c:3 >/dev/null 2>&1   # index once, so no arm below pays the cold parse
+
+    # FE1 — the first edit, inside addTwo's body
+    FEL1="$FET/fe1.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL1" fe1 Edit "$FE_BODY"; FECTX1="$( fe_ctx )"
+    echo "-- FE1 context --"; printf '%s\n' "$FECTX1" | head -c 900; echo
+    [ "$FERC" -eq 0 ] && printf '%s' "$FEOUT" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null 2>&1 \
+        && ok "FE1 first edit: exit 0, PreToolUse additionalContext" || no "FE1 first edit: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+    printf '%s' "$FECTX1" | grep -q 'addTwo' && printf '%s' "$FECTX1" | grep -q 'useAdd src/calc.c:6' \
+        && ok "FE1 first edit: names the symbol (addTwo) and its caller (useAdd src/calc.c:6)" \
+        || no "FE1 first edit: the context does not name addTwo and its caller useAdd src/calc.c:6"
+    printf '%s' "$FECTX1" | grep -q 'test/calc_test.c' \
+        && ok "FE1 first edit: names the test that reaches the symbol (test/calc_test.c)" \
+        || no "FE1 first edit: no test/calc_test.c in the tests line"
+    printf '%s' "$FEOUT" | grep -q 'permissionDecision\|"decision"' \
+        && no "FE1 first edit: carries a permission decision" || ok "FE1 first edit: no permission decision"
+
+    # FE1b — the signature edit is previewed against the pending bytes
+    fe_run "$HOOK" "$FEPATH" "$FET/fe1b.jsonl" fe1b Edit "$FE_SIG"; FECTX1B="$( fe_ctx )"
+    printf '%s' "$FECTX1B" | grep -q 'status=contract-change' && printf '%s' "$FECTX1B" | grep -q 'preview of this edit' \
+        && ok "FE1b preview: adding a parameter reads status=contract-change before the edit is applied" \
+        || no "FE1b preview: [$( printf '%s' "$FECTX1B" | head -c 300 )]"
+    git -C "$FEREPO" diff --quiet && ok "FE1b preview: the work tree is byte-identical afterwards (nothing written)" \
+        || no "FE1b preview: the hook changed the work tree"
+
+    # FE2 — the second edit of the same session
+    fe_run "$HOOK" "$FEPATH" "$FEL1" fe1 Edit "$FE_SIG"
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && ok "FE2 second edit: silent (once per session)" \
+        || no "FE2 second edit: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+    [ "$( meterrowget "$FEL1" 1 nudge )/$( meterrowget "$FEL1" 1 nudged )" = "first-edit/1" ] \
+        && [ "$( meterrowget "$FEL1" 2 nudge )/$( meterrowget "$FEL1" 2 nudged )" = "none/0" ] \
+        && ok "FE2 rows: the first edit reads nudge=first-edit nudged=1, the second nudge=none" \
+        || no "FE2 rows: [$( meterrowget "$FEL1" 1 nudge )/$( meterrowget "$FEL1" 1 nudged )] then [$( meterrowget "$FEL1" 2 nudge )/$( meterrowget "$FEL1" 2 nudged )]"
+
+    # FE3 — a non-source file first: nothing, and the session's one check is still unspent
+    FEL3="$FET/fe3.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL3" fe3 Edit "$FE_README"
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && [ "$( meterrowget "$FEL3" 1 nudge )" = "none" ] \
+        && ok "FE3 non-source file (README.md): silent, nudge=none" \
+        || no "FE3 non-source file: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] nudge=[$( meterrowget "$FEL3" 1 nudge )]"
+    fe_run "$HOOK" "$FEPATH" "$FEL3" fe3 Edit "$FE_BODY"
+    fe_ctx | grep -q 'addTwo' && ok "FE3b the source edit after it still gets the check (a non-source edit spends nothing)" \
+        || no "FE3b the source edit after a README edit got no check: [$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE5 — control arm
+    FEL5="$FET/fe5.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL5" fe5 Edit "$FE_BODY" RIPWIRE_METER_ARM=control
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && [ "$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 arm )" = "first-edit-control/control" ] \
+        && ok "FE5 control arm: silent, the row records the counterfactual moment (first-edit-control)" \
+        || no "FE5 control arm: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] row=[$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 arm )]"
+
+    # FE6 — the default and the switch. An empty RIPWIRE_FIRST_EDIT is the unset reading (`${…:-conf}`), and the
+    # gate's RIPWIRE_HOME holds no meter.conf, so FE6a is exactly an unconfigured install.
+    FEL6="$FET/fe6.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FE6A="$FEOUT/$( meterrowget "$FEL6" 1 nudge )"
+    mkdir -p "$FET/conf6"; printf 'first_edit=1\n' >"$FET/conf6/meter.conf"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6b Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_HOME="$FET/conf6"
+    FE6B="$( fe_ctx | grep -q 'addTwo' && echo 1 || echo 0 )/$( meterrowget "$FEL6" 2 nudge )"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6c Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=0 RIPWIRE_HOME="$FET/conf6"
+    FE6C="$FEOUT/$( meterrowget "$FEL6" 3 nudge )"
+    [ "$FE6A" = "/none" ] && ok "FE6a default: an unconfigured install says nothing on the first edit (nudge=none)" \
+        || no "FE6a default: [$FE6A], want silent/none"
+    [ "$FE6B" = "1/first-edit" ] && ok "FE6b opt-in: first_edit=1 in meter.conf turns the check on" \
+        || no "FE6b opt-in: [$FE6B], want 1/first-edit"
+    [ "$FE6C" = "/none" ] && ok "FE6c env wins: RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent" \
+        || no "FE6c env wins: [$FE6C], want silent/none"
+
+    # FE7 — Codex parity through the wrapper
+    fe_run "$ROOT/hooks/ripwire-codex-nudge.sh" "$FEPATH" "$FET/fe7.jsonl" fe7 Edit "$FE_BODY"
+    [ "$FERC" -eq 0 ] && fe_ctx | grep -q 'useAdd src/calc.c:6' \
+        && ok "FE7 Codex wrapper: the same check reaches Codex's additionalContext" \
+        || no "FE7 Codex wrapper: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE8 — bounded bytes; Write of an existing file (first changed line) and of a new file
+    FEBYTES="$( printf '%s' "$FECTX1" | wc -c | tr -d ' ' )"
+    [ "$FEBYTES" -gt 0 ] && [ "$FEBYTES" -le 1536 ] && ok "FE8 bounded: the FE1 context is $FEBYTES B (cap 1536)" \
+        || no "FE8 bounded: the FE1 context is $FEBYTES B (want 1..1536)"
+    FEW="$( jq -cn --arg f "$FEREPO/src/calc.c" --arg c "$( sed 's/return addTwo( x, 1 );/return addTwo( x, 2 );/' "$FEREPO/src/calc.c" )" \
+        '{file_path:$f, content:($c + "\n")}' )"
+    fe_run "$HOOK" "$FEPATH" "$FET/fe8.jsonl" fe8 Write "$FEW"
+    fe_ctx | grep -q '^useAdd src/calc.c:6' && ok "FE8 Write of an existing file: checks the definition holding its first changed line (useAdd)" \
+        || no "FE8 Write of an existing file: [$( printf '%s' "$FEOUT" | head -c 300 )]"
+    fe_run "$HOOK" "$FEPATH" "$FET/fe8n.jsonl" fe8n Write '{"file_path":"'"$FEREPO"'/src/new.c","content":"int n( void ) { return 0; }\n"}'
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && ok "FE8 Write of a new file: silent (no existing definition to check)" \
+        || no "FE8 Write of a new file: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE9 — plain first. A wrapper that sleeps on --dry-run (the preview) and runs the real binary for everything else.
+    mkdir -p "$FET/slowpreview"
+    printf '#!/bin/sh\ncase " $* " in *" --dry-run "*) echo $$ >>"$FE_STUB_PIDS"; exec sleep 30 ;; esac\nexec "%s" "$@"\n' "$FEREAL" \
+        >"$FET/slowpreview/ripwire"; chmod +x "$FET/slowpreview/ripwire"
+    FE_STUB_PIDS="$FET/stub9.pids"; : >"$FE_STUB_PIDS"; FEL9="$FET/fe9.jsonl"
+    FE9T0="$( fe_ms )"
+    fe_run "$HOOK" "$FET/slowpreview:$PATH" "$FEL9" fe9 Edit "$FE_SIG" RIPWIRE_FIRST_EDIT_MS=2500 FE_STUB_PIDS="$FE_STUB_PIDS"
+    FE9MS=$(( $( fe_ms ) - FE9T0 )); FECTX9="$( fe_ctx )"
+    echo "  (FE9 wall time with a 2500 ms deadline and a preview that never answers: ${FE9MS} ms)"
+    [ -s "$FE_STUB_PIDS" ] && ok "FE9 not vacuous: the preview was attempted (the --dry-run stub ran)" \
+        || no "FE9 vacuous: the --dry-run stub never ran, so the plain-first path was not exercised"
+    [ "$FERC" -eq 0 ] && printf '%s' "$FECTX9" | grep -q 'addTwo src/calc.c:1 fn: current tree vs HEAD: status=unchanged' \
+        && printf '%s' "$FECTX9" | grep -q 'useAdd src/calc.c:6' && printf '%s' "$FECTX9" | grep -q 'preview did not finish within 2500 ms' \
+        && ! printf '%s' "$FECTX9" | grep -q 'skipped: timeout' \
+        && ok "FE9 plain first: a stalled preview still delivers the plain check (symbol, caller) with the 'preview did not finish' note" \
+        || no "FE9 plain first: exit=$FERC ctx=[$( printf '%s' "$FECTX9" | head -c 400 )]"
+    [ "$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )" = "first-edit-plain/1" ] && ok "FE9 row: nudge=first-edit-plain nudged=1" \
+        || no "FE9 row: [$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )]"
+    FE9BYTES="$( printf '%s' "$FECTX9" | wc -c | tr -d ' ' )"
+    [ "$FE9MS" -lt 3900 ] && [ "$FE9BYTES" -le 1536 ] && ok "FE9 bounded: back in ${FE9MS} ms (deadline 2500, bound 3900), ${FE9BYTES} B" \
+        || no "FE9 bounded: ${FE9MS} ms, ${FE9BYTES} B"
+    FE9LEFT=""
+    for fe9p in $( tr '\n' ' ' <"$FE_STUB_PIDS" 2>/dev/null ); do
+        if kill -0 "$fe9p" 2>/dev/null; then
+            case "$( ps -o stat= -p "$fe9p" 2>/dev/null )" in Z*|'') ;; *) FE9LEFT="$FE9LEFT $fe9p" ;; esac
+        fi
+    done
+    [ -z "$FE9LEFT" ] && ok "FE9 timeout: the stalled preview is gone when the hook returns" \
+        || { no "FE9 timeout: preview pid(s)$FE9LEFT outlived the hook"; kill $FE9LEFT 2>/dev/null; }
+else
+    echo "  SKIP  FE1-FE3, FE5-FE9: no built binary at $FEREAL (they need the real --at/--edit-check/--affected)"
+fi
+
+# FE4 — a ripwire that never answers. Runs with the stub, so it needs no build.
+FEL4="$FET/fe4.jsonl"
+FE4T0="$( fe_ms )"
+FE_STUB_PIDS="$FET/stub.pids"; : >"$FE_STUB_PIDS"
+fe_run "$HOOK" "$FET/slowbin:$PATH" "$FEL4" fe4 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT_MS=400 FE_STUB_PIDS="$FE_STUB_PIDS"
+FE4T1="$( fe_ms )"; FE4MS=$(( FE4T1 - FE4T0 ))
+echo "  (FE4 wall time with a 400 ms deadline: ${FE4MS} ms)"
+[ "$FERC" -eq 0 ] && fe_ctx | grep -q 'skipped: timeout' \
+    && ok "FE4 timeout: exit 0 and the disclosed 'skipped: timeout' line" \
+    || no "FE4 timeout: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+[ "$FE4MS" -lt 1400 ] && ok "FE4 timeout: back in ${FE4MS} ms (deadline 400 ms, bound 1400 ms)" \
+    || no "FE4 timeout: took ${FE4MS} ms against a 400 ms deadline"
+[ "$( meterrowget "$FEL4" 1 nudge )" = "first-edit-timeout" ] && ok "FE4 row: nudge=first-edit-timeout" \
+    || no "FE4 row: nudge=[$( meterrowget "$FEL4" 1 nudge )]"
+# Not vacuous: the stub must have RUN (a pid recorded) for "no survivor" to mean anything. A zombie awaiting its reaper
+# answers kill -0 too, so a `Z` state counts as gone.
+FE4PIDS="$( tr '\n' ' ' <"$FE_STUB_PIDS" 2>/dev/null )"; FE4LEFT=""
+for fe4p in $FE4PIDS; do
+    if kill -0 "$fe4p" 2>/dev/null; then
+        case "$( ps -o stat= -p "$fe4p" 2>/dev/null )" in Z*|'') ;; *) FE4LEFT="$FE4LEFT $fe4p" ;; esac
+    fi
+done
+if [ -z "$FE4PIDS" ]; then
+    no "FE4 timeout: the stub never ran, so 'nothing left behind' would be vacuous"
+elif [ -z "$FE4LEFT" ]; then
+    ok "FE4 timeout: the stub it started (pid$( printf ' %s' $FE4PIDS )) is gone when the hook returns"
+else
+    no "FE4 timeout: stub pid(s)$FE4LEFT outlived the hook"
+    kill $FE4LEFT 2>/dev/null
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log
