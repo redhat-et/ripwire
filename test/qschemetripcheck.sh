@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, lane objcxx-std-qualified (on origin/main f7cfcec7a): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 348 (PLACEHOLDER above drafts #769's 344 and the RESOLVER lane's possible 346, rich 349): an
+#   ObjC++ (.mm) call written `std::X()` carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore). kCacheVersion
+#   55 and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 7cacf91040…caef25.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix
