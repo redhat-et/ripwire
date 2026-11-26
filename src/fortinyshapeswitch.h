@@ -19,8 +19,7 @@ namespace rw::tinyshape
 // reader (infra/envnumber.h) decides what "0" is.
 [[nodiscard]] inline bool tinyShapeSwitchedOff() noexcept
 {
-    const EnvNumber knob = readEnvNumber( "RIPWIRE_TINY_SHAPE" );
-    return knob.parsed && knob.value == 0;
+    return readEnvNumber( "RIPWIRE_TINY_SHAPE" ).isZero();
 }
 [[nodiscard]] inline bool tinyShapeOn() noexcept { return tinyShapeForced() || !tinyShapeSwitchedOff(); }
 // The posture this process serves, as --version discloses it (tiny=).
