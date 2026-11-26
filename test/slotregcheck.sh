@@ -157,6 +157,7 @@ kmut(){
     [ "$MUT" = 1 ] || return 0
     run km.c nocache "$@"
     RIPWIRE_FAULT_SLOTREG_ANYKEY=1 run km.w warm "$@"
+    if [ "$( cat "$TMP/km.w.rc" )" != 0 ]; then no "IM $label: the ANYKEY mutant exited $( cat "$TMP/km.w.rc" ) (a crash differs from anything: it proves nothing)"; return 0; fi
     if ! same km.w km.c; then ok "IM $label: serving a stale entry turns the identity red"; else no "IM $label: the ANYKEY mutant matched the reference: the arm cannot see a stale index"; fi
 }
 # rmut LABEL ARGS... : the EMPTYREFUSED mutant, on a record that is refused, must differ
@@ -165,6 +166,7 @@ rmut(){
     [ "$MUT" = 1 ] || return 0
     run rm.c nocache "$@"
     RIPWIRE_FAULT_SLOTREG_EMPTYREFUSED=1 run rm.w warm "$@"
+    if [ "$( cat "$TMP/rm.w.rc" )" != 0 ]; then no "RM $label: the EMPTYREFUSED mutant exited $( cat "$TMP/rm.w.rc" ) (a crash differs from anything: it proves nothing)"; return 0; fi
     if ! same rm.w rm.c; then ok "RM $label: answering a refused record as empty turns the identity red"; else no "RM $label: the EMPTYREFUSED mutant matched the reference"; fi
 }
 # invalidated LABEL INDEX TAG : the honest calls after a change rebuilt. TAG.p, the first, is never served (if it re-parsed the
