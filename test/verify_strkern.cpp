@@ -1359,13 +1359,13 @@ std::vector<std::pair<std::string, std::string>> needleCases()
     return cases;
 }
 
-// D2's random text: `n` bytes over "ab\n" (dense: matches overlap often) or over every byte value.
-std::string drawNeedleText( DeterministicRng& gen, std::size_t n, bool dense )
+// D2's random text: `n` bytes over `alphabet` — "ab\n" by default (dense: matches overlap often) — or over every byte value.
+std::string drawNeedleText( DeterministicRng& gen, std::size_t n, bool dense, std::string_view alphabet = "ab\n" )
 {
     std::string text( n, '\0' );
     for( char& c : text )
     {
-        c = dense ? "ab\n"[ gen.next() % 3u ] : char( gen.next() & 0xFF );
+        c = dense ? alphabet[ gen.next() % alphabet.size() ] : char( gen.next() & 0xFF );
     }
     return text;
 }
@@ -1562,15 +1562,7 @@ TEST_CASE( "strkern: D3 ciFindLiteral == tolower + std::string_view::find, both 
 
 // D4-D6's buffers: `n` bytes over "ab\n\r" (dense: newlines, CRLF pairs and set members are common) or over every byte value, then
 // copied to an EXACT-SIZE heap buffer (see D2), so a block loop reading one byte past the end is an ASan report.
-std::string drawLineText( DeterministicRng& gen, std::size_t n, bool dense )
-{
-    std::string text( n, '\0' );
-    for( char& c : text )
-    {
-        c = dense ? "ab\n\r"[ gen.next() % 4u ] : char( gen.next() & 0xFF );
-    }
-    return text;
-}
+std::string drawLineText( DeterministicRng& gen, std::size_t n, bool dense ) { return drawNeedleText( gen, n, dense, "ab\n\r" ); }
 
 // D4-D6's lengths: every size 0..80, either side of the 8/16/32-byte blocks and of countByte's 255-block lane bound (4080 bytes), and
 // random sizes up to 300.

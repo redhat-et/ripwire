@@ -563,6 +563,43 @@ struct NeedleEnds
     char        last  = 0;
     std::size_t span  = 0;   // the needle's length: `last` sits at start + span - 1
 };
+// The candidate-mask helpers every path shares. A mask carries kBitsPerStart bits per start position — 8 for SWAR (the high bit of
+// each byte), 4 for NEON (one nibble per byte, see neonNibbleMask), 1 for AVX2 (pmovmskb) — so one verify loop and one "drop the
+// starts already tested" serve all three.
+template<unsigned kBitsPerStart, class Mask>
+inline Mask dropStartsBelow( Mask mask, std::size_t count ) noexcept
+{
+    // clears the LOW bits ( ~( 2^s - 1 ) ) and never shifts set bits out: G1's integer sanitizer rejects an unsigned shift that loses bits
+    return mask & ~Mask( ( Mask( 1 ) << ( kBitsPerStart * count ) ) - 1 );
+}
+// The first start of `mask` (counted from at0) that `verify` accepts, lowest first, or `none`. A start's bits are cleared as a whole:
+// with a nibble per byte, `mask &= mask - 1` (the bit-per-byte idiom) would spin on the other three bits of the same byte.
+template<unsigned kBitsPerStart, class Mask, class Verify>
+inline std::size_t firstVerified( std::size_t at0, Mask mask, std::size_t none, const Verify& verify ) noexcept
+{
+    constexpr Mask kStartBits = Mask( ( Mask( 1 ) << kBitsPerStart ) - 1 );
+    while( mask != 0 )
+    {
+        const int         lowBit = std::countr_zero( mask );
+        const std::size_t at     = at0 + std::size_t( lowBit ) / kBitsPerStart;
+        if( verify( at ) )
+        {
+            return at;
+        }
+        mask &= ~Mask( kStartBits << ( unsigned( lowBit ) / kBitsPerStart * kBitsPerStart ) );
+    }
+    return none;
+}
+// SWAR: the eight starts at0..at0+7, one exact high bit per start whose first and last bytes both match (the masks are exact).
+template<class Fold>
+inline std::uint64_t swarEndByteCandidates( const char* p, std::size_t at0, std::size_t span, std::uint64_t first8, std::uint64_t last8 ) noexcept
+{
+    std::uint64_t a = 0, b = 0;
+    std::memcpy( &a, p + at0, 8 );
+    std::memcpy( &b, p + at0 + span - 1, 8 );
+    return swarZeroByteMask( Fold::swar8( a ) ^ first8 ) & swarZeroByteMask( Fold::swar8( b ) ^ last8 );
+}
+
 template<class Fold = ExactBytes, class Verify>
 inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
 {
@@ -571,52 +608,25 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
     {
         return n;
     }
-    constexpr std::uint64_t kOnes = 0x0101010101010101ull;
-    const std::uint64_t     n0    = kOnes * static_cast<unsigned char>( first );
-    const std::uint64_t     nl    = kOnes * static_cast<unsigned char>( last );
-    std::size_t             k     = 0;
-    while( k + span + 7 <= n )                 // eight starts k..k+7, each with the whole needle in range
+    constexpr std::uint64_t kOnes  = 0x0101010101010101ull;
+    const std::uint64_t     first8 = kOnes * static_cast<unsigned char>( first );
+    const std::uint64_t     last8  = kOnes * static_cast<unsigned char>( last );
+    const std::size_t       starts = n - span + 1;
+    std::size_t             k      = 0;
+    for( ; k + 8 <= starts; k += 8 )           // eight starts k..k+7, each with the whole needle in range
     {
-        std::uint64_t a = 0, b = 0;
-        std::memcpy( &a, p + k, 8 );
-        std::memcpy( &b, p + k + span - 1, 8 );
-        a = Fold::swar8( a );
-        b = Fold::swar8( b );
-        // both masks are exact, so their AND marks exactly the starts where the first and last bytes agree
-        std::uint64_t mask = swarZeroByteMask( a ^ n0 ) & swarZeroByteMask( b ^ nl );
-        while( mask != 0 )
+        const std::size_t at = firstVerified<8>( k, swarEndByteCandidates<Fold>( p, k, span, first8, last8 ), n, verify );
+        if( at != n )
         {
-            const std::size_t at = k + ( std::size_t( std::countr_zero( mask ) ) >> 3 );
-            if( verify( at ) )
-            {
-                return at;
-            }
-            mask &= mask - 1;
+            return at;
         }
-        k += 8;
     }
-    const std::size_t starts = n - span + 1;
-    if( k < starts && starts >= 8 )            // the last 1..7 starts: one more word ending at the last start, its already-tested
-    {                                          // starts (below k) masked off — no byte loop once there are eight starts. The mask
-                                               // clears the LOW bits ( ~( 2^s - 1 ) ), never shifts set bits out: G1's integer
-                                               // sanitizer rejects an unsigned shift that loses bits
+    if( k < starts && starts >= 8 )            // the last 1..7 starts: one more word ending at the last start, the starts below k
+    {                                          // (tested already) dropped, so there is no byte loop once there are eight starts
         const std::size_t at0 = starts - 8;
-        std::uint64_t     a = 0, b = 0;
-        std::memcpy( &a, p + at0, 8 );
-        std::memcpy( &b, p + at0 + span - 1, 8 );
-        std::uint64_t mask = swarZeroByteMask( Fold::swar8( a ) ^ n0 ) & swarZeroByteMask( Fold::swar8( b ) ^ nl ) & ~( ( 1ull << ( 8 * ( k - at0 ) ) ) - 1 );
-        while( mask != 0 )
-        {
-            const std::size_t at = at0 + ( std::size_t( std::countr_zero( mask ) ) >> 3 );
-            if( verify( at ) )
-            {
-                return at;
-            }
-            mask &= mask - 1;
-        }
-        return n;
+        return firstVerified<8>( at0, dropStartsBelow<8>( swarEndByteCandidates<Fold>( p, at0, span, first8, last8 ), k - at0 ), n, verify );
     }
-    for( ; k + span <= n; ++k )
+    for( ; k < starts; ++k )
     {
         if( Fold::one( p[ k ] ) == first && Fold::one( p[ k + span - 1 ] ) == last && verify( k ) )
         {
@@ -626,141 +636,107 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
     return n;
 }
 
-template<class Fold = ExactBytes, class Verify>
-inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
-{
-    const auto [ first, last, span ] = ends;
-    if( span == 0 || span > n )
-    {
-        return n;
-    }
-    std::size_t k = 0;
+// The vector block, one struct per ISA with the same members, so findByEndBytesBlocks below is ONE loop for NEON and AVX2.
 #if defined( __ARM_NEON )
-    const uint8x16_t s0 = vdupq_n_u8( static_cast<std::uint8_t>( first ) );
-    const uint8x16_t sl = vdupq_n_u8( static_cast<std::uint8_t>( last ) );
-    const auto block = [ & ]( std::size_t at0 ) noexcept   // the candidates of the sixteen starts at0..at0+15
-    {
-        const uint8x16_t v0 = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + at0 ) ) );
-        const uint8x16_t vl = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + at0 + span - 1 ) ) );
-        return vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( vl, sl ) );
-    };
-    const auto verifyEach = [ & ]( std::size_t at0, std::uint64_t mask ) noexcept
-    {
-        while( mask != 0 )
-        {
-            // one NIBBLE per input byte, so the lowest set bit sits at 4 * byteIndex and clearing the
-            // candidate means clearing its whole nibble — `mask &= mask - 1` (the bit-per-byte idiom) would
-            // spin on the other three bits of the same byte.
-            const int         lowBit = std::countr_zero( mask );
-            const std::size_t at     = at0 + ( std::size_t( lowBit ) >> 2 );
-            if( verify( at ) )
-            {
-                return at;
-            }
-            mask &= ~( 0xFull << ( lowBit & ~3 ) );
-        }
-        return n;
-    };
-    // Four blocks per test: sixty-four starts, one OR-reduced mask, so a stretch with no candidate costs one branch per 64 B (the
-    // one-block loop below measured 0.6x libc's memchr-led std find on a rare first byte; this one is its equal or better).
-    while( k + span + 63 <= n )
-    {
-        const uint8x16_t c0 = block( k ), c1 = block( k + 16 ), c2 = block( k + 32 ), c3 = block( k + 48 );
-        if( neonNibbleMask( vorrq_u8( vorrq_u8( c0, c1 ), vorrq_u8( c2, c3 ) ) ) != 0 )
-        {
-            const uint8x16_t cs[ 4 ] = { c0, c1, c2, c3 };
-            for( std::size_t b = 0; b < 4; ++b )
-            {
-                const std::size_t at = verifyEach( k + 16 * b, neonNibbleMask( cs[ b ] ) );
-                if( at != n )
-                {
-                    return at;
-                }
-            }
-        }
-        k += 64;
-    }
-    while( k + span + 15 <= n )                // sixteen starts, each with the whole needle in range
-    {
-        const std::size_t at = verifyEach( k, neonNibbleMask( block( k ) ) );
-        if( at != n )
-        {
-            return at;
-        }
-        k += 16;
-    }
-    const std::size_t starts = n - span + 1;
-    if( starts >= 16 )                         // the last 0..15 starts: one block ending at the last start, the starts below k (tested
-    {                                          // already) masked off, so a haystack of sixteen starts or more never reaches the scalar tail
-        if( k == starts )
-        {
-            return n;
-        }
-        const std::size_t at0 = starts - 16;
-        return verifyEach( at0, neonNibbleMask( block( at0 ) ) & ~( ( 1ull << ( 4 * ( k - at0 ) ) ) - 1 ) );
-    }
+struct EndByteBlock
+{
+    using Vec                                 = uint8x16_t;
+    using Mask                                = std::uint64_t;
+    static constexpr std::size_t kStarts      = 16;
+    static constexpr unsigned    kBitsPerStart = 4;   // neonNibbleMask: one nibble per byte
+    static Vec  splat( char c ) noexcept { return vdupq_n_u8( static_cast<std::uint8_t>( c ) ); }
+    template<class Fold>
+    static Vec load( const char* q ) noexcept { return Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( q ) ) ); }
+    static Vec  bothEqual( Vec a, Vec s, Vec b, Vec t ) noexcept { return vandq_u8( vceqq_u8( a, s ), vceqq_u8( b, t ) ); }
+    static Vec  either( Vec a, Vec b ) noexcept { return vorrq_u8( a, b ); }
+    static Mask mask( Vec v ) noexcept { return neonNibbleMask( v ); }
+};
 #elif defined( __AVX2__ )
-    const __m256i s0    = _mm256_set1_epi8( first );
-    const __m256i sl    = _mm256_set1_epi8( last );
-    const auto    block = [ & ]( std::size_t at0 ) noexcept   // the candidates of the thirty-two starts at0..at0+31
+struct EndByteBlock
+{
+    using Vec                                 = __m256i;
+    using Mask                                = std::uint32_t;
+    static constexpr std::size_t kStarts      = 32;
+    static constexpr unsigned    kBitsPerStart = 1;   // pmovmskb: one bit per byte
+    static Vec  splat( char c ) noexcept { return _mm256_set1_epi8( c ); }
+    template<class Fold>
+    static Vec load( const char* q ) noexcept { return Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( q ) ) ); }
+    static Vec  bothEqual( Vec a, Vec s, Vec b, Vec t ) noexcept { return _mm256_and_si256( _mm256_cmpeq_epi8( a, s ), _mm256_cmpeq_epi8( b, t ) ); }
+    static Vec  either( Vec a, Vec b ) noexcept { return _mm256_or_si256( a, b ); }
+    static Mask mask( Vec v ) noexcept { return Mask( _mm256_movemask_epi8( v ) ); }
+};
+#endif
+
+#if defined( __ARM_NEON ) || defined( __AVX2__ )
+// The vector end-byte filter for a haystack of at least one block of starts. Sixty-four starts per test (four NEON blocks, two AVX2),
+// one OR-reduced mask, so a stretch with no candidate costs one branch per 64 B (the one-block loop measured 0.6x libc's memchr-led
+// std find on a rare first byte); a test that sees a candidate verifies its blocks' masks in order. The last 1..kStarts-1 starts are
+// one block ending at the last start, with the starts already tested dropped: no scalar tail.
+template<class Fold, class Verify>
+inline std::size_t findByEndBytesBlocks( const char* p, std::size_t n, NeedleEnds ends, const Verify& verify ) noexcept
+{
+    using B                      = EndByteBlock;
+    constexpr std::size_t kGroup = 64, kBlocksPerGroup = kGroup / B::kStarts;
+    const std::size_t     span = ends.span, starts = n - span + 1;
+    const typename B::Vec first = B::splat( ends.first ), last = B::splat( ends.last );
+    const auto candidates = [ & ]( std::size_t at0 ) noexcept { return B::bothEqual( B::template load<Fold>( p + at0 ), first, B::template load<Fold>( p + at0 + span - 1 ), last ); };
+    const auto firstInBlocks = [ & ]( std::size_t at0, std::size_t blocks ) noexcept
     {
-        const __m256i v0 = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + at0 ) ) );
-        const __m256i vl = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + at0 + span - 1 ) ) );
-        return _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( vl, sl ) );
-    };
-    const auto verifyEach = [ & ]( std::size_t at0, std::uint32_t mask ) noexcept
-    {
-        while( mask != 0 )
+        for( std::size_t b = 0; b < blocks; ++b )
         {
-            const std::size_t at = at0 + std::size_t( std::countr_zero( mask ) );
-            if( verify( at ) )
-            {
-                return at;
-            }
-            mask &= mask - 1;
-        }
-        return n;
-    };
-    // Two blocks per test (sixty-four starts), the NEON loop's shape: one OR-reduced test per 64 B.
-    while( k + span + 63 <= n )
-    {
-        const __m256i c0 = block( k ), c1 = block( k + 32 );
-        if( !_mm256_testz_si256( _mm256_or_si256( c0, c1 ), _mm256_or_si256( c0, c1 ) ) )
-        {
-            std::size_t at = verifyEach( k, std::uint32_t( _mm256_movemask_epi8( c0 ) ) );
-            if( at == n )
-            {
-                at = verifyEach( k + 32, std::uint32_t( _mm256_movemask_epi8( c1 ) ) );
-            }
+            const std::size_t at = firstVerified<B::kBitsPerStart>( at0 + b * B::kStarts, B::mask( candidates( at0 + b * B::kStarts ) ), n, verify );
             if( at != n )
             {
                 return at;
             }
         }
-        k += 64;
-    }
-    while( k + span + 31 <= n )                // thirty-two starts, each with the whole needle in range
+        return n;
+    };
+    std::size_t k = 0;
+    for( ; k + kGroup <= starts; k += kGroup )
     {
-        const std::size_t at = verifyEach( k, std::uint32_t( _mm256_movemask_epi8( block( k ) ) ) );
-        if( at != n )
+        typename B::Vec group[ kBlocksPerGroup ];
+        typename B::Vec any = group[ 0 ] = candidates( k );
+        for( std::size_t b = 1; b < kBlocksPerGroup; ++b )
         {
-            return at;
+            any = B::either( any, group[ b ] = candidates( k + b * B::kStarts ) );
         }
-        k += 32;
+        for( std::size_t b = 0; B::mask( any ) != 0 && b < kBlocksPerGroup; ++b )
+        {
+            const std::size_t at = firstVerified<B::kBitsPerStart>( k + b * B::kStarts, B::mask( group[ b ] ), n, verify );
+            if( at != n )
+            {
+                return at;
+            }
+        }
     }
-    const std::size_t starts = n - span + 1;
-    if( starts >= 32 )                         // the last 0..31 starts: one block ending at the last start, as on NEON
+    const std::size_t wholeBlocks = ( starts - k ) / B::kStarts;
+    if( const std::size_t at = firstInBlocks( k, wholeBlocks ); at != n )
     {
-        if( k == starts )
-        {
-            return n;
-        }
-        const std::size_t at0 = starts - 32;
-        return verifyEach( at0, std::uint32_t( _mm256_movemask_epi8( block( at0 ) ) ) & ~( ( 1u << ( k - at0 ) ) - 1 ) );
+        return at;
+    }
+    k += wholeBlocks * B::kStarts;
+    const std::size_t at0 = starts - B::kStarts;
+    return k == starts ? n : firstVerified<B::kBitsPerStart>( at0, dropStartsBelow<B::kBitsPerStart>( B::mask( candidates( at0 ) ), k - at0 ), n, verify );
+}
+#endif
+
+// Muła's end-byte filter on the compiled path: the vector blocks once there is a block of start positions, the SWAR loop below that
+// (and on a target with neither NEON nor AVX2).
+template<class Fold = ExactBytes, class Verify>
+inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
+{
+    if( ends.span == 0 || ends.span > n )
+    {
+        return n;
+    }
+#if defined( __ARM_NEON ) || defined( __AVX2__ )
+    if( n - ends.span + 1 >= EndByteBlock::kStarts )
+    {
+        return findByEndBytesBlocks<Fold>( p, n, ends, verify );
     }
 #endif
-    const std::size_t tail = findByEndBytes_scalar<Fold>( p + k, n - k, ends, [ &verify, k ]( std::size_t at ) { return verify( k + at ); } );
-    return tail == n - k ? n : k + tail;
+    return findByEndBytes_scalar<Fold>( p, n, ends, verify );
 }
 
 // Which path a dispatching kernel runs: the compiled vector path (NEON or AVX2; the scalar loop on a target with neither), or the scalar
@@ -1179,24 +1155,15 @@ inline std::size_t appendCleanRun( const char* d, std::size_t i, std::size_t n, 
 template<class Fn>
 inline void forEachByte_scalar( const char* p, std::size_t n, char b, Fn&& fn )
 {
-    constexpr std::uint64_t kOnes = 0x0101010101010101ull;
-    const std::uint64_t     splat = kOnes * static_cast<unsigned char>( b );
-    std::size_t             k     = 0;
-    for( ; k + 8 <= n; k += 8 )
+    for( std::size_t k = 0; k < n; ++k )   // a find walk on findByte_scalar: one SWAR spelling of "where is b" for both twins
     {
-        std::uint64_t x = 0;
-        std::memcpy( &x, p + k, 8 );
-        for( std::uint64_t m = swarZeroByteMask( x ^ splat ); m != 0; m &= m - 1 )   // one exact bit per match: the bit idiom is right here
+        const std::size_t at = findByte_scalar( p + k, n - k, b );
+        if( at == n - k )
         {
-            fn( k + ( std::size_t( std::countr_zero( m ) ) >> 3 ) );
+            return;
         }
-    }
-    for( ; k < n; ++k )
-    {
-        if( p[ k ] == b )
-        {
-            fn( k );
-        }
+        k += at;
+        fn( k );
     }
 }
 
@@ -1298,6 +1265,13 @@ inline void forEachByteOn( KernelPath path, const char* p, std::size_t n, char b
         count += p[ k ] == b ? 1u : 0u;
     }
     return count;
+}
+
+// The 1-based line of byte offset `at` in `text`: 1 + the newlines before it (an offset past the end counts them all), as a line
+// number, std::uint32_t, is stored everywhere here. The one spelling of `1 + countByte( text.substr( 0, at ), '\n' )`.
+[[nodiscard]] inline std::uint32_t lineNumberAt( std::string_view text, std::size_t at, KernelPath path = KernelPath::Vector ) noexcept
+{
+    return 1u + std::uint32_t( countByte( text.substr( 0, at ), '\n', path ) );
 }
 
 // Whether the table ends with a start AT text.size() when the text ends in '\n' — the start of an empty last line. Both house
