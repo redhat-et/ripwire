@@ -314,7 +314,7 @@ done
 C1="$( mcp_text "$( call connect '{"path":"'"$ROOT"'","symbols":["main"]}' )" )"
 case "$C1" in
     *"connect needs 2..16 symbols (got 1)"*) no "M8: connect symbols:[\"main\"] still serves the bespoke fourth dialect";;
-    *"2..16 symbol names"*"e.g. symbols="*)   ok "M8: connect symbols:[\"main\"] gets the domain clause + a runnable example";;
+    *"2..16 symbols to relate"*"e.g. symbols="*)   ok "M8: connect symbols:[\"main\"] gets the domain clause + a runnable example";;
     *) no "M8: unexpected connect 1-name refusal: $C1";;
 esac
 # and ABSENT must still be the M7 missing-field sentence — the two halves stay distinguishable.

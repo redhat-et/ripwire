@@ -78,7 +78,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
       FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
     { "find_referencing_symbols","symbol",    "a symbol name (the final name segment; add scope to disambiguate) or @FILE:LINE (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
-    { "grep",                    "pattern",   "a literal string to search for",                                    "pattern=\"parseArgs\"" },
+    { "grep",                    "pattern",   "the literal text to search for",                                    "pattern=\"parseArgs\"" },
     // R-H span tiers: the MCP spelling of the CLI's --grep-in. Optional, and the hatch has to exist on THIS
     // surface too — an MCP-only agent that sees suppressed_comment= has no CLI to re-ask from.
     { "grep",                    "in",        "which span tier to serve: code (default) or any",                    "in=\"any\"", FieldRule::Optional },
@@ -100,7 +100,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "rank_by",                 "rank_by",   "OPTIONAL — pagerank|authority|hub|rrf|churn|churn-decay (default pagerank when omitted; churn/churn-decay refuse)", "rank_by=\"authority\"",
       FieldRule::Optional },
     { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result (@FILE:LINE line-seeds resolve too)",   "handle=\"src/cli.h::rw::parseArgs\"" },
-    { "batch",                   "queries",   "an array of {verb, ...args} sub-query objects",                      "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
+    { "batch",                   "queries",   "the sub-queries, answered in order: {verb, ...args} objects",         "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
 
     // ── flagship-reflex verbs ──
     { "exemplar",                "kind",      "a kind token (fn|method|class|struct|iface|var)",                    "kind=\"fn\"",  FieldRule::AnyOf },
@@ -114,7 +114,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
       FieldRule::Required },
     { "path_between",            "from",      "the SOURCE symbol name (or @FILE:LINE)",                             "from=\"main\"" },
     { "path_between",            "to",        "the DESTINATION symbol name (or @FILE:LINE)",                        "to=\"parseArgs\"" },
-    { "connect",                 "symbols",   "an array (or comma-string) of 2..16 symbol names (@FILE:LINE entries resolve)", "symbols=[\"main\",\"parseArgs\"]" },
+    { "connect",                 "symbols",   "the 2..16 symbols to relate, array or comma-string (@FILE:LINE entries resolve)", "symbols=[\"main\",\"parseArgs\"]" },
     { "explore",                 "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "pack_task",               "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "from_trace",              "trace",     "the raw trace TEXT, pasted (not paraphrased into a query)",           "trace=\"Traceback (most recent call last): ...\"" },
@@ -370,47 +370,47 @@ struct McpValueSpec
 // keeps its full sentence: brevity is charged where the repetition is, not everywhere.
 inline constexpr McpValueSpec kMcpValueFields[] = {
     // ── numeric ──
-    { "limit",         "a positive integer (omit for the default window)",                            "limit=40", "integer" },
-    { "offset",        "a non-negative integer (omit to start at row 1)",                             "offset=0", "integer" },
-    { "radius",        "an integer in 1..12 (omit it for the default 6)",                             "radius=6", "integer" },
-    { "partition",     "an integer in 2..16 (omit it for one un-split bundle; 1 IS the un-split one)", "partition=4", "integer" },
-    { "top_k",         "an integer in 1..1000 (omit it for the verb's own default)",                  "top_k=4", "integer" },
-    { "budget_tokens", "a positive integer token budget (omit it for the verb's own default)",        "budget_tokens=6000", "integer" },
-    { "start_line",    "a positive integer, 1-based and body-relative (omit it to start at line 1)",  "start_line=1", "integer" },
-    { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
-    { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
+    { "limit",         "rows per page, >=1 (omit: the default window)",                              "limit=40", "integer" },
+    { "offset",        "rows to skip: a page's next_offset (omit: 0)",                               "offset=0", "integer" },
+    { "radius",        "undirected hop bound, 1..12 (omit: 6)",                                      "radius=6", "integer" },
+    { "partition",     "agents to fan out to, 2..16 (omit, or 1: one un-split bundle)",              "partition=4", "integer" },
+    { "top_k",         "how many docs to return, 1..1000 (omit: the verb's default)",               "top_k=4", "integer" },
+    { "budget_tokens", "token budget for the answer, >=1 (omit: the verb's default)",               "budget_tokens=6000", "integer" },
+    { "start_line",    "first line to return, 1-based within the body (omit: line 1)",               "start_line=1", "integer" },
+    { "end_line",      "last line to return, inclusive, 1-based within the body (omit: the end)",    "end_line=40", "integer" },
+    { "depth",         "the flow's hop bound, 1..32 (omit: the disclosed default 8; needs flow)", "depth=4", "integer" },
     // ── string ──
-    { "path",          "a STRING repo directory",                                                     "path=\".\"" },
-    { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },
-    { "diff",          "a STRING of unified-diff TEXT (omit it to use the working-tree git diff)",     "diff=\"diff --git a/x b/x\"" },
-    { "symbol",        "a STRING symbol name (the final name segment; add scope to disambiguate)",     "symbol=\"parseArgs\"" },
-    { "kind",          "a STRING (a name-substring filter, or exemplar's kind token)",                 "kind=\"fn\"" },
-    { "pattern",       "a STRING literal to search for",                                              "pattern=\"parseArgs\"" },
-    { "task",          "a STRING: the task in plain words",                                           "task=\"add a since filter\"" },
-    { "type",          "a STRING interface or base-type name (file:name disambiguates)",               "type=\"Shape\"" },
-    { "file",          "a STRING file path (a path SUFFIX is enough)",                                "file=\"src/main.cpp\"" },
-    { "handle",        "a STRING handle taken from a read verb's result",                             "handle=\"src/cli.h::rw::parseArgs\"" },
-    { "from",          "a STRING: the SOURCE symbol name",                                            "from=\"main\"" },
-    { "to",            "a STRING: the DESTINATION symbol name",                                       "to=\"parseArgs\"" },
-    { "trace",         "a STRING: the raw trace TEXT, pasted",                                        "trace=\"Traceback (most recent call last): ...\"" },
-    { "new_body",      "a STRING: the complete, well-formed replacement definition",                  "new_body=\"int f() { return 0; }\"" },
-    { "text",          "a STRING: the text to insert",                                                "text=\"// note\\n\"" },
-    { "verb",          "a STRING naming one read sub-verb",                                           "verb=\"grep\"" },
+    { "path",          "absolute root (default: launch root)",                                       "path=\"/abs/repo/root\"" },
+    { "files",         "changed files, comma-separated in one string (not an array)",                "files=\"src/a.cpp,src/b.h\"" },
+    { "diff",          "unified-diff TEXT to judge (omit: the working-tree git diff)",               "diff=\"diff --git a/x b/x\"" },
+    { "symbol",        "the symbol's final name segment; add scope to disambiguate (Parser::parse)",  "symbol=\"parseArgs\"" },
+    { "kind",          "name-substring filter (exemplar: a kind token)",                              "kind=\"fn\"" },
+    { "pattern",       "the literal text to search for",                                              "pattern=\"parseArgs\"" },
+    { "task",          "the task in plain words",                                                     "task=\"add a since filter\"" },
+    { "type",          "interface or base-type name (file:name disambiguates)",                       "type=\"Shape\"" },
+    { "file",          "the file to narrow to (a path SUFFIX is enough)",                             "file=\"src/main.cpp\"" },
+    { "handle",        "handle taken from a read verb's result",                                     "handle=\"src/cli.h::rw::parseArgs\"" },
+    { "from",          "the SOURCE symbol name",                                                      "from=\"main\"" },
+    { "to",            "the DESTINATION symbol name",                                                 "to=\"parseArgs\"" },
+    { "trace",         "the raw trace TEXT, pasted",                                                  "trace=\"Traceback (most recent call last): ...\"" },
+    { "new_body",      "the complete, well-formed replacement definition",                            "new_body=\"int f() { return 0; }\"" },
+    { "text",          "the text to insert",                                                          "text=\"// note\\n\"" },
+    { "verb",          "the one read sub-verb to run",                                                "verb=\"grep\"" },
     // R-H span tiers + wave-3 verifier P6-2: a CLOSED value set, so the sentence names the set. The CLI
     // twin refuses an unknown --grep-in= value and says why (a typo would read as "code" and quietly
     // suppress the very rows the caller asked to see); both MCP dialects now refuse through this row.
-    { "in",            "a STRING span tier: code (the default) or any",                               "in=\"any\"" },
+    { "in",            "span tier: code (the default) or any",                                        "in=\"any\"" },
     // lane/tc-sliceat: slice's own knobs — var picks the variable (omit it for the inventory, or to let an
     // @FILE:LINE seed line pre-pick), flow is a CLOSED direction set so the sentence names it.
-    { "var",           "a STRING variable name inside the resolved definition (omit it to list the sliceable locals)", "var=\"out\"" },
-    { "flow",          "a STRING flow direction: back, fwd or both (omit it for the flat per-line rows)", "flow=\"back\"" },
+    { "var",           "variable name inside the resolved definition (omit: list the sliceable locals)", "var=\"out\"" },
+    { "flow",          "flow direction: back, fwd or both (omit: the flat per-line rows)", "flow=\"back\"" },
     // lean-answers lane: whereis's CLOSED listing set, the CLI --whereis-listing= values verbatim.
-    { "listing",       "a STRING: defs (refs counted), refs or all; default: more defs listed, else the shorter page", "listing=\"all\"" },
+    { "listing",       "rows to list: defs (refs counted), refs or all; default: more defs listed, else the shorter page", "listing=\"all\"" },
     // lane/t10-mcp-coverage: rank_by's own CLOSED value set, the CLI --rank-by= spelling verbatim (cli.h's
     // parse arm). churn/churn-decay are valid CLI values that this row still names — the closed-set check
     // must accept them so the refusal can then say WHY they are unsupported HERE (a named gap, not an
     // unknown-value error about a value the CLI itself accepts).
-    { "rank_by",       "a STRING ranking signal: pagerank (default), authority, hub, rrf, churn or churn-decay — "
+    { "rank_by",       "ranking signal: pagerank (default), authority, hub, rrf, churn or churn-decay — "
                         "churn/churn-decay are refused on this verb (git-mining ranking, CLI-only for now)", "rank_by=\"authority\"" },
     // §5a decision 3: a CLOSED set, so the sentence names it — an unknown value is refused, never read as
     // the default (the rule the `in` row above records, for the same reason: a typo must not silently
@@ -424,7 +424,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // DESCRIPTIONS: mcpmanifestcheck's own registered rule is that the ceiling moves for a declared
     // argument's obliged description and never for prose, and prose there would cost ~680 B against 159 B
     // of headroom. The refusal example names the NON-default value, which is the one a caller has to type.
-    { "legend",        "a STRING legend posture: compact (the default) or full (restores the full legend)", "legend=\"full\"" },
+    { "legend",        "legend posture: compact (the default) or full (restores the full legend)", "legend=\"full\"" },
     // L2 (round-1 lever B1): `for`'s <lego>/<compose> sections collapse to a counted stub by default (the
     // CLI --sections= twin, cli.h validateSectionsModifier) — a comma-separated, order-insensitive CLOSED
     // set (each name at most once), the same rule the `in`/`legend` rows above state for the same reason: a
@@ -432,21 +432,21 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // above): `example` below feeds only the refusal sentence (badValueRefusal), never tools/list, but
     // `needs` rides every session's tools/list payload and this tool's schema was measured at the
     // mcpmanifestcheck per-session ceiling before this field existed.
-    { "sections",      "lego, compose, or both", "sections=\"lego,compose\"" },
+    { "sections",      "sections to restore: lego, compose, or both", "sections=\"lego,compose\"" },
     // MR1 (owner ruling 168): `for`'s row form, the CLI --rows= twin — a CLOSED set. Terse: it rides tools/list.
-    { "rows",          "lines (the default) or elements", "rows=\"elements\"" },
+    { "rows",          "row form: lines (the default) or elements", "rows=\"elements\"" },
     // ── boolean ──
     // F-R1-07 (2026-09-10 audit): the CLI's own answer to a route MIS-FIRE is to re-run with --no-route,
     // and the MCP surface had no equivalent — an agent that reads route= and disagrees was told WHICH ranker
     // answered and given no way to ask for the other one. Advertised as a real boolean, not a string, so a
     // quoted "true" refuses instead of being guessed at (mcpBoolArg).
-    { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
+    { "no_route",      "true forces plain subtoken+body BM25 (omit: the default router)", "no_route=true", "boolean" },
     // RT2 MCP parity: the CLI --no-verb-route twin, the opt-out a routed `for` answer's next= names. Terse: it rides tools/list.
-    { "no_verb_route", "a BOOLEAN: true never routes to a verb", "no_verb_route=true", "boolean" },
+    { "no_verb_route", "true never routes to a verb", "no_verb_route=true", "boolean" },
     // whereis-lean (review C1): the CLI --whereis-full-text twin, the replay a <t_cut next=> names. Terse: it rides tools/list.
-    { "full_text",     "a BOOLEAN: true prints every t= line whole", "full_text=true", "boolean" },
+    { "full_text",     "true prints every t= line whole", "full_text=true", "boolean" },
     // lane lean2b: the CLI --show-stale twin, the replay quality_delta's stale_next names. Terse: it rides tools/list.
-    { "show_stale",    "a BOOLEAN: true = the full stale list", "show_stale=true", "boolean" },
+    { "show_stale",    "true lists every stale ack", "show_stale=true", "boolean" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -463,9 +463,9 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "name",          "a STRING naming one of the advertised tools (call tools/list for them)",      "name=\"analyze\"" },
     { "arguments",     "a JSON OBJECT of the tool's arguments — not a string of JSON, which drops every argument in it", "arguments={\"path\":\".\"}", "object" },
     // ── array ──
-    { "symbols",       "an ARRAY (or comma-string) of 2..16 symbol names",                            "symbols=[\"main\",\"parseArgs\"]", "array", "string" },
-    { "queries",       "an ARRAY of {verb, ...args} sub-query objects",                               "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]", "array", "object" },
-    { "paths",         "an ARRAY of 1..16 repo roots",                                                "paths=[\"svc\",\"web\"]", "array", "string" },
+    { "symbols",       "the 2..16 symbols to relate (array or comma-string)",                         "symbols=[\"main\",\"parseArgs\"]", "array", "string" },
+    { "queries",       "the sub-queries, answered in order: {verb, ...args} objects",                 "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]", "array", "object" },
+    { "paths",         "1..16 absolute roots, one workspace",                                        "paths=[\"svc\",\"web\"]", "array", "string" },
 };
 
 // W3FIX NIT: the got-ECHO is CAPPED. The echo exists so a caller can see which of their values was rejected,
@@ -673,7 +673,13 @@ inline std::string badValueRefusal( std::string_view field, std::string_view got
     {
         if( field == row.field )
         {
-            msg += std::string( " — needs " ) + row.needs;
+            // audit 2026-11-26 item 7: the schema description says what the field MEANS (its type is the schema's
+            // own "type" key), so the refusal, which a wrong-SHAPED value reaches, names the type itself
+            const std::string_view needs = row.needs;
+            const std::string_view type  = row.jsonType;
+            const bool typed = needs.starts_with( "a " ) || needs.starts_with( "an " );
+            const char* article = type == "integer" || type == "array" ? "an " : "a ";
+            msg += std::string( " — needs " ) + ( typed ? std::string() : article + std::string( type == "object" ? "JSON object" : type ) + ": " ) + row.needs;
             msg += " — got '" + echo + "', e.g. " + row.example;
             return msg;
         }

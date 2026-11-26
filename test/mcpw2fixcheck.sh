@@ -213,7 +213,7 @@ echo
 echo "=== N6 — connect {} and batch {} speak the M7 verb+field TABLE, not bespoke sentences ==="
 C6="$( mcp_text "$( call connect '{"path":"'"$ROOT"'"}' )" )"
 case "$C6" in
-    __ERROR__:"missing required field: symbols"*"2..16 symbol names"*"e.g. symbols="*) ok "N6: connect {} → the table's sentence, specifics kept (2..16 names)";;
+    __ERROR__:"missing required field: symbols"*"2..16 symbols to relate"*"e.g. symbols="*) ok "N6: connect {} → the table's sentence, specifics kept (2..16 names)";;
     *) no "N6: connect {} still bespoke: $C6";;
 esac
 # W3FIX M8 split this arm's two probes apart, deliberately, and the assertion follows. N6 asserted that an
@@ -227,7 +227,7 @@ for probe in '{"path":"'"$ROOT"'"}|missing required field: queries' \
     args="${probe%%|*}"; prefix="${probe#*|}"
     B6="$( mcp_text "$( call batch "$args" )" )"
     case "$B6" in
-        __ERROR__:"$prefix"*"{verb, ...args} sub-query objects"*"e.g. queries="*) ok "N6: batch $args → the table's sentence, specifics kept ({verb, ...} objects)";;
+        __ERROR__:"$prefix"*"{verb, ...args} objects"*"e.g. queries="*) ok "N6: batch $args → the table's sentence, specifics kept ({verb, ...} objects)";;
         *) no "N6: batch $args still bespoke: $B6";;
     esac
 done
