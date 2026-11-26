@@ -33,7 +33,8 @@ for grammar in $GRAMMARS; do
         *) echo "run.sh: '$grammar' has no add_ripwire_fuzzer line in CMakeLists.txt (known: $ALL_GRAMMARS)" >&2; exit 2 ;;
     esac
 done
-[ -n "${GRAMMARS// /}" ] || { echo "run.sh: empty grammar list" >&2; exit 2; }
+# Count words, not characters: a list of only tabs or newlines must not pass as a sweep of nothing.
+[ -n "$( printf '%s' $GRAMMARS )" ] || { echo "run.sh: empty grammar list" >&2; exit 2; }
 
 TMP="$( mktemp -d )"
 FAILED=0
