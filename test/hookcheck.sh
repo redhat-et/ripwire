@@ -1985,15 +1985,16 @@ echo "-- live-shape rows --"; [ -f "$LV2" ] && cat "$LV2"
     || no "V2d live-shape: Edit row = [$( meterrowget "$LV2" 4 class )/$( meterrowget "$LV2" 4 family )] target=[$( meterrowget "$LV2" 4 target )] nudged=[$( meterrowget "$LV2" 4 nudged )] nudge=[$( meterrowget "$LV2" 4 nudge )]"
 V2E_BAD=""
 for i in 1 2 3 4; do
-    [ "$( meterrowget "$LV2" "$i" v )" = "3" ] || V2E_BAD="$V2E_BAD v[$i]=$( meterrowget "$LV2" "$i" v )"
+    # v4 since §FACTORIAL (2026-11-26) added `primer` and `first_edit`; every v3 field is still on the row.
+    [ "$( meterrowget "$LV2" "$i" v )" = "4" ] || V2E_BAD="$V2E_BAD v[$i]=$( meterrowget "$LV2" "$i" v )"
     [ "$( meterrowget "$LV2" "$i" agent )" = "claude" ] || V2E_BAD="$V2E_BAD agent[$i]=$( meterrowget "$LV2" "$i" agent )"
     [ "$( meterrowget "$LV2" "$i" session )" = "live1" ] || V2E_BAD="$V2E_BAD session[$i]=$( meterrowget "$LV2" "$i" session )"
 done
 [ "$( meterrowget "$LV2" 1 surface )" = "cli" ] && [ "$( meterrowget "$LV2" 2 surface )" = "native" ] \
     && [ "$( meterrowget "$LV2" 4 surface )" = "native" ] || V2E_BAD="$V2E_BAD surface=[$( meterrowget "$LV2" 1 surface )/$( meterrowget "$LV2" 2 surface )/$( meterrowget "$LV2" 4 surface )]"
 [ -z "$V2E_BAD" ] \
-    && ok "V2e schema v3: every row carries v=3, agent=claude, the live session id, and surface cli/native/mcp" \
-    || no "V2e schema v3:$V2E_BAD"
+    && ok "V2e schema v4: every row carries v=4, agent=claude, the live session id, and surface cli/native/mcp" \
+    || no "V2e schema v4:$V2E_BAD"
 # The other three native edit tools, and NotebookEdit's differently-named path key.
 LV2F="$TMP/v2f.jsonl"; TV2F="$TMP/tv2f"; mkdir -p "$TV2F"
 run_meter "$LV2F" "$( livejson live2 Write '{"file_path":"/x/repo/docs/new.md","content":"hi"}' )" "$TV2F" >/dev/null 2>&1
@@ -2392,9 +2393,10 @@ PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
 #   FE2  a second edit in the same session says nothing; the rows say which call was the moment
 #   FE3  an edit to a non-source file says nothing and does not spend the session's one check (FE3b)
 #   FE4  a ripwire that never answers: the disclosed "skipped: timeout" line, exit 0, well inside the deadline+1 s
-#   FE5  the control arm is silent and records the counterfactual moment (first-edit-control)
-#   FE6  OFF BY DEFAULT: unconfigured is silent (nudge=none); first_edit=1 in meter.conf turns it on; the env wins
-#        over the file (RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent)
+#   FE5  the PRIMER arm does not gate the check (§FACTORIAL): primer control + a forced-on check speaks, and the row
+#        carries primer=control first_edit=forced-on. The hashed check-off counterfactual is (17)'s FX5.
+#   FE6  with the meter OFF and no force it is #779's default-off (silent); first_edit=1 in meter.conf turns it on;
+#        the env wins over the file (RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent, first_edit=forced-off)
 #   FE7  the Codex wrapper carries the same text
 #   FE8  bounded: the context is at most 1536 B; a Write of an existing file and a Write of a new one
 #   FE9  PLAIN FIRST: a preview that never answers (a ripwire whose --dry-run sleeps) still delivers the plain check
@@ -2484,29 +2486,30 @@ if [ -x "$FEREAL" ]; then
     fe_ctx | grep -q 'addTwo' && ok "FE3b the source edit after it still gets the check (a non-source edit spends nothing)" \
         || no "FE3b the source edit after a README edit got no check: [$( printf '%s' "$FEOUT" | head -c 200 )]"
 
-    # FE5 — control arm
+    # FE5 — the primer arm does not gate the check
     FEL5="$FET/fe5.jsonl"
     fe_run "$HOOK" "$FEPATH" "$FEL5" fe5 Edit "$FE_BODY" RIPWIRE_METER_ARM=control
-    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && [ "$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 arm )" = "first-edit-control/control" ] \
-        && ok "FE5 control arm: silent, the row records the counterfactual moment (first-edit-control)" \
-        || no "FE5 control arm: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] row=[$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 arm )]"
+    FE5ROW="$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 primer )/$( meterrowget "$FEL5" 1 first_edit )"
+    [ "$FERC" -eq 0 ] && fe_ctx | grep -q 'useAdd src/calc.c:6' && [ "$FE5ROW" = "first-edit/control/forced-on" ] \
+        && ok "FE5 primer control + forced-on check: speaks; row first-edit/primer=control/first_edit=forced-on" \
+        || no "FE5 primer control + forced-on check: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] row=[$FE5ROW]"
 
     # FE6 — the default and the switch. An empty RIPWIRE_FIRST_EDIT is the unset reading (`${…:-conf}`), and the
-    # gate's RIPWIRE_HOME holds no meter.conf, so FE6a is exactly an unconfigured install.
+    # gate's RIPWIRE_HOME holds no meter.conf; RIPWIRE_METER=0 is the meter-off state, where #779's default-off holds.
     FEL6="$FET/fe6.jsonl"
-    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
-    FE6A="$FEOUT/$( meterrowget "$FEL6" 1 nudge )"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_METER=0
+    FE6A="$FEOUT/$( meterrows "$FEL6" )"
     mkdir -p "$FET/conf6"; printf 'first_edit=1\n' >"$FET/conf6/meter.conf"
     fe_run "$HOOK" "$FEPATH" "$FEL6" fe6b Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_HOME="$FET/conf6"
-    FE6B="$( fe_ctx | grep -q 'addTwo' && echo 1 || echo 0 )/$( meterrowget "$FEL6" 2 nudge )"
+    FE6B="$( fe_ctx | grep -q 'addTwo' && echo 1 || echo 0 )/$( meterrowget "$FEL6" 1 nudge )/$( meterrowget "$FEL6" 1 first_edit )"
     fe_run "$HOOK" "$FEPATH" "$FEL6" fe6c Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=0 RIPWIRE_HOME="$FET/conf6"
-    FE6C="$FEOUT/$( meterrowget "$FEL6" 3 nudge )"
-    [ "$FE6A" = "/none" ] && ok "FE6a default: an unconfigured install says nothing on the first edit (nudge=none)" \
-        || no "FE6a default: [$FE6A], want silent/none"
-    [ "$FE6B" = "1/first-edit" ] && ok "FE6b opt-in: first_edit=1 in meter.conf turns the check on" \
-        || no "FE6b opt-in: [$FE6B], want 1/first-edit"
-    [ "$FE6C" = "/none" ] && ok "FE6c env wins: RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent" \
-        || no "FE6c env wins: [$FE6C], want silent/none"
+    FE6C="$FEOUT/$( meterrowget "$FEL6" 2 nudge )/$( meterrowget "$FEL6" 2 first_edit )"
+    [ "$FE6A" = "/0" ] && ok "FE6a meter off, nothing forced: says nothing on the first edit and writes no row (#779's default-off)" \
+        || no "FE6a meter off: [$FE6A], want silent/0 rows"
+    [ "$FE6B" = "1/first-edit/forced-on" ] && ok "FE6b force: first_edit=1 in meter.conf turns the check on (first_edit=forced-on)" \
+        || no "FE6b force: [$FE6B], want 1/first-edit/forced-on"
+    [ "$FE6C" = "/none/forced-off" ] && ok "FE6c env wins: RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent (first_edit=forced-off)" \
+        || no "FE6c env wins: [$FE6C], want silent/none/forced-off"
 
     # FE7 — Codex parity through the wrapper
     fe_run "$ROOT/hooks/ripwire-codex-nudge.sh" "$FEPATH" "$FET/fe7.jsonl" fe7 Edit "$FE_BODY"
@@ -2589,6 +2592,146 @@ elif [ -z "$FE4LEFT" ]; then
 else
     no "FE4 timeout: stub pid(s)$FE4LEFT outlived the hook"
     kill $FE4LEFT 2>/dev/null
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (17) §FACTORIAL — the primer and the first-edit check are two independent arms (owner ruling, 2026-11-26)
+#
+#   FX1  over 1,000 fixed UUID-shaped session ids, the assignment (`--arm-cells`) hits all four cells
+#   FX2  each cell is within 250 ± 60 of those 1,000 (± 60 is 4.4 binomial standard deviations at p = 0.25; the ids
+#        are fixed, so this is a deterministic fact about the two hashes, not a sampled one)
+#   FX3  the PRIMER assignment is byte-identical to #779's: 32 ids whose labels were recorded from #779's hook rows
+#        (golden string below) read the same `arm`, the same `primer`, and the same `--arm-cells` primer column
+#   FX4  forces win: RIPWIRE_FIRST_EDIT=1 on a hashed-off session speaks (forced-on); =0 on a hashed-on one is silent
+#        (forced-off, nudge=none)
+#   FX5  the hash decides while the meter is active: a hashed-on session speaks (first_edit=on); a hashed-off one is
+#        silent and records the counterfactual (first-edit-control, first_edit=off)
+#   FX6  meter off: the hashed-on session of FX5, with RIPWIRE_METER=0 and no force, says nothing
+#   FX7  both labels on every row the hook writes, in every mode it logs from
+#   FX8  bench/substitution_report.py prints the 2x2 table from a synthetic v4 log, keeps the primer comparison
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(17) §FACTORIAL: primer x first-edit check"
+FXT="$TMP/fx"; mkdir -p "$FXT/tmp"
+python3 -c 'import uuid
+for i in range(1000): print(uuid.uuid5(uuid.NAMESPACE_URL, "ripwire-factorial-%d" % i))' >"$FXT/ids"
+bash "$HOOK" --arm-cells <"$FXT/ids" >"$FXT/cells" 2>/dev/null
+FXROWS="$( grep -c . "$FXT/cells" 2>/dev/null )"; [ -n "$FXROWS" ] || FXROWS=0
+fx_cell() { awk -F'\t' -v p="$1" -v c="$2" '$2 == p && $3 == c { n++ } END { print n + 0 }' "$FXT/cells"; }
+FXCT="$( fx_cell control off )"; FXCO="$( fx_cell control on )"; FXTT="$( fx_cell treatment off )"; FXTO="$( fx_cell treatment on )"
+echo "  (2x2 over $FXROWS ids: primer control/check off $FXCT, control/on $FXCO, treatment/off $FXTT, treatment/on $FXTO)"
+[ "$FXROWS" -eq 1000 ] && [ "$FXCT" -gt 0 ] && [ "$FXCO" -gt 0 ] && [ "$FXTT" -gt 0 ] && [ "$FXTO" -gt 0 ] \
+    && ok "FX1 cells: 1,000 fixed ids reach all four cells" \
+    || no "FX1 cells: $FXROWS rows; cells $FXCT/$FXCO/$FXTT/$FXTO"
+FX2BAD=""
+for fxn in "$FXCT" "$FXCO" "$FXTT" "$FXTO"; do
+    [ "$fxn" -ge 190 ] && [ "$fxn" -le 310 ] || FX2BAD="$FX2BAD $fxn"
+done
+[ "$FXROWS" -eq 1000 ] && [ -z "$FX2BAD" ] && ok "FX2 balance: every cell is within 250 ± 60 of 1,000 ($FXCT/$FXCO/$FXTT/$FXTO)" \
+    || no "FX2 balance: cell(s) outside 190..310:${FX2BAD:- (no table)}"
+
+# FX3 — the golden primer labels, recorded from #779's hook (0799eda28) on ids fxgold-0..fxgold-31, T=treatment C=control
+FXGOLD="TTTTTTCCTCCTTTTCTCCTTTTCTTTTTTTT"
+FXL3="$FXT/fx3.jsonl"; FX3ROWS=""; FX3CELL=""
+for fxi in $( seq 0 31 ); do
+    printf '{"session_id":"fxgold-%s","cwd":"%s","tool_name":"Grep","tool_input":{"pattern":"x"}}' "$fxi" "$REPO" \
+        | env -u RIPWIRE_METER_ARM RIPWIRE_METER_LOG="$FXL3" PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" bash "$HOOK" >/dev/null 2>&1
+    printf 'fxgold-%s\n' "$fxi"
+done >"$FXT/goldids"
+FX3ROWS="$( python3 -c 'import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+print("".join(("T" if r.get("arm") == "treatment" else "C") + ("" if r.get("primer") == r.get("arm") else "!") for r in rows))' "$FXL3" 2>/dev/null )"
+FX3CELL="$( bash "$HOOK" --arm-cells <"$FXT/goldids" 2>/dev/null | awk -F'\t' '{ printf "%s", ($2 == "treatment" ? "T" : "C") }' )"
+[ "$FX3ROWS" = "$FXGOLD" ] && [ "$FX3CELL" = "$FXGOLD" ] \
+    && ok "FX3 primer unchanged: 32 ids read #779's primer labels in arm, primer and --arm-cells ($FXGOLD)" \
+    || no "FX3 primer changed: rows [$FX3ROWS] cells [$FX3CELL], want [$FXGOLD]"
+
+# FX7 — both labels on every row, through the stub: SessionStart, Grep, Bash, a native edit of a non-source file
+FXL7="$FXT/fx7.jsonl"
+for fxp in '{"session_id":"fx7","cwd":"'"$REPO"'","source":"startup"}|--session-start' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}|' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git log -3"}}|' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Edit","tool_input":{"file_path":"'"$REPO"'/notes.md","old_string":"a","new_string":"b"}}|' \
+           '{"session_id":"fx7b","cwd":"'"$REPO"'","tool_name":"Read","tool_input":{"file_path":"x"}}|'; do
+    printf '%s' "${fxp%|*}" | env RIPWIRE_METER_LOG="$FXL7" RIPWIRE_FIRST_EDIT=0 PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" \
+        bash "$HOOK" ${fxp##*|} >/dev/null 2>&1
+done
+printf '%s' '{"session_id":"fx7c","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}' \
+    | env RIPWIRE_METER_LOG="$FXL7" RIPWIRE_METER_ARM=control PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" bash "$HOOK" >/dev/null 2>&1
+FX7="$( python3 -c 'import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+bad = [r for r in rows if r.get("v") != 4 or r.get("primer") not in ("treatment", "control") or r.get("primer") != r.get("arm")
+       or r.get("first_edit") not in ("on", "off", "forced-on", "forced-off")]
+print("%d %d %s" % (len(rows), len(bad), ",".join(sorted({str(r.get("first_edit")) for r in rows}))))' "$FXL7" 2>/dev/null )"
+case "$FX7" in
+    "6 0 "*) ok "FX7 labels: all 6 rows (SessionStart, Grep, Bash, Edit, Read; two arms) are v4 with primer and first_edit (${FX7#6 0 })" ;;
+    *)       no "FX7 labels: rows/bad/labels = [$FX7], want 6 rows, 0 bad" ;;
+esac
+
+if [ -x "$FEREAL" ]; then
+    # Session ids from the assignment itself, a FRESH one per run: the once-per-session marker would otherwise silence a
+    # later arm for the wrong reason. fx_id CHECK N -> the Nth id the hash put in that check cell.
+    fx_id() { awk -F'\t' -v c="$1" -v n="$2" '$3 == c { k++; if (k == n) { print $1; exit } }' "$FXT/cells"; }
+    FXOFF="$( fx_id off 1 )"; FXON="$( fx_id on 1 )"; FXOFF2="$( fx_id off 2 )"; FXON2="$( fx_id on 2 )"; FXON3="$( fx_id on 3 )"
+    # FX4 — forces win
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx4a.jsonl" "$FXOFF" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=1
+    FX4A="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )/$( meterrowget "$FXT/fx4a.jsonl" 1 first_edit )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx4b.jsonl" "$FXON" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=0
+    FX4B="$FEOUT/$( meterrowget "$FXT/fx4b.jsonl" 1 nudge )/$( meterrowget "$FXT/fx4b.jsonl" 1 first_edit )"
+    [ "$FX4A" = "1/forced-on" ] && [ "$FX4B" = "/none/forced-off" ] \
+        && ok "FX4 forces win: =1 on a hashed-off session speaks (forced-on); =0 on a hashed-on one is silent (forced-off)" \
+        || no "FX4 forces: on-a-hashed-off [$FX4A], off-a-hashed-on [$FX4B]"
+    # FX5 — the hash decides while the meter is active (nothing forced)
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx5a.jsonl" "$FXON2" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX5A="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )/$( meterrowget "$FXT/fx5a.jsonl" 1 nudge )/$( meterrowget "$FXT/fx5a.jsonl" 1 first_edit )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx5b.jsonl" "$FXOFF2" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX5B="$FEOUT/$( meterrowget "$FXT/fx5b.jsonl" 1 nudge )/$( meterrowget "$FXT/fx5b.jsonl" 1 first_edit )"
+    [ "$FX5A" = "1/first-edit/on" ] && [ "$FX5B" = "/first-edit-control/off" ] \
+        && ok "FX5 hash: a hashed-on session speaks (first_edit=on); a hashed-off one is silent and logs first-edit-control" \
+        || no "FX5 hash: on [$FX5A], off [$FX5B]"
+    # FX6 — meter off: a hashed-on id, nothing forced, says nothing; then the SAME id with the meter on speaks, so the
+    # silence is the meter's doing (meter off spends no marker, so the second run is still the session's first edit).
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx6.jsonl" "$FXON3" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_METER=0
+    FX6A="$FERC/$FEOUT/$( meterrows "$FXT/fx6.jsonl" )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx6.jsonl" "$FXON3" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX6B="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )"
+    [ "$FX6A" = "0//0" ] && [ "$FX6B" = 1 ] \
+        && ok "FX6 meter off: a hashed-on session says nothing and writes nothing; the same id with the meter on speaks" \
+        || no "FX6 meter off: off-run [$FX6A] (want 0//0), on-run spoke=[$FX6B]"
+else
+    echo "  SKIP  FX4-FX6: no built binary at $FEREAL"
+fi
+
+# FX8 — the readout. Two sessions per cell, one forced session, one mixed-label session, one v3 row.
+FXL8="$FXT/fx8.jsonl"
+python3 - "$FXL8" <<'PY'
+import json, sys
+rows = []
+def add(sid, primer, check, fam, n):
+    for i in range(n):
+        rows.append({"v": 4, "seq": len(rows) + 1, "session": sid, "repo": "/x/r", "tag": "r", "tool": "Grep", "class": "grep",
+                     "family": fam, "nudged": 0, "nudge": "none", "post_nudge": 0, "post_sweep": 0, "arm": primer,
+                     "primer": primer, "first_edit": check, "detail": "x", "agent": "claude", "surface": "native", "target": ""})
+for p in ("control", "treatment"):
+    for c in ("off", "on"):
+        for k in range(2):
+            add("s-%s-%s-%d" % (p, c, k), p, c, "native", 3)
+            add("s-%s-%s-%d" % (p, c, k), p, c, "ripwire", 1)
+add("s-forced", "treatment", "forced-on", "native", 2)
+add("s-mixed", "control", "on", "native", 1)
+add("s-mixed", "control", "off", "native", 1)
+rows.append({"v": 3, "seq": 99, "session": "s-old", "arm": "treatment", "family": "native", "class": "grep", "tool": "Grep"})
+open(sys.argv[1], "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+python3 "$ROOT/bench/substitution_report.py" "$FXL8" >"$FXT/report8.out" 2>&1; FX8RC=$?
+grep -A8 '2x2' "$FXT/report8.out" | sed 's/^/    /'
+if [ "$FX8RC" -eq 0 ] \
+    && grep -qE '^ +primer control +2 +2 +4$' "$FXT/report8.out" && grep -qE '^ +primer treatment +2 +2 +4$' "$FXT/report8.out" \
+    && grep -qE '^ +total +4 +4 +8$' "$FXT/report8.out" && grep -q 'forced-on 1; dropped as mixed-label: 1' "$FXT/report8.out" \
+    && grep -q 'by arm' "$FXT/report8.out"; then
+    ok "FX8 readout: the 2x2 counts 2 sessions per cell, sets the forced and mixed sessions apart, keeps the primer block"
+else
+    no "FX8 readout: exit=$FX8RC; see $FXT/report8.out"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════

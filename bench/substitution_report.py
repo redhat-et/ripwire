@@ -576,6 +576,55 @@ def arm_section(rows):
     print("      not an effect of anything the hook said. That is what retired both tiers on 2026-09-02.")
 
 
+# ── the 2x2 (§FACTORIAL in hooks/ripwire-nudge.sh, schema v4). Two independent assignments per session: the PRIMER
+# arm (`primer`, = `arm`) and the FIRST-EDIT CHECK arm (`first_edit`: on|off|forced-on|forced-off). Sessions are the
+# unit, as in arm_section. A session whose rows disagree on either label is dropped (its assignment changed mid-session,
+# so it is not a unit); a FORCED check session is counted apart, never in a randomized cell; a row with no
+# `first_edit` (v3 and older, before the split existed) is outside the table. The primer-only comparison the earlier
+# readouts used is still the `by arm` block above, which reads `arm` and therefore POOLS over the check arm.
+FACTORIAL_CHECK_CELLS = ("off", "on")
+FACTORIAL_PRIMER_CELLS = ("control", "treatment")
+
+
+def session_cells(rows):
+    """{session: (primer, check)} for sessions with one consistent label pair; 'mixed' for the rest."""
+    per = collections.defaultdict(set)
+    for r in rows:
+        if "first_edit" not in r:
+            continue
+        per[str(r.get("session"))].add((r.get("primer", r.get("arm", "?")), r.get("first_edit")))
+    return {sid: (labels.pop() if len(labels) == 1 else "mixed") for sid, labels in per.items()}
+
+
+def factorial_section(rows):
+    cells = session_cells(rows)
+    print("")
+    print("  2x2 — primer arm x first-edit check arm, SESSIONS per cell (rows without `first_edit` are outside it):")
+    if not cells:
+        print("    no v4 rows: this log predates the split, so only the primer comparison above applies.")
+        return
+    counts = collections.Counter(v for v in cells.values() if v != "mixed")
+    by_session = collections.defaultdict(list)
+    for r in rows:
+        by_session[str(r.get("session"))].append(r)
+    print("    %-22s %10s %10s %8s" % ("", "check off", "check on", "total"))
+    for primer in FACTORIAL_PRIMER_CELLS:
+        row = [counts[(primer, c)] for c in FACTORIAL_CHECK_CELLS]
+        print("    %-22s %10d %10d %8d" % ("primer " + primer, row[0], row[1], sum(row)))
+    col = [sum(counts[(p, c)] for p in FACTORIAL_PRIMER_CELLS) for c in FACTORIAL_CHECK_CELLS]
+    print("    %-22s %10d %10d %8d" % ("total", col[0], col[1], sum(col)))
+    forced = collections.Counter(v[1] for v in cells.values() if v != "mixed" and str(v[1]).startswith("forced-"))
+    mixed = sum(1 for v in cells.values() if v == "mixed")
+    print("    forced check sessions (outside the randomized cells): %s; dropped as mixed-label: %d"
+          % (", ".join("%s %d" % kv for kv in sorted(forced.items())) or "none", mixed))
+    print("    substitution rate per cell (calls pooled inside the cell; read the session counts first):")
+    for primer in FACTORIAL_PRIMER_CELLS:
+        for check in FACTORIAL_CHECK_CELLS:
+            sub = [r for sid, v in cells.items() if v == (primer, check) for r in by_session[sid]]
+            print("      %-30s %s" % ("primer %s, check %s" % (primer, check), fmt_rate(*split_counts(sub))))
+    print("    the primer-only comparison of earlier readouts = the `by arm` block above (pooled over the check arm).")
+
+
 def edit_section(rows):
     # ── §5b terminality by EDIT verb ────────────────────────────────────────────────────────────────
     # The edit path has a follow-up §5 cannot see and one it must not charge. Claude Code's harness
@@ -719,6 +768,7 @@ def main():
     schema_mix_note(rows)
 
     arm_section(rows)
+    factorial_section(rows)
 
     # ── §2 the composition of both sides ────────────────────────────────────────────────────────────
     section("2. calls by class (what the rate is made of)")

@@ -267,10 +267,12 @@ sweep_on=1
 sweep_n=3
 dedup_cooldown=20
 dedup_cap=3
-# §FIRSTEDIT (2026-11-26): the before-the-first-edit check. OFF by default (an owner call is pending); `first_edit=1` /
-# RIPWIRE_FIRST_EDIT=1 opts in, and then treatment speaks and control is silent. RIPWIRE_FIRST_EDIT_MS / `first_edit_ms`
-# is its hard deadline.
-firstedit_on=0
+# §FIRSTEDIT (2026-11-26): the before-the-first-edit check, with its OWN arm (§FACTORIAL, owner ruling 11-26): while the
+# meter is active an unforced session is hashed on|off independently of the primer arm; `first_edit=1|0` /
+# RIPWIRE_FIRST_EDIT force it (forced-on|forced-off); with the meter off and no force it is off. RIPWIRE_FIRST_EDIT_MS /
+# `first_edit_ms` is its hard deadline.
+firstedit_force=""
+firstedit_label="off"
 firstedit_ms=2000
 # ---- meter_dest — WHERE the log goes. Sets `_mhome` (the config directory) and `meter_file`, and
 #      applies the §FIXTURE guard. `_mexplicit` is the guard's whole input: it records whether the
@@ -391,17 +393,66 @@ meter_auto_arm()
 # agent is told, not what is counted.
 firstedit_resolve()
 {
-    # A deadline that is not a plain positive integer of at most 6 digits reads as the shipped 2000 ms; `10#` keeps a leading zero from reading as octal. OPT-IN: only an explicit yes turns it on, so
-    # an unconfigured install, a typo and an empty value all leave the PreToolUse path silent as before.
+    # A deadline that is not a plain positive integer of at most 6 digits reads as the shipped 2000 ms; `10#` keeps a leading zero from reading as octal. A FORCE is an explicit yes or no; an empty
+    # value or a typo forces nothing, and then firstedit_assign decides.
     case "${RIPWIRE_FIRST_EDIT:-$1}" in
-        1|on|yes|true) firstedit_on=1 ;;
-        *)             firstedit_on=0 ;;
+        1|on|yes|true)  firstedit_force="on" ;;
+        0|off|no|false) firstedit_force="off" ;;
+        *)              firstedit_force="" ;;
     esac
     _fems="${RIPWIRE_FIRST_EDIT_MS:-$2}"
     case "$_fems" in
         ''|*[!0-9]*) firstedit_ms=2000 ;;
         *)           if [ "${#_fems}" -le 6 ] && [ "$(( 10#$_fems ))" -gt 0 ]; then firstedit_ms="$(( 10#$_fems ))"; else firstedit_ms=2000; fi ;;
     esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §FACTORIAL — THE PRIMER AND THE FIRST-EDIT CHECK ARE TWO INDEPENDENT ARMS (owner ruling, 2026-11-26)
+#
+# Two levers, two assignments, four cells: neither, primer only, check only, both. The PRIMER arm is `meter_auto_arm`,
+# untouched byte for byte (cksum of the session id, mod 100, < 50 = control), so every session id lands where it
+# always landed and the primer history stays comparable. The CHECK arm is `firstedit_hash`: 32-bit FNV-1a over the
+# salted string "ripwire-first-edit/v1:" + session id, mod 100, < 50 = off. A different hash FAMILY, not just a
+# different salt, on purpose: cksum is a CRC, and a CRC is linear, so CRC(salt || id) and CRC(id) differ by a
+# length-dependent XOR constant and would NOT be independent; FNV's multiply breaks that. Pure bash, no fork.
+#
+# WHEN THE HASH DECIDES. Only while the meter is ACTIVE (counting on, with a log to write to): a split nobody records
+# is not an experiment, so with the meter off and no force the check is off, exactly #779's default. A force wins over
+# the hash in either state: `first_edit=1|0` in meter.conf or RIPWIRE_FIRST_EDIT=1|0 (env over file), logged as
+# forced-on / forced-off so a readout can drop forced sessions from the randomized comparison. The primer arm's own
+# forcing (`arm=treatment|control`) does not touch the check arm, and the check arm does not touch the primer.
+#
+# EVERY ROW CARRIES BOTH LABELS (schema v4): `primer` (= `arm`, kept for the history) and `first_edit`
+# (on|off|forced-on|forced-off). bench/substitution_report.py prints the 2x2 table, and the old primer-only comparison
+# stays computable as primer treatment vs control pooled over the check arm. `--arm-cells` (below) prints the hash
+# assignment for a list of session ids, which is how test/hookcheck.sh (17) checks the four cells and their balance.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# firstedit_hash SESSION — sets _feh to the 32-bit FNV-1a of "ripwire-first-edit/v1:SESSION" (bytes, C locale)
+firstedit_hash()
+{
+    local LC_ALL=C s="ripwire-first-edit/v1:$1" i=0 c h=2166136261
+    while [ "$i" -lt "${#s}" ]
+    do
+        printf -v c '%d' "'${s:i:1}"
+        h=$(( ( ( h ^ ( c & 255 ) ) * 16777619 ) & 4294967295 ))
+        i=$(( i + 1 ))
+    done
+    _feh="$h"
+}
+# firstedit_assign — the check arm for this session: a force, else the hash while the meter is active, else off
+firstedit_assign()
+{
+    if [ -n "$firstedit_force" ]
+    then
+        firstedit_label="forced-$firstedit_force"
+    elif [ "$meter_enabled" = "1" ]
+    then
+        firstedit_hash "$session"
+        if [ "$(( _feh % 100 ))" -lt 50 ]; then firstedit_label="off"; else firstedit_label="on"; fi
+    else
+        firstedit_label="off"
+    fi
 }
 
 meter_init()
@@ -486,12 +537,13 @@ meter_init()
         *)          meter_arm="treatment" ;;
     esac
 
-    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
+    [ -n "$meter_file" ] || { firstedit_assign; return 0; }   # no HOME and no explicit log path — nothing to write to
 
     case "${RIPWIRE_METER:-$_conf_enabled}" in
         0|off|no|false) meter_enabled=0 ;;
         *)              meter_enabled=1 ;;
     esac
+    firstedit_assign
 }
 
 # ---- JSON string escape for the no-jq fallback. Control characters are DELETED rather than escaped:
@@ -540,10 +592,11 @@ meter_log()
             --arg nudge "$_mreason" --argjson post_nudge "$meter_post" \
             --argjson post_sweep "$meter_postsweep" --arg arm "$meter_arm" \
             --arg detail "$_mdetail" --arg agent "$meter_agent" --arg surface "$msurface" --arg target "$mtarget" \
-            '{v:3,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,detail:($detail|.[0:200]),agent:$agent,surface:$surface,target:($target|.[0:200])}' \
+            --arg first_edit "$firstedit_label" \
+            '{v:4,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,primer:$arm,first_edit:$first_edit,detail:($detail|.[0:200]),agent:$agent,surface:$surface,target:($target|.[0:200])}' \
             2>/dev/null )" || _mrow=""
     else
-        _mrow="{\"v\":3,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\",\"agent\":\"$( meter_esc "$meter_agent" )\",\"surface\":\"$( meter_esc "$msurface" )\",\"target\":\"$( meter_esc "$mtarget" )\"}"
+        _mrow="{\"v\":4,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"primer\":\"$meter_arm\",\"first_edit\":\"$firstedit_label\",\"detail\":\"$( meter_esc "$_mdetail" )\",\"agent\":\"$( meter_esc "$meter_agent" )\",\"surface\":\"$( meter_esc "$msurface" )\",\"target\":\"$( meter_esc "$mtarget" )\"}"
     fi
     [ -n "$_mrow" ] || return 0
     { printf '%s\n' "$_mrow" >>"$meter_file"; } 2>/dev/null || true
@@ -1212,6 +1265,24 @@ meter_family()
 # {agent_id, agent_type}; context = exit 0 plus {"hookSpecificOutput":{"hookEventName":"SubagentStart",
 # "additionalContext":"..."}}. Every path exits 0. Whether that context reaches the SUBAGENT's own context on a given
 # client version is what scripts/hk2_probe.sh in the lane's results measures; it is not asserted here.
+# ---- Arm-cells mode (`--arm-cells`): the §FACTORIAL hash assignment for a list of session ids. NOT installed by anything ----
+# One session id per stdin line; one `ID<TAB>PRIMER<TAB>CHECK` line out, PRIMER from meter_auto_arm (treatment|control),
+# CHECK from firstedit_hash (on|off). It reads no config and no env: this is the ASSIGNMENT, before any force or meter
+# state, which is what test/hookcheck.sh (17) needs to check four cells, their balance and the unchanged primer split.
+# Tabs and control characters in an id are dropped and it is cut at 200 bytes, like a meter row's detail.
+if [ "${1:-}" = "--arm-cells" ]
+then
+    while IFS= read -r _acid || [ -n "$_acid" ]
+    do
+        _acid="$( printf '%s' "$_acid" | tr -d '\000-\037' | cut -c1-200 )"
+        [ -n "$_acid" ] || continue
+        firstedit_hash "$_acid"
+        if [ "$(( _feh % 100 ))" -lt 50 ]; then _acfe="off"; else _acfe="on"; fi
+        printf '%s\t%s\t%s\n' "$_acid" "$( meter_auto_arm "$_acid" )" "$_acfe"
+    done
+    exit 0
+fi
+
 if [ "${1:-}" = "--subagent-start" ]
 then
     command -v jq >/dev/null 2>&1 || exit 0
@@ -2002,18 +2073,18 @@ fi
 # (`sed -i`, `cat > f`, a script) reaches this hook as a Bash call and gets no check; Varun's audit names the same
 # blind spot ("shell-first file writes") for its own harness. NotebookEdit is not a source file here.
 #
-# THE ARM AND THE METER. Treatment speaks; control is silent and records the same moment as `first-edit-control`, so
-# eligibility is measurable in both arms and the primer readout can cut every session at its first-edit row (before
-# it, the arms still differ by the primer alone). The row's `nudge`: `first-edit` (nudged=1, the check delivered),
+# THE ARM AND THE METER (§FACTORIAL above). The CHECK has its own arm, independent of the primer's: a session whose
+# check arm is on (hashed on, or forced on) speaks; a hashed-off one is silent and records the same moment as
+# `first-edit-control`, so eligibility is measurable in both check arms; forced-off, and a meter that is off, do
+# nothing. The primer arm no longer gates it. The row's `nudge`: `first-edit` (nudged=1, the check delivered),
 # `first-edit-plain` (nudged=1: the deadline fell inside the preview, so the current-tree check went out with a note),
 # `first-edit-timeout` (the skip line delivered), `first-edit-nosym` (the edit sits inside no indexed definition, or
 # the binary answered nothing: silent), `first-edit-control`. `post_nudge`/`post_sweep` are NOT touched: they stay
 # the retired tiers' counterfactual markers.
 #
-# OFF BY DEFAULT, PENDING AN OWNER CALL. Opt in with `first_edit=1` in meter.conf (or RIPWIRE_FIRST_EDIT=1); the env
-# wins over the file, and any other value reads as off. Default-off keeps the live primer A/B exactly as it was: with
-# it on, a treatment session would carry two levers (primer + this check) against a control that has neither. When it
-# is on, the arm split below applies.
+# DEFAULT: RANDOMIZED WHILE THE METER IS ACTIVE, OFF OTHERWISE (owner ruling 2026-11-26: ship #779 off, then split
+# 2x2). With counting on, about half of the unforced sessions get the check, independently of the primer, so the
+# primer A/B stays a clean comparison pooled over the check arm. `first_edit=1|0` / RIPWIRE_FIRST_EDIT force it.
 #
 # THE BOUNDS. Time: one hard deadline over the whole check (default 2000 ms; Codex registers this hook with a 3 s
 # timeout), enforced by one non-polling watchdog that kills the check's process group. The plain check (current tree)
@@ -2266,12 +2337,20 @@ firstedit_run()
     rm -rf "$tmp" 2>/dev/null
     return 0
 }
-if [ "$mclass" = native-edit ] && [ "$nudge_ok" = "1" ] && [ "$firstedit_on" = "1" ] && firstedit_eligible
+# §FACTORIAL: the CHECK arm decides, never the primer arm. on/forced-on run the check; a hashed `off` (only reached
+# while the meter is active) records the same moment as `first-edit-control`, the counterfactual; forced-off and a
+# meter that is off do nothing at all.
+fe_go=0
+case "$firstedit_label" in
+    on|forced-on) fe_go=1 ;;
+    off)          [ "$meter_enabled" = "1" ] && fe_go=2 ;;
+esac
+if [ "$mclass" = native-edit ] && [ "$nudge_ok" = "1" ] && [ "$fe_go" != 0 ] && firstedit_eligible
 then
     # mkdir is the atomic test-and-set: two edits of one session racing here cannot both win.
     if mkdir "${TMPDIR:-/tmp}/ripwire-nudge.${session}.first-edit" 2>/dev/null
     then
-        if [ "$meter_arm" = "control" ]
+        if [ "$fe_go" = 2 ]
         then
             nudge="first-edit-control"
         else
@@ -2282,8 +2361,8 @@ fi
 
 meter_log "$mclass" "$( meter_family "$mclass" )" "$nudged" "$nudge" "$mdetail"
 # ---- §RETIRED (2026-09-02): the PreToolUse path ENDS here. It writes one meter row and exits 0. Its stdout is EMPTY on
-#      every tool call it observes but ONE, and that one only when `first_edit=1` opts in: the first source edit of a
-#      treatment session, which carries the §FIRSTEDIT check above. The one-time tips and the sweep escalation that used to be built below are gone — see §RETIRED at
+#      every tool call it observes but ONE, and that one only in a session whose CHECK arm is on (§FACTORIAL): the first
+#      source edit, which carries the §FIRSTEDIT check above. The one-time tips and the sweep escalation that used to be built below are gone — see §RETIRED at
 #      the top of this file for the readout that retired them and for what stayed.
 #
 #      This is a CONTRACT, not an incidental property, and test/hookcheck.sh asserts both halves: every other PreToolUse
