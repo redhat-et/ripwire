@@ -246,3 +246,11 @@ kTaskEchoBytes	sink:taskCut
 kTestdataWalkDirs	none:a disk-walk bound on the testdata search under the act's subsystem; where-else is a pointer list, so a corpus past it is unseen and never claimed absent
 kUsersShown	sink:more
 kWhereElseCap	sink:more
+# lane/brief-cochange (2026-11-26): the unit's build file and its co-change roles added 7 caps (25).
+kMaxWiden	none:a search bound: the anchor's sibling set widens to the next dir's subtree at most twice; the roles found are a ranked pointer list, never a census, so a partner past it is unseen and never claimed absent
+kPartnersRead	none:a read bound: the 400 strongest co-change partners are sorted into roles (each costs a disk stat); every slot is a ranked pointer list and fills from the strongest, so a weaker partner past it is unseen and never claimed absent
+kRoleShown	none:a pointer bound: the test, build and docs slots name at most 2 co-changed files each, strongest first; where-else's own cap discloses its overflow as +N
+kSiblingsWiden	none:a premise threshold, not a cut: fewer siblings than this and the next dir's subtree is read as well; nothing is dropped
+kSweepCeil	none:a filter bound: commits wider than the repo's 90th-percentile commit (clamped to 12..50 files) are formatter passes and mass moves, dropped from the co-change counts by design; they carry no unit-level coupling
+kSweepFloor	none:a filter bound: commits wider than the repo's 90th-percentile commit (clamped to 12..50 files) are formatter passes and mass moves, dropped from the co-change counts by design; they carry no unit-level coupling
+kUnitBuildShown	none:a pointer bound: <build> names at most 2 unit build files (the nearest manifest above the anchor and above its tests first); the root manifests are quoted on their own lines

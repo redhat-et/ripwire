@@ -21,18 +21,21 @@
 // Deterministic: every list is sorted before it is cut; no hash-map order reaches the output; git is read only for co-change.
 
 #include "forqsites.h"     // questionTokens / collectSites / formatLines — the θ11 question sites, called directly (not behind RIPWIRE_THETA11)
-#include "gitmine.h"       // gitCommitFileSets / cochangePartners — where-else's history-backed partners
-#include "gitstamp.h"      // isShallow — history="0" on a depth-limited clone
+#include "filter.h"        // isTestPath — the shared test-path predicate, beside the brief's own dir-role one
+#include "gitmine.h"       // deriveGitPathOffset / hasEnclosingGitRepo — the walk's git paths as root-relative ones
 #include "graph.h"         // Graph (inEdges / outOff / outTargets), resolveIncludeAdj
 #include "lexical.h"       // routeLower — the one ASCII lowercase
 #include "model.h"         // IngestResult, Symbol, rootRelPath, HashMap
+#include "quality.h"       // gitRawCommitStreamCached — the cached 18-month history walk --for already ran
 #include "pattern.h"       // appendUnique — order-preserving unique push
 #include "resolve.h"       // trimWs / includerDir — the one trim and dir-of-path
 #include "sarif.h"         // rootPrefixOf — the question sites' root-relative paths
 #include "serialize.h"     // escapeXml, attrOf
 #include "subagentblock.h" // kSubagentBriefBlock — section 8
+#include "infra/envnumber.h" // readEnvNumber — the two halves' OFF switches
 #include "infra/namesplit.h" // afterLast — the one last-segment split
 #include "infra/ownedfile.h"
+#include "infra/sortutil.h"  // sortUnique — the co-change path sets
 
 #include <algorithm>
 #include <array>
@@ -107,6 +110,7 @@ struct BriefInputs
     std::string_view    task;
     std::string_view    forPage;       // the finished --for page 1 for `task`
     std::size_t         budgetBytes = 0;   // 0: the size class decides
+    bool                noCache     = false;   // --no-cache: the history walk's cut prefix is neither read nor stored
 };
 
 namespace detail
@@ -2183,6 +2187,20 @@ inline std::string renderBuild( const std::vector<std::string>& lines, int more,
     return out + "</build>";
 }
 
+// The unit's own build file(s) — nearest above the anchor / its tests — closing the <build> line: "| unit build: a · b".
+inline std::string withUnitBuild( std::string build, const std::vector<std::string>& unit )
+{
+    static constexpr std::string_view kClose = "</build>";
+    std::string                        tail;
+    for( const std::string& u : unit )
+    {
+        tail += ( tail.empty() ? " | unit build: " : " · " ) + xml( u );
+    }
+    ASSUME( build.ends_with( kClose ), "renderBuild always closes its line" );
+    build.insert( build.size() - kClose.size(), tail );
+    return build;
+}
+
 // ── section 3: entry ────────────────────────────────────────────────────────────────────────────────────────────────────────
 struct Entry
 {
@@ -3235,6 +3253,409 @@ inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const
     return out + "</edges>";
 }
 
+// ── the unit's build file and its co-change roles (BRIEF-COCHANGE, owner 11-26 "Try co-change angle") ────────────────────────
+// Two repo-independent signals in place of name patterns. (1) The nearest build manifest above the anchor (the exemplar's file,
+// else the first named/act file) and above the test home: the file a new sibling unit is listed in or built by. (2) Co-change:
+// the files committed together with the anchor's SIBLINGS (same dir, same extension) over the history walk --for already ran
+// and cached (quality::gitRawCommitStreamCached, the qchurn blob — a warm call walks nothing), each sorted into a role slot by
+// what the file is: test, build, docs, changelog, or registration (a source file several siblings change with). Sweeping
+// commits (more files than the repo's 90th-percentile commit, clamped) are dropped: formatter passes, mass renames and moves
+// are wide by nature, and git's -c merge diff lists only what a merge itself changed. RIPWIRE_BRIEF_UNITBUILD=0 and
+// RIPWIRE_BRIEF_COCHANGE=0 turn the two halves off (each leaves the brief as it was without it).
+inline constexpr std::size_t kMinHistoryCommits = 10;    // fewer kept commits = no usable history (a 1-commit shallow clone)
+inline constexpr std::size_t kSweepFloor        = 12;    // the sweeping-commit cut never sits below this many files …
+inline constexpr std::size_t kSweepCeil         = 50;    // … nor above this many
+inline constexpr std::size_t kSiblingsWiden     = 3;     // fewer siblings than this, or …
+inline constexpr std::size_t kMinSiblingCommits = 20;    // … fewer kept commits touching them: the next dir up's subtree counts …
+inline constexpr int         kMaxWiden          = 2;     // … at most twice, never the root
+inline constexpr std::uint32_t kMinSiblingsTouched = 2;  // a partner changed with at least this many distinct siblings, …
+inline constexpr std::uint32_t kMinJoint        = 2;     // … in at least this many commits, …
+inline constexpr double      kMinPartnerLift    = 2.0;   // … at least twice as often as an average commit does (a hot file is not a role)
+inline constexpr std::size_t kRoleShown         = 2;     // test, build and docs slots
+inline constexpr std::size_t kUnitBuildShown    = 2;
+inline constexpr std::size_t kPartnersRead      = 400;   // the strongest partners sorted into roles (each is a disk stat)
+
+inline bool switchOff( const char* name ) noexcept
+{
+    const EnvNumber knob = readEnvNumber( name );
+    return knob.parsed && knob.value == 0;
+}
+
+inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
+
+// The basename's last dot-segment: the sibling test's "same language" key (an extension-less name is its own key).
+inline std::string_view extOf( std::string_view rel ) noexcept { return namesplit::afterLast( baseName( rel ), "." ); }
+
+// A build manifest by its name: the files a build system reads to know the units (lockfiles are outputs, not lists).
+inline constexpr std::string_view kUnitManifests[] = { "BUILD.bazel", "BUILD", "BUILD.gn", "CMakeLists.txt", "Cargo.toml", "meson.build", "Makefile.am",
+                                                      "Makefile", "package.json", "pom.xml", "build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py",
+                                                      "project.json", "go.mod" };
+inline constexpr std::string_view kUnitManifestExts[] = { "bzl", "cmake", "mk", "gni" };   // included build fragments, by extension
+inline bool isManifestPath( std::string_view rel ) noexcept
+{
+    return std::ranges::contains( kUnitManifests, baseName( rel ) ) || std::ranges::contains( kUnitManifestExts, extOf( rel ) );
+}
+
+inline bool isChangelogPath( std::string_view rel )
+{
+    const std::string lo = lower( rel );
+    return lo.find( "changelog" ) != std::string::npos || lo.find( "changes/" ) != std::string::npos || lo.starts_with( "news" ) || lo.find( "/news" ) != std::string::npos
+           || lower( baseName( rel ) ).starts_with( "changes" );
+}
+
+// The manifest of the nearest dir above `from` (the root excluded: its manifests are already quoted), with the line that names
+// the file `name` when one does (src/functions/CMakeLists.txt:3, crates/nu-command/Cargo.toml, packages/common/BUILD.bazel).
+inline std::string nearestManifest( const Corpus& c, std::string_view from, std::string_view name )
+{
+    for( std::string_view d = dirName( from ); !d.empty(); d = dirName( d ) )
+    {
+        for( const std::string_view m : kUnitManifests )
+        {
+            const std::string path = std::string( d ) + "/" + std::string( m );
+            if( !c.exists( path ) )
+            {
+                continue;
+            }
+            const std::optional<std::string> text = name.size() >= 3 ? c.read( path ) : std::nullopt;
+            int at = 0;
+            forEachLine( text ? std::string_view( *text ) : std::string_view(), [ & ]( std::string_view l, int lineNo )
+            {
+                at = l.find( name ) != std::string_view::npos ? lineNo : 0;
+                return at == 0;   // the first line that names the file
+            } );
+            return at > 0 ? path + ":" + std::to_string( at ) : path;
+        }
+    }
+    return {};
+}
+
+// ── the history view ──
+struct RoleHistory
+{
+    bool                     read      = false;   // history="1": the cached walk holds kMinHistoryCommits+ kept commits
+    std::size_t              commits   = 0;       // kept commits (sweeping ones dropped)
+    std::size_t              sweepCut  = 0;       // the dropped-commit threshold, in files
+    std::vector<std::string> registration, tests, builds, docs, logs;   // registration uncut: withHistory caps it and counts +N
+};
+
+// The walk's commits as root-relative path sets (paths outside the root dropped), each sorted and unique.
+inline std::vector<std::vector<std::string>> rootCommits( const RawCommitStream& raw, std::string_view gitPrefix )
+{
+    std::vector<std::vector<std::string>> out;
+    out.reserve( raw.commits.size() );
+    for( const RawCommitStream::Commit& commit : raw.commits )
+    {
+        std::vector<std::string> paths;
+        for( const std::string& p : commit.paths )
+        {
+            if( p.starts_with( gitPrefix ) && p.size() > gitPrefix.size() )
+            {
+                paths.push_back( p.substr( gitPrefix.size() ) );
+            }
+        }
+        rw::sortutil::sortUnique( paths );
+        if( !paths.empty() )
+        {
+            out.push_back( std::move( paths ) );
+        }
+    }
+    return out;
+}
+
+// The repo's own commit-size distribution sets the sweep cut: its 90th-percentile commit, clamped to [kSweepFloor, kSweepCeil].
+inline std::size_t sweepCutOf( const std::vector<std::vector<std::string>>& commits )
+{
+    std::vector<std::size_t> sizes;
+    sizes.reserve( commits.size() );
+    for( const std::vector<std::string>& c : commits )
+    {
+        sizes.push_back( c.size() );
+    }
+    if( sizes.empty() )
+    {
+        return kSweepFloor;
+    }
+    std::sort( sizes.begin(), sizes.end() );
+    return std::clamp( sizes[std::min( sizes.size() - 1, sizes.size() * 9 / 10 )], kSweepFloor, kSweepCeil );
+}
+
+// The anchor's siblings in history: non-test files in its dir with its extension (the anchor included). Too few of them, or too
+// little history on them (a mature dir), and the next dir up's whole subtree counts, at most kMaxWiden times, never the root.
+inline std::size_t commitsTouching( const std::vector<std::vector<std::string>>& commits, const std::vector<std::string>& sorted )
+{
+    return std::size_t( std::count_if( commits.begin(), commits.end(), [ & ]( const std::vector<std::string>& c )
+    {
+        return std::any_of( c.begin(), c.end(), [ & ]( const std::string& p ) { return std::binary_search( sorted.begin(), sorted.end(), p ); } );
+    } ) );
+}
+
+inline std::vector<std::string> siblingsOf( const std::vector<std::vector<std::string>>& commits, std::string_view anchor )
+{
+    const std::string_view ext = extOf( anchor );
+    const auto collect = [ & ]( std::string_view dir, bool subtree )
+    {
+        std::vector<std::string> out{ std::string( anchor ) };
+        const std::string        prefix = std::string( dir ) + "/";
+        for( const std::vector<std::string>& c : commits )
+        {
+            for( const std::string& p : c )
+            {
+                const bool inDir = subtree ? p.starts_with( prefix ) : dirName( p ) == dir;
+                if( inDir && extOf( p ) == ext && !isCoTestPath( p ) )
+                {
+                    out.push_back( p );
+                }
+            }
+        }
+        rw::sortutil::sortUnique( out );   // sorted: siblingCochange binary-searches it
+        return out;
+    };
+    std::string_view         level = dirName( anchor );
+    std::vector<std::string> sib   = collect( level, false );
+    for( int widen = 0; widen < kMaxWiden && !dirName( level ).empty() && ( sib.size() < kSiblingsWiden || commitsTouching( commits, sib ) < kMinSiblingCommits ); ++widen )
+    {
+        level = dirName( level );
+        sib   = collect( level, true );
+    }
+    return sib;
+}
+
+struct CoScore
+{
+    std::string   path;
+    std::uint32_t siblings = 0;   // distinct siblings it changed with (itself excluded)
+    std::uint32_t joint    = 0;   // its commits that touch a sibling (itself excluded)
+    std::uint32_t freq     = 0;   // its kept commits
+};
+
+// Every path's sibling co-change over the kept commits, strongest first (distinct siblings, then joint commits, then path).
+// A dir counts as an entry of every commit that touches a file in it ("tests/queries/stateless/"), so a corpus or a changelog
+// fragment dir whose files each change once still recurs. Kept: kMinJoint+ joint commits with kMinSiblingsTouched+ distinct siblings, at kMinPartnerLift+ times the base rate (the share of
+// all kept commits that touch a sibling) — so a file every commit touches (a lockfile, a root manifest) is not a partner.
+inline std::vector<CoScore> siblingCochange( const std::vector<std::vector<std::string>>& commits, const std::vector<std::string>& sib )
+{
+    HashMap<std::string, std::uint32_t>      idOf;
+    std::vector<CoScore>                     scores;
+    std::vector<std::vector<std::uint32_t>>  touched;   // per path: sibling indices it changed with
+    const auto id = [ & ]( const std::string& p )
+    {
+        const auto [ it, isNew ] = idOf.try_emplace( p, std::uint32_t( scores.size() ) );
+        if( isNew )
+        {
+            scores.push_back( CoScore{ p } );
+            touched.emplace_back();
+        }
+        return it->second;
+    };
+    for( const std::vector<std::string>& c : commits )
+    {
+        std::vector<std::uint32_t> here;   // sibling indices in this commit
+        for( const std::string& p : c )
+        {
+            if( const auto it = std::lower_bound( sib.begin(), sib.end(), p ); it != sib.end() && *it == p )
+            {
+                here.push_back( std::uint32_t( it - sib.begin() ) );
+            }
+        }
+        std::vector<std::string> entries = c;   // each path, and each path's dir as "dir/": a corpus whose files change once each still recurs
+        for( const std::string& p : c )
+        {
+            if( !dirName( p ).empty() )
+            {
+                entries.push_back( std::string( dirName( p ) ) + "/" );
+            }
+        }
+        rw::sortutil::sortUnique( entries );
+        for( const std::string& p : entries )
+        {
+            const std::uint32_t pi   = id( p );
+            CoScore&            s    = scores[pi];
+            const auto          self = std::lower_bound( sib.begin(), sib.end(), p );
+            const std::uint32_t mine = self != sib.end() && *self == p ? std::uint32_t( self - sib.begin() ) : UINT32_MAX;
+            ++s.freq;
+            bool any = false;
+            for( const std::uint32_t k : here )
+            {
+                if( k != mine )
+                {
+                    touched[pi].push_back( k );
+                    any = true;
+                }
+            }
+            s.joint += any ? 1 : 0;
+        }
+    }
+    for( std::size_t i = 0; i < scores.size(); ++i )
+    {
+        rw::sortutil::sortUnique( touched[i] );
+        scores[i].siblings = std::uint32_t( touched[i].size() );
+    }
+    const double baseRate = commits.empty() ? 1.0 : double( commitsTouching( commits, sib ) ) / double( commits.size() );
+    std::erase_if( scores, [ & ]( const CoScore& s )
+    {
+        return s.siblings < kMinSiblingsTouched || s.joint < kMinJoint || double( s.joint ) < kMinPartnerLift * baseRate * double( s.freq );
+    } );
+    std::sort( scores.begin(), scores.end(), []( const CoScore& a, const CoScore& b )
+               { return std::tie( b.siblings, b.joint, a.path ) < std::tie( a.siblings, a.joint, b.path ); } );
+    return scores;
+}
+
+// A role list's entries, strongest first: a dir entry ("dir/") stands for the files directly in it (it counts only those), so
+// a file whose own dir is already listed adds nothing; a deeper file or dir is its own entry.
+inline std::vector<std::string> collapseDirs( const std::vector<std::string>& paths, std::size_t shown )
+{
+    std::vector<std::string> out;
+    for( std::size_t i = 0; i < paths.size() && out.size() < shown; ++i )
+    {
+        const std::string& p      = paths[i];
+        const auto ownDir = []( std::string_view q ) { return std::string( dirName( q.ends_with( "/" ) ? q.substr( 0, q.size() - 1 ) : q ) ) + "/"; };
+        const bool listed = !p.ends_with( "/" ) && std::find( out.begin(), out.end(), ownDir( p ) ) != out.end();
+        if( p.ends_with( "/" ) )
+        {
+            std::erase_if( out, [ & ]( const std::string& o ) { return !o.ends_with( "/" ) && ownDir( o ) == p; } );   // the dir replaces its files listed above it
+        }
+        if( !listed )
+        {
+            out.push_back( p );
+        }
+    }
+    return out;
+}
+
+// Sort the partners into the role slots. The anchor's own siblings are the unit kind, not a role: never registration.
+inline void assignRoles( const Corpus& c, const std::vector<CoScore>& scores, const std::vector<std::string>& sib, std::string_view anchor, RoleHistory& h )
+{
+    std::vector<std::string> tests, logs;
+    for( std::size_t i = 0; i < scores.size() && i < kPartnersRead; ++i )
+    {
+        const CoScore&         s = scores[i];
+        const std::string_view p = s.path;
+        if( p.ends_with( "/" ) )   // a dir entry stands only for a test corpus or a changelog fragment dir
+        {
+            const bool test = isCoTestPath( std::string( p ) + "x" ), log = isChangelogPath( p );
+            if( ( test || log ) && !isSkipRole( roleOfPath( std::string( p ) + "x" ) ) && isDir( joinPath( c.diskRoot, p ) ) )
+            {
+                ( test ? tests : logs ).push_back( s.path );
+            }
+            continue;
+        }
+        if( p == anchor || isSkipRole( roleOfPath( p ) ) || !c.exists( p ) )
+        {
+            continue;
+        }
+        if( isCoTestPath( p ) )
+        {
+            tests.push_back( s.path );
+        }
+        else if( isManifestPath( p ) )
+        {
+            pattern::appendUnique( h.builds, s.path );
+        }
+        else if( isChangelogPath( p ) )
+        {
+            logs.push_back( s.path );
+        }
+        else if( isDocPath( p ) || isDocExt( p ) )
+        {
+            pattern::appendUnique( h.docs, s.path );
+        }
+        else if( !std::binary_search( sib.begin(), sib.end(), s.path ) )
+        {
+            pattern::appendUnique( h.registration, s.path );
+        }
+    }
+    h.tests = collapseDirs( tests, kRoleShown );
+    h.logs  = collapseDirs( logs, 1 );
+    h.builds.resize( std::min( h.builds.size(), kRoleShown ) );
+    h.docs.resize( std::min( h.docs.size(), kRoleShown ) );
+}
+
+// The role slots of `anchor` from the cached history walk; read=false (nothing else set) when the walk holds too little.
+inline RoleHistory roleHistory( const Corpus& c, std::string_view anchor, bool noCache )
+{
+    RoleHistory h;
+    if( anchor.empty() || switchOff( "RIPWIRE_BRIEF_COCHANGE" ) || !hasEnclosingGitRepo( c.diskRoot ) )
+    {
+        return h;
+    }
+    const RawCommitStream raw    = quality::gitRawCommitStreamCached( c.diskRoot, "18 months ago", noCache );
+    const GitPathOffset   offset = deriveGitPathOffset( c.ing, UINT32_MAX );
+    std::vector<std::vector<std::string>> commits = rootCommits( raw, offset.gitPrefix );
+    h.sweepCut = sweepCutOf( commits );
+    std::erase_if( commits, [ & ]( const std::vector<std::string>& k ) { return k.size() > h.sweepCut; } );
+    h.commits = commits.size();
+    h.read    = !raw.unread && h.commits >= kMinHistoryCommits;
+    if( !h.read )
+    {
+        return h;
+    }
+    const std::vector<std::string> sib = siblingsOf( commits, anchor );
+    assignRoles( c, siblingCochange( commits, sib ), sib, anchor, h );
+    return h;
+}
+
+// The unit's build files: the nearest manifest above the anchor and above its tests (the siblings' co-changed test home when
+// history has one, else the test home), then the co-changed ones, kUnitBuildShown in all.
+inline std::vector<std::string> unitBuild( const Corpus& c, std::string_view anchor, const TestHome& home, const RoleHistory& h )
+{
+    std::vector<std::string> out;
+    if( !switchOff( "RIPWIRE_BRIEF_UNITBUILD" ) && !anchor.empty() )
+    {
+        const std::string_view testFrom = !h.tests.empty()          ? std::string_view( h.tests.front() )
+                                          : !home.testDir.empty()   ? std::string_view( home.testDir )
+                                          : home.testFiles.empty()  ? std::string_view()
+                                                                    : std::string_view( home.testFiles.front() );
+        const std::string_view name = baseName( anchor );
+        for( const std::string& m : { nearestManifest( c, anchor, name ), testFrom.empty() ? std::string() : nearestManifest( c, testFrom, name ) } )
+        {
+            const bool dup = std::any_of( out.begin(), out.end(), [ & ]( const std::string& o ) { return o.substr( 0, o.find( ':' ) ) == m.substr( 0, m.find( ':' ) ); } );
+            if( !m.empty() && !dup )
+            {
+                out.push_back( m );
+            }
+        }
+    }
+    for( const std::string& b : h.builds )
+    {
+        const bool dup = std::any_of( out.begin(), out.end(), [ & ]( const std::string& o ) { return o.substr( 0, o.find( ':' ) ) == b; } );
+        if( !dup && b.find( '/' ) != std::string::npos && out.size() < kUnitBuildShown )   // root manifests are quoted already
+        {
+            out.push_back( b );
+        }
+    }
+    return out;
+}
+
+// Registration with the co-change partners first: the files the siblings' own commits touched lead the name-pattern ones;
+// kRegistrationShown in all, the rest counted as +N.
+inline Registration withHistory( Registration byName, const RoleHistory& h )
+{
+    if( h.registration.empty() )
+    {
+        return byName;
+    }
+    Registration out{ {}, byName.more };
+    std::vector<std::string> all = h.registration;
+    all.insert( all.end(), std::make_move_iterator( byName.paths.begin() ), std::make_move_iterator( byName.paths.end() ) );
+    for( std::string& p : all )
+    {
+        const bool dup = std::find( out.paths.begin(), out.paths.end(), p ) != out.paths.end();
+        if( dup )
+        {
+            continue;
+        }
+        if( out.paths.size() < kRegistrationShown )
+        {
+            out.paths.push_back( std::move( p ) );
+        }
+        else
+        {
+            ++out.more;
+        }
+    }
+    return out;
+}
+
 // ── section 6: where-else ───────────────────────────────────────────────────────────────────────────────────────────────────
 struct WhereElse
 {
@@ -3344,24 +3765,26 @@ inline bool isDistinctiveName( std::string_view n ) noexcept
     return n.size() >= 8;
 }
 
-inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std::vector<std::string>& files, const TestHome& home, bool history,
+inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std::vector<std::string>& files, const TestHome& home, const RoleHistory& hist,
                                 const std::vector<std::string>& mirrors )
 {
     WhereElse w;
-    w.hasHistory = history;
+    w.hasHistory = hist.read;
+    for( const std::string& t : hist.tests )   // what the siblings' commits touched: their test home, docs and changelog lead
+    {
+        addItem( w, "test", t, files );
+    }
+    for( const std::string& d : hist.docs )
+    {
+        addItem( w, "doc", d, files );
+    }
+    for( const std::string& l : hist.logs )
+    {
+        addItem( w, "log", l, files );
+    }
     for( const std::string& m : mirrors )   // the exemplar's dir under the test and api roots: where the new unit's twins go
     {
         addItem( w, isTestPath( m ) ? "test" : "mirror", m, files );
-    }
-    if( history && !files.empty() )
-    {
-        const std::vector<std::vector<std::uint32_t>> sets = gitCommitFileSets( c.diskRoot, c.ing, "18 months ago", 30 );
-        std::uint32_t                                 commits = 0;
-        const std::vector<CoPartner>                  partners = cochangePartners( c.ing, files.front(), commits, sets );
-        for( std::size_t i = 0; i < partners.size() && i < 2; ++i )
-        {
-            addItem( w, "co", c.rel[partners[i].fileId], files );
-        }
     }
     for( const std::string& t : home.testFiles )
     {
@@ -3574,7 +3997,9 @@ inline std::string composeBrief( const BriefInputs& in )
     const std::vector<std::string>   named   = anchoredNamed( namedFiles( c, in.task, actFiles( core ) ), ex );
     const std::vector<std::string>   files   = orderedFiles( named, actFiles( core ) );
     const std::vector<std::uint32_t> actSyms = actSymbols( c, core, named );
-    const bool       history = !gitstamp::isShallow( std::string( in.diskRoot ) ) && hasEnclosingGitRepo( std::string( in.diskRoot ) );
+    const std::string  anchor = !ex.file.empty() ? ex.file : files.empty() ? std::string() : files.front();   // the unit a new one imitates
+    const RoleHistory  hist   = roleHistory( c, anchor, in.noCache );
+    const bool         history = hist.read;
 
     // 1 layout
     const std::vector<LayoutEntry> deep = layoutEntries( c, true );
@@ -3607,13 +4032,13 @@ inline std::string composeBrief( const BriefInputs& in )
     // 5 edges
     const std::vector<EdgeSet> edges   = findEdges( c, actSyms );
     const EdgeSet              imports = primaryImports( c, adj, named, files, caps.imports );
-    const Registration         reg     = findRegistration( c, files );
+    const Registration         reg     = withHistory( findRegistration( c, files ), hist );
     // 6 where-else
-    const WhereElse where = findWhereElse( c, core, files, home, history, exemplarMirrors( c, ex ) );
+    const WhereElse where = findWhereElse( c, core, files, home, hist, exemplarMirrors( c, ex ) );
     // 7 conventions
     const std::vector<ConventionDoc> conv = findConventions( c );
     // 8 next
-    Sections s{ renderLayout( deep, caps.layoutEntries ), renderLayout( top, caps.layoutEntries ), renderBuild( buildLines, buildMore, home ),
+    Sections s{ renderLayout( deep, caps.layoutEntries ), renderLayout( top, caps.layoutEntries ), withUnitBuild( renderBuild( buildLines, buildMore, home ), unitBuild( c, anchor, home, hist ) ),
                       renderEntries( c, entries, caps.entries ), renderEntries( c, entries, 3 ), renderTask( core, renderExemplar( ex ) + qs.text( kQsBytes ) ), renderTask( core, "" ),
                       renderEdges( edges, kEdgeSymbols, imports, reg ), renderEdges( edges, 1, imports, reg ), renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
                       renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>" };

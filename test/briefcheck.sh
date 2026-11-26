@@ -33,6 +33,13 @@
 #        (its imports line first) and its dir's test mirror leads where-else; "like frob" with two definitions is disclosed as
 #        ambiguous="2" with both candidates and changes none of the 6 other sections against the task without the phrase; a task
 #        with no like-phrase draws no <like>.
+#   (H)  BRIEF-COCHANGE, one synthetic git fixture with dated history: twenty-two sibling functions under src/functions/, each added in
+#        a commit with the catalog (named nothing like a registry), a numbered test corpus, the docs page, the changelog and the unit's CMakeLists; a hot
+#        file in many unrelated commits; a sweeping commit (a formatter pass over 60 files). <r>registration: leads with the
+#        catalog, where-else lists the corpus dir, the docs page and the changelog, <build> names the unit's CMakeLists with
+#        the line that lists the exemplar, history="1"; the hot file and the sweep-only file are absent. The same tree cut to
+#        one commit (a shallow clone's shape) answers history="0" with no history slot; RIPWIRE_BRIEF_COCHANGE=0 and
+#        RIPWIRE_BRIEF_UNITBUILD=0 each remove exactly their half.
 # usage: test/briefcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -330,6 +337,53 @@ if [ "$same" = 6 ]; then na=$(( na + 1 )); else no "(A) an ambiguous exemplar ch
 if sect "$TMP/a1.out" where-else | grep -q '^test tests/ext/stages/squash/'; then na=$(( na + 1 )); else no "(A) the exemplar's test mirror does not lead where-else: $( sect "$TMP/a1.out" where-else )"; fi
 if ! grep -q '<like' "$TMP/a3.out" && ! grep -q '<like' "$TMP/cmake.out"; then na=$(( na + 1 )); else no "(A) a task with no like-phrase drew a <like> element"; fi
 if [ "$na" = 6 ]; then ok "(A) exemplar anchor: unique accepted, leads the edges and its test mirror leads where-else, ambiguous disclosed with 6 of 6 sections unchanged, no phrase no element (6 of 6)"; else no "(A) exemplar anchor $na of 6"; fi
+
+# ─── (H) co-change roles + the unit's build file (BRIEF-COCHANGE) ─────────────────────────────────────────────────────
+mk_hist() {       # a C project whose functions are added the same way each time: catalog + corpus test + docs + changelog + unit build
+    local d="$TMP/hist" i n=0
+    mkdir -p "$d/src/functions" "$d/tests/queries/stateless" "$d/docs" "$d/src/core"
+    printf 'cmake_minimum_required(VERSION 3.10)\nproject(hist C)\nadd_subdirectory(src/functions)\n' > "$d/CMakeLists.txt"
+    printf 'int core_main(void) { return 0; }\n' > "$d/src/core/main.c"
+    printf 'int hot(void) { return 0; }\n' > "$d/src/core/hot.c"
+    git -C "$d" init -q && git -C "$d" config user.email t@example.invalid && git -C "$d" config user.name t
+    commit() { n=$(( n + 1 )); local at; at="$( python3 -c "import datetime,sys; print((datetime.datetime(2026,1,1,10)+datetime.timedelta(days=int(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$n" )"; git -C "$d" add -A && GIT_AUTHOR_DATE="$at" GIT_COMMITTER_DATE="$at" git -C "$d" commit -qm "$1"; }
+    commit "base"
+    for i in $( seq 1 22 ); do
+        printf 'int fn_%s(int x) { return x + %s; }\n' "$i" "$i" > "$d/src/functions/fn_$i.c"
+        printf 'void add_fn_%s(void);\n' "$i" >> "$d/src/catalog.c"
+        printf 'SELECT fn_%s(1);\n' "$i" > "$d/tests/queries/stateless/000${i}_fn_$i.sql"
+        printf '## fn_%s\n' "$i" >> "$d/docs/functions.md"
+        printf -- '- add fn_%s\n' "$i" >> "$d/CHANGELOG.md"
+        printf 'add_library(fn_%s fn_%s.c)\n' "$i" "$i" >> "$d/src/functions/CMakeLists.txt"
+        commit "add fn_$i"
+        printf '// %s\n' "$i" >> "$d/src/core/hot.c"; commit "tweak hot $i a"
+        printf '// %s b\n' "$i" >> "$d/src/core/hot.c"; commit "tweak hot $i b"
+    done
+    for i in $( seq 1 60 ); do printf 'int w_%s;\n' "$i" > "$d/src/core/wide_$i.c"; done
+    for i in $( seq 1 22 ); do printf '\n' >> "$d/src/functions/fn_$i.c"; done
+    printf '\n' >> "$d/src/core/main.c"; commit "format everything"
+}
+mk_hist
+hbrief() { ( cd "$1" && env "${@:2}" "$BIN" . --no-cache --brief-bytes=8192 "--brief=add a new function (like fn_3) to the catalog" 2>/dev/null ); }
+hbrief "$TMP/hist" > "$TMP/h1.out"
+hbrief "$TMP/hist" RIPWIRE_BRIEF_COCHANGE=0 > "$TMP/h2.out"
+hbrief "$TMP/hist" RIPWIRE_BRIEF_UNITBUILD=0 > "$TMP/h3.out"
+git clone -q --depth 1 "file://$TMP/hist" "$TMP/hist1" 2>/dev/null
+mkdir -p "$TMP/h4cache"; hbrief "$TMP/hist1" TMPDIR="$TMP/h4cache" > "$TMP/h4.out"   # its own cache: the full clone's walk is keyed to the same HEAD
+nh=0
+[ "$( attr history < "$TMP/h1.out" )" = 1 ] && grep -qF '<like t="fn_3">src/functions/fn_3.c</like>' "$TMP/h1.out" && nh=$(( nh + 1 )) || no "(H) premise: history=\"1\" with the exemplar fn_3 anchored: $( head -c 400 "$TMP/h1.out" )"
+sect "$TMP/h1.out" edges | grep -qF '<r>registration: src/catalog.c' && nh=$(( nh + 1 )) || no "(H) the catalog does not lead registration: $( sect "$TMP/h1.out" edges | head -c 300 )"
+we="$( sect "$TMP/h1.out" where-else )"
+for want in 'test tests/queries/stateless/' 'doc docs/functions.md' 'log CHANGELOG.md'; do
+    case "$we" in *"$want"*) nh=$(( nh + 1 )) ;; *) no "(H) where-else lacks '$want': $we" ;; esac
+done
+sect "$TMP/h1.out" build | grep -qE 'unit build: src/functions/CMakeLists.txt:3( |$|<| ·)' && nh=$(( nh + 1 )) || no "(H) <build> does not name the unit's CMakeLists at the fn_3 line: $( sect "$TMP/h1.out" build )"
+grep -qE 'src/core/hot\.c|src/core/wide_|src/core/main\.c' "$TMP/h1.out" && no "(H) the hot file or a sweep-only file reached the brief" || nh=$(( nh + 1 ))
+[ "$( attr history < "$TMP/h4.out" )" = 0 ] && ! sect "$TMP/h4.out" edges | grep -qF '<r>registration: src/catalog.c' && nh=$(( nh + 1 )) || no "(H) the 1-commit clone is not history=\"0\" without the history slots"
+grep -qF 'unit build: src/functions/CMakeLists.txt' "$TMP/h4.out" && nh=$(( nh + 1 )) || no "(H) the history-free half is missing on the 1-commit clone: $( sect "$TMP/h4.out" build )"
+[ "$( attr history < "$TMP/h2.out" )" = 0 ] && ! sect "$TMP/h2.out" edges | grep -qF '<r>registration: src/catalog.c' && grep -qF 'unit build: src/functions/CMakeLists.txt' "$TMP/h2.out" && nh=$(( nh + 1 )) || no "(H) RIPWIRE_BRIEF_COCHANGE=0 did not remove exactly the history half"
+! grep -qF 'unit build: src/functions/CMakeLists.txt:3' "$TMP/h3.out" && sect "$TMP/h3.out" edges | grep -qF 'src/catalog.c' && nh=$(( nh + 1 )) || no "(H) RIPWIRE_BRIEF_UNITBUILD=0 did not remove exactly the nearest-manifest half: $( sect "$TMP/h3.out" build )"
+if [ "$nh" = 11 ]; then ok "(H) co-change roles: catalog, corpus dir, docs, changelog, the unit's CMakeLists at the exemplar's line; hot and sweep-only files absent; 1-commit clone history=0; both OFF switches (11 of 11)"; else no "(H) co-change roles $nh of 11"; fi
 
 [ "$fail" = 0 ] && echo "briefcheck: PASS" || echo "briefcheck: FAIL"
 exit "$fail"
