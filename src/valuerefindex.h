@@ -1433,25 +1433,7 @@ private:
     void index( const KeepSets* keep )
     {
         const IngestResult& ing = m_ing;
-        if( keep != nullptr && keep->fnAll != nullptr )
-        {
-            for( const auto& [ name, one ] : keep->names )   // SLOT-NARROW: the base's unfiltered table, read once per kept name
-            {
-                if( const auto it = keep->fnAll->find( name ); it != keep->fnAll->end() )
-                {
-                    m_fnByName.try_emplace( name, it->second );
-                }
-            }
-        }
-        for( NodeId id = 0; id < ing.symbols.size() && ( keep == nullptr || keep->fnAll == nullptr ); ++id )
-        {
-            const Symbol& s = ing.symbols[id];
-            if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) != VrLangFamily::None
-                && ( keep == nullptr || keep->names.contains( s.name ) ) )
-            {
-                m_fnByName[ s.name ].push_back( id );
-            }
-        }
+        indexFunctionsByName( keep );
         indexOwners( keep );
         markPythonMembers();
         for( std::uint32_t i = 0; i < ing.references.size(); ++i )
@@ -1478,6 +1460,31 @@ private:
         m_slots->resolveCalleesBy( [ this ]( const Reference& v ) { return resolveCallee( v ); } );
         m_slots->build( ing, m_values, m_targets );
         m_slots->resolveCalleesBy( nullptr );   // it captured `this`: never outlives the build
+    }
+    // part 1: the functions by name (`keep` non-null: only its names). The narrow base hands its unfiltered table (SLOT-NARROW),
+    // read once per kept name, so its index does not walk the symbols a second time.
+    void indexFunctionsByName( const KeepSets* keep )
+    {
+        if( keep != nullptr && keep->fnAll != nullptr )
+        {
+            for( const auto& [ name, one ] : keep->names )
+            {
+                if( const auto it = keep->fnAll->find( name ); it != keep->fnAll->end() )
+                {
+                    m_fnByName.try_emplace( name, it->second );
+                }
+            }
+            return;
+        }
+        for( NodeId id = 0; id < m_ing.symbols.size(); ++id )
+        {
+            const Symbol& s = m_ing.symbols[id];
+            if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) != VrLangFamily::None
+                && ( keep == nullptr || keep->names.contains( s.name ) ) )
+            {
+                m_fnByName[ s.name ].push_back( id );
+            }
+        }
     }
     // part 2: a path language's functions by owner type (`Editor::backspace`, ownedBy's "family#Owner::name"), and every file's
     // crate (slot_join::cratesOf) when such a language is indexed.
