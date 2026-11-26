@@ -128,7 +128,8 @@ ident(){
 }
 recordOf(){ find "$TMP/t/ripwire" -name "ripwire-verbfs-*-$1-*.bin" 2>/dev/null | head -1; }
 # the answers an invalidation arm compares: the quality lens (tested=, pure=) and the metrics map (tested=, lcom4=, cbo=)
-identAll(){ ident "$1 --for" --for="$TASK" && ident "$1 --metrics" --metrics; }
+# the --for answer is kept as id.f.out: --metrics overwrites id.w.out and prints no pure=, so a pure= check must read the --for copy
+identAll(){ ident "$1 --for" --for="$TASK" && cp "$TMP/id.w.out" "$TMP/id.f.out" && ident "$1 --metrics" --metrics; }
 # mut LABEL FAULT : a binary blinded by FAULT, served from the record of the state before the edit, must differ from --no-cache
 MUT=0
 # mutrun FAULT TAG ARGS... : a served run under one fault switch (exported for that run only), through run's own rc file
@@ -157,6 +158,9 @@ for ln in p.stdout.decode("utf8", "replace").splitlines():
     except ValueError: continue
     if r.get("id") == 1:
         sys.stdout.write("".join(c.get("text", "") for c in r.get("result", {}).get("content", [])))
+if p.returncode != 0:
+    sys.stderr.write("mcp: ripwire --mcp exited %d\n" % p.returncode)
+    sys.exit(1)
 PY
 }
 
@@ -191,11 +195,12 @@ printf '\n// a working-tree edit for the delta to report\nint deltaProbe( int a 
 s2n=$(( s2n + 1 )); ident "S2 --quality-delta" --quality-delta && s2=$(( s2 + 1 ))
 gitq checkout -- src/widget.cpp
 run warm2 warm --for="$TASK"
-mcp "$TMP/m.w.out" "$FIX" for "$TASK"; mcp "$TMP/m.n.out" "$FIX" for "$TASK" novfs
-mcp "$TMP/e.w.out" "$FIX" exemplar "$TASK"; mcp "$TMP/e.n.out" "$FIX" exemplar "$TASK" novfs
+mrc=0
+mcp "$TMP/m.w.out" "$FIX" for "$TASK" || mrc=1; mcp "$TMP/m.n.out" "$FIX" for "$TASK" novfs || mrc=1
+mcp "$TMP/e.w.out" "$FIX" exemplar "$TASK" || mrc=1; mcp "$TMP/e.n.out" "$FIX" exemplar "$TASK" novfs || mrc=1
 s2n=$(( s2n + 1 ))
-if [ -s "$TMP/m.w.out" ] && [ -s "$TMP/e.w.out" ] && cmp -s "$TMP/m.w.out" "$TMP/m.n.out" && cmp -s "$TMP/e.w.out" "$TMP/e.n.out"; then s2=$(( s2 + 1 ))
-else no "S2 MCP for/exemplar: the answer with a record differs from RIPWIRE_NO_VERBFS=1 (or is empty)"; fi
+if [ "$mrc" = 0 ] && [ -s "$TMP/m.w.out" ] && [ -s "$TMP/e.w.out" ] && cmp -s "$TMP/m.w.out" "$TMP/m.n.out" && cmp -s "$TMP/e.w.out" "$TMP/e.n.out"; then s2=$(( s2 + 1 ))
+else no "S2 MCP for/exemplar: an MCP process failed (rc), or the answer with a record differs from RIPWIRE_NO_VERBFS=1 (or is empty)"; fi
 if [ "$s2" = "$s2n" ]; then ok "S2 all ${s2n} surfaces identical on an unchanged index (--for --metrics --quality-panel --exemplar --html --quality-delta MCP)"
 else no "S2 only ${s2} of ${s2n} surfaces identical"; fi
 statrun s2s --metrics
@@ -215,6 +220,9 @@ else no "I1: '$( line i1s qmetrics )'"; fi
 
 # ── I2: references only — a side-effecting call added to the helper a const method calls ───────────────────────────
 run pre2 warm --for="$TASK"
+# premise: before the edit the quality lens prints Widget::size pure=1, so I2's "pure=1 gone" check below cannot pass on an answer that never had it
+if grep -q 'Widget::size[^|]*pure=1' "$TMP/pre2.out"; then ok "I2 premise: before the edit, --for prints Widget::size pure=1"
+else no "I2 premise: --for never printed Widget::size pure=1 before the edit, so the I2 purity check would be vacuous"; fi
 cat >"$FIX/src/widget.cpp" <<'E'
 #include "widget.hpp"
 #include <cstdlib>
@@ -224,7 +232,7 @@ int helperCount() { std::exit( 3 ); }
 E
 mut "I2 a side effect added under a const method" RIPWIRE_FAULT_VERBFS_QMETRICS_NOREFS
 statrun i2s --for="$TASK"
-if identAll "I2" && [ "$( field i2s impure served )" = 0 ] && [ "$( field i2s impure why )" = refs ] && ! grep -q 'Widget::size[^|]*pure=1' "$TMP/id.w.out"; then
+if identAll "I2" && [ "$( field i2s impure served )" = 0 ] && [ "$( field i2s impure why )" = refs ] && ! grep -q 'Widget::size[^|]*pure=1' "$TMP/id.f.out"; then
     ok "I2 a side effect under a const method: impure recomputed (why=refs), pure= gone, identical"
 else no "I2: '$( line i2s impure )'"; fi
 

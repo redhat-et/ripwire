@@ -513,7 +513,9 @@ inline bool readQmPayload( std::string_view payload, QmRecord& r )
     }
     const bool rowsOk = std::ranges::all_of( r.tested, []( std::uint8_t t ) { return t <= 1; } )
                      && std::ranges::all_of( r.lcom4At, [ & ]( std::uint32_t at ) { return at < r.symbolCount; } )
-                     && std::ranges::adjacent_find( r.lcom4At, std::greater_equal<>() ) == r.lcom4At.end();
+                     && std::ranges::adjacent_find( r.lcom4At, std::greater_equal<>() ) == r.lcom4At.end()
+                     // a stored LCOM4 is a component count of a class with methods: at least 1, never the NA sentinel, never more than the symbols
+                     && std::ranges::all_of( r.lcom4Value, [ & ]( std::uint32_t v ) { return v >= 1 && v != kLcom4NA && v <= r.symbolCount; } );
     return VALIDATE( rowsOk, "verbfs qmetrics: a stored row lies outside the record's index" );
 }
 
