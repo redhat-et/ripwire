@@ -4863,6 +4863,10 @@ int main( int argc, char** argv )
     {
         return 1;   // the refusal is on stderr
     }
+    if( cfg.noCache )
+    {
+        rw::quality::skipCacheDirSweepForProcess();   // --no-cache never evicts another root's blob (quality.h, before any thread)
+    }
     // harvest 2026-09-09: a hook-form core.fsmonitor in a crawl root's own .git/config is a command git would run on
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
