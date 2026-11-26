@@ -449,7 +449,8 @@ D2_SNAPSHOT="$( mktemp -d "$TMP/d2snap.XXXXXX" )"; cp -R "$D2_WS/"* "$D2_SNAPSHO
 D2_MSG="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"insert_before_symbol\",\"arguments\":{\"path\":\"$D2_OTHER\",\"symbol\":\"perimeter\",\"file\":\"geometry.cpp\",\"text\":\"// x7-outside\\n\"}}}"
 mcp_call_root "$D2_WS" '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$D2_MSG" >"$TMP/d2_out"
 D2_INNER="$( c_inner_text "$TMP/d2_out" )"
-[ "$D2_INNER" = "__ERROR__:path outside workspace; start the server on that root or pass an absolute in-root path" ] \
+# SEP-1303 (lane mcp-metadata): the refusal is an isError result and ends in a next call; the named sentence leads it unchanged
+case "$D2_INNER" in "__ERROR__:path outside workspace; start the server on that root or pass an absolute in-root path — next: find_symbol "*) true ;; *) false ;; esac \
     && ok "(D-2) edit verb with an outside-root path refuses with the named workspace-pin error" \
     || no "(D-2) unexpected: $D2_INNER"
 diff -rq "$D2_SNAPSHOT" "$D2_WS" >/dev/null \

@@ -162,6 +162,72 @@ inline std::string joinClauses( const std::vector<std::string_view>& parts, std:
     return out;
 }
 
+// ─── the NEXT CALL: every tool-execution refusal names the ripwire call to make next ────────────────────
+//
+// Xu & Wu, "MCP Error Messages Written for Developers Hurt the Most Capable Agents Most" (2609.35381): in 150 MCP
+// servers, a recovery step naming a terminal command left 45% of tasks recovered, and the loss GREW with model
+// capability; a step naming a server TOOL raised recovery to 84-88%. So every refusal this surface sends ends in
+// ONE callable step on this surface, in the argument spelling the e.g. clauses already use:
+//
+//     — next: <tool> field="value" ...
+//
+// The step is chosen by what the refusal knows, never invented: a missing / bad / undeclared field retries the
+// SAME tool with the table's example for it; a not-found with a near-miss retries with the near-miss; a not-found
+// with none greps the spelling (the textual hits, parse_degraded rows included); a refusal the minimal call would
+// only repeat names the call its dispatch site knows to be useful instead. test/mcpnextcallcheck.sh drives every
+// row and round-trips each next call through tools/call.
+inline constexpr std::string_view kNextCallLead = " — next: ";
+
+inline bool hasNextCall( std::string_view msg )
+{
+    return msg.find( kNextCallLead ) != std::string_view::npos;
+}
+
+inline std::string nextCallClause( std::string_view tool, std::string_view args )
+{
+    std::string out( kNextCallLead );
+    out += tool;
+    if( !args.empty() )
+    {
+        out += ' ';
+        out += args;
+    }
+    return out;
+}
+
+// `tool`'s minimal well-formed call: each Required row's example and the FIRST AnyOf member's (the one the
+// dispatch prefers), in table order, with `part` ("field=value") standing in for its own field's example or, when
+// the tool does not require that field, leading the list. "" for a tool that needs nothing beyond its root.
+inline std::string minimalCallArgs( std::string_view tool, std::string_view part = {} )
+{
+    const std::string_view partField = part.substr( 0, part.find( '=' ) );
+    std::vector<std::string_view> parts;
+    bool anyOfTaken = false, partPlaced = part.empty();
+    for( const McpFieldSpec& row : kMcpRequiredFields )
+    {
+        if( tool != std::string_view( row.verb ) || row.rule == FieldRule::Optional )
+        {
+            continue;
+        }
+        if( row.rule == FieldRule::AnyOf )
+        {
+            if( anyOfTaken )
+            {
+                continue;
+            }
+            anyOfTaken = true;
+        }
+        const bool isPart = !partPlaced && partField == std::string_view( row.field );
+        partPlaced        = partPlaced || isPart;
+        parts.push_back( isPart ? part : std::string_view( row.example ) );
+    }
+    if( !partPlaced )
+    {
+        parts.insert( parts.begin(), part );
+    }
+    return joinClauses( parts, " " );
+}
+
 // M7 — the missing-required-field refusal for `verb`, or "" when nothing required is missing. `isPresent`
 // answers "did the request carry this argument?" and is the ONLY thing the two arms supply differently (the
 // live arm reads its parsed locals, the batch arm reads its sub-query object), which is precisely why the
@@ -217,7 +283,8 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
     if( hasAnyOf && !anyOfSatisfied && names.empty() )
     {
         return "missing required field: " + joinClauses( anyNames, " or " ) + " — " + std::string( verb )
-             + " needs " + joinClauses( anyNeeds, " or " ) + ", e.g. " + std::string( anyExample );
+             + " needs " + joinClauses( anyNeeds, " or " ) + ", e.g. " + std::string( anyExample )
+             + nextCallClause( verb, minimalCallArgs( verb ) );
     }
 
     if( names.empty() )
@@ -227,7 +294,7 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
 
     return std::string( "missing required field" ) + ( names.size() > 1 ? "s" : "" ) + ": "
          + joinClauses( names, ", " ) + " — " + std::string( verb ) + " needs " + joinClauses( needs, " and " )
-         + ", e.g. " + joinClauses( examples, " " );
+         + ", e.g. " + joinClauses( examples, " " ) + nextCallClause( verb, minimalCallArgs( verb ) );
 }
 
 // The refusal a verb+field pair renders when NOTHING was given at all — used where the caller has already
@@ -421,6 +488,70 @@ inline std::string cappedEcho( std::string_view got )
         --cut; // mid-sequence continuation byte
     }
     return std::string( got.substr( 0, cut ) ) + "…";
+}
+
+// A caller's spelling as a next call's quoted value: capped like every echo, with `"` and `\` escaped the way the
+// e.g. examples spell them, so the clause parses back to the same string (JSON string syntax).
+inline std::string nextCallValue( std::string_view v )
+{
+    std::string out = "\"";
+    for( const char c : cappedEcho( v ) )
+    {
+        if( c == '"' || c == '\\' )
+        {
+            out += '\\';
+        }
+        out += ( c == '\n' || c == '\r' || c == '\t' ) ? ' ' : c;
+    }
+    return out + "\"";
+}
+
+// The table's runnable example for `field` ("limit=40"), or "" when the field has no value row.
+inline std::string_view valueExampleFor( std::string_view field )
+{
+    for( const McpValueSpec& row : kMcpValueFields )
+    {
+        if( field == std::string_view( row.field ) )
+        {
+            return row.example;
+        }
+    }
+    return {};
+}
+
+// The envelope's backstop (mcp.h errResultMsg, the batch arm's sub-query error): a refusal no renderer gave a next
+// call gets the tool's minimal well-formed call, with a bad VALUE's own field set to the table's example. A bad
+// `path`/`paths` names the call WITHOUT a root: omitted, the server's own root answers. Never applied twice.
+inline std::string withNextCallFor( std::string msg, std::string_view tool )
+{
+    if( tool.empty() || hasNextCall( msg ) )
+    {
+        return msg;
+    }
+    constexpr std::string_view kBadValue = "invalid value for field: ";
+    std::string_view           part;
+    if( std::string_view( msg ).starts_with( kBadValue ) )
+    {
+        const std::string_view rest  = std::string_view( msg ).substr( kBadValue.size() );
+        const std::string_view field = rest.substr( 0, rest.find( ' ' ) );
+        if( field != "path" && field != "paths" )
+        {
+            part = valueExampleFor( field );
+        }
+    }
+    // an edit verb's refusal names a READ next: its minimal call carries the table's example body, which is no step to
+    // run blind (a missing or bad edit FIELD already names the edit itself, through its renderer)
+    if( tool == "replace_symbol_body" || tool == "insert_before_symbol" || tool == "insert_after_symbol" )
+    {
+        return msg + nextCallClause( "find_symbol", minimalCallArgs( "find_symbol" ) );
+    }
+    return msg + nextCallClause( tool, minimalCallArgs( tool, part ) );
+}
+
+// A refusal whose minimal call would only repeat it names the call its dispatch site knows to help instead.
+inline std::string withNextCall( std::string msg, std::string_view tool, std::string_view args )
+{
+    return hasNextCall( msg ) ? msg : msg + nextCallClause( tool, args );
 }
 
 // ─── G5: an edit verb's PAYLOAD field, and the noun a refusal calls it by ────────────────────────────────
@@ -963,8 +1094,10 @@ inline std::string atSeedClause( const IngestResult& ing, std::string_view spell
     return atSeedFaultClause( ing, resolveAtSeed( ing, spelling.substr( 1 ) ) );
 }
 
+// `nextTool` (the tool that refused; "" on a path with no tool to name) gets the near-miss retry as the next call;
+// with no near-miss the next call greps the spelling. `noun` is the field the spelling came in (symbol / type).
 inline std::string notFound( const IngestResult& ing, std::string_view noun, std::string_view spelling,
-                             std::string_view retryHint = {} )
+                             std::string_view retryHint = {}, std::string_view nextTool = {} )
 {
     std::string msg = std::string( noun ) + " not found: '" + cappedEcho( spelling ) + "'";
     if( !spelling.empty() && spelling.front() == '@' )
@@ -980,7 +1113,14 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
     msg += defHit.found ? defNote : degradedParseNote( ing, spelling ) + defNote;   // a capped scan adds its note after the degraded one
-    return msg;
+    if( !near.empty() && near != spelling && !nextTool.empty() )
+    {
+        // an edit verb's next step is a READ of the near-miss (its handle, its file): a placeholder body is no step to run blind
+        const bool        edits = nextTool == "replace_symbol_body" || nextTool == "insert_before_symbol" || nextTool == "insert_after_symbol";
+        const std::string part  = ( edits ? std::string( "symbol" ) : std::string( noun ) ) + "=" + nextCallValue( near );
+        return msg + nextCallClause( edits ? std::string_view( "find_symbol" ) : nextTool, minimalCallArgs( edits ? "find_symbol" : nextTool, part ) );
+    }
+    return msg + nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) );
 }
 
 // The FILE-spelling variant (`cochange`, `situational_awareness`). didYouMean's pool is symbol names, which
@@ -997,7 +1137,8 @@ inline std::string fileNotFound( const IngestResult& ing, std::string_view spell
         msg += " (did you mean '" + std::string( best ) + "'?)";
     }
     msg += " — a path SUFFIX is enough";
-    return msg;
+    return msg + ( !best.empty() && best != spelling ? nextCallClause( "cochange", "file=" + nextCallValue( best ) )
+                                                     : nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) ) );
 }
 
 // ─── M9: the unknown-verb refusal ────────────────────────────────────────────────────────────────────────
@@ -1214,13 +1355,16 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
     constexpr int     kMaxEditDistance = 3;   // same bandwidth cutoff nearestName searches within
     std::string       msg  = "unknown field: '" + cappedEcho( field ) + "'";
     const std::string near = nearestName( declared, field );
-    if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
+    const bool        isNear = !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size();
+    if( isNear )
     {
         msg += " (did you mean '" + near + "'?)";
     }
     msg += " — " + std::string( verb ) + " accepts: " + joinClauses(
                std::vector<std::string_view>( declared.begin(), declared.end() ), ", " );
-    return msg;
+    // the next call types the near-miss with the table's example; a far typo gets the plain minimal call
+    const bool rootField = near == "path" || near == "paths";
+    return msg + nextCallClause( verb, minimalCallArgs( verb, isNear && !rootField ? valueExampleFor( near ) : std::string_view() ) );
 }
 
 // The batch verb's SUB-QUERY item schema (the `queries` items properties, verbatim from the batch stanza).
@@ -1549,7 +1693,7 @@ inline std::string unknownVerbRefusal( std::span<const std::string_view> known, 
     }
     msg += " — call tools/list for the " + std::to_string( advertisedCount ? advertisedCount : known.size() )
          + " available tools";
-    return msg;
+    return near.empty() ? msg : msg + nextCallClause( near, minimalCallArgs( near ) );
 }
 
 }   // namespace rw::mcprefuse

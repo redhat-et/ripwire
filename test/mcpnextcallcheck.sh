@@ -80,8 +80,9 @@ listing = session( [ { "method": "tools/list", "params": {} } ] )[ 0 ]
 tools   = { t[ "name" ]: t for t in listing[ "result" ][ "tools" ] }
 CALLABLE = set( tools ) | { "pack_task" }
 
-NEXT = re.compile( r" — next: ([a-z_]+)((?: [a-z_]+=(?:\"(?:[^\"\\\\]|\\\\.)*\"|\[[^\]]*\]|[^ ]+))*)\s*$" )
-ARG  = re.compile( r" ([a-z_]+)=(\"(?:[^\"\\\\]|\\\\.)*\"|\[[^\]]*\]|[^ ]+)" )
+VAL  = r'"(?:[^"\\]|\\.)*"|\[[^\]]*\]|[^ ]+'
+NEXT = re.compile( r' — next: ([a-z_]+)((?: [a-z_]+=(?:' + VAL + r'))*)\s*$' )
+ARG  = re.compile( r' ([a-z_]+)=(' + VAL + ')' )
 def parseNext( text ):
     for line in ( text or "" ).splitlines():
         m = NEXT.search( line )

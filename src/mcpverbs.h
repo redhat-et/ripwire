@@ -6650,7 +6650,20 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const bool      hasStart  = startArg.isPresent;
     const bool      hasEnd    = endArg.isPresent;
 
-    const auto bad = [ & ]( std::string m ) -> BatchSub { r.ok = false; r.err = std::move( m ); r.payload.clear(); return r; };
+    // The next call (mcprefusal.h kNextCallLead): a sub-query refusal names the SAME next call the live arm names for the
+    // same refusal, so the two arms keep one wording. A CLI-spelled alias names its tool; an unknown sub-verb names none
+    // (its own refusal lists the served set).
+    const auto nextToolOf = []( std::string_view v ) -> std::string_view
+    { return v == "callers" ? std::string_view( "find_referencing_symbols" ) : v == "callees" ? std::string_view( "find_symbol" ) : v; };
+    const std::string_view nextTool = nextToolOf( r.verb );
+    const bool             nextable = !mcprefuse::declaredFieldsFor( nextTool ).empty();
+    const auto bad = [ & ]( std::string m ) -> BatchSub
+    {
+        r.ok  = false;
+        r.err = nextable ? mcprefuse::withNextCallFor( std::move( m ), nextTool ) : std::move( m );
+        r.payload.clear();
+        return r;
+    };
 
     // §B6 M7: the missing-required-field refusal comes from the SHARED table (mcprefusal.h), the same one
     // the live server arm renders — this arm used to say "missing pattern" where the live arm said "missing
@@ -6673,7 +6686,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     };
     const auto symbolMissing = [ & ]( std::string_view verb, std::string_view spelling ) -> std::string
     {
-        std::string msg = mcprefuse::notFound( getIndex( root ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( verb, "symbol" ) );
+        std::string msg = mcprefuse::notFound( getIndex( root ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( verb, "symbol" ), nextToolOf( verb ) );
         const bool  answering = verb == "find_symbol" || verb == "find_referencing_symbols" || verb == "impact";
         return answering ? withRenameClause( std::move( msg ), renameNearOf( spelling ) ) : msg;
     };

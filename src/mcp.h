@@ -1887,7 +1887,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // -32602 (invalid params) is the tool's own input validation or business logic here, so it travels as isError.
             const auto errResultMsg = [ & ]( int code, const std::string& msg )
             {
-                return code == -32602 && namesServedTool ? toolErrorResult( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) : protocolErrMsg( code, msg );
+                if( code != -32602 || !namesServedTool )
+                {
+                    return protocolErrMsg( code, msg );
+                }
+                // the next call (mcprefusal.h kNextCallLead): a renderer's own, else the tool's minimal well-formed call
+                const std::string withNext = mcprefuse::withNextCallFor( msg, name );
+                return toolErrorResult( withNext + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) );
             };
             const auto errResult = [ & ]( int code, const char* msg ) { return errResultMsg( code, std::string( msg ) ); };
             // §B6 M8: the shared not-found renderers, bound to THIS request's index. Seven verbs on both
@@ -1898,9 +1904,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // owns the field's wording, instead of being written out at each call site — that is what let
             // the batch arm serve three of these sentences with the guidance half missing.
             const auto notFoundSym  = [ & ]( std::string_view spelling ) -> std::string
-            { return mcprefuse::notFound( getIndex( path ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( name, "symbol" ) ); };
+            { return mcprefuse::notFound( getIndex( path ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( name, "symbol" ), name ); };
             const auto notFoundKind = [ & ]( std::string_view noun, std::string_view spelling ) -> std::string
-            { return mcprefuse::notFound( getIndex( path ).ing, noun, spelling ); };
+            { return mcprefuse::notFound( getIndex( path ).ing, noun, spelling, {}, name ); };
             // Fix list #2 (2026-10-01), the CLI twin's parity: a not-found carries its refusal sentence AND the answer
             // document the CLI prints on stdout (selectorrefuse.h writeNotFoundAnswer), both in content (SEP-1303), with a
             // working-tree rename offered first in both the message and the document. `msg` is the verb's own refusal
@@ -1909,6 +1915,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto notFoundAnswered = [ & ]( std::string msg, NotFoundAnswer answer, bool json ) -> std::string
             {
                 msg = withRenameClause( std::move( msg ), answer.near, answer.missing );   // the batch arm's rule too
+                // a refusal sentence its renderer gave no next call (path_between's endpoints, uses' selector) greps the
+                // spelling that matched nothing: the textual hits are the step this server can take
+                const auto& missEcho = answer.missing == "to" && answer.echo.size() > 1 ? answer.echo[ 1 ] : answer.echo.front();
+                msg = mcprefuse::withNextCall( std::move( msg ), "grep", "pattern=" + mcprefuse::nextCallValue( missEcho.second ) );
                 attachNotFoundText( getIndex( path ).ing, answer );   // BX2 FIX 9: the CLI twin's plain-text occurrences (callers / uses / impact)
                 answer.text.mcpKeys = true;                            // ... their JSON rows in MCP's "file" / "line" keys
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
@@ -1927,7 +1937,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // success envelope for an edit verb: the JSON payload as text content + the fresh _index stamp
             // (the index was just invalidated, so indexStamp() rebuilds and reports the NEW post-edit state).
             const auto editResult = [ & ]( const mcpedit::Outcome& oc )
-            { return oc.ok ? textResult( oc.resultJson ) : errResultMsg( oc.errCode, oc.message ); };
+            {
+                // an edit refusal's next step is a READ of the target (its candidates, handles and files), never a
+                // placeholder edit: the minimal call of an edit verb carries the table's example body
+                return oc.ok ? textResult( oc.resultJson )
+                     : symbol.empty() ? errResultMsg( oc.errCode, oc.message )
+                     : errResultMsg( oc.errCode, mcprefuse::withNextCall( oc.message, "find_symbol",
+                                                                          mcprefuse::minimalCallArgs( "find_symbol", "symbol=" + mcprefuse::nextCallValue( symbol ) ) ) );
+            };
 
             // The envelope EVERY paged verb shares (grep / impact / whereis): read the window once, refuse a
             // bad one once, and otherwise hand the validated window to the verb. Written as one shape rather
@@ -2254,8 +2271,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 if( path.empty() )
                 {
                     // #350: from a home/system launch directory the missing path has a cause worth naming
-                    return policy.noRootReason.empty() ? mcprefuse::missingPathRefusal()
-                                                       : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason;
+                    // the next call cannot know the root (the server has none to offer), so it names the field to fill: an
+                    // ABSOLUTE root, which a relative one resolved against this server's own launch directory is not
+                    return ( policy.noRootReason.empty() ? mcprefuse::missingPathRefusal()
+                                                         : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason )
+                         + mcprefuse::nextCallClause( name, mcprefuse::minimalCallArgs( name, "path=\"/abs/repo/root\"" ) );
                 }
                 return mcprefuse::missingFieldRefusal( name, argPresent );
             };
@@ -2381,12 +2401,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     if( rbMode != "pagerank" && rbMode != "authority" && rbMode != "hub" && rbMode != "rrf"
                         && rbMode != "churn" && rbMode != "churn-decay" )
                     {
-                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)" );
+                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)"
+                                                     + mcprefuse::nextCallClause( "rank_by", "rank_by=\"authority\"" ) );
                     }
                     else if( rbMode == "churn" || rbMode == "churn-decay" )
                     {
                         resp = errResultMsg( -32602, "rank_by=" + rbMode + " is not available over MCP yet — it mines git history through the CLI's "
-                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode );
+                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode
+                                                     + mcprefuse::nextCallClause( "rank_by", "rank_by=\"authority\"" ) );
                     }
                     else
                     {
@@ -2475,7 +2497,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         const std::string j = listRefusal.empty() ? situationDiffJson( path, src, pg ) : std::string();
                         return !listRefusal.empty() ? errResultMsg( -32602, listRefusal )
-                             : j.empty()            ? errResult( -32602, "no changed files given and no git diff" )
+                             : j.empty()            ? errResultMsg( -32602, "no changed files given and no git diff"
+                                                                         + mcprefuse::nextCallClause( "situational_awareness", mcprefuse::valueExampleFor( "files" ) ) )
                                                     : textResult( j );
                     } );
                 }
@@ -2520,7 +2543,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         {
                             return errResult( -32603, "internal error: the for answer buffer lost bytes — no answer served" );
                         }
-                        return answer->empty() ? errResult( -32602, "no symbols found" ) : textResult( *answer );
+                        return answer->empty() ? errResultMsg( -32602, "no symbols found" + mcprefuse::nextCallClause( "analyze", {} ) ) : textResult( *answer );
                     } );
                 }
                 else if( name == "lego" && !path.empty() && !type.empty() )
@@ -2560,7 +2583,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
                         // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
-                        return t.empty() ? errResultMsg( -32602, sweepEmptyCause( path, "search" ) ) : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withNextCall( sweepEmptyCause( path, "search" ), "grep",
+                                                                                          "pattern=" + mcprefuse::nextCallValue( symbol ) ) )
+                                         : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -2576,7 +2601,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
-                        return t.empty() ? errResultMsg( -32602, emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause )
+                        // with no refs to compare there is no branch question to ask; the map of this tree is what is answerable
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withNextCall( emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause,
+                                                                                          "analyze", {} ) )
                                          : textResult( t );
                     } );
                 }
@@ -2652,6 +2679,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
                                                 : symbol.empty()
                                                 ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
+                                                  + mcprefuse::nextCallClause( "analyze", {} )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );
                     } );
@@ -2664,7 +2692,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::string arg = !kind.empty() ? kind : task;
                     const std::optional<std::string> answer = exemplarText( path, arg, redactPtr );
                     resp = !answer        ? errResult( -32603, "internal error: the exemplar answer buffer lost bytes — no answer served" )
-                         : answer->empty() ? errResult( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)" )
+                         : answer->empty() ? errResultMsg( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)"
+                                                                     + mcprefuse::nextCallClause( "exemplar", "kind=\"fn\"" ) )
                                            : textResult( *answer );
                 }
                 else if( name == "impact" && !path.empty() && !symbol.empty() )
@@ -2721,11 +2750,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, "affected: '" + r.badItem + "' matches no indexed file path (as a path pattern) and no indexed "
                                               "symbol (as a symbol name; file:name and path::scope::name also accepted)" + afNearPath
                                               + ( afNearPath.empty() ? selectorFaultClause( afIng, r.badItem, "--affected=" ) : std::string() )
-                                              + affectedNoneResolvedClause( r.unusedCount ) );   // AF5: as the CLI
+                                              + affectedNoneResolvedClause( r.unusedCount )   // AF5: as the CLI
+                                              + mcprefuse::nextCallClause( "grep", "pattern=" + mcprefuse::nextCallValue( r.badItem ) ) );
                     }
                     else if( r.noSeeds )
                     {
-                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files );
+                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files + mcprefuse::nextCallClause( "grep", "pattern=" + mcprefuse::nextCallValue( files ) ) );
                     }
                     else
                     {
@@ -2844,7 +2874,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     const FromTraceResult r = fromTraceText( path, trace, budgetTokens, redactPtr );
                     resp = r.isBufferLost ? errResult( -32603, "internal error: a from_trace buffer lost bytes — the bundle is withheld, not served without its blocks" )
-                         : !r.ok          ? errResult( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map" )
+                         : !r.ok          ? errResultMsg( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map"
+                                                          + mcprefuse::nextCallClause( "for", "task=" + mcprefuse::nextCallValue( trace ) ) )
                                           : textResult( r.xml );
                 }
                 // L4: `edit_check` — did SYM's contract (params/publicness) change vs git HEAD (editCheckBundleText,

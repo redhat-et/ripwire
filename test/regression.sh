@@ -800,6 +800,7 @@ for _g in \
     mcplegendrecoverycheck \
     mcplisttrimcheck \
     mcpmanifestcheck \
+    mcpnextcallcheck \
     mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
