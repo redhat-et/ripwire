@@ -40,8 +40,8 @@
 # escalation below is untouched and still escalates on a same-class run of literal greps.
 #
 # Design posture (non-negotiable — do not "improve" this into a blocker):
-#   - NEVER blocks, denies, or rewrites the tool call. Always permissionDecision "allow" when it
-#     speaks at all; never "deny"/"ask"; never "updatedInput". Any internal failure (missing jq,
+#   - NEVER blocks, denies, approves, or rewrites the tool call: no permissionDecision of any value
+#     ("allow" skips the user's permission prompt), never "updatedInput". Any internal failure (missing jq,
 #     malformed JSON, no git, no ripwire) degrades to silent allow — exit 0, no stdout.
 #   - Fires at MOST once per session per pattern (Grep, Bash-grep, git-diff, git-log, and git-show-stat
 #     are separate patterns), via a marker file under $TMPDIR keyed by session_id (falls back to PPID
@@ -54,8 +54,8 @@
 # Contract (verified against https://code.claude.com/docs/en/hooks, 2026-07-13): PreToolUse JSON
 # arrives on stdin with at least {session_id, cwd, tool_name, tool_input}. Advisory feedback that does
 # NOT block the call = exit 0 + this JSON on stdout:
-#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
-#    "additionalContext":"..."}}
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}
+# with no permissionDecision: "allow" would skip the user's permission prompt (test/hookcheck.sh (15)).
 #
 # Usage (wired by the installer, not meant to be run by hand):
 #   printf '%s' "$PRETOOLUSE_JSON" | hooks/ripwire-nudge.sh
@@ -148,7 +148,7 @@ set -u
 # THE CONTRACT (all four are gated in test/hookcheck.sh, arms S1-S14):
 #   - At most ONE escalation per CLASS per session — the same dedup posture as the base nudges, with
 #     its own marker, so an escalated grep sweep never re-fires and never silences a read sweep.
-#   - Advisory only. Same posture as everything else here: permissionDecision "allow", never deny,
+#   - Advisory only. Same posture as everything else here: no permissionDecision, never deny,
 #     never a rewrite, and any internal failure degrades to silence.
 #   - The escalation is RECORDED — `nudge":"sweep<N>"` on the row it fired on, and `post_sweep` on
 #     every row after it in that session. Without those two fields the efficacy question cannot be
