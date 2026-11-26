@@ -1037,6 +1037,7 @@ for _g in \
     routeedgecheck \
     routehookcheck \
     routeoncecheck \
+    routingcheck \
     routingreportcheck \
     rowlinescheck \
     rubyargcheck \
