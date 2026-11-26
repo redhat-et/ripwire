@@ -1135,6 +1135,7 @@ for _g in \
     statgatecheck \
     stdmembergatecheck \
     stdqualcheck \
+    straynographcheck \
     strkerncheck \
     structlayoutcheck \
     subagentprimercheck \

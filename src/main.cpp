@@ -3363,7 +3363,12 @@ bool graphUnreadByWinner( const rw::Config& c, const char* winner )
                           && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 || std::strcmp( winner, "--whereis" ) == 0 );
     const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
                                     || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
-    return archWins && !modifierReadsGraph;
+    // STRAY-NO-GRAPH: --stray-content answers from git alone (crossref::computeStrayContent takes the root and the ref
+    // filter), and its --abi and --plan modes from the ingest as well (computeAbiCheck / computePlan take d.ing); runCrossRef
+    // never hands d.g to any of the three. Neither mode has a precedence row, so the winner reads --stray-content for all
+    // three shapes. test/straynographcheck.sh pins the bytes against a graph-built run.
+    const bool strayWins = winner != nullptr && std::strcmp( winner, "--stray-content" ) == 0;
+    return ( archWins || strayWins ) && !modifierReadsGraph;
 }
 
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
