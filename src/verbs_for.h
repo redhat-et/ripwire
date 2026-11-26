@@ -5917,11 +5917,13 @@ inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answe
 // legend, so the two postures stay byte permutations of each other (forpagescheck P6). It needs the finished answer, so this posture
 // is rendered into a buffer here; nullopt: not this posture, or no buffer to render into, or a capture that failed (the caller then
 // renders it straight through, as the answer-first path does — and the failed render's notices are not replayed, or each would
-// print twice).
+// print twice). θ11 (forqsites.h) needs the same capture: its sites ride the posture's ledger, so the capture is taken when the act
+// line OR the question-sites block is on, and only the act line's insertion is gated on actLineOn() (with both off: nullopt, as before).
 inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    if( cfg.legendAnswerFirst || !rw::actline::actLineOn() || cfg.json || cfg.columnar || cfg.candidates )
+    const bool        act = rw::actline::actLineOn();
+    if( cfg.legendAnswerFirst || !( act || rw::qsites::thetaElevenOn() ) || cfg.json || cfg.columnar || cfg.candidates )
     {
         return std::nullopt;
     }
@@ -5934,7 +5936,10 @@ inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
     std::string doc = r.out->bytes;
     if( capturedWhole( r.out ) )
     {
-        (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+        if( act )
+        {
+            (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+        }
         rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );   // θ11: the legend-first posture carries the same block
     }
     std::fwrite( doc.data(), 1, doc.size(), stdout );

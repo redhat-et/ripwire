@@ -26,6 +26,9 @@
 #         under its label (the crawl row carries the label, not the disk path)
 #   (Q12) FLOORS: a fixture whose crawl counted 501 extensionless files (rows keep 500) prints n="N+" on every line; an unreadable
 #         text file floors too; the main fixture, every file read, prints no `+` (counted against Q1's lines)
+#   (Q14) ACT LINE OFF, --legend=first (CodeRabbit review 6061457213, verbs_for.h runForLensLegendFirstAct): with
+#         RIPWIRE_NO_ACTLINE=1 the legend-first answer still carries the block (the posture used to skip its capture, so the block
+#         was lost); with RIPWIRE_THETA11=0 as well it is that answer less its block, and (BASE_BIN set) the old binary's byte for byte
 #   (Q13) WORD-BOUNDED BEFORE THE CAP: a line of 4,000,003 `z` holds ~4 M substring matches of `zzz` (the scan's match cap) and no
 #         whole-word one; the whole-word site on the next line is still found (the cap counts only whole-word sites)
 set -u
@@ -63,6 +66,8 @@ RIPWIRE_THETA11=1 rw "$NEG" >"$WORK/neg_on1.xml"
 RIPWIRE_THETA11=0 rw "$NEG" >"$WORK/neg_off.xml"
 rw "$POS" --token-budget=600 >"$WORK/budget.xml"
 rw "$POS" --legend=first >"$WORK/lfirst.xml"
+RIPWIRE_NO_ACTLINE=1 rw "$POS" --legend=first >"$WORK/lf_noact.xml"
+RIPWIRE_NO_ACTLINE=1 RIPWIRE_THETA11=0 rw "$POS" --legend=first >"$WORK/lf_noact_off.xml"
 rw "$POS" --page-bytes=1500:1 >"$WORK/page1.xml"
 rw "$POS" --page-bytes=1500:2 >"$WORK/page2.xml"
 # (V) the posture --version names; (I) the =0 answer against a binary from before the block existed
@@ -72,6 +77,7 @@ RIPWIRE_THETA11=0 "$BIN" --version >"$WORK/v_off.txt" 2>&1
 if [ -n "${BASE_BIN:-}" ]; then
     ( cd "$FX" && "$BASE_BIN" "$FX" --no-cache "--for=$POS" 2>/dev/null ) >"$WORK/base_pos.xml"
     ( cd "$FX" && "$BASE_BIN" "$FX" --no-cache "--for=$NEG" 2>/dev/null ) >"$WORK/base_neg.xml"
+    ( cd "$FX" && RIPWIRE_NO_ACTLINE=1 "$BASE_BIN" "$FX" --no-cache "--for=$POS" --legend=first 2>/dev/null ) >"$WORK/base_lf_noact.xml"
 fi
 # Q11: a two-root workspace, run from $FX (a directory holding neither root, so a labelled path does not resolve against the cwd)
 mkdir -p "$WORK/wsa" "$WORK/wsb"
@@ -247,6 +253,21 @@ cr = rows_of(rd('cap.xml')).get('zzz')
 if cr and ('src/big.c', 2) in cr[1] and ('src/f.c', 1) in cr[1] and ('src/big.c', 1) not in cr[1]:
     P(f'(Q13) word-bounded before the cap: big.c:2 found past ~4 M non-word matches on line 1; f.c:1 too (n={cr[0]})')
 else: F(f'(Q13) the whole-word site past the cap was lost: {cr and cr[2]!r}')
+# Q14 act line off, --legend=first: the block still rides; with =0 too, the answer less its block (and the old binary's)
+na, nao = rd('lf_noact.xml'), rd('lf_noact_off.xml')
+if '</ctx>' not in na or '</ctx>' not in nao or '<act ' in na or '<act ' in nao:
+    F(f'(Q14) premise: answers missing or the act line still on (act in on={"<act " in na}, off={"<act " in nao})')
+elif not (rows_of(na) == rows and inside_root(na)):
+    F(f'(Q14) RIPWIRE_NO_ACTLINE=1 --legend=first lost the block: {len(rows_of(na))} <qs> elements, want {len(rows)}')
+else:
+    i = na.rfind(LEG); k = na.find('-->', i) + 3
+    while QS.match(na, k): k += len(QS.match(na, k).group(0))
+    twin = nao == na[:i] + na[k:] and '<qs' not in nao
+    bf = os.path.join(W, 'base_lf_noact.xml'); base = rd('base_lf_noact.xml') if os.path.exists(bf) else None
+    if twin and (base is None or base == nao):
+        P(f'(Q14) RIPWIRE_NO_ACTLINE=1 --legend=first carries the {len(rows)} <qs> elements inside the root; with =0 too it is that answer less its block'
+          + ('' if base is None else f' and the old binary\'s byte for byte ({len(nao)} B)'))
+    else: F(f'(Q14) both off: twin={twin} base={"unset" if base is None else base == nao}')
 sys.exit(bad)
 PY
 [ "$fail" = 0 ] && echo "forqsitescheck: PASS" || echo "forqsitescheck: FAIL"
