@@ -882,6 +882,7 @@ for _g in \
     packcallersharecheck \
     packkeybodycheck \
     packlocatecheck \
+    packpartnerscheck \
     packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
