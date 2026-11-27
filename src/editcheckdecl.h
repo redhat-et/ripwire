@@ -250,6 +250,35 @@ inline EditCheckTieResult editCheckTieDeclaration( const IngestResult& ing, Edit
     return { EditCheckTie::Declares, declSig.defaulted, false };
 }
 
+// THE STALE PAIR (EDIT-CHECK-ARITY): a bodyless declaration D that WOULD declare definition F but for the parameter list
+// — the edit changed F's list and D still spells the old one (`int jq_start( jq_state*, jv, int )` in jq.h beside a
+// four-parameter definition in execute.c). For "did my edit break a contract" the two are ONE symbol: the bare name answers
+// at F instead of refusing "2 distinct contracts", and the answer names D and its old count (editcheck.h decl_pair=), which
+// is itself the finding — every caller that sees only the header still compiles against the old list. Every other clause
+// of the identity rule holds: same name and innermost scope, both C-family, F external or in D's file, F's file is D's or
+// #includes it directly; and for a C++ definition the full scope chain and member qualifiers are both read and equal
+// (a C definition has no namespace, and a C file's macros can make the chain unreadable for no reason that matters here).
+inline bool editCheckStalePair( const IngestResult& ing, EditCheckSources& sources, NodeId decl, NodeId def )
+{
+    const Symbol& d = ing.symbols[ decl ];
+    const Symbol& f = ing.symbols[ def ];
+    if(    d.name != f.name || d.scope != f.scope || d.params == f.params || !langCompatible( d.lang, Lang::C ) || !langCompatible( f.lang, Lang::C )
+        || isDefinitionNotDeclaration( d ) || !isDefinitionNotDeclaration( f ) || ( f.internalLinkage != 0 && d.fileId != f.fileId ) )
+    {
+        return false;
+    }
+    if( f.lang != Lang::C )
+    {
+        const EditCheckSignature declSig = editCheckSignatureOf( sources, d );
+        const EditCheckSignature defSig  = editCheckSignatureOf( sources, f );
+        if( !declSig.chain || !defSig.chain || *declSig.chain != *defSig.chain || declSig.quals != defSig.quals )
+        {
+            return false;
+        }
+    }
+    return d.fileId == f.fileId || includeProofOfDeclFiles( ing, { decl }, { def } )[ f.fileId ] != 0;
+}
+
 // Per member of the overload set, the FEWEST arguments a call may pass: `params` minus the defaults of the declaration
 // that declares it and carries the most of them (C++ lets a redeclaration add defaults; the widest reading is the
 // one-sided one). `fromDecl` is true when any member's range was widened that way — the root's defaults_from="decl".
@@ -262,12 +291,13 @@ struct EditCheckDeclDefaults
 };
 
 // One definition's minimum; its untied declarations are appended to `untied` (an overload set may meet one declaration
-// from several members, so the caller counts distinct ids). Only a fixed-arity C-family DEFINITION can be widened —
-// anything else is already a wildcard (arityExact 0) or has no declaration to read.
+// from several members, so the caller counts distinct ids). Only a C-family DEFINITION can be widened: a fixed-arity one,
+// or a C++ one whose own list already carries a default or a pack (arityExact 0), whose range editcheckarity.h reads off
+// its text and lowers by what is returned here. Anything else has no declaration to read.
 inline std::uint16_t editCheckMinArity( const IngestResult& ing, EditCheckSources& sources, NodeId def, std::vector<NodeId>& untied )
 {
     const Symbol& f = ing.symbols[ def ];
-    if( !langCompatible( f.lang, Lang::C ) || f.arityExact == 0 || !isDefinitionNotDeclaration( f ) )
+    if( !langCompatible( f.lang, Lang::C ) || ( f.arityExact == 0 && langFacts( f.lang ).arityReader != ArityReader::Cpp ) || !isDefinitionNotDeclaration( f ) )
     {
         return f.params;
     }

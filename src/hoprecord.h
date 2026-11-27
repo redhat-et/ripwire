@@ -544,7 +544,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         tests.emplace_back( ing, ing.symbols[ w.to ], std::span<const NodeId>( &w.to, 1 ), g.provenSites );
     }
     // The arity half of the tiebreak: can the edge's callee accept this call's argument count? The --edit-check rule
-    // (editCheckArityAccepts): an uncounted call, a variadic/defaulted callee or an implicit receiver always fits. A C-family
+    // (editcheck.h editCheckArities): an uncounted call, a variadic/defaulted callee or an implicit receiver always fits. A C-family
     // callee whose declaration may carry defaults is read (editCheckMinArity) only for a call passing FEWER arguments than
     // it takes, once per edge, lazily: most edges never pay it.
     EditCheckSpliced                     noSplice{};

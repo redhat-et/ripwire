@@ -431,8 +431,8 @@ fi
 # and so went red the moment that sentence was rewritten for a reason it had no opinion about — a gate keyed
 # to wording rather than to what the wording has to SAY. What it has to say is now spelled out:
 #   (a) no plan ID in the emitted text (the reason this arm exists);
-#   (b) the arity RULE is stated — the reader is told a call is flagged only when every candidate carries a
-#       FIXED arity that disagrees;
+#   (b) the arity RULE is stated — the reader is told a call is flagged only when every candidate's accepted
+#       arity RANGE excludes it (EDIT-CHECK-ARITY, 2026-11-27: was "carries a FIXED arity that disagrees");
 #   (c) the BINDING limit is stated, and the old absolute claim is gone. The flag is one-sided in the arity
 #       and says nothing about whether the call site binds to this definition at all (call edges are matched
 #       by NAME), so a legend promising "provably … never a guess" is making a claim the tool cannot keep —
@@ -440,8 +440,8 @@ fi
 "$BIN" "$ROOT" --edit-check=rankGraphTeleport --legend=full >"$TMP/ec" 2>/dev/null
 if grep -q 'B2\.2' "$TMP/ec"; then
     no "--edit-check's legend still ships the 'B2.2' plan ID"
-elif ! grep -q 'FIXED arity' "$TMP/ec"; then
-    no "--edit-check's legend no longer states the arity RULE (want: every candidate has a FIXED arity that disagrees)"
+elif ! grep -q 'arity RANGE' "$TMP/ec"; then
+    no "--edit-check's legend no longer states the arity RULE (want: every candidate's accepted arity RANGE excludes it)"
 elif grep -qE 'never a guess|PROVABLY incompatible' "$TMP/ec"; then
     no "--edit-check's legend still claims the flag is PROVEN — it is one-sided in the arity only, not a proof of binding"
 elif ! grep -q 'matched by NAME' "$TMP/ec"; then

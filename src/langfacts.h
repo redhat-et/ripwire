@@ -144,6 +144,10 @@ enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CS
 /// two C-family ones for unhandled-arm's enums and count-drift's name sets). Markdown has the count-drift facet only. None: the
 /// language has no defect-shape sites.
 enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash, Markdown };
+/// Which parameter-list reader --edit-check uses to give a definition its accepted arity RANGE (editcheckarity.h): C reads `(void)`,
+/// a `...` tail and a prototype-less `()`; C++ defaults and packs; Rust a `self` receiver; Go `a, b int` grouping, a `...T` tail and
+/// `<-` channel types. None keeps ingest's call-comparable arity (Symbol::arityExact) as the whole answer.
+enum class ArityReader : std::uint8_t { None, C, Cpp, Rust, Go };
 
 /// ASSERTED (lane asserted-signal, LangFacts::assertionCalls): one spelling of an assertion call in a test framework. `name` is the
 /// callee as written (a Reference's calleeName), matched whole or, with `prefix`, as its start (`assert` covers `assertEqual`,
@@ -536,6 +540,10 @@ struct LangFacts
     /// objcxxStdQualifierBefore), and the call takes the same keepStdQualifiedCandidates guard a .cpp/.cu/.metal call does. A grammar
     /// with real qualified names (C++) answers from the tree instead and leaves this false.
     bool lexicalStdQualifier = false;
+
+    /// C, C++, Rust, Go: --edit-check reads each definition's accepted arity range off its signature text with this reader
+    /// (editcheckarity.h editCheckArityFromSignature); every other language keeps ingest's arityExact answer.
+    ArityReader arityReader = ArityReader::None;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -592,7 +600,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp, .assertionCalls = kCFamilyAssertionCalls },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp, .assertionCalls = kCFamilyAssertionCalls, .arityReader = ArityReader::Cpp },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python, .assertionCalls = kPythonAssertionCalls },
@@ -601,10 +609,10 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical, .assertionCalls = kJsAssertionCalls },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
-      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go, .assertionCalls = kGoAssertionCalls },
+      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go, .assertionCalls = kGoAssertionCalls, .arityReader = ArityReader::Go },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust, .assertionCalls = kRustAssertionCalls },
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust, .assertionCalls = kRustAssertionCalls, .arityReader = ArityReader::Rust },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
@@ -626,7 +634,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp, .assertionCalls = kCSharpAssertionCalls },
     { .lang = Lang::C, .typeFirstParameters = true, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C, .assertionCalls = kCFamilyAssertionCalls },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C, .assertionCalls = kCFamilyAssertionCalls, .arityReader = ArityReader::C },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Php, .memberSeparator = "::", .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },

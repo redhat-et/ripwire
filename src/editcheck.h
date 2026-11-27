@@ -27,6 +27,7 @@
 #include "compactlegend.h"  // fix round 1 (ruling 5): foldPays — the verdict line ships only when it pays
 #include "pageview.h"       // LB-G: pageWindow / effectiveRowCap / pagingDisclosure — the ONE paging vocabulary
 #include "editcheckdecl.h"   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
+#include "editcheckarity.h"   // the accepted ARITY RANGE per definition: the family shape + the C/C++/Rust/Go signature reader
 #include "valuerefs.h"      // CALLSITE-AT: VrRender / vrPath — the one root-relative file spelling a site token shares with <vr> rows
 #include "sitetokens.h"     // SITES-SHORT: siteTokensFor — a site in the row's own file is a bare line, any other the full file:line
 
@@ -262,6 +263,71 @@ inline std::vector<std::size_t> editCheckDeclFoldTargets( const IngestResult& in
     return target;
 }
 
+// THE STALE-PAIR FOLD (EDIT-CHECK-ARITY), after the identity fold: when ONE group holds definitions and every other group
+// is only declarations that each stale-pair (editcheckdecl.h editCheckStalePair) with one of its definitions, those are the
+// definition's own declarations left at the old parameter list — one symbol, answered at the definition, and the answer
+// names the declaration (editCheckStaleDecls, decl_pair=). Two definition groups, or a declaration that pairs with none,
+// keep every group: distinct contracts, still refused.
+inline void editCheckFoldStaleDeclGroups( const IngestResult& ing, EditCheckGroupKeys& gk )
+{
+    std::size_t defGroup = gk.keys.size();
+    for( std::size_t groupIndex = 0; groupIndex < gk.keys.size(); ++groupIndex )
+    {
+        if( !editCheckDeclOnlyGroup( ing, gk.members[ groupIndex ] ) )
+        {
+            if( defGroup != gk.keys.size() )
+            {
+                return;   // two definition groups: two contracts
+            }
+            defGroup = groupIndex;
+        }
+    }
+    if( gk.keys.size() < 2 || defGroup == gk.keys.size() )
+    {
+        return;
+    }
+    EditCheckSources            sources( ing, EditCheckSpliced{} );
+    const std::vector<NodeId>&  defs = gk.members[ defGroup ];
+    for( std::size_t groupIndex = 0; groupIndex < gk.keys.size(); ++groupIndex )
+    {
+        for( NodeId decl : gk.members[ groupIndex ] )
+        {
+            const bool paired = groupIndex == defGroup
+                             || std::any_of( defs.begin(), defs.end(), [ & ]( NodeId def ) { return editCheckStalePair( ing, sources, decl, def ); } );
+            if( !paired )
+            {
+                return;
+            }
+        }
+    }
+    EditCheckGroupKeys kept;
+    kept.keys.push_back( gk.keys[ defGroup ] );
+    kept.members.push_back( gk.members[ defGroup ] );
+    gk = std::move( kept );
+}
+
+// The declarations that stale-pair with a member of the overload set (the bare-name fold above, and the qualified spelling
+// alike): what decl_pair= / decl_params= name. Ascending node id; empty for every symbol whose declarations match it.
+inline std::vector<NodeId> editCheckStaleDecls( const IngestResult& ing, std::span<const NodeId> overloadNodes )
+{
+    std::vector<NodeId> stale;
+    if( overloadNodes.empty() || !langCompatible( ing.symbols[ overloadNodes[0] ].lang, Lang::C ) )
+    {
+        return stale;
+    }
+    EditCheckSources sources( ing, EditCheckSpliced{} );
+    const std::string_view name = ing.symbols[ overloadNodes[0] ].name;
+    for( NodeId cand = 0; cand < ing.symbols.size(); ++cand )
+    {
+        if( ing.symbols[ cand ].name == name
+            && std::any_of( overloadNodes.begin(), overloadNodes.end(), [ & ]( NodeId def ) { return editCheckStalePair( ing, sources, cand, def ); } ) )
+        {
+            stale.push_back( cand );
+        }
+    }
+    return stale;
+}
+
 inline void editCheckFoldDeclGroups( const IngestResult& ing, EditCheckGroupKeys& gk )
 {
     const std::size_t groupCount = gk.keys.size();
@@ -282,6 +348,7 @@ inline void editCheckFoldDeclGroups( const IngestResult& ing, EditCheckGroupKeys
     }
     ENSURES( !kept.keys.empty() );   // a folded group always names a kept one as its target
     gk = std::move( kept );
+    editCheckFoldStaleDeclGroups( ing, gk );
 }
 
 inline EditCheckGroupKeys editCheckGroupKeys( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches, bool foldDecls )
@@ -704,13 +771,30 @@ inline bool editCheckImplicitReceiver( const Symbol& s ) noexcept
     return ( s.lang == Lang::Python || s.lang == Lang::Ruby ) && !s.scope.empty();
 }
 
-// The arity half of the incompatibility test for one member of the overload set: can a call passing `argCount`
-// arguments bind it? A variadic/defaulted definition (arityExact 0) and an implicit receiver are wildcards; a C/C++
-// definition whose declaration carries defaults accepts [minArity, params] (editCheckDeclDefaults); every other
-// definition's minArity IS its params, so for it this is the exact test.
-inline bool editCheckArityAccepts( const Symbol& os, std::uint16_t minArity, std::uint16_t argCount ) noexcept
+// The arity half of the incompatibility test, per member of the overload set: the range of argument counts a call may pass
+// (editcheckarity.h). A language ingest gives a call-comparable arity keeps it — a fixed list (arityExact) accepts
+// [minArity, params], where minArity is params less the defaults a matching C/C++ declaration carries (editCheckDeclDefaults),
+// and a variadic/defaulted list or an implicit receiver is a wildcard. C, Rust and Go, which ingest leaves without one, and a
+// C++ list ingest called a range, are read off the signature text instead (editCheckArityFromSignature).
+inline std::vector<EditCheckArity> editCheckArities( const IngestResult& ing, std::span<const NodeId> overloadNodes,
+                                                     const EditCheckDeclDefaults& declDefaults, const EditCheckSpliced& spliced )
 {
-    return os.arityExact == 0 || editCheckImplicitReceiver( os ) || ( minArity <= argCount && argCount <= os.params );
+    ASSUME( declDefaults.minArity.size() == overloadNodes.size() );
+    std::vector<EditCheckArity> arity;
+    arity.reserve( overloadNodes.size() );
+    EditCheckSources sources( ing, spliced );
+    for( std::size_t k = 0; k < overloadNodes.size(); ++k )
+    {
+        const Symbol& os = ing.symbols[ overloadNodes[k] ];
+        if( os.arityExact != 0 || !editCheckArityLayerLang( os.lang ) )
+        {
+            arity.push_back( EditCheckArity{ declDefaults.minArity[k], os.params, EditCheckReceiver::None,
+                                             os.arityExact != 0 && !editCheckImplicitReceiver( os ), false } );
+            continue;
+        }
+        arity.push_back( editCheckArityFromSignature( sources, os, declDefaults.minArity[k] ) );
+    }
+    return arity;
 }
 
 // ── THE CALLEE TEST, with the Elixir arity fold ──────────────────────────────────────────────────────────
@@ -774,11 +858,20 @@ struct CallSiteCalleeTest
 
 struct EditCheckCalleeTest : CallSiteCalleeTest
 {
-    EditCheckDeclDefaults declDefaults;   // per overload: the fewest arguments a matching C/C++ declaration admits
+    EditCheckDeclDefaults       declDefaults;   // per overload: the fewest arguments a matching C/C++ declaration admits
+    std::vector<EditCheckArity> arity;          // per overload: the argument counts a call may pass (editCheckArities)
 
     EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads, std::span<const ProvenSite> provenSites )
-        : CallSiteCalleeTest( input, focusSymbol, overloads, provenSites ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) )
+        : CallSiteCalleeTest( input, focusSymbol, overloads, provenSites ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) ),
+          arity( editCheckArities( input, overloads, declDefaults, {} ) )
     {
+    }
+
+    // the pre-apply preview: its spans index the spliced bytes, so both per-overload readings are re-read from them
+    void rereadFrom( const EditCheckSpliced& spliced )
+    {
+        declDefaults = editCheckDeclDefaults( ing, overloadNodes, spliced );
+        arity        = editCheckArities( ing, overloadNodes, declDefaults, spliced );
     }
 };
 
@@ -795,19 +888,12 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
                                                      EditCheckCalleeTest& callee, std::span<const char> seenCaller,
                                                      std::span<const std::uint32_t> keptForwards )
 {
-    // a C/C++ definition whose matching declaration carries defaults accepts the RANGE [minArity, params]
-    // (editCheckDeclDefaults); every other definition's minArity is its params, so the test below is the exact one
-    ASSUME( callee.declDefaults.minArity.size() == overloadNodes.size() );
-    const auto provenIncompatible = [ & ]( std::uint16_t argCount ) -> bool
+    // each overload's accepted RANGE (editCheckArities): a call is proven incompatible only when no range admits it
+    ASSUME( callee.arity.size() == overloadNodes.size() );
+    const auto provenIncompatible = [ & ]( const Reference& r ) -> bool
     {
-        for( std::size_t k = 0; k < overloadNodes.size(); ++k )
-        {
-            if( editCheckArityAccepts( ing.symbols[ overloadNodes[k] ], callee.declDefaults.minArity[k], argCount ) )
-            {
-                return false; // a candidate could still accept it
-            }
-        }
-        return true;
+        return std::none_of( callee.arity.begin(), callee.arity.end(),
+                             [ & ]( const EditCheckArity& a ) { return editCheckArityRangeAccepts( a, r.argCount, r.memberCall && r.qualifier.empty() ); } );
     };
     std::vector<char> callerIncompatible( ing.symbols.size(), 0 );
     for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
@@ -822,7 +908,7 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
         {
             continue;
         }
-        if( provenIncompatible( r.argCount ) )
+        if( provenIncompatible( r ) )
         {
             callerIncompatible[r.fromSymbol] = 1;
         }
@@ -1214,6 +1300,64 @@ inline constexpr const char* kEditCheckDefaultsFromDeclLegend =
     "the definition's own list. ";
 
 // defaults_untied=N (review S2/S3): the declarations the identity rule could NOT prove or refute, that may carry a default,
+// EDIT-CHECK-ARITY: the two root attributes editcheckarity.h / editCheckStaleDecls add, each defined only beside itself.
+inline constexpr std::string_view kEditCheckArityUnknownLegend =
+    "arity_unknown=N: N definitions in the folded set whose parameter list could not be read (a macro where parameters belong, "
+    "a list that does not match the indexed parameter count, an unreadable or oversized signature): they are wildcards, so "
+    "incompatible= says nothing about their callers — not compatible, UNKNOWN. ";
+inline constexpr std::string_view kEditCheckDeclPairLegend =
+    "decl_pair=FILE:LINE: a C/C++ declaration of this definition (same name and scope, its file included by the definition's) "
+    "whose parameter list still differs from it — decl_params= is the declaration's count; a caller that sees only that "
+    "declaration compiles against the old list. It is merged into this contract: the bare name answers here instead of "
+    "refusing. decl_pairs=N: N such declarations (decl_pair= names the first). ";
+// The EDIT-CHECK-ARITY facts one answer carries beside incompatible=: how many overloads have no readable arity
+// (arity_unknown=) and the first C/C++ declaration left at the old parameter list (decl_pair= / decl_params= / decl_pairs=).
+struct EditCheckArityFacts
+{
+    std::size_t   unread     = 0;
+    std::size_t   staleCount = 0;
+    std::string   declAt;          // "path:line" of the first stale declaration (raw, escaped on emit)
+    std::uint16_t declParams = 0;
+
+    std::string legend() const
+    {
+        return std::string( unread > 0 ? kEditCheckArityUnknownLegend : std::string_view() )
+             + std::string( staleCount > 0 ? kEditCheckDeclPairLegend : std::string_view() );
+    }
+
+    template <class Escape>
+    std::string attrs( Escape&& ex ) const
+    {
+        std::string out = unread > 0 ? " arity_unknown=\"" + std::to_string( unread ) + "\"" : std::string();
+        if( staleCount > 0 )
+        {
+            out += " decl_pair=\"" + ex( declAt ) + "\" decl_params=\"" + std::to_string( declParams ) + "\"";
+            out += staleCount > 1 ? " decl_pairs=\"" + std::to_string( staleCount ) + "\"" : std::string();
+        }
+        return out;
+    }
+};
+
+template <class PathRel>
+inline EditCheckArityFacts editCheckArityFacts( const IngestResult& ing, std::span<const EditCheckArity> arity, std::span<const NodeId> overloadNodes,
+                                                PathRel&& pathRel )
+{
+    EditCheckArityFacts       facts;
+    const std::vector<NodeId> stale = editCheckStaleDecls( ing, overloadNodes );
+    for( const EditCheckArity& a : arity )
+    {
+        facts.unread += a.unread ? 1u : 0u;
+    }
+    facts.staleCount = stale.size();
+    if( !stale.empty() )
+    {
+        const Symbol& d  = ing.symbols[ stale[0] ];
+        facts.declAt     = std::string( pathRel( d.fileId ) ) + ":" + std::to_string( d.line );
+        facts.declParams = d.params;
+    }
+    return facts;
+}
+
 // emitted only beside a nonzero incompatible= — a flag one of them might admit is then qualified instead of silent.
 inline constexpr const char* kEditCheckDefaultsUntiedLegend =
     "defaults_untied=N (only beside a nonzero incompatible=): N C/C++ declarations of this name and scope may carry defaults "
@@ -1364,6 +1508,8 @@ struct EditCheckVerdictFacts
     std::size_t      defs             = 0;
     std::size_t      unprovenDefs     = 0;
     std::size_t      declinedCalls    = 0;
+    std::size_t      arityUnknown     = 0;      // EDIT-CHECK-ARITY: overloads whose arity was not read (arity_unknown=)
+    std::size_t      staleDecls       = 0;      // EDIT-CHECK-ARITY: declarations left at the old list (decl_pair=)
     bool             defsUnmeasured   = false;
     bool             defaultsFromDecl = false;
     bool             notesDegraded    = false;
@@ -1375,7 +1521,8 @@ inline bool editCheckVerdictOnlyTaken( const EditCheckVerdictFacts& f ) noexcept
 {
     // callers > 0: with no caller there is no row to leave out, so the full document is owed (its payload is the same line)
     const bool cleanContract = f.status == "unchanged" && f.incompatible == 0 && f.defs == 1 && !f.defsUnmeasured && f.callers > 0;
-    const bool nothingBeside = f.unprovenDefs == 0 && f.declinedCalls == 0 && !f.defaultsFromDecl && !f.notesDegraded && f.noNotes;
+    const bool nothingBeside = f.unprovenDefs == 0 && f.declinedCalls == 0 && f.arityUnknown == 0 && f.staleDecls == 0 && !f.defaultsFromDecl
+                            && !f.notesDegraded && f.noNotes;
     return f.page.verdictOnly && !f.preview && f.page.limit == 0 && f.page.offset == 0 && cleanContract && nothingBeside;
 }
 
@@ -1415,7 +1562,7 @@ inline std::string editCheckVerdictOnlyText( const EditCheckVerdictFacts& f, con
                                                          : nextFlag( "--edit-check=", rowsSel ) + " --limit=" + std::to_string( f.callers );
     std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD: status=\"unchanged\" "
                       "(nothing about the contract moved), and no 1-hop caller is flagged incompatible=\"1\" (flagged only when its "
-                      "argument count was reliably counted and every candidate definition has a FIXED arity that disagrees). That arity "
+                      "argument count was reliably counted and every candidate definition's arity range excludes it). That arity "
                       "check is one-sided and is NOT a proof that a call site binds to THIS definition: call edges are matched by NAME. "
                       "root= is the crawl root every p= is relative to (single-root runs only). defs= is the one definition compared. callers= "
                       "counts its 1-hop callers; their rows are left out of this answer because none is flagged AND the tree is at HEAD "
@@ -1468,7 +1615,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     EditCheckCalleeTest       callee( ing, fsym, overloadNodes, g.provenSites );
     if( spliced.engaged )
     {
-        callee.declDefaults = editCheckDeclDefaults( ing, overloadNodes, spliced );   // the preview's spans index the spliced bytes
+        callee.rereadFrom( spliced );   // the preview's spans index the spliced bytes
     }
     const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
 
@@ -1502,7 +1649,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // idea #11: the VERDICT-ONLY answer (editCheckVerdictOnlyText). Placed after every verdict number is fixed, like the
     // window above: it cannot move a count. Fix round 1 (ruling 5): it is a CANDIDATE — the full document is still built, and
     // the verdict line ships only when it pays against it (foldPays, at the end of this function).
+    const EditCheckArityFacts arityFacts = editCheckArityFacts( ing, callee.arity, overloadNodes, ecPathRel );
     const EditCheckVerdictFacts verdictFacts{ page, preview, verdict.status, incompatibleCount, overloadNodes.size(), unprovenDefs, declinedCalls,
+                                              arityFacts.unread, arityFacts.staleCount,
                                               contract.defsUnmeasured, callee.declDefaults.fromDecl, notesDegraded,
                                               renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
                                                   && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty(),
@@ -1535,9 +1684,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                        "contract-change, or no-baseline when the root has no git HEAD to compare against (not a repository, or "
                        "no commit yet): then NOTHING is claimed about the contract, and a symbol is never called new for want "
                        "of a baseline — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "
-                       "was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that "
-                       "disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts "
-                       "the self/cls the call site never writes) has no fixed arity and is never flagged. That makes the ARITY half "
+                       "was reliably counted and NO definition in the folded set could accept it: every one's accepted arity RANGE "
+                       "excludes it. A variadic or defaulted definition accepts a range (read off the signature for C, C++, Rust and "
+                       "Go; elsewhere a wildcard), and an implicit-receiver definition (a Python/Ruby method, whose params counts "
+                       "the self/cls the call site never writes) is never flagged. That makes the ARITY half "
                        "one-sided — a call the compared definitions could accept is never flagged — but it is NOT a proof that the "
                        "call site binds to THIS definition. Call edges are matched by NAME, so a receiver-qualified call to a "
                        "same-named callee this tool does not index (a standard-library or third-party method) is measured against "
@@ -1609,6 +1759,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // emitted exactly when the root carries unproven_defs= (graphlegend.h unprovenDefsVerbLegend).
     out += unprovenDefsVerbLegend( UnprovenDefsVerb::EditCheck, unprovenDefs > 0 );
     out += declinedCallsLegendWithGates( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 );   // exactly when the root carries declined_calls=
+    out += arityFacts.legend();
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
@@ -1674,6 +1825,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     }
     out += unprovenDefsAttrXml( unprovenDefs );   // H1: beside the incompatible= it qualifies; absent at zero
     out += declinedCallsAttrXml( declinedCalls ); // callers the resolver declined to bind that could have meant it; absent at zero
+    out += arityFacts.attrs( ex );   // beside the incompatible= they qualify
     // r26-stamp Task A: the HEAD baseline this contract compares against is only meaningful pinned to a
     // commit (+dirty state) — omitted entirely on a non-git root. Appended LAST (after every pre-existing
     // attribute) so an existing substring-adjacency assertion elsewhere (e.g. "status=\"x\" callers=\"N\"")

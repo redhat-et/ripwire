@@ -504,6 +504,7 @@ for _g in \
     dynmapsimdcheck \
     edgemarkcheck \
     editcheckanswercheck \
+    editcheckaritycheck \
     editcheckcheck \
     editcheckdeclcheck \
     editchecknotecheck \

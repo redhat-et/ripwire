@@ -61,13 +61,37 @@ inline void editCheckBlankComments( std::string& text )
     }
 }
 
+// Past a generic parameter list opening at `i` (Rust `<…>`, Go `[…]`), at the next non-blank byte; `i` itself when none opens
+// there, npos when it never closes. A `->` inside Rust generics (`F: Fn() -> T`) closes nothing.
+inline std::size_t editCheckSkipGenerics( std::string_view text, std::size_t i ) noexcept
+{
+    if( i == std::string_view::npos || ( text[i] != '<' && text[i] != '[' ) )
+    {
+        return i;
+    }
+    const char open = text[i], close = ( open == '<' ) ? '>' : ']';
+    int        depth = 0;
+    for( ; i < text.size(); ++i )
+    {
+        const bool arrow = close == '>' && i > 0 && text[ i - 1 ] == '-';
+        depth += ( text[i] == open ) ? 1 : ( text[i] == close && !arrow ) ? -1 : 0;
+        if( depth == 0 )
+        {
+            return text.find_first_not_of( " \t\r\n", i + 1 );
+        }
+    }
+    return std::string_view::npos;
+}
+
 // Where `name` sits in a signature's text and where its parameter list opens: the first whole-word occurrence followed
-// (whitespace allowed) by '('. {npos, npos} when there is none.
-inline std::pair<std::size_t, std::size_t> editCheckParamOpen( std::string_view text, std::string_view name )
+// (whitespace allowed) by '(' — or, with `skipGenerics` (the Rust/Go arity reader, editcheckarity.h), by a generic
+// parameter list and then '('. {npos, npos} when there is none.
+inline std::pair<std::size_t, std::size_t> editCheckParamOpen( std::string_view text, std::string_view name, bool skipGenerics = false )
 {
     for( std::size_t at = name.empty() ? std::string_view::npos : text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
     {
-        const std::size_t after = text.find_first_not_of( " \t\r\n", at + name.size() );
+        const std::size_t blank = text.find_first_not_of( " \t\r\n", at + name.size() );
+        const std::size_t after = skipGenerics ? editCheckSkipGenerics( text, blank ) : blank;
         if( ( at == 0 || !namesplit::isIdentChar( text[ at - 1 ] ) ) && after != std::string_view::npos && text[after] == '(' )
         {
             return { at, after };

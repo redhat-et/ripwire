@@ -151,33 +151,34 @@ fold_rows "(1v-c) clean tree, 3 callers (--legend=full): the rows ride there too
 # ruling 1 (rv-lean-trio item 1): on a DIRTY tree every caller row rides. RED on 33873861 (folded into rows_next=):
 #   TS — `export` dropped from blend: the contract check is blind to TS publicness (status stays "unchanged"), and
 #        main.ts:go, the importer the edit breaks, is a row;
-#   C  — use1 edited to the wrong arity beside an unchanged prototype: never flagged, and use1 is a row.
+#   C  — use1 edited to pass a wrong-type argument beside an unchanged prototype: never flagged, and use1 is a row.
+#        (Was a wrong-ARITY edit; since EDIT-CHECK-ARITY a C call at the wrong count is flagged, so the unseen edit is a type.)
 ( cd "$FOLD" && sed 's/^export function blend/function blend/' src/util.ts > src/util.ts.new && mv src/util.ts.new src/util.ts )
 F_D="$( fec blend )"
 printf '%s' "$F_D" | grep -q 'status="unchanged"' && printf '%s' "$F_D" | grep -q 'at="[0-9a-f]*+dirty' \
     && fold_rows "(1v-d) dirty tree (TS export dropped): every caller rides, main.ts:go listed" "$F_D" '<c n="go" p="src/main.ts:2"/>' \
     || { no "(1v-d) premise: the TS export drop should read unchanged on a +dirty tree"; printf '%s\n' "$F_D"; }
 ( cd "$FOLD" && git checkout -q src/util.ts \
-  && sed 's/^int use1(void) { return compute(1, 2); }/int use1(void) { return compute(1, 2, 3); }/' src/calc.c > src/calc.c.new && mv src/calc.c.new src/calc.c )
+  && sed 's/^int use1(void) { return compute(1, 2); }/int use1(void) { return compute("1", 2); }/' src/calc.c > src/calc.c.new && mv src/calc.c.new src/calc.c )
 F_D="$( fec compute )"
 printf '%s' "$F_D" | grep -q 'status="unchanged"' && ! printf '%s' "$F_D" | grep -q 'incompatible="1"' \
-    && fold_rows "(1v-e) dirty tree (C caller at the wrong arity, unflagged): use1 listed" "$F_D" '<c n="use1" p="src/calc.c:3"/>' \
-    || { no "(1v-e) premise: the wrong-arity caller should be unflagged under unchanged"; printf '%s\n' "$F_D"; }
+    && fold_rows "(1v-e) dirty tree (C caller with a wrong-type argument, unflagged): use1 listed" "$F_D" '<c n="use1" p="src/calc.c:3"/>' \
+    || { no "(1v-e) premise: the wrong-type caller should be unflagged under unchanged"; printf '%s\n' "$F_D"; }
 ( cd "$FOLD" && git checkout -q src/calc.c && echo 'int stray;' > src/stray.c )
 # the near miss: an UNTRACKED file alone is a working-tree change too (at= says +dirty), so the rows ride
 fold_rows "(1v-f) an untracked file alone (+dirty): the rows ride" "$( fec compute )" '<c n="use1" p="src/calc.c:3"/>'
 rm -f "$FOLD/src/stray.c"
 # (1v-h) fix round 2 (rv-lean-trio2 nit b): an edit git status cannot see — the caller's file marked skip-worktree, or
-# assume-unchanged, then edited to the wrong arity — leaves at= clean, so the stamp alone would fold the unflagged use1 row.
+# assume-unchanged, then edited to a wrong-type argument — leaves at= clean, so the stamp alone would fold the unflagged use1 row.
 # The fold also refuses on any such index bit (quality.h indexHidesTrackedContent, the probe the qd identity basis uses).
 # RED on 9bd8528a: the verdict alone, use1 folded into rows_next=.
 for bit in skip-worktree assume-unchanged; do
     ( cd "$FOLD" && git update-index --"$bit" src/calc.c \
-      && sed 's/^int use1(void) { return compute(1, 2); }/int use1(void) { return compute(1, 2, 3); }/' src/calc.c > src/calc.c.new \
+      && sed 's/^int use1(void) { return compute(1, 2); }/int use1(void) { return compute("1", 2); }/' src/calc.c > src/calc.c.new \
       && cat src/calc.c.new > src/calc.c && rm -f src/calc.c.new )
     F_H="$( fec compute )"
     if [ -n "$( cd "$FOLD" && git status --porcelain )" ] || ! printf '%s' "$F_H" | grep -q 'status="unchanged"' \
-       || printf '%s' "$F_H" | grep -q 'at="[0-9a-f]*+dirty' || ! grep -q 'compute(1, 2, 3)' "$FOLD/src/calc.c"; then
+       || printf '%s' "$F_H" | grep -q 'at="[0-9a-f]*+dirty' || ! grep -q 'compute("1", 2)' "$FOLD/src/calc.c"; then
         no "(1v-h) premise ($bit): git status should be silent, at= clean and the edit on disk"; printf '%s\n' "$F_H"
     else
         fold_rows "(1v-h) $bit + an edited caller (git status silent): the rows ride, use1 listed" "$F_H" '<c n="use1" p="src/calc.c:3"/>'

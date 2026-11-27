@@ -999,6 +999,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 2026-10-01: present-only — rides only a C/C++ definition whose declaration's defaults widened its accepted arity
     { "defaults_from", "defaults_from=decl: a C/C++ declaration of this definition (same types) has defaults; calls within them are never flagged", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     { "defaults_untied", "defaults_untied=N: N same-name C/C++ declarations with possible defaults could not be tied (not applied); a flag may be one", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    // EDIT-CHECK-ARITY (2026-11-27): present-only — an unread C/C++/Rust/Go parameter list, a C/C++ declaration left at the old list
+    { "arity_unknown", "arity_unknown=N: N definitions whose parameter list could not be read; incompatible= says nothing of their callers (unknown, not compatible)", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    { "decl_pair", "decl_pair=FILE:LINE: a C/C++ declaration of SYM whose parameter list differs, merged into this contract (callers seeing only it compile against the old list)", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    { "decl_params", "decl_params=N: decl_pair='s parameter count", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    { "decl_pairs", "decl_pairs=N: N such declarations (decl_pair= names the first)", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     // exemplar: src/verbs_for.h + src/exemplar.h selectExemplar/pickWinnerOfKind
     { "candidates", "candidates=N: instances of kind= under the ccx ceiling the pick was ranked from", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
     { "low_confidence", "low_confidence=1: weak task-to-kind match, fell back to fn unless off_task=1; pass a kind (fn|method|class...)", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
