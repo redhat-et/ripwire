@@ -109,12 +109,24 @@ inline std::optional<RankedGraph>& storedDefaultRank() noexcept
     static std::optional<RankedGraph> rank;
     return rank;
 }
+// The stored rank WITHOUT taking it, or nullptr. TIERANK-SERVED: a reader that only needs the ORDER (forpage.h
+// tailTermTieRank, the TAIL-SYM-TERMS tie-break) must not spend a slot the default map and --lint still consume, so it
+// reads through here instead of through defaultRank below. This is also the ONE place the rule "the stored rank belongs
+// to this graph" is written: defaultRank asks the same question of the same function, so the two cannot drift apart.
+// The slot is written only by readGraph (a served run) and buildGraphRecorded (the run that records), both reached from
+// the single graphFromWarmSnapshot call site in main.cpp — so one CLI process stores at most one rank, for the one graph
+// every verb in that run sees. The MCP server never fills it: mcpindex.h builds its graph with buildGraph directly.
+inline const std::vector<float>* storedRankFor( const Graph& g ) noexcept
+{
+    const std::optional<RankedGraph>& stored = storedDefaultRank();
+    return stored && stored->rank.size() == g.wOutDeg.size() ? &stored->rank : nullptr;
+}
 inline RankedGraph defaultRank( const Graph& g )
 {
-    std::optional<RankedGraph>& stored = storedDefaultRank();
-    if( stored && stored->rank.size() == g.wOutDeg.size() )
+    if( storedRankFor( g ) != nullptr )
     {
-        RankedGraph rank = std::move( *stored );
+        std::optional<RankedGraph>& stored = storedDefaultRank();
+        RankedGraph                 rank   = std::move( *stored );
         stored.reset();
         return rank;
     }

@@ -1170,6 +1170,7 @@ for _g in \
     textdocscheck \
     textpoolcheck \
     tiebreakcontentcheck \
+    tierankservedcheck \
     tiercallerscheck \
     timsortcheck \
     tinyshapecheck \
