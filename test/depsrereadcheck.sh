@@ -125,13 +125,16 @@ done
 sleep 3   # kRacySlackNs is 2 s: every fixture byte is now settled for the recording runs below
 
 binof(){ case "$1" in r*|vref) echo "$REF" ;; *) echo "$BIN" ;; esac; }
-# record COPY : cold run, then the recording run (R copies rewrite go.mod in between), then one served run
+# record COPY : the cold run, which records the graph (warmsnap.h recordsWhatItBuilt: a run that opened with no blob
+# stores what it built), then two more runs. R copies rewrite go.mod just BEFORE the cold run, so its signature is too
+# young when the graph is recorded. A binary that still records on run 2 (main before the warm-serve lane) records within
+# the same 2 s, since run 1 on this fixture takes well under that.
 record(){
     local c="$1" bin; bin="$( binof "$1" )"
-    run "$c.1" "$c" "$bin"
     case "$c" in
         ?R) printf 'module example.com/m\n\ngo 1.21\n' >"$TMP/fx/$c/go.mod"; mt_save "$TMP/fx/$c/go.mod" "$c" ;;
     esac
+    run "$c.1" "$c" "$bin"
     run "$c.2" "$c" "$bin"
     run "$c.3" "$c" "$bin"
 }

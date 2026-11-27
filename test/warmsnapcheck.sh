@@ -25,12 +25,15 @@
 #
 # The observable is one stderr line under RIPWIRE_SNAPSHOT_STATS=1:
 #   ripwire: snapshot-stats tree=walked|replayed model=built|loaded graph=built|loaded why=<first refusal> model_why= graph_why= saved=0|1
+#            unsaved_why=<why a stage this run built was not stored: ok|racy|reparsed>
 #
 # ARMS
 #   V   vacuity guard: the second run on an unchanged tree must say graph=loaded AND tree=replayed. A build without
 #       the snapshot prints no such line, so "nothing was loaded, the two outputs are trivially equal" is a FAIL here,
 #       never a pass. V also pins the two placement contracts: nothing is written beside the blob the user named, and
 #       a run that serves the snapshot leaves that blob byte-identical.
+#   N   the earliest serving call: from a fresh cache on a tree older than the racy slack, call 1 (cold) records the
+#       crawl, the model and the graph, and call 2 is served; calls 1-4 all print the --no-cache bytes.
 #   I   identity: per verb, stdout of the loading run == stdout of a --no-cache run (which builds everything).
 #   S   a stale snapshot is REFUSED and the answer is the full build's: (S1) one file's content changed; (S2) the
 #       snapshot's version field differs; (S3) a flipped byte in its body; (S4) a snapshot truncated inside a field;
@@ -67,7 +70,7 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-echo "warmsnapcheck: BIN=$BIN  TMP=$TMP"
+echo "warmsnapcheck: BIN=$BIN ($( "$BIN" --version 2>/dev/null | head -1 ))  TMP=$TMP"
 export XDG_CACHE_HOME="$TMP/xdg"; mkdir -p "$XDG_CACHE_HOME"   # the ignore-probe sidecar stays inside TMP
 # TMPDIR OUTRANKS XDG_CACHE_HOME in the cache-dir ladder (quality::cacheDirLadder), and this gate writes one
 # snapshot of the whole test corpus per configuration — about thirty of them across the arms below. Point TMPDIR at
@@ -211,6 +214,40 @@ envrun HOME="$HOME" PATH="$PATH" XDG_CACHE_HOME="$XDG_CACHE_HOME" GIT_EDITOR=tru
 # where the sidecar and the in-blob section both read one artifact and refused it as why=options. The stored key is
 # still compared inside (warmsnap.h openSnapshot) and still the only thing that could catch a name collision.
 if grep -q 'why=absent' "$TMP/v2.stats"; then ok "V2 ...and a new GIT_* variable resolves another snapshot entirely (why=absent)"; else no "V2 a new GIT_* variable did not refuse the snapshot: $( cat "$TMP/v2.stats" )"; fi
+
+# ── N: the EARLIEST serving call, from a fresh cache ─────────────────────────────────────────────
+# MEASURE-M5 (11-26, llvm-project): from an empty cache dir, calls 1, 2 AND 3 built the model and the graph, and only
+# call 4 was served — two 24-32 s calls an agent paid before its first served one. Call 1 parses every file because
+# there is no blob to hit, and "a run that parsed stores nothing" (the edit-loop rule S8b pins) kept it from recording
+# the model and the graph; on llvm, call 2 then re-parsed 5 files for reasons of the parse pool's own, so it recorded
+# nothing either. A run whose blob did not exist when it opened is not the run after an edit: it records.
+# So call 2 must serve, and every call must print the bytes a --no-cache build prints.
+# The tree is aged past the racy slack BEFORE call 1: that is the honest premise. A tree written within the slack is
+# refused by the racy rule, which is a different arm (S8).
+nsrv()
+{
+    local tag="$1" k; shift
+    local nd="$TMP/n.$tag" nc="$TMP/n.$tag.bin"
+    mkcorpus "$nd"; sleep 3                 # every signature older than the racy slack before call 1 starts
+    for k in 1 2 3 4; do run "$nc" "$nd" "$TMP/n.$tag.$k" "$@"; done
+    full "$nd" "$TMP/n.$tag.full" "$@"
+    if grep -q 'cache-stats reparsed=[1-9]' "$TMP/n.$tag.1.err" && has "$TMP/n.$tag.1" 'why=absent'; then
+        ok "N  [$tag] premise: call 1 is cold — no blob, every file parsed ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/n.$tag.1.err" ))"
+    else no "N  [$tag] premise: call 1 is not a cold run: $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/n.$tag.1.err" ) $( cat "$TMP/n.$tag.1.stats" )"; fi
+    if has "$TMP/n.$tag.1" 'saved=1' && has "$TMP/n.$tag.1" 'unsaved_why=ok'; then ok "N  [$tag] call 1 recorded a snapshot and held nothing back (unsaved_why=ok)"
+    else no "N  [$tag] call 1 did not record all it built: $( cat "$TMP/n.$tag.1.stats" )"; fi
+    if has "$TMP/n.$tag.2" 'tree=replayed' && has "$TMP/n.$tag.2" 'model=loaded' && has "$TMP/n.$tag.2" 'graph=loaded'; then
+        ok "N  [$tag] call 2 is SERVED ($( sed 's/^ripwire: snapshot-stats //' "$TMP/n.$tag.2.stats" ))"
+    else no "N  [$tag] call 2 is not served — the first served call is later than the design allows: $( cat "$TMP/n.$tag.2.stats" )"; fi
+    if has "$TMP/n.$tag.2" 'saved=0'; then ok "N  [$tag] ...and writes nothing"; else no "N  [$tag] the serving call 2 rewrote the snapshot: $( cat "$TMP/n.$tag.2.stats" )"; fi
+    for k in 3 4; do
+        if has "$TMP/n.$tag.$k" 'model=loaded' && has "$TMP/n.$tag.$k" 'graph=loaded'; then ok "N  [$tag] call $k is served"
+        else no "N  [$tag] call $k is not served: $( cat "$TMP/n.$tag.$k.stats" )"; fi
+    done
+    for k in 1 2 3 4; do same "N  [$tag] call $k == built" "$TMP/n.$tag.$k" "$TMP/n.$tag.full"; done
+}
+nsrv map
+nsrv for --for="hello lib module"
 
 # ── I: identity, per verb ─────────────────────────────────────────────────────────────────────────
 ident()
@@ -389,16 +426,18 @@ else no "S8 a steady warm run rewrote the snapshot: $( cat "$TMP/s8.third.stats"
 
 # S8b: a run that re-parses and is OUTSIDE the racy window DOES record — the crawl, under the name of the blob it has
 #      just republished, so the next run replays the walk instead of making it. What it deliberately does NOT record
-#      is the model and the graph (warmsnap_graph.h buildGraphRecorded and ingest.cpp recordWarmModel both stop on
-#      ing.reparsedFiles != 0: a run that parsed is followed, as a rule, by another edit, and must not pay to write
-#      what the next run refuses). The in-blob placement could not store even the crawl on such a run: recording
-#      meant a second whole-blob rewrite in a run that had already paid for one.
+#      is the model and the graph (warmsnap.h recordsWhatItBuilt, which buildGraphRecorded and recordWarmModel both
+#      ask: a run that parsed is followed, as a rule, by another edit, and must not pay to write what the next run
+#      refuses — unless it opened with no blob at all, arm N). The in-blob placement could not store even the crawl on
+#      such a run: recording meant a second whole-blob rewrite in a run that had already paid for one.
 printf 'package lib\n\nfunc Yello() int {\n\treturn 4\n}\n' >"$S8/gomod/lib/lib.go"
 sleep 2
 run "$TMP/s8.bin" "$S8" "$TMP/s8b.out"
 if grep -q 'cache-stats reparsed=[1-9]' "$TMP/s8b.out.err" && has "$TMP/s8b.out" 'saved=1' && hasSnap "$TMP/s8.bin"; then
     ok "S8b a re-parsing run records: $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/s8b.out.err" ), saved=1, and the snapshot is named after the blob it left behind"
 else no "S8b the re-parsing run stored nothing reachable from its own blob: $( cat "$TMP/s8b.out.stats" ), $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/s8b.out.err" ), snapshot=$( snapfile "$TMP/s8.bin" )"; fi
+if has "$TMP/s8b.out" 'unsaved_why=reparsed'; then ok "S8b ...and its stats line says why the model and the graph it built were held back (unsaved_why=reparsed)"
+else no "S8b the re-parsing run did not disclose why it held back what it built: $( cat "$TMP/s8b.out.stats" )"; fi
 run "$TMP/s8.bin" "$S8" "$TMP/s8b.next"; full "$S8" "$TMP/s8b.full"
 if has "$TMP/s8b.next" 'tree=replayed'; then ok "S8b ...so the very next run after the edit REPLAYS the crawl ($( sed 's/^ripwire: snapshot-stats //' "$TMP/s8b.next.stats" ))"
 else no "S8b the run after a re-parsing run walked the tree again: $( cat "$TMP/s8b.next.stats" )"; fi

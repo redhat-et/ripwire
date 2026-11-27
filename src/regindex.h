@@ -53,6 +53,8 @@
 #include "nextverb.h"         // nextAttrXml / nextFlag — the capped row's shell-safe follow-up
 #include "resolve.h"           // resolvePreciseInclude, resolvePythonModuleSuffix, lexicalNormalize — an import's module file
 #include "serialize.h"         // escapeXml
+#include "infra/sortutil.h"   // svLess: the cut names are sorted and binary-searched
+#include "verbfs_slotreg_seam.h" // SLOTREG: a served index answers RegIndex::build from its record (src/verbfs_slotreg.h)
 
 #include <algorithm>
 #include <array>
@@ -112,6 +114,8 @@ struct RegSite
     std::string   as;                       // TS: the provider field (useClass…); "" otherwise
     NodeId        key          = kNoNode;   // the key's one definition
     bool          test         = false;
+
+    bool operator==( const RegSite& ) const = default;   // SLOTREG's plain-build check: a served index equals a fresh build
 };
 
 struct RegKey
@@ -121,6 +125,8 @@ struct RegKey
     std::vector<RegSite>       sites;                 // source order (reference order)
     std::vector<NodeId>        consumers;             // enclosing symbols of a send / inject site, first-seen order
     std::vector<bool>          consumerTest;
+
+    bool operator==( const RegKey& ) const = default;
 };
 
 class RegIndex
@@ -159,8 +165,18 @@ public:
         return keys;
     }
 
-    // Names whose re-export chain ran past kRegReexportDepth (a registration or definition through it is uncounted).
-    bool reexportCut( std::string_view name ) const { return m_cut.contains( std::string( name ) ); }
+    // Names whose re-export chain ran past kRegReexportDepth (a registration or definition through it is uncounted), sorted.
+    std::vector<std::string> cutNames() const
+    {
+        std::vector<std::string> names;
+        names.reserve( m_cut.size() );
+        for( const auto& [ name, flag ] : m_cut )
+        {
+            names.push_back( name );
+        }
+        std::ranges::sort( names, rw::sortutil::svLess );
+        return names;
+    }
 
 private:
     const IngestResult&                         m_ing;
@@ -830,12 +846,57 @@ inline bool isRegistrationCallee( std::string_view callee, bool decorator = fals
 }
 }   // namespace reg_detail
 
+// The whole-index half of the render: every key and the cut names. Neither reads the question, so a served index answers it
+// from the SLOTREG record when `ing` is the model the warm snapshot identifies (src/verbfs_slotreg.h); anything else builds it.
+struct RegIndexRows
+{
+    std::vector<RegKey>      keys;
+    std::vector<std::string> cut;   // sorted
+};
+
+inline RegIndexRows regIndexBuilt( const IngestResult& ing )
+{
+    RegIndex     idx( ing );
+    RegIndexRows rows;
+    rows.keys = idx.build();      // build() before cutNames(): the cut names are found while resolving
+    rows.cut  = idx.cutNames();
+    return rows;
+}
+
+// The served rows are the ones this index would build: the plain build's check behind a served regIndexOf.
+inline bool regIndexMatchesFresh( const IngestResult& ing, const RegIndexRows& served )
+{
+    const RegIndexRows fresh = regIndexBuilt( ing );
+    return fresh.keys == served.keys && fresh.cut == served.cut;
+}
+
+inline RegIndexRows regIndexOf( const IngestResult& ing )
+{
+    RegIndexRows                            rows;
+    const verbfs::slotreg::Seams&           seam  = verbfs::slotreg::seams();
+    const verbfs::slotreg::Serve            tried = seam.regServe != nullptr ? seam.regServe( ing, rows.keys, rows.cut ) : verbfs::slotreg::Serve{};
+    if( tried.served )
+    {
+        // The plain build proves every served index against a fresh one (release: not evaluated). The served entry is keyed on
+        // the model ingest() returned; a pass that later edited that model IN PLACE would serve a stale index, and this fires.
+        DASSERT( verbfs::slotreg::servesStaleOnPurpose() || regIndexMatchesFresh( ing, rows ), "SLOTREG: the served registrar index differs from a fresh build of this IngestResult (was the model edited after ingest()?)" );
+        return rows;
+    }
+    verbfs::slotreg::BuildWatch watch( seam.regKeep != nullptr );
+    rows = regIndexBuilt( ing );
+    if( seam.regKeep != nullptr )
+    {
+        seam.regKeep( ing, tried, rows.keys, rows.cut, watch.readsPinned( ing.files ) );
+    }
+    return rows;
+}
+
 // THE RENDER: the <reg> rows a compact --for answer gains for the shown ranked rows `shownIds` and question `task` (the gate
 // above). "" when no key passes it.
 inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeId> shownIds, std::string_view task )
 {
-    RegIndex                  idx( ing );
-    const std::vector<RegKey> keys = idx.build();   // build() before reexportCut(): the cut names are found while resolving
+    const RegIndexRows         idx  = regIndexOf( ing );
+    const std::vector<RegKey>& keys = idx.keys;
     if( keys.empty() )
     {
         return {};
@@ -949,7 +1010,7 @@ inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeI
         {
             out += " capped=\"1\"" + nextAttrXml( nextFlag( "--grep=", ks.name ) );
         }
-        if( idx.reexportCut( ks.name ) )
+        if( std::ranges::binary_search( idx.cut, std::string_view( ks.name ), rw::sortutil::svLess ) )
         {
             out += " cut=\"1\"";
         }
