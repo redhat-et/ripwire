@@ -287,8 +287,8 @@ Start this only after STEP 0 clears the bar. It follows the path Dart took (comm
 - **Gates that enumerate grammars:**
   - `test/dependencypincheck.sh`
   - `test/ripwirepubliccheck.sh` (`_grammars`)
-  - `test/fuzz/run.sh` and `test/fuzz/seeds/<name>/valid`
-  - `test/g1configcheck.sh` (seed count)
+  - `test/fuzz/seeds/<name>/valid` (`test/fuzz/run.sh` sweeps every `add_ripwire_fuzzer` line, and
+    `test/g1configcheck.sh` requires a seed for each)
   - the doctor grammar count in `test/dartcheck.sh` and `test/elixircheck.sh` (both pin `23` today)
   - a `test/gateexitcheck.sh` row for your gate
 

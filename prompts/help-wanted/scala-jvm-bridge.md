@@ -77,8 +77,8 @@ Pin a full 40-hex commit — the tag's, or a newer one with a reason — and say
 touched. Landing Kotlin found more that a new language has to reach, and Scala will too: the `--help`
 languages line in `src/cli.h` and its regenerated copy in `docs/COMMANDS.md`
 (`test/docscommandscheck.sh` arm G), the README's languages line and grammar count, a
-`THIRD_PARTY.md` row with the grammar's ABI and size, `test/fuzz/run.sh` and a seed directory under
-`test/fuzz/seeds/`, the help labels in `test/printf_parity.manifest`, a RE-PIN LOG entry in
+`THIRD_PARTY.md` row with the grammar's ABI and size, an `add_ripwire_fuzzer` line (which
+`test/fuzz/run.sh` sweeps) and a seed directory under `test/fuzz/seeds/`, the help labels in `test/printf_parity.manifest`, a RE-PIN LOG entry in
 `test/qschemetripcheck.sh`, and an extraction paragraph in `docs/ARCHITECTURE.md` beside Elixir's,
 Dart's and Kotlin's. `Lang` in `src/model.h` is append-only because its values are serialized into
 the cache: `Lang::Scala` goes after the last enumerator on the `main` you land on, and `kLangCount`

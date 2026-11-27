@@ -1,12 +1,41 @@
 #!/usr/bin/env bash
 # Bounded full fuzz sweep. Not part of normal regression; invoke explicitly from the G1/release gate.
+#
+#   bash test/fuzz/run.sh [BUILD_DIR] [SECONDS] [GRAMMARS]   # every grammar (or the GRAMMARS named) for SECONDS each
+#   bash test/fuzz/run.sh --list                             # print the grammars a sweep would run, one per line
+#
+# The grammar list is not written here. It is the NAME of every add_ripwire_fuzzer( NAME LANGUAGE KEY ) call in
+# CMakeLists.txt, the same lines that create the ripwire_fuzz_<NAME> targets, so a new grammar's fuzzer is swept as soon
+# as it is registered (a hand-kept list here once swept 17 of 25). test/g1configcheck.sh compares `--list` with those
+# lines. To run fewer, name them, as the third argument or in RIPWIRE_FUZZ_GRAMMARS ("lua proto"); a name with no
+# add_ripwire_fuzzer line is refused rather than reported missing.
 
 set -u
 
 ROOT="$( cd "$( dirname "$0" )/../.." && pwd )"
+
+ALL_GRAMMARS="$( sed -n 's/^[[:space:]]*add_ripwire_fuzzer([[:space:]]*\([A-Za-z0-9_]*\)[[:space:]].*/\1/p' "$ROOT/CMakeLists.txt" | tr '\n' ' ' )"
+[ -n "${ALL_GRAMMARS// /}" ] || { echo "run.sh: no add_ripwire_fuzzer( NAME ... ) lines in CMakeLists.txt" >&2; exit 2; }
+
+if [ "${1:-}" = "--list" ]; then
+    printf '%s\n' $ALL_GRAMMARS
+    exit 0
+fi
+
 BUILD_DIR="${1:-$ROOT/fuzz}"
 DURATION_SEC="${2:-120}"
+GRAMMARS="${3:-${RIPWIRE_FUZZ_GRAMMARS:-$ALL_GRAMMARS}}"
 JOBS="${RIPWIRE_FUZZ_JOBS:-4}"
+
+for grammar in $GRAMMARS; do
+    case " $ALL_GRAMMARS " in
+        *" $grammar "*) ;;
+        *) echo "run.sh: '$grammar' has no add_ripwire_fuzzer line in CMakeLists.txt (known: $ALL_GRAMMARS)" >&2; exit 2 ;;
+    esac
+done
+# Count words, not characters: a list of only tabs or newlines must not pass as a sweep of nothing.
+[ -n "$( printf '%s' $GRAMMARS )" ] || { echo "run.sh: empty grammar list" >&2; exit 2; }
+
 TMP="$( mktemp -d )"
 FAILED=0
 
@@ -31,7 +60,6 @@ cleanup()
 }
 trap cleanup EXIT
 
-GRAMMARS="cpp python go rust typescript tsx swift objc javascript bash java ruby json elixir dart kotlin clojure"
 mkdir -p "$TMP/artifacts" "$TMP/logs"
 
 run_one()
