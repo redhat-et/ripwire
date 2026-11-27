@@ -19,6 +19,8 @@
 #include "lexical.h"     // lexicalScanText — the working-tree bytes of a file, read once, for the hunk-coverage and accessor checks below
 #include "diffhunks.h"   // gitDiffHunksAllVsHead — the ONE-spawn whole-tree hunk evidence the symbol-granular change set narrows by
 #include "prcontext.h"   // A3-F17b/A3-F13: reuse the ONE numstat-based mask builder (gitDiffChangedMaskNumstat)
+#include "gitcmd.h"     // SITU-NAME: gitCmd — the last-commit line
+#include "infra/shquote.h"   // shSingleQuote
 #include "gitstamp.h"    // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
 #include "testmap.h"     // §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
 #include "didyoumean.h"  // H6: nearestIndexedFileClause — the ONE path near-miss suggester, shared with the MCP arm
@@ -982,6 +984,7 @@ struct SymbolChangeSet
     std::size_t         hunksUnlocated    = 0;   // of those, the ones that forced a file back to file-granular
     std::size_t         filesNarrowed     = 0;   // changed files seeded from their located symbols only
     std::size_t         filesFileGranular = 0;   // changed files kept whole (fallback / no evidence)
+    std::vector<std::uint32_t> wholeFiles;       // SITU-NAME: the fileIds behind filesFileGranular, ascending — --situ's changed: rows
     bool                evidence          = false;   // the whole-tree hunk spawn succeeded
 };
 
@@ -1127,6 +1130,7 @@ inline SymbolChangeSet computeSymbolChangeSet( const std::string& root, const In
                 out.symMask[i] = 1;
             }
             ++out.filesFileGranular;
+            out.wholeFiles.push_back( f );
         }
     }
 
@@ -1199,6 +1203,221 @@ inline void writeSituSiblingRows( std::FILE* out, const SituSiblings& sibs, Path
     }
 }
 
+// SITU-NAME-CHANGED (VERB-AUDIT-2 gap 2, 11-27): the report named only the change's DEPENDENTS — "2 changed file(s)",
+// then a changed_symbols= count — so "what did I change" cost an agent `git diff --stat` plus a grep for the
+// functions, 4 of 4 audit repos. The changed: rows answer it first: one row per seed symbol (path:first-last
+// name) with its direct-caller files outside the diff, one row per file kept whole (file-granular), every cut
+// named with the call that lifts it (lesson 1: a short shape names what it leaves out).
+inline constexpr std::size_t kSituChangedRowsShown   = 8;   // changed: rows; a raisable DEFAULT (--limit=N)
+inline constexpr std::size_t kSituChangedCallerFiles = 3;   // direct-caller files named per seed row
+
+// One seed's direct-caller files outside the diff, most caller symbols first, then path.
+inline std::vector<std::pair<std::uint32_t, std::uint32_t>> situDirectCallerFiles( const IngestResult& ing, const Graph& g, NodeId seed,
+                                                                                   const std::vector<char>& changedFile )
+{
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> files;   // (fileId, caller symbols)
+    const auto* ro = g.inEdges.rowOffsets();
+    const auto* ci = g.inEdges.colIndices();
+    if( seed >= g.inEdges.rows() )
+    {
+        return files;
+    }
+    for( std::uint32_t k = ro[seed]; k < ro[seed + 1]; ++k )
+    {
+        const NodeId c = ci[k];
+        if( c >= ing.symbols.size() || c == seed )
+        {
+            continue;
+        }
+        const std::uint32_t f = ing.symbols[c].fileId;
+        if( f < changedFile.size() && changedFile[f] )
+        {
+            continue;
+        }
+        const auto it = std::find_if( files.begin(), files.end(), [ f ]( const auto& e ) { return e.first == f; } );
+        if( it == files.end() )
+        {
+            files.emplace_back( f, 1 );
+        }
+        else
+        {
+            ++it->second;
+        }
+    }
+    std::sort( files.begin(), files.end(), [ & ]( const auto& a, const auto& b )
+               { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
+    return files;
+}
+
+// "It worked yesterday": the edit that broke it may already be COMMITTED, and a diff vs HEAD never sees it. The
+// last commit, first-parent, paths relative to the root — named on one line, never walked (the [1]-[3] sections
+// stay the working-tree answer). A parentless HEAD (a root commit, a shallow clone's boundary) has no "last change"
+// to name, so the line is omitted rather than listing the whole tree as changed.
+inline constexpr std::size_t kSituLastCommitFilesShown   = 3;    // last commit: files named before "+K"
+inline constexpr std::size_t kSituLastCommitSubjectBytes = 60;   // last commit: subject bytes before "…"
+
+struct SituLastCommit
+{
+    std::string              sha7;
+    std::string              subject;
+    std::vector<std::string> paths;
+    bool                     ok = false;
+};
+
+inline SituLastCommit situLastCommit( const std::string& root )
+{
+    SituLastCommit  out;
+    const auto      r = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                                         + " log -1 -m --first-parent --relative --no-color --format=%h%x09%P%x09%s --name-only HEAD 2>/dev/null" );
+    if( !r.isStarted || r.status != 0 || r.abandoned || r.lines.empty() )
+    {
+        return out;
+    }
+    const std::string& head = r.lines.front();
+    const std::size_t  t1   = head.find( '\t' );
+    const std::size_t  t2   = t1 == std::string::npos ? std::string::npos : head.find( '\t', t1 + 1 );
+    if( t2 == std::string::npos || t2 == t1 + 1 )   // no parents: nothing to diff against
+    {
+        return out;
+    }
+    out.sha7    = head.substr( 0, t1 );
+    out.subject = head.substr( t2 + 1 );
+    if( out.subject.size() > kSituLastCommitSubjectBytes )
+    {
+        std::size_t cut = kSituLastCommitSubjectBytes;
+        while( cut > 0 && ( static_cast<unsigned char>( out.subject[cut] ) & 0xC0 ) == 0x80 )
+        {
+            --cut;   // never split a UTF-8 sequence
+        }
+        out.subject = out.subject.substr( 0, cut ) + "…";
+    }
+    for( std::size_t i = 1; i < r.lines.size(); ++i )
+    {
+        out.paths.push_back( r.lines[i] );
+    }
+    out.ok = true;
+    return out;
+}
+
+inline void writeSituLastCommitLine( std::FILE* out, const std::string& root )
+{
+    const SituLastCommit lc = situLastCommit( root );
+    if( !lc.ok )
+    {
+        return;
+    }
+    std::string files;
+    for( std::size_t i = 0; i < lc.paths.size() && i < kSituLastCommitFilesShown; ++i )
+    {
+        files += ( i ? ", " : ": " ) + lc.paths[i];
+    }
+    if( lc.paths.size() > kSituLastCommitFilesShown )
+    {
+        files += " +" + std::to_string( lc.paths.size() - kSituLastCommitFilesShown );   // the cut, named as a count; --pr-context=HEAD~1 lists them all
+    }
+    rw::emitTo( out, "  last commit: {} \"{}\" — {} file(s){}; committed, so outside this diff (both: --pr-context=HEAD~1)\n",
+                lc.sha7, lc.subject, lc.paths.size(), files );
+}
+
+// One changed: row — a seed symbol, or a whole file (sym = kNoNode) when its hunks could not be located.
+struct SituChangedRow
+{
+    std::uint32_t fileId;
+    NodeId        sym;
+};
+
+// The rows in path order, then line within a file; whole-file rows first in their file (they have no line).
+inline std::vector<SituChangedRow> situChangedRows( const IngestResult& ing, const SymbolChangeSet& scs )
+{
+    std::vector<char>           whole( ing.files.size(), 0 );
+    std::vector<SituChangedRow> rows;
+    for( const std::uint32_t f : scs.wholeFiles )
+    {
+        whole[f] = 1;
+        rows.push_back( SituChangedRow{ f, kNoNode } );
+    }
+    for( const NodeId n : scs.changedSyms )
+    {
+        if( !whole[ ing.symbols[n].fileId ] )
+        {
+            rows.push_back( SituChangedRow{ ing.symbols[n].fileId, n } );
+        }
+    }
+    const auto lineOf = [ & ]( const SituChangedRow& r ) { return r.sym == kNoNode ? 0u : ing.symbols[r.sym].line; };
+    std::sort( rows.begin(), rows.end(), [ & ]( const SituChangedRow& a, const SituChangedRow& b )
+               {
+                   if( a.fileId != b.fileId )
+                   {
+                       return ing.files[a.fileId] < ing.files[b.fileId];
+                   }
+                   return lineOf( a ) != lineOf( b ) ? lineOf( a ) < lineOf( b ) : a.sym < b.sym;
+               } );
+    return rows;
+}
+
+// What the changed: rows read besides the change set itself.
+struct SituChangeContext
+{
+    const IngestResult&      ing;
+    const Graph&             g;
+    const std::vector<char>& changedFile;
+};
+
+// `path:first-last name ← caller files` for a seed; the caller list names its cut and the call that lifts it.
+template <typename PathRelFn>
+inline std::string situSeedRowText( const SituChangeContext& cx, NodeId seed, PathRelFn pathRel )
+{
+    const Symbol&       s    = cx.ing.symbols[seed];
+    const std::uint32_t last = s.loc > 1 ? s.line + s.loc - 1 : s.line;
+    std::string         text = std::string( pathRel( s.fileId ) ) + ":" + std::to_string( s.line ) + "-" + std::to_string( last ) + " "
+                             + ( s.scope.empty() || s.scope == s.name ? s.name : s.scope + "." + s.name );
+    const auto          callers = situDirectCallerFiles( cx.ing, cx.g, seed, cx.changedFile );
+    for( std::size_t c = 0; c < callers.size() && c < kSituChangedCallerFiles; ++c )
+    {
+        text += c == 0 ? " ← " : ", ";
+        text += pathRel( callers[c].first );
+    }
+    if( callers.size() > kSituChangedCallerFiles )
+    {
+        text += " +" + std::to_string( callers.size() - kSituChangedCallerFiles ) + " (--callers=" + s.name + ")";
+    }
+    return text;
+}
+
+template <typename PathRelFn>
+inline void writeSituChangedRows( std::FILE* out, const SituChangeContext& cx, const SymbolChangeSet& scs, PathRelFn pathRel,
+                                  const SituPageArgs& page )
+{
+    const std::vector<SituChangedRow> rows = situChangedRows( cx.ing, scs );
+    std::size_t                       nFiles = 0;
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        nFiles += ( i == 0 || rows[i].fileId != rows[i - 1].fileId ) ? 1 : 0;
+    }
+    const std::string wholeNote = scs.wholeFiles.empty() ? std::string() : ", " + std::to_string( scs.wholeFiles.size() ) + " kept whole";
+    rw::emitTo( out, "  changed: {} file(s), {} symbol(s){} — what the diff touched; \"← f\" = direct-caller files outside the diff\n",
+                nFiles, rows.size() - scs.wholeFiles.size(), wholeNote );
+    std::vector<std::uint32_t> seedsInFile( cx.ing.files.size(), 0 );   // a whole-file row prints its own seed count
+    for( const NodeId n : scs.changedSyms )
+    {
+        ++seedsInFile[ cx.ing.symbols[n].fileId ];
+    }
+    const std::size_t shown = std::min( rows.size(), std::size_t( effectiveRowCap( page.limit, int( kSituChangedRowsShown ) ) ) );
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        if( rows[i].sym == kNoNode )
+        {
+            rw::emitTo( out, "        {} (whole file: {} symbols)\n", pathRel( rows[i].fileId ), seedsInFile[ rows[i].fileId ] );
+            continue;
+        }
+        rw::emitTo( out, "        {}\n", situSeedRowText( cx, rows[i].sym, pathRel ) );
+    }
+    if( rows.size() > shown )
+    {
+        rw::emitTo( out, "        +{} more: {}\n", rows.size() - shown, situNextInvocation( page.selector, rows.size() ) );
+    }
+}
+
 // F2: the two causes the old "(none, or no git history)" conflated, told apart by the only fact that
 // separates them — how many commits the window actually contained.
 // `bulkSkipped`: the window's commits the 30-file cut left out. A window whose every commit was bulk mined 0 sets, and that zero is
@@ -1255,7 +1474,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // actually touched when hunk evidence locates them, else — per file, conservatively — every symbol of the
     // file, which is exactly the pre-narrowing set. ONE implementation, shared with computeSituationFacts,
     // so this report and its MCP twin cannot disagree about what "the change" is.
-    const SymbolChangeSet         scs         = computeSymbolChangeSet( root, ing, changedFile, onlyRoot, page.selector.empty() );   // a named --situ=FILES list is never narrowed
+    const bool                    situDiffForm = page.selector.empty();   // the git-diff form (bare --situ), not a named --situ=FILES list
+    const SymbolChangeSet         scs         = computeSymbolChangeSet( root, ing, changedFile, onlyRoot, situDiffForm );   // a named --situ=FILES list is never narrowed
     const std::vector<NodeId>&    changedSyms = scs.changedSyms;
 
     rw::emitTo( out, "ripwire situational-awareness — {} changed file(s), {} symbols in them\n", nChanged, scs.fileSymbols );
@@ -1285,12 +1505,24 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         if( nChanged == 0 )
         {
             rw::emitRaw( out, "  (0 changed files — working tree is clean, nothing to analyze)\n" );
+            if( situDiffForm )
+            {
+                writeSituLastCommitLine( out, root );   // SITU-NAME: a clean tree's last change is the commit
+            }
         }
         else
         {
             rw::emitTo( out, "  (no indexed symbols in the {} changed file(s) — nothing to analyze)\n", nChanged );
         }
         return;
+    }
+
+    // SITU-NAME: what changed, before what depends on it — on the git-diff form only: an explicit --situ=FILES list
+    // already names its files (the caller typed them) and is never narrowed, so the rows would only restate it.
+    if( situDiffForm )
+    {
+        writeSituChangedRows( out, SituChangeContext{ ing, g, changedFile }, scs, situPathRel, page );
+        writeSituLastCommitLine( out, root );
     }
 
     // THE GRANULARITY DISCLOSURE — the honesty half of the narrowing above: a narrower answer must say what

@@ -144,6 +144,9 @@ kSibliftMaxSib	OUTPUT
 kSideDepthStd	INDEXING
 kSideDepthUses	INDEXING
 kSituBlastFilesShown	OUTPUT
+kSituChangedCallerFiles	OUTPUT
+kSituChangedRowsShown	OUTPUT
+kSituLastCommitFilesShown	OUTPUT
 kSituPartnerFileRowsShown	OUTPUT
 kSituPartnerRowsShown	OUTPUT
 kSkillScanFindingCap	INDEXING
