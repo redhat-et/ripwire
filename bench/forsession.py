@@ -1,46 +1,69 @@
 #!/usr/bin/env python3
-"""forsession.py — the per-WARM-QUERY cost of personalized ranking, which is the only framing in
-which RANK-SPEED step 2 can be judged.
+"""forsession.py — the per-WARM-QUERY cost of an MCP session, which is the only framing in which a
+per-call cost can be judged.
 
 WHY THIS SHAPE. `rankGraphTeleport` is the PERSONALIZED rank: it runs once per query, from a
 different seed set each time. `buildGraph` runs once per index. Comparing them as shares of one cold
-run prices a per-call cost against a one-time one -- the same amortisation error that makes the git
-walk look expensive until the qchurn cache is accounted for. So this harness drives ONE MCP session
-that holds the graph in memory and issues N `for` calls with N DIFFERENT tasks, which is the real
-agent use case, and reads the per-scope aggregate the profile build prints at exit:
+run prices a per-call cost against a one-time one -- the error that made personalized ranking look
+like ~1% of the work when it is ~400 ms of every warm llvm-project query. So this harness drives ONE
+session that holds the graph in memory, issues N `for` calls with N DIFFERENT tasks, and reads the
+per-scope aggregate the profile build prints at exit:
 
     rankGraph: PageRank (power iteration)   calls=N  total_ms=<sum over the N queries>
+    buildGraph: resolve refs + build CSR    calls=1  total_ms=<paid once for the session>
 
-calls=N is the proof that the scope really ran per query rather than once, and total_ms/N is the
-per-warm-query ranking cost. `main: query + emit` beside it, also calls=N, is the rest of the verb.
-An `ingest: total` with calls=1 confirms the session paid ingest once, not per call.
+`calls=` is the whole point: it is the proof of which costs are per-query and which are per-index.
+
+THE TRANSPORT IS A ONE-WAY STREAM, DELIBERATELY. An earlier version of this file spoke JSON-RPC
+interactively -- write a request, read its reply, repeat -- and it DEADLOCKED on llvm-project twice,
+in two different ways. First it gave the child stderr=PIPE and drained it only after closing stdin,
+which deadlocks once the 64 KiB buffer fills. Then, with that fixed, it still hung: the read loop
+assumed one reply is one line, and a large llvm answer spans many, so stdout was under-drained until
+the server blocked writing it. Both sides sat at 0.0% CPU and looked like a slow run from outside.
+
+The fix is not a better read loop -- it is noticing that the read loop buys nothing. Nothing here
+needs a reply: the clock is the server's own `RIPWIRE_MCP_TIMINGS` stderr line per request, and the
+attribution is the #PROF_TSV block at exit. So every request is written up front, stdin is closed,
+stdout goes to /dev/null and stderr goes to a FILE. There is no interactive state to deadlock, no
+reply framing to get wrong, and no pipe this process can under-drain. Reply BYTES are the one thing
+this shape cannot report, and they are not what it measures.
 
 usage: forsession.py PROF_BIN ROOT TASKS_FILE [N]
+  PROF_BIN must be a -DRIPWIRE_PROFILE=ON build, or there is no #PROF_TSV block to read.
 """
+
+from __future__ import annotations
+
 import json
 import os
-import select
 import subprocess
 import sys
 import tempfile
-import time
 
-# WHY STDERR GOES TO A FILE AND NOT A PIPE. The first version of this harness gave the child
-# stderr=PIPE and drained it only after closing stdin. That is a deadlock by construction: once the
-# 64 KiB pipe buffer fills, the server blocks WRITING stderr while this process blocks READING
-# stdout, and neither can proceed. Both sides sat at 0.0% CPU for 16 minutes on llvm-project.
-# `bench/largescale.py`'s own run_once already routes child stderr to a file for exactly this
-# reason, with a comment saying so, and I did not apply it here.
-#
-# WHAT FILLED IT IS UNCONFIRMED, and an earlier version of this comment guessed wrong. It blamed
-# "a run of `[math degraded]` alerts" on llvm-project. Counted, llvm-project emits exactly TWO such
-# lines, one per site as designed (~400 bytes), so they cannot fill 64 KiB and were not the cause.
-# The profile report printed at exit -- the human table plus the #PROF_TSV block, one row per scope
-# per rendering, over ~100 scopes for a rich llvm ingest -- is the plausible writer, but the stderr
-# of the deadlocked run was lost with the process, so this is a hypothesis and is labelled one.
-# The fix does not depend on which writer it was: an undrained pipe deadlocks whatever fills it.
-# A deadline on every read is the second half: a hang now fails one cell instead of the lane.
-REPLY_TIMEOUT_S = 600.0
+# Scopes worth printing, ordered so the per-query / per-index split reads top to bottom.
+PER_CALL_SCOPE = "mcp: handle one request (the per-call unit of a session)"
+ONCE_SCOPES = ("buildGraph: resolve refs + build CSR", "ingest: total (crawl + parse + model)")
+NAMED_QUERY_SCOPES = (
+    "rankGraph: PageRank (power iteration)",
+    "lexical: lexicalScores (BM25 over symbols)",
+    "lexical: lexicalScoresNameExact (whole-name BM25 over symbols)",
+    "lexical: pass 2 via persisted subtoken stats (cached tf/dl, no corpus re-tokenize)",
+    "main: computeQMetrics + change-amplification",
+    "gitmine: popenTrimmed (one shell + git child, block read)",
+)
+SCOPES = (PER_CALL_SCOPE,) + NAMED_QUERY_SCOPES + ONCE_SCOPES
+
+
+def build_stream(root, tasks):
+    """Every request of the session, one JSON object per line, written before the child starts."""
+    lines = [json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                         "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                    "clientInfo": {"name": "forsession", "version": "1"}}})]
+    for i, task in enumerate(tasks):
+        lines.append(json.dumps({"jsonrpc": "2.0", "id": i + 2, "method": "tools/call",
+                                 "params": {"name": "for",
+                                            "arguments": {"path": root, "task": task}}}))
+    return "\n".join(lines) + "\n"
 
 
 def parse_tsv(block):
@@ -59,76 +82,68 @@ def parse_tsv(block):
     return rows, unparsed
 
 
-def report(rows, scopes):
-    print(f"\n  {'calls':>6} {'total_ms':>10} {'per_call_ms':>12}  scope")
-    for scope in scopes:
+def run_session(prof_bin, root, tasks):
+    env = dict(os.environ)
+    env["RIPWIRE_MCP_TIMINGS"] = "1"   # one `ripwire-timing verb=… wall_ms=…` line per request
+    errf = tempfile.NamedTemporaryFile("w+", prefix="forsession-err-", suffix=".txt", delete=False)
+    with errf, open(os.devnull, "wb") as devnull:
+        done = subprocess.run([prof_bin, "--mcp"], input=build_stream(root, tasks),
+                              stdout=devnull, stderr=errf, env=env, text=True)
+        errf.flush()
+        errf.seek(0)
+        return done.returncode, errf.read(), errf.name
+
+
+def report(rows, tasks):
+    print(f"\n  {'calls':>6} {'total_ms':>11} {'per_call_ms':>12}  scope")
+    for scope in SCOPES:
         if scope in rows:
             calls, ms = rows[scope]
-            print(f"  {calls:>6} {ms:>10.1f} {ms / max(calls, 1):>12.2f}  {scope}")
+            print(f"  {calls:>6} {ms:>11.1f} {ms / max(calls, 1):>12.2f}  {scope}")
+
+    per_request = rows.get(PER_CALL_SCOPE)
+    if not per_request or not tasks:
+        print("\n  (no per-request scope in this build — the per-query residual needs "
+              "dispatchMcpLine's scope)", file=sys.stderr)
+        return
+    once = sum(rows[s][1] for s in ONCE_SCOPES if s in rows)
+    query = (per_request[1] - once) / len(tasks)
+    print(f"\n  per warm `for`: {query:,.0f} ms  (= {per_request[1]:,.0f} ms over "
+          f"{per_request[0]} requests, less the {once:,.0f} ms of ingest + buildGraph a session "
+          f"pays ONCE, over {len(tasks)} calls)")
+    named = sum(rows[s][1] / max(rows[s][0], 1) for s in NAMED_QUERY_SCOPES if s in rows)
+    print(f"  of which named scopes account for {named:,.0f} ms; {query - named:,.0f} ms is "
+          f"unattributed inside the verb")
+    print("  NOTE: a -DRIPWIRE_PROFILE=ON build carries the instrumentation tax and is NOT the "
+          "PGO build; these are attribution shares, not a publishable wall clock.")
 
 
 def main():
+    if len(sys.argv) < 4:
+        raise SystemExit("usage: forsession.py PROF_BIN ROOT TASKS_FILE [N]")
     prof_bin, root, tasks_file = sys.argv[1], sys.argv[2], sys.argv[3]
-    tasks = [t.strip() for t in open(tasks_file) if t.strip()][: int(sys.argv[4]) if len(sys.argv) > 4 else 99]
+    limit = int(sys.argv[4]) if len(sys.argv) > 4 else 99
+    tasks = [t.strip() for t in open(tasks_file) if t.strip()][:limit]
 
-    env = dict(os.environ)
-    env["RIPWIRE_MCP_TIMINGS"] = "1"
-    errf = tempfile.NamedTemporaryFile(prefix="forsession-err-", suffix=".txt", delete=False)
-    proc = subprocess.Popen([prof_bin, "--mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=errf, env=env, text=True, bufsize=1)
-
-    def call(method, params, rid):
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method,
-                                     "params": params}) + "\n")
-        proc.stdin.flush()
-        t0 = time.perf_counter()
-        ready, _, _ = select.select([proc.stdout], [], [], REPLY_TIMEOUT_S)
-        if not ready:
-            proc.kill()
-            raise SystemExit(f"!! no reply to {method} within {REPLY_TIMEOUT_S:.0f}s — cell failed, "
-                             f"not hung (child killed); stderr at {errf.name}")
-        line = proc.stdout.readline()
-        return time.perf_counter() - t0, len(line)
-
-    call("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
-                        "clientInfo": {"name": "forsession", "version": "1"}}, 1)
-    print(f"# session over {root}: {len(tasks)} `for` calls, different task each time")
-    for i, task in enumerate(tasks):
-        wall, nbytes = call("tools/call", {"name": "for", "arguments": {"path": root, "task": task}}, i + 2)
-        print(f"  call {i + 1:2d}  wall {wall * 1000:8.1f} ms  reply {nbytes:7d} B  task={task[:52]!r}")
-    proc.stdin.close()
-    proc.wait()
-    errf.flush()
-    err = open(errf.name, errors="replace").read()
-
-    # the per-scope aggregate the profile build prints at exit
-    start, end = err.find("#PROF_TSV_BEGIN"), err.find("#PROF_TSV_END")
-    if start < 0:
-        print("!! no #PROF_TSV block -- is this the -DRIPWIRE_PROFILE=ON binary?", file=sys.stderr)
-        print(err[-1500:], file=sys.stderr)
-        return
-
-    want = ("mcp: handle one request (the per-call unit of a session)",
-            "verb/for: runForLens (the --for answer itself)",
-            "rankGraph: PageRank (power iteration)",
-            "main: query + emit (the verb, after the graph)",
-            "lexical: lexicalScores (BM25 over symbols)",
-            "lexical: lexicalScoresNameExact (whole-name BM25 over symbols)",
-            "lexical: pass 2 via persisted subtoken stats (cached tf/dl, no corpus re-tokenize)",
-            "main: computeQMetrics + change-amplification",
-            "buildGraph: resolve refs + build CSR",
-            "ingest: total (crawl + parse + model)",
-            "gitmine: popenTrimmed (one shell + git child, block read)")
-    rows, unparsed = parse_tsv(err[start:end])
-    if unparsed:
-        # A silently dropped row is how a measurement harness reports a cost of zero for a scope it
-        # simply failed to read. Say how many and show one, rather than passing on the exception.
-        print(f"!! {len(unparsed)} #PROF_TSV row(s) did not parse, e.g. {unparsed[0][:120]!r} — "
-              f"the scopes below may be incomplete", file=sys.stderr)
-    report(rows, want)
+    rc, err, err_path = run_session(prof_bin, root, tasks)
+    print(f"# session over {root}: {len(tasks)} `for` calls, a different task each time (rc={rc})")
     for line in err.splitlines():
         if line.startswith("ripwire-timing"):
             print("  " + line)
+
+    start, end = err.find("#PROF_TSV_BEGIN"), err.find("#PROF_TSV_END")
+    if start < 0:
+        print(f"!! no #PROF_TSV block — is {prof_bin} a -DRIPWIRE_PROFILE=ON build? "
+              f"stderr kept at {err_path}", file=sys.stderr)
+        return
+    rows, unparsed = parse_tsv(err[start:end])
+    if unparsed:
+        # A silently dropped row is how a measurement harness reports a cost of zero for a scope it
+        # merely failed to read. Say how many, and show one.
+        print(f"!! {len(unparsed)} #PROF_TSV row(s) did not parse, e.g. {unparsed[0][:120]!r} — "
+              f"the table below may be incomplete", file=sys.stderr)
+    report(rows, tasks)
+    print(f"\n  [stderr kept at {err_path}]")
 
 
 if __name__ == "__main__":
