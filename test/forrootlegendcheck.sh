@@ -133,18 +133,33 @@ else
 fi
 
 # ── arm 4: the MCP `for` twin carries the SAME clause -- byte-consistency between dialects ─────────────
-python3 - "$BIN" "$ROOT" "$CLAUSE_SNIPPET" <<'PY_EOF' \
-    && ok "arm4: MCP \`for\` twin's <ctx> defines root= with the same clause the CLI carries" \
-    || no "arm4: MCP \`for\` twin is missing the root= legend clause (dialects have drifted)"
+# THE DEADLINE IS NOT THE ASSERTION (2026-11-27, lane showcase-recapture, PR #813). This arm asked the MCP
+# twin for a whole-repo `for` answer under a 30 s subprocess deadline, which is a tenth of what every
+# sibling gate that runs `--mcp` against $ROOT allows (anchorhonestycheck, foranchornscheck,
+# forbasenamedefaultcheck, impactdepthcheck: timeout=300). On run 45920074167 / release (macos-26, plain,
+# appleclang, shard 1/4) the call needed longer than that under three parallel gate workers -- the job log
+# records `subprocess.TimeoutExpired ... timed out after 30 seconds` -- and the UNCAUGHT exception exited
+# non-zero, so the arm printed "dialects have drifted" about a dialect it never read. The clause was
+# present in both dialects on that very binary. A cold whole-repo MCP `for` is 2.4-2.6 s on a quiet dev
+# host, ~15 s per whole-repo arm on that CI leg; 30 s was never headroom, it was a coin flip.
+# Two changes, neither of which touches what the arm asserts: the deadline moves to the house 300 s, and a
+# timeout now reports ITSELF (exit 2 -> its own FAIL line) instead of being read as a drift. A genuinely
+# missing clause still fails this arm exactly as before.
+python3 - "$BIN" "$ROOT" "$CLAUSE_SNIPPET" <<'PY_EOF'
 import json, sys, subprocess
 BIN, CORPUS, SNIPPET = sys.argv[1], sys.argv[2], sys.argv[3]
+MCP_DEADLINE_S = 300   # the house budget for `--mcp` against the whole repo; see the note above
 reqs = [
     { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} },
     { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
       "params": { "name": "for", "arguments": { "task": "rank symbols by pagerank" } } },
 ]
 blob = ''.join( json.dumps( r ) + '\n' for r in reqs ).encode( 'utf-8' )
-proc = subprocess.run( [ BIN, '--mcp', CORPUS ], input=blob, capture_output=True, timeout=30 )
+try:
+    proc = subprocess.run( [ BIN, '--mcp', CORPUS ], input=blob, capture_output=True, timeout=MCP_DEADLINE_S )
+except subprocess.TimeoutExpired:
+    sys.stderr.write( 'forrootlegendcheck arm4: the MCP `for` call did not answer within %d s\n' % MCP_DEADLINE_S )
+    sys.exit( 2 )
 body = ''
 for line in proc.stdout.decode( 'utf-8', 'replace' ).splitlines():
     line = line.strip()
@@ -162,6 +177,12 @@ for line in proc.stdout.decode( 'utf-8', 'replace' ).splitlines():
         break
 sys.exit( 0 if ( body and SNIPPET in body and 'root="' in body ) else 1 )
 PY_EOF
+arm4rc=$?
+case "$arm4rc" in
+    0) ok "arm4: MCP \`for\` twin's <ctx> defines root= with the same clause the CLI carries" ;;
+    2) no "arm4: the MCP \`for\` call did not answer within its 300s deadline -- a TIMEOUT, not a dialect drift (nothing was read; re-run this gate alone)" ;;
+    *) no "arm4: MCP \`for\` twin is missing the root= legend clause (dialects have drifted)" ;;
+esac
 
 # ── arm 5: determinism ───────────────────────────────────────────────────────────────────────────────
 OUT1B="$( "$BIN" "$ROOT" --for="rank symbols by pagerank" --no-cache 2>/dev/null )"
