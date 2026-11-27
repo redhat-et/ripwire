@@ -1221,6 +1221,7 @@ for _g in \
     verbdefrowscheck \
     verbfixcheck \
     verbfscheck \
+    verbscopecheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \

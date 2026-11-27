@@ -108,7 +108,9 @@ def main():
         print(err[-1500:], file=sys.stderr)
         return
 
-    want = ("rankGraph: PageRank (power iteration)",
+    want = ("mcp: handle one request (the per-call unit of a session)",
+            "verb/for: runForLens (the --for answer itself)",
+            "rankGraph: PageRank (power iteration)",
             "main: query + emit (the verb, after the graph)",
             "lexical: lexicalScores (BM25 over symbols)",
             "lexical: lexicalScoresNameExact (whole-name BM25 over symbols)",

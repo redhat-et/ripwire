@@ -24,6 +24,7 @@
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
 #include "notfoundtext.h"   // BX2 FIX 9: a not-found answer's plain-text occurrences, as the CLI twin's
 
+#include "infra/profileScope.h"  // PROFILE_SCOPE — the per-request scope in dispatchMcpLine; ((void)0) unless -DRIPWIRE_PROFILE=ON
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
 #include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
 
@@ -1156,6 +1157,14 @@ struct McpDispatchResult
 inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, bool stable, bool noRedact,
                                           const McpDispatchPolicy& policy )
 {
+    // The PER-CALL unit of an agent session, and the only place it can be timed once for both transports.
+    // A long-lived server pays ingest and buildGraph ONCE and this scope PER REQUEST, so `calls=` here is
+    // what separates the per-session fixed cost from the per-query cost: reading a one-invocation cold
+    // figure as a per-query one is how personalized ranking came to look like 1% of the work when it is
+    // ~400 ms of every warm llvm query (bench/PROFILE.md, "the PER-WARM-QUERY cost of personalized
+    // ranking"). main.cpp's "query + emit" scope cannot serve this: the MCP server has its own dispatch
+    // and never enters dispatchMainBody, so before this scope the agent path had no per-call timer at all.
+    PROFILE_SCOPE_DESCRIBE( "mcp: handle one request (the per-call unit of a session)" );
     McpDispatchResult out;
     {
         // ── §H3: the FRAMING GATE — before a single field is read out of this frame ─────────────────────────

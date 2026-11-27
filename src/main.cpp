@@ -6669,16 +6669,35 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
 
     // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
     // "after the graph" share; the verbs' own scopes nest inside it).
+    //
+    // MEASURED 2026-11-27 (lane/large-repo-perf, bench/PROFILE.md "Large-repo phase balance"): on a warm
+    // llvm-project `--for`, this one scope reads 2,920 ms, of which the already-instrumented ranking (398) and
+    // BM25 (207) account for ~605. The remaining ~2.3 s was a SINGLE UNLABELLED BUCKET — the largest per-query
+    // term in the whole profile, bigger than the ranking another lane is approximating — because the comment
+    // above is aspirational for the --for family: `runForLens`, `runForVerbRoute` and `runPackTask` carry no
+    // scopes of their own, so "the verbs' own scopes nest inside it" nested nothing.
+    //
+    // The four handler calls below are now bracketed, which answers WHICH handler owns the time. It does not
+    // answer what inside that handler owns it: `runForLens`/`runPackTask` live in verbs_for.h and
+    // `runForVerbRoute` in verbs_forroute.h, and splitting their interiors means editing those files. Four and
+    // not all ~50 handlers on purpose — these are the ones the large-repo profile actually lands in, and a
+    // scope per verb would cost a diff nobody can review for attribution nobody has asked for.
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
     // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
     // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
-    if( std::optional<int> handled = runForVerbRoute( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runForVerbRoute (--for routed to a nav verb)" );
+        if( std::optional<int> handled = runForVerbRoute( dsp ) )
+        {
+            return *handled;
+        }
     }
-    if( std::optional<int> handled = runForLens( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runForLens (the --for answer itself)" );
+        if( std::optional<int> handled = runForLens( dsp ) )
+        {
+            return *handled;
+        }
     }
 
     // §A2 (audit 2026-08-08) — the query family dispatches FIRST, as one contiguous block. A typed task
@@ -6688,9 +6707,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // --pack-task lost to --skipped/--hotspots but beat --lint, and --query lost to all ~50 — an order nobody
     // designed and no caller could infer. Intra-family order is X9(c)'s and UNCHANGED: --for (above) >
     // --pack-task > --query. Deliberate behaviour change; test/dispatchordercheck.sh pins every pair.
-    if( std::optional<int> handled = runPackTask( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runPackTask (--pack-task)" );
+        if( std::optional<int> handled = runPackTask( dsp ) )
+        {
+            return *handled;
+        }
     }
 
     // --query owns no handler of its own: runDefaultMap serves it (the lexical-rank branch at its top) and is
@@ -6700,6 +6722,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // Guarded on --query, so a run without it still falls through the whole table exactly as before.
     if( !cfg.query.empty() )
     {
+        PROFILE_SCOPE_DESCRIBE( "verb/map: runDefaultMap (--query's lexical-rank branch)" );
         return runDefaultMap( dsp );
     }
 
