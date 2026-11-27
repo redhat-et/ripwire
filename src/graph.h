@@ -11170,20 +11170,16 @@ inline HashMap<std::string, FlatRecvType> buildVarTypeBindingTable( const Ingest
 // one edge's sites in one partition, or the low bits move and the ranking with them (see src/pagerank.cpp's note).
 struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };
 
-// buildGraph/4. Flatten the edge accumulator, cap and sort by (from, to) — deterministic regardless of map order —
-// then build the out-edge CSR, the weighted out-degree, the optional per-edge provenance / name-only / anchor-miss
-// columns, and the in-edge CSR. `acc` is CONSUMED: it is released as soon as it has been flattened (G1c), so the sort
-// and the CSR arrays stack on the edge list alone. The two provenance facts the caller owns are passed in rather than
-// re-derived — whether a SCIP overlay was supplied, and whether any site committed a one-implementor dispatch edge.
-// This is the phase test/verify_csr.cpp reaches, which is the one indexed test in buildGraph's production radius.
-inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std::uint64_t, EdgeAcc>& acc,
-                                 const ScipOverlay* scip, bool anyImplSite )
+// One flattened call-graph edge, as buildGraph/4 sorts and stores it. At file scope (it was local to the flatten phase)
+// so the three steps below can each take the edge list; `marks` carries resolve.h EdgeMark (EDGE-FLAGS).
+struct GraphEdge { NodeId from, to; float w; std::uint8_t marks; };
+
+// buildGraph/4, step 1. Flatten the accumulator into one edge list: weight each edge confSum/nref * sqrt(nref), CAP it
+// at 8, then radix-sort by (from, to) so the order is the edge keys' and not the hash map's. `acc` is CONSUMED (G1c):
+// released as soon as it has been read, so the sort and the CSR arrays stack on the edge list alone.
+inline std::vector<GraphEdge> flattenEdgeAccumulator( HashMap<std::uint64_t, EdgeAcc>& acc )
 {
-    PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
-    const std::size_t N = ing.symbols.size();
-    // flatten + cap + sort by (from, to) — deterministic regardless of map order
-    struct E { NodeId from, to; float w; std::uint8_t marks; };   // marks: the accumulator's EdgeMark bits, carried through the sort
-    std::vector<E> edges;
+    std::vector<GraphEdge> edges;
     edges.reserve( acc.size() );
     for( const auto& [ k, e ] : acc )
     {
@@ -11195,12 +11191,23 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
         edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
     }
     releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
-    std::vector<E> edgeScratch;
+    std::vector<GraphEdge> edgeScratch;
     sortutil::radixSortByFromTo( edges, edgeScratch );
+    return edges;
+}
+
+// buildGraph/4, step 2. The out-edge CSR, the weighted out-degree, and the three OPTIONAL per-edge columns --
+// provenance, name-only and anchor-miss -- each allocated only when some edge needs it, so a cleanly resolving corpus
+// carries none of them and serialize emits no prov= at all. `scip` and `anyImplSite` are facts the caller owns, passed
+// in rather than re-derived.
+inline void buildOutEdgeCsr( Graph& g, const IngestResult& ing, const std::vector<GraphEdge>& edges,
+                             const ScipOverlay* scip, bool anyImplSite )
+{
+    const std::size_t N = ing.symbols.size();
 
     // out-edges (by source) + weighted out-degree
     g.outOff.assign( N + 1, 0 );
-    for( const E& e : edges )
+    for( const GraphEdge& e : edges )
     {
         ++g.outOff[e.from + 1];
     }
@@ -11221,7 +11228,7 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
     //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
     // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
     std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
-    for( const E& e : edges )
+    for( const GraphEdge& e : edges )
     {
         anyMarks |= e.marks;
     }
@@ -11229,7 +11236,7 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
     {
         std::array<std::size_t, 8> perBit{};
         std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
-        for( const E& e : edges )
+        for( const GraphEdge& e : edges )
         {
             for( std::size_t b = 0; b < perBit.size(); ++b )
             {
@@ -11244,7 +11251,7 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
     {
         g.outProv.assign( edges.size(), 0u );
     }
-    const auto anchorMissed = []( const E& e ) noexcept
+    const auto anchorMissed = []( const GraphEdge& e ) noexcept
     {
         return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
     };
@@ -11254,15 +11261,15 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
     }
     // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
     // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
-    const auto hedged = []( const E& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
-    const auto marked = [ & ]( const E& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
+    const auto hedged = []( const GraphEdge& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
+    const auto marked = [ & ]( const GraphEdge& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
     if( std::any_of( edges.begin(), edges.end(), marked ) )
     {
         g.outNameOnly.assign( edges.size(), 0u );
     }
     {
         std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
-        for( const E& e : edges )
+        for( const GraphEdge& e : edges )
         {
             const std::uint32_t pos = cur[ e.from ]++;
             g.outTargets[ pos ] = e.to;
@@ -11299,9 +11306,16 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
 
     rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
 
+}
+
+// buildGraph/4, step 3. The in-edge CSR, built by counting in-degree and filling each target row with its sources. The
+// structural checks stay here, where the arrays they describe have just been written.
+inline void buildInEdgeCsr( Graph& g, const IngestResult& ing, const std::vector<GraphEdge>& edges )
+{
+    const std::size_t N = ing.symbols.size();
     // in-edge CSR (row = target) for PageRank
     std::vector<std::uint32_t> inDeg( N, 0 );
-    for( const E& e : edges )
+    for( const GraphEdge& e : edges )
     {
         ++inDeg[e.to];
     }
@@ -11314,7 +11328,7 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
             ro[i + 1] = ro[i] + inDeg[i];
         }
         std::vector<std::uint32_t> cur( ro, ro + N );
-        for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
+        for( const GraphEdge& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
     }
     DASSERT( verifyCsr( g.inEdges, N ) );   // structural, so CHECKED in debug and not promised in release — see Diagnostics.h
     DASSERT( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
@@ -11322,6 +11336,21 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
     // indices cannot wrap, and the four columns stay parallel.
     ENSURES( g.declinedSiteCaller.size() <= ing.references.size() && g.declinedSiteList.size() == g.declinedSiteCaller.size()
              && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
+}
+
+// buildGraph/4. Flatten the edge accumulator, cap and sort by (from, to) — deterministic regardless of map order —
+// then build the out-edge CSR, the weighted out-degree, the optional per-edge provenance / name-only / anchor-miss
+// columns, and the in-edge CSR. `acc` is CONSUMED: it is released as soon as it has been flattened (G1c), so the sort
+// and the CSR arrays stack on the edge list alone. The two provenance facts the caller owns are passed in rather than
+// re-derived — whether a SCIP overlay was supplied, and whether any site committed a one-implementor dispatch edge.
+// This is the phase test/verify_csr.cpp reaches, which is the one indexed test in buildGraph's production radius.
+inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std::uint64_t, EdgeAcc>& acc,
+                                 const ScipOverlay* scip, bool anyImplSite )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
+    const std::vector<GraphEdge> edges = flattenEdgeAccumulator( acc );
+    buildOutEdgeCsr( g, ing, edges, scip, anyImplSite );
+    buildInEdgeCsr( g, ing, edges );
 }
 
 // buildGraph/6. doc<->code edges: isDocLink refs (a markdown `backtick` naming a code symbol) resolved to real
