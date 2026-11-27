@@ -1268,7 +1268,7 @@ inline SituLastCommit situLastCommit( const std::string& root )
 {
     SituLastCommit  out;
     const auto      r = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                                         + " log -1 -m --first-parent --relative --no-color --format=%h%x09%P%x09%s --name-only HEAD 2>/dev/null" );
+                                         + " log -1 -m --first-parent --relative --no-ext-diff --no-textconv --no-color --format=%h%x09%P%x09%s --name-only HEAD 2>/dev/null" );
     if( !r.isStarted || r.status != 0 || r.abandoned || r.lines.empty() )
     {
         return out;
