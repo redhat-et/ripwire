@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 // filter.h — --ignore-tests: drop symbols/references in test files so the token
 // window is packed with production logic. Post-ingest, densifies symbol ids.
@@ -1108,6 +1109,7 @@ inline bool taskAsksForDocText( std::string_view task )
 // cue), or a change or translation cue
 inline bool taskAsksAboutDocs( std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: taskAsksAboutDocs (does the task ask about docs?)" );
     if( taskAsksForDocText( task ) )
     {
         return true;

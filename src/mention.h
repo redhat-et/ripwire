@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 // mention.h — B8 (query-mention anchoring; see bench/headtohead/REPORT.md).
 //
@@ -2029,6 +2030,7 @@ inline bool resolveUniquePartnerFile( const IngestResult& ing, std::uint32_t nam
 // round-robin (serialize.h forHeadRoundRobinOn) leaves such a question's rows in score order: it asked about that file.
 inline bool taskNamesIndexedFile( const IngestResult& ing, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/header: taskNamesIndexedFile (does the task name an indexed file?)" );
     using namespace mention_detail;
     if( task.empty() )
     {
@@ -2040,6 +2042,7 @@ inline bool taskNamesIndexedFile( const IngestResult& ing, std::string_view task
 
 inline std::vector<ForNamedHeaderRow> forNamedHeaderRows( const IngestResult& ing, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/header: forNamedHeaderRows (the resolver's named header rows)" );
     using namespace mention_detail;
     std::vector<ForNamedHeaderRow> out;
     if( task.empty() )

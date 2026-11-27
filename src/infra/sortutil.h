@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 #include "radixSort.h"
 
@@ -117,6 +118,7 @@ inline void radixSortNonNegativeFloatsDesc( std::vector<float>& values )
 // order. Stable radix preserves the id-ascending tie-break after the optional id pre-pass.
 inline void radixSortByScoreDescId( std::vector<std::uint32_t>& order, const std::vector<float>& scores, std::vector<std::uint32_t>& scratch )
 {
+    PROFILE_SCOPE_DESCRIBE( "sortutil: radixSortByScoreDescId (shared score-desc sort; total spans ALL callers, not just --for)" );
     constexpr std::size_t kRadixThreshold = 2048;
     const std::size_t count = order.size();
     if( count < kRadixThreshold )

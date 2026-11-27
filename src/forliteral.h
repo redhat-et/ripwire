@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forliteral.h — MF1-LIT: THE LITERAL ANCHOR of a --for answer whose task names a literal (an error string, an env var, a
 // config key, an error code).
 //
@@ -4948,6 +4949,7 @@ inline void appendTableScanPlan( const IngestResult& ing, std::string_view task,
 // rarely has a site) and then its table anchors: staged, they would be two reads.
 inline std::vector<std::string> forLiteralScanPlan( const IngestResult& ing, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/scan: forLiteralScanPlan (plan the corpus literal scan)" );
     std::vector<std::string> plan;
     std::size_t              scans = 0;
     for( const ForLiteral& lit : forLiteralCandidates( task ) )

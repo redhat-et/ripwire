@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 // clones.h — token-normalized duplicate detection (--clones), function/method level. The CCFinder/PMD-CPD
 // idea: normalize each body to a token stream (identifiers → $I, literals →
@@ -710,6 +711,7 @@ inline std::vector<CloneGroup> findClonesComputed( const IngestResult& ing, int 
 // their stored signatures are the stored ones; otherwise the pass runs exactly as it always did and offers its result.
 inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/scan: findClones (clone groups; shared with --clones)" );
     const verbfs::Seams& seam = verbfs::seams();
     if( seam.cloneServe == nullptr || seam.cloneKeep == nullptr )
     {

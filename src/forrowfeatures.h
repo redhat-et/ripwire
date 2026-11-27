@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forrowfeatures.h — ROW-FEATURE-DUMP (precision tool, dev only): RIPWIRE_ROW_FEATURES=<path> makes --for append one TSV line per
 // row it ranked or printed to <path>, with the ranker's internals beside the answer's own placement of the row. The answer is
 // byte-identical with and without the variable (stdout, stderr and rc), and unset it costs one getenv per --for call.
@@ -180,6 +181,7 @@ struct RowFeatureSurface
 };
 inline void rowFeaturesSurface( const RowFeatureSurface& s )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: rowFeaturesSurface (row-feature dump; inert unless armed)" );
     if( RowFeatureRecorder& rec = rowFeatures(); rec.armed )
     {
         rec.finalRank = s.rank;

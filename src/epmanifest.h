@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // epmanifest.h — MANIFEST ENTRY POINTS on a --for answer (lane ep-manifest; CONTRIBUTING family 10, slice 10a, first readers).
 //
 // WHY. A Python plugin is registered in a manifest, not in code: setup.cfg `[options.entry_points] flake8.report = pylint =
@@ -69,6 +70,7 @@ inline constexpr std::size_t kForEpUsedAtRows   = 3;    // consumer sites shown 
 
 inline bool forEpManifestOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forEpManifestOn (is the entry-point manifest on?)" );
     return std::getenv( "RIPWIRE_NO_EP_MANIFEST" ) == nullptr;
 }
 
@@ -1309,6 +1311,7 @@ inline void collectEpManifestsForShown( const IngestResult& ing, std::span<const
 // Cargo group rides on a binary cue in it, pickEpGroups). Single-root runs only.
 inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const NodeId> shown, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForEpManifest (the entry-point manifest)" );
     EpRender out;
     if( ing.crawlRoot.empty() || shown.empty() )
     {

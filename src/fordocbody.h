@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // fordocbody.h — FOR-DOC-BODY: a prose --for task whose answer leads with doc files gets the top-ranked SECTIONS of the first
 // doc files it shows, in <doc_body> just before </ctx>. (CLI src/verbs_for.h, MCP `for` src/mcpverbs.h forTaskText, --json
 // emitForLensJsonPass — one picker, one builder, two spellings.)
@@ -186,6 +187,7 @@ struct ForDocBodyPick
 // The display paths of the first `shown` rows of a tail: the rows an answer printed when a token budget ended its tail early.
 inline std::vector<std::string> emittedTailPaths( const FileTail& tail, std::size_t shown )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: emittedTailPaths (the tail paths already emitted)" );
     return std::vector<std::string>( tail.paths.begin(), tail.paths.begin() + std::ptrdiff_t( std::min( shown, tail.paths.size() ) ) );
 }
 
@@ -198,6 +200,7 @@ template<class RankTail>
 inline ForDocBodyPick pickForDocBody( const IngestResult& ing, std::string_view task, std::span<const NodeId> shownSigIds, RankTail&& rankTail,
                                       std::string_view rootArg, const std::vector<std::string>* emittedTail = nullptr )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: pickForDocBody (choose the doc sections)" );
     ForDocBodyPick pick;
     if( !forDocBodyOn() || !forDocBodyProseTask( task ) )
     {
@@ -1199,6 +1202,7 @@ enum class ForDocDialect : std::uint8_t
 // Serve a fired pick through one dialect ("" when it does not fire; the JSON text is ",\"doc_body\":{...}"): see fitForDocBody.
 inline std::string renderForDocBody( const ForDocBodyInputs& in, const ForDocBodyBudget& budget, ForDocDialect dialect )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForDocBody (the doc-body block)" );
     if( !in.pick.fires || in.pick.fileIds.empty() )
     {
         return {};

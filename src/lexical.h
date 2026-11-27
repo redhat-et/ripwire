@@ -3017,6 +3017,7 @@ struct AdaptiveCut
 inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t floorK, std::size_t ceilingK,
                                 bool scanFullDistribution = false )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/cut: adaptiveCut (the relevance cliff cut)" );
     AdaptiveCut cut;
 
     // positive scores only, sorted DESC (id tie-break is irrelevant to the gap analysis — pure magnitudes).
@@ -3122,6 +3123,7 @@ constexpr std::size_t kAdaptiveHomonymPoolFloor = 50;   // positiveHits must cle
 
 inline bool isAdaptiveHomonymDecline( bool nameExactRoute, const AdaptiveCut& cut, std::size_t floorK )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: isAdaptiveHomonymDecline (the homonym decline test)" );
     return nameExactRoute && cut.positiveHits > kAdaptiveHomonymPoolFloor && cut.kept <= 2 * floorK;
 }
 
@@ -3139,6 +3141,7 @@ inline bool isAdaptiveHomonymDecline( bool nameExactRoute, const AdaptiveCut& cu
 // leave three independent implementations to keep in sync; this is the one all three now call.
 inline bool isNameExactRouteTag( const char* routeTag ) noexcept
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: isNameExactRouteTag (is the route name-exact?)" );
     return routeTag != nullptr && std::strcmp( routeTag, "name-exact" ) == 0;
 }
 
@@ -3199,6 +3202,7 @@ inline constexpr std::string_view kForCompactFileGapClause = " [file_gap_pct=: o
 inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false,
                                           double fileGapPct = -1.0 )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/conf: deriveForConfidence (the confidence pair)" );
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
     const bool sharpHead = !cut.hitCeiling || servedComplete;

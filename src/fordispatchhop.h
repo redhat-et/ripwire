@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // fordispatchhop.h — THE DISPATCH HOP of a name-exact --for answer (lane mf1-nx, wave 4): when the question names a call the
 // served function makes through an interface-, trait- or abstract-typed receiver, the implementations that can run there.
 //
@@ -70,6 +71,7 @@ inline constexpr std::size_t kForDispatchHeldText = 160; // bytes of one declara
 
 inline bool forDispatchHopOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forDispatchHopOn (is the dispatch hop on?)" );
     return std::getenv( "RIPWIRE_NO_DISPATCH_HOP" ) == nullptr;
 }
 
@@ -306,6 +308,7 @@ inline DispatchCands splitDispatchCands( const IngestResult& ing, const Graph& g
 // receiver keeps every same-name site, one per distinct list. At most kForDispatchSites, in the declined rows' served order.
 inline std::vector<std::uint32_t> forDispatchSites( const IngestResult& ing, const Graph& g, std::span<const NodeId> bodyCandidates, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: forDispatchSites (find the dispatch sites)" );
     std::vector<std::uint32_t> out;
     const std::vector<dispatch_detail::TaskCall> names = dispatch_detail::taskCallNames( task );
     if( names.empty() || bodyCandidates.empty() )
@@ -665,6 +668,7 @@ inline bool appendHeldAsRow( std::string& x, const IngestResult& ing, const Memb
 inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Graph& g, std::span<const std::uint32_t> sites, const BodyFoldInputs& bodyIn,
                                                bool withBody = true )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForDispatchHop (the dispatch-hop block)" );
     DispatchHopRender     out;
     std::vector<char>     esc;
     const MemberOwners    owners( ing );

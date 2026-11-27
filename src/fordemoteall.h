@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // fordemoteall.h — DEMOTE-ALL-DIALECTS (card B26): SIBLING-DEMOTE (forsiblingdemote.h) and DECL-TWIN (fordecltwin.h) in every dialect
 // of the --for answer, so one question gets one answer shape:
 //   - the no-budget XML answer (CLI --for and MCP `for`): the post-pass after <syms> renders, as before (demoteAndPointRowsInto);
@@ -30,6 +31,7 @@ namespace rw
 {
 inline bool demoteRulesOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: demoteRulesOn (are the demote rules on?)" );
     return siblingDemoteOn() || declTwinOn();
 }
 
@@ -45,6 +47,7 @@ struct BlockInAnswer
 // back unchanged and the block is the edited text between them.
 inline std::string demoteAndPointBlock( const IngestResult& ing, const Graph& g, std::string_view task, BlockInAnswer in )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: demoteAndPointBlock (sibling demote + decl twin)" );
     const std::string_view before = in.before;
     const std::string_view block  = in.block;
     const std::string_view after  = in.after;

@@ -52,7 +52,22 @@ ok()   { echo "  ok    $*"; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 
-FILES="src/verbs_for.h src/forpage.h"
+# The files the --for phase map lives in. verbs_for.h and forpage.h carry the answer's own phases;
+# the rest carry one section renderer each, which is how the render pass gets split into named
+# blocks versus the leftover (serialize.h, which is reserved and deliberately not instrumented).
+FILES="src/verbs_for.h src/forpage.h
+       src/forfold.h src/forslots.h src/fordocbody.h src/forowner.h src/fordispatchhop.h
+       src/forreexport.h src/epmanifest.h src/listedin.h src/forfilepage.h src/forunused.h
+       src/forselfhook.h src/fordemoteall.h src/formembers.h src/regindex.h src/forctorhop.h
+       src/forcallerhop.h src/foraliashop.h src/fordottedstring.h src/demoterefill.h
+       src/forliteral.h src/clones.h src/lexical.h src/mention.h src/subjectanchor.h
+       src/forrowfeatures.h src/filter.h src/infra/sortutil.h
+       src/memstats.h src/model.h src/sarif.h src/graphlegend.h"
+
+# Arm D asserts the scopes THIS phase map owns: for/… and sortutil:…. The shared files above also
+# carry other lanes' pre-existing scopes (lexical.h's BM25 scopes, for one) whose posture coverage
+# is not this gate's claim, so asserting them here would red on someone else's instrument.
+OWNED='^(for[:/]|sortutil:)'
 
 # ── the matcher, shared by arms A and B ──────────────────────────────────────────────────────────────
 # Prints one "line:description" per scope whose PRECEDING source line is not exactly `{`. Silence
@@ -83,10 +98,10 @@ for f in $FILES; do
 done
 
 # A deletion must not read as a pass either: the map is only useful while it is complete.
-if [ "$total_scopes" -lt 41 ]; then
-    note "arm A: only $total_scopes scopes across $FILES, expected at least 41 — the --for phase map has lost blocks"
+if [ "$total_scopes" -lt 108 ]; then
+    note "arm A: only $total_scopes scopes across the phase-map files, expected at least 108 — the --for phase map has lost blocks"
 else
-    ok "arm A: $total_scopes scopes across $FILES (floor 41)"
+    ok "arm A: $total_scopes scopes across $( echo $FILES | wc -w ) phase-map files (floor 108)"
 fi
 
 # ── Arm B: the control. A deliberately misplaced scope must be REPORTED misplaced ────────────────────
@@ -180,6 +195,17 @@ else
     run_posture --for="$T" --auto-bodies
     run_posture --for="$T" --sections=lego,compose
     POSTURE_ENV="RIPWIRE_COCHANGE=1"; run_posture --for="$T"
+    # A bare symbol name takes the NAME-EXACT route, which is the only route that reaches the
+    # dispatch hop (autoBundleMode && autoBodies && name-exact && !json && no budget) and the only
+    # one whose confident head reaches routeEmittedHead / routeAnchorHeadsRows.
+    run_posture --for="computeLensRanking"
+    run_posture --for="computeLensRanking" --auto-bodies
+    # An explanatory cue ("how does …") is what forBodySlotAsked looks for; the slot then needs the
+    # compact XML posture, so this posture carries no dialect or budget flag.
+    run_posture --for="how does the resolver bind a call to a definition"
+    # The cue alone is not enough: the slot also has to FIND an owner, which needs a task whose
+    # words name one. This exact task is what makes renderForBodySlot run on this corpus.
+    run_posture --for="how does renderForBodySlot choose an owner"
     run_posture --for="path from parseArgs to rankGraph"
     run_posture --for="who calls resolveReference"
     run_posture --for="the call hierarchy of computeLensRanking"
@@ -202,9 +228,16 @@ else
           $desc"
             fi
         done <<EOF
-$( sed -n 's/.*PROFILE_SCOPE_DESCRIBE( "\(.*\)" ).*/\1/p' $( for f in $FILES; do echo "$ROOT/$f"; done ) | sort -u )
+$( sed -n 's/.*PROFILE_SCOPE_DESCRIBE( "\(.*\)" ).*/\1/p' $( for f in $FILES; do echo "$ROOT/$f"; done ) | grep -E "$OWNED" | sort -u )
 EOF
-        # NAMED EXEMPTIONS, and nothing else. Each of these needs a posture this gate does not know
+        # NAMED EXEMPTIONS, and nothing else. The two render blocks here need a corpus INSTANCE of
+        # their feature, not just a posture: renderForDispatchHop needs a task-named call made
+        # through an interface receiver that the resolver declined, and routeAnchorNotHeadClause
+        # needs a high-confidence name-exact route whose anchor does NOT head the rows. Probed over
+        # this repo and over src/ with targeted name-exact and explanatory tasks: both stayed at
+        # calls=0, while the same probe DID reach renderForBodySlot — so these are inert on the
+        # available corpus rather than unreached by a missing flag, which is the distinction the
+        # 11-27 "a passing poison is two hypotheses" rule insists on. Each of these needs a posture this gate does not know
         # how to construct from the CLI; both sit behind a compound soft-target condition that also
         # requires both sections pre-rendered under a cut. They are listed here rather than dropped
         # from the derived list, so the exemption is a disclosure instead of a silence, and the
@@ -215,7 +248,10 @@ EOF
             s2="${s2#"${s2%%[![:space:]]*}"}"   # the silent list is indented for printing; match the description, not its indent
             [ -n "$s2" ] || continue
             case "$s2" in
-                "for/budget: forSoftTrailingFloorBytes (soft-target trailing floor)" | "for/tail: fileTailOldWalk (the pre-widening reserve walk)")
+                "for/budget: forSoftTrailingFloorBytes (soft-target trailing floor)" \
+              | "for/tail: fileTailOldWalk (the pre-widening reserve walk)" \
+              | "for/section: renderForDispatchHop (the dispatch-hop block)" \
+              | "for/helper: routeAnchorNotHeadClause (the not-the-head clause)")
                     exempt_count=$(( exempt_count + 1 )) ;;
                 *) still="$still
           $s2" ;;
@@ -226,10 +262,10 @@ INNER
         if [ -n "$still" ]; then
             note "arm D: $( echo "$still" | grep -c . ) of $checked scopes never fired on any posture and are not on the named exemption list — a scope that reads zero because it never ran is indistinguishable from \"no time here\":$still"
         else
-            ok "arm D: all $checked scopes in $FILES fired with calls>=1, bar $exempt_count named exemptions"
+            ok "arm D: all $checked for/ scopes across the phase-map files fired with calls>=1, bar $exempt_count named exemptions"
         fi
-        if [ "$exempt_count" -gt 2 ]; then
-            note "arm D: $exempt_count scopes took the exemption, but only 2 are named — the list has grown and the extras are unproven"
+        if [ "$exempt_count" -gt 4 ]; then
+            note "arm D: $exempt_count scopes took the exemption, but only 4 are named — the list has grown and the extras are unproven"
         fi
 
         # ── Arm E: the control for D ──────────────────────────────────────────────────────────────

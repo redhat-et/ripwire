@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // formembers.h — MEMBER NAMES on the owner rows of a compact-route --for answer (lane member-names, train 32).
 //
 // WHY. A compact --for answer (bodies="0") names a class/struct/interface as one <d> row: its declaration line, never what it
@@ -60,6 +61,7 @@ static_assert( kForMemberNameCap > 0, "an owner row lists at least one member na
 // The A/B switch: member names ride unless RIPWIRE_NO_MEMBER_NAMES is set. The caller adds the posture (compact route, XML, default).
 inline bool forMemberNamesOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forMemberNamesOn (are the member names on?)" );
     return std::getenv( "RIPWIRE_NO_MEMBER_NAMES" ) == nullptr;
 }
 
@@ -199,6 +201,7 @@ struct MemberNamesServed
 inline std::size_t spliceMemberNames( std::string& sigs, const IngestResult& ing, const std::vector<NodeId>& shownIds,
                                       std::string_view task, const MemberNamesServed& served )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceMemberNames (the member-name rows)" );
     constexpr std::string_view kOpen = "<d l=\"";
     std::vector<std::size_t> heads;
     for( std::size_t at = sigs.find( kOpen ); at != std::string::npos; at = sigs.find( kOpen, at + kOpen.size() ) )

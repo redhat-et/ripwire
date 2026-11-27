@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 
 
@@ -146,6 +147,7 @@ inline const char* sarifLevel( std::string_view sev )
 // empty URI — a path that is nothing at all would be a wrong answer, not a shorter one.
 inline std::string_view rootRelativeUri( std::string_view file, std::string_view rootPrefix )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: sarif::rootRelativeUri (a file's root-relative URI)" );
     const auto dropLeadingDot = []( std::string_view p ) noexcept
     { return p.rfind( "./", 0 ) == 0 ? p.substr( 2 ) : p; };
     const std::string_view f = dropLeadingDot( file );
@@ -172,6 +174,7 @@ inline std::string_view rootRelativeUri( std::string_view file, std::string_view
 // (same normalization ccjson.h's writeCcJson performs on the same input for the same reason).
 inline std::string rootPrefixOf( std::string_view root )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: sarif::rootPrefixOf (normalise the root prefix)" );
     std::string prefix( root );
     while( prefix.size() > 1 && prefix.back() == '/' )
     {

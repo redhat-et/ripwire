@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forslots.h — INITIALIZER SLOTS on the shown table rows of a compact-route --for answer (lane peer-s, card FOR-SLOTS).
 //
 // WHY. A compact --for answer (bodies="0") names a struct/table initializer as one <d> row: its declaration line
@@ -55,6 +56,7 @@ static_assert( kForSlotCap > 0, "a table row lists at least one slot pair" );
 // The A/B switch: slots ride unless RIPWIRE_NO_INIT_SLOTS is set. The caller adds the posture (compact route, XML, default).
 inline bool forInitSlotsOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forInitSlotsOn (are the init slots on?)" );
     return std::getenv( "RIPWIRE_NO_INIT_SLOTS" ) == nullptr;
 }
 
@@ -143,6 +145,7 @@ inline InitSlotPairs initSlotPairs( const IngestResult& ing, const ValueRefIndex
 // disagrees with `shownIds` splices nothing (the rows are not the ones the ids name).
 inline std::size_t spliceInitSlots( std::string& sigs, const IngestResult& ing, const std::vector<NodeId>& shownIds, const MemberNamesServed& served )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceInitSlots (the init-slot rows)" );
     // the candidate rows: an initializer kind the answer does not already carry the text of
     std::vector<std::pair<NodeId, std::size_t>> cand;   // (symbol, row index)
     for( std::size_t i = 0; i < shownIds.size(); ++i )
@@ -251,6 +254,7 @@ inline std::size_t spliceInitSlots( std::string& sigs, const IngestResult& ing, 
 inline constexpr std::ptrdiff_t kForSlotByCap = 4;
 inline bool forSlotJoinRowsOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forSlotJoinRowsOn (are the slot-join rows on?)" );
     return std::getenv( "RIPWIRE_NO_SLOT_JOIN_ROWS" ) == nullptr;
 }
 // fix1 F-4: the mark on a caller joined by the field NAME alone, and its present-only clause (rides when a row prints the mark).
@@ -322,6 +326,7 @@ inline std::string joinedRun( std::string_view attr, const std::vector<std::stri
 // `nameTier` (when given) is set when a printed caller joined by the field NAME alone (the `~` mark).
 inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& ing, const std::vector<NodeId>& shownIds, bool* nameTier = nullptr )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceSlotJoinRows (the slot-join rows)" );
     std::vector<std::size_t> cand;
     for( std::size_t i = 0; i < shownIds.size(); ++i )
     {

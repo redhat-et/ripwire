@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forreexport.h — RE-EXPORT HOP ROWS on a --for answer (lane alias-import; readout-40 family ALIAS-IMPORT, mf1 shape MF-a:
 // "the answer reaches the definition and then stops").
 //
@@ -78,6 +79,7 @@ inline constexpr std::size_t kReexportSpellingCap = 256;   // spellings one walk
 
 inline bool forReexportOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forReexportOn (are the re-export hops on?)" );
     return std::getenv( "RIPWIRE_NO_REEXPORT_HOPS" ) == nullptr;
 }
 
@@ -1618,6 +1620,7 @@ inline std::string specOnlyBlock( const ImportSpecBlock& spec, bool held )
 // set, so a marker stands in for the rows).
 inline std::string renderForReexports( const IngestResult& ing, std::string_view task, bool held = false )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForReexports (the re-export block)" );
     using namespace reexport_detail;
     std::vector<ReexportTaskName>       names  = reexportTaskNames( task );
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
@@ -2617,6 +2620,7 @@ inline void appendShortKeyGenRung( std::string& out, const IngestResult& ing, co
 // its one code-shaped name resolved to no definition: from="sentence").
 inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortKeyArgs& a )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderShortKeyFallback (the short-key fallback ladder)" );
     using namespace shortkey_detail;
     std::string_view x = routeName( a.routeNote );
     // SHORT-KEY-SENTENCE: a route that read the task as words reaches the same ladder when the task holds exactly one code-shaped

@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forselfhook.h — THE SELF HOOK of a --for answer (lane self-hook): a served Python override names WHERE its base classes reach it
 // through `self` or `cls`.
 //
@@ -77,6 +78,7 @@ inline constexpr std::size_t kForSelfHookCandidateRows = 4;   // base definition
 
 inline bool forSelfHookOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forSelfHookOn (are the self hooks on?)" );
     return std::getenv( "RIPWIRE_NO_SELF_HOOK" ) == nullptr;
 }
 
@@ -1291,6 +1293,7 @@ struct RowWriter
 // set, so only the marker `<selfhooks held="budget" total=N/>` (the count, no rows) is returned, "" when the count is 0.
 inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const NodeId> served, bool held = false )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForSelfHooks (the self-hooks block)" );
     using namespace selfhook_detail;
     const IngestResult& ing = in.ing;
     if( std::ranges::none_of( served, [ & ]( NodeId id ) { return id < ing.symbols.size() && familyRow( ing.symbols[id].lang ) != nullptr; } ) )

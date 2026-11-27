@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // fordottedstring.h — STRING-IMPORT: the dotted-string literals that name a shown Python definition.
 //
 // WHY. `import_string( path )` loads what a string names, so no call edge reaches the target: `_builtin_context_processors =
@@ -737,6 +738,7 @@ inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row
 // only strings whose last segment matches a shown name, and reads a file only to confirm a loader of a printed candidate.
 inline std::string renderDottedStrings( const IngestResult& ing, std::span<const NodeId> shown )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderDottedStrings (the dotted-string rows)" );
     using namespace dotteddetail;
     if( ing.crawlRoot.empty() || shown.empty() || !forDottedStringsOn() )
     {

@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forctorhop.h — the OWNER'S CONSTRUCTOR on the top method row of a compact-route --for answer (lane peer-s, card OWNER-CTOR-HOP).
 //
 // WHY. A question about a method often turns on state its class's constructor set up: koa's per-request ctx is built by
@@ -44,6 +45,7 @@ static_assert( kForCtorHopCap == 16, "kForCtorHopLegend states the cap: move the
 
 inline bool forCtorHopOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forCtorHopOn (is the constructor hop on?)" );
     return std::getenv( "RIPWIRE_NO_CTOR_HOP" ) == nullptr;
 }
 
@@ -92,6 +94,7 @@ inline NodeId innermostOwner( const IngestResult& ing, NodeId id, const std::vec
 inline std::size_t spliceCtorHop( std::string& sigs, const IngestResult& ing, const Graph& g, const std::vector<NodeId>& shownIds,
                                   const MemberNamesServed& served )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceCtorHop (the constructor-hop rows)" );
     using namespace ctor_detail;
     if( shownIds.empty() || shownIds[0] >= ing.symbols.size() )
     {

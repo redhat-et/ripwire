@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // RIPWIRE_STATS's memory readings (card M0 MEM-STATS, reports mem-audit-fable-1111): the process footprint and its lifetime
 // peak at the phase boundaries that set a run's headline peak — the parse pool's join, the cache write, the model at rest,
 // buildGraph's side tables built, its resolve loop done and its end. Before these lines, every per-phase figure needed lldb
@@ -24,6 +25,7 @@ namespace rw::memstats
 // read at each of the handful of call sites (no cache: a run asks it fewer than a dozen times)
 inline bool enabled() noexcept
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: memstats::enabled (is the stats dump armed?)" );
     return std::getenv( "RIPWIRE_STATS" ) != nullptr;
 }
 
