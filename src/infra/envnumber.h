@@ -37,7 +37,7 @@ inline EnvNumber readEnvNumber( const char* name ) noexcept
     return n;
 }
 // An OFF switch: the knob is set to exactly 0. Unset, empty or any other value leaves the feature on — the shape of every
-// default-ON feature's kill switch (RIPWIRE_BRIEF_*, RIPWIRE_BRIEF_ROUTE), so each reads it here instead of restating it.
+// default-ON feature's kill switch (the host passes the knob's name in), so each reads it here instead of restating it.
 [[nodiscard]] inline bool envSwitchedOff( const char* name ) noexcept
 {
     const EnvNumber knob = readEnvNumber( name );
