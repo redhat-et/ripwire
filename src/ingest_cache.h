@@ -400,7 +400,12 @@ constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signa
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 344;          // bump on any grammar/.scm/extraction change
+                                                      // 344 = 2026-11-26 (lane rust-turbofish-callers, PLACEHOLDER: the train renumbers; above main's 342 and its
+                                                      //   rich 343; rich file tag 345): a Rust turbofish on a path function or a method (`W::f::<T>(x)`,
+                                                      //   `w.m::<T>(y)`, queries/rust/tags.scm) is captured as a call, and a `macro_rules!` transcriber's
+                                                      //   `f::<T>(` is read as a call of `f` (ingest_names.h readCallPath). A v342 blob holds no reference
+                                                      //   for those sites. No record shape changes; kCacheVersion unchanged.
                                                       // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
                                                       //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
                                                       //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.

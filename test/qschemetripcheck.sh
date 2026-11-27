@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, lane rust-turbofish-callers (on main 5f4b50415): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 344 (PLACEHOLDER, rich 345): a Rust turbofish on a path function or a method is a call
+#   (queries/rust/tags.scm), and a transcriber's `f::<T>(` is read as a call (ingest_names.h readCallPath). kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 366b3fa9c3…9030201c.
 # 2026-11-26, lane asserted-signal (stacked on #770, 790ff59b5): RE-PINNED with UPDATE_GOLDEN=1. kCacheVersion and
 #   kIngestCacheVersionMirror 54 -> 57 (the M5's ingest slot): queries/python/tags.scm records the `assert` statement as a call
 #   reference named `assert`, so a v54 .py blob lacks those references. No record shape change; kParserVer 342 and
