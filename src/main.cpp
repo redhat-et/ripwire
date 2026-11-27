@@ -6112,6 +6112,11 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         std::error_code copyEc;
         std::filesystem::copy_file( std::filesystem::path( richPath ), std::filesystem::path( leanPath ), std::filesystem::copy_options::overwrite_existing, copyEc );
         int rc = 0;
+        if( !VALIDATE( !copyEc, "--index-out: the lean copy of the blob was not written" ) )
+        {
+            rw::emitTo( stderr, "ripwire: --index-out: failed to copy {} to {}: {}\n", richPath.c_str(), leanPath.c_str(), copyEc.message() );
+            rc = 1;   // the size checks below still run: a lean file left behind by another writer is not this run's output
+        }
         for( const auto& [ path, family ] : { std::pair<const std::string&, const char*>{ leanPath, "lean" }, { richPath, "rich" } } )
         {
             std::error_code       ec;

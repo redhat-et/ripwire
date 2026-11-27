@@ -123,10 +123,12 @@ checks=0
 for args in "" "--deps" "--callers=$SYM" "--expand=$SYM" "--for=$FOR"; do
     a=(); [ -n "$args" ] && a=( "$args" )
     for x in "$XA" "$XB"; do
-        run "$x" ${a[@]+"${a[@]}"}; cp "$TMP/o" "$TMP/warm"   # status: the answer is the verdict: the cmp against --no-cache below FAILs on a failed run
-        ( cd "$W" && "$BIN" . --no-cache ${a[@]+"${a[@]}"} >"$TMP/cold" 2>/dev/null </dev/null )
+        run "$x" ${a[@]+"${a[@]}"}; wrc=$?; cp "$TMP/o" "$TMP/warm"
+        ( cd "$W" && "$BIN" . --no-cache ${a[@]+"${a[@]}"} >"$TMP/cold" 2>/dev/null </dev/null ); crc=$?
         checks=$(( checks + 1 ))
-        if [ -s "$TMP/cold" ] && cmp -s "$TMP/cold" "$TMP/warm"; then
+        if [ "$wrc" != 0 ] || [ "$crc" != 0 ]; then
+            no "(d) '${args:-map}' ($( basename "$x" )): exit status warm=$wrc --no-cache=$crc"
+        elif [ -s "$TMP/cold" ] && cmp -s "$TMP/cold" "$TMP/warm"; then
             ok "(d) '${args:-map}' on the shared blob ($( basename "$x" )) == --no-cache ($( wc -c <"$TMP/cold" | tr -d ' ' ) B)"
         else
             no "(d) '${args:-map}' on the shared blob ($( basename "$x" )) diverges from --no-cache (or is empty)"; diff "$TMP/cold" "$TMP/warm" | head -6
