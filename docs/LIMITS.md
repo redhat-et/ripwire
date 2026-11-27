@@ -45,7 +45,7 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-26 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-27 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
