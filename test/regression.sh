@@ -867,6 +867,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    norepogitcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
