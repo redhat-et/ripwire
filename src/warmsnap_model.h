@@ -497,9 +497,31 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
     {
         return false;
     }
-    ing.references.resize( rowCount );
+    {
+        // SEPARATE SCOPE, because these are two full write passes over the same memory and only one of
+        // them is parallel. `Reference` is 64 B and is NOT trivially default constructible (every field
+        // carries an `= 0` NSDMI), so resize() VALUE-INITIALISES every row -- at llvm-project scale,
+        // where the map header accounts for at least 5.69 M call references before the non-call roles,
+        // that is ~400-580 MB written SERIALLY and then written again by the decode below. Whether the
+        // zero-fill or the decode owns the 254.6 ms this function costs is not something the enclosing
+        // scope could ever say, and the two call for completely different changes.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: resize the reference vector (serial value-init of 64 B rows)" );
+        ing.references.resize( rowCount );
+    }
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: the parallel reference decode itself" );
+    // itemsPerWorker = 1: one item here is a 4096-row CHUNK costing ~163 us, so a single chunk is worth a
+    // worker. Under the 2048 default this decode ran on ONE core (measured effective threads 1.00 at both
+    // envoy's 287 chunks and llvm-project's 1,449) despite the format being cut into chunks precisely so
+    // that it could be decoded in parallel.
     parallelFor( refStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
+        // INSIDE the lambda, so this fires once per chunk and its total is THREAD time, while the
+        // scope outside is WALL. total_here / wall_outside is the effective thread count, and that
+        // ratio is what decides the change: near the core count means the region is already well
+        // parallelised and the only route left is less work per row; near 1 means the parallelism is
+        // not arriving and the fix is scheduling, not the row body. Guessing between those two is how
+        // a cache-locality rewrite gets written for a load-balance problem.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: one reference chunk (per-chunk THREAD time; /wall = effective threads)" );
         VarIn         row = refStream.chunk( c );
         std::uint32_t prevFile = 0, prevStart = 0, prevLine = 0, prevFrom = 0;
         const std::size_t last = std::min( refStream.rowCount, ( c + 1 ) * kRowsPerChunk );
@@ -552,7 +574,7 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
             if( x.fileId >= t.fileCount || !t.symOk( x.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 
@@ -565,6 +587,7 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
         return false;
     }
     ing.bindings.resize( rowCount );
+    // itemsPerWorker = 1, for the same reason as the reference chunks above.
     parallelFor( bindStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
         VarIn         row = bindStream.chunk( c );
@@ -595,7 +618,7 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
             if( b.fileId >= t.fileCount || !t.symOk( b.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 
