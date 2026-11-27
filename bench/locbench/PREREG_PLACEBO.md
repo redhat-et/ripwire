@@ -367,14 +367,14 @@ different and weaker claim. This file is written first so none of them can happe
 - **2026-11-26, the 243 is a different split (a fact for the owner; no rule here). No held-out model episode
   has run, and none will until the owner rules.**
   - The "243 over 78 repos" (README, `docs/EVALS.md` §3: train 317/87, held-out 243/78) is the split
-    produced by salt **`ctxpack-a7-v2`**.
-  - Commit `3315fb19d` (2026-07-31, "rename: ctxpack -> ripwire … mechanical sweep") rewrote
+    produced by the **pre-rename salt** (the same string with the project's pre-release name in place of `ripwire`).
+  - Commit `3315fb19d` (2026-07-31, the mechanical project-rename sweep) rewrote
     `frozen_partition()`'s salt to `ripwire-a7-v2`. That gives a different split, **held-out 306/88 and train
     254**, and it is the split this harness, `dataset.lock`, the Stage 0 seal above and the TRAIN pilot all
     used.
   - Measured on repository names only, with no gold read:
     - 138 instances (39 repos) are held-out under both salts.
-    - **10 of the 24 pilot instances, which a model has already seen, are held-out under `ctxpack-a7-v2`.**
+    - **10 of the 24 pilot instances, which a model has already seen, are held-out under the pre-rename salt.**
     - 3 of A2's 4 excluded instances fall inside that 243.
   - The 302-manifest seal above covers the `ripwire-a7-v2` held-out set, not the 243.
   - The owner needs to rule on which split is the held-out one, and on what the 10 pilot-touched instances
@@ -385,7 +385,7 @@ different and weaker claim. This file is written first so none of them can happe
     A2**. It is exactly the Stage 0 seal above (`4bc5f511…5a17`, 302 manifests).
   - **The 243 is superseded.** The text above saying "243 instances over 78 repos", and every 243 in the
     power section, describes the pre-rename split.
-  - **Why.** Commit `3315fb19d` (2026-07-31) renamed the salt from `ctxpack-a7-v2` to `ripwire-a7-v2`, which
+  - **Why.** Commit `3315fb19d` (2026-07-31) renamed the salt from its pre-rename form to `ripwire-a7-v2`, which
     changed the split. Every tuning run since then used the new train side. That makes the old 243 the
     contaminated set: 105 of its instances sat on that train side during tuning, and 10 of them were seen by
     the TRAIN pilot. The new held-out side was touched by neither post-07-31 tuning nor the pilot.
