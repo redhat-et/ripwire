@@ -12,7 +12,9 @@
 // WHICH CLAUSES. Only the ones in kTravels, each with its TRIGGERS — the element (<h) or attribute (via=) whose presence on a page
 // means the page needs the clause. A clause is moved only when page 1's rows (its root included) carry none of its triggers and a
 // later page's rows carry one; any trigger in page 1's rows keeps it there, so a trigger that also matches a served body or an
-// unrelated element only keeps bytes, never drops a reading. Short attributes (l= p= n=, on every row kind) are never triggers:
+// unrelated element only keeps bytes, never drops a reading. A VALUE trigger ("&lt;file-scope&gt;", its escaped spelling) is a
+// name no element or attribute stands for: the module-scope owner rides a <d n=>, an <h n=> or a tail row's sym= list alike.
+// Short attributes (l= p= n=, on every row kind) are never triggers:
 // such a clause is needed by its ELEMENT. A clause not in the table, or whose lead no longer starts a dictionary entry (it was
 // reworded), stays on page 1 — a missed saving, never a wrong reading. Gate: test/pagelegendcheck.sh (test/pagelegend.py holds an
 // independent copy of the triggers; LD0-LD8, with mutation controls).
@@ -34,7 +36,7 @@ namespace rw::forpages::scope
 struct Travels
 {
     std::string_view                lead;       // the clause's opening bytes, as its dictionary entry spells them
-    std::array<std::string_view, 4> triggers;   // "<name": that element on the page; "name=": that attribute
+    std::array<std::string_view, 4> triggers;   // "<name": that element on the page; "name=": that attribute; "&lt;…": that value
 };
 
 // Order is irrelevant (a moved clause keeps its page-1 order on the later page). Leads verbatim from the constants they name.
@@ -60,6 +62,7 @@ inline constexpr Travels kTravels[] = {
     { "; d slot_by= functions that MAY call", { "slot_by=", "slot_fields=", "slot_by_more=", "slot_fields_more=" } },   // forslots.h
     { "; d slot_by= ~C,", { "slot_by=", "slot_fields=" } },                          // kForCompactSlotNameLegend
     { "; d slots= ", { "slots=", "slots_more=" } },                                  // kForCompactInitSlotsLegend
+    { "; t=modscope n=<file-scope>:", { "&lt;file-scope&gt;" } },                   // graphlegend.h kForCompactModScopeClause
 };
 inline constexpr std::size_t kTravelCount = std::size( kTravels );
 
@@ -100,7 +103,7 @@ inline const std::array<std::string_view, kTravelCount>& travelBodies()
 }
 
 // Does `rows` (rowsOnly bytes, the root's open tag included on page 1) carry one of row `i`'s triggers? An element trigger is its
-// open tag ("<h " "<h>" "<h/"), an attribute trigger its spelling after a space (` via="`).
+// open tag ("<h " "<h>" "<h/"), an attribute trigger its spelling after a space (` via="`), a value trigger its bytes anywhere.
 [[nodiscard]] inline bool needs( std::size_t i, std::string_view rows ) noexcept
 {
     for( const std::string_view t : kTravels[ i ].triggers )
@@ -109,8 +112,8 @@ inline const std::array<std::string_view, kTravelCount>& travelBodies()
         for( std::size_t at = rows.find( t ); at != std::string_view::npos; at = rows.find( t, at + 1 ) )
         {
             const std::size_t e = at + t.size();
-            const bool        hit = t.front() == '<' ? e < rows.size() && ( rows[ e ] == ' ' || rows[ e ] == '>' || rows[ e ] == '/' )
-                                                     : at > 0 && rows[ at - 1 ] == ' ' && e < rows.size() && rows[ e ] == '"';
+            const bool        hit = t.front() == '&' || ( t.front() == '<' ? e < rows.size() && ( rows[ e ] == ' ' || rows[ e ] == '>' || rows[ e ] == '/' )
+                                                                       : at > 0 && rows[ at - 1 ] == ' ' && e < rows.size() && rows[ e ] == '"' );
             if( hit ) { return true; }
         }
     }

@@ -570,7 +570,31 @@ for L in compact full; do
         no "(8g) --for --legend=$L: premise lost — the owner is not a tail-only row (tail: ${T:0:300})"
     fi
 done
-[ "$tc_seen" = 2 ] && ok "(8g) both legends exercised a tail-only owner (2 of 2)" || no "(8g) only $tc_seen of 2 legends reached a tail-only owner"
+if [ "$tc_seen" = 2 ]; then ok "(8g) both legends exercised a tail-only owner (2 of 2)"; else no "(8g) only $tc_seen of 2 legends reached a tail-only owner"; fi
+# PAGED: the default answer is served in pages (forpages.h). What page N prints is defined on page N or page 1 — and page 1 does
+# not define in advance what only a later page prints (forpagelegend.h kTravels: the clause travels with the owner's page). On
+# #790's tree the owner's tail row sat on page 2 with the clause on neither page. Small pages put the fixture's tail past page 1.
+tcp(){ "$BIN" "$TC" --no-cache --for='emit xml attributes' --legend=compact --page-bytes=3000${1:+:$1} 2>/dev/null; }
+tcrows(){ perl -0pe 's/<!--.*?-->//gs'; }   # a page's rows: its legend comments removed (the clause itself spells <file-scope>)
+P1="$( tcp )"; NP="$( printf '%s' "$P1" | grep -o ' pages="[0-9]*"' | head -1 | grep -o '[0-9][0-9]*' )"
+tc_owned=0
+if printf '%s' "$P1" | tcrows | grep -q '<file-scope>\|&lt;file-scope&gt;'; then
+    no "(8g) paged: page 1 prints the owner — the fixture lost its premise (the owner must sit on a later page)"
+else
+    printf '%s' "$P1" | grep -q 't=modscope' \
+        && no "(8g) paged: page 1 holds the clause although only a later page prints the owner" \
+        || ok "(8g) paged: page 1 prints no owner and sends no clause in advance"
+    for k in $( seq 2 "${NP:-1}" ); do
+        PK="$( tcp "$k" )"
+        if printf '%s' "$PK" | tcrows | grep -q '<file-scope>\|&lt;file-scope&gt;'; then
+            tc_owned=$(( tc_owned + 1 ))
+            printf '%s' "$PK" | grep -q 't=modscope' \
+                && ok "(8g) paged: page $k of $NP prints the owner and carries its clause" \
+                || no "(8g) paged: page $k of $NP prints the owner and neither it nor page 1 defines it"
+        fi
+    done
+fi
+if [ "$tc_owned" -ge 1 ]; then ok "(8g) paged: $tc_owned later page(s) printed the owner"; else no "(8g) paged: no later page printed the owner (pages=${NP:-?})"; fi
 
 # ── 8d) #60 MED-2: the legend says the owner has no body, and --expand agrees ──────────────────────────
 # Every clause naming this kind says "no body to expand". --expand used to answer either the WHOLE FILE
