@@ -257,8 +257,14 @@ grep -qE '(^|/)src/verify\.h:' "$TMP/repro.paths" || grep -qE '(^|/)src/' "$TMP/
     || no "capped first screen lost every src/ row to config rows"
 
 # (4d) with the cap lifted, EVERY doc row still sorts after EVERY code row
-"$BIN" "$ROOT" --grep=DISCLOSE --limit=1000 >"$TMP/repro_all.xml" 2>/dev/null
+# The limit must sit above this repo's whole DISCLOSE count, or the "un-capped" listing is capped and holds code rows
+# only (1,000 was: the indexed code passed 1,000 hits). The arm right below proves the cap really is lifted.
+UNCAPPED=100000
+"$BIN" "$ROOT" --grep=DISCLOSE --limit="$UNCAPPED" >"$TMP/repro_all.xml" 2>/dev/null
 hitpaths <"$TMP/repro_all.xml" >"$TMP/repro_all.paths"
+[ "$( wc -l <"$TMP/repro_all.paths" | tr -d ' ' )" -lt "$UNCAPPED" ] \
+    && ok "un-capped listing is below its limit ($( wc -l <"$TMP/repro_all.paths" | tr -d ' ' ) of $UNCAPPED rows): the doc tier is in view" \
+    || no "un-capped listing filled its --limit=$UNCAPPED: the doc tier may be cut off, so the order check below proves nothing"
 firstDocRow="$( grep -n '\.md:'  "$TMP/repro_all.paths" | head -1 | cut -d: -f1 )"
 lastCodeRow="$( grep -vn '\.md:' "$TMP/repro_all.paths" | tail -1 | cut -d: -f1 )"
 if [ -n "$firstDocRow" ] && [ -n "$lastCodeRow" ] && [ "$firstDocRow" -gt "$lastCodeRow" ]; then

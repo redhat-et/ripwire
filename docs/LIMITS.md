@@ -45,16 +45,16 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-26 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-27 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 477 | 164 | 301 | **176** |
+| 479 | 166 | 301 | **178** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 477 + 10 is the 487 constants this generator parses out of `src/`.
+are not counted as caps, and 479 + 10 is the 489 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **148 of 477 caps are classified
-(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 329 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 479 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 331 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -808,6 +808,14 @@ Discloses: **none**
 | `kMaxNamesTracked` | `2000000` | INDEXING | map bound; 44,904 on the deepest repo measured |
 | `kMaxProbeCommits` | `40000` | INDEXING | walk bound — past it, misses are "unknown", never "never" |
 | `kMinNameLen` | `4` | BOUNDARY | — |
+
+### `src/gitstampcache.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxRows` | `4096` | — | — |
 
 ### `src/graph.h`
 
@@ -1678,6 +1686,14 @@ Discloses: `capped`, `value_refs_depth_capped`
 | `kSlotCallerCap` | `8` | — | — |
 | `kSlotTargetCap` | `16` | — | — |
 | `kValueRefRowCap` | `64` | — | — |
+
+### `src/verbfs_qmetrics.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDigestRowsPerBlock` | `256` | — | — |
 
 ### `src/verbs_change.h`
 

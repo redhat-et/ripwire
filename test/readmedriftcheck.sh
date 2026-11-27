@@ -862,17 +862,23 @@ fi
 
 DATES="docs/lineage-paper-dates.tsv"
 asof="$( grep -m1 -oE 'dates as of [0-9]{4}-[0-9]{2}-[0-9]{2}|as of [0-9]{4}-[0-9]{2}-[0-9]{2}' README.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 )"
-if [ ! -r "$DATES" ]; then
-    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
-elif [ -z "$asof" ]; then
-    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
-else
-    h2="$( ASOF="$asof" DATES="$DATES" python3 - <<'PYEOF'
+# 2026-11-26 (lane LINEAGE-REFRESH): the join reads arXiv ids from the WORK column — the first cell of a
+# §1/§2 table row — and nowhere else. It used to read every id anywhere above §3, which was exact only while
+# every id sat in a Work cell: once a row's lesson cites a follow-on (a replication, a contrary study) and
+# the cited-not-given paragraph names the papers read and declined, an all-text scan counts them as FOLDED
+# papers and the README's "N of the folded papers" overstates by every follow-on. And a publication date
+# LATER than the as-of date now fails instead of counting: (asof - date).days is negative, so it used to
+# land inside both the two-month and the thirty-day windows. H2b and H2c are the controls for both.
+cat > "$TMP/h2.py" <<'PYEOF'
 import os, re, sys, datetime
 asof = datetime.date.fromisoformat(os.environ["ASOF"])
-lin  = open("docs/LINEAGE.md").read().split("## 3. The tool field")[0]
-ids  = sorted(set(re.findall(r'arXiv:(\d{4}\.\d{4,5})', lin)))
-ids26 = [i for i in ids if i.startswith("26")]
+lin  = open(os.environ.get("LIN", "docs/LINEAGE.md")).read().split("## 3. The tool field")[0]
+ids  = set()
+for row in lin.splitlines():
+    if row.startswith("|"):
+        cells = row.split("|")
+        if len(cells) > 2: ids.update(re.findall(r'arXiv:(\d{4}\.\d{4,5})', cells[1]))
+ids26 = sorted(i for i in ids if i.startswith("26"))
 dates = {}
 for line in open(os.environ["DATES"]):
     if line.startswith("#") or not line.strip(): continue
@@ -880,13 +886,16 @@ for line in open(os.environ["DATES"]):
 missing = [i for i in ids26 if i not in dates]
 if missing:
     print("FAIL no publication date for %s in %s" % (",".join(missing), os.environ["DATES"])); sys.exit(0)
+future = [i for i in ids26 if dates[i] > asof]
+if future:
+    print("FAIL publication date after the as-of date %s for %s — move the README's as-of date forward" % (asof, ",".join(future))); sys.exit(0)
 n26  = len(ids26)
 n2mo = sum(1 for i in ids26 if (asof - dates[i]).days <= 61)
 n30  = sum(1 for i in ids26 if (asof - dates[i]).days <= 30)
 rd   = open("README.md").read()
 WORD = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,
         "eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,
-        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30}
+        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"zero":0,"none":0}
 # Only NUMBER tokens may fill the slot. A bare ([a-z]+) also matches the summary line
 # "...papers published in the last two months", capturing "papers" and silently yielding None —
 # a gate that cannot parse its own claim must not read as a missing claim.
@@ -907,10 +916,36 @@ for label, got, want in (("2026 papers", s26, n26), ("last two months", s2mo, n2
 print(("FAIL " + "; ".join(bad)) if bad else
       "OK derived %d from 2026, %d in the last two months, %d in the last thirty days (as of %s)" % (n26, n2mo, n30, asof))
 PYEOF
-)"
+if [ ! -r "$DATES" ]; then
+    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
+elif [ -z "$asof" ]; then
+    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
+else
+    h2="$( ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
     case "$h2" in
         OK*) ok "(H2) recency counts re-derive from LINEAGE + $DATES: ${h2#OK }" ;;
         *)   no "(H2) recency counts do not re-derive: ${h2#FAIL }" ;;
+    esac
+    # (H2b) SCOPE control. An undated 2026 id planted in PROSE above §3 must not move the verdict; the same id
+    #       planted in a §2 Work cell must turn it red (no date entry). Without the second half a green H2b
+    #       would prove only that the planted line was never read.
+    awk '/^## 3\. The tool field/ && !d { print "Planted prose: [arXiv:2612.99999](https://arxiv.org/abs/2612.99999)."; d = 1 } { print }' docs/LINEAGE.md > "$TMP/lin_prose.md"
+    awk '/^\| \*Lost in the Middle\*/ && !d { sub( /^\| /, "| [arXiv:2612.99999](https://arxiv.org/abs/2612.99999) " ); d = 1 } { print }' docs/LINEAGE.md > "$TMP/lin_cell.md"
+    h2p="$( LIN="$TMP/lin_prose.md" ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
+    h2c="$( LIN="$TMP/lin_cell.md"  ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
+    if [ "$h2p" = "$h2" ] && [ "${h2c#FAIL no publication date for 2612.99999}" != "$h2c" ]; then
+        ok "(H2b) scope control: a 2026 id planted in prose is not counted; the same id in a Work cell is caught"
+    else
+        no "(H2b) scope control failed — prose plant: '${h2p:0:80}' / Work-cell plant: '${h2c:0:80}'"
+    fi
+    # (H2c) FUTURE-DATE control: the newest dated id moved one day past the as-of date must turn H2 red.
+    newest="$( grep -v '^#' "$DATES" | sort -k2 | tail -1 | cut -f1 )"
+    nextday="$( python3 -c "import datetime,sys; print(datetime.date.fromisoformat(sys.argv[1]) + datetime.timedelta(days=1))" "$asof" )"
+    awk -v id="$newest" -v nd="$nextday" 'BEGIN { OFS = "\t" } $1 == id { $2 = nd } { print }' "$DATES" > "$TMP/dates_future.tsv"
+    h2f="$( ASOF="$asof" DATES="$TMP/dates_future.tsv" python3 "$TMP/h2.py" )"
+    case "$h2f" in
+        "FAIL publication date after the as-of date"*) ok "(H2c) future-date control: $newest dated $nextday (one day past $asof) is refused" ;;
+        *) no "(H2c) future-date control did not fire — $newest dated $nextday read as: ${h2f:0:120}" ;;
     esac
 fi
 

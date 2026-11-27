@@ -58,6 +58,8 @@ struct RawDef
     std::uint8_t  steer     = 0;   // QD-TANGLE steering locals (model.h Symbol::steer; from cc_walk, saturating at 255)
     std::uint16_t deepDispatch = 0;   // QD-TANGLE: deepLoc lines inside short flat-dispatch arms (model.h Symbol::dispatchShare; saturating)
     std::uint8_t  nestArmCut   = 0;   // QD-TANGLE: maxNest less the deepest nesting outside those arms (model.h Symbol::dispatchShare)
+    std::uint32_t maxBlock10   = kTangleNoCap;   // QD-TANGLE BLOCK FACTS: the highest one-block score, tenths (model.h TangleBlockFacts; kTangleNoCap = not walked)
+    std::uint8_t  cross        = 0;              // QD-TANGLE BLOCK FACTS: cross-block top-level locals (saturating)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
     std::uint8_t  testScope = 0;   // L8: 1 ⇒ an IN-FILE test convention encloses this def (see inFileTestScope)
     std::uint8_t  recovered = 0;   // extent honesty (extentsuspect.h kRecovered*): the parse RECOVERED this def's container
@@ -167,7 +169,7 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
+constexpr std::uint32_t kCacheVersion = 55;           // 55: lane tangle-rule — a def record gains the block facts (RawDef::maxBlock10 u32, ::cross u8, after nestArmCut). 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
                                                       // 53: lane rust-self-chain — LocalBindKind RecvCall (appended; readBind's kind bound moves).
                                                       // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
@@ -2667,7 +2669,7 @@ inline constexpr std::uint32_t kCloneKeyKindBits = ( 1u << unsigned( SymKind::Fu
 static_assert( kSymKindCount <= 32, "kCloneKeyKindBits holds one bit per SymKind" );
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.steer ); w.u32( d.deepDispatch ); w.u8( d.nestArmCut ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.steer ); w.u32( d.deepDispatch ); w.u8( d.nestArmCut ); w.u32( d.maxBlock10 ); w.u8( d.cross ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     w.u8( d.cloneKey != 0 ? 1 : 0 );                                     // v50: clone-key presence byte (0 = no key), then the key
     if( d.cloneKey != 0 ) { w.u64( d.cloneKey ); }
@@ -2822,7 +2824,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 99;   // 18×u32 + 19×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50; QD-TANGLE steer u8 + deepDispatch u32 + nestArmCut u8: 93 -> 99, v54)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 104;  // 19×u32 + 20×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50; QD-TANGLE steer u8 + deepDispatch u32 + nestArmCut u8: 93 -> 99, v54; QD-TANGLE BLOCK FACTS maxBlock10 u32 + cross u8: 99 -> 104, v55)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
@@ -2852,7 +2854,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = r.u16Of32(); d.humps = r.u16Of32(); d.deepLoc = r.u16Of32(); d.ev = r.u16Of32(); d.params = r.u16Of32(); d.paramsMin = r.u16Of32(); d.maxNest = r.u8(); d.steer = r.u8(); d.deepDispatch = r.u16Of32(); d.nestArmCut = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.internalLinkage = r.u8(); d.scopeRootsStd = r.u8(); d.fnScopeStart = r.u32(); d.fnScopeEnd = r.u32(); d.kind = r.enumU8<SymKind>( kSymKindCount ); d.lang = r.enumU8<Lang>( kLangCount ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = r.u16Of32(); d.humps = r.u16Of32(); d.deepLoc = r.u16Of32(); d.ev = r.u16Of32(); d.params = r.u16Of32(); d.paramsMin = r.u16Of32(); d.maxNest = r.u8(); d.steer = r.u8(); d.deepDispatch = r.u16Of32(); d.nestArmCut = r.u8(); d.maxBlock10 = r.u32(); d.cross = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.internalLinkage = r.u8(); d.scopeRootsStd = r.u8(); d.fnScopeStart = r.u32(); d.fnScopeEnd = r.u32(); d.kind = r.enumU8<SymKind>( kSymKindCount ); d.lang = r.enumU8<Lang>( kLangCount ); d.name = r.str(); d.scope = r.str();
     // B2.2: the extractor (ingest_sidecap.h) stores paramsMin only when it is <= params. A record past that rule is
     // corruption, and a too-high minimum is the UNSAFE direction (the resolver drops a candidate for too few arguments),
     // so it takes the same one refusal path as a short read: that file reparses and the rest of the blob stands.

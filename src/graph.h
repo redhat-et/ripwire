@@ -36,6 +36,7 @@
 #include "argtypepick.h"         // B2.3: ArgTypeOverloadPick — a C++ call's same-arity overloads picked by the arguments' declared types; cppFullChainOf
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "memstats.h"      // M0 MEM-STATS: RIPWIRE_STATS footprint readings at buildGraph's tables-built, resolve-done and end
+#include "verbfs_qmetrics_seam.h"   // VERB-FS QMETRICS: computeQMetrics / computeImpure may be answered from a per-index record (src/verbfs_qmetrics.h)
 
 #include <algorithm>
 #include <array>
@@ -18234,18 +18235,25 @@ inline bool isImpureName( const std::string& n ) noexcept
 // newly become impure, so push them and stop when the worklist drains — same result (every symbol
 // reachable backward from an impure seed ends up impure), touching only the edges that matter instead
 // of an O(S) sweep per round.
-inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g )
+// The seed half: a reference whose enclosing symbol is impure at the source (a CALL of a side-effecting intrinsic; ABS-3: a
+// var read named "free" is not one). computeImpureComputed collects these in reference order; VERB-FS QMETRICS
+// (src/verbfs_qmetrics.h) collects the same sequence in fixed blocks, and it is also what that record's key covers.
+inline bool isImpureSeed( const Reference& r, std::size_t symbolCount ) noexcept
 {
-    PROFILE_SCOPE_DESCRIBE( "computeImpure: purity fixpoint (worklist over in-edge CSR)" );
-    const std::size_t S = ing.symbols.size();
-    std::vector<char> impure( S, 0 );
+    return r.role == RefRole::Call && r.fromSymbol != kNoNode && r.fromSymbol < symbolCount && isImpureName( r.calleeName );
+}
+
+// The propagation half: every seed site's symbol marked, then impurity pushed callee -> caller over the in-edge CSR.
+// `seedSites` is in reference order and repeats a symbol once per seed site; the first site of each symbol enqueues it.
+inline std::vector<char> propagateImpure( std::size_t symbolCount, const Graph& g, std::span<const NodeId> seedSites )
+{
+    const std::size_t   S = symbolCount;
+    std::vector<char>   impure( S, 0 );
     std::vector<NodeId> worklist;                                       // seed: direct side-effecting calls
-    for( const Reference& r : ing.references )
+    for( const NodeId from : seedSites )
     {
-        if( r.role == RefRole::Call && r.fromSymbol != kNoNode && r.fromSymbol < S && isImpureName( r.calleeName ) )
-        { // ABS-3: only CALL sites seed impurity (not a var read named "free")
-            if( !impure[ r.fromSymbol ] ) { impure[ r.fromSymbol ] = 1; worklist.push_back( r.fromSymbol ); }
-        }
+        EXPECTS( from < S, "a seed site names a symbol of this index (isImpureSeed)" );
+        if( !impure[ from ] ) { impure[ from ] = 1; worklist.push_back( from ); }
     }
 
     const auto* inRo = g.inEdges.rowOffsets();
@@ -18266,6 +18274,29 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
         }
     }
     return impure;
+}
+
+// The whole fixpoint, as it always ran: the seed sites in reference order, then the propagation.
+inline std::vector<char> computeImpureComputed( const IngestResult& ing, const Graph& g )
+{
+    PROFILE_SCOPE_DESCRIBE( "computeImpure: purity fixpoint (worklist over in-edge CSR)" );
+    const std::size_t   S = ing.symbols.size();
+    std::vector<NodeId> seedSites;
+    for( const Reference& r : ing.references )
+    {
+        if( isImpureSeed( r, S ) )
+        {
+            seedSites.push_back( r.fromSymbol );
+        }
+    }
+    return propagateImpure( S, g, seedSites );
+}
+
+// VERB-FS QMETRICS: on the primary index of a cached single-root run the mask is answered from a per-index record whose key
+// digests every input above (src/verbfs_qmetrics.h); everywhere else, and on any miss, it is computed as it always was.
+inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g )
+{
+    return verbfs::servedOrComputed( verbfs::derivedSeams().impure, &computeImpureComputed, ing, g );
 }
 
 // ── Q-compute: evidence-validated per-symbol metrics, surfaced on --metrics ONLY (descriptive facts,
@@ -18411,16 +18442,24 @@ struct UnionFind
     }
 };
 
-inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
+// QMetrics' four columns, each sized to the index. The two halves below fill them: the DIRECT columns (callerCount, cbo) are
+// CSR row lengths and one pass over composeEdges; the DERIVED ones (tested, lcom4) are the whole-index work — a forward
+// reach from every test symbol and a union-find per class — which VERB-FS QMETRICS keeps per index (src/verbfs_qmetrics.h).
+inline QMetrics sizedQMetrics( std::size_t symbolCount )
 {
-    PROFILE_SCOPE_DESCRIBE( "computeQMetrics: cbo/tested/lcom4/callers" );
-    const std::size_t S = ing.symbols.size();
     QMetrics q;
-    q.cbo.assign( S, 0u );
-    q.tested.assign( S, 0u );
-    q.lcom4.assign( S, kLcom4NA );
-    q.callerCount.assign( S, 0u );
+    q.cbo.assign( symbolCount, 0u );
+    q.tested.assign( symbolCount, 0u );
+    q.lcom4.assign( symbolCount, kLcom4NA );
+    q.callerCount.assign( symbolCount, 0u );
+    return q;
+}
 
+// The direct columns: callerCount (the amp half) and cbo.
+inline void fillQMetricsDirect( const IngestResult& ing, const Graph& g, QMetrics& q )
+{
+    const std::size_t S = ing.symbols.size();
+    EXPECTS( q.cbo.size() == S && q.callerCount.size() == S, "q was sized for this index (sizedQMetrics)" );
     // ── caller count (amp half) + CBO callee half: both are direct reads of the CSRs (deduped by construction).
     const auto* inRo = g.inEdges.rowOffsets();
     for( std::size_t i = 0; i < S; ++i )
@@ -18454,7 +18493,13 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
             ++q.cbo[owner];
         }
     }
+}
 
+// The derived column tested=.
+inline void fillQMetricsTested( const IngestResult& ing, const Graph& g, QMetrics& q )
+{
+    const std::size_t S = ing.symbols.size();
+    EXPECTS( q.tested.size() == S, "q was sized for this index (sizedQMetrics)" );
     // ── tested=: the same transitive test-seed reach used by --exercises and --seams. A direct-reference
     //    pass silently marked outer() but not outer()->leaf(), contradicting those verbs and the documented
     //    "a test reaches it" contract. Test symbols are seeds, not production coverage rows themselves.
@@ -18474,7 +18519,13 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
             q.tested[i] = 1u;
         }
     }
+}
 
+// The derived column lcom4=.
+inline void fillQMetricsLcom4( const IngestResult& ing, const Graph& g, QMetrics& q )
+{
+    const std::size_t S = ing.symbols.size();
+    EXPECTS( q.lcom4.size() == S, "q was sized for this index (sizedQMetrics)" );
     // ── LCOM4: per class-kind symbol, components of its method graph. Group methods by their enclosing class
     //    (method's scope == class name AND same file — scope is the class name, matched to a class symbol in
     //    the same file to avoid cross-file same-name collisions). Then union methods that call each other or
@@ -18617,7 +18668,25 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
             q.lcom4[ cid ] = comps;
         }
     }
+}
+
+// The whole computation, as it always ran.
+inline QMetrics computeQMetricsComputed( const IngestResult& ing, const Graph& g )
+{
+    PROFILE_SCOPE_DESCRIBE( "computeQMetrics: cbo/tested/lcom4/callers" );
+    QMetrics q = sizedQMetrics( ing.symbols.size() );
+    fillQMetricsDirect( ing, g, q );
+    fillQMetricsTested( ing, g, q );
+    fillQMetricsLcom4( ing, g, q );
     return q;
+}
+
+// VERB-FS QMETRICS: on the primary index of a cached single-root run the derived columns are answered from a per-index
+// record whose key digests every input fillQMetricsTested and fillQMetricsLcom4 read (src/verbfs_qmetrics.h), and the direct
+// columns are filled as here; everywhere else, and on any miss, the whole computation runs as it always did.
+inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
+{
+    return verbfs::servedOrComputed( verbfs::derivedSeams().qmetrics, &computeQMetricsComputed, ing, g );
 }
 
 // resolve #include/import targets to repo file ids → the DIRECT (1-hop) file→file dependency graph

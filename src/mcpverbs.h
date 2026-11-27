@@ -701,7 +701,7 @@ inline std::string strayContentText( const std::string& root, const std::string&
     if( !res.ok )
     {
         if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }   // K75: named, not "not a git repository"
-        if( emptyCause != nullptr && !res.blobsUnread )
+        if( emptyCause != nullptr )   // never empty on this path: the caller speaks it as the refusal
         {
             // a ref-name filter that matched no ref is its own refusal: the repository was read, the filter chose nothing
             *emptyCause = res.filterMatchedNothing ? "no local ref name contains '" + filter + "' — no refs to compare; drop kind= to compare every ref"

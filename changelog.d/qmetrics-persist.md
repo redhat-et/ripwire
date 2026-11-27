@@ -1,0 +1,8 @@
+### Changed — a served `--for` no longer recomputes QMetrics and the purity mask: both answer from a per-index record
+
+On a warm, served run, `computeQMetrics` (tested=, lcom4=, cbo=, the callers half of amp=) and `computeImpure` (the purity fixpoint behind pure=) were recomputed after every snapshot load, though both are pure functions of the index and the call graph. Each now keeps its result in its own record in the cache directory (`ripwire-verbfs-<rootKey>-{qmetrics,impure}-*.bin`, beside the other VERB-FS records). A record is used only when a digest of every input the computation reads matches the stored one: the symbols, the file paths, the references it collects, the call-graph arrays, the compose edges, and the build that wrote the record. Anything else runs the unchanged computation and rewrites the record. The cbo and caller-count columns are still computed live. Every answer is byte-identical, MCP's included. Measured on an M5 Pro, Release, no PGO, n=5 interleaved, medians, served warm `--for` against the VERB-FS build (d76c740fb):
+- llvm-project 3.89 → 3.62 s; the two phases 212.8 + 73.1 ms → 12.4 + 7.9 ms;
+- vscode 0.915 → 0.868 s;
+- envoy 0.644 → 0.606 s.
+
+On a run that has to compute anyway, the digest and the write cost 19 ms on llvm-project. The cache grows by 3.2 MB there, 0.55 MB on vscode and 0.42 MB on envoy. Armed only where the warm snapshot is (a cached single-root run); `RIPWIRE_NO_VERBFS=1` turns it off; `RIPWIRE_STATS=1` prints one `[verbfs] qmetrics` and one `[verbfs] impure` line per use, with `why=` naming the input that moved on a miss. New gate `test/qmetricscheck.sh`.

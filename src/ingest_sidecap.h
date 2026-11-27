@@ -2512,12 +2512,12 @@ inline void fillDefinitionExtent( RawDef& d, const DefCodeNodes& code, const Def
 // attribute's claim ("the body carries alternatives") is already made at 1; the nesting profile (model.h Symbol::humps/deepLoc):
 // deepLoc is a floor already, so a clamp there stays honest in the direction the attribute already claims; essential complexity
 // (model.h Symbol::ev) is already saturated inside ev_finalize, 0 outside evCountedLang, matching the emitters' omission rule;
-// QD-TANGLE's steering locals and dispatch share (model.h Symbol::steer, ::dispatchShare).
+// QD-TANGLE's steering locals and dispatch share (model.h Symbol::steer, ::dispatchShare); its block facts (model.h TangleBlockFacts).
 inline void fillDefinitionComplexity( RawDef& d, const TagsFile& file, const DefIdentity& id, const DefCodeNodes& code )
 {
     const TSNode     measured = code.spanThroughBody ? code.body : ( ts_node_is_null( code.literal ) ? code.defNode : code.literal );
     const Complexity c        = isCallable( id.kind ) && file.shape ? complexityOf( measured, file.src, file.le.lang )
-                                                       : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
+                                                       : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u, kTangleNoCap, 0u };
     d.cx           = c.cx;
     d.ccx          = c.ccx;
     d.locals       = c.locals;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2526,6 +2526,8 @@ inline void fillDefinitionComplexity( RawDef& d, const TagsFile& file, const Def
     d.steer        = saturatedTo<std::uint8_t>( c.steer );
     d.deepDispatch = saturatedTo<std::uint16_t>( c.deepDispatch );
     d.nestArmCut   = saturatedTo<std::uint8_t>( c.nestArmCut );
+    d.maxBlock10   = c.maxBlock10 == kTangleNoCap ? kTangleNoCap : std::min( c.maxBlock10, kTangleBlockMax10 );   // QD-TANGLE BLOCK FACTS
+    d.cross        = saturatedTo<std::uint8_t>( c.cross );
     d.humps        = saturatedTo<std::uint16_t>( c.humps );
     d.deepLoc      = saturatedTo<std::uint16_t>( c.deepLoc );
     d.ev           = saturatedTo<std::uint16_t>( c.ev );
