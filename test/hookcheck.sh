@@ -260,6 +260,8 @@ if [ -x "$REALBIN" ]; then
     # ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, and these arms keep the operator's HOME. A sandbox for the arms of this block only
     # (unset after it: install.sh honours CLAUDE_CONFIG_DIR too), so an operator's own pasted block cannot silence one.
     export CLAUDE_CONFIG_DIR="$TMP/claudeconfig"; mkdir -p "$CLAUDE_CONFIG_DIR"
+    # the same for Codex's global level ${CODEX_HOME:-~/.codex} (AGENTS.md, config.toml), which the Codex primer reads (3i7)
+    export CODEX_HOME="$TMP/codexhome"; mkdir -p "$CODEX_HOME"
     WITH_REAL="$RBIN:$PATH"
     T3I="$TMP/t3i"; mkdir -p "$T3I"
     SS_JSON='{"session_id":"sscase","cwd":"'"$REPO"'","source":"startup"}'
@@ -517,8 +519,98 @@ if [ -x "$REALBIN" ]; then
     ssd_wo="$( printf '%s\n%s\n' "$ssd_wcl" "$ssd_wxl" | grep -c -i -e 'either one delivers' -e 'rely on the hook' )"
     [ "$ssd_wc" = 2 ] && [ "$ssd_wx" = 0 ] && [ "$ssd_wo" = 0 ] && ok "wrap claude names the paste as the reliable path and the control arm the hook skips (codex: not said; no hook-alone promise)" \
         || no "wrap paste/hook note: claude=$ssd_wc (want 2) codex=$ssd_wx (want 0) hook-alone wording=$ssd_wo (want 0)"
+    # ── (3i7) θ20 PREFIX-DIET: the same dedup for Codex, against the AGENTS.md chain Codex loads (hooks/ripwire-nudge.sh
+    # agentsMdHoldsBlurb). PRESENT -> silent; ABSENT, STALE and NOT DELIVERED -> byte-identical to the block as SessionStart JSON.
+    # NOT DELIVERED covers what Codex would not inject or might cut: a non-empty AGENTS.override.md beside the file (Codex takes one
+    # file per directory, the override first), a file above the Git root, a file past the 32 KiB project_doc_max_bytes default, and
+    # a config.toml naming a discovery key (kept conservatively). Every arm counts what it planted and FAILS on zero.
+    # RED on the hook without agentsMdHoldsBlurb: every PRESENT arm prints the block.
+    if command -v jq >/dev/null 2>&1; then
+        SSDX_WANT="$( jq -n --arg m "$SSD_CODEX" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
+    else
+        SSDX_WANT="$( printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+            "$( printf '%s' "$SSD_CODEX" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{printf "%s\\n", $0}' )" )"
+    fi
+    ssdx_run() { ssd_run "$1" "${@:2}" RIPWIRE_METER_AGENT=codex; }   # env's -u options must come before any NAME=value
+    ssdx_has() { grep -cFx -e "$( printf '%s' "$SSD_CODEX" | head -n1 )" "$1" 2>/dev/null; }
+    SSDX_LINES="$( printf '%s\n' "$SSD_CODEX" | grep -c . )"
+    if [ "${SSDX_LINES:-0}" -ge 10 ] && printf '%s' "$SSD_CODEX" | grep -q '^## ripwire' && [ "$SSD_CODEX" != "$SSD_BLURB" ]; then
+        ok "Codex dedup: the wrap codex block to plant has $SSDX_LINES lines and differs from Claude's"
+    else no "Codex dedup: the wrap codex block has ${SSDX_LINES:-0} lines or equals Claude's; every arm below is vacuous"; fi
+    SSDX_ABS="$( ssdx_run xabsent )"
+    [ -n "$SSDX_ABS" ] && [ "$SSDX_ABS" = "$SSDX_WANT" ] \
+        && ok "Codex dedup ABSENT: no AGENTS.md holds the block -> the block is sent, byte-identical to before (${#SSDX_ABS} B)" \
+        || no "Codex dedup ABSENT: ${#SSDX_ABS} B, expected ${#SSDX_WANT} B byte-identical to the wrap codex block as JSON"
+    ssdx_seen=0; ssdx_silent=0
+    for ssd_case in "cwd AGENTS.md|$SSDCWD/AGENTS.md" "Git root AGENTS.md|$SSDREPO/AGENTS.md" "cwd AGENTS.override.md|$SSDCWD/AGENTS.override.md" \
+                    "global \$CODEX_HOME/AGENTS.md|$CODEX_HOME/AGENTS.md" "global \$CODEX_HOME/AGENTS.override.md|$CODEX_HOME/AGENTS.override.md"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$ssd_file" "$SSD_CODEX"; ssd_p="$( ssdx_has "$ssd_file" )"
+        [ "${ssd_p:-0}" -ge 1 ] && ssdx_seen=$(( ssdx_seen + 1 ))
+        ssd_out="$( ssdx_run "xp$ssdx_seen" )"
+        if [ "${ssd_p:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssdx_silent=$(( ssdx_silent + 1 )); ok "Codex dedup PRESENT ($ssd_name): silent"
+        else no "Codex dedup PRESENT ($ssd_name): planted=${ssd_p:-0} out=${#ssd_out} B, expected silent"; fi
+        rm -f "$ssd_file"
+    done
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; sed 's/$/\r/' "$SSDCWD/AGENTS.md" > "$SSDCWD/AGENTS.md.crlf"; mv "$SSDCWD/AGENTS.md.crlf" "$SSDCWD/AGENTS.md"
+    ssd_cr="$( grep -c $'\r$' "$SSDCWD/AGENTS.md" )"; ssd_out="$( ssdx_run xcrlf )"
+    if [ "${ssd_cr:-0}" -ge "$SSDX_LINES" ] && [ -z "$ssd_out" ]; then ssdx_silent=$(( ssdx_silent + 1 )); ok "Codex dedup PRESENT (CRLF, $ssd_cr CR lines): silent"
+    else no "Codex dedup PRESENT (CRLF): CR lines=${ssd_cr:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/AGENTS.md"
+    # control first: the same environment with no file sends the block, so the silent run below is the file's doing
+    SSDHOME="$TMP/ssdxhome"; mkdir -p "$SSDHOME"; ssd_ctl="$( ssdx_run xhomectl -u CODEX_HOME HOME="$SSDHOME" )"
+    ssd_plant "$SSDHOME/.codex/AGENTS.md" "$SSD_CODEX"
+    ssd_out="$( ssdx_run xhome -u CODEX_HOME HOME="$SSDHOME" )"
+    if [ "$ssd_ctl" = "$SSDX_ABS" ] && [ -s "$SSDHOME/.codex/AGENTS.md" ] && [ -z "$ssd_out" ]; then ssdx_silent=$(( ssdx_silent + 1 )); ok "Codex dedup PRESENT (~/.codex/AGENTS.md, no CODEX_HOME): silent"
+    else no "Codex dedup PRESENT (~/.codex/AGENTS.md): control=${#ssd_ctl} B (want ${#SSDX_ABS}) out=${#ssd_out} B, expected silent"; fi
+    rm -rf "$SSDHOME"
+    # control at the limit: the files Codex reads come to exactly 32768 B, the block inside them
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; ssd_n="$( wc -c < "$SSDCWD/AGENTS.md" )"
+    yes 'Keep tests green.' | head -c "$(( 32768 - ssd_n ))" > "$SSDREPO/AGENTS.md"
+    ssd_n="$(( $( wc -c < "$SSDREPO/AGENTS.md" ) + $( wc -c < "$SSDCWD/AGENTS.md" ) ))"; ssd_out="$( ssdx_run xlimit )"
+    if [ "$ssd_n" -eq 32768 ] && [ -z "$ssd_out" ]; then ssdx_silent=$(( ssdx_silent + 1 )); ok "Codex dedup PRESENT (combined size exactly 32768 B): silent"
+    else no "Codex dedup PRESENT (combined size $ssd_n B, want 32768): out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDREPO/AGENTS.md" "$SSDCWD/AGENTS.md"
+    [ "$ssdx_seen" -eq 5 ] && [ "$ssdx_silent" -eq 8 ] && ok "Codex dedup PRESENT: 8 of 8 placements silent (5 planted files seen)" \
+        || no "Codex dedup PRESENT: $ssdx_silent of 8 silent, $ssdx_seen of 5 planted files seen (0 seen = a vacuous arm)"
+    # STALE (the same chosen behaviour as Claude's): the current block is sent
+    ssd_plant "$SSDCWD/AGENTS.md" "$( printf '%s\n' "$SSD_CODEX" | sed '$d' )"; ssd_out="$( ssdx_run xstale )"
+    [ -n "$ssd_out" ] && [ "$ssd_out" = "$SSDX_ABS" ] && ok "Codex dedup STALE (last line dropped): the current block is sent, byte-identical to ABSENT" \
+        || no "Codex dedup STALE: out=${#ssd_out} B, expected ${#SSDX_ABS} B"
+    rm -f "$SSDCWD/AGENTS.md"
+    # NOT DELIVERED: the exact block is planted where Codex would not read it, or might cut it
+    ssdx_kept=0; ssdx_cases=0
+    ssdx_keep() # NAME FILE-HOLDING-THE-BLOCK: run, compare to ABSENT, count
+    {
+        local p; p="$( ssdx_has "$2" )"; ssdx_cases=$(( ssdx_cases + 1 )); ssd_out="$( ssdx_run "xk$ssdx_cases" )"
+        if [ "${p:-0}" -ge 1 ] && [ "$ssd_out" = "$SSDX_ABS" ]; then ssdx_kept=$(( ssdx_kept + 1 )); ok "Codex dedup NOT DELIVERED ($1): the block is sent, byte-identical to ABSENT"
+        else no "Codex dedup NOT DELIVERED ($1): planted=${p:-0} out=${#ssd_out} B, expected ${#SSDX_ABS} B"; fi
+    }
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; printf 'Local override.\n' > "$SSDCWD/AGENTS.override.md"
+    ssdx_keep "a non-empty AGENTS.override.md beside the AGENTS.md" "$SSDCWD/AGENTS.md"; rm -f "$SSDCWD/AGENTS.md" "$SSDCWD/AGENTS.override.md"
+    ssd_plant "$CODEX_HOME/AGENTS.md" "$SSD_CODEX"; printf 'Global override.\n' > "$CODEX_HOME/AGENTS.override.md"
+    ssdx_keep "a non-empty global AGENTS.override.md beside the global AGENTS.md" "$CODEX_HOME/AGENTS.md"; rm -f "$CODEX_HOME/AGENTS.md" "$CODEX_HOME/AGENTS.override.md"
+    ssd_plant "$TMP/AGENTS.md" "$SSD_CODEX"
+    ssdx_keep "AGENTS.md above the Git root" "$TMP/AGENTS.md"; rm -f "$TMP/AGENTS.md"
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; ssd_n="$( wc -c < "$SSDCWD/AGENTS.md" )"
+    yes 'Keep tests green.' | head -c "$(( 32769 - ssd_n ))" > "$SSDREPO/AGENTS.md"
+    ssdx_keep "combined size 32769 B, one over the 32 KiB default" "$SSDCWD/AGENTS.md"; rm -f "$SSDREPO/AGENTS.md" "$SSDCWD/AGENTS.md"
+    for ssd_case in "user config.toml naming project_doc_max_bytes|$CODEX_HOME/config.toml|project_doc_max_bytes = 65536" \
+                    "a profile's config.toml naming project_doc_fallback_filenames|$CODEX_HOME/work.config.toml|project_doc_fallback_filenames = [\"TEAM.md\"]" \
+                    "project .codex/config.toml naming project_root_markers|$SSDREPO/.codex/config.toml|project_root_markers = []"; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; mkdir -p "${ssd_file%/*}"; printf '%s\n' "${ssd_rest#*|}" > "$ssd_file"
+        ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDCWD/AGENTS.md"; rm -f "$ssd_file" "$SSDCWD/AGENTS.md"
+    done
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssdx_keep "the block in CLAUDE.md, which Codex does not read" "$SSDCWD/CLAUDE.md"; rm -f "$SSDCWD/CLAUDE.md"
+    [ "$ssdx_cases" -eq 8 ] && [ "$ssdx_kept" -eq 8 ] && ok "Codex dedup NOT DELIVERED: 8 of 8 keep the primer" \
+        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 8 of 8)"
+    # Claude is not deduped against AGENTS.md (Claude Code reads CLAUDE.md), even when AGENTS.md holds Claude's own block
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_BLURB"; ssd_out="$( ssd_run xclaude )"
+    [ -n "$ssd_out" ] && [ "$ssd_out" = "$SSD_ABS" ] && ok "Codex dedup: the Claude primer still speaks with AGENTS.md holding its block" \
+        || no "Codex dedup: the Claude primer went silent or changed with AGENTS.md holding its block (out=${#ssd_out} B)"
+    rm -f "$SSDCWD/AGENTS.md"
   fi
-    unset CLAUDE_CONFIG_DIR
+    unset CLAUDE_CONFIG_DIR CODEX_HOME
 else
     echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"
 fi

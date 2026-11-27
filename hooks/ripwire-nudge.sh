@@ -1444,6 +1444,56 @@ claudeMdHoldsBlurb()
     done
     return 1
 }
+# agentsMdHoldsBlurb DIR BLURB: the Codex counterpart (θ20, 2026-11-27): true when an AGENTS.md that Codex loads at session start
+# already holds BLURB word for word. Codex's documented discovery (learn.chatgpt.com/docs/agent-configuration/agents-md): the
+# global level in ${CODEX_HOME:-~/.codex} is AGENTS.override.md when non-empty, else AGENTS.md; then one file per directory from
+# the project root (the Git root) down to DIR, AGENTS.override.md before AGENTS.md; root-first, and no file is added once the
+# combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it). CONSERVATIVE where that is not modelled:
+# a file only counts when every byte up to its end lies within 32 KiB, the global file included; a config.toml (user-level,
+# any profile, or a project .codex/ one) naming project_doc_max_bytes, project_doc_fallback_filenames or project_root_markers
+# keeps the primer; carriage returns ignored. test/hookcheck.sh (3i7) pins each case.
+agentsMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text size top total=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
+    local -a files=() dirs=()
+    for f in "$home/config.toml" "$home/"*.config.toml
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 1
+    done
+    top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || return 1
+    [ -n "$top" ] || return 1
+    top="$( cd "$top" 2>/dev/null && pwd -P )" && d="$( cd "$d" 2>/dev/null && pwd -P )" || return 1
+    [ "$d" = "$top" ] || [[ "$d" == "$top"/* ]] || return 1
+    while :
+    do
+        dirs=( "$d" ${dirs[@]+"${dirs[@]}"} )   # bash 3.2 + set -u: an empty array is unbound
+        [ "$d" = "$top" ] && break
+        d="${d%/*}"
+    done
+    for f in "${dirs[@]}"
+    do
+        [ -f "$f/.codex/config.toml" ] || continue
+        claudeMdRead "$f/.codex/config.toml" || continue
+        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 1
+    done
+    for f in "$home" "${dirs[@]}"
+    do
+        if [ -s "$f/AGENTS.override.md" ]; then files+=( "$f/AGENTS.override.md" )
+        elif [ -s "$f/AGENTS.md" ]; then files+=( "$f/AGENTS.md" ); fi
+    done
+    for f in ${files[@]+"${files[@]}"}
+    do
+        size="$( wc -c < "$f" 2>/dev/null )"
+        [ -n "$size" ] || return 1
+        total=$(( total + size ))
+        [ "$total" -le 32768 ] || return 1   # this file and every later one may be cut: Codex stops adding at 32 KiB
+        claudeMdRead "$f" || continue
+        [[ "$text" == *$'\r'* ]] && text="${text//$'\r'/}"
+        [[ "$text" == *"$want"* ]] && return 0
+    done
+    return 1
+}
 
 if [ "${1:-}" = "--session-start" ]
 then
@@ -1497,8 +1547,9 @@ then
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
     # HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND this hook installed, the same ~3.9 KB arrived
-    # twice on every request. Only for Claude, whose memory files are the ones checked; Codex's AGENTS.md is not.
+    # twice on every request. Each agent is checked against the files IT loads: Claude's memory files, Codex's AGENTS.md chain (θ20).
     [ "$meter_agent" = claude ] && claudeMdHoldsBlurb "$dir" "$blurb" && exit 0
+    [ "$meter_agent" = codex ] && agentsMdHoldsBlurb "$dir" "$blurb" && exit 0
 
     if command -v jq >/dev/null 2>&1
     then
