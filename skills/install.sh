@@ -490,14 +490,19 @@ install_claude_hook()
     # mcp__ripwire__.* is in the matcher for the OTHER job this hook does: the substitution meter counts
     # ripwire's own calls as the numerator, and an agent that prefers the MCP server to the CLI would
     # otherwise be a pure undercount (docs/SUBSTITUTION_METER.md). The hook never nudges those calls,
-    # nor the native edit tools, which are metered only so the EDIT band can see them.
+    # nor the native edit tools, which are metered so the EDIT band can see them — except the first source edit of a
+    # session whose first-edit CHECK arm is on, which gets the §FIRSTEDIT check (hooks/ripwire-nudge.sh §FACTORIAL).
     echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
     echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookCmd\" }] }]"
     echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookCmd --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call, and since 2026-09-02 never speaks on it"
     echo "            either — the advisory nudge was measured inert and retired (docs/EVALS.md §4)."
     echo "            What remains on PreToolUse is the substitution meter and the router's adoption"
-    echo "            observation. The SessionStart entry still injects the use-when guidance."
+    echo "            observation, plus, in about half of the sessions while counting is on (a randomized arm,"
+    echo "            independent of the primer's): ONE answer before the first edit of an existing source file,"
+    echo "            a bounded --edit-check of the symbol it touches (2 s deadline). first_edit=0 in"
+    echo "            ~/.ripwire/meter.conf turns it off, first_edit=1 on. The SessionStart entry still injects"
+    echo "            the use-when guidance."
     echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row"
     echo "            carries the RAW file path (Read, and the Edit/Write/MultiEdit/NotebookEdit target), RAW"
     echo "            grep/glob pattern, the first 200 B of the RAW command (Bash), or an MCP verb's symbol/file"

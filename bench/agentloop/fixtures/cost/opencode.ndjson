@@ -1,0 +1,7 @@
+{"type":"step_start","part":{"modelID":"claude-sonnet-4-5"}}
+{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"ripwire . --for=foo"}}}}
+{"type":"tool_use","part":{"tool":"read","state":{"input":{"filePath":"a.py"}}}}
+{"type":"step_finish","part":{"modelID":"claude-sonnet-4-5","cost":0.25,"tokens":{"input":900,"output":300,"reasoning":100,"cache":{"read":10000,"write":5000}}}}
+{"type":"step_start","part":{"modelID":"claude-sonnet-4-5"}}
+{"type":"tool_use","part":{"tool":"edit","state":{"input":{"filePath":"a.py"}}}}
+{"type":"step_finish","part":{"modelID":"claude-sonnet-4-5","cost":0.17,"tokens":{"input":100,"output":200,"reasoning":0,"cache":{"read":15000,"write":0}}}}

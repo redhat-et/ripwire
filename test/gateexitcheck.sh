@@ -307,6 +307,8 @@ FAILFAST = {
     "gdscriptcheck.sh":        ( "set -e and Python assertions; same shape as elixircheck. rc READ, not inferred: run against the pre-GDScript baseline binary (which indexes no .gd, so the fixture yields zero symbols) it exits 1", 1 ),
     "clojurecheck.sh":         ( "set -e and Python assertions; forced an empty output with RIPWIRE_BIN=/usr/bin/true, observed xmllint exit 1", 1 ),
     "agentloopcodexcheck.sh":  ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
+    "agentloopaccountingcheck.sh": ( "its arms accumulate inside one TRAILING python3 heredoc (sys.exit(1 if fails)); its rc IS the script's, after a fail-fast `exit 2` when BIN does not run. rc READ, not inferred: run against main 5f4b50415's bench/agentloop (9 of 10 arms red) and e28cb7893's (4 of 10 red) it exits 1 both times (2026-11-26)", 1 ),
+    "agentloophistorycheck.sh":  ( "its arms accumulate inside one TRAILING python3 heredoc (sys.exit(1 if fails)); its rc IS the script's, after a fail-fast `exit 2` when BIN does not run. rc READ, not inferred: run against main 5f4b50415's bench/agentloop (6 of 6 arms red) it exits 1 (2026-11-26)", 1 ),
     "clonebandcheck.sh":        ( "every check is `echo FAIL; exit 2` at the site",                      2 ),
     "clonelexcheck.sh":         ( "single terminal if/else on the harness binary, `exit 2` on failure",  2 ),
     "communitylabelcheck.sh":   ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),

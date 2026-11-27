@@ -307,11 +307,13 @@ for _g in \
     affectedfoldcheck \
     affectedgroupcheck \
     affectedpathcheck \
+    agentloopaccountingcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
     agentloopfollowupcheck \
     agentloopgradercheck \
+    agentloophistorycheck \
     agentlooplockcheck \
     agentloopopencodecheck \
     agentsurfacecheck \
@@ -857,6 +859,7 @@ for _g in \
     nextaposcheck \
     nextverbcheck \
     noaliascheck \
+    nocacheevictcheck \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
@@ -1209,6 +1212,7 @@ for _g in \
     warmpeakcheck \
     warmsnapcheck \
     weaksignalcheck \
+    whereisnographcheck \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
