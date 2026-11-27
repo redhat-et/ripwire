@@ -633,11 +633,8 @@ inline constexpr const char* kAssertedColumnLegend =
     "<asserted> (when fields= names it): 1 = a tested row an ASSERTING test reaches (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback); 0 = none found, or not tested. ";
 inline constexpr const char* assertedLensLegend( bool isColumnar, bool present ) noexcept
 {
-    if( !present )
-    {
-        return "";
-    }
-    return isColumnar ? kAssertedColumnLegend : kAssertedRowLegend;
+    return !present ? "" : isColumnar ? kAssertedColumnLegend
+                                      : kAssertedRowLegend;
 }
 
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
