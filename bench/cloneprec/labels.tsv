@@ -1,0 +1,53 @@
+# cloneprec — PRE-EXISTING clone-row labels, transcribed 2026-11-27, authored by OTHER lanes.
+#
+# This file contains NO judgement of mine. Every row is an adjudication someone else committed, with
+# the file and arm that pins it. It exists so the regression check in README.md Part 1 can be run
+# without this lane deciding anything, and so a later reader can see exactly which labels were
+# available before this lane started.
+#
+# READ THE WARNING IN README.md BEFORE COMPUTING A PRECISION FROM THIS FILE. Every pair here is
+# labelled BECAUSE it was adjudicated by the rounds that built the demotion rules, and the FALSE ones
+# were then demoted by those rules — so they are no longer in the gating population by construction.
+# Precision over this subpopulation is a near-tautology, not a measurement. Its legitimate use is as a
+# REGRESSION CHECK in both directions:
+#     a FALSE pair found GATING today  -> a demotion regressed
+#     a TRUE pair found MISSING today  -> a recall loss
+#
+# verdict: FALSE = structural resemblance only, correctly not gating
+#          TRUE  = a real duplication, correctly gating
+#          HELD  = a pre-existing group correctly NOT reported as this change's duplication (neither)
+# scope:   real = a real commit of this repo    fixture = a synthetic fixture (NEVER counted in a
+#          precision over real code; a fixture population would inflate any such figure)
+#
+# verdict	scope	fix_commit	pair	kinds	label_source
+FALSE	real	7037e7e03	siteLess | keyLess	duplication	test/dupshortcheck.sh (A) demoted
+FALSE	real	e4bd12b94	errorMaskHitGates | sameFamily	duplication	test/dupshortcheck.sh (A) demoted
+FALSE	real	00cb4ac60	isHandlerShaped | declinedCallMayReach	duplication	test/dupshortcheck.sh (A) demoted
+FALSE	real	00cb4ac60	isHandlerShaped | isServed	duplication,new-clone-of-reused-helper	test/dupshortcheck.sh (A) demoted
+FALSE	real	1d604ab41	shipsViewFlag | varSpansCover	duplication	test/dupshortcheck.sh (A) demoted
+FALSE	real	bae4d12f6	containsAny | namesEvents	duplication	test/dupshortcheck.sh (A) demoted
+FALSE	real	1a009c9f7	decltwin_detail::baseOf | gitstamp::atAttr	duplication,new-clone-of-reused-helper	test/dupshortcheck.sh 1a009c9f7 note (QD-IDIOM-ELEMTYPE); docs/EVALS.md:19457
+TRUE	real	760a433c7	recallBytesForTokens | ceilingAllowanceBytes	duplication,new-clone-of-reused-helper	test/dupshortcheck.sh (B) gates — share kMinBytesPerToken
+TRUE	real	dd29aa8c2	qualifiedName | callerHopSelector	duplication	test/dupshortcheck.sh (B) gates — a one-line copy
+TRUE	real	bae4d12f6	containsAny | isKeyFileToken	duplication	test/dupshortcheck.sh (B) gates — same file and scope
+TRUE	real	c5b45f163	isCQuoteRootProbe | isBareTsSpecifier	duplication	test/dupshortcheck.sh (B) gates — share includeLangOf
+TRUE	real	3b7931830	afterLast family (every row of the fix)	duplication	test/dupshortcheck.sh (B) — two-statement members, all rows gate
+TRUE	real	708348e97	emptyUnder | picksAlone	duplication	docs/EVALS.md:19457 "What still gates" — 84 tokens, by design
+TRUE	real	708348e97	isIdent | isWordChar	duplication,new-clone-of-reused-helper	docs/EVALS.md:19457 "What still gates" — share the literal 0x80 and a callee
+TRUE	real	708348e97	writeHexPairLines | writeTangleLines	duplication	docs/EVALS.md:19457 "What still gates" — a real duplicate
+TRUE	real	708348e97	JsonNode::get | steer_find	duplication	docs/EVALS.md:19457 "What still gates" — a real duplicate
+TRUE	real	708348e97	lintCatalogFind | steer_find	duplication	docs/EVALS.md:19457 "What still gates" — a real duplicate
+HELD	real	1a009c9f7	model.h::pathDirOf (moved body)	duplication,new-clone-of-reused-helper	test/dupshortcheck.sh — ContentMoves holds the pre-existing group; no row is correct
+FALSE	fixture	-	P1 svLess over vector<string> | over span<const string_view>	duplication	test/cloneoperandcheck.sh P1 — why="different parameter types"
+FALSE	fixture	-	P2 quote strip | whitespace squeeze	duplication	test/cloneoperandcheck.sh P2 — why="different literals"
+FALSE	fixture	-	P3 bounded peek returning '\0' | returning a member	duplication	test/cloneoperandcheck.sh P3 — different literals, one side empty
+TRUE	fixture	-	N1 tag-parameterised hex writer | its "tangle " instance	duplication	test/cloneoperandcheck.sh N1 — kept a literal
+TRUE	fixture	-	N2 two reverse find-by-key loops	duplication	test/cloneoperandcheck.sh N2 — same literals (a recall pin)
+TRUE	fixture	-	N3 the P2 pair in one file and one namespace	duplication	test/cloneoperandcheck.sh N3
+TRUE	fixture	-	N4 generic template member | the concrete P1 member	duplication	test/cloneoperandcheck.sh N4
+TRUE	fixture	-	N5 the P2 shape past the 80-token ceiling	duplication	test/cloneoperandcheck.sh N5
+TRUE	fixture	-	N6 Python \w | an identifier class with '$'	duplication	test/cloneoperandcheck.sh N6 — share one literal
+TRUE	fixture	-	calcDup appended beside the reused helper calc	new-clone-of-reused-helper	test/clonededupcheck.sh — the canonical positive case
+TRUE	fixture	-	dup1 | dup2 inside one new file	duplication	test/qualitycheck.sh §3
+TRUE	fixture	-	a third exact copy of a baseline group	duplication	test/qdclonepaircheck.sh (c) control
+TRUE	fixture	-	a new near clone of an untouched function	duplication	test/qdclonepaircheck.sh (d) control

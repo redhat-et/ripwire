@@ -199,6 +199,35 @@ a win.
 
 ---
 
+---
+
+# Addendum, declared 2026-11-27 after population A was run and before population B was run
+
+Two changes, both marked where they appear. The pre-registration above is **not** edited to match the
+results; this addendum sits after it so a reader can see exactly what was decided when.
+
+**(i) A factual correction to the method, not to a finding.** Part 2's definition said "each row's `sym`
+is its members' canonical ids joined". That is wrong for one of the two kinds: a `duplication` row names
+its group in **`members=`**, and only a `new-clone-of-reused-helper` row uses `sym=`. The parser reads
+both (`run_cloneprec.py::members_of`). Nothing else about the definition changes.
+
+**(ii) Population A returned an EMPTY gating population, so a second population was declared.**
+Population A (the 40 frozen first-parent merge ranges) emitted clone rows but **zero gating** ones, and a
+precision cannot be computed on an empty population - this is the failure the honesty rules above
+anticipated, and A's result is reported as it came out rather than being replaced. Two consequences:
+
+- **Population B** - `bench/cloneprec/ranges_b.lock`, the last **80 non-merge** commits from the tip,
+  each as `C~1..C`, frozen before it was run. The reason for the shape: A's rows were overwhelmingly
+  `origin="new-symbol"`, and a clone group whose every member is new **cannot** gate by construction, so
+  A's population was structurally incapable of carrying the quantity. An ordinary commit more often
+  touches code that already exists. Same rubric, same salt, same stopping rule. **B does not replace A**;
+  both are reported, and if B is also empty that is the finding, not a prompt for a population C.
+- **A post-hoc second metric for Part 2**, clearly labelled as post-hoc: rows per underlying duplication
+  over **all** clone rows, gating or not, in addition to the pre-registered gating-only metric. The
+  pre-registered metric is gating-only because PR #809 merges only gating rows; the all-rows figure
+  measures what a reader of the document actually sees. It is reported beside the pre-registered one and
+  never in place of it, and the fact that #809 does not act on the non-gating rows is stated with it.
+
 ## Results
 
-(appended after the runs; nothing above this line is written with a result in view)
+(appended after the runs; nothing above the addendum line is written with a result in view)
