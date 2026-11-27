@@ -7,6 +7,11 @@ You can also point the audit at **your own large repository**. Build ripwire, ru
 report what it gets wrong. Your tree is an instrument this project does not have. Either way, a
 finding is a reproducer — argv, corpus and commit, output — not an impression.
 
+**Coordinate on [issue #152](https://github.com/redhat-et/ripwire/issues/152)**, which tracks this
+prompt. On 2026-11-26 Lens 1 (hostile inputs) is claimed there, since 2026-11-13, on a mid-sized public
+C++ tree; the other five lenses are open. Post the lens, the tree and its sha before you start, so two
+runs do not overlap.
+
 Build first. Most lenses need a binary, and Lens 1 needs the sanitizer build too:
 
 ```bash
@@ -14,10 +19,14 @@ cmake -S . -B build && cmake --build build -j        # no build type: Release bl
 cmake -S . -B asan -DRIPWIRE_ASAN=ON && cmake --build asan -j
 ```
 
-## Before any lens: measure the instrument
+## Before any lens: orient, then measure the instrument
 
-The previous full audit (2026-09-10, PR #127 and follow-ups #128–#136) was fooled three times. Each
-time the subject was fine and the instrument was not:
+Each lens orients first: `./build/ripwire . --for="<the lens, in words>"` for the code, and
+`./build/ripwire . --recall="<the lens>"` for the plans and earlier rounds in `docs/`. Read what they
+rank before you open whole files.
+
+The last completed full audit (2026-09-10, PR #127 and follow-ups #128–#136) was fooled three
+times. Each time the subject was fine and the instrument was not:
 
 - **A cache that evicted itself faked super-linearity.** Two `--for` rows on llvm-project read
   super-linear, one of them 14×. The cause was the 2 GB oldest-first sweep (`kMaxCacheDirBytes`,
@@ -111,6 +120,9 @@ number is worth flagging is your judgment call, not a red exit code.
   O(children²), but only on flat child lists (comment extras, include guards).
 - On llvm-project (182,555 files) those walks cost a fifth of the cold parse: 194.14 → 155.60 s CPU in
   #127. They were invisible on every standard corpus.
+- Memory is the other half of the rung. A name-keyed base-class walk with no visited set grew one
+  llvm-project process to 149.7 GB on 2026-11-18; after #693 (2026-11-19) the cold map peaks at about
+  3.0 GB, byte-identical, and no standard corpus had shown it. Record peak RSS beside every timing.
 - Report per phase, and find a control invocation that does everything except the suspect phase.
 
 **Protocol.**

@@ -23,8 +23,9 @@ order.
 
 ## Setup — where to start from
 
-Base the work on **`main`**, which is **v0.6.2** (tagged 2026-09-21, commit `15a20855`). There is no
-branch to wait for; `main` is the base, and a fork of it is the right shape for this.
+Base the work on **`main`**. The latest release on 2026-11-26 is **v0.7.0** (tagged 2026-11-23, commit
+`5a3df049e`). There is no branch to wait for; `main` is the base, and a fork of it is the right shape
+for this.
 
 ```bash
 cmake -S . -B build && cmake --build build -j
@@ -39,9 +40,34 @@ header, so every number below has a binary attached to it.
 
 ---
 
-## What has already been measured, and on what
+## Where #70 stands (2026-11-26)
 
-Every COBOL number this project holds came from **716 public files**: NIST, CardDemo, an
+One external round has already been run. On 2026-10-10 the issue's reporter posted on #70:
+
+- **Part 1 on a small public corpus** — 24 COBOL and 17 DDS files, all 59 reference sites hand-reviewed,
+  recall split by tier (tree tier: out-of-line PERFORM 23/24, literal CALL 13/18, COPY 7/17; token
+  tier: CALL 1/18, nothing else), plus the same table in aggregate for a private snapshot.
+- **The scanner fixes upstream**, as open pull requests on `yutaro-sakamoto/tree-sitter-cobol`: #44
+  (the out-of-bounds read) and #42 (the end-of-file hang). Neither was merged on 2026-11-26, so you
+  still patch both yourself.
+- **Part 2 answered *yes* for their pipeline** — their own parser already knows where a body ends —
+  with a proposed standard-SCIP import contract.
+
+The maintainers' reply (2026-10-12) likes the shape and defers the contract decision. It names four
+things a SCIP-import pull request must meet, and `CONTRIBUTING.md`, "Languages without a grammar:
+imported, not parsed", is the reference it will be reviewed against. Today `--scip=` is a precision
+overlay on call edges for languages ripwire already parses; it does not import symbols for a language
+it does not parse.
+
+So the most useful run now is Part 1 on **more and different corpora** (41 files is a small
+denominator, and a second corpus is the only check on the first), the frequency counts in 1.3, and —
+if your resolver differs — your own Part 2 answer.
+
+---
+
+## What was measured first, and on what
+
+The first round of COBOL numbers (2026-09) came from **716 public files**: NIST, CardDemo, an
 OMP course set, and IBM, Microsoft and exercism samples. That is a convenience sample, not a census,
 and its shape is the reason this round exists — sample code under-represents the constructs real
 shops live in.
@@ -228,8 +254,8 @@ for what your extraction knows, not what it could be made to infer.
 
 ### 2.1 — re-run your verb telemetry
 
-Previously reported: **17 sessions, 317 MCP calls, eight native verbs** — `fetch_body`, `grep`,
-`find_symbol`, `find_referencing_symbols`, `uses`, `explore`, `for`, `analyze` — and **none** of the
+Reported on #70 on 2026-09-11: **17 sessions, 317 MCP calls, eight native verbs** — `fetch_body`,
+`grep`, `find_symbol`, `find_referencing_symbols`, `uses`, `explore`, `for`, `analyze` — and **none** of the
 parse-tree features. That mix is why `typed_enclosing_range` is the blocker rather than one item
 among many: `fetch_body` is in the top of it.
 

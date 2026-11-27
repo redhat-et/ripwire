@@ -1,5 +1,11 @@
 # Nesting refusals, visible: a file ripwire refused to parse is never invisible
 
+> **Solved (2026-11-26).** A file refused for pathological nesting (JSON, YAML, Markdown, Kotlin) now gets a
+> `--skipped` row (`why="nest-refused"`) on cold and warm runs and a `nest_refused=` count, and `--match` no longer
+> parses it, in [#331](https://github.com/redhat-et/ripwire/pull/331) (train 18, a maintainer lane), closing [#157](https://github.com/redhat-et/ripwire/issues/157). The YAML and
+> Markdown KNOWN GAP blocks are flipped: `test/yamllangcheck.sh:307` and `test/mdsectioncheck.sh:134` now read
+> `#157 FLIPPED`. This kit stays as a worked example; nothing in it remains open.
+
 ripwire refuses pathologically nested JSON, YAML, Markdown and Kotlin files **before** it parses them.
 For YAML, Markdown and Kotlin that refusal is about survival: the vendored grammars' external scanners
 write past a buffer (YAML, Markdown) or abort the whole process (Kotlin) at deep enough nesting. The

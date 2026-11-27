@@ -4,8 +4,16 @@ You are writing unit tests for ripwire's CSR call graph and its PageRank power i
 that makes CI build and run them. The tests use small hand-built graphs whose expected values you can
 check on paper. The gate turns a rejection rule that nothing can trigger into one a change can fail.
 
+> **Status (2026-11-26): claimed, and a PR is in review.** @Ankit-cs claimed #153 on 2026-10-15, and
+> the plan was agreed on the issue on 2026-11-01. PR #531 (opened 2026-11-04) adds the 43 tests and
+> `test/csrpagerankcheck.sh`; maintainer review comments of 2026-11-06 and 2026-11-09 list the open
+> items. **If you are not the claimant, do not start a competing PR:** offer help on #531, or pick
+> another kit. This kit stays as the specification #531 is reviewed against.
+
 Work in a git worktree, not the main checkout. Run every gate in the foreground. Line numbers are from
-`main` at `f22081b0`; if one has moved, find the symbol, not the line.
+`main` at `f22081b0` and many have moved since (at `09995f4b` the `RIPWIRE_TESTS` option is at
+`CMakeLists.txt:849`, not 604); find the symbol, not the line —
+`./build/ripwire . --grep=NAME` names the line and the enclosing symbol.
 
 ---
 
@@ -14,15 +22,16 @@ Work in a git worktree, not the main checkout. Run every gate in the foreground.
 `CONTRIBUTING.md` §2 lists what rejects a change automatically, and one entry is "the CSR property test
 fails". Today nothing can make that happen:
 
-- **No gate and no CI job builds the CSR or PageRank tests.** They exist only behind the CMake option
-  `RIPWIRE_TESTS` (`CMakeLists.txt:604`, OFF by default). `.github/workflows/ci.yml` never sets it, no
-  gate in `test/regression.sh` builds `ripwire_test_csr` or `ripwire_test_pagerank`, and nothing runs
-  `ctest`. `test/dependencypincheck.sh` configures with `-DRIPWIRE_TESTS=ON`, but it builds nothing.
-- **Because nothing builds it, the PageRank test no longer compiles.** `test/verify_pagerank.cpp:65`
-  assigns `rw::pageRankDouble( … )` to a `const unsigned`. Since `2bbd134d` (2026-08-17) the function
-  returns `PageRankRun`, and the target fails with `no viable conversion from 'PageRankRun' to 'const
-  unsigned int'`. With only that line changed, its one test case passes 16 of 16 assertions (measured).
-- `ripwire_test_csr` builds and passes: 2 test cases, 23 assertions (measured).
+- **Only the Windows leg builds the CSR and PageRank tests.** They exist behind the CMake option
+  `RIPWIRE_TESTS` (OFF by default). The Windows CI leg configures with `-DRIPWIRE_TESTS=ON` and runs
+  `ctest` (`.github/workflows/ci.yml`, the "Unit tests (ctest …)" step). No Linux or macOS leg and no
+  gate in `test/regression.sh` builds `ripwire_test_csr` or `ripwire_test_pagerank`, so a failure shows
+  up on Windows only. `test/dependencypincheck.sh` configures with `-DRIPWIRE_TESTS=ON`, but it builds
+  nothing.
+- **The PageRank test compiles again.** It once broke silently for lack of a builder (`pageRankDouble`
+  started returning `PageRankRun` in `2bbd134d`); `main` now reads `.iterationCount`. That is the
+  failure mode a POSIX gate exists to prevent.
+- At `09995f4b`, `test/verify_csr.cpp` has 2 test cases and `test/verify_pagerank.cpp` has 1.
 
 CLAUDE.md's first non-negotiable is why this matters here: a ranking and a call graph look plausible
 whether or not they are correct. A wrong edge weight or an off-by-one in the stopping rule does not
@@ -34,10 +43,10 @@ crash. It produces an ordering an agent believes.
 
 | File | What it gives you |
 | --- | --- |
-| `CMakeLists.txt:604-635` | The `RIPWIRE_TESTS` option and both targets: `ripwire_test_csr` (`test/verify_csr.cpp` + `src/infra/diagnostics.cpp`) and `ripwire_test_pagerank` (`test/verify_pagerank.cpp` + `src/pagerank.cpp` + `src/infra/diagnostics.cpp`), each with `add_test`. Lines 742-744 put them on the G1 sanitizer target lists |
+| `CMakeLists.txt`, `option(RIPWIRE_TESTS` (line 849 at `09995f4b`) | The option and the doctest targets: `ripwire_test_csr` (`test/verify_csr.cpp` + `src/infra/diagnostics.cpp`) and `ripwire_test_pagerank` (`test/verify_pagerank.cpp` + `src/pagerank.cpp` + `src/infra/diagnostics.cpp`), each with `add_test`. The `RIPWIRE_RUNTIME_COMPILE_TARGETS` lists put them on the G1 sanitizer targets |
 | `third_party/deps/doctest` | doctest 2.4.12, pinned by commit and vendored. The test framework; test-only |
 | `test/verify_csr.cpp` | Random CSRs at 0, 1, 2, 100 and 10,000 nodes with an adjacency round-trip; a 70,001-edge row that catches 16-bit truncation; NaN and negative-value rejection; `buildGraph` orientation on a hand-built `IngestResult`. Keep all of it |
-| `test/verify_pagerank.cpp` | The empty graph, a two-node dangling fixture checked against 20/57, all-dangling equals teleport, fractional weights keep mass, three tied callers of one hub. Keep all of it once line 65 is fixed |
+| `test/verify_pagerank.cpp` | The empty graph, a two-node dangling fixture checked against 20/57, all-dangling equals teleport, fractional weights keep mass, three tied callers of one hub. Keep all of it |
 | `test/strkerncheck.sh` | **The template.** It configures a scratch tree with `-DRIPWIRE_TESTS=ON -DRIPWIRE_ASAN=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON`, builds one doctest target, runs it with the sanitizer options, parses doctest's tally lines against floors, and has a mutation arm that must go red. It is pinned in `test/binoverridecheck.sh`'s `EXEMPT` table because it never runs `build/ripwire` |
 | `test/dynmapsimdcheck.sh` | SIMD-versus-scalar parity for `sparseCsr`'s kernels: `blockReduceDot` and `scaleVec` at sizes 0 to 2051, across the 1024 seam; `spmvRow` and `applyInto` at row lengths 0 to 40; `dominantEigenvector` on a 2×2. Do not repeat it |
 | `test/prconvergecheck.sh` | The non-convergence disclosure end to end on the binary, including an NDEBUG binary, and the `RIPWIRE_TEST_PR_MAXITERS` strings `100 100000 0 "" 2x x2 " 2" -2` |
@@ -93,10 +102,10 @@ Two other help-wanted kits overlap with this one. Do not duplicate them; link th
    runs, and correct results across the 1024-element block seam.
 8. **`ASSUME` is not a test oracle.** In a plain or ASan build a failed `ASSUME` calls the assert
    handler, which ends the process. Under `NDEBUG` it becomes an optimizer assumption
-   (`src/infra/Diagnostics.h:265-321`), so a violated precondition in a Release build is undefined
+   (`RW_CHECK_` and `RW_ASSUME_` in `src/infra/Diagnostics.h`), so a violated precondition in a Release build is undefined
    behaviour. doctest has no death tests. Never give a test an input that violates an `ASSUME`; test the
    predicate (`verifyCsr`) directly.
-9. **`DISCLOSE` logs once per call site per process** (`Diagnostics.h:543-550`). In a test
+9. **`DISCLOSE` logs once per call site per process** (the `DISCLOSE` family in `src/infra/Diagnostics.h`). In a test
    binary, the non-convergence alert prints on the first truncated run and never again. The part you can
    test is the returned `PageRankRun`.
 10. **`RIPWIRE_TEST_PR_MAXITERS` is read once per process** (`src/pagerank.cpp:56`). A test cannot vary
@@ -111,6 +120,11 @@ Two other help-wanted kits overlap with this one. Do not duplicate them; link th
 ---
 
 ## Coverage inventory
+
+> **Line numbers below are from the tree this kit was written against (2026-09), and `src/graph.h` has
+> grown since: `buildGraph` now starts near line 11,000, `biasPrior` near 15,050 and `computeImpure` near
+> 18,240. The function names are the anchors. Re-derive each line with `./build/ripwire . --expand=<function>`
+> before you cite it in a test comment; `src/pagerank.cpp` and `src/infra/sparseCsr.h` have moved less.**
 
 | Function | Branch or condition | Why it matters | Test |
 | --- | --- | --- | --- |
@@ -167,8 +181,7 @@ none in `sparseCsr.h`, in `csrverify.h`, in the CSR section of `buildGraph`, in 
 
 **Nearby, out of scope.** These read the CSR but are not in scope; they are listed so nobody assumes
 they are covered: `fanInFromInEdges` raises `DISCLOSE` when the CSR has no offsets
-(`src/graph.h:3915`), and `computeImpure` silently skips propagation when the CSR shape mismatches
-(`:4590`).
+(`src/graph.h`), and `computeImpure` silently skips propagation when the CSR shape mismatches.
 
 ---
 
@@ -286,7 +299,7 @@ truncated.
 
 | ID | Input | Expected |
 | --- | --- | --- |
-| K0 | empty: `sparseCsr<float>( 0, 0, 0 )` with empty spans; then again with `maxIterationCount = 1` | `{ 0, true }`, and `rank` stays empty. This is the case at line 65 that no longer compiles |
+| K0 | empty: `sparseCsr<float>( 0, 0, 0 )` with empty spans; then again with `maxIterationCount = 1` | `{ 0, true }`, and `rank` stays empty. This extends the existing empty-graph case |
 | K1 | 1 node, no edges, `wOutDeg { 0 }`, teleport `{ 1 }` | `{ 1, true }`; rank exactly `{ 1.0 }`, because α·1 + (1 − α) is exactly 1 for this α |
 | K2 | 1 node with a self-loop: offsets `{ 0, 1 }`, columns `{ 0 }`, values `{ 1 }`, `wOutDeg { 1 }`, teleport `{ 1 }` | `{ 1, true }`; rank exactly `{ 1.0 }`. The kernel uses a self-loop it is given |
 | K3 | chain 0→1: offsets `{ 0, 0, 1 }`, columns `{ 0 }`, values `{ 1 }`, `wOutDeg { 1, 0 }`, teleport `{ 0.5, 0.5 }` | x* = ( 1/(2+α), (1+α)/(2+α) ) = ( 0.350877190047, 0.649122809953 ). Shipped `{ 17, true }` (margins 1.133, 0.482); precise `{ 35, true }`. The existing 20/57 check is the fixed point for α = 0.85, so keep it under a config that passes 0.85 explicitly |
@@ -360,7 +373,7 @@ check that its own E1 runs executed assertions.
 
 ## CI wiring
 
-1. **CMake needs nothing new.** `RIPWIRE_TESTS` already exists. Fix line 65 in its own first commit.
+1. **CMake needs nothing new.** `RIPWIRE_TESTS` already exists, and both targets compile on `main`.
 2. **The gate:** `test/csrpagerankcheck.sh` (a proposed name), shaped like `test/strkerncheck.sh`.
    - **Arm 0, presence.** Both target names appear in `CMakeLists.txt` and both sources exist. A missing
      target must FAIL, not silently run zero tests.
@@ -396,8 +409,10 @@ check that its own E1 runs executed assertions.
 
    `.github/pargates-shard-weights.json` needs no entry; an unlisted gate gets the median weight.
 4. **Where CI runs it.** The `release` job in `.github/workflows/ci.yml` runs `test/pargates.py` over
-   that loop on six legs, macOS 14 AppleClang, Ubuntu gcc and Ubuntu clang, each as `Release` and as
-   `plain`. Every leg is split into four shards, so the gate runs once per leg: six times per push.
+   that loop. The full matrix is six legs, macOS 26 AppleClang, Ubuntu gcc and Ubuntu clang, each as
+   `Release` and as `plain`, each split into four shards, so the gate runs once per leg. A light run
+   keeps only the Ubuntu clang Release leg; read the `decide` step's header comment for which runs
+   are light.
    **A leg's build flavour does not reach the gate's build.** The gate configures its own scratch trees,
    which is why arm 1 builds with ASan itself and arm 2 builds with `NDEBUG` itself. On the gcc legs the
    ASan configure gets GCC's smaller sanitizer set and announces it. The `asan` job runs named steps,
@@ -411,6 +426,14 @@ check that its own E1 runs executed assertions.
 ---
 
 ## Build and verify
+
+**Orient with ripwire before you open files.** `./build/ripwire . --for="pageRankDouble stopping rule
+dangling mass buildGraph CSR edge weight"` ranks the code these tests cover;
+`./build/ripwire . --expand=pageRankDouble` and `--expand=verifyCsr` give the bodies the fixtures are
+derived from. Before you write the gate, run `./build/ripwire . --exemplar="a gate that builds one
+doctest target under ASan and mutates a copy"` (`test/strkerncheck.sh` is the template). Before you
+call it done, run `./build/ripwire . --quality-delta --legend=compact`, then
+`./build/ripwire . --test-gate`.
 
 ```bash
 cmake -S . -B build && cmake --build build -j          # plain dev build: never -DCMAKE_BUILD_TYPE=Release
@@ -431,7 +454,7 @@ gates that crawl the live repository. Run the full suite on CI, not locally.
 
 **Never edit the tree while a build is running.** `graph.h` pulls in `src/model.h`. After a branch
 switch, rebuild with `--clean-first`: an incremental build can mix objects that disagree about
-`sizeof( Symbol )`. The `static_assert` at `src/model.h:389` cannot catch that, because it passes in
+`sizeof( Symbol )`. The `static_assert` on `sizeof( Symbol )` in `src/model.h` cannot catch that, because it passes in
 each translation unit on its own. CLAUDE.md's "Build" section tells the story. The gate's scratch trees
 are fresh every time; your local test tree is not.
 
@@ -478,7 +501,10 @@ Follow `CONTRIBUTING.md` §3; the rules that come up most in tests:
 
 ## Acceptance criteria
 
-1. `test/verify_pagerank.cpp` compiles again, in its own commit, before any new test.
+**Done means** `test/csrpagerankcheck.sh` is green in the foreground and listed in `test/regression.sh`,
+with every criterion below met.
+
+1. Both doctest targets still compile and pass before any new test is added (they do on `main`).
 2. Every ID above exists as a test case with the stated expectation, or the plan says why it changed or
    was dropped. No expected value comes from running the code under test.
 3. The gate has arms 0 to 3. Each mutation in arm 3 was seen to fail, and the failing IDs are recorded

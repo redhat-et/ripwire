@@ -2,23 +2,19 @@
 name: ripwire-graph-query
 description: >
   A call-graph question the fixed verbs can't phrase — 'which high-complexity functions can reach X?',
-  'what has 10+ callers in src/?', 'untested symbols within one hop of main'. --graph-query: a small
-  closed expression language — kind, complexity, fan-in, tested filters; a file or cluster; bounded
-  hops; and/or/not.
+  'what has 10+ callers in src/?', 'untested symbols within one hop of main'. --graph-query: a closed
+  expression language — kind, complexity, fan-in, tested filters; a file or cluster; bounded hops;
+  and/or/not.
 allowed-tools: Bash, Read
 ---
 
 # Graph queries with ripwire
 
 > One-hop questions have cheaper verbs — **ripwire-navigate** (`--callers`, `--callees`, `--uses`, `--path`,
-> `--impact`). Reach for `--graph-query` only when you need to COMBINE conditions. Repo-wide architecture health
-> → **ripwire-layers**.
+> `--impact`). Use `--graph-query` only to COMBINE conditions. Repo-wide architecture health → **ripwire-layers**.
 
-## The one call
-
-`ripwire <dir> --graph-query='EXPR' --legend=compact` — a small closed expression language (not Datalog: no user
-rules, no unbounded recursion) evaluated to a deterministic, importance-ranked node set capped at `--top-k`
-(default 200). Single-quote the whole expression for the shell.
+`ripwire <dir> --graph-query='EXPR'` evaluates a small closed expression language (no user rules, no unbounded
+recursion) to a deterministic, importance-ranked node set capped at `--top-k` (default 200). Single-quote it.
 
 | Kind | Form | Meaning |
 |---|---|---|
@@ -31,19 +27,19 @@ rules, no unbounded recursion) evaluated to a deterministic, importance-ranked n
 
 ```
 # the refactor short-list, then its blast radius (≤3 hops)
-ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))' --legend=compact
-ripwire <dir> --graph-query='callers(and(cx(all,15),file(all,"src/")),3)' --legend=compact
+ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))'
+ripwire <dir> --graph-query='callers(and(cx(all,15),file(all,"src/")),3)'
 # the de-facto API surface: 10+ callers
-ripwire <dir> --graph-query='fanin(all,10)' --legend=compact
+ripwire <dir> --graph-query='fanin(all,10)'
 ```
 
 ## Stop rule and trust
 
-One expression answers one question; narrow `file(...)` to your target before trusting the numbers. `count=` vs
-`shown=` in the header says whether the cap bit. Closures walk name-based edges: dynamic dispatch, callbacks and
-macros can be missing. A malformed expression reports the parse error and yields nothing — never half an answer.
+One expression answers one question; narrow `file(...)` to your target before trusting the numbers. `count=` vs `shown=`
+says whether the cap bit. Closures walk name-based edges (dynamic dispatch, callbacks, macros can be missing). A
+malformed expression reports the parse error and yields nothing — never half an answer.
 
 ## Reference file
 
-`graph-query-reference.md` — refactor planning with cluster + blast radius, the full operator table, every
-verified example, calibration.
+`graph-query-reference.md` — refactor planning with cluster + blast radius, the full operator table, every verified
+example, calibration.

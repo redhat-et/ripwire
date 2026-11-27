@@ -1,5 +1,7 @@
 # ripwire-orient — reference: ladder (read on demand; the recipe is in SKILL.md)
 
+Contents: The escalation ladder — climb only until you feel oriented · 0. Recall what you already KNOW · 1. Architecture summary · 2. Task-relevant code · 3. File-by-file map · 4. Cohesive modules · 5. Maintenance pain · 6. Budget it
+
 # Orient with ripwire
 
 > Routing — pick the right door:

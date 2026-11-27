@@ -10,7 +10,9 @@ The panel's contract, so you know what you are auditing: it ranks symbols by how
 evidence families** fire on them — `structural`, `lexical`, `confusion`, `historical`, `colocation`,
 `state` — it refuses composite scores on principle, and every number it prints is either exact, a
 labelled floor, or absent — absent meaning "condition not met", never "unknown". A finding against
-any of that is a finding against the product, not against your corpus.
+any of that is a finding against the product, not against your corpus. The full contract — presets,
+thresholds, why there is no composite — is `ripwire --help=--quality-panel`, and in a ripwire checkout
+`docs/QUALITY_PANEL.md`.
 
 ## Step 1 — capture the claims
 
