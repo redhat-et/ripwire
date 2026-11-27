@@ -190,13 +190,16 @@ int main( int argc, char** argv )
                 double a = 0, b = 0, mC = 0;
                 for( const Symbol& s : ing.symbols )
                 {
+                    if( s.id >= N ) { continue; }
                     if( changed[s.fileId] ) { a = p[s.id]; } else { b = p[s.id]; }
                 }
                 // "in the changed set AND ranked" is the seed's membership rule; it is named ONCE, and the
                 // masses are divided through afterwards rather than in a second pass that repeats the test.
                 for( const Symbol& s : ing.symbols )
                 {
-                    if( changed[s.fileId] && w[s.id] > 0 ) { seed.push_back( { s.id, w[s.id] } ); mC += w[s.id]; }
+                    // s.id < N is part of the membership rule, not a belt: ing.symbols can outrun the graph's
+                    // node count, and w is sized to the graph.
+                    if( s.id < N && changed[s.fileId] && w[s.id] > 0 ) { seed.push_back( { s.id, w[s.id] } ); mC += w[s.id]; }
                 }
                 if( !( mC > 0 ) ) { continue; }
                 for( auto& [ seedId, seedMass ] : seed ) { (void)seedId; seedMass /= mC; }
