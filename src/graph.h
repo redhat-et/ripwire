@@ -7000,16 +7000,20 @@ inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const 
 }
 
 // Counts one call reference's disposition when its resolve-loop iteration ENDS — on every exit, each `continue`
-// included — so no exit needs a counter of its own, only the assignment naming what happened. A reference that
-// leaves naming nothing is counted Unaccounted, and the conservation line cannot balance silently.
+// included — so no exit needs a counter of its own, only the `set` naming what happened. A reference that leaves
+// naming nothing is counted Unaccounted, and the conservation line cannot balance silently. The disposition lives
+// in the tally, so every exit reads as the call it is (a bare local stored for a destructor's hidden read was one
+// clang-analyzer DeadStores row per exit, TIDY-TRIAGE C1).
 struct DispositionTally
 {
-    const CallDisposition& disposition;
     CallDispositionCounts& counts;
+    CallDisposition        disposition = CallDisposition::Unaccounted;
     ~DispositionTally()
     {
         ++counts[ std::size_t( disposition ) ];
     }
+
+    void set( CallDisposition named ) noexcept { disposition = named; }
 };
 
 // `census` arms the eval-only S6-C silent-pin census (src/pincensus.h): every DECIDED call site records
@@ -12631,11 +12635,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         // From here on every exit names its disposition and the tally counts it when the iteration ends,
         // whichever `continue` ends it. An exit that names nothing is counted Unaccounted (DispositionTally).
-        CallDisposition        disposition = CallDisposition::Unaccounted;
-        const DispositionTally tally{ disposition, subscript ? subscriptDispositions : g.callDispositions };
+        DispositionTally tally{ subscript ? subscriptDispositions : g.callDispositions };
         if( r.fromSymbol == kNoNode )
         {
-            disposition = CallDisposition::FileScope;   // no caller node for an edge; the use-site index still lists the site
+            tally.set( CallDisposition::FileScope );   // no caller node for an edge; the use-site index still lists the site
             continue;
         }
         if( r.role == RefRole::Inert )
@@ -12645,7 +12648,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ++g.declinedOut[ r.fromSymbol ];
             ++g.inertDeclinedCalls;
             g.inertDeclinedCaller.push_back( r.fromSymbol );   // no declinedSite* record: no candidate list, no decline site
-            disposition = CallDisposition::Declined;
+            tally.set( CallDisposition::Declined );
             continue;
         }
         const auto                     it          = byName.find( r.calleeName );
@@ -12702,7 +12705,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const bool anyProcMacro  = macroSite && !anyMacroDef && std::any_of( it->second.begin(), it->second.end(), procMacroDef );
         if( macroSite && !anyMacroDef && !anyProcMacro )
         {
-            disposition = vetoExternal( r );
+            tally.set( vetoExternal( r ) );
             continue;
         }
 
@@ -12771,7 +12774,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // (L) fix round 2 / 3 (D3, D6): `import ext.Util; … Util::open` (or `import ext.*;` alone) names the outside Util
             if( javaProvenType.empty() || recvEv.types.jvmHides( r.fileId, r.startByte, r.recvVar.substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) )
             {
-                disposition = javaCandidateRefused( g, r, it != byName.end() );
+                tally.set( javaCandidateRefused( g, r, it != byName.end() ) );
                 continue;
             }
         }
@@ -12845,7 +12848,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // say. Modelling what `__using__` injects stays open (test/elixirnamearitycheck.sh arm A).
                 if( it == byName.end() )
                 {
-                    disposition = CallDisposition::Undefined;
+                    tally.set( CallDisposition::Undefined );
                     continue;
                 }
                 bool anySameRootDef = !multiRoot;
@@ -12856,11 +12859,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 if( anySameRootDef )
                 {
                     ++g.unresolvedOut[ r.fromSymbol ];
-                    disposition = CallDisposition::Unresolved;
+                    tally.set( CallDisposition::Unresolved );
                 }
                 else
                 {
-                    disposition = CallDisposition::OtherRoot;
+                    tally.set( CallDisposition::OtherRoot );
                 }
                 continue;
             }
@@ -12894,13 +12897,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const ReceiverEvidence::PathOwners rustPath = recvEv.pathOwners( r, cand, canonical, importClass );
         if( rustPath == ReceiverEvidence::PathOwners::External )
         {
-            disposition = vetoExternal( r );
+            tally.set( vetoExternal( r ) );
             continue;
         }
         if( rustPath == ReceiverEvidence::PathOwners::Decline )
         {
             recordDecline( r, cand, DeclinedSiteKind::Ladder );
-            disposition = CallDisposition::Declined;
+            tally.set( CallDisposition::Declined );
             continue;
         }
         const bool rustPathHedge = rustPath == ReceiverEvidence::PathOwners::Hedge;
@@ -12928,7 +12931,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 if( it == byName.end() )
                 {
-                    disposition = CallDisposition::Undefined;   // no in-repo def of this builtin name — not external=
+                    tally.set( CallDisposition::Undefined );   // no in-repo def of this builtin name — not external=
                     continue;
                 }
                 for( NodeId c : it->second )
@@ -12940,7 +12943,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 if( cand.empty() )
                 {
-                    disposition = vetoExternal( r );
+                    tally.set( vetoExternal( r ) );
                     continue;
                 }
                 narrowed = true;
@@ -12984,7 +12987,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !jsImports.rebinds.empty() && langFacts( r.lang ).writtenBindingUndecided && jsCallThroughWrittenBinding( jsImports, r ) )
         {
             ++g.unresolvedOut[ r.fromSymbol ];
-            disposition = CallDisposition::Unresolved;
+            tally.set( CallDisposition::Unresolved );
             continue;
         }
         // …and a MEMBER call through a written root is not receiver-typed by its spelling (jsMemberRootWritten): it goes on to the by-name ladder
@@ -13025,14 +13028,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const JsImportTarget& bound = imported->second;
                 if( !shadowed && bound.outcome == JsImportOutcome::External )
                 {
-                    disposition = vetoExternal( r );
+                    tally.set( vetoExternal( r ) );
                     continue;
                 }
                 if( shadowed || bound.outcome == JsImportOutcome::Refused
                     || ( bound.outcome == JsImportOutcome::Unlisted && bound.renamed ) )
                 {
                     ++g.unresolvedOut[ r.fromSymbol ];
-                    disposition = CallDisposition::Unresolved;
+                    tally.set( CallDisposition::Unresolved );
                     continue;
                 }
                 if( bound.outcome == JsImportOutcome::Pinned && !r.memberCall )   // `reply.header()` is not the imported `header`: the ladder reads it
@@ -13069,7 +13072,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 if( cand.empty() )
                 {
                     ++g.unresolvedOut[r.fromSymbol];   // a KNOWN-indirect call the tool refuses to guess at
-                    disposition = CallDisposition::Unresolved;
+                    tally.set( CallDisposition::Unresolved );
                     continue;
                 }
             }
@@ -13090,7 +13093,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             narrowed = narrowTo( javaNarrower.methodOnTypeOrBases( javaProvenType, r, chaUp ), r, cand );
             if( !narrowed )
             {
-                disposition = javaCandidateRefused( g, r, it != byName.end() );
+                tally.set( javaCandidateRefused( g, r, it != byName.end() ) );
                 continue;
             }
         }
@@ -13123,11 +13126,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( rubyReachable.empty() )
             {
-                disposition = vetoExternal( r );
+                tally.set( vetoExternal( r ) );
                 continue;
             }
             recordDecline( r, std::span<const NodeId>( rubyReachable.data(), rubyReachable.size() ), DeclinedSiteKind::RubyNew );
-            disposition = CallDisposition::Declined;
+            tally.set( CallDisposition::Declined );
             continue;
         }
         if( !scipPinned && !canonical && !narrowed && !rubySelfCall.side )
@@ -13144,7 +13147,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         if( !scipPinned && !canonical && !narrowed && r.recv == RecvKind::SuperObj && bindingTier.empty() )
         {
-            disposition = vetoExternal( r );
+            tally.set( vetoExternal( r ) );
             continue;
         }
         // Ruby: a receiver the code builds is an instance, and answers from its class's instances' lookup — by
@@ -13166,7 +13169,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             if( !narrowTo( closed.hit, r, cand ) )
             {
-                disposition = vetoExternal( r );   // RSpec's own target, a class whose lookup leaves the tree: the method Ruby runs is outside it
+                tally.set( vetoExternal( r ) );   // RSpec's own target, a class whose lookup leaves the tree: the method Ruby runs is outside it
                 continue;
             }
             narrowed = true;
@@ -13317,7 +13320,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     g.declinedSiteBound.emplace_back( std::uint32_t( g.declinedSiteRef.size() - 1 ), std::string( bound ) );
                 }
-                disposition = CallDisposition::Declined;
+                tally.set( CallDisposition::Declined );
                 continue;
             }
             else if( cppSplit && ifaceCand.empty() )
@@ -13423,8 +13426,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             switch( recvEv.types.rustBareNarrow( r, falseEdges.decide( r, *baseIds, feKept ), *baseIds, feKept, [ & ] { return falseEdges.isLocalOfCaller( r ); } ) )   // + a Rust bare call's `use`
             {
-                case FalseEdgeRules::Verdict::External: disposition = vetoExternal( r ); continue;
-                case FalseEdgeRules::Verdict::Local:    ++g.unresolvedOut[ r.fromSymbol ]; disposition = CallDisposition::Unresolved; continue;
+                case FalseEdgeRules::Verdict::External: tally.set( vetoExternal( r ) ); continue;
+                case FalseEdgeRules::Verdict::Local:    ++g.unresolvedOut[ r.fromSymbol ]; tally.set( CallDisposition::Unresolved ); continue;
                 case FalseEdgeRules::Verdict::Narrow:
                     ASSUME( !feKept.empty(), "Narrow is returned only while a candidate of the call's language survives" );
                     baseIds = &feKept;
@@ -13460,14 +13463,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             // in reach, but on the other side of self: no edge, and no claim it is outside
             recordDecline( r, std::span<const NodeId>( rubyReachable.data(), rubyReachable.size() ), DeclinedSiteKind::RubySide );
-            disposition = CallDisposition::Declined;
+            tally.set( CallDisposition::Declined );
             continue;
         }
         if( rubyCut == RubyCut::Cut )
         {
             if( rubyReachable.empty() )
             {
-                disposition = vetoExternal( r );   // every namesake is out of reach: the method Ruby runs is outside the tree
+                tally.set( vetoExternal( r ) );   // every namesake is out of reach: the method Ruby runs is outside the tree
                 continue;
             }
             nameIds = &rubyReachable;
@@ -13617,7 +13620,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             || ( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
                  && it != byName.end() && externalVeto.isExternalBound( r ) ) )
         {
-            disposition = vetoExternal( r );
+            tally.set( vetoExternal( r ) );
             continue;
         }
         if( !scipPinned && !canonical && !narrowed )
@@ -13633,7 +13636,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 if( bindingTier.empty() )
                 {
-                    disposition = CallDisposition::Undefined;
+                    tally.set( CallDisposition::Undefined );
                     continue;
                 }
             }
@@ -13702,12 +13705,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( cut == RubyCut::Declined )
             {
                 recordDecline( r, cand, DeclinedSiteKind::RubySide );
-                disposition = CallDisposition::Declined;
+                tally.set( CallDisposition::Declined );
                 continue;
             }
             if( cand.empty() )
             {
-                disposition = vetoExternal( r );
+                tally.set( vetoExternal( r ) );
                 continue;
             }
         }
@@ -13726,7 +13729,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 std::erase_if( cand, ownsOne );
                 if( cand.empty() )
                 {
-                    disposition = vetoExternal( r );
+                    tally.set( vetoExternal( r ) );
                     continue;
                 }
             }
@@ -13773,7 +13776,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 std::string path = std::string( rustWrittenQualifierOf( r ) ) + "::" + r.calleeName;
                 if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) && !recvEv.types.rustRootNamesTreePackage( r.fileId, r.startByte, path ) )
                 {
-                    disposition = vetoExternal( r );
+                    tally.set( vetoExternal( r ) );
                     continue;
                 }
             }
@@ -13783,14 +13786,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const bool alreadyPinned = scipPinned || canonical || narrowed || rule3QualifiedHedge;
         if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
-            disposition = CallDisposition::QualifiedExternal;                   // qualified-external → no edge
+            tally.set( CallDisposition::QualifiedExternal );                   // qualified-external → no edge
             continue;
         }
 
         // ---- std::-qualified C++ call scope guard — see keepStdQualifiedCandidates -------------------------
         if( !keepStdQualifiedCandidates( ing, r, cand ) )
         {
-            disposition = vetoExternal( r );                                    // nothing inside std answers → external=, counted External
+            tally.set( vetoExternal( r ) );                                    // nothing inside std answers → external=, counted External
             continue;
         }
         if( candMemo != nullptr && cand.size() != candMemo->ids.size() )
@@ -13905,12 +13908,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     // PY-MOD-CALL-SITES: `y.f()` through a from-imported submodule y is a module attribute, which a free function
                     // can be: not provably outside the tree, only unproven, so it is declined and counted (declined=)
                     recordDecline( r, std::span<const NodeId>( modAttrNamesakes.data(), modAttrNamesakes.size() ), DeclinedSiteKind::Ladder );
-                    disposition = CallDisposition::Declined;
+                    tally.set( CallDisposition::Declined );
                     continue;
                 }
                 if( cand.empty() )
                 {
-                    disposition = vetoExternal( r );
+                    tally.set( vetoExternal( r ) );
                     continue;
                 }
             }
@@ -13928,7 +13931,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // candidate may run is the standard library's own member — external, not declined
         if( stdWritten.runsOnlyStd( r, nameOnly, stdIndex != StdMemberGate::kNotStd, cand, memberRule3 ) )
         {
-            disposition = vetoExternal( r );
+            tally.set( vetoExternal( r ) );
             continue;
         }
         // ---- tier ladder (the name-based fallback) — SKIPPED when SCIP pinned this site, and for Rule 2's class-identity CLAIM (a type fact, not a locality guess)
@@ -13951,7 +13954,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     // language. That is a call the tool would otherwise SILENTLY drop as "external" while a plausibly-
                     // internal (cross-language-filtered / mis-classified) def exists. Count it so `unresolved=N` sees
                     // it. The guard is defensive/self-documenting (it is invariant-true at this site).
-                    disposition = CallDisposition::Undefined;   // `it == end` cannot reach here (site A continued); named anyway
+                    tally.set( CallDisposition::Undefined );   // `it == end` cannot reach here (site A continued); named anyway
                     if( it != byName.end() )
                     {
                         // multi-root: the per-root semantics of this gauge is "defined in THIS root but
@@ -13968,11 +13971,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         if( anySameRootDef )
                         {
                             ++g.unresolvedOut[r.fromSymbol];
-                            disposition = CallDisposition::Unresolved;
+                            tally.set( CallDisposition::Unresolved );
                         }
                         else
                         {
-                            disposition = CallDisposition::OtherRoot;
+                            tally.set( CallDisposition::OtherRoot );
                         }
                     }
                     continue;
@@ -14021,7 +14024,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         {
                             g.stdMemberDeclines.emplace_back( r.fromSymbol, stdIndex );   // the <stdm> line names it too
                         }
-                        disposition = CallDisposition::Declined;
+                        tally.set( CallDisposition::Declined );
                         continue;
                     }
                 }
@@ -14078,7 +14081,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     // caller (declinedOut → the header's declined=, the callees answer's declined_calls=) and records the candidate list it could equally have meant
                     // (internDeclinedList → the callers and impact answers' declined_calls=), so a count="0" there says a call was declined. test/declinecheck.sh (A), (B).
                     recordDecline( r, cand, DeclinedSiteKind::Ladder );
-                    disposition = CallDisposition::Declined;
+                    tally.set( CallDisposition::Declined );
                     continue;
                 }
             }
@@ -14086,7 +14089,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         if( tier.empty() )
         {
-            disposition = CallDisposition::Self;   // a covered-but-empty SCIP site (all self/out-of-range) yields no edge
+            tally.set( CallDisposition::Self );   // a covered-but-empty SCIP site (all self/out-of-range) yields no edge
             continue;
         }
 
@@ -14331,7 +14334,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 if( gateRefused.empty() )
                 {
-                    disposition = vetoExternal( r );   // every target is one this call cannot reach: not a decline of any of them
+                    tally.set( vetoExternal( r ) );   // every target is one this call cannot reach: not a decline of any of them
                     continue;
                 }
                 std::sort( gateRefused.begin(), gateRefused.end() );   // one sequence per set, as internDeclinedList keys it
@@ -14342,7 +14345,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     g.gateDeclinedTarget[ c ] = 1;
                 }
-                disposition = CallDisposition::Declined;
+                tally.set( CallDisposition::Declined );
                 continue;
             }
         }
@@ -14383,7 +14386,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     g.gateDeclinedTarget[ c ] = 1;
                 }
                 g.stdMemberDeclines.emplace_back( r.fromSymbol, stdIndex );
-                disposition = CallDisposition::Declined;
+                tally.set( CallDisposition::Declined );
                 continue;
             }
         }
@@ -14393,7 +14396,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( stdWritten.pruneTier( tier, bindingPinned ) )
         {
             recordDecline( r, stdWritten.declineList( cand ), DeclinedSiteKind::Ladder );
-            disposition = CallDisposition::Declined;
+            tally.set( CallDisposition::Declined );
             continue;
         }
 
@@ -14414,7 +14417,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             std::erase_if( tier, [ & ]( NodeId c ) { return ing.symbols[ c ].kind != SymKind::Function && ing.symbols[ c ].kind != SymKind::Method; } );
             if( tier.empty() )
             {
-                disposition = CallDisposition::Undefined;
+                tally.set( CallDisposition::Undefined );
                 continue;
             }
         }
@@ -14485,7 +14488,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             // a recursion, not an edge — but a PROVEN one is still a site of the caller alone, never of its namesakes
             noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), tier );
-            disposition = CallDisposition::Self;   // the tier held only the caller itself: a recursion, not an edge
+            tally.set( CallDisposition::Self );   // the tier held only the caller itself: a recursion, not an edge
             continue;
         }
         // ---- the Phase-4 disclosure marker (shipped): the census's `locality` label, by the same predicate ---
@@ -14592,7 +14595,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             g.keptForwards.push_back( std::uint32_t( siteIndex ) );   // ascending: the loop walks the references in order
         }
-        disposition = CallDisposition::Bound;
+        tally.set( CallDisposition::Bound );
     }
     if( memstats::enabled() )
     {
