@@ -63,8 +63,18 @@ if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra -pthread \
     fi
     sed 's/^/        /' "$WORK/cc.log" | head -12
 else
-    "$WORK/harness" | sed 's/^/  /'
-    [ "${PIPESTATUS[0]}" -eq 0 ] || fail=1
+    # The harness carries its own assertions, so its EXIT STATUS is the arm -- not its stdout. Run it
+    # unpiped into a file and branch on the status with `if`: a pipeline's status is the last stage's,
+    # so `harness | sed` reports sed's success and loses every assertion the harness made.
+    # ${PIPESTATUS[0]} would read correctly here but test/gateexitcheck.sh arm H1 does not credit it
+    # (its accepted forms are if / || / && .. || / rc=$? compared / set -e / pipefail), and a status
+    # test a reader cannot see is the same hazard as one that is not there.
+    if "$WORK/harness" > "$WORK/harness.out" 2>&1; then
+        sed 's/^/  /' "$WORK/harness.out"
+    else
+        sed 's/^/  /' "$WORK/harness.out"
+        note "arms A+B: the harness ran but its own assertions FAILED (exit status above zero)"
+    fi
 fi
 
 # ── arm C: the worker count cannot change an answer ─────────────────────────────────────────────────
