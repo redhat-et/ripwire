@@ -16,27 +16,35 @@
 # never ran must not read as agreement. Every later arm's non-vacuity rests on (B), and the base's red comes
 # through it. This asymmetry is the same one test/prconvergecheck.sh records, for the same reason.
 #
-# RED ON BASE — PREDICTED, NOT YET OBSERVED. A quiet window was held for another lane's sealed timing run
-# for the whole of this lane's working time, so nothing here has been built or run and this block is a
-# PREDICTION, which is exactly the weaker thing a gate header must not pass off as evidence. The base is
-# origin/train/m5-1126-4 @ 4262eec3f, which has no RIPWIRE_PPR_PUSH at all, so the variable is ignored and
-# every row count is 0. Confirm it and replace this block with the observed output before trusting the gate:
+# RED ON BASE — OBSERVED, 8 FAIL / 10 PASS. Proved through RIPWIRE_BIN=, not through $1:
 #
-#     RIPWIRE_BIN=<base binary> bash test/pprpushcheck.sh   ->  expected exit 1, 8 FAIL / 9 PASS
+#     RIPWIRE_BIN=/opt/homebrew/bin/ripwire bash test/pprpushcheck.sh   ->  FAILURES
+#       BIN=/opt/homebrew/bin/ripwire  ripwire 0.7.0-dev.30+g9db391da8 (Release, ...)
 #       FAIL  (B) shadow mode wrote ZERO shadow rows -- a shadow arm that never ran is not agreement
 #       FAIL  (B) every shadow row carries a parseable eps= value
 #       FAIL  (C) shadow stdout is byte-identical to off stdout (vacuous without rows)
-#       FAIL  (D) every shadow row has top10_same=1 at the registered epsilon
-#       FAIL  (D) every shadow row has blend10_same=1 at the registered epsilon
+#       FAIL  (D) every shadow row has top10_same=1 at the registered epsilon (same=0 differ=0)
+#       FAIL  (D) every shadow row has blend10_same=1 at the registered epsilon (same=0 differ=0)
 #       FAIL  (E) the tie-aware criterion is not vacuous: some row reported a compared position
-#       FAIL  (E) no shadow row performed a single push
+#       FAIL  (E) no shadow row performed a single push -- the push kernel never ran, so (D) is about nothing
 #       FAIL  (G) two shadow runs agree on every non-timing column
 #
-# THE NINE THAT PASS ON BASE ARE ABSENCE AND INVARIANCE ARMS, and their passing is not a defect in them —
+# That binary is 9db391da8 rather than this lane's base 4262eec3f. The red is structural and identical at
+# both, and the claim is checkable rather than asserted: `git grep -c RIPWIRE_PPR_PUSH` finds ZERO
+# occurrences at either ref, while the same grep for RIPWIRE_TEST_PR_MAXITERS finds src/pagerank.cpp at
+# both -- the positive control that proves the search could have found something.
+#
+# THE TEN THAT PASS ON BASE ARE ABSENCE AND INVARIANCE ARMS, and their passing is not a defect in them:
 # "no shadow row on an unset run" and "`on` changes nothing" are trivially true of a binary that has no such
-# surface anywhere. They are (A)'s two, (C)'s stdout-clean and xmllint checks, (D)'s budget-hit check, (E)'s
-# two mutation controls on this gate's OWN pattern discipline, and BOTH of (F)'s. That asymmetry is why (B)
+# surface anywhere. They are (A)'s three, (C)'s stdout-row and xmllint checks, (D)'s budget-hit check, (E)'s
+# two mutation controls on this gate's OWN pattern discipline, and both of (F)'s. That asymmetry is why (B)
 # leads: the absence arms exist only so the presence arms cannot be satisfied by emitting rows everywhere.
+#
+# TWO ARMS WERE WRONG ON THE FIRST RUN AND BOTH WENT RED ON A CORRECT BINARY, which is the only reason they
+# are right now. (C) grepped for the bare substring `pprshadow` in stdout -- and src/pprshadow.h is a file in
+# the corpus, so the ranked map legitimately NAMES it; it now matches a tab-delimited row at line start. And
+# the whole gate drove a DEFAULT `--for`, which never reaches the anchors site at all (see run_for below),
+# so it found zero rows on a working binary and would have reported that as disagreement.
 #
 # GREPS MATCH VALUES, NOT KEYS. The row tag is a literal `pprshadow` at the start of a stderr line and every
 # assertion below matches a value shape (`top10_same=1`, `eps=[0-9]`), never a bare key: a key appears in
@@ -63,11 +71,17 @@ printf 'BIN=%s  %s\n' "$BIN" "$( "$BIN" --version 2>&1 | head -1 )"
 # One query, one small real corpus: src/ itself. --for is the verb that reaches the anchors site
 # (verbs_for.h computeLensRanking -> graph.h anchoredLexicalRank), which is the per-query personalized rank.
 QUERY="personalized pagerank teleport seed rank graph"
+# THE ANCHORS SITE IS REACHED ONLY THROUGH `--anchor`, WHICH IS EXPERIMENTAL AND GATED ON RIPWIRE_DEV=1.
+# verbs_for.h calls anchoredLexicalRank under `if( cfg.anchor )`, commented "EXPERIMENTAL: lexically-anchored
+# graph expansion (byte-identical without the flag)", and cli.h refuses --anchor without RIPWIRE_DEV=1. So a
+# default --for never reaches the only SPARSE teleport in the tree, and this gate must drive the flag to have
+# anything to check. That is a fact about the product, recorded here because a gate that quietly measured the
+# default path would have found zero rows and read it as "the push agrees".
 run_for(){   # $1 mode ("" = unset), $2 stdout file, $3 stderr file
     if [ -z "$1" ]; then
-        env -u RIPWIRE_PPR_PUSH "$BIN" "$ROOT/src" --for="$QUERY" --legend=compact >"$2" 2>"$3"
+        env -u RIPWIRE_PPR_PUSH RIPWIRE_DEV=1 "$BIN" "$ROOT/src" --for="$QUERY" --anchor --legend=compact >"$2" 2>"$3"
     else
-        RIPWIRE_PPR_PUSH="$1" "$BIN" "$ROOT/src" --for="$QUERY" --legend=compact >"$2" 2>"$3"
+        RIPWIRE_DEV=1 RIPWIRE_PPR_PUSH="$1" "$BIN" "$ROOT/src" --for="$QUERY" --anchor --legend=compact >"$2" 2>"$3"
     fi
     return 0
 }
@@ -127,8 +141,11 @@ if [ "$shadowRows" -gt 0 ] 2>/dev/null && cmp -s "$TMP/off.out" "$TMP/shadow.out
 else
     no "(C) shadow stdout is byte-identical to off stdout (vacuous without rows)"
 fi
-if [ "$( grep -c 'pprshadow' "$TMP/shadow.out" )" = 0 ]; then
-    ok "(C) no shadow row reached stdout (G4: no newline outside CDATA, and the document stays well-formed)"
+# A ROW, not the word. This arm first grepped for the bare substring `pprshadow` and went red on a correct
+# binary, because src/pprshadow.h is now a file in the corpus and the ranked map legitimately NAMES it. The
+# assertion is about a tab-delimited row at the start of a line, so that is what it matches.
+if [ "$( grep -c '^pprshadow	' "$TMP/shadow.out" )" = 0 ]; then
+    ok "(C) no shadow ROW reached stdout (G4: no newline outside CDATA, and the document stays well-formed)"
 else
     no "(C) a shadow row reached stdout — that breaks XML well-formedness and the token-density contract"
 fi
@@ -209,8 +226,13 @@ if grep -qE 'pr_iters="?[1-9]' "$TMP/map.on.out" && cmp -s "$TMP/map.off.out" "$
 else
     no "(F) \`on\` is site-scoped: the default map's pr_iters= still names a real power iteration"
 fi
+# MEASURED, not assumed: a default `--for` and the flagless map both run the power iteration with a teleport
+# whose nonzero count EQUALS N. A push over a seed supported on every node touches every node and does
+# strictly more work than the iteration it replaces, so there is nothing for it to exploit there. The working
+# set is measured offline instead (test/pprlab.cpp), where the plain rank supplies the global term and only
+# the changed-file part is pushed.
 if [ "$( rows "$TMP/map.on.err" )" = 0 ]; then
-    ok "(F) the default map's working-set rank is not shadowed (its teleport is dense — lab-only, by design)"
+    ok "(F) the default map's rank is not shadowed (its teleport is DENSE: nonzero == N — lab-only, by design)"
 else
     no "(F) the default map wrote a shadow row — the working-set site is measured offline, not here"
 fi

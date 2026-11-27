@@ -55,17 +55,43 @@ enum class Mode : std::uint8_t
 // site is two orders of magnitude looser than the working-set site because its teleport is supported on
 // kAnchorCount = 20 nodes rather than on every symbol in the corpus.
 //
-// RE-DERIVED, NOT INHERITED. test/pprlab.cpp sweeps epsilon and the gate asserts the fidelity criterion AT
-// THIS VALUE, so the constant and the evidence for it move together. The M2's own sweep stopped at 1e-7,
-// which is above the working-set value and below nothing — so the recommended epsilons were outside the
-// measured range and the lab's sweep is extended to cover them.
+// RE-DERIVED, NOT INHERITED, and the two derivations disagree with the relayed values in OPPOSITE
+// directions. test/pprlab.cpp sweeps epsilon; applying the rule (largest with zero non-tie top-10 swaps on
+// every call, then / 10) over 10 seed sets per site on two corpora — ripwire's own src (N=18,364,
+// nnz=32,362) and kubernetes (N=293,542, nnz=376,585), 2026-11-27:
+//
+//   site        largest clean (ripwire | k8s)   rule gives   relayed   binding across both
+//   anchors        3e-4  |  1e-3                3e-5 | 1e-4   3e-6        3e-5
+//   working set    3e-8  |  3e-6                3e-9 | 3e-7   3e-8        3e-9
+//
+// ANCHORS keeps the relayed 3e-6, which is ten times STRICTER than the rule gives on either corpus. Nothing
+// is bought by loosening it: the push already costs a median of 553 and 686 edge walks there against nnz of
+// 32,362 and 376,585, so the margin is free.
+//
+// WORKING SET is moved to 3e-9, because the relayed 3e-8 is ten times LOOSER than the rule gives on
+// ripwire's own tree — 3e-8 is the largest CLEAN epsilon there, which is the value the rule divides, not its
+// answer. At 3e-6 the ws20 site scored 8/10 on that corpus, so the constant would have been describing a
+// fidelity it did not have. Nothing in the product reads it today (see kMaxSeedSupport: every default
+// teleport is dense, so the working-set site is lab-only), and it is corrected rather than deleted so the
+// next reader inherits the derivation and not a number that fails its own rule.
+//
+// Both are FLOORS over two corpora, not settled constants: a third tree could tighten either.
 inline constexpr double kEpsilonAnchors = 3e-6;
-inline constexpr double kEpsilonWorkingSet = 3e-8;
+inline constexpr double kEpsilonWorkingSet = 3e-9;
 
 // The teleport this shadow arm can push from must be SPARSE: the push's whole advantage is that it touches a
-// neighbourhood instead of the corpus, and a teleport with mass on every symbol (diffTeleport's uniform
-// floor) has no neighbourhood. The working-set site is therefore measured OFFLINE only
-// (test/pprlab.cpp, where the plain rank is in hand and R*w can supply the global term), and a dense
+// neighbourhood instead of the corpus, and a teleport with mass on every symbol has no neighbourhood — a
+// push seeded on every node touches every node and does strictly MORE work than the iteration it replaces.
+//
+// MEASURED, 2026-11-27, and it is the central fact about this whole feature: EVERY teleport that runs on a
+// default path is DENSE. A default `--for` enters the power iteration TWICE and both times with
+// teleport_nonzero == N; the flagless map enters it once, also with nonzero == N. `rankGraph` is a uniform
+// vector by construction (graph.h: 1/ranked on every node), and `diffTeleport` puts (1-beta)/(N-changed) on
+// every UNchanged symbol, so it is dense too. The only sparse teleport in the tree is the anchors one, and
+// verbs_for.h reaches it only under `--anchor`, which is EXPERIMENTAL and refused without RIPWIRE_DEV=1.
+//
+// So the working-set site is measured OFFLINE only (test/pprlab.cpp, where the plain rank is in hand and
+// R*w can supply the global term, which is what makes a dense teleport tractable at all), and a dense
 // teleport here records a row with no comparison rather than a comparison of something else.
 inline constexpr std::size_t kMaxSeedSupport = 4096;
 
