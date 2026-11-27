@@ -37,6 +37,13 @@
 #       went red on the fix.
 #   S3  the fallback is live, not dead: --no-cache arms no snapshot session at all, so the slot is empty and the site
 #       computes. Without this arm "served" could be the only reachable answer and the fallback never exercised.
+#   S4  a graph the snapshot never ranked is never served a stored rank: --pin-census and --scip both leave the
+#       session unarmed (main.cpp:6176 arms it only when scipIndex AND pinCensus are empty), so this site must
+#       compute. Run against the SAME home the warm pair just served — on a fresh home "computed" would only mean
+#       "no snapshot here". This closes the one way a stored rank could belong to a DIFFERENT graph.
+#   S5  those two runs arm no snapshot session at all, so they emit no graph= disclosure.
+#   S6  the control that makes S4/S5 non-vacuous: a plain run immediately after them is STILL served, so S4 declined
+#       the stored rank by FLAG rather than because the snapshot had gone stale or been evicted.
 #   D1  warm == cold: the served answer is the recording run's bytes, and the same exit status.
 #   D2  warm == warm: two served answers are the same bytes.
 #   D3  served == computed: the --no-cache answer, whose tie-break rank came from a fresh power iteration in this same
@@ -145,7 +152,16 @@ run warm2 "$H" RIPWIRE_SNAPSHOT_STATS=1
 run abl "$TMP/homeab" RIPWIRE_NO_TAIL_SYM_TERMS=1
 RUNFLAGS="--no-cache"
 run nosnap "$TMP/homenc" RIPWIRE_SNAPSHOT_STATS=1
+# S4/S5: the DISARMING flags, run against the SAME home "$H" whose snapshot the warm pair just served — a fresh home
+# would prove nothing, because "computed" would then only mean "no snapshot here". main.cpp:6176 arms the session only
+# when scipIndex and pinCensus are both empty, so with either flag the slot is never written and this site must compute.
+# The pin-census file goes in TMP: a gate never writes into the shared checkout.
+RUNFLAGS="--pin-census=$TMP/pincensus.txt"
+run pincensus "$H" RIPWIRE_SNAPSHOT_STATS=1
+RUNFLAGS="--scip=$ROOT/test/scipfix/index.scip"
+run scip "$H" RIPWIRE_SNAPSHOT_STATS=1
 RUNFLAGS=""
+run warm3 "$H" RIPWIRE_SNAPSHOT_STATS=1   # S6: the control that makes S4/S5 non-vacuous — still served afterwards
 
 tsym(){ grep -o 'tsym="[^"]*"' "$TMP/$1.out" | head -1; }
 tsymn(){ grep -o 'tsym="' "$TMP/$1.out" | wc -l | tr -d ' '; }   # occurrences, not lines: the answer is one minified line
@@ -187,6 +203,20 @@ case "$( tierank nosnap )" in
     '')                 no "S3  the --no-cache run disclosed no tie_rank= at all — this binary does not have the change";;
     *)                  no "S3  the --no-cache run disclosed '$( tierank nosnap )', expected tie_rank=computed: nothing exercises the fallback";;
 esac
+
+# ── S4/S5/S6: a graph the snapshot never ranked can never be served a stored rank ───────────────────
+for t in pincensus scip; do
+    case "$( tierank $t )" in
+        tie_rank=computed*) ok "S4  the $t run computed ($( tierank $t )) — main.cpp:6176 leaves the session unarmed under that flag";;
+        '')                 no "S4  the $t run disclosed no tie_rank= at all — this binary does not have the change";;
+        *)                  no "S4  the $t run disclosed '$( tierank $t )', expected tie_rank=computed: a SCIP/pin-census graph was served a rank recorded for a DIFFERENT graph";;
+    esac
+    if [ -z "$( graphstate $t )" ]; then ok "S5  the $t run armed no snapshot session at all (no graph= disclosure), as main.cpp:6176 requires"
+    else no "S5  the $t run reported '$( graphstate $t )': the session WAS armed under a flag that must disarm it"; fi
+done
+if [ "$( graphstate warm3 )" = "graph=loaded" ] && [ "$( tierank warm3 )" = "$( tierank warm1 )" ] && [ -n "$( tierank warm1 )" ]; then
+    ok "S6  control: a plain run right after them is STILL served ($( graphstate warm3 ), $( tierank warm3 )) — so S4 declined the rank by FLAG, not because the snapshot had gone"
+else no "S6  control: the run after the flag runs reports '$( graphstate warm3 )' / '$( tierank warm3 )' vs warm1's '$( tierank warm1 )' — S4/S5 may be passing only because no snapshot was available"; fi
 
 # ── D: the answer does not move ──────────────────────────────────────────────────────────────────────────────────────
 if cmp -s "$TMP/cold.out" "$TMP/warm1.out"; then ok "D1  warm == cold — the served answer is the recording run's bytes ($( wc -c <"$TMP/cold.out" | tr -d ' ' ) B)"
