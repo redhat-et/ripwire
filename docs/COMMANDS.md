@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#--detailn) · [`--pack-signatures`](#--pack-signatures) · [`--outline`](#--outlineab) · [`--expand`](#--expandab) · [`--compress`](#--compress) · [`--pack-top-n`](#--pack-top-nn) · [`--no-redact`](#--no-redact)
 
-**assess quality / structure** — [`--metrics`](#--metrics) · [`--deps`](#--deps) · [`--hotspots`](#--hotspots) · [`--clones`](#--clones) · [`--biggest-first`](#--biggest-first) · [`--nonlocal-state`](#--nonlocal-state) · [`--ensemble`](#--ensemble) · [`--quality-panel`](#--quality-panelpreset) · [`--context-ratio`](#--context-ratio) · [`--naming-calibration`](#--naming-calibration) · [`--naming-consistency`](#--naming-consistency) · [`--naming-locals`](#--naming-locals) · [`--comment-coherence`](#--comment-coherence) · [`--cochange`](#--cochangefile) · [`--cochange-recur`](#--cochange-recurk) · [`--cochange-groups`](#--cochange-groups) · [`--since`](#--sincerevdate) · [`--arch`](#--archfile) · [`--arch`](#--archfile---baseline) · [`--arch`](#--archfile---baseline-update) · [`--lint`](#--lint) · [`--lint-catalog`](#--lint-catalog) · [`--lint-rules`](#--lint-rulesdir) · [`--lint-select`](#--lint-selectprefix) · [`--lint-ignore`](#--lint-ignoreprefix) · [`--lint-max-per-rule`](#--lint-max-per-rulen) · [`--sarif`](#--sarif) · [`--with-profile`](#--with-profilefile) · [`--communities`](#--communities) · [`--community`](#--communityid) · [`--zoom`](#--zoomdepth) · [`--report`](#--report) · [`--seams`](#--seams) · [`--mermaid`](#--mermaid) · [`--owners`](#--ownerssym) · [`--dead-code`](#--dead-codedir) · [`--quality-baseline`](#--quality-baseline) · [`--allow-dirty`](#--allow-dirty) · [`--show-stale`](#--show-stale) · [`--quality-delta`](#--quality-delta) · [`--quality-delta`](#--quality-deltarevab) · [`--quality-kinds`](#--quality-kindskk) · [`--dmm`](#--dmmrevab) · [`--quality-ack`](#--quality-ackreason) · [`--ack-only`](#--ack-onlysubstrsubstr) · [`--scope`](#--scopeglobglob) · [`--edit-check`](#--edit-checksym) · [`--replace-symbol-body`](#--replace-symbol-bodytarget) · [`--insert-before-symbol`](#--insert-before-symboltarget) · [`--insert-after-symbol`](#--insert-after-symboltarget) · [`--edit-payload`](#--edit-payloadfile-) · [`--edit-target-file`](#--edit-target-filepath) · [`--no-post-check`](#--no-post-check) · [`--edit-plan`](#--edit-planfile) · [`--dry-run`](#--dry-run----apply) · [`--safe-delete`](#--safe-deletesym) · [`--slice`](#--slicesymvar) · [`--slice-flow`](#--slice-flowbackfwdboth) · [`--slice-depth`](#--slice-depthn) · [`--at`](#--atfileline) · [`--pr-context`](#--pr-contextbaseref) · [`--merge-scout`](#--merge-scoutrefref) · [`--plan-lanes`](#--plan-lanesn---taskgoal) · [`--plan-lanes`](#--plan-lanes---brieffile) · [`--stray-content`](#--stray-contentsubstr) · [`--plan`](#--plan) · [`--abi`](#--abi) · [`--whereis`](#--whereissym) · [`--whereis-full-text`](#--whereis-full-text) · [`--whereis-listing`](#--whereis-listingwhich) · [`--flags`](#--flagssubstr) · [`--flip`](#--flipname) · [`--layout`](#--layoutstruct) · [`--field-affinity`](#--field-affinitystruct) · [`--doc-drift`](#--doc-driftsubstr) · [`--doc-drift`](#--doc-drift---gateability) · [`--with-history`](#--with-history) · [`--plan-lint`](#--plan-lintfile) · [`--from-trace`](#--from-tracefile) · [`--run-trace`](#--run-tracecmd) · [`--run-timeout`](#--run-timeoutseconds) · [`--note-add`](#--note-addtarget-text) · [`--notes`](#--notes) · [`--pack-task`](#--pack-tasktask) · [`--partition`](#--partitionn) · [`--with-graph`](#--with-graph) · [`--export`](#--exportccjsonfile) · [`--batch`](#--batchfile)
+**assess quality / structure** — [`--metrics`](#--metrics) · [`--deps`](#--deps) · [`--hotspots`](#--hotspots) · [`--clones`](#--clones) · [`--biggest-first`](#--biggest-first) · [`--nonlocal-state`](#--nonlocal-state) · [`--ensemble`](#--ensemble) · [`--quality-panel`](#--quality-panelpreset) · [`--context-ratio`](#--context-ratio) · [`--naming-calibration`](#--naming-calibration) · [`--naming-consistency`](#--naming-consistency) · [`--naming-locals`](#--naming-locals) · [`--comment-coherence`](#--comment-coherence) · [`--cochange`](#--cochangefile) · [`--cochange-recur`](#--cochange-recurk) · [`--cochange-groups`](#--cochange-groups) · [`--since`](#--sincerevdate) · [`--include-bots`](#--include-bots) · [`--arch`](#--archfile) · [`--arch`](#--archfile---baseline) · [`--arch`](#--archfile---baseline-update) · [`--lint`](#--lint) · [`--lint-catalog`](#--lint-catalog) · [`--lint-rules`](#--lint-rulesdir) · [`--lint-select`](#--lint-selectprefix) · [`--lint-ignore`](#--lint-ignoreprefix) · [`--lint-max-per-rule`](#--lint-max-per-rulen) · [`--sarif`](#--sarif) · [`--with-profile`](#--with-profilefile) · [`--communities`](#--communities) · [`--community`](#--communityid) · [`--zoom`](#--zoomdepth) · [`--report`](#--report) · [`--seams`](#--seams) · [`--mermaid`](#--mermaid) · [`--owners`](#--ownerssym) · [`--dead-code`](#--dead-codedir) · [`--quality-baseline`](#--quality-baseline) · [`--allow-dirty`](#--allow-dirty) · [`--show-stale`](#--show-stale) · [`--quality-delta`](#--quality-delta) · [`--quality-delta`](#--quality-deltarevab) · [`--quality-kinds`](#--quality-kindskk) · [`--dmm`](#--dmmrevab) · [`--quality-ack`](#--quality-ackreason) · [`--ack-only`](#--ack-onlysubstrsubstr) · [`--scope`](#--scopeglobglob) · [`--edit-check`](#--edit-checksym) · [`--replace-symbol-body`](#--replace-symbol-bodytarget) · [`--insert-before-symbol`](#--insert-before-symboltarget) · [`--insert-after-symbol`](#--insert-after-symboltarget) · [`--edit-payload`](#--edit-payloadfile-) · [`--edit-target-file`](#--edit-target-filepath) · [`--no-post-check`](#--no-post-check) · [`--edit-plan`](#--edit-planfile) · [`--dry-run`](#--dry-run----apply) · [`--safe-delete`](#--safe-deletesym) · [`--slice`](#--slicesymvar) · [`--slice-flow`](#--slice-flowbackfwdboth) · [`--slice-depth`](#--slice-depthn) · [`--at`](#--atfileline) · [`--pr-context`](#--pr-contextbaseref) · [`--merge-scout`](#--merge-scoutrefref) · [`--plan-lanes`](#--plan-lanesn---taskgoal) · [`--plan-lanes`](#--plan-lanes---brieffile) · [`--stray-content`](#--stray-contentsubstr) · [`--plan`](#--plan) · [`--abi`](#--abi) · [`--whereis`](#--whereissym) · [`--whereis-full-text`](#--whereis-full-text) · [`--whereis-listing`](#--whereis-listingwhich) · [`--flags`](#--flagssubstr) · [`--flip`](#--flipname) · [`--layout`](#--layoutstruct) · [`--field-affinity`](#--field-affinitystruct) · [`--doc-drift`](#--doc-driftsubstr) · [`--doc-drift`](#--doc-drift---gateability) · [`--with-history`](#--with-history) · [`--plan-lint`](#--plan-lintfile) · [`--from-trace`](#--from-tracefile) · [`--run-trace`](#--run-tracecmd) · [`--run-timeout`](#--run-timeoutseconds) · [`--note-add`](#--note-addtarget-text) · [`--notes`](#--notes) · [`--pack-task`](#--pack-tasktask) · [`--partition`](#--partitionn) · [`--with-graph`](#--with-graph) · [`--export`](#--exportccjsonfile) · [`--batch`](#--batchfile)
 
 **self-diagnosis** — [`--doctor`](#--doctor) · [`--agent`](#--agentcodexclaude) · [`--skipped`](#--skipped)
 
@@ -1181,7 +1181,7 @@ at: 61fafaba3
   (0 changed files — working tree is clean, nothing to analyze)
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--legend`, `--limit`
+**Shaped by:** `--affected`, `--test-gate`, `--include-bots`, `--legend`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1883,7 +1883,7 @@ $ ./build/ripwire . --hotspots
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--expand`, `--since`, `--limit`
+**Shaped by:** `--affected`, `--expand`, `--since`, `--include-bots`, `--limit`
 
 ### `--clones`
 
@@ -2247,7 +2247,7 @@ $ ./build/ripwire . --cochange
 ... [22 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--cochange-recur`, `--cochange-groups`, `--since`, `--limit`
+**Shaped by:** `--cochange-recur`, `--cochange-groups`, `--since`, `--include-bots`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2344,6 +2344,12 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 - limit the churn-based verbs to commits after this revision or date scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point: a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate ("2 weeks ago" — wall-clock-relative).
 - Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too).
 - A value you pass HERE is never re-anchored: it is stamped verbatim, so --since="18 months ago" is the wall-clock window on request.
+
+### `--include-bots`
+
+**Answers:** keep bot-authored commits in churn and co-change (left out by default) a commit whose author name or email ends in [bot], or a listed automation account (Dependabot, Renovate, GitHub Actions), is left out of --hotspots, --rank-by=churn| churn-decay, --cochange, --situ and --quality-delta's short-horizon churn, and the answer says bots_skipped=N;
+
+this flag keeps them (bots_included=N). Commits with an agent Co-Authored-By trailer are always kept and counted (agent_commits=N), and an exact file move adds no churn: the file's older history follows it (renames=N)
 
 ### `--arch=FILE`
 
@@ -2988,7 +2994,7 @@ $ ./build/ripwire . --quality-delta
 </quality-delta>
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--allow-dirty`, `--show-stale`, `--quality-kinds`, `--dmm`, `--quality-ack`, `--scope`
+**Shaped by:** `--affected`, `--test-gate`, `--include-bots`, `--allow-dirty`, `--show-stale`, `--quality-kinds`, `--dmm`, `--quality-ack`
 
 **Caveats (stated by the binary):**
 
@@ -3013,7 +3019,7 @@ $ ./build/ripwire . --quality-delta
 </quality-delta>
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--allow-dirty`, `--show-stale`, `--quality-kinds`, `--dmm`, `--quality-ack`, `--scope`
+**Shaped by:** `--affected`, `--test-gate`, `--include-bots`, `--allow-dirty`, `--show-stale`, `--quality-kinds`, `--dmm`, `--quality-ack`
 
 **Caveats (stated by the binary):**
 
@@ -4504,7 +4510,7 @@ $ ./build/ripwire . --rank-by=churn --top-k=5
 ... [10 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--since`, `--in`
+**Shaped by:** `--since`, `--include-bots`, `--in`
 
 **Caveats (stated by the binary):**
 
@@ -4761,7 +4767,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=5969670ece74a11c entries=1326
+ripwire legend dictionary ripwire.dict/v1 dictv=70425301e1ede486 entries=1344
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)

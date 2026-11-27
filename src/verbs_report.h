@@ -500,6 +500,86 @@ static void refuseUndecidedPathRule( const rw::PathRule& pr, const rw::PathRuleV
                 pr.from, pr.to, src, dst, reason );
 }
 
+// --arch observation qualification (lane metric-labels; arch.h archUnqualified holds the rule): the files whose imports this
+// build never read — indexed files in a no-file-edge language, and the crawl's unsupported-ext rows of a code extension — and
+// which rules they sit on the FROM side of. `floor` is set when the crawl's unsupported rows were capped (ingest.h
+// kMaxSkipRowsPerClass) and the EXACT extension histogram holds code-extension files no row names: those were never matched
+// against a rule, so unqualified= is then a floor and says so.
+struct ArchUnqualifiedRead
+{
+    rw::ArchUnqualified q;
+    bool                floor = false;
+    bool                any() const noexcept { return q.files != 0 || floor; }   // the disclosure rides (a floor's 0 is not "none")
+};
+static ArchUnqualifiedRead readArchUnqualified( const rw::ArchRules& ar, const rw::IngestResult& ing, const std::vector<std::string_view>& relFiles, std::string_view rootPath )
+{
+    std::vector<std::string_view> candidates;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( rw::langHasNoFileEdges( rw::langOfPath( ing.files[f] ) ) )
+        {
+            candidates.push_back( relFiles[f] );
+        }
+    }
+    std::uint64_t rowed = 0, tallied = 0;
+    for( const rw::SkippedFile& row : ing.crawlSkips.unsupported )
+    {
+        if( rw::archUnindexedCodeExt( row.ext ) )
+        {
+            candidates.push_back( rw::relForHash( row.path, rootPath ) );
+            ++rowed;
+        }
+    }
+    for( const rw::UnindexedExt& e : ing.crawlSkips.unindexedExts )
+    {
+        tallied += rw::archUnindexedCodeExt( e.ext ) ? e.files : 0;
+    }
+    ArchUnqualifiedRead out{ rw::archUnqualified( ar, candidates ), tallied > rowed };
+    return out;
+}
+// The root's present-only pair: unqualified=N when a rule-bound file went unjudged, or when the count is a floor (then 0 is
+// not "none"), and unqualified_floor="1" beside it in that second case.
+static std::string archUnqualifiedRootAttr( const ArchUnqualifiedRead& u )
+{
+    if( !u.any() )
+    {
+        return {};
+    }
+    return std::format( " unqualified=\"{}\"{}", u.q.files, u.floor ? " unqualified_floor=\"1\"" : "" );
+}
+// One <rule> row per rule with an unjudged FROM-side file. verdict="unknown" whatever the violation rows say: a rule with a
+// violation is still a floor of its own violations, and one without is not a pass.
+static void emitArchUnqualifiedRows( const ArchUnqualifiedRead& u, std::vector<char>& ae )
+{
+    for( const rw::ArchUnqualifiedRule& r : u.q.rules )
+    {
+        rw::emitTo( stdout, "<rule text=\"{}\" unqualified=\"{}\" verdict=\"unknown\"/>", std::string( rw::escapeXml( r.text, ae ) ), r.files );
+    }
+}
+// Said on stderr in every mode, because the baseline modes exit 0 by contract (--help) and a CI log reads stderr, not XML.
+static void warnArchUnqualified( const ArchUnqualifiedRead& u )
+{
+    if( !u.any() )
+    {
+        return;
+    }
+    rw::emitTo( stderr, "ripwire arch: {}{} file(s) on a rule's FROM side have imports this build never read (a no_file_edges= language, or a code "
+                        "extension it does not index): {} rule(s) are UNKNOWN, never PASS — the exit code answers the judged edges only\n",
+                u.q.files, u.floor ? " or more" : "", u.q.rules.size() );
+}
+// The full-dialect clause, present-only beside the root attribute (the compact twin is compactlegend.h's unqualified row).
+static std::string archUnqualifiedLegend( const ArchUnqualifiedRead& u )
+{
+    if( !u.any() )
+    {
+        return {};
+    }
+    return std::string( " unqualified=N: files on a rule's FROM side whose imports were never read (a no_file_edges= language, or a code extension"
+                        " this build does not index), so no edge from them was judged; rule text= unqualified= verdict=unknown: each rule they"
+                        " sit under, as the rules file spells it: UNKNOWN, never PASS, its violations a floor, whatever the exit code." )
+           + ( u.floor ? " unqualified_floor=1: the crawl's unindexed-file rows were capped, so unqualified= is a floor." : "" );
+}
+
 std::optional<int> runArchViews( const MainDispatch& d )
 {
     using namespace rw;
@@ -618,6 +698,11 @@ std::optional<int> runArchViews( const MainDispatch& d )
         {
             lof[f] = archLayerOf( ar, relFiles[f] );
         }
+        // Lane metric-labels: a rule-bound file this build never read makes that rule UNKNOWN (arch.h archUnqualified); the root
+        // attribute and the legend clause ride every exit path beside the partial-graph ones, present-only.
+        const ArchUnqualifiedRead unqualified    = readArchUnqualified( ar, ing, relFiles, cfg.rootPath );
+        const std::string         archRootExtra  = archPartialAttr + archUnqualifiedRootAttr( unqualified );
+        const std::string         archExtrasNote = archExtrasLegend + archUnqualifiedLegend( unqualified );
 
         // Collect all violations (sorted for determinism). Each violation carries its own from/to layer
         // labels so layer-name rules and ABS-4 regex PATH-rules share one emit/baseline path. A path-rule
@@ -711,6 +796,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stderr, "ripwire arch: {} file(s) in {}: this build resolves almost none of their imports to files, so an edge through one was mostly never judged: violations= is a floor\n",
                         archNoEdge.files, archNoEdgeLangs );
         }
+        warnArchUnqualified( unqualified );   // every exit path, as the floor lines above
 
         const std::string sidecarPath = archBaselinePath( std::string( cfg.archRules ) );
 
@@ -758,6 +844,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const std::optional<double> shownPropCost = rw::systemNumbersUnknown( archNoEdge, archMeasure ) ? std::nullopt : std::optional<double>( propCost );
         const auto emitMetrics = [ & ]()
         {
+            emitArchUnqualifiedRows( unqualified, ae );   // the <rule verdict="unknown"> rows: after the <v> rows, in all three emit paths
             // #478 gap 3: before the module rows it qualifies, in all three emit paths
             rw::emitRaw( stdout, buildPrunedPackagesBlock( ing.crawlSkips, ing.realPaths.empty() && cfg.roots.size() == 1 ? std::string_view( cfg.roots[ 0 ] ) : std::string_view {} ).c_str() );
             emitArchMetrics( mods, shownPropCost, archMeasure.masked, ae );
@@ -796,9 +883,9 @@ std::optional<int> runArchViews( const MainDispatch& d )
                           viols.size(), sidecarPath.c_str() );
             // Still emit the arch XML for reference (shows what was baselined), then exit 0.
             rw::emitTo( stdout, "<!-- ripwire arch: baseline mode — all {} violation(s) accepted as baseline. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
-                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasNote );
             rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archPartialAttr, avRootAttr );
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archRootExtra, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -824,9 +911,9 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stderr, "ripwire arch: baseline updated ({} hash(es) total) → {}\n",
                           hashes.size(), sidecarPath.c_str() );
             rw::emitTo( stdout, "<!-- ripwire arch: baseline-update mode — {} violation(s) merged into baseline; baselined= is every hash the sidecar now holds. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
-                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasNote );
             rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archPartialAttr, avRootAttr );
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archRootExtra, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -868,10 +955,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             " baseline=\"symlink-refused\": the baseline sidecar is a SYMLINK, refused unopened — no violation was"
             " suppressed, so every one below counts as new; this is not the same answer as having no baseline.";
         rw::emitTo( stdout, "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.{}{}{}{}{} -->",
-                     kArchMatchDomain, archMetricsNote, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+                     kArchMatchDomain, archMetricsNote, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasNote );
         rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}{}>",
                      ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(),
-                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archPartialAttr, avRootAttr );
+                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archRootExtra, avRootAttr );
         for( const Viol& v : viols )
         {
             emitViol( v, hasBaseline && baseline.count( v.hash ) );
@@ -1204,7 +1291,10 @@ inline constexpr const char* kCochangeRepoLegend =
 
 inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
-    "together= is the number of commits in window= that touched BOTH this file and the partner (3 or more, or the partner is not reported); "
+    "together= is the number of commits in window= that touched BOTH this file and the partner (floor= or more, or the partner is not reported); "
+    "floor= is that support floor, 3 shared commits; floor_tail=corroborated: one file is one seed, so the list is filled to 10 with partners "
+    "sharing 2 commits that are corroborated, below every 3-commit row; why= says which: support (3+), confidence (in at least half this file's commits) "
+    "or link (an include, import or call edge either way, a test-of pair, or the same directory of 20 files or fewer); "
     "deg= is that count over commits=, THIS file's own commit count — a different denominator from the repo-wide pair form, which divides by the less-changed side. "
     "deg= is therefore already DIRECTIONAL here (this file => partner: of your commits, the fraction that also touched the partner); conf_rev= is the other direction, "
     "that same count over the PARTNER's own commit count. deg=1.00 means you never touch this file alone; conf_rev=1.00 means the partner never moves without you. "
@@ -1723,8 +1813,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const rw::SinceScope fidScope = multiRoot ? rw::resolveSinceScope( fidRepo, cfg.since ) : sinceScope;
             std::uint32_t                commits    = 0;
             std::uint32_t                subWindows = 0;
-            std::vector<CoPartner>       ps         = cochangePartners( fidRepo, ing, cfg.cochangeFile, commits,
-                                                                        cfg.since.empty() ? nullptr : &fidScope, fidRoot, &subWindows );
+            // one file is one seed: the corroborated tail fills the list (situ.h coCorroboratedTail; floor_tail= and why= below)
+            CoCouplingCache              tailCoupling( ing );
+            std::vector<CoPartner>       ps         = coCorroboratedTail( ing, &d.g, fid,
+                                                                          cochangePartners( fidRepo, ing, cfg.cochangeFile, commits, cfg.since.empty() ? nullptr : &fidScope,
+                                                                                            fidRoot, &subWindows, kCoTailSupport ),
+                                                                          tailCoupling );
             // §CLIO: --cochange-recur=K drops the partners whose co-change does not RECUR across the mined
             // window's sub-windows. Applied BEFORE partners= is counted, so partners= keeps meaning "the rows
             // this run is reporting" and reconciles with shown=/capped= exactly as it always has; the reason
@@ -1747,9 +1841,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
             // verb already calls, placed LAST on the element to match --hotspots' existing attribute order.
-            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\"{}{}{}{}>",
+            // floor=: the shared commits a partner needed (gitmine.h kCoSupportFloor)
+            rw::emitTo( stdout, "<cochange of=\"{}\" commits=\"{}\" window=\"{}\" sub_windows=\"{}\"{} partners=\"{}\" floor=\"{}\" floor_tail=\"corroborated\"{}{}{}{}>",
                          ex( mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[fid], mvRootPrefix ) : std::string_view( ing.files[fid] ) ).c_str(),
-                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(),
+                         commits, coWindowLabel.c_str(), subWindows, rw::cstr( pminrec ), ps.size(), kCoSupportFloor,
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          mvRootAttr.c_str(),                // R-E fix: root= before at= — at= stays LAST (r26)
@@ -1759,10 +1854,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 const std::string_view rp = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ ps[ partnerIndex ].fileId ], mvRootPrefix )
                                                           : std::string_view( ing.files[ ps[ partnerIndex ].fileId ] );
-                rw::emitTo( stdout, "<f p=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_rev=\"{:.2f}\" recur=\"{}\"{}/>",
+                rw::emitTo( stdout, "<f p=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_rev=\"{:.2f}\" recur=\"{}\" why=\"{}\"{}/>",
                              ex( rp ).c_str(), ps[ partnerIndex ].together,
                              ps[ partnerIndex ].deg, ps[ partnerIndex ].degRev, ps[ partnerIndex ].recur,
-                             coPairAttr( ps[ partnerIndex ] ) );
+                             coWhyName( ps[ partnerIndex ].why ), coPairAttr( ps[ partnerIndex ] ) );
             }
             rw::emitTo( stdout, "</cochange>" );
             return 0;

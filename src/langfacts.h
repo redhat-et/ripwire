@@ -144,6 +144,26 @@ enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CS
 /// two C-family ones for unhandled-arm's enums). None: the language has no defect-shape sites.
 enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash };
 
+/// ASSERTED (lane asserted-signal, LangFacts::assertionCalls): one spelling of an assertion call in a test framework. `name` is the
+/// callee as written (a Reference's calleeName), matched whole or, with `prefix`, as its start (`assert` covers `assertEqual`,
+/// `assert_eq!`, Elixir's `assert/1`). `receiver`, when set, is the written receiver the call must sit on (`assert` in Go's
+/// `assert.Equal( t, … )`, `Assert` in C#'s `Assert.Equal( … )`), and an empty `name` beside it takes any member of that receiver.
+struct AssertionCall
+{
+    std::string_view name;
+    bool             prefix   = false;
+    std::string_view receiver = {};
+
+    constexpr bool matches( std::string_view callee, std::string_view written ) const noexcept
+    {
+        if( !receiver.empty() && written != receiver )
+        {
+            return false;
+        }
+        return name.empty() ? !receiver.empty() : prefix ? callee.starts_with( name ) : callee == name;
+    }
+};
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -491,6 +511,30 @@ struct LangFacts
 
     /// The defect-shape scanner this language's files go through (DefectScan above).
     DefectScan defectScan = DefectScan::None;
+
+    /// ASSERTED (lane asserted-signal): the calls a test body makes to CHECK a result, in this language's test frameworks
+    /// (AssertionCall above). graph.h testSymbolForwardReach reads it to tell a test that asserts from one that only reaches it; a
+    /// language with no rows never reads as asserted (absence = none found). Empty, for a stated reason: Bash (a shell test checks
+    /// exit codes and `[ ]` tests, and its reach is subprocess-driven, outside the graph); Dart (package:test registers every test
+    /// as an anonymous callback inside `main()`, so the index attributes all of a file's examples to the one NAMED function main,
+    /// which graph.h's module-scope exclusion cannot see, and counting it would over-claim); Swift, Objective-C and PHP (no gate
+    /// control holds: on the XCTest and PHPUnit fixtures tested= itself never fires — the test methods are not test symbols, or
+    /// their calls do not resolve — so a vocabulary row could not be shown to work); the non-code rows; and Proto (a schema).
+    /// Known misses in covered languages: Kotlin infix matchers (`x shouldBe y` is recorded as no call), busted's `assert.are.*`.
+    /// ANONYMOUS CALLBACKS: where a test is an anonymous callback (Jest/Vitest/Mocha `test( …, () => … )`, RSpec `it`, busted `it`,
+    /// clojure.test `deftest`), its calls belong to the file's module scope, which graph.h never counts as asserting (it stands in
+    /// for every example in the file: an over-claim). Those rows keep these languages' vocabulary for NAMED test functions only.
+    std::span<const AssertionCall> assertionCalls = {};
+    constexpr bool isAssertionCall( std::string_view callee, std::string_view written ) const noexcept
+    {
+        return std::ranges::any_of( assertionCalls, [ & ]( const AssertionCall& a ) { return a.matches( callee, written ); } );
+    }
+
+    /// Objective-C++ (.mm, Lang::ObjC): tree-sitter-objc has no qualified_identifier, so `std::X()` arrives as error recovery beside a
+    /// bare call. ingest_sidecap.h qualifyPathReference reads the std-rooted chain back lexically (ingest_names.h
+    /// objcxxStdQualifierBefore), and the call takes the same keepStdQualifiedCandidates guard a .cpp/.cu/.metal call does. A grammar
+    /// with real qualified names (C++) answers from the tree instead and leaves this false.
+    bool lexicalStdQualifier = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -501,56 +545,98 @@ inline constexpr std::array<std::string_view, 4> kRustPreludeCalls = { "Err", "O
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
 inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals", "hashCode", "toString" };
 
+// ASSERTED vocabularies (LangFacts::assertionCalls), one per framework family. A name is matched only on a call a TEST symbol's own
+// body makes (graph.h assertingTestSymbols), so a production function of the same name is never read as an assertion.
+/// C, C++: <cassert> assert, GoogleTest EXPECT_*/ASSERT_*/FAIL/ADD_FAILURE, Catch2/doctest CHECK/REQUIRE(_*), Boost.Test,
+/// Unity TEST_ASSERT*, Check ck_assert*, cmocka assert_*, XCTest XCTAssert*/XCTFail.
+inline constexpr std::array<AssertionCall, 16> kCFamilyAssertionCalls = { {
+    { "assert", true }, { "EXPECT_", true }, { "ASSERT_", true }, { "FAIL" }, { "ADD_FAILURE" }, { "CHECK" }, { "CHECK_", true },
+    { "REQUIRE" }, { "REQUIRE_", true }, { "BOOST_CHECK", true }, { "BOOST_REQUIRE", true }, { "BOOST_TEST" }, { "TEST_ASSERT", true },
+    { "ck_assert", true }, { "XCTAssert", true }, { "XCTFail" } } };
+/// Python: the `assert` statement (queries/python/tags.scm records it as a call named `assert`), unittest self.assert*/self.fail,
+/// numpy.testing assert_*, mock's assert_called*, pytest.raises/warns/fail.
+inline constexpr std::array<AssertionCall, 5> kPythonAssertionCalls = { {
+    { "assert", true }, { "fail", false, "self" }, { "raises", false, "pytest" }, { "warns", false, "pytest" }, { "fail", false, "pytest" } } };
+/// TypeScript, JavaScript: Jest/Vitest/Chai expect*, node:assert and Chai's assert (called, or any member of it).
+inline constexpr std::array<AssertionCall, 3> kJsAssertionCalls = { { { "expect", true }, { "assert", true }, { "", false, "assert" } } };
+/// Go: testing.T/B's Errorf/Fatal/Fatalf/FailNow (Error and Fail only on a receiver written t: `err.Error()` is no check), any
+/// member of testify's assert/require packages, Gomega's Expect.
+inline constexpr std::array<AssertionCall, 9> kGoAssertionCalls = { {
+    { "Errorf" }, { "Fatal" }, { "Fatalf" }, { "FailNow" }, { "Error", false, "t" }, { "Fail", false, "t" }, { "", false, "assert" },
+    { "", false, "require" }, { "Expect" } } };
+/// Rust: assert!/assert_eq!/assert_ne!/assert_matches! and the debug_ forms (role Macro sites).
+inline constexpr std::array<AssertionCall, 2> kRustAssertionCalls = { { { "assert", true }, { "debug_assert", true } } };
+/// Java: JUnit/AssertJ/Hamcrest/Truth assert*, JUnit fail, Mockito verify*.
+inline constexpr std::array<AssertionCall, 3> kJavaAssertionCalls = { { { "assert", true }, { "fail" }, { "verify", true } } };
+/// Kotlin: Java's, plus kotlin.test's and kotest's method forms (should*, `x.shouldBe( y )`).
+inline constexpr std::array<AssertionCall, 4> kKotlinAssertionCalls = { { { "assert", true }, { "fail" }, { "verify", true }, { "should", true } } };
+/// C#: any member of NUnit/xUnit/MSTest's Assert, CollectionAssert and StringAssert; FluentAssertions' Should; Moq's Verify.
+inline constexpr std::array<AssertionCall, 5> kCSharpAssertionCalls = { {
+    { "", false, "Assert" }, { "", false, "CollectionAssert" }, { "", false, "StringAssert" }, { "Should" }, { "Verify", true } } };
+/// Ruby: minitest assert*/refute*/flunk and must_/wont_ expectations, RSpec expect/is_expected.
+inline constexpr std::array<AssertionCall, 7> kRubyAssertionCalls = { {
+    { "assert", true }, { "refute", true }, { "flunk" }, { "must_", true }, { "wont_", true }, { "expect" }, { "is_expected" } } };
+/// Elixir: ExUnit assert/refute/flunk and their _raise/_receive forms (the index names them with an arity: `assert/1`).
+inline constexpr std::array<AssertionCall, 3> kElixirAssertionCalls = { { { "assert", true }, { "refute", true }, { "flunk", true } } };
+/// Lua: assert() (busted and plain) and luaunit's assert*. busted's `assert.are.equal( … )` chain is a known miss: the Lua
+/// extractor records no receiver root for it, so only its last name (`equal`) reaches the reference.
+inline constexpr std::array<AssertionCall, 1> kLuaAssertionCalls = { { { "assert", true } } };
+/// GDScript: GUT's assert_*.
+inline constexpr std::array<AssertionCall, 1> kGdAssertionCalls = { { { "assert", true } } };
+/// Clojure: clojure.test is/are.
+inline constexpr std::array<AssertionCall, 2> kClojureAssertionCalls = { { { "is" }, { "are" } } };
+
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp, .assertionCalls = kCFamilyAssertionCalls },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python, .assertionCalls = kPythonAssertionCalls },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical, .assertionCalls = kJsAssertionCalls },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
-      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go },
+      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go, .assertionCalls = kGoAssertionCalls },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust },
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust, .assertionCalls = kRustAssertionCalls },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily,
+      .lexicalStdQualifier = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical, .assertionCalls = kJsAssertionCalls },
     { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true, .defectScan = DefectScan::Bash },
     { .lang = Lang::Java, .basesAsCaptures = true, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::Java },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::Java, .assertionCalls = kJavaAssertionCalls },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true, .assertionCalls = kRubyAssertionCalls },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp, .assertionCalls = kCSharpAssertionCalls },
     { .lang = Lang::C, .typeFirstParameters = true, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C, .assertionCalls = kCFamilyAssertionCalls },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Php, .memberSeparator = "::", .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },
-    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved, .singleQuoteStrings = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read },
+    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved, .singleQuoteStrings = true, .assertionCalls = kLuaAssertionCalls },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .assertionCalls = kElixirAssertionCalls },
     { .lang = Lang::Dart, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .singleQuoteStrings = true },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .edgeFamily = Lang::Java },
-    { .lang = Lang::GDScript, .hashComment = true, .singleQuoteStrings = true },
-    { .lang = Lang::Clojure },
+      .implicitReceiver = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .edgeFamily = Lang::Java, .assertionCalls = kKotlinAssertionCalls },
+    { .lang = Lang::GDScript, .hashComment = true, .singleQuoteStrings = true, .assertionCalls = kGdAssertionCalls },
+    { .lang = Lang::Clojure, .assertionCalls = kClojureAssertionCalls },
     { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
 } };
 

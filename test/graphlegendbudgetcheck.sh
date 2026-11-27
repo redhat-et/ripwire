@@ -143,8 +143,13 @@ budgetFor(){
         # still says "PageRank order" / "most-imported first" is the false claim. Measured on this probe: 4803 B on the base
         # (2f5561c26), 4895 B on this lane (+92 B, exactly the two sentences); 4625 keeps the previous excess-over-pin shape
         # (the 309 B of registered present-only clauses still cover what they covered).
-        callers) echo 3769 ;;
-        impact)  echo 4625 ;;
+        # RE-PINNED callers +39 and impact +39 (2026-11-26, lane metric-labels, test/metriclegendcheck.sh (T4)): kTestedRowLegend, which
+        # both full legends carry, now says how a test reaches the row and that reaching is not asserting ("transitively reaches it"
+        # -> "transitively reaches it over call edges; reached, not asserted", +39 B, exactly that phrase; Veritas 2610.33708). A
+        # tested=1 reading that leaves "reached" unqualified is the false claim. 3769 -> 3808 and 4625 -> 4664 keep each verb's
+        # previous excess-over-pin shape; the (a-twin) pin moves 3429 -> 3468 for the same 39 B, which its cut does not remove.
+        callers) echo 3808 ;;
+        impact)  echo 4664 ;;
         uses)    echo 4114 ;;
     esac
 }
@@ -163,7 +168,8 @@ for v in $VERBS; do
     fi
 done
 
-# (a-twin) the pre-CALLSITE-AT callers pin: the --callers full legend minus the sites_at= sentence still fits 3429 B. The
+# (a-twin) the pre-CALLSITE-AT callers pin: the --callers full legend minus the sites_at= sentence still fits 3468 B (3429 + the
+# 39 B tested= reading, 2026-11-26). The
 # cut is taken only when a row carries sites_at= AND the sentence occurs once, start to end; any other premise FAILs.
 twin="$( python3 - "$TMP/callers.xml" <<'PY'
 import re, sys
@@ -181,7 +187,7 @@ PY
 )"
 case "$twin" in
     NOPREMISE*) no "(a-twin) --callers legend twin cannot measure: ${twin#NOPREMISE }" ;;
-    *)  lt_gate "(a-twin) --callers legend minus the sites_at= sentence (the pre-CALLSITE-AT pin)" full:callers "$twin" 3429 "$twin" "$( lt_full_guard 3429 )" "$TMP/callers.xml" ;;
+    *)  lt_gate "(a-twin) --callers legend minus the sites_at= sentence (the pre-CALLSITE-AT pin)" full:callers "$twin" 3468 "$twin" "$( lt_full_guard 3468 )" "$TMP/callers.xml" ;;
 esac
 
 # ── (b) the honesty vocabulary a reader must meet on all three, unchanged by the trim (test/floormarkcheck.sh

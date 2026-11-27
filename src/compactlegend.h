@@ -472,6 +472,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "refused",           "refused=symlink: the sidecar is a symlink, refused unopened: no note was read", false, "notes" },
     { "baseline",          "baseline=symlink-refused: the sidecar is a symlink, refused unopened: every violation is new", false, "arch",
       MapHeaderRead::No, "symlink-refused" },
+    // Lane metric-labels (verbs_report.h readArchUnqualified, arch.h archUnqualified): a rule-bound file whose imports this build
+    // never read makes the rule UNKNOWN. Present-only, on the <arch> root; the reading also names the <rule> row it pulls in.
+    { "unqualified",       "unqualified=N: files on a rule's FROM side whose imports were never read (no_file_edges= language or an unindexed code extension); rule text= unqualified= verdict=unknown: a rule they sit under, UNKNOWN, never PASS, whatever the exit code", false, "arch" },
+    { "unqualified_floor", "unqualified_floor=1: unindexed-file rows were capped, so unqualified= is a floor", false, "arch" },
     { "regex_line_max",    "regex_line_max=: the longest line it could take" },
     { "regex_stack_bytes", "regex_stack_bytes=: the smaller stack every scan thread was held to" },
     // Both also ride the map header: est_tokens= alone there under order=stable (the root drops it), over_ceiling=1 there
@@ -664,7 +668,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // DENSE value per row: 1 where graph.h isTestedByReach holds, 0 on every other row, a test symbol's row included. A parallel
     // array cannot omit a false entry, so unlike the <s> attribute this prints 0, and an answer over a tree with no test carries a
     // column of zeros: the term reads the COLUMN (a <cols fields=> that lists tested), never a 1. compactlegendcheck (D34)/(D35).
-    { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
+    { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches over call edges; reached, not asserted; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
+    // Lane asserted-signal (columnar.h columnarAssertedPresent): present-only, the last column, 1 where isAssertedByReach holds
+    { "fields",            "<asserted> column: 1 = a tested row an ASSERTING test reaches (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback); 0 = none found, or not tested", true, "cols", MapHeaderRead::No, "asserted" },
     // TIER-FOLLOWUP (columnar.h ColumnarRowExtras::testRow): present-only, when a shown row is a test definition
     { "fields",            "<test> column: 1 = a test or fixture definition row, counted apart from production; 0 = a production row", true, "cols", MapHeaderRead::No, "test" },
     { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
@@ -675,7 +681,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // a literal 0. ELEMENT-qualified on <s>: flipimpact.h's <h tested=> prints 0 as well as 1 and <exemplar tested=> is another
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
-    { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches over call edges; reached, not asserted (absent otherwise, never 0)", true, "s" },
+    // Lane asserted-signal (graph.h isAssertedByReach, via radiusTierRowAttrXml): only beside tested=1, on the --callers/--callees/
+    // --impact rows. The scope is the test's: its own body or a test-scoped helper it calls (graph.h assertingTestSymbols). An
+    // assertion call there does not prove it checks THIS row, and a miss is name-based, so the reading says both. test/assertedcheck.sh.
+    { "asserted",          "<s asserted=1>: beside tested=1, an ASSERTING test reaches the row (an assertion call in its body or a test-scoped helper it calls; not counted for an anonymous test callback, whose calls belong to its file; not proof it checks this row); absent = none found, never none exists", true, "s" },
     // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
     { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
@@ -782,7 +792,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // only under --metrics, --for or --exemplar, so the reading rides the answers that computed it (--pack-task --metrics; --for
     // keeps its native legend). ELEMENT-qualified on <d>, like the row above: flipimpact.h's <d sym=> and the dead-code <d n=>
     // rows carry no tested=. compactlegendcheck (D33)/(D35).
-    { "tested",            "<d tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "d" },
+    { "tested",            "<d tested=1>: a non-test row an indexed test transitively reaches over call edges; reached, not asserted (absent otherwise, never 0)", true, "d" },
     // THE LENS FACTS ON <d> ROWS (2026-09-12, the lane's end). serialize.h sigRowHead writes r= on a lens row (rank > 0), cx=/ccx=
     // under facts.metrics and in= when a fan-in vector was supplied, and packSignatures' lens appends amp= (main.cpp computes it
     // under --metrics; printed above 0). --pack-task passes metrics and supplies its own fan-in, so every one of its <d> rows
@@ -1089,7 +1099,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // D4 (src/quality.h ratchetAttrsXml): present when the tangle ratchet read its reference point
     { "ratchet_ref", "ratchet_ref=TAG ratchet_judged=N: N tangle rows' functions compared with their best since TAG; ratchet_unread= / ratchet_cut=1: versions not measured", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     // CR712-SHSTATUS-DEPTH (src/verbs_quality.h QdRootFields::shellCut): present when not 0
-    { "shell_cut", "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; deeper code not judged", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "shell_cut", "shell_cut=N: shell files whose parse stopped at nesting depth 64; such a file's defect-shape scan is discarded whole", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, ceiling=, tangle", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped: self-registering test/bench macros or Rust #[test]; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1170,6 +1180,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // cochange-file: src/verbs_report.h runMaintenanceViews, the cfg.cochangeFile branch (<cochange of=> + <f>); sub_windows= row above covers it
     { "commits", "commits=N: this file's own commits in window=; the denominator of deg=", false, "cochange", MapHeaderRead::No, {}, "cochange" },
     { "partners", "partners=N: partner files with 3+ shared commits (after min_recur); the total, rows paged", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "floor", "floor=N: shared commits a partner needed", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "floor_tail", "floor_tail=corroborated: filled to 10 with 2-commit partners, each why=", false, "cochange", MapHeaderRead::No, {}, "cochange" },
+    { "why", "why=support (floor+)|confidence (half the commits)|link (code edge, test, small dir)", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "recur", "recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "dep_capable", "dep_capable=0: a side cannot carry a static dependency (md, json, sh vs C++), so surprising= is undefined", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "no_file_edges", "no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown, not 0", true, "f", MapHeaderRead::No, {}, "cochange" },
@@ -1335,6 +1348,18 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "files", "files=N: single-author files folded into this one row; detail=1 lists each", true, "uniform", MapHeaderRead::No, {}, "owners" },
     // pack-task: src/serialize.h pureFromSig + the impure lens (pureSig at the <d> row emitters)
     { "pure", "pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "pack-task" },
+    // pack-task <partners>: src/packtask.h packTaskPartnersSection / packTaskPartners (the co-change partners of the ranking's top files)
+    { "seeds", "<partners>: files sharing 3+ commits (floor=) in window= (commits= read) with one of the ranking's first seeds= files, not those; partners_cut=N rows the budget cut", true, "partners", MapHeaderRead::No, {}, "pack-task" },   // also defines window= commits= partners_cut= floor=
+    { "together", "f together=N: commits shared with its best seed", true, "f", MapHeaderRead::No, {}, "pack-task" },
+    { "floor_tail", "partners floor_tail=corroborated: one seed, filled to 10 with 2-commit partners, each why=", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "why", "f why=support (floor+)|confidence (half the commits)|link (code edge, test, small dir)", true, "f", MapHeaderRead::No, {}, "pack-task" },
+    { "shallow", "partners shallow=1: a depth-limited clone, so a floor", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bulk_skipped", "partners bulk_skipped=N: commits over 30 indexed files, left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bots_skipped", "partners bots_skipped=N: bot commits left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "bots_included", "partners bots_included=N: bot commits kept (include-bots)", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "agent_commits", "partners agent_commits=N: kept commits an agent co-authored", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "renames", "partners renames=N: exact moves followed, not co-change", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    { "partners_none", "partners_none=: why no <partners>: no_git, no_history (no window commit touched an indexed file), shallow, multi_root, no_seed", false, {}, MapHeaderRead::No, {}, "pack-task" },
     // pr-context: src/prcontext.h (prAnchorAttr, prDirectionAttr, root tail format, per-file impact/cochange/owners, no-ref-work)
     { "anchor", "anchor=merge-base: diffed from merge base(base, HEAD); ref-tip-two-dot = no merge base, two-dot view", false, "pr-context", MapHeaderRead::No, {}, "pr-context" },
     { "base_sha", "base_sha=: the merge-base commit (9 hex) the diff is anchored at", false, "pr-context", MapHeaderRead::No, {}, "pr-context" },
@@ -1451,8 +1476,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "of", "of=: the test file pattern given", false, "exercises", MapHeaderRead::No, {}, "exercises" },
     // external-surface: src/verbs_navigate.h
     { "names", "names=N: distinct external names (the x rows' total)", false, "external-surface", MapHeaderRead::No, {}, "external-surface" },
-    // metrics: src/serialize.h (the metrics <s> row)
-    { "cx", "s in= out= cx= ccx= loc= params= nest= cbo= lcom4= amp=: callers, callees, cyclomatic/cognitive complexity, lines, parameters, nesting depth, coupled types, class cohesion, callers + co-changed files", true, "s", MapHeaderRead::No, {}, "metrics" },
+    // metrics: src/serialize.h (the metrics <s> row). cbo= is OUT-coupling (graph.h computeQMetrics: distinct resolved callees +
+    // composed member types) and in= its in-coupling; they load as separate factors (arXiv 2609.20411), so the reading keeps them
+    // apart and test/metriclegendcheck.sh (G) holds that no score sums them (lane metric-labels, 2026-11-26).
+    { "cx", "s in= out= cx= ccx= loc= params= nest= cbo= lcom4= amp=: callers, callees, cyclomatic/cognitive complexity, lines, parameters, nesting depth, out-coupling (distinct in-repo targets; never summed with in=), class cohesion, callers + co-changed files", true, "s", MapHeaderRead::No, {}, "metrics" },
     // pr-context: src/prcontext.h
     { "files", "files=N: changed files in the diff (shown= of them listed)", false, "pr-context", MapHeaderRead::No, {}, "pr-context" },
     { "symbols", "file symbols=: indexed symbols in that changed file", true, "file", MapHeaderRead::No, {}, "pr-context" },

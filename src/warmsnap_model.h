@@ -199,6 +199,13 @@ struct BlobFacts
     std::vector<std::string> bridgeBlobs;
 };
 
+// The blob facts a recorded model carries: what this run's load read, or, on a run that opened with no blob
+// (Session::coldBlob), what the next run's load reads from the blob this run just published: one record per crawled file.
+inline BlobFacts recordedBlobFacts( const Session& s, std::uint64_t recordsRead, std::uint64_t blobEntries, std::size_t files )
+{
+    return s.coldBlob ? BlobFacts{ files, files, {} } : BlobFacts{ recordsRead, blobEntries, {} };
+}
+
 inline bool bridgeDocsStillEmpty( const std::vector<std::string>& bridgeBlobs )
 {
     if( bridgeBlobs.empty() )

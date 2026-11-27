@@ -36,6 +36,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/tablelookup.h"  // isOneOf — archUnindexedCodeExt's table lookup
 #include "infra/strkern.h"      // strkern::lowerFoldedEquals — the built-in layer names match a path component, A-Z folded
 #include "infra/fileSetStore.h" // rw::FileAdjacency: the file graph the metrics and the propagation walk read
 #include "memguard.h"           // guardedFileClosure: the propagation fold stops at the hard line
@@ -656,6 +657,105 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
         }
     }
     return denied || ( hasAllow && !allowed );
+}
+
+// ── OBSERVATION QUALIFICATION (lane metric-labels, 2026-11-26; research audit item 9) ─────────────────────────────────
+//
+// A rule is judged only on the edges the include/import graph draws, and a file whose imports this build never reads draws
+// none. Two populations: an INDEXED file in a language with no file edges (LangFacts::fileEdges Unmeasured: Go, Java, Swift…),
+// and a file of a CODE extension this build does not index at all (the crawl's unsupported-ext rows; table below). Either one
+// on a rule's FROM side means the rule was never checked for that file, so its verdict is UNKNOWN, never PASS: the verb prints
+// <arch unqualified=N> (distinct such files under at least one rule) and a <rule text= unqualified= verdict="unknown"> row per
+// rule they fall under. FROM side only, on purpose: an edge a rule judges starts at a FROM file, and an unread file's
+// imports are exactly its outgoing edges; a TO-side file that cannot be imported-resolved has a FROM-side importer, and that
+// importer is what goes unjudged (counted on its own side when it too is unread). Evidence: arXiv 2610.41276 (single author,
+// 240 files) — the identity-hashed baseline this verb already has matched 480/480 scenarios where count-only matched 360/480;
+// the gap left was qualifying the observation, which is the honesty rule applied to --arch.
+//
+// The extension table names PROGRAMMING languages only. The unsupported-ext population also holds .txt, .css, .html and every
+// other text file nothing reads, and none of those carries an import a layering rule judges — counting them would read every
+// rule over a ui/ directory UNKNOWN forever, which is noise, not honesty. An entry for an extension this build does index is
+// inert (the crawl never rows it as unsupported). Lower-case with the leading dot: SkippedFile::ext's own spelling.
+inline constexpr std::array<std::string_view, 44> kArchUnindexedCodeExts = {{
+    ".scala", ".sc", ".hs", ".lhs", ".ml", ".mli", ".fs", ".fsi", ".fsx", ".vb", ".zig", ".nim", ".jl", ".r", ".pl", ".pm",
+    ".groovy", ".erl", ".hrl", ".cr", ".d", ".f90", ".f95", ".pas", ".adb", ".ads", ".cob", ".cbl", ".vue", ".svelte", ".astro",
+    ".elm", ".purs", ".rkt", ".scm", ".lisp", ".el", ".coffee", ".hx", ".sol", ".tcl", ".v", ".sv", ".vhd",
+}};
+inline bool archUnindexedCodeExt( std::string_view ext ) noexcept
+{
+    return isOneOf( ext, kArchUnindexedCodeExts );
+}
+
+// One rule with an unjudged file on its FROM side: the rule as the rules file spells it, and how many such files.
+struct ArchUnqualifiedRule
+{
+    std::string   text;
+    std::uint64_t files = 0;
+};
+struct ArchUnqualified
+{
+    std::vector<ArchUnqualifiedRule> rules;       // layer rules in file order, then deny path-rules in file order; files > 0 only
+    std::uint64_t                    files = 0;   // distinct candidates under at least one rule (the root's unqualified=)
+};
+
+// The rule as written: `deny ui -> db`, `allow * -> core`.
+inline std::string archRuleText( const ArchRules& r, const ArchRules::Rule& rule )
+{
+    const auto name = [ & ]( int id ) -> std::string_view { return id < 0 ? std::string_view( "*" ) : std::string_view( r.layerNames[ std::size_t( id ) ] ); };
+    return std::string( rule.allow ? "allow " : "deny " ) + std::string( name( rule.from ) ) + " -> " + std::string( name( rule.to ) );
+}
+
+// `candidates` are the ROOT-RELATIVE paths (the spelling every matcher in this file takes) of the files whose imports were
+// never read. A layer rule holds a candidate on its FROM side when the candidate's layer is the rule's FROM (or FROM is '*'
+// and the candidate is layered at all — archViolates judges no unlayered file either). A deny path-rule holds it when its FROM
+// regex does not decisively miss: an undecided match (the engine gave up) counts, since UNKNOWN is the answer either way.
+// Allow path-rules are exceptions that never forbid, so they have no verdict to qualify. Deterministic: candidates are walked
+// in the caller's order, rows come out in rule order.
+// Does rule `i` (layer rules first, then path-rules: archUnqualified's index) hold `rel` on its FROM side? `layer` is
+// archLayerOf( ar, rel ), computed once by the caller.
+inline bool archRuleHoldsFrom( const ArchRules& ar, std::size_t i, std::string_view rel, int layer )
+{
+    if( i < ar.rules.size() )
+    {
+        return layer >= 0 && ( ar.rules[i].from == -1 || ar.rules[i].from == layer );
+    }
+    const PathRule& pr = ar.pathRules[ i - ar.rules.size() ];
+    return !pr.bad && !pr.allow && pr.fromRe.search( rel, kCallerStackBytesFloor ) != RegexVerdict::Miss;
+}
+
+inline ArchUnqualified archUnqualified( const ArchRules& ar, const std::vector<std::string_view>& candidates )
+{
+    std::vector<std::uint64_t> perRule( ar.rules.size() + ar.pathRules.size(), 0 );
+    ArchUnqualified            out;
+    for( std::string_view rel : candidates )
+    {
+        const int layer = archLayerOf( ar, rel );
+        bool      under = false;
+        for( std::size_t i = 0; i < perRule.size(); ++i )
+        {
+            const bool holds = archRuleHoldsFrom( ar, i, rel, layer );
+            perRule[i] += holds ? 1 : 0;
+            under = under || holds;
+        }
+        out.files += under ? 1 : 0;
+    }
+    for( std::size_t i = 0; i < perRule.size(); ++i )
+    {
+        if( perRule[i] == 0 )
+        {
+            continue;
+        }
+        if( i < ar.rules.size() )
+        {
+            out.rules.push_back( { archRuleText( ar, ar.rules[i] ), perRule[i] } );
+        }
+        else
+        {
+            const PathRule& pr = ar.pathRules[ i - ar.rules.size() ];
+            out.rules.push_back( { "deny path " + pr.from + " -> " + pr.to, perRule[i] } );
+        }
+    }
+    return out;
 }
 
 // ── S5-B: --arch --baseline helpers ──────────────────────────────────────────────────────────────────

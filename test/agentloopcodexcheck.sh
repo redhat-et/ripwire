@@ -111,7 +111,9 @@ with tempfile.TemporaryDirectory() as td:
 
 trailer = '{"usage":{"input_tokens":10,"output_tokens":2},"total_cost_usd":0.05}'
 cm = module._claude_metrics( trailer )
-assert cm == dict( tokens_in=10, tokens_out=2, cost_usd=0.05 ), cm
+# the four-way cache split rides along (cost_accounting.py); a cell the trailer lacks is None, never 0
+assert cm == dict( tokens_in=10, tokens_out=2, cost_usd=0.05, split_uncached_in=10, split_cache_write=None,
+                   split_cache_read=None, split_output=2, tool_calls=None, model_calls=None ), cm
 assert module._claude_metrics( "not json" ) == {}, "trailer schema drift must degrade to nulls, not crash"
 
 # ── analyze.py self-test: pins pairing, clustering, bootstrap sign, and the exact fixture ratios ───────

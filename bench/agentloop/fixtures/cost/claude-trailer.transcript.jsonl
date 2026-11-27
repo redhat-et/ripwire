@@ -1,0 +1,6 @@
+{"type":"user","message":{"content":"fix the bug"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"looking"},{"type":"tool_use","name":"Bash","input":{"command":"ripwire . --for=bug"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.py"}},{"type":"tool_use","name":"Grep","input":{"pattern":"x"}}]}}
+not json at all
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"pytest -q"}},{"type":"tool_use","name":"Edit","input":{"file_path":"a.py"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}

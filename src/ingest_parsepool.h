@@ -675,10 +675,6 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     continue;
                 }
-                if( looksBinary( bytes ) )
-                {
-                    continue;
-                }
                 if( le->ext == ".h" && looksObjC( bytes ) )
                 {
                     if( const LangEntry* objcLe = lookupLang( ".m" ) )
@@ -696,6 +692,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     scan.statSize[ fileId ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
                     scan.statMtime[ fileId ] = si.mtimeNs;
                     scan.statCtime[ fileId ] = si.ctimeNs;
+                }
+                // Sniffed AFTER the hash: a binary file skipped unhashed was stored as hash 0, which the next run's prewarm
+                // hash never matches, so every first warm run re-read it as a re-parse (reparsed=5 on llvm's NUL-byte tests).
+                if( looksBinary( bytes ) )
+                {
+                    continue;
                 }
                 bytesLoaded = true;
             }

@@ -57,6 +57,7 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "batchpage.h"             // CL1: the CLI --batch pages by whole <q> sub-answers under the output ceiling (cliBatchPage)
 #include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
@@ -3313,10 +3314,11 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     return prec;
 }
 
-// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only) and nothing
+// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only), or --whereis
+// (WHEREIS-NO-GRAPH: the ingest and git, test/whereisnographcheck.sh), and nothing
 // that runs between the graph build and dispatch reads the graph: --pin-census writes g.pinCensus; --metrics, --for and
 // --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
-// those keeps the build, so a combination answers exactly as before. Everything else that outranks --deps/--arch is a verb
+// those keeps the build, so a combination answers exactly as before. Everything else that outranks the three is a verb
 // row above them in the precedence table, so it would have been the winner.
 // The graph for a run with a warm snapshot armed: the stored one when every guard in warmsnap.h holds, else a build whose
 // outcome becomes the next run's stored one.
@@ -3346,18 +3348,28 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
     std::string().swap( snap.graphOut );
     if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
     {
-        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={}\n", snap.treeReplayed ? "replayed" : "walked",
-                    snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built", rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ],
-                    rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0 );
+        // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={}\n",
+                    snap.treeReplayed ? "replayed" : "walked", snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built",
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ],
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ] );
     }
 }
 
 bool graphUnreadByWinner( const rw::Config& c, const char* winner )
 {
-    const bool archWins = winner != nullptr && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 );
+    // WHEREIS-NO-GRAPH: --whereis joins them — runCrossRef's arm reads d.ing (seed, def sites, near-miss), the redaction
+    // tally and the repo's refs (crossref::computeWhereis), never d.g. Its MCP twin answers from getIndex(), not from here.
+    const bool archWins = winner != nullptr
+                          && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 || std::strcmp( winner, "--whereis" ) == 0 );
     const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
                                     || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
-    return archWins && !modifierReadsGraph;
+    // STRAY-NO-GRAPH: --stray-content answers from git alone (crossref::computeStrayContent takes the root and the ref
+    // filter), and its --abi and --plan modes from the ingest as well (computeAbiCheck / computePlan take d.ing); runCrossRef
+    // never hands d.g to any of the three. Neither mode has a precedence row, so the winner reads --stray-content for all
+    // three shapes. test/straynographcheck.sh pins the bytes against a graph-built run.
+    const bool strayWins = winner != nullptr && std::strcmp( winner, "--stray-content" ) == 0;
+    return ( archWins || strayWins ) && !modifierReadsGraph;
 }
 
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
@@ -4608,6 +4620,42 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// The history-signal verbs (--hotspots, --rank-by=churn[-decay], --cochange, --situ, --quality-delta) say once, after the answer,
+// what their git walks left out (bot commits) and followed (exact moves) — gitmine.h WHOSE HISTORY. Other verbs that read history
+// for a secondary lens (the map's churn=, --for's co-change boost) apply the same policy and do not repeat the sentence.
+// --pack-task states its own walk's counts as attributes on <partners>, inside its budget (packtask.h PackPartners).
+static bool historySignalVerb( const rw::Config& cfg ) noexcept
+{
+    if( cfg.mcp || cfg.lsp || !cfg.listen.empty() )
+    {
+        return false;   // a server answers per request: the MCP envelope's _history_policy (mcp.h), never one line at exit
+    }
+    return cfg.hotspots || cfg.cochange || cfg.situ || cfg.qualityDelta
+        || cfg.rankBy == rw::RankBy::Churn || cfg.rankBy == rw::RankBy::ChurnDecay;
+}
+
+static void discloseHistoryPolicy( const rw::Config& cfg, char** argv )
+{
+    if( !historySignalVerb( cfg ) )
+    {
+        return;
+    }
+    const std::string sentence = rw::gitHistoryPolicySentence();
+    if( sentence.empty() )
+    {
+        return;
+    }
+    // the same stream rule as history_cut (discloseGitWalkCuts): a comment where the answer can hold one, never on a protocol stream
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--{}-->\n", rw::xmlCommentText( sentence ) );   // `--` is not well-formed in a comment
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
+    }
+}
+
 // Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
 // abstention (which prints without running the verb) both ask.
 static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
@@ -4871,10 +4919,15 @@ int main( int argc, char** argv )
     {
         return 1;   // the refusal is on stderr
     }
+    if( cfg.noCache )
+    {
+        rw::quality::skipCacheDirSweepForProcess();   // --no-cache never evicts another root's blob (quality.h, before any thread)
+    }
     // harvest 2026-09-09: a hook-form core.fsmonitor in a crawl root's own .git/config is a command git would run on
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    rw::gGitIncludeBots.store( cfg.includeBots, std::memory_order_relaxed );   // the history walks' bot policy (gitmine.h WHOSE HISTORY), before any walk starts
     // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
     // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
     // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
@@ -4902,6 +4955,7 @@ static int finishMainRun( const rw::Config& cfg, char** argv )
     using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
+    discloseHistoryPolicy( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed
@@ -5015,6 +5069,62 @@ static int serveWholeAnswer( const rw::Config& cfg, Run&& run )
     }
     std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
     return rc;
+}
+
+// The flags a CLI batch page's next= replays: the ones that shape its sub-answers (runBatchSub's topK/stable, the legend
+// posture applyCompactToBatchSubs reads, redaction) and the crawl scope, so the next page is a page of the SAME batch.
+static std::string batchReplayFlags( const rw::Config& cfg )
+{
+    std::string out;
+    out += cfg.topKExplicit ? " --top-k=" + std::to_string( cfg.topK ) : std::string();
+    out += cfg.stable ? " --order=stable" : "";
+    out += cfg.legendDefaulted ? std::string() : " " + rw::nextFlag( "--legend=", cfg.legend );
+    out += cfg.noRedact ? " --no-redact" : "";
+    return out + crawlScopeFlags( cfg );
+}
+
+// CL1 (batchpage.h) for the CLI --batch: a batch that fits at no --offset, or one asked whole with --page-bytes=0, prints as
+// batchText wrote it — the second with the over-ceiling size line --for's whole answer prints. Past the ceiling it prints the
+// page from --offset=K, whole <q> sub-answers only, and a <q> over the ceiling alone gets one stderr line. The fit is priced on
+// the bytes the legend posture delivers, as serveWholeAnswer prices a whole answer. A printed answer reports the batch's
+// redaction tally after it, as the batch arm always did; a refusal prints neither.
+static int printCliBatch( const rw::Config& cfg, const std::string& whole, const rw::RedactCounts& redacted )
+{
+    const std::size_t offset    = std::size_t( std::max( cfg.pageOffset, 0 ) );
+    const std::size_t delivered = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( whole, compactLegendHint( cfg, whole ) ) : whole.size();
+    const bool        asWhole   = rw::wholeAnswerAsked( cfg ) || ( offset == 0 && delivered <= rw::kOutputCeilingChars );
+    const std::optional<rw::BatchRowSplit> split = asWhole ? std::nullopt : rw::splitBatchRows( whole );
+    if( asWhole || !split )
+    {
+        if( !asWhole )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the whole batch is printed: every sub-answer arrives, only the size is over the ceiling",
+                      "printCliBatch: batchText's document did not split into <q> rows — printed whole" );
+            rw::emitTo( stderr, "ripwire: --batch: this answer is {} B, over the {} B output ceiling, and could not be split into its <q> "
+                                "sub-answers; it is printed whole\n", delivered, rw::kOutputCeilingChars );
+        }
+        noteWholeAnswerOverCeiling( cfg, delivered );
+        rw::emitTo( stdout, "{}\n", whole );
+        reportRedactions( stderr, redacted );
+        return 0;
+    }
+    const rw::CliBatchPage page = rw::cliBatchPage( *split, offset, rw::nextFlag( "--batch=", cfg.batchFile ), batchReplayFlags( cfg ) );
+    if( !page.refusal.empty() )
+    {
+        rw::emitTo( stderr, "ripwire: --batch: {}\n", page.refusal );
+        return 1;
+    }
+    if( page.overBytes > 0 )
+    {
+        const std::size_t pageBytes = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( page.text, compactLegendHint( cfg, page.text ) )
+                                                              : page.text.size();
+        rw::emitTo( stderr, "ripwire: --batch: sub-answer q={} is larger than a page, so this page carries it alone, whole: {} B, over the {} B "
+                            "output ceiling (an agent harness may show only a preview of it); narrow that sub-query to receive it inline\n",
+                    offset, pageBytes, rw::kOutputCeilingChars );
+    }
+    rw::emitTo( stdout, "{}\n", page.text );
+    reportRedactions( stderr, redacted );   // the whole batch ran, so its tally is every page's
+    return 0;
 }
 
 // --lint under --page-bytes=0: the whole answer through serveWholeAnswer; every other lint-family run as runLint serves it.
@@ -5894,10 +6004,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         {
             rw::applyCompactToBatchSubs( subs );
         }
-        std::fputs( batchText( subs, requested, kBatchCap ).c_str(), stdout );
-        std::fputc( '\n', stdout );
-        reportRedactions( stderr, rc );
-        return 0;
+        return printCliBatch( cfg, batchText( subs, requested, kBatchCap ), rc );
     }
 
     // Wave-4 remote ergonomics: a git-URL positional (https:// or git@) is shallow-cloned to a per-URL
@@ -6332,9 +6439,10 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), so when one of
-    // them is the dispatch WINNER (§B11.4's own scan, not cfg.deps: `--deps --callers` still answers --deps, but a graph verb
-    // that outranks it would not) and no modifier reads the graph before dispatch, the build is skipped and `g` stays empty.
+    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), and --whereis from
+    // the ingest and git (WHEREIS-NO-GRAPH), so when one of them is the dispatch WINNER (§B11.4's own scan, not cfg.deps:
+    // `--deps --callers` still answers --deps, but a graph verb that outranks it would not) and no modifier reads the graph
+    // before dispatch, the build is skipped and `g` stays empty.
     const bool graphUnread = graphUnreadByWinner( cfg, verbPrec.winner );
     const Graph       g               = [ & ]
     {
@@ -6351,9 +6459,9 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         }
     }();
     finishWarmSnapshot( warmSnap );
-    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
+    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch/--whereis, the ingest) and the verbs
     {
-        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );
+        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (a verb that reads no graph: after the ingest) — exit 5, one stderr line" );
         rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( graphUnread ? "ingest" : "graph build" ) );
         rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;

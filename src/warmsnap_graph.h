@@ -582,7 +582,7 @@ inline Graph buildGraphRecorded( Session& s, const IngestResult& ing )
         const depwatch::Armed armed( &log );
         return buildGraph( ing, nullptr, false );
     }();
-    if( !s.on() || !s.treeKeyValid || ing.memoryStop.isSet() || ing.reparsedFiles != 0 )   // a run that parsed stores nothing: see recordWarmModel
+    if( !s.on() || !mayStoreBuilt( s, ing.reparsedFiles, ing.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
     {
         return g;
     }

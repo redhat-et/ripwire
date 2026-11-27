@@ -647,7 +647,9 @@ A second, much smaller cache sits beside it: the **span-tier memo** (`ingest_ast
 path + parser version, gated on the same `(sizeBytes, mtimeNs, ctimeNs)` stat triple and racy-mtime rule
 the parse cache's warm path uses, and it carries a measured size floor so it writes blobs only for files
 whose parse actually costs something. It obeys the same rules as everything else here: `--no-cache`
-turns it off, a blob that cannot be trusted is ignored rather than repaired, and `test/grepfastcheck.sh`
+turns it off, as it does the working-tree parse cache (the HEAD-side families a commit-tree verb writes
+stay on, but a `--no-cache` run never sweeps another root's blobs — `test/nocacheevictcheck.sh`),
+a blob that cannot be trusted is ignored rather than repaired, and `test/grepfastcheck.sh`
 pins cold output byte-identical to warm across the whole `--grep` option matrix.
 
 ---

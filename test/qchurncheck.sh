@@ -49,7 +49,9 @@ nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the
 # expensive walk gitRawCommitStreamCached guards). Any OTHER git call this run makes (rev-parse, HEAD
 # resolution, etc.) never contains "name-only", so this is a clean, argv-based signal — not a timing guess.
-name_only_count(){ grep -c "name-only" "$1" 2>/dev/null || true; }
+# Since lane/history-honesty (2026-11-26) the walk lists changes with --raw (gitmine.h gitLogRecordsCmd); the walk is still
+# the only git call carrying that flag, so the signal is the same argv test with the walk's current spelling.
+name_only_count(){ grep -cE "[ ']log[ '].*--raw" "$1" 2>/dev/null || true; }
 # run TRACEFILE ARGS... — invokes ripwire against $REPO with our private TMPDIR + a fresh GIT_TRACE file.
 run(){ local tf="$1"; shift; : > "$tf"; env TMPDIR="$QTMP" GIT_TRACE="$tf" "$BIN" "$REPO" "$@"; }
 
@@ -133,7 +135,7 @@ diff -q "$TMP/new.out" "$TMP/new2.out" >/dev/null \
 KSHIM="$TMP/kshim"; mkdir -p "$KSHIM"
 cat >"$KSHIM/git" <<KSHIMEOF
 #!/bin/sh
-case "\$*" in *name-only*) exit 128;; esac
+case "\$*" in *" --raw "*) exit 128;; esac
 exec "$( command -v git )" "\$@"
 KSHIMEOF
 chmod +x "$KSHIM/git"
@@ -162,9 +164,13 @@ grep -q ' history_unread="1"' "$TMP/k_grep.out" \
     || no "K51: --grep --metrics on a failed walk is silent"
 krun "$TMP/k_full.out" --for=helper --legend=full
 grep -q 'history_unread=1: the git history walk' "$TMP/k_full.out" \
-    && ok "K51: the attribute is defined beside its root (a comment that reads it)" || no "K51: history_unread= is not defined in the document"
+    \
+        && ok "K51: the attribute is defined beside its root (a comment that reads it)" \
+        || no "K51: history_unread= is not defined in the document"
 xmllint --noout "$TMP/k_for.out" "$TMP/k_map.out" "$TMP/k_grep.out" "$TMP/k_full.out" 2>/dev/null \
-    && ok "K51: every disclosing document is well-formed XML" || no "K51: a disclosing document is malformed XML"
+    \
+        && ok "K51: every disclosing document is well-formed XML" \
+        || no "K51: a disclosing document is malformed XML"
 [ "$( nqchurn )" -eq "$kbefore" ] \
     && ok "K51: the failed walk was NOT cached (qchurn blobs $kbefore -> $( nqchurn ))" \
     || no "K51: a failed walk was stored as a qchurn blob ($kbefore -> $( nqchurn ))"
@@ -297,7 +303,9 @@ fi
 
 # ── xmllint clean (sanity — --for output is still well-formed XML under the cached path) ───────────────
 "$BIN" "$REPO" --for="helper" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
-    && ok "xmllint clean" || no "xmllint reported malformed XML"
+    \
+        && ok "xmllint clean" \
+        || no "xmllint reported malformed XML"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi
