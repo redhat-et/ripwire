@@ -544,6 +544,34 @@ for L in compact full; do
     done
 done
 
+# ── 8g) TAIL-CLAUSE: an owner ranked only into <tail> is printed there, so the clause rides ──────────────
+# 8f's head walk reads the <d>/<hops> rows; a module-scope owner ranked past them still reaches the answer as
+# a <t> pointer row (sym= its file's top symbols). Reported by the M5 session (8f red on #790's tree: a tail
+# row sym="p,&lt;file-scope&gt;" and no definition). Fixture: 60 files whose functions the query names, and
+# one file whose ONLY symbol is its module scope (a top-level call) — it ranks 61st, into the tail alone.
+echo "=== (8g) TAIL-CLAUSE: a <tail> row naming an owner carries the clause ==="
+TC="$TMP/tailowner"; mkdir -p "$TC/src" "$TC/boot"
+for i in $( seq 1 60 ); do
+    printf 'export function emitXmlAttr%d(attr: string): string {\n  return "<x " + attr + "/>"\n}\n' "$i" > "$TC/src/xmlattr$i.ts"
+done
+printf "import { emitXmlAttr1 } from '../src/xmlattr1'\n\nemitXmlAttr1('boot')\n" > "$TC/boot/start.ts"
+tc_seen=0
+for L in compact full; do
+    A="$( "$BIN" "$TC" --no-cache --for='emit xml attributes' --legend=$L 2>/dev/null )"
+    T="$( printf '%s' "$A" | perl -0ne 'print $1 if /(<tail\b.*?<\/tail>)/s' )"
+    REST="$( printf '%s' "$A" | perl -0pe 's/<tail\b.*?<\/tail>//s' )"
+    # PREMISE: the owner's file is in the tail, and nowhere else in the document (not a head row)
+    if printf '%s' "$T" | grep -q 'boot/start\.ts[^<]*\(<file-scope>\|&lt;file-scope&gt;\)' && ! printf '%s' "$REST" | grep -q 'boot/start\.ts'; then
+        tc_seen=$(( tc_seen + 1 ))
+        printf '%s' "$A" | grep -q 'modscope\|MODULE SCOPE' \
+            && ok "(8g) --for --legend=$L: the owner rides only in <tail> and the clause defines it" \
+            || no "(8g) --for --legend=$L: <tail> prints <file-scope> and the legend never defines it"
+    else
+        no "(8g) --for --legend=$L: premise lost — the owner is not a tail-only row (tail: ${T:0:300})"
+    fi
+done
+[ "$tc_seen" = 2 ] && ok "(8g) both legends exercised a tail-only owner (2 of 2)" || no "(8g) only $tc_seen of 2 legends reached a tail-only owner"
+
 # ── 8d) #60 MED-2: the legend says the owner has no body, and --expand agrees ──────────────────────────
 # Every clause naming this kind says "no body to expand". --expand used to answer either the WHOLE FILE
 # (the whole-file serving always undercuts an empty bundle) or shown="0" capped="1" — a cap over a body
