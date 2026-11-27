@@ -83,6 +83,8 @@ mcp_call "${FIND_MSGS[@]}" | tail -1 > "$TMP/find_a"
 python3 -c '
 import sys, json, re
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 d = json.loads(r["result"]["content"][0]["text"])
 syms = [d["symbol"]] + d.get("calledBy", []) + d.get("calls", [])
 missing = [s["name"] for s in syms if not s.get("handle")]
@@ -111,6 +113,8 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
 b = json.loads(r["result"]["content"][0]["text"])
 open(sys.argv[2], "w").write(b["body"])
@@ -145,12 +149,14 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 has_result = "result" in r
 code = r.get("error", {}).get("code")
 msg  = r.get("error", {}).get("message", "")
-print("STALE_REFUSED" if (not has_result and code == -32602 and "stale" in msg) else "STALE_SERVED:" + json.dumps(r)[:200])
+print("STALE_REFUSED" if (not has_result and code == "isError" and "stale" in msg) else "STALE_SERVED:" + json.dumps(r)[:200])
 ' "$TMP/stale" > "$TMP/stalechk"
-if grep -q STALE_REFUSED "$TMP/stalechk"; then ok "stale handle refused with -32602 'stale', no body"; else no "stale handle NOT refused: $(cat "$TMP/stalechk")"; fi
+if grep -q STALE_REFUSED "$TMP/stalechk"; then ok "stale handle refused (isError) 'stale', no body"; else no "stale handle NOT refused: $(cat "$TMP/stalechk")"; fi
 
 echo
 echo "=== 6. garbage / mutated handle is REFUSED ==="
@@ -161,7 +167,9 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
-print("GARBAGE_REFUSED" if ("result" not in r and r.get("error",{}).get("code")==-32602) else "GARBAGE_SERVED")
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
+print("GARBAGE_REFUSED" if ("result" not in r and r.get("error",{}).get("code")=="isError") else "GARBAGE_SERVED")
 ' "$TMP/garbage" > "$TMP/gchk"
 if grep -q GARBAGE_REFUSED "$TMP/gchk"; then ok "garbage handle refused"; else no "garbage handle NOT refused"; fi
 
@@ -179,7 +187,9 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
-print("MUT_REFUSED" if ("result" not in r and r.get("error",{}).get("code")==-32602) else "MUT_SERVED:" + json.dumps(r)[:160])
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
+print("MUT_REFUSED" if ("result" not in r and r.get("error",{}).get("code")=="isError") else "MUT_SERVED:" + json.dumps(r)[:160])
 ' "$TMP/mut" > "$TMP/mchk"
 if grep -q MUT_REFUSED "$TMP/mchk"; then ok "mutated (non-existent id) handle refused, no body"; else no "mutated handle NOT refused: $(cat "$TMP/mchk")"; fi
 
@@ -199,6 +209,8 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "result" not in r: print("NAME_REFUSED:" + r.get("error",{}).get("message","")[:160]); sys.exit(0)
 j = json.loads(r["result"]["content"][0]["text"])
 okBody   = "engineStepA1() + engineStepA1()" in j.get("body","")
@@ -218,8 +230,10 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 m = r.get("error",{}).get("message","")
-okCode = "result" not in r and r.get("error",{}).get("code") == -32602
+okCode = "result" not in r and r.get("error",{}).get("code") == "isError"
 print("BADNAME_OK" if (okCode and "did you mean" in m and "engineStepA2" in m and "find_symbol" in m) else "BADNAME_BAD:" + m[:200])
 ' "$TMP/badname" > "$TMP/badnamechk"
 grep -q BADNAME_OK "$TMP/badnamechk" \
@@ -234,6 +248,8 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 m = r.get("error",{}).get("message","")
 print("GUARD_OK" if ("result" not in r and "malformed handle" in m) else "GUARD_BAD:" + m[:160])
 ' "$TMP/symgarb" > "$TMP/symgarbchk"
@@ -253,6 +269,8 @@ mcp_call \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "result" not in r: print("DUP_REFUSED:" + r.get("error",{}).get("message","")[:160]); sys.exit(0)
 j = json.loads(r["result"]["content"][0]["text"])
 others = j.get("other_defs", [])
@@ -321,11 +339,13 @@ printf '%s\n' \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "result" in r: print("SERVED_ANYWAY"); sys.exit(0)
 m   = r.get("error", {}).get("message", "")
 low = m.lower()
 problems = []
-if r.get("error", {}).get("code") != -32602: problems.append("wrong error code")
+if r.get("error", {}).get("code") != "isError": problems.append("wrong error code")
 if "path" not in low:                        problems.append("the refusal never names the `path` argument")
 if sys.argv[2] not in m:                     problems.append("the refusal never says which root answered")
 print("NOPATH_OK" if not problems else "NOPATH_BAD:" + "; ".join(problems) + " || " + m[:220])
@@ -343,6 +363,8 @@ printf '%s\n' \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "result" in r: print("SERVED_ANYWAY"); sys.exit(0)
 m = r.get("error", {}).get("message", "")
 okRename = "renamed or removed" in m
@@ -362,6 +384,8 @@ printf '%s\n' \
 python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 print("SERVE_OK" if "result" in r else "SERVE_BAD:" + r.get("error",{}).get("message","")[:160])
 ' "$TMP/nopath_ok" > "$TMP/nopathokchk"
 grep -q SERVE_OK "$TMP/nopathokchk" \

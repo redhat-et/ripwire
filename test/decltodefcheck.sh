@@ -212,6 +212,8 @@ except Exception:
     sys.stdout.write("__ERROR__:no JSON-RPC response"); sys.exit(0)
 if "error" in r:
     sys.stdout.write("__ERROR__:"+str(r["error"].get("message","")))
+elif r["result"].get("isError"):   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, the same refusal
+    sys.stdout.write("__ERROR__:"+"".join(c.get("text","") for c in r["result"]["content"]))
 else:
     sys.stdout.write(r["result"]["content"][0]["text"])' "$1"; }
 

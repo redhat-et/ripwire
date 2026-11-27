@@ -37,6 +37,8 @@ handle_of_symbol() {
     tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
 print(json.loads(r["result"]["content"][0]["text"])["symbol"]["handle"])
 '
@@ -69,7 +71,9 @@ fetch_range() {
         | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
-if "error" in r: print("__ERR__:%d:%s" % (r["error"].get("code",0), r["error"].get("message","")))
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
+if "error" in r: print("__ERR__:%s:%s" % (r["error"].get("code",0), r["error"].get("message","")))
 else: print(r["result"]["content"][0]["text"])
 '
 }
@@ -169,6 +173,8 @@ else
         | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
 if "error" in r: print("__ERR__:" + json.dumps(r["error"])); sys.exit(0)
 b = json.loads(r["result"]["content"][0]["text"])
 body = b["body"]
@@ -201,9 +207,9 @@ open(p, "wb").write(b2)
 PY
 STALE_RANGE_JSON="$( fetch_range 1 2 )"
 case "$STALE_RANGE_JSON" in
-    __ERR__:-32602:*chang*) ok "stale handle + range request refused with -32602 mentioning the file changed (range never applied to a stale handle): ${STALE_RANGE_JSON#__ERR__:-32602:}";;
-    __ERR__:-32602:*)       no "stale handle + range refused with -32602 but the message does not mention the file changing (may be the wrong refusal reason): $STALE_RANGE_JSON";;
-    __ERR__*)               no "stale handle + range refused with the WRONG error code (want -32602/stale): $STALE_RANGE_JSON";;
+    __ERR__:isError:*chang*) ok "stale handle + range request refused (isError) mentioning the file changed (range never applied to a stale handle): ${STALE_RANGE_JSON#__ERR__:isError:}";;
+    __ERR__:isError:*)       no "stale handle + range refused (isError) but the message does not mention the file changing (may be the wrong refusal reason): $STALE_RANGE_JSON";;
+    __ERR__*)               no "stale handle + range refused with the WRONG error code (want isError/stale): $STALE_RANGE_JSON";;
     *)                      no "stale handle + range request returned a BODY instead of refusing — the staleness pin was bypassed by the range path: $( echo "$STALE_RANGE_JSON" | head -c 150 )";;
 esac
 
@@ -216,10 +222,12 @@ STALE_FULL_JSON2="$( mcp_call \
     | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
-print("__ERR__:%d:%s" % (r["error"]["code"], r["error"]["message"]) if "error" in r else "NO_ERROR")
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError RESULT now; read it as the refusal it is, code "isError"
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )
+print("__ERR__:%s:%s" % (r["error"]["code"], r["error"]["message"]) if "error" in r else "NO_ERROR")
 ' )"
 case "$STALE_FULL_JSON2" in
-    __ERR__:-32602:*) ok "control: the same stale handle with NO range also refuses with -32602 (staleness check is shared, not range-path-specific)";;
+    __ERR__:isError:*) ok "control: the same stale handle with NO range also refuses (isError) (staleness check is shared, not range-path-specific)";;
     *) no "control: stale handle with no range did not refuse as expected: $STALE_FULL_JSON2";;
 esac
 

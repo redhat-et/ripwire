@@ -157,6 +157,8 @@ def mcp( name, arguments, raw = False ):
     r = json.loads( last )
     if "error" in r:
         return "__ERROR__:" + r[ "error" ].get( "message", "" )
+    if r[ "result" ].get( "isError" ):   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, the same refusal
+        return "__ERROR__:" + r[ "result" ][ "content" ][ 0 ][ "text" ]
     return r[ "result" ][ "content" ][ 0 ][ "text" ]
 
 # ── name extraction: XML attribute names, and a recursive JSON key walk ───────────────────────────────

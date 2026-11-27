@@ -124,6 +124,7 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_a"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[0])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 code = r.get("error", {}).get("code")
 print("OK" if isinstance(code, int) else "BAD:" + json.dumps(r))
 PYEOF
@@ -136,6 +137,7 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_b"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[1])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 code = r.get("error", {}).get("code")
 print("OK" if isinstance(code, int) else "BAD:" + json.dumps(r))
 PYEOF
@@ -148,6 +150,7 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_c"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[2])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 print("OK" if r.get("id") == 7 and "error" not in r else "BAD:" + json.dumps(r))
 PYEOF
 [ "$( cat "$TMP/check_c" )" = "OK" ] \
@@ -181,11 +184,12 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_e"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[3])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 code = r.get("error", {}).get("code")
-print("OK" if isinstance(code, int) else "BAD:" + json.dumps(r))
+print("OK" if code == "isError" else "BAD:" + json.dumps(r))   # SEP-1303: a refusal of a served tool is an isError result now, not a numeric JSON-RPC code
 PYEOF
 [ "$( cat "$TMP/check_e" )" = "OK" ] \
-    && ok "(e) tools/call with missing arguments object -> error with numeric code" \
+    && ok "(e) tools/call with missing arguments object -> an isError refusal (SEP-1303)" \
     || no "(e) missing arguments: $( cat "$TMP/check_e" )"
 
 # (f) find_symbol with no symbol argument -> error with code.
@@ -193,11 +197,12 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_f"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[4])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 code = r.get("error", {}).get("code")
-print("OK" if isinstance(code, int) else "BAD:" + json.dumps(r))
+print("OK" if code == "isError" else "BAD:" + json.dumps(r))   # SEP-1303: a refusal of a served tool is an isError result now, not a numeric JSON-RPC code
 PYEOF
 [ "$( cat "$TMP/check_f" )" = "OK" ] \
-    && ok "(f) find_symbol with no symbol argument -> error with numeric code" \
+    && ok "(f) find_symbol with no symbol argument -> an isError refusal (SEP-1303)" \
     || no "(f) find_symbol no-symbol: $( cat "$TMP/check_f" )"
 
 # (g) unknown tool name -> error with code.
@@ -205,6 +210,7 @@ python3 - "$TMP/battery_out" <<'PYEOF' >"$TMP/check_g"
 import sys, json
 lines = [l for l in open(sys.argv[1]) if l.strip()]
 r = json.loads(lines[5])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 code = r.get("error", {}).get("code")
 print("OK" if isinstance(code, int) else "BAD:" + json.dumps(r))
 PYEOF
@@ -234,6 +240,7 @@ inner_text(){
     tail -1 "$TMP/$1" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r:
     print("__ERROR__:" + json.dumps(r["error"]))
 else:
@@ -354,6 +361,7 @@ c_inner_text(){
     tail -1 "$1" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r: print("__ERROR__:" + r["error"].get("message",""))
 else: print(r["result"]["content"][0]["text"])
 '
@@ -441,7 +449,8 @@ D2_SNAPSHOT="$( mktemp -d "$TMP/d2snap.XXXXXX" )"; cp -R "$D2_WS/"* "$D2_SNAPSHO
 D2_MSG="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"insert_before_symbol\",\"arguments\":{\"path\":\"$D2_OTHER\",\"symbol\":\"perimeter\",\"file\":\"geometry.cpp\",\"text\":\"// x7-outside\\n\"}}}"
 mcp_call_root "$D2_WS" '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$D2_MSG" >"$TMP/d2_out"
 D2_INNER="$( c_inner_text "$TMP/d2_out" )"
-[ "$D2_INNER" = "__ERROR__:path outside workspace; start the server on that root or pass an absolute in-root path" ] \
+# SEP-1303 (lane mcp-metadata): the refusal is an isError result and ends in a next call; the named sentence leads it unchanged
+case "$D2_INNER" in "__ERROR__:path outside workspace; start the server on that root or pass an absolute in-root path — next: find_symbol "*) true ;; *) false ;; esac \
     && ok "(D-2) edit verb with an outside-root path refuses with the named workspace-pin error" \
     || no "(D-2) unexpected: $D2_INNER"
 diff -rq "$D2_SNAPSHOT" "$D2_WS" >/dev/null \
@@ -525,6 +534,7 @@ case "$( c_inner_text "$TMP/d5_out" )" in
 tail -1 "$TMP/d5_out" | python3 -c '
 import sys, json, os
 r = json.load( sys.stdin )
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 a = r.get( "result", {} ).get( "_assumed_root", "" )
 want = os.path.realpath( sys.argv[1] )
 print( "OK" if ( "assumed root" in a and want in a and "pass path=" in a ) else "BAD:" + a )' "$FIX" >"$TMP/d5b_res"

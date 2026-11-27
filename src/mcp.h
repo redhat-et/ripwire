@@ -1275,6 +1275,40 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
+// ─── SEP-1303 (MCP 2025-11-25; audit 2026-11-26 item 3): which failures are RESULTS ─────────────────────────────
+// A tools/call that NAMED a tool this server serves and then failed inside it (a missing or bad argument, a not-found, a
+// business-logic refusal) is a Tool Execution Error: a RESULT with isError:true and the explanation in content, which a
+// client SHOULD show the model. A JSON-RPC error is a Protocol Error, which a client MAY drop: it stays for a request that
+// reached no tool (an unknown or --mcp-tools-hidden name, a missing or wrong-typed `name`, a wrong-typed `arguments`) and
+// for the server faults (-32000 the memory hard line, -32601 remote edits off, -32603 internal). Claude Code shows both (6
+// of 6 sampled -32602s arrived as is_error), so the gain is every other client and the spec. The message bytes are the
+// same in either envelope; only the envelope moves. Gate: test/mcpiserrorcheck.sh.
+inline bool mcpIsToolExecutionError( int code, std::string_view name )
+{
+    // a name with no declared field set is no tool this server serves (aliases resolve to their target's row)
+    return code == -32602 && !mcprefuse::declaredFieldsFor( name ).empty();
+}
+
+inline std::string mcpToolErrorFrame( const std::string& id, const std::string& text )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+         + mcpdetail::jsonEscape( text ) + "\"}],\"isError\":true}}";
+}
+
+inline std::string mcpProtocolErrorFrame( const std::string& id, int code, const std::string& text )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
+         + mcpdetail::jsonEscape( text ) + "\"}}";
+}
+
+// found=0 is an ANSWER ("none found", non-negotiable 3), so it is a plain result, not an error of either kind: the CLI's
+// answer document first, the refusal sentence (echo, near-miss, rename, next call) as the second block.
+inline std::string mcpFoundZeroFrame( const std::string& id, const std::string& doc, const std::string& sentence )
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+         + mcpdetail::jsonEscape( doc ) + "\"},{\"type\":\"text\",\"text\":\"" + mcpdetail::jsonEscape( sentence ) + "\"}]}}";
+}
+
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the
@@ -1464,37 +1498,37 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // stable ordering, so rows come out grouped by file in a byte-stable order, not rank-descending).
                    // The header stanza's order= attribute names the emitted order; k= is absent under it, so an
                    // agent that wants the rank must read membership, not row position.
-                   "{\"name\":\"analyze\",\"description\":\"Architecture map for a directory: signatures and the call graph for the top symbols. Use when landing cold, before reading files ('for' for a task, find_symbol for one symbol). MEMBERSHIP is the PageRank top-K; rows come in stable file-grouped order (order=), not rank order; files=/symbols=/shown= and ambiguous=/unresolved= gauge completeness.\","
+                   "{\"name\":\"analyze\",\"description\":\"Landing cold, before reading files? The architecture map: signatures and the call graph for the top symbols ('for' for a task, find_symbol for one symbol). MEMBERSHIP is the PageRank top-K; rows come in stable file-grouped order (order=), not rank order; files=/symbols=/shown= and ambiguous=/unresolved= gauge completeness.\","
                    + mcprefuse::toolMetadataFor( "analyze", pathIsRequired ) + "},"
                    // lane/t10-mcp-coverage: the MCP twin of --rank-by=pagerank|authority|hub|rrf|churn|churn-decay.
                    // Same map `analyze` serves (same MEMBERSHIP/ORDER split), a different ranking SIGNAL.
-                   "{\"name\":\"rank_by\",\"description\":\"The SAME architecture map 'analyze' serves, ranked by a different signal instead of plain PageRank. rank_by = pagerank (default; unbiased, so it can differ from 'analyze' on a tree with uncommitted changes), authority (core APIs), hub (entrypoints) or rrf (all three fused). churn/churn-decay are valid CLI --rank-by= values this tool REFUSES for now: they mine git history through a path this server does not build yet; use the CLI (ripwire <dir> --rank-by=churn). Attributes follow 'analyze'.\","
+                   "{\"name\":\"rank_by\",\"description\":\"Want core APIs or entrypoints first? The SAME map 'analyze' serves, ranked by another signal than plain PageRank. rank_by = pagerank (default; unbiased, so it can differ from 'analyze' on a tree with uncommitted changes), authority (core APIs), hub (entrypoints) or rrf (all three fused). churn/churn-decay are valid CLI --rank-by= values this tool REFUSES for now: they mine git history through a path this server does not build yet; use the CLI (ripwire <dir> --rank-by=churn). Attributes follow 'analyze'.\","
                    + mcprefuse::toolMetadataFor( "rank_by", pathIsRequired ) + "},"
-                   "{\"name\":\"find_symbol\",\"description\":\"A symbol's 1-hop neighborhood: the symbol (with a fetch_body handle) plus direct callers (calledBy) and callees (calls). Transitive reach: 'impact'; read/write/import sites: 'uses'. JSON; both arrays are FLOORS and the payload says why. valueRefs/valueCallees: value uses (tables, args), not a proven call. " + std::string( kAtSeedDocClause ) + "\","
+                   "{\"name\":\"find_symbol\",\"description\":\"Holding a symbol name? Its 1-hop neighborhood: the symbol (with a fetch_body handle) plus direct callers (calledBy) and callees (calls). Transitive reach: 'impact'; read/write/import sites: 'uses'. JSON; both arrays are FLOORS and the payload says why. valueRefs/valueCallees: value uses (tables, args), not a proven call. " + std::string( kAtSeedDocClause ) + "\","
                    + mcprefuse::toolMetadataFor( "find_symbol", pathIsRequired ) + "},"
-                   "{\"name\":\"find_referencing_symbols\",\"description\":\"Direct (1-hop) callers of a symbol, each with a fetch_body handle. Transitive blast radius: 'impact'; read/write/import sites: 'uses'. JSON; calledBy is a FLOOR and the payload says why; declined_calls: same-named calls left unbound; valueRefs: value uses (tables, args), not a proven call; neither is in count.\","
+                   "{\"name\":\"find_referencing_symbols\",\"description\":\"Who calls X directly? Its 1-hop callers, each with a fetch_body handle. Transitive blast radius: 'impact'; read/write/import sites: 'uses'. JSON; calledBy is a FLOOR and the payload says why; declined_calls: same-named calls left unbound; valueRefs: value uses (tables, args), not a proven call; neither is in count.\","
                    + mcprefuse::toolMetadataFor( "find_referencing_symbols", pathIsRequired ) + "},"
                    // verifier N8: limit/offset are DECLARED here because they are HONORED (mcpPageArgs →
                    // pageWindow, the same trio the CLI --grep applies). This was the only paged CLI verb whose
                    // MCP twin disclosed capped:true at 100 hits with no knob to raise or walk past it.
-                   "{\"name\":\"grep\",\"description\":\"Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in). Hits carry text; enclosing rows a fetch_body handle. in=any lifts the span tiering (default: the tightest non-empty tier; the rest rides as suppressed_comment/suppressed_string). limit/offset page the hits (first 100). hits_capped means total is a floor.\","
+                   "{\"name\":\"grep\",\"description\":\"Where does this exact text occur? Trigram literal search, each hit annotated with its enclosing function/class. Hits carry text; enclosing rows a fetch_body handle. in=any lifts the span tiering (default: the tightest non-empty tier; the rest rides as suppressed_comment/suppressed_string). limit/offset page the hits (first 100). hits_capped means total is a floor.\","
                    + mcprefuse::toolMetadataFor( "grep", pathIsRequired ) + "},"
-                   "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. dep_capable=false (sh/md/json/binary) or no_file_edges (Go, Java) makes surprising undefined, not a finding. The root names the mined window.\","
+                   "{\"name\":\"cochange\",\"description\":\"Editing a file? The files that historically change with it (its co-edit partners). dep_capable=false (sh/md/json/binary) or no_file_edges (Go, Java) makes surprising undefined, not a finding. The root names the mined window.\","
                    + mcprefuse::toolMetadataFor( "cochange", pathIsRequired ) + "},"
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
-                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut.\","
+                   "{\"name\":\"memory_recall\",\"description\":\"Before reading code, recall what is written down: the few memory notes / docs that matter for a task, full text. path = the docs/memory dir. top_k = 1..1000 (default 6), refused outside that band; budget_tokens (default 8000) SHAPES the bodies to fit like the CLI --recall's --max-tokens, never refusing; the header discloses max_tokens= and every cut.\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
-                   "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files default to 'git diff HEAD'; files is a comma-separated STRING (an array is refused rather than read as absent). limit/offset page blast_radius and forgotten only (default: every row). " + std::string( kTestRowJsonShapeClause ) + "\","
+                   "{\"name\":\"situational_awareness\",\"description\":\"Mid-change or reviewing a diff? The 5 things to know about it, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files default to 'git diff HEAD'; files is a comma-separated STRING (an array is refused rather than read as absent). limit/offset page blast_radius and forgotten only (default: every row). " + std::string( kTestRowJsonShapeClause ) + "\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
-                   "{\"name\":\"mentions\",\"description\":\"Docs (markdown plans/designs) that name a code symbol in a backtick. " + std::string( kAtSeedRebindClause ) + "\","
+                   "{\"name\":\"mentions\",\"description\":\"Changing a symbol docs describe? The markdown plans/designs that name it in a backtick. " + std::string( kAtSeedRebindClause ) + "\","
                    + mcprefuse::toolMetadataFor( "mentions", pathIsRequired ) + "},"
-                   "{\"name\":\"for\",\"description\":\"Task-lens ranked, signatures-only inventory of the building blocks most relevant to a task (cx=complexity, in=reuse-count). budget_tokens = an optional soft row target. The header carries route= (which ranker answered), confidence=/margin_pct= (low means a starting point, not an answer) and lens= (columns this dialect does not measure).\","
+                   "{\"name\":\"for\",\"description\":\"Starting a task? The ranked, signatures-only inventory of the building blocks most relevant to it (cx=complexity, in=reuse-count). budget_tokens = an optional soft row target. The header carries route= (which ranker answered), confidence=/margin_pct= (low means a starting point, not an answer) and lens= (columns this dialect does not measure).\","
                    + mcprefuse::toolMetadataFor( "for", pathIsRequired ) + "},"
-                   "{\"name\":\"lego\",\"description\":\"Interface-to-impls view for ONE named interface/base: its method contract plus EVERY implementor (own-language only), each with file path. Use when implementing against a KNOWN interface ('for' sprays top interfaces for a task).\","
+                   "{\"name\":\"lego\",\"description\":\"Implementing against a KNOWN interface/base? Its method contract plus EVERY implementor (own-language only), each with file path. 'for' sprays top interfaces for a task.\","
                    + mcprefuse::toolMetadataFor( "lego", pathIsRequired ) + "},"
-                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. at= is the commit computed at (+dirty = the tree differed). " + std::string( kAtSeedRebindClause ) + "\","
+                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"owners\",\"description\":\"Who knows this code? Bus-factor: recency-weighted (6-month half-life) author ownership per file. at= is the commit computed at (+dirty = the tree differed). " + std::string( kAtSeedRebindClause ) + "\","
                    + mcprefuse::toolMetadataFor( "owners", pathIsRequired ) + "}," ) +
                    // EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
                    "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. One trailing newline folds (trailing_newline_folded). REFUSES, file byte-unchanged, when: not found (lists nearest names), ambiguous (lists file:line candidates; retry with 'file'), the index is stale (call any read verb first), the target is a SYMLINK, or a concurrent write is detected. symbol accepts @FILE:LINE. The receipt's span is the POST-EDIT byte range, not the region overwritten.\","
@@ -1504,7 +1538,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"insert_after_symbol\",\"description\":\"Insert text immediately AFTER a symbol's definition (past its final byte, which is preserved exactly); padded to the file's own blank-line seam (separator_padded=N); one trailing newline folds (trailing_newline_folded). Same refusal contract as replace_symbol_body; symbol accepts @FILE:LINE. The receipt's span is the POST-EDIT range of the inserted text; replaced_bytes is always 0.\","
                    + mcprefuse::toolMetadataFor( "insert_after_symbol", pathIsRequired ) + "},"
                    // T4 lazy-body verb — the read verbs return signatures + a stable `handle`; fetch the full body ONLY when needed.
-                   "{\"name\":\"fetch_body\",\"description\":\"Full (or partial-range) source of a symbol's definition, addressed by the stable `handle` a read verb attached to it (bodies on request, not by default). start_line/end_line: optional, 1-based, INCLUSIVE, BODY-RELATIVE (line 1 = the def's first line), clamped; the response reports start_line/end_line/total_lines/partial. Refuses a malformed, stale or unresolvable handle; overloads sharing a handle add ambiguous_handle, never the wrong body.\","
+                   "{\"name\":\"fetch_body\",\"description\":\"After a read verb ranked a symbol: its full (or partial-range) definition source, by the stable `handle` that verb attached (bodies on request, not by default). start_line/end_line: optional, 1-based, INCLUSIVE, BODY-RELATIVE (line 1 = the def's first line), clamped; the response reports start_line/end_line/total_lines/partial. Refuses a malformed, stale or unresolvable handle; overloads sharing a handle add ambiguous_handle, never the wrong body.\","
                    + mcprefuse::toolMetadataFor( "fetch_body", pathIsRequired ) + "},"
                    // ─── flagship-reflex verbs: the write-moment (exemplar), the before-you-call-it-done (quality_delta/quality_baseline), and the is-it-safe-to-change (impact/uses/path) reflexes an MCP-only agent otherwise cannot reach.
                    // §B6 M13: the selection rule is exemplar.h's kExemplarSelectionRule, SPLICED IN rather than
@@ -1513,14 +1547,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "exemplar", pathIsRequired ) + "},"
                    "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your tree made WORSE vs baseline, in 13 kinds (complexity, verbosity, nesting, params, new duplication/dead code/public API, error-masking, short-horizon churn, helper clone, stub/TODO, defect shape, tangle). new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling and a tangled new function; sev=minor never gates; acked findings hide until worse. Baseline: git HEAD, or a fresh pinned .ripwire_quality_baseline; at= names it (+dirty = tree differed).\","
                    + mcprefuse::toolMetadataFor( "quality_delta", pathIsRequired ) + "},"
-                   "{\"name\":\"quality_baseline\",\"description\":\"PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. Call once at the start of non-trivial work; quality_delta then compares against it instead of HEAD. Writes a file: skip it for a simple 'before I push' check.\","
+                   "{\"name\":\"quality_baseline\",\"description\":\"At the start of non-trivial work, PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. quality_delta then compares against it instead of HEAD. Writes a file: skip it for a simple 'before I push' check.\","
                    + mcprefuse::toolMetadataFor( "quality_baseline", pathIsRequired ) + "},"
                    // §B6 M4: limit/offset are DECLARED here because they are HONORED (mcpPageArgs → pageWindow),
                    // which is what the legend has always instructed. Before this they were undeclared and
                    // silently ignored, so the two answers were byte-identical with and without them.
                    "{\"name\":\"impact\",\"description\":\"IS IT SAFE TO CHANGE X? — the TRANSITIVE blast radius of a symbol via calls, nearest first (d= hop depth), then PageRank. Use before modifying or deleting a symbol; find_referencing_symbols is direct callers only, 'uses' adds read/write/import sites. Call edges are name-based, so reaches= is a FLOOR: a strong lead, not a proof. limit (default 40) and offset page the listing.\","
                    + mcprefuse::toolMetadataFor( "impact", pathIsRequired ) + "},"
-                   "{\"name\":\"uses\",\"description\":\"The STATICALLY RESOLVABLE use-sites of a symbol, not just calls: role (call | read | write | import | extends), file:line, and enclosing symbol. Use before renaming. symbol = the bare name, the union across same-named defs (file:name narrowing is CLI-only); an @FILE:LINE seed serves the enclosing definition's sites. count=0 is a real answer; counts_floor=1 marks count= as a FLOOR.\","
+                   "{\"name\":\"uses\",\"description\":\"Before renaming? The STATICALLY RESOLVABLE use-sites of a symbol, not just calls: role (call | read | write | import | extends), file:line, and enclosing symbol. symbol = the bare name, the union across same-named defs (file:name narrowing is CLI-only); an @FILE:LINE seed serves the enclosing definition's sites. count=0 is a real answer; counts_floor=1 marks count= as a FLOOR.\","
                    + mcprefuse::toolMetadataFor( "uses", pathIsRequired ) + "},"
                    // lane/t10-mcp-coverage: the MCP twin of --affected=F1,F2|SYM — WHICH TESTS TO RUN before a PR.
                    "{\"name\":\"affected\",\"description\":\"WHICH TESTS TO RUN for a change — test files that transitively reach the changed files/symbols, ranked by evidence (edited > partner-named > hop distance). seeded_by= says whether files read as paths or symbols; a test file named in files gets seed_kind=test, not subtracted. script_gates_unmodelled= discloses test/*.sh runners the call-graph walk cannot see, never counted in tests=/reached=.\","
@@ -1543,7 +1577,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // coupling for the first two (they read OTHER refs' blobs, which the index never ingested).
                    + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). kind=def rows are parsed (HEAD's from the index, other refs' from their blob); kind=text is a def-like line not parsed. symbol accepts @FILE:LINE; kind = optional ref-name substring filter (filter=); limit/offset page the hits (first 60). at= is HEAD's sha; +dirty = changed paths read from the working tree. Single-root.\","
                    + mcprefuse::toolMetadataFor( "whereis", pathIsRequired ) + "}," ) +
-                   mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"stray_content\",\"description\":\"Per branch: the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. Verdicts (unmerged+superseded+merged+unknown=refs): v=unmerged is genuinely absent; v=superseded means the live line re-implemented it, the case `git cherry` structurally cannot see; merged branches are omitted and counted; v=unknown could NOT be analysed (no merge-base). Line-granular, not semantic. kind = optional ref-name substring filter (filter=). Single-root.\","
+                   mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"stray_content\",\"description\":\"Is a branch's work stranded? Per branch, the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. Verdicts (unmerged+superseded+merged+unknown=refs): v=unmerged is genuinely absent; v=superseded means the live line re-implemented it, the case `git cherry` structurally cannot see; merged branches are omitted and counted; v=unknown could NOT be analysed (no merge-base). Line-granular, not semantic. kind = optional ref-name substring filter (filter=). Single-root.\","
                    + mcprefuse::toolMetadataFor( "stray_content", pathIsRequired ) + "}," ) +
                    "{\"name\":\"flags\",\"description\":\"WHAT IS BUILT BUT DARK here — the answer to 'why don't I see feature X?'. Harvests header ifndef/define gates, CMake option() and getenv reads: kind, DEFAULT, guarded size, read sites. Lexical: the in-repo default, never your build's value. kind = optional gate-name filter (filter=). symbol = a GATE NAME switches to the FLIP lens: what becomes live, who holds it, what it reaches, which tests cover it; an unknown gate is refused with near-misses. limit/offset page read sites (first 8) and flip context rows (first 25), never gate rows.\","
                    + mcprefuse::toolMetadataFor( "flags", pathIsRequired ) + "},"
@@ -1607,6 +1641,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // `arguments` means every argument read below is about the wrong scope, so naming an argument first
             // would send the caller to fix the wrong thing.
             std::string shapeRefusal = !nameArg.refusal.empty() ? nameArg.refusal : argsArg.refusal;
+            const bool callShapeFault = !shapeRefusal.empty();   // SEP-1303: the request's own shape, a protocol error; argument faults after it are isError
             const auto  strArg = [ & ]( const char* field ) -> std::string
             {
                 const McpStringArg a = mcpStringArg( args, field );
@@ -1943,19 +1978,17 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 const std::string note = memguard::peakNoteOnIncrease( "this request finished with the error above" );
                 return note.empty() ? note : "; " + note;
             };
-            const auto errResult = [ & ]( int code, const char* msg )
-            {
-                const std::string suffix = memoryStopSuffix( msg ) + memoryPeakSuffix( msg );
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg
-                     + mcpdetail::jsonEscape( suffix ) + "\"}}";
-            };
+            // SEP-1303: a served tool's own refusal is an isError result, every other failure a JSON-RPC error (mcpToolErrorFrame)
+            const auto protocolErrMsg = [ & ]( int code, const std::string& msg )
+            { return mcpProtocolErrorFrame( id, code, msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ); };
             // dynamic-message variant (edit verbs build refusal messages that embed symbol names / candidate
             // file:line lists) — JSON-escape so a path with a quote or a control byte can't corrupt the response.
             const auto errResultMsg = [ & ]( int code, const std::string& msg )
             {
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
-                     + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) + "\"}}";
+                return !mcpIsToolExecutionError( code, name ) ? protocolErrMsg( code, msg )
+                     : mcpToolErrorFrame( id, mcprefuse::withNextCallFor( msg, name ) + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) );
             };
+            const auto errResult = [ & ]( int code, const char* msg ) { return errResultMsg( code, std::string( msg ) ); };
             // §B6 M8: the shared not-found renderers, bound to THIS request's index. Seven verbs on both
             // arms answered a bare "symbol not found" — no echo of what the caller typed, no near-miss —
             // while the CLI twin has carried both since A3-F16a and the `flags` verb below carries both
@@ -1964,23 +1997,23 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // owns the field's wording, instead of being written out at each call site — that is what let
             // the batch arm serve three of these sentences with the guidance half missing.
             const auto notFoundSym  = [ & ]( std::string_view spelling ) -> std::string
-            { return mcprefuse::notFound( getIndex( path ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( name, "symbol" ) ); };
+            { return mcprefuse::notFound( getIndex( path ).ing, "symbol", spelling, mcprefuse::notFoundHintFor( name, "symbol" ), name ); };
             const auto notFoundKind = [ & ]( std::string_view noun, std::string_view spelling ) -> std::string
-            { return mcprefuse::notFound( getIndex( path ).ing, noun, spelling ); };
-            // Fix list #2 (2026-10-01), the CLI twin's parity: a not-found keeps its -32602 refusal and ALSO carries the
-            // answer document the CLI prints on stdout (selectorrefuse.h writeNotFoundAnswer) in error.data.answer, with a
+            { return mcprefuse::notFound( getIndex( path ).ing, noun, spelling, {}, name ); };
+            // Fix list #2 (2026-10-01), the CLI twin's parity: a not-found carries its refusal sentence AND the answer
+            // document the CLI prints on stdout (selectorrefuse.h writeNotFoundAnswer), both in content (SEP-1303), with a
             // working-tree rename offered first in both the message and the document. `msg` is the verb's own refusal
             // sentence; the rename clause goes right after its quoted echo. The document's echo is cappedEcho'd like the
             // message's, so a 400 KB selector cannot mint a 400 KB frame (mcpw3fixcheck NIT [symbol]).
             const auto notFoundAnswered = [ & ]( std::string msg, NotFoundAnswer answer, bool json ) -> std::string
             {
                 msg = withRenameClause( std::move( msg ), answer.near, answer.missing );   // the batch arm's rule too
+                msg = mcprefuse::withGrepNextOf( std::move( msg ), answer );   // the next call a renderer did not give (mcprefusal.h)
                 attachNotFoundText( getIndex( path ).ing, answer );   // BX2 FIX 9: the CLI twin's plain-text occurrences (callers / uses / impact)
                 answer.text.mcpKeys = true;                            // ... their JSON rows in MCP's "file" / "line" keys
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
                 while( !doc.empty() && doc.back() == '\n' ) { doc.pop_back(); }
-                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""
-                     + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) ) + "\",\"data\":{\"answer\":\"" + mcpdetail::jsonEscape( doc ) + "\"}}}";
+                return mcpFoundZeroFrame( id, doc, msg + memoryStopSuffix( msg ) );   // SEP-1303: found=0 is an answer
             };
             const auto notFoundNearOf = [ & ]( std::string_view spelling ) -> NotFoundNear
             {
@@ -1991,7 +2024,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // success envelope for an edit verb: the JSON payload as text content + the fresh _index stamp
             // (the index was just invalidated, so indexStamp() rebuilds and reports the NEW post-edit state).
             const auto editResult = [ & ]( const mcpedit::Outcome& oc )
-            { return oc.ok ? textResult( oc.resultJson ) : errResultMsg( oc.errCode, oc.message ); };
+            {
+                // an edit refusal's next step is a READ of the target (its candidates, handles and files), never a
+                // placeholder edit: the minimal call of an edit verb carries the table's example body
+                return oc.ok ? textResult( oc.resultJson ) : errResultMsg( oc.errCode, mcprefuse::withReadNext( oc.message, symbol ) );
+            };
 
             // The envelope EVERY paged verb shares (grep / impact / whereis): read the window once, refuse a
             // bad one once, and otherwise hand the validated window to the verb. Written as one shape rather
@@ -2029,7 +2066,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             if( !hiddenToolRefusal.empty() )
             {
                 DISCLOSE( Diagnostics::answerRefused, "a tools/call of a tool --mcp-tools left out answers an MCP error naming the flag that enables it" );
-                resp = errResultMsg( -32602, hiddenToolRefusal );
+                resp = protocolErrMsg( -32602, hiddenToolRefusal );   // SEP-1303: a tool this server does not serve is a protocol error
             }
             bool pathsUsageError = !hiddenToolRefusal.empty();
             if( !pathsUsageError )
@@ -2181,7 +2218,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // stdio default-root rebind must have happened before `path` is judged present.
             if( !pathsUsageError && !shapeRefusal.empty() )
             {
-                resp = errResultMsg( -32602, shapeRefusal );
+                resp = callShapeFault ? protocolErrMsg( -32602, shapeRefusal ) : errResultMsg( -32602, shapeRefusal );   // SEP-1303: name/arguments shape is the request's
                 pathsUsageError = true;   // reuse the skip-flag: no dispatch, no getIndex(), and for an edit verb no byte written
             }
             // P1 (L7): `legend` is a closed set on every verb that declares it — an unknown value is refused,
@@ -2318,8 +2355,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 if( path.empty() )
                 {
                     // #350: from a home/system launch directory the missing path has a cause worth naming
-                    return policy.noRootReason.empty() ? mcprefuse::missingPathRefusal()
-                                                       : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason;
+                    // the next call cannot know the root (the server has none to offer), so it names the field to fill: an
+                    // ABSOLUTE root, which a relative one resolved against this server's own launch directory is not
+                    return ( policy.noRootReason.empty() ? mcprefuse::missingPathRefusal() : mcprefuse::missingPathRefusal() + "; " + policy.noRootReason )
+                         + mcprefuse::missingPathNextCall( name );
                 }
                 return mcprefuse::missingFieldRefusal( name, argPresent );
             };
@@ -2445,12 +2484,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     if( rbMode != "pagerank" && rbMode != "authority" && rbMode != "hub" && rbMode != "rrf"
                         && rbMode != "churn" && rbMode != "churn-decay" )
                     {
-                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)" );
+                        resp = errResultMsg( -32602, "rank_by: unknown value '" + rbMode + "' (supported: pagerank|authority|hub|rrf|churn|churn-decay)" + mcprefuse::kRankByNext );
                     }
                     else if( rbMode == "churn" || rbMode == "churn-decay" )
                     {
                         resp = errResultMsg( -32602, "rank_by=" + rbMode + " is not available over MCP yet — it mines git history through the CLI's "
-                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode );
+                                              "parsed-argument path (main.cpp), which this server does not build. Use the CLI: ripwire <dir> --rank-by=" + rbMode + mcprefuse::kRankByNext );
                     }
                     else
                     {
@@ -2542,7 +2581,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         const std::string j = listRefusal.empty() ? situationDiffJson( path, src, pg ) : std::string();
                         return !listRefusal.empty() ? errResultMsg( -32602, listRefusal )
-                             : j.empty()            ? errResult( -32602, "no changed files given and no git diff" )
+                             : j.empty()            ? errResultMsg( -32602, "no changed files given and no git diff" + mcprefuse::situationNextCall() )
                                                     : textResult( j );
                     } );
                 }
@@ -2587,7 +2626,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         {
                             return errResult( -32603, "internal error: the for answer buffer lost bytes — no answer served" );
                         }
-                        return answer->empty() ? errResult( -32602, "no symbols found" ) : textResult( *answer );
+                        return answer->empty() ? errResultMsg( -32602, "no symbols found" + mcprefuse::nextCallClause( "analyze", {} ) ) : textResult( *answer );
                     } );
                 }
                 else if( name == "lego" && !path.empty() && !type.empty() )
@@ -2627,7 +2666,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
                         // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
-                        return t.empty() ? errResultMsg( -32602, sweepEmptyCause( path, "search" ) ) : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withGrepNext( sweepEmptyCause( path, "search" ), symbol ) ) : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -2643,7 +2682,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
-                        return t.empty() ? errResultMsg( -32602, emptyCause ) : textResult( t );
+                        // with no refs to compare there is no branch question to ask; the map of this tree is what is answerable.
+                        // emptyCause is never empty on that path (strayContentText), so the dispatch needs no fallback sentence.
+                        return t.empty() ? errResultMsg( -32602, mcprefuse::withMapNext( emptyCause ) ) : textResult( t );
                     } );
                 }
                 else if( name == "flags" && !path.empty() )
@@ -2717,7 +2758,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
                         return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
                                                 : symbol.empty()
-                                                ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
+                                                ? mcprefuse::withMapNext( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );
                     } );
@@ -2730,7 +2771,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::string arg = !kind.empty() ? kind : task;
                     const std::optional<std::string> answer = exemplarText( path, arg, redactPtr );
                     resp = !answer        ? errResult( -32603, "internal error: the exemplar answer buffer lost bytes — no answer served" )
-                         : answer->empty() ? errResult( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)" )
+                         : answer->empty() ? errResultMsg( -32602, "no matching exemplar (no symbol of that kind, or the task matched nothing)" + mcprefuse::kExemplarNext )
                                            : textResult( *answer );
                 }
                 else if( name == "impact" && !path.empty() && !symbol.empty() )
@@ -2787,11 +2828,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, "affected: '" + r.badItem + "' matches no indexed file path (as a path pattern) and no indexed "
                                               "symbol (as a symbol name; file:name and path::scope::name also accepted)" + afNearPath
                                               + ( afNearPath.empty() ? selectorFaultClause( afIng, r.badItem, "--affected=" ) : std::string() )
-                                              + affectedNoneResolvedClause( r.unusedCount ) );   // AF5: as the CLI
+                                              + affectedNoneResolvedClause( r.unusedCount ) + mcprefuse::grepNextCall( r.badItem ) );   // AF5: as the CLI
                     }
                     else if( r.noSeeds )
                     {
-                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files );
+                        resp = errResultMsg( -32602, "affected: matched no symbols: " + files + mcprefuse::grepNextCall( files ) );
                     }
                     else
                     {
@@ -2910,7 +2951,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     const FromTraceResult r = fromTraceText( path, trace, budgetTokens, redactPtr );
                     resp = r.isBufferLost ? errResult( -32603, "internal error: a from_trace buffer lost bytes — the bundle is withheld, not served without its blocks" )
-                         : !r.ok          ? errResult( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map" )
+                         : !r.ok          ? errResultMsg( -32602, "no stack-trace / sanitizer / compiler frames found in `trace` — nothing to map" + mcprefuse::traceNextCall( trace ) )
                                           : textResult( r.xml );
                 }
                 // L4: `edit_check` — did SYM's contract (params/publicness) change vs git HEAD (editCheckBundleText,
@@ -3116,7 +3157,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const std::string missing = missingArgMsg();
                     if( !missing.empty() )
                     {
-                        resp = errResultMsg( -32602, missing );
+                        resp = errResultMsg( -32602, missing );   // SEP-1303: isError for a served tool, else the protocol error
                     }
                     else
                     {
@@ -3137,7 +3178,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         // code stays -32602 (what this arm has always sent for an unknown tool); the FIX
                         // here is the message, and changing the code too would break callers switching on it
                         // for a reason unrelated to the finding.
-                        resp = errResultMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );
+                        resp = protocolErrMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );   // SEP-1303: unknown tool
                     }
                 }
             }

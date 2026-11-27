@@ -263,6 +263,8 @@ EMPTY="$( mcp_reply slice "{\"path\":\"$MFIX\",\"symbol\":\"geometry.cpp:distanc
 printf '%s' "$EMPTY" | python3 -c '
 import sys, json
 r = json.load( sys.stdin )
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now; read it as the refusal it is
+r = { "error": { "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r
 if "error" not in r:
     print( "ANSWERED" ); raise SystemExit( 1 )
 msg = r[ "error" ].get( "message", "" )
@@ -293,6 +295,8 @@ RBEMPTY="$( mcp_reply rank_by "{\"path\":\"$MFIX\",\"rank_by\":\"\"}" )"
 printf '%s' "$RBEMPTY" | python3 -c '
 import sys, json
 r = json.load( sys.stdin )
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now; read it as the refusal it is
+r = { "error": { "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if r.get( "result", {} ).get( "isError" ) else r
 if "error" not in r:
     print( "ANSWERED" ); raise SystemExit( 1 )
 msg = r[ "error" ].get( "message", "" )

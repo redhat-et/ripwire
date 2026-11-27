@@ -369,7 +369,8 @@ mcp_uses(){
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load( sys.stdin )
-print( "__ERROR__:" + r[ "error" ].get( "message", "" ) if "error" in r else r[ "result" ][ "content" ][ 0 ][ "text" ] )
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, the same refusal
+print( "__ERROR__:" + r[ "error" ].get( "message", "" ) if "error" in r else "__ERROR__:" + r[ "result" ][ "content" ][ 0 ][ "text" ] if r[ "result" ].get( "isError" ) else r[ "result" ][ "content" ][ 0 ][ "text" ] )
 ' 2>/dev/null
 }
 MB="$( mcp_uses ctwin )"

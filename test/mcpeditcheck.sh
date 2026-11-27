@@ -60,6 +60,8 @@ import sys, json
 r = json.load(sys.stdin)
 if "error" in r:
     print("__ERROR__:" + r["error"].get("message",""))
+elif r["result"].get("isError"):   # SEP-1303 (lane mcp-metadata): an edit refusal is an isError result now
+    print("__ERROR__:" + r["result"]["content"][0]["text"])
 else:
     print(r["result"]["content"][0]["text"])
 '
@@ -358,7 +360,7 @@ wait "$SRV" 2>/dev/null
 R5="$( grep '"id":3' "$W5/out.txt" | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
-print("__ERROR__:" + r["error"].get("message","")) if "error" in r else print(r["result"]["content"][0]["text"])
+print("__ERROR__:" + r["error"].get("message","")) if "error" in r else print("__ERROR__:" + r["result"]["content"][0]["text"]) if r["result"].get("isError") else print(r["result"]["content"][0]["text"])
 ' )"
 case "$R5" in
     __ERROR__*changed\ since\ index*) ok "stale-index: edit REFUSED with 'changed since index' message (edit-verb byte-hash guard)";;

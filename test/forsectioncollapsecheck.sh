@@ -214,7 +214,8 @@ sys.exit(0 if ('<lego total=' in t and '<iface' not in t) or '<lego' not in t el
 
     MCPBAD='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"test/legofix","task":"shape interface implementors","sections":"bogus"}}}'
     printf '%s\n' "$MCPBAD" | "$BIN" --mcp >"$TMP/mcp_bad.json" 2>/dev/null
-    grep -q '"error"' "$TMP/mcp_bad.json" && grep -q 'sections' "$TMP/mcp_bad.json" \
+    # SEP-1303 (lane mcp-metadata): the refusal is an isError result now (was a JSON-RPC error); the arms still assert it
+    grep -q '"isError":true' "$TMP/mcp_bad.json" && grep -q 'sections' "$TMP/mcp_bad.json" \
         && ok "(8b) MCP for: sections=\"bogus\" refuses with a message naming the field" \
         || no "(8b) MCP for: sections=\"bogus\" did not refuse cleanly: $( cat "$TMP/mcp_bad.json" )"
 
@@ -224,7 +225,7 @@ sys.exit(0 if ('<lego total=' in t and '<iface' not in t) or '<lego' not in t el
     # which cannot distinguish absent from present-but-empty) — a real, shipped bug caught before landing.
     MCPEMPTY='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"test/legofix","task":"shape interface implementors","sections":""}}}'
     printf '%s\n' "$MCPEMPTY" | "$BIN" --mcp >"$TMP/mcp_empty.json" 2>/dev/null
-    grep -q '"error"' "$TMP/mcp_empty.json" && grep -q 'sections' "$TMP/mcp_empty.json" \
+    grep -q '"isError":true' "$TMP/mcp_empty.json" && grep -q 'sections' "$TMP/mcp_empty.json" \
         && ok "(8c) MCP for: sections=\"\" (present, empty) refuses — not silently read as absent" \
         || no "(8c) MCP for: sections=\"\" did not refuse — present-but-empty was read as absent: $( cat "$TMP/mcp_empty.json" )"
 
@@ -232,7 +233,7 @@ sys.exit(0 if ('<lego total=' in t and '<iface' not in t) or '<lego' not in t el
     for badv in 'lego,' 'lego,,compose'; do
         MCPTRAIL='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"test/legofix","task":"shape interface implementors","sections":"'"$badv"'"}}}'
         printf '%s\n' "$MCPTRAIL" | "$BIN" --mcp >"$TMP/mcp_trail.json" 2>/dev/null
-        grep -q '"error"' "$TMP/mcp_trail.json" && grep -q 'sections' "$TMP/mcp_trail.json" \
+        grep -q '"isError":true' "$TMP/mcp_trail.json" && grep -q 'sections' "$TMP/mcp_trail.json" \
             && ok "(8d) MCP for: sections=\"$badv\" (an empty segment) refuses" \
             || no "(8d) MCP for: sections=\"$badv\" did not refuse: $( head -c 300 "$TMP/mcp_trail.json" )"
     done

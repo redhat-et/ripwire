@@ -222,7 +222,8 @@ fi
 REQNF='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"lego","arguments":{"path":"'"$CORPUS"'","type":"NoSuchType"}}}'
 printf '%s\n' "$REQNF" | "$BIN" --mcp 2>/dev/null > "$TMP/mcp_nf" || true
 MCPNF="$( cat "$TMP/mcp_nf" )"
-if printf '%s' "$MCPNF" | grep -qi '"error"' && printf '%s' "$MCPNF" | grep -q 'not found'; then
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now (was a JSON-RPC error); either form is the refusal
+if printf '%s' "$MCPNF" | grep -qiE '"error"|"isError":true' && printf '%s' "$MCPNF" | grep -q 'not found'; then
     ok "MCP lego verb: NoSuchType errors with an unambiguous not-found message (D8: no longer conflated)"
 else
     no "MCP lego verb: NoSuchType should error with a not-found message, got: $MCPNF"

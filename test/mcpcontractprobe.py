@@ -186,7 +186,13 @@ class Server:
             return { "raw": line }
 
     def tool( self, name, args ):
-        return self.call( "tools/call", { "name": name, "arguments": args } )
+        # SEP-1303 (lane mcp-metadata): a tool's own refusal is an isError RESULT now (it was a JSON-RPC -32602); read it
+        # as the refusal it is, under the code "isError", so every arm below still asserts refused-vs-answered
+        r = self.call( "tools/call", { "name": name, "arguments": args } )
+        res = r.get( "result", {} ) if isinstance( r, dict ) else {}
+        if res.get( "isError" ):
+            return { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in res.get( "content", [] ) ) } }
+        return r
 
     def close( self ):
         try:

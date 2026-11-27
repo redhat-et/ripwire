@@ -131,6 +131,7 @@ mcp(){ printf '%s\n%s\n%s\n' \
 mtext(){ python3 -c 'import json,sys
 d=json.loads(sys.stdin.read() or "{}")
 if "error" in d: print("ERROR "+json.dumps(d["error"])); sys.exit(0)
+if d.get("result",{}).get("isError"): print("ERROR isError "+"".join(c.get("text","") for c in d["result"].get("content",[]))); sys.exit(0)   # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, not a JSON-RPC error; same marker, same meaning
 print("".join(c.get("text","") for c in d.get("result",{}).get("content",[])))'; }
 MM="$( mcp 'src/core.cpp,ChangeLog,src/obsolete_widget.cpp' | mtext )"
 case "$MM" in ERROR*) no "F MCP affected errored on the mixed list: $( printf '%s' "$MM" | head -c 300 )" ;;

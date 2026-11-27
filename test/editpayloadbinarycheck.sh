@@ -110,7 +110,9 @@ import json, sys
 last = [l for l in open(sys.argv[1], encoding="utf-8") if l.strip()][-1]
 r = json.loads(last)
 msg = r["error"]["message"] if "error" in r else r.get("result", {}).get("content", [{}])[0].get("text", "")
-print(("REFUSED " if "error" in r else "ACCEPTED ") + msg.replace("\n", " "))
+# SEP-1303 (lane mcp-metadata): an edit refusal is an isError result now (was a JSON-RPC error)
+refused = "error" in r or r.get("result", {}).get("isError") is True
+print(("REFUSED " if refused else "ACCEPTED ") + msg.replace("\n", " "))
 PY
 grep -q '^REFUSED' "$TMP/m.verdict" \
     && ok "MCP replace_symbol_body refuses a NUL-byte new_body" \

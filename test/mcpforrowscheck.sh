@@ -163,8 +163,9 @@ say(answers[0][4] == answers[0][3] and answers[0][4] != answers[0][2], "(P2) row
 # (P3)
 for v in ("xml", ""):
     r = mcp(SRC, [call(t0, rows=v)])[0]
-    say(r.startswith(b"ERR:") and b"-32602" in r and b"rows" in r and b"lines" in r and b"elements" in r,
-        "(P3) rows=%r refused -32602 naming the field and both values" % v)
+    # SEP-1303 (lane mcp-metadata): the refusal is an isError result, not -32602; the helper already maps both to ERR:
+    say(r.startswith(b"ERR:") and b'"isError": true' in r and b"rows" in r and b"lines" in r and b"elements" in r,
+        "(P3) rows=%r refused (isError) naming the field and both values" % v)
 
 # (P6)
 SESS = ["rank symbols by pagerank and serialize the map", "mcp legend session dictionary ref posture", "decode row lines back to elements"]

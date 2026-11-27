@@ -44,6 +44,7 @@ mcp_text() {
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r: print("__ERROR__:" + r["error"].get("message",""))
 else:            print(r["result"]["content"][0]["text"])
 '
@@ -55,6 +56,7 @@ batch_sub() {
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json, re, html
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "error" in r: print("__ERROR__:" + r["error"].get("message","")); raise SystemExit
 t = r["result"]["content"][0]["text"]
 m = re.search(r"<q i=\"0\" verb=\"[^\"]*\" ok=\"0\" err=\"([^\"]*)\"", t)
@@ -215,7 +217,7 @@ echo
 echo "=== N6 — connect {} and batch {} speak the M7 verb+field TABLE, not bespoke sentences ==="
 C6="$( mcp_text "$( call connect '{"path":"'"$ROOT"'"}' )" )"
 case "$C6" in
-    __ERROR__:"missing required field: symbols"*"2..16 symbol names"*"e.g. symbols="*) ok "N6: connect {} → the table's sentence, specifics kept (2..16 names)";;
+    __ERROR__:"missing required field: symbols"*"2..16 symbols to relate"*"e.g. symbols="*) ok "N6: connect {} → the table's sentence, specifics kept (2..16 names)";;
     *) no "N6: connect {} still bespoke: $C6";;
 esac
 # W3FIX M8 split this arm's two probes apart, deliberately, and the assertion follows. N6 asserted that an
@@ -229,7 +231,7 @@ for probe in '{"path":"'"$ROOT"'"}|missing required field: queries' \
     args="${probe%%|*}"; prefix="${probe#*|}"
     B6="$( mcp_text "$( call batch "$args" )" )"
     case "$B6" in
-        __ERROR__:"$prefix"*"{verb, ...args} sub-query objects"*"e.g. queries="*) ok "N6: batch $args → the table's sentence, specifics kept ({verb, ...} objects)";;
+        __ERROR__:"$prefix"*"{verb, ...args} objects"*"e.g. queries="*) ok "N6: batch $args → the table's sentence, specifics kept ({verb, ...} objects)";;
         *) no "N6: batch $args still bespoke: $B6";;
     esac
 done

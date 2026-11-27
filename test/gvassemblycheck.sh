@@ -293,9 +293,15 @@ for line in p.stdout.splitlines():
     r = o.get( "result", {} )
     text = "".join( c.get( "text", "" ) for c in r.get( "content", [] ) )
     try:
-        j = json.loads( text )
+        # SEP-1303 (lane mcp-metadata): a found=0 answer carries its refusal sentence as a second block, so the
+        # JSON document is content[0] alone
+        j = json.loads( r[ "content" ][ 0 ].get( "text", "" ) if r.get( "content" ) else text )
     except ValueError:
         print( "err", ( json.dumps( o.get( "error" ) ) if "error" in o else text ).replace( "\n", " " )[:300] ); break
+    # SEP-1303 (lane mcp-metadata): a not-found is a plain result now, the found=0 document in content[0] and the
+    # refusal sentence in content[1] (it was a -32602 error); "notfound" + that sentence keeps (d5)'s refusal arm exact
+    if j.get( "found" ) == 0 and len( r.get( "content", [] ) ) > 1:
+        print( "notfound", r[ "content" ][ 1 ].get( "text", "" ).replace( "\n", " " )[:300] ); break
     names = [ e.get( "name" ) for e in j.get( "calledBy", [] ) ]
     print( "ok", "narrowed=" + str( j.get( "narrowed", "-" ) ), "note=" + ( "1" if "narrowed_note" in j else "0" ),
            "defs=" + str( j.get( "defs" ) ), "calledBy=" + ",".join( n for n in names if n ) )
@@ -312,13 +318,14 @@ d5a="$( mcpq "$F1" find_referencing_symbols )"; d5b="$( mcpq "$F1N" find_referen
 if [ "$( rc d3 )" = 0 ] && [ "$d5a" = "ok narrowed=ApplicationRef.tick note=1 defs=1 calledBy=bootApp" ]; then
     ok "(d5) MCP find_referencing_symbols narrows like --callers (d3): $d5a"
 else no "(d5) MCP find_referencing_symbols ApplicationRef.tick: want the CLI's narrowed answer, got [$d5a]"; fi
-# The refusal must be THE refusal: a -32602 symbol-not-found error for the selector. "err no response" (the subprocess died or
+# The refusal must be THE refusal: the symbol-not-found answer for the selector (a found=0 result carrying the refusal
+# sentence; a -32602 error before SEP-1303). "err no response" (the subprocess died or
 # hung up), a malformed result, or any other error is a FAIL, not a pass by default.
 case "$d5b" in
-    'err {"code": -32602, "message": "symbol not found: '"'ApplicationRef.tick'"*)
+    'notfound symbol not found: '"'ApplicationRef.tick'"*)
         ok "(d5) negative: two source definitions left, MCP still refuses like --callers: [$d5b]" ;;
     ok\ *) no "(d5) negative: two source definitions left, MCP must still refuse like --callers (d4): [$d5b]" ;;
-    *)     no "(d5) negative: want the -32602 symbol-not-found refusal for ApplicationRef.tick, got [$d5b]" ;;
+    *)     no "(d5) negative: want the symbol-not-found answer for ApplicationRef.tick, got [$d5b]" ;;
 esac
 
 # ── CALLERS-TWO-COPY-BIND ──

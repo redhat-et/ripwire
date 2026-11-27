@@ -256,7 +256,14 @@ class Server:
         resp, t = self.rpc("tools/call", {"name": name, "arguments": args})
         if "error" in resp:
             return "err", (resp["error"].get("code"), resp["error"].get("message", "")), t
-        return "ok", resp["result"]["content"][0]["text"], t
+        # SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now, and a not-found with the CLI found=0
+        # document is an answer (content[0] the document, content[1] the refusal sentence); both were JSON-RPC errors
+        content = resp["result"]["content"]
+        if resp["result"].get("isError"):
+            return "err", ("isError", "".join(c.get("text", "") for c in content)), t
+        if len(content) > 1 and " not found" in content[1].get("text", ""):
+            return "err", ("found0", content[1]["text"]), t
+        return "ok", content[0]["text"], t
 
     def close(self):
         try:
@@ -440,7 +447,7 @@ def cli_view(root, verb, sym):
 
 def mcp_fs_view(kind, payload):
     if kind == "err":
-        return ("NOTFOUND",) if payload[0] == -32602 and "not found" in payload[1] else ("MCPERR", payload)
+        return ("NOTFOUND",) if payload[0] in ( "isError", "found0" ) and "not found" in payload[1] else ("MCPERR", payload)
     j = json.loads(payload)
 
     def win(k):
@@ -505,7 +512,7 @@ def cli_refs(root, syms, paths, greps, rankbys, with_map=True):
 def mcp_xml(srv, name, notfound_ok=True, **args):
     kind, payload, t = srv.tool(name, **args)
     if kind == "err":
-        return (("NOTFOUND",) if (payload[0] == -32602 and "not found" in payload[1]) else ("MCPERR", payload)), t
+        return (("NOTFOUND",) if (payload[0] in ( "isError", "found0" ) and "not found" in payload[1]) else ("MCPERR", payload)), t
     return ("OK", xml_clean(payload)), t
 
 

@@ -24,6 +24,7 @@
 #include "didyoumean.h"    // §B6 M8: the ONE near-miss suggester (lifted out of main.cpp so this is reachable)
 #include "degradedscan.h"  // degradedTextHit — the ONE degraded-parse text scan (selectorrefuse.h words the same facts for the CLI)
 #include "selectorrefuse.h" // the @FILE:LINE at-diagnosis (atSeedFaultClause) — ONE set of fault sentences for both surfaces
+#include "infra/tablelookup.h" // findByField / findIndexByField — the table lookups the next-call and title rows share
 #include "mcpjson.h"       // §H3: mcpdetail::FrameShape — the framing verdict this file words (mcpjson is upstream of everything MCP; no cycle)
 
 #include <algorithm>       // std::find — the declared-field membership tests (M4)
@@ -78,7 +79,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
       FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
     { "find_referencing_symbols","symbol",    "a symbol name (the final name segment; add scope to disambiguate) or @FILE:LINE (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
-    { "grep",                    "pattern",   "a literal string to search for",                                    "pattern=\"parseArgs\"" },
+    { "grep",                    "pattern",   "the literal text to search for",                                    "pattern=\"parseArgs\"" },
     // R-H span tiers: the MCP spelling of the CLI's --grep-in. Optional, and the hatch has to exist on THIS
     // surface too — an MCP-only agent that sees suppressed_comment= has no CLI to re-ask from.
     { "grep",                    "in",        "which span tier to serve: code (default) or any",                    "in=\"any\"", FieldRule::Optional },
@@ -100,7 +101,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "rank_by",                 "rank_by",   "OPTIONAL — pagerank|authority|hub|rrf|churn|churn-decay (default pagerank when omitted; churn/churn-decay refuse)", "rank_by=\"authority\"",
       FieldRule::Optional },
     { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result (@FILE:LINE line-seeds resolve too)",   "handle=\"src/cli.h::rw::parseArgs\"" },
-    { "batch",                   "queries",   "an array of {verb, ...args} sub-query objects",                      "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
+    { "batch",                   "queries",   "the sub-queries, answered in order: {verb, ...args} objects",         "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
 
     // ── flagship-reflex verbs ──
     { "exemplar",                "kind",      "a kind token (fn|method|class|struct|iface|var)",                    "kind=\"fn\"",  FieldRule::AnyOf },
@@ -114,7 +115,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
       FieldRule::Required },
     { "path_between",            "from",      "the SOURCE symbol name (or @FILE:LINE)",                             "from=\"main\"" },
     { "path_between",            "to",        "the DESTINATION symbol name (or @FILE:LINE)",                        "to=\"parseArgs\"" },
-    { "connect",                 "symbols",   "an array (or comma-string) of 2..16 symbol names (@FILE:LINE entries resolve)", "symbols=[\"main\",\"parseArgs\"]" },
+    { "connect",                 "symbols",   "the 2..16 symbols to relate, array or comma-string (@FILE:LINE entries resolve)", "symbols=[\"main\",\"parseArgs\"]" },
     { "explore",                 "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "pack_task",               "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "from_trace",              "trace",     "the raw trace TEXT, pasted (not paraphrased into a query)",           "trace=\"Traceback (most recent call last): ...\"" },
@@ -160,6 +161,72 @@ inline std::string joinClauses( const std::vector<std::string_view>& parts, std:
         out += parts[i];
     }
     return out;
+}
+
+// ─── the NEXT CALL: every tool-execution refusal names the ripwire call to make next ────────────────────
+//
+// Xu & Wu, "MCP Error Messages Written for Developers Hurt the Most Capable Agents Most" (2609.35381): in 150 MCP
+// servers, a recovery step naming a terminal command left 45% of tasks recovered, and the loss GREW with model
+// capability; a step naming a server TOOL raised recovery to 84-88%. So every refusal this surface sends ends in
+// ONE callable step on this surface, in the argument spelling the e.g. clauses already use:
+//
+//     — next: <tool> field="value" ...
+//
+// The step is chosen by what the refusal knows, never invented: a missing / bad / undeclared field retries the
+// SAME tool with the table's example for it; a not-found with a near-miss retries with the near-miss; a not-found
+// with none greps the spelling (the textual hits, parse_degraded rows included); a refusal the minimal call would
+// only repeat names the call its dispatch site knows to be useful instead. test/mcpnextcallcheck.sh drives every
+// row and round-trips each next call through tools/call.
+inline constexpr std::string_view kNextCallLead = " — next: ";
+
+inline bool hasNextCall( std::string_view msg )
+{
+    return msg.find( kNextCallLead ) != std::string_view::npos;
+}
+
+inline std::string nextCallClause( std::string_view tool, std::string_view args )
+{
+    std::string out( kNextCallLead );
+    out += tool;
+    if( !args.empty() )
+    {
+        out += ' ';
+        out += args;
+    }
+    return out;
+}
+
+// `tool`'s minimal well-formed call: each Required row's example and the FIRST AnyOf member's (the one the
+// dispatch prefers), in table order, with `part` ("field=value") standing in for its own field's example or, when
+// the tool does not require that field, leading the list. "" for a tool that needs nothing beyond its root.
+inline std::string minimalCallArgs( std::string_view tool, std::string_view part = {} )
+{
+    const std::string_view partField = part.substr( 0, part.find( '=' ) );
+    std::vector<std::string_view> parts;
+    bool anyOfTaken = false, partPlaced = part.empty();
+    for( const McpFieldSpec& row : kMcpRequiredFields )
+    {
+        if( tool != std::string_view( row.verb ) || row.rule == FieldRule::Optional )
+        {
+            continue;
+        }
+        if( row.rule == FieldRule::AnyOf )
+        {
+            if( anyOfTaken )
+            {
+                continue;
+            }
+            anyOfTaken = true;
+        }
+        const bool isPart = !partPlaced && partField == std::string_view( row.field );
+        partPlaced        = partPlaced || isPart;
+        parts.push_back( isPart ? part : std::string_view( row.example ) );
+    }
+    if( !partPlaced )
+    {
+        parts.insert( parts.begin(), part );
+    }
+    return joinClauses( parts, " " );
 }
 
 // M7 — the missing-required-field refusal for `verb`, or "" when nothing required is missing. `isPresent`
@@ -217,7 +284,8 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
     if( hasAnyOf && !anyOfSatisfied && names.empty() )
     {
         return "missing required field: " + joinClauses( anyNames, " or " ) + " — " + std::string( verb )
-             + " needs " + joinClauses( anyNeeds, " or " ) + ", e.g. " + std::string( anyExample );
+             + " needs " + joinClauses( anyNeeds, " or " ) + ", e.g. " + std::string( anyExample )
+             + nextCallClause( verb, minimalCallArgs( verb ) );
     }
 
     if( names.empty() )
@@ -227,7 +295,7 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
 
     return std::string( "missing required field" ) + ( names.size() > 1 ? "s" : "" ) + ": "
          + joinClauses( names, ", " ) + " — " + std::string( verb ) + " needs " + joinClauses( needs, " and " )
-         + ", e.g. " + joinClauses( examples, " " );
+         + ", e.g. " + joinClauses( examples, " " ) + nextCallClause( verb, minimalCallArgs( verb ) );
 }
 
 // The refusal a verb+field pair renders when NOTHING was given at all — used where the caller has already
@@ -303,47 +371,47 @@ struct McpValueSpec
 // keeps its full sentence: brevity is charged where the repetition is, not everywhere.
 inline constexpr McpValueSpec kMcpValueFields[] = {
     // ── numeric ──
-    { "limit",         "a positive integer (omit for the default window)",                            "limit=40", "integer" },
-    { "offset",        "a non-negative integer (omit to start at row 1)",                             "offset=0", "integer" },
-    { "radius",        "an integer in 1..12 (omit it for the default 6)",                             "radius=6", "integer" },
-    { "partition",     "an integer in 2..16 (omit it for one un-split bundle; 1 IS the un-split one)", "partition=4", "integer" },
-    { "top_k",         "an integer in 1..1000 (omit it for the verb's own default)",                  "top_k=4", "integer" },
-    { "budget_tokens", "a positive integer token budget (omit it for the verb's own default)",        "budget_tokens=6000", "integer" },
-    { "start_line",    "a positive integer, 1-based and body-relative (omit it to start at line 1)",  "start_line=1", "integer" },
-    { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
-    { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
+    { "limit",         "rows per page, >=1 (omit: the default window)",                              "limit=40", "integer" },
+    { "offset",        "rows to skip: a page's next_offset (omit: 0)",                               "offset=0", "integer" },
+    { "radius",        "undirected hop bound, 1..12 (omit: 6)",                                      "radius=6", "integer" },
+    { "partition",     "agents to fan out to, 2..16 (omit, or 1: one un-split bundle)",              "partition=4", "integer" },
+    { "top_k",         "how many docs to return, 1..1000 (omit: the verb's default)",               "top_k=4", "integer" },
+    { "budget_tokens", "token budget for the answer, >=1 (omit: the verb's default)",               "budget_tokens=6000", "integer" },
+    { "start_line",    "first line to return, 1-based within the body (omit: line 1)",               "start_line=1", "integer" },
+    { "end_line",      "last line to return, inclusive, 1-based within the body (omit: the end)",    "end_line=40", "integer" },
+    { "depth",         "the flow's hop bound, 1..32 (omit: the disclosed default 8; needs flow)", "depth=4", "integer" },
     // ── string ──
-    { "path",          "a STRING repo directory",                                                     "path=\".\"" },
-    { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },
-    { "diff",          "a STRING of unified-diff TEXT (omit it to use the working-tree git diff)",     "diff=\"diff --git a/x b/x\"" },
-    { "symbol",        "a STRING symbol name (the final name segment; add scope to disambiguate)",     "symbol=\"parseArgs\"" },
-    { "kind",          "a STRING (a name-substring filter, or exemplar's kind token)",                 "kind=\"fn\"" },
-    { "pattern",       "a STRING literal to search for",                                              "pattern=\"parseArgs\"" },
-    { "task",          "a STRING: the task in plain words",                                           "task=\"add a since filter\"" },
-    { "type",          "a STRING interface or base-type name (file:name disambiguates)",               "type=\"Shape\"" },
-    { "file",          "a STRING file path (a path SUFFIX is enough)",                                "file=\"src/main.cpp\"" },
-    { "handle",        "a STRING handle taken from a read verb's result",                             "handle=\"src/cli.h::rw::parseArgs\"" },
-    { "from",          "a STRING: the SOURCE symbol name",                                            "from=\"main\"" },
-    { "to",            "a STRING: the DESTINATION symbol name",                                       "to=\"parseArgs\"" },
-    { "trace",         "a STRING: the raw trace TEXT, pasted",                                        "trace=\"Traceback (most recent call last): ...\"" },
-    { "new_body",      "a STRING: the complete, well-formed replacement definition",                  "new_body=\"int f() { return 0; }\"" },
-    { "text",          "a STRING: the text to insert",                                                "text=\"// note\\n\"" },
-    { "verb",          "a STRING naming one read sub-verb",                                           "verb=\"grep\"" },
+    { "path",          "absolute root (default: launch root)",                                       "path=\"/abs/repo/root\"" },
+    { "files",         "changed files, comma-separated in one string (not an array)",                "files=\"src/a.cpp,src/b.h\"" },
+    { "diff",          "unified-diff TEXT to judge (omit: the working-tree git diff)",               "diff=\"diff --git a/x b/x\"" },
+    { "symbol",        "the symbol's final name segment; add scope to disambiguate (Parser::parse)",  "symbol=\"parseArgs\"" },
+    { "kind",          "name-substring filter (exemplar: a kind token)",                              "kind=\"fn\"" },
+    { "pattern",       "the literal text to search for",                                              "pattern=\"parseArgs\"" },
+    { "task",          "the task in plain words",                                                     "task=\"add a since filter\"" },
+    { "type",          "interface or base-type name (file:name disambiguates)",                       "type=\"Shape\"" },
+    { "file",          "the file to narrow to (a path SUFFIX is enough)",                             "file=\"src/main.cpp\"" },
+    { "handle",        "handle taken from a read verb's result",                                     "handle=\"src/cli.h::rw::parseArgs\"" },
+    { "from",          "the SOURCE symbol name",                                                      "from=\"main\"" },
+    { "to",            "the DESTINATION symbol name",                                                 "to=\"parseArgs\"" },
+    { "trace",         "the raw trace TEXT, pasted",                                                  "trace=\"Traceback (most recent call last): ...\"" },
+    { "new_body",      "the complete, well-formed replacement definition",                            "new_body=\"int f() { return 0; }\"" },
+    { "text",          "the text to insert",                                                          "text=\"// note\\n\"" },
+    { "verb",          "the one read sub-verb to run",                                                "verb=\"grep\"" },
     // R-H span tiers + wave-3 verifier P6-2: a CLOSED value set, so the sentence names the set. The CLI
     // twin refuses an unknown --grep-in= value and says why (a typo would read as "code" and quietly
     // suppress the very rows the caller asked to see); both MCP dialects now refuse through this row.
-    { "in",            "a STRING span tier: code (the default) or any",                               "in=\"any\"" },
+    { "in",            "span tier: code (the default) or any",                                        "in=\"any\"" },
     // lane/tc-sliceat: slice's own knobs — var picks the variable (omit it for the inventory, or to let an
     // @FILE:LINE seed line pre-pick), flow is a CLOSED direction set so the sentence names it.
-    { "var",           "a STRING variable name inside the resolved definition (omit it to list the sliceable locals)", "var=\"out\"" },
-    { "flow",          "a STRING flow direction: back, fwd or both (omit it for the flat per-line rows)", "flow=\"back\"" },
+    { "var",           "variable name inside the resolved definition (omit: list the sliceable locals)", "var=\"out\"" },
+    { "flow",          "flow direction: back, fwd or both (omit: the flat per-line rows)", "flow=\"back\"" },
     // lean-answers lane: whereis's CLOSED listing set, the CLI --whereis-listing= values verbatim.
-    { "listing",       "a STRING: defs (refs counted), refs or all; default: more defs listed, else the shorter page", "listing=\"all\"" },
+    { "listing",       "rows to list: defs (refs counted), refs or all; default: more defs listed, else the shorter page", "listing=\"all\"" },
     // lane/t10-mcp-coverage: rank_by's own CLOSED value set, the CLI --rank-by= spelling verbatim (cli.h's
     // parse arm). churn/churn-decay are valid CLI values that this row still names — the closed-set check
     // must accept them so the refusal can then say WHY they are unsupported HERE (a named gap, not an
     // unknown-value error about a value the CLI itself accepts).
-    { "rank_by",       "a STRING ranking signal: pagerank (default), authority, hub, rrf, churn or churn-decay — "
+    { "rank_by",       "ranking signal: pagerank (default), authority, hub, rrf, churn or churn-decay — "
                         "churn/churn-decay are refused on this verb (git-mining ranking, CLI-only for now)", "rank_by=\"authority\"" },
     // §5a decision 3: a CLOSED set, so the sentence names it — an unknown value is refused, never read as
     // the default (the rule the `in` row above records, for the same reason: a typo must not silently
@@ -357,7 +425,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // DESCRIPTIONS: mcpmanifestcheck's own registered rule is that the ceiling moves for a declared
     // argument's obliged description and never for prose, and prose there would cost ~680 B against 159 B
     // of headroom. The refusal example names the NON-default value, which is the one a caller has to type.
-    { "legend",        "a STRING legend posture: compact (the default) or full (restores the full legend)", "legend=\"full\"" },
+    { "legend",        "legend posture: compact (the default) or full (restores the full legend)", "legend=\"full\"" },
     // L2 (round-1 lever B1): `for`'s <lego>/<compose> sections collapse to a counted stub by default (the
     // CLI --sections= twin, cli.h validateSectionsModifier) — a comma-separated, order-insensitive CLOSED
     // set (each name at most once), the same rule the `in`/`legend` rows above state for the same reason: a
@@ -365,21 +433,21 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // above): `example` below feeds only the refusal sentence (badValueRefusal), never tools/list, but
     // `needs` rides every session's tools/list payload and this tool's schema was measured at the
     // mcpmanifestcheck per-session ceiling before this field existed.
-    { "sections",      "lego, compose, or both", "sections=\"lego,compose\"" },
+    { "sections",      "sections to restore: lego, compose, or both", "sections=\"lego,compose\"" },
     // MR1 (owner ruling 168): `for`'s row form, the CLI --rows= twin — a CLOSED set. Terse: it rides tools/list.
-    { "rows",          "lines (the default) or elements", "rows=\"elements\"" },
+    { "rows",          "row form: lines (the default) or elements", "rows=\"elements\"" },
     // ── boolean ──
     // F-R1-07 (2026-09-10 audit): the CLI's own answer to a route MIS-FIRE is to re-run with --no-route,
     // and the MCP surface had no equivalent — an agent that reads route= and disagrees was told WHICH ranker
     // answered and given no way to ask for the other one. Advertised as a real boolean, not a string, so a
     // quoted "true" refuses instead of being guessed at (mcpBoolArg).
-    { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
+    { "no_route",      "true forces plain subtoken+body BM25 (omit: the default router)", "no_route=true", "boolean" },
     // RT2 MCP parity: the CLI --no-verb-route twin, the opt-out a routed `for` answer's next= names. Terse: it rides tools/list.
-    { "no_verb_route", "a BOOLEAN: true never routes to a verb", "no_verb_route=true", "boolean" },
+    { "no_verb_route", "true never routes to a verb", "no_verb_route=true", "boolean" },
     // whereis-lean (review C1): the CLI --whereis-full-text twin, the replay a <t_cut next=> names. Terse: it rides tools/list.
-    { "full_text",     "a BOOLEAN: true prints every t= line whole", "full_text=true", "boolean" },
+    { "full_text",     "true prints every t= line whole", "full_text=true", "boolean" },
     // lane lean2b: the CLI --show-stale twin, the replay quality_delta's stale_next names. Terse: it rides tools/list.
-    { "show_stale",    "a BOOLEAN: true = the full stale list", "show_stale=true", "boolean" },
+    { "show_stale",    "true lists every stale ack", "show_stale=true", "boolean" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -396,9 +464,9 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "name",          "a STRING naming one of the advertised tools (call tools/list for them)",      "name=\"analyze\"" },
     { "arguments",     "a JSON OBJECT of the tool's arguments — not a string of JSON, which drops every argument in it", "arguments={\"path\":\".\"}", "object" },
     // ── array ──
-    { "symbols",       "an ARRAY (or comma-string) of 2..16 symbol names",                            "symbols=[\"main\",\"parseArgs\"]", "array", "string" },
-    { "queries",       "an ARRAY of {verb, ...args} sub-query objects",                               "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]", "array", "object" },
-    { "paths",         "an ARRAY of 1..16 repo roots",                                                "paths=[\"svc\",\"web\"]", "array", "string" },
+    { "symbols",       "the 2..16 symbols to relate (array or comma-string)",                         "symbols=[\"main\",\"parseArgs\"]", "array", "string" },
+    { "queries",       "the sub-queries, answered in order: {verb, ...args} objects",                 "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]", "array", "object" },
+    { "paths",         "1..16 absolute roots, one workspace",                                        "paths=[\"svc\",\"web\"]", "array", "string" },
 };
 
 // W3FIX NIT: the got-ECHO is CAPPED. The echo exists so a caller can see which of their values was rejected,
@@ -421,6 +489,97 @@ inline std::string cappedEcho( std::string_view got )
         --cut; // mid-sequence continuation byte
     }
     return std::string( got.substr( 0, cut ) ) + "…";
+}
+
+// A caller's spelling as a next call's quoted value: capped like every echo, with `"` and `\` escaped the way the
+// e.g. examples spell them, so the clause parses back to the same string (JSON string syntax).
+inline std::string nextCallValue( std::string_view v )
+{
+    std::string out = "\"";
+    for( const char c : cappedEcho( v ) )
+    {
+        if( c == '"' || c == '\\' )
+        {
+            out += '\\';
+        }
+        out += ( c == '\n' || c == '\r' || c == '\t' ) ? ' ' : c;
+    }
+    return out + "\"";
+}
+
+// `tool`'s minimal well-formed call with `field` set to the value table's own runnable example for it ("limit=40"). A
+// field with no value row (an envelope key) has no example to type, and the call is the plain minimal one.
+inline std::string minimalCallArgsWithField( std::string_view tool, std::string_view field )
+{
+    std::string_view part;
+    for( const McpValueSpec& row : kMcpValueFields )
+    {
+        part = field == std::string_view( row.field ) ? std::string_view( row.example ) : part;
+    }
+    return minimalCallArgs( tool, part );
+}
+
+// The envelope's backstop (mcp.h errResultMsg, the batch arm's sub-query error): a refusal no renderer gave a next
+// call gets the tool's minimal well-formed call, with a bad VALUE's own field set to the table's example. A bad
+// `path`/`paths` names the call WITHOUT a root: omitted, the server's own root answers. Never applied twice.
+inline std::string withNextCallFor( std::string msg, std::string_view tool )
+{
+    if( tool.empty() || hasNextCall( msg ) )
+    {
+        return msg;
+    }
+    constexpr std::string_view kBadValue = "invalid value for field: ";
+    std::string_view           field;
+    if( std::string_view( msg ).starts_with( kBadValue ) )
+    {
+        const std::string_view rest = std::string_view( msg ).substr( kBadValue.size() );
+        field = rest.substr( 0, rest.find( ' ' ) );
+        field = field == "path" || field == "paths" ? std::string_view() : field;
+    }
+    // an edit verb's refusal names a READ next: its minimal call carries the table's example body, which is no step to
+    // run blind (a missing or bad edit FIELD already names the edit itself, through its renderer)
+    if( tool == "replace_symbol_body" || tool == "insert_before_symbol" || tool == "insert_after_symbol" )
+    {
+        return msg + nextCallClause( "find_symbol", minimalCallArgs( "find_symbol" ) );
+    }
+    return msg + nextCallClause( tool, minimalCallArgsWithField( tool, field ) );
+}
+
+// A refusal whose minimal call would only repeat it names the call its dispatch site knows to help instead.
+inline std::string withNextCall( std::string msg, std::string_view tool, std::string_view args )
+{
+    return hasNextCall( msg ) ? msg : msg + nextCallClause( tool, args );
+}
+
+// The dispatch sites' own next calls, for refusals the tool's minimal call would only repeat (mcp.h):
+inline const std::string kRankByNext   = nextCallClause( "rank_by", "rank_by=\"authority\"" );   // the signals this server serves
+inline const std::string kExemplarNext = nextCallClause( "exemplar", "kind=\"fn\"" );           // the commonest kind
+inline std::string grepNextCall( std::string_view spelling ) { return nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) ); }
+inline std::string withGrepNext( std::string msg, std::string_view spelling ) { return hasNextCall( msg ) ? msg : msg + grepNextCall( spelling ); }
+// a git-less tree has no branch or history question to answer; the map of the tree is what still answers
+inline std::string withMapNext( std::string msg ) { return withNextCall( std::move( msg ), "analyze", {} ); }
+inline std::string traceNextCall( std::string_view trace ) { return nextCallClause( "for", "task=" + nextCallValue( trace ) ); }
+inline std::string situationNextCall() { return nextCallClause( "situational_awareness", minimalCallArgsWithField( "situational_awareness", "files" ) ); }
+// the root is the one thing the server cannot see, so the call names the field to fill with an ABSOLUTE root
+inline std::string missingPathNextCall( std::string_view tool ) { return nextCallClause( tool, minimalCallArgs( tool, "path=\"/abs/repo/root\"" ) ); }
+
+// An edit verb's refusal (mcpedit.h's Outcome) names a READ of the target next: find_symbol lists the candidates, their
+// handles and files. With no symbol to name, the refusal is left to the envelope's backstop.
+inline std::string withReadNext( std::string msg, std::string_view symbol )
+{
+    return symbol.empty() ? msg : withNextCall( std::move( msg ), "find_symbol", minimalCallArgs( "find_symbol", "symbol=" + nextCallValue( symbol ) ) );
+}
+
+// A found=0 answer's refusal sentence that its renderer gave no next call (path_between's endpoints, uses' selector) greps
+// the spelling that matched nothing: the textual hits are the step this server can take.
+inline std::string withGrepNextOf( std::string msg, const NotFoundAnswer& answer )
+{
+    if( answer.echo.empty() )
+    {
+        return msg;
+    }
+    const auto& miss = answer.missing == "to" && answer.echo.size() > 1 ? answer.echo[ 1 ] : answer.echo.front();
+    return withNextCall( std::move( msg ), "grep", "pattern=" + nextCallValue( miss.second ) );
 }
 
 // ─── G5: an edit verb's PAYLOAD field, and the noun a refusal calls it by ────────────────────────────────
@@ -542,7 +701,13 @@ inline std::string badValueRefusal( std::string_view field, std::string_view got
     {
         if( field == row.field )
         {
-            msg += std::string( " — needs " ) + row.needs;
+            // audit 2026-11-26 item 7: the schema description says what the field MEANS (its type is the schema's
+            // own "type" key), so the refusal, which a wrong-SHAPED value reaches, names the type itself
+            const std::string_view needs = row.needs;
+            const std::string_view type  = row.jsonType;
+            const bool typed = needs.starts_with( "a " ) || needs.starts_with( "an " );
+            const char* article = type == "integer" || type == "array" ? "an " : "a ";
+            msg += std::string( " — needs " ) + ( typed ? std::string() : article + std::string( type == "object" ? "JSON object" : type ) + ": " ) + row.needs;
             msg += " — got '" + echo + "', e.g. " + row.example;
             return msg;
         }
@@ -963,8 +1128,24 @@ inline std::string atSeedClause( const IngestResult& ing, std::string_view spell
     return atSeedFaultClause( ing, resolveAtSeed( ing, spelling.substr( 1 ) ) );
 }
 
+// The not-found's next call: the near-miss retried on `nextTool` (an edit verb's is a READ of it, find_symbol: a
+// placeholder body is no step to run blind), else a grep of the spelling.
+inline std::string notFoundNextCall( std::string_view noun, std::string_view spelling, std::string_view near, std::string_view nextTool )
+{
+    if( near.empty() || near == spelling || nextTool.empty() )
+    {
+        return nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) );
+    }
+    const bool             edits = nextTool == "replace_symbol_body" || nextTool == "insert_before_symbol" || nextTool == "insert_after_symbol";
+    const std::string_view tool  = edits ? std::string_view( "find_symbol" ) : nextTool;
+    const std::string      part  = std::string( edits ? std::string_view( "symbol" ) : noun ) + "=" + nextCallValue( near );
+    return nextCallClause( tool, minimalCallArgs( tool, part ) );
+}
+
+// `nextTool` (the tool that refused; "" on a path with no tool to name) gets the near-miss retry as the next call;
+// with no near-miss the next call greps the spelling. `noun` is the field the spelling came in (symbol / type).
 inline std::string notFound( const IngestResult& ing, std::string_view noun, std::string_view spelling,
-                             std::string_view retryHint = {} )
+                             std::string_view retryHint = {}, std::string_view nextTool = {} )
 {
     std::string msg = std::string( noun ) + " not found: '" + cappedEcho( spelling ) + "'";
     if( !spelling.empty() && spelling.front() == '@' )
@@ -980,7 +1161,7 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
     msg += defHit.found ? defNote : degradedParseNote( ing, spelling ) + defNote;   // a capped scan adds its note after the degraded one
-    return msg;
+    return msg + notFoundNextCall( noun, spelling, near, nextTool );
 }
 
 // The FILE-spelling variant (`cochange`, `situational_awareness`). didYouMean's pool is symbol names, which
@@ -997,7 +1178,8 @@ inline std::string fileNotFound( const IngestResult& ing, std::string_view spell
         msg += " (did you mean '" + std::string( best ) + "'?)";
     }
     msg += " — a path SUFFIX is enough";
-    return msg;
+    return msg + ( !best.empty() && best != spelling ? nextCallClause( "cochange", "file=" + nextCallValue( best ) )
+                                                     : nextCallClause( "grep", "pattern=" + nextCallValue( spelling ) ) );
 }
 
 // ─── M9: the unknown-verb refusal ────────────────────────────────────────────────────────────────────────
@@ -1044,7 +1226,8 @@ struct McpVerbFields
 {
     const char* verb;
     const char* fields;   // space-separated, in inputSchema order
-    enum class Effect : std::uint8_t { ReadOnly, Writes, Destructive };
+    // Writes = a repeat with the same arguments has no further effect (idempotentHint); Appends = it writes AGAIN.
+    enum class Effect : std::uint8_t { ReadOnly, Writes, Destructive, Appends };
     Effect      effect = Effect::ReadOnly;
 };
 
@@ -1116,8 +1299,8 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "slice",                    "path symbol var flow depth legend" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },
-    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
-    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
+    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Appends },
+    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Appends },
 };
 
 // Dispatch-only ALIASES of advertised tools: a name tools/call answers that gets no separate tools/list
@@ -1214,13 +1397,16 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
     constexpr int     kMaxEditDistance = 3;   // same bandwidth cutoff nearestName searches within
     std::string       msg  = "unknown field: '" + cappedEcho( field ) + "'";
     const std::string near = nearestName( declared, field );
-    if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
+    const bool        isNear = !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size();
+    if( isNear )
     {
         msg += " (did you mean '" + near + "'?)";
     }
     msg += " — " + std::string( verb ) + " accepts: " + joinClauses(
                std::vector<std::string_view>( declared.begin(), declared.end() ), ", " );
-    return msg;
+    // the next call types the near-miss with the table's example; a far typo gets the plain minimal call
+    const bool rootField = near == "path" || near == "paths";
+    return msg + nextCallClause( verb, minimalCallArgsWithField( verb, isNear && !rootField ? std::string_view( near ) : std::string_view() ) );
 }
 
 // The batch verb's SUB-QUERY item schema (the `queries` items properties, verbatim from the batch stanza).
@@ -1506,6 +1692,50 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
 // annotations Codex uses when selecting and approving tools. The effect lives on kMcpVerbFields so a new
 // advertised verb cannot acquire a second, hand-maintained side-effect list. All ripwire tools are local to
 // the caller's workspace: none reaches an external/open-world service.
+// MCP 2025-06-18's `title`: the display name a host shows in place of the snake_case `name`. One row per advertised
+// tool; the consteval floor below fails the build when a kMcpVerbFields tool has none.
+struct McpToolTitle { const char* verb; const char* title; };
+
+inline constexpr McpToolTitle kMcpToolTitles[] = {
+    { "analyze", "Architecture map" },               { "rank_by", "Map by ranking signal" },
+    { "find_symbol", "Symbol neighborhood" },        { "find_referencing_symbols", "Direct callers" },
+    { "grep", "Literal search" },                    { "cochange", "Co-change partners" },
+    { "memory_recall", "Recall docs for a task" },   { "situational_awareness", "Diff situation report" },
+    { "mentions", "Docs naming a symbol" },          { "for", "Building blocks for a task" },
+    { "lego", "Interface implementors" },            { "owners", "File ownership" },
+    { "fetch_body", "Fetch symbol source" },         { "batch", "Batch read sweep" },
+    { "exemplar", "Exemplar to imitate" },           { "quality_delta", "Quality regressions" },
+    { "quality_baseline", "Pin quality baseline" },  { "impact", "Blast radius" },
+    { "uses", "Use sites" },                         { "affected", "Tests to run" },
+    { "path_between", "Call path A to B" },          { "connect", "Connect symbols" },
+    { "explore", "Task orientation bundle" },        { "from_trace", "Map a stack trace" },
+    { "edit_check", "Edit contract check" },         { "whereis", "Content across branches" },
+    { "stray_content", "Unmerged branch content" },  { "flags", "Built but dark features" },
+    { "doc_drift", "False doc claims" },             { "slice", "Variable def-use slice" },
+    { "replace_symbol_body", "Replace symbol body" },{ "insert_before_symbol", "Insert before symbol" },
+    { "insert_after_symbol", "Insert after symbol" },
+};
+
+consteval bool everyMcpToolHasTitle()
+{
+    for( const McpVerbFields& row : kMcpVerbFields )
+    {
+        if( findIndexByField( kMcpToolTitles, &McpToolTitle::verb, std::string_view( row.verb ) ) == std::size( kMcpToolTitles ) )
+        {
+            return false;
+        }
+    }
+    return std::size( kMcpToolTitles ) == std::size( kMcpVerbFields );
+}
+static_assert( everyMcpToolHasTitle(), "a kMcpVerbFields tool has no kMcpToolTitles row (or a title row names no tool): tools/list would "
+                                       "advertise it without the display name every other tool carries" );
+
+inline std::string_view toolTitleFor( std::string_view verb )
+{
+    const McpToolTitle* t = findByField( kMcpToolTitles, &McpToolTitle::verb, verb );
+    return t != nullptr ? std::string_view( t->title ) : verb;
+}
+
 inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
 {
     McpVerbFields::Effect effect = McpVerbFields::Effect::ReadOnly;
@@ -1520,9 +1750,16 @@ inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
 
     const bool readOnly    = effect == McpVerbFields::Effect::ReadOnly;
     const bool destructive = effect == McpVerbFields::Effect::Destructive;
-    return "\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
+    // idempotentHint (audit 2026-11-26 item 8), OWNER RULING 2026-11-26: only on the WRITE tools. The spec calls it
+    // meaningful only when readOnlyHint is false, and a read repeats with no effect by construction, so the 29 read-only
+    // copies would be 638 B of every session's tools/list saying nothing. quality_baseline rewrites the same sidecar for
+    // the same HEAD, replace_symbol_body splices the same body over the same span (a renamed body refuses the repeat,
+    // file unchanged); only the two inserts insert again on every call.
+    const bool idempotent  = effect != McpVerbFields::Effect::Appends;
+    return "\"title\":\"" + std::string( toolTitleFor( verb ) ) + "\",\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
          + ",\"annotations\":{\"readOnlyHint\":" + ( readOnly ? "true" : "false" )
          + ",\"destructiveHint\":" + ( destructive ? "true" : "false" )
+         + ( readOnly ? "" : idempotent ? ",\"idempotentHint\":true" : ",\"idempotentHint\":false" )
          + ",\"openWorldHint\":false}";
 }
 
@@ -1549,7 +1786,7 @@ inline std::string unknownVerbRefusal( std::span<const std::string_view> known, 
     }
     msg += " — call tools/list for the " + std::to_string( advertisedCount ? advertisedCount : known.size() )
          + " available tools";
-    return msg;
+    return near.empty() ? msg : msg + nextCallClause( near, minimalCallArgs( near ) );
 }
 
 }   // namespace rw::mcprefuse

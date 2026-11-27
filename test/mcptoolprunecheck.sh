@@ -155,6 +155,7 @@ stdio_call() { # $1 = workspace root (positional startup root), $2 = the JSON-RP
 names_py='
 import sys, json
 r = json.load(open(sys.argv[1]))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 if "result" not in r: print("__ERR__"); sys.exit(0)
 print(" ".join(t["name"] for t in r["result"]["tools"]))
 '
@@ -192,6 +193,7 @@ echo "=== (B) [red] the omission is self-describing in initialize's instructions
 python3 - "$TMP/nogit.init" "$GIT_ONLY" <<'PY' > "$TMP/disc.res" 2>&1
 import sys, json
 r = json.load(open(sys.argv[1]))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 ins = r.get("result", {}).get("instructions", "")
 problems = []
 if "git" not in ins.lower():
@@ -251,6 +253,7 @@ http_call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"owner
 python3 - "$TMP/owners.res" <<'PY' > "$TMP/own.res" 2>&1
 import sys, json
 r = json.load(open(sys.argv[1]))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 m = r.get("error", {}).get("message", "")
 low = m.lower()
 if "result" in r:            print("ANSWERED")                  # a non-git root cannot answer owners
@@ -284,6 +287,7 @@ for f in cochange situ editcheck qdelta; do
     python3 -c '
 import sys, json
 r = json.load(open(sys.argv[1]))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 print("Y" if "result" in r else "N")
 ' "$TMP/e.$f" | grep -q Y || refused="$refused $f"
 done
@@ -361,6 +365,7 @@ EMPTY_IDENTITY="$( names_identical "$EMPTY_NAMES" "$EXPECTED_NONGIT" )"
 python3 - "$TMP/empty.init" <<'PY' > "$TMP/empty.res" 2>&1
 import sys, json
 r = json.load(open(sys.argv[1]))
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 ins = r.get("result", {}).get("instructions", "")
 low = ins.lower()
 problems = []

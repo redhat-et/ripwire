@@ -143,6 +143,7 @@ mcp_post INIT_CURRENT "$MCP_CURRENT_INIT"
 printf '%s' "$INIT_CURRENT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 assert r["result"]["protocolVersion"] == "2025-11-25", r
 ' 2>/dev/null && ok "initialize echoes the supported requested protocol version (2025-11-25)" \
               || no "initialize did not negotiate 2025-11-25: $( printf %s "$INIT_CURRENT" | head -c 160 )"
@@ -232,6 +233,7 @@ mcp_post FOR_HTTP "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"pa
 printf '%s' "$FOR_HTTP" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 assert "error" not in r, r
 # §B1.7 (2026-07-29): ctx root carries task=/route= attributes now — match the element open.
 assert ("<ctx>" in r["result"]["content"][0]["text"] or "<ctx " in r["result"]["content"][0]["text"]), "no <ctx> lens payload"
@@ -246,6 +248,7 @@ mcp_post OFF '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"a
 printf '%s' "$OFF" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 assert "error" in r and "workspace" in r["error"]["message"], r
 ' 2>/dev/null && ok "off-workspace path (/etc) is refused with a clean workspace error" \
              || no "off-workspace path not cleanly refused: $( printf %s "$OFF" | head -c 200 )"
@@ -255,6 +258,7 @@ mcp_post OMIT '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"
 printf '%s' "$OMIT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 # §B1.7 (2026-07-29): same root-attribute change — element-open match.
 assert "error" not in r and ("<ctx>" in r["result"]["content"][0]["text"] or "<ctx " in r["result"]["content"][0]["text"]), r
 ' 2>/dev/null && ok "omitted path defaults to the pinned workspace (answers normally)" \
@@ -293,6 +297,7 @@ AFTER_SHA="$( shasum "$TARGET" | awk '{print $1}' )"
 printf '%s' "$EDIT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 assert "error" in r and ("remote" in r["error"]["message"] or "disabled" in r["error"]["message"]), r
 ' 2>/dev/null && ok "remote replace_symbol_body is refused with a JSON-RPC error" \
              || no "remote edit was not cleanly refused: $( printf %s "$EDIT" | head -c 200 )"

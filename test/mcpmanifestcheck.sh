@@ -364,7 +364,14 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #   per property entry, the lego/explore precedent): memory_recall's schema 500 -> 592 B, batch's 997 -> 1,089 B; descriptions
 #   unchanged at 15,141 B. Measured 40,170 -> 40,354 B (base 5f4b50415 vs the lane binary). Ceiling = measured + 30 B, the same
 #   margin. OWNER CALL flagged on the PR: the MCP-METADATA lane stacked on this one raises it again separately.
-CEILING = 40384
+# MCP-METADATA (2026-11-26, stacked on #774), OWNER CALL: 40,384 -> 41,701, measured 41,671 B (from 40,354 B on the merged
+#   base 6c1890314). +1,317 B, every byte attributed: title on all 33 tools +971 B (MCP 2025-06-18); idempotentHint on the
+#   4 write tools only +90 B (owner ruling 2026-11-26: the spec calls it meaningful only when readOnlyHint is false, so
+#   the 29 read-only tools carry none); schemas 20,648 -> 20,836 B (+188 B: property descriptions by meaning, path and
+#   paths on all 33 now say absolute root and the default, the type text the other rows dropped pays most of it back);
+#   descriptions +68 B (15,141 -> 15,219 characters, +78; the dropped em dashes are 6 bytes each in this metric) from the
+#   16 routing sentences front-loaded with the moment to use the tool. Ceiling = measured + 30 B, the same margin.
+CEILING = 41701
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
@@ -382,6 +389,28 @@ check( len( whereisTool ) == 1 and len( whereisTool[ 0 ][ "description" ] ) == 5
 listingDesc = whereisTool[ 0 ][ "inputSchema" ].get( "properties", {} ).get( "listing", {} ).get( "description", "" ) if whereisTool else ""
 check( listingDesc.endswith( "default: more defs listed, else the shorter page" ),
        "(1c) whereis's listing field states the default rule exactly (got: %r)" % listingDesc )
+
+# ── (1d) every property description says what the parameter MEANS, not only its type (audit 2026-11-26 item 7) ──
+# The schema already carries "type"; a description that opens with its type ("a STRING repo directory", "a positive
+# integer ...") spends its bytes restating it and leaves the meaning out — S13: descriptions are "by far the most
+# important factor" in tool use. Two halves: no description OPENS with a type phrase, and each keeps a clause of at
+# least three words once every type word is struck out. `path` additionally says it is the ABSOLUTE root and what an
+# omitted one defaults to (S7, poka-yoke).
+TYPE_LEAD  = re.compile( r"^(OPTIONAL\s*[—-]\s*)?(an?\s+)?(STRING|ARRAY|BOOLEAN|JSON OBJECT|string|array|boolean|positive integer|non-negative integer|integer)\b", re.I )
+TYPE_WORDS = re.compile( r"\b(an?|STRING|ARRAY|BOOLEAN|JSON|OBJECT|string|array|boolean|positive|non-negative|integer|of)\b", re.I )
+typeLed, typeOnly = [], []
+for t in tools:
+    for k, v in t[ "inputSchema" ].get( "properties", {} ).items():
+        d = v.get( "description", "" )
+        if TYPE_LEAD.search( d ):
+            typeLed.append( "%s.%s=%r" % ( t[ "name" ], k, d[ :60 ] ) )
+        if len( re.findall( r"[A-Za-z_]{2,}", TYPE_WORDS.sub( " ", d ) ) ) < 3:
+            typeOnly.append( "%s.%s=%r" % ( t[ "name" ], k, d[ :60 ] ) )
+check( not typeLed, "(1d) no property description opens with its type (%d do: %s)" % ( len( typeLed ), "; ".join( typeLed[ :4 ] ) ) )
+check( not typeOnly, "(1d) every property description keeps a meaning clause beyond its type (%d do not: %s)" % ( len( typeOnly ), "; ".join( typeOnly[ :4 ] ) ) )
+pathDescs = { t[ "inputSchema" ][ "properties" ].get( "path", {} ).get( "description", "" ) for t in tools }
+check( all( "absolute" in d and "default" in d for d in pathDescs ),
+       "(1d) `path` says it is the absolute repo root and what an omitted one defaults to (got %r)" % sorted( pathDescs )[ :2 ] )
 
 # ── (1b) the CHANGELOG's own copy of this figure does not silently rot ──────────────────────────────
 # train10.md's "manifest anchor" finding: the byte figure above lives in two places — this file's own
@@ -457,6 +486,16 @@ for n in drift[ :5 ]:
     print( "  FAIL  (2) %s first sentence moved:\n          pinned: %s\n          live:   %s"
            % ( n, pins[ n ][ :180 ], live[ n ][ :180 ] ) )
 check( not drift, "(2) every routing sentence is byte-identical to its pin (%d checked)" % len( pins ) )
+
+# (2c) audit 2026-11-26 item 9: the routing sentence opens with the MOMENT to use the tool, not its mechanism. Past 10K
+# tokens Claude Code defers the tool definitions and tool search scores names and descriptions, so the first words a
+# deferred search reads should be the agent's situation: a question it has ("Who calls X directly?"), a moment
+# ("Before renaming", "At the start of non-trivial work"), or, for the write verbs, the action itself.
+MOMENT_OPENERS = ( "Before ", "BEFORE ", "After ", "At the start", "When ", "Just ", "Paste ", "Your ", "ONE-", "ONE ", "PIN ",
+                   "WHAT ", "WHICH ", "WHERE ", "IS IT ", "Does ", "Replace ", "Insert " )
+mechanismLed = [ n for n, f in sorted( live.items() ) if not ( "?" in f[ :60 ] or f.startswith( MOMENT_OPENERS ) ) ]
+check( not mechanismLed, "(2c) every routing sentence opens with the moment to use the tool (%d lead with mechanism: %s)"
+       % ( len( mechanismLed ), ",".join( mechanismLed ) ) )
 
 # A description that is ONLY its first sentence has nothing left to say about its arguments; a description
 # whose first sentence is most of its bytes has not been trimmed, it has been truncated. Both are shapes a

@@ -463,7 +463,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
                      "an unindexed file, a typo or an uncommitted rename can each hide the definition.{}{} near=: the indexed name "
                      "to retry with; near_renamed=1: the working tree renamed the selector to it (a DEFINITION of the selector left "
                      "a changed file that now defines near=; a mere mention is not a rename). On the CLI the exit status stays 1, a "
-                     "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data.{}{} -->{}{}",
+                     "refusal, and stderr carries the same diagnosis; over MCP this document is the result's answer and the refusal sentence rides beside it.{}{} -->{}{}",
                  a.tag, a.refusedLegend(),
                  a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.",
                  a.nearMatches != 0 ? " matches=N: N indexed files end with the path selector and it cannot pick one; near= is the first by path, one whole path answers." : "",

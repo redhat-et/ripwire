@@ -319,6 +319,7 @@ else
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 print(r["result"]["content"][0]["text"]) if "result" in r else print("__ERROR__")
 ' )"
     case "$FB" in
@@ -357,6 +358,7 @@ stale_refusal() {
     grep '"id":3' "$d/out.txt" | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 print("__ERROR__:"+r["error"].get("message","")) if "error" in r else print(r["result"]["content"][0]["text"])
 '
 }

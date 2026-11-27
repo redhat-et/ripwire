@@ -416,9 +416,10 @@ for line in sys.stdin:
     if not line: continue
     d=json.loads(line)
     if "error" in d: print("ERROR", d["error"].get("code"), d["error"].get("message",""), end="")
+    elif d.get("result",{}).get("isError"): print("ISERROR", "".join(x.get("text","") for x in d["result"]["content"]), end="")
     elif d.get("result",{}).get("content"): print("ANSWER", end="")' 2>/dev/null )"
     case "$V_MSG" in
-        "ERROR -32602 invalid value for field: in"*"got '$echo_'"*) ok "(9e) the live MCP grep verb refuses a non-string in=$val through the shape gate and echoes '$echo_'" ;;
+        "ISERROR invalid value for field: in"*"got '$echo_'"*) ok "(9e) the live MCP grep verb refuses a non-string in=$val through the shape gate and echoes '$echo_'" ;;
         *) no "(9e) the live MCP grep verb did not refuse in=$val echoing '$echo_' — got: ${V_MSG:-nothing}" ;;
     esac
 done

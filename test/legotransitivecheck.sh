@@ -160,7 +160,8 @@ if printf '%s' "$M" | grep -q 'shown_transitive=\\"2\\" transitive_capped=\\"1\\
 M="$( mcp '' )"
 if printf '%s' "$M" | grep -q 'transitive=\\"3\\"' && ! printf '%s' "$M" | grep -q 'has_more'; then ok "MCP without a window: the whole closure"; else no "MCP default: $( printf '%s' "$M" | head -c 300 )"; fi
 M="$( mcp ',"offset":-1' )"
-if printf '%s' "$M" | grep -q '"error"'; then ok "MCP offset:-1 is refused"; else no "MCP offset:-1 accepted: $( printf '%s' "$M" | head -c 300 )"; fi
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now (was a JSON-RPC error); either form is the refusal
+if printf '%s' "$M" | grep -qE '"error"|"isError":true'; then ok "MCP offset:-1 is refused"; else no "MCP offset:-1 accepted: $( printf '%s' "$M" | head -c 300 )"; fi
 
 echo "=== (M1) a Ruby module mixed in is an implements edge: include / extend ==="
 if lego DSL

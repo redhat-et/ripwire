@@ -475,18 +475,19 @@ esac
     && ok "edit_check verb: contract shape (sym/status/callers)" \
     || { no "edit_check verb: wrong shape"; printf '%s\n' "$EDITCHECK_INNER" | head -c 300; echo; }
 
-# unknown symbol → -32602 naming it
+# unknown symbol → an isError refusal naming it (SEP-1303; was -32602)
 EDITCHECK_UNKNOWN="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"edit_check","arguments":{"path":"'"$CORPUS"'","symbol":"noSuchSymbolXYZ"}}}' | tail -1 )"
 python3 -c '
 import sys, json
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now (was -32602); the arm still asserts the refusal and its wording
 r = json.loads(sys.argv[1])
-msg = r.get("error", {}).get("message", "")
-print("OK" if r.get("error",{}).get("code")==-32602 and "noSuchSymbolXYZ" in msg else "GOT:" + json.dumps(r))
+msg = "".join(c.get("text", "") for c in r.get("result", {}).get("content", []))
+print("OK" if "error" not in r and r.get("result", {}).get("isError") is True and "noSuchSymbolXYZ" in msg else "GOT:" + json.dumps(r))
 ' "$EDITCHECK_UNKNOWN" >"$TMP/editcheck_unknown"
 [ "$( cat "$TMP/editcheck_unknown" )" = "OK" ] \
-    && ok "edit_check: unknown symbol -> -32602 naming it" \
+    && ok "edit_check: unknown symbol -> isError naming it" \
     || no "edit_check: unknown symbol did not refuse correctly: $( cat "$TMP/editcheck_unknown" )"
 
 # ── missing-arg gives the per-verb message (D3 convention) ──────────────────────────────────────
@@ -498,9 +499,10 @@ check_missing_arg() {
         '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"'"$verb"'","arguments":'"$argsJson"'}}' | tail -1 )"
     python3 -c '
 import sys, json
+# SEP-1303 (lane mcp-metadata): a tool refusal is an isError result now (was -32602); the arm still asserts the refusal and its wording
 r = json.loads(sys.argv[1])
-msg = r.get("error", {}).get("message", "")
-print("OK" if r.get("error",{}).get("code")==-32602 and sys.argv[2] in msg else "GOT:" + json.dumps(r))
+msg = "".join(c.get("text", "") for c in r.get("result", {}).get("content", []))
+print("OK" if "error" not in r and r.get("result", {}).get("isError") is True and sys.argv[2] in msg else "GOT:" + json.dumps(r))
 ' "$out" "$wantSubstr" >"$TMP/missing_$verb"
     [ "$( cat "$TMP/missing_$verb" )" = "OK" ] \
         && ok "$verb: missing-arg gives 'missing required field: $wantSubstr'" \
@@ -633,18 +635,22 @@ print("OK" if "in_id=\"useAll\"" in txt and "external=\"0\"" in txt else "GOT:" 
 AT_BADFS="$( at_call find_symbol '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}' )"
 python3 -c '
 import sys, json
+# SEP-1303 (lane mcp-metadata): the find_symbol not-found is a found=0 ANSWER now (was a -32602 error): content[0] the found=0
+# document, content[1] the refusal sentence, which still carries the at-diagnosis this arm is about
 r = json.loads(sys.argv[1])
-msg = r.get("error",{}).get("message","")
-print("OK" if r.get("error",{}).get("code")==-32602 and "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
+c = r.get("result", {}).get("content", [])
+msg = c[1].get("text", "") if len(c) > 1 else ""
+print("OK" if "error" not in r and "\"found\":0" in (c[0].get("text", "") if c else "") and "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
 ' "$AT_BADFS" >"$TMP/at_badfs"
 [ "$( cat "$TMP/at_badfs" )" = "OK" ] \
-    && ok "@seed (7e): find_symbol faulted seed -> -32602 carrying the at-diagnosis" \
+    && ok "@seed (7e): find_symbol faulted seed -> the found=0 answer carrying the at-diagnosis" \
     || no "@seed (7e): find_symbol faulted-seed refusal wrong: $( cat "$TMP/at_badfs" )"
 
 AT_BADUS="$( at_call uses '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}' )"
 python3 -c '
 import sys, json
 r = json.loads(sys.argv[1])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 msg = r.get("error",{}).get("message","")
 print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
 ' "$AT_BADUS" >"$TMP/at_badus"
@@ -688,6 +694,7 @@ AT_MENBAD="$( at_call mentions '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}'
 python3 -c '
 import sys, json
 r = json.loads(sys.argv[1])
+r = ( lambda r: { "error": { "code": "isError", "message": "".join( c.get( "text", "" ) for c in r[ "result" ][ "content" ] ) } } if isinstance( r, dict ) and r.get( "result", {} ).get( "isError" ) else { "error": { "code": "found0", "message": r[ "result" ][ "content" ][ 1 ].get( "text", "" ) } } if isinstance( r, dict ) and len( r.get( "result", {} ).get( "content", [] ) ) > 1 and " not found: " in r[ "result" ][ "content" ][ 1 ].get( "text", "" ) else r )( r )   # SEP-1303 (lane mcp-metadata): an isError result, or a found=0 answer, reads as the refusal it was
 msg = r.get("error",{}).get("message","")
 print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
 ' "$AT_MENBAD" >"$TMP/at_menbad"
