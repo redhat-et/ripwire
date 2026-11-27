@@ -2330,6 +2330,103 @@ inline bool rustInFileTestScope( TSNode defNode, std::string_view src ) noexcept
                                        } );
 }
 
+inline std::optional<std::string_view> rustPlainPath( std::string_view text )
+{
+    const auto quote = text.find( '"' );
+    if( quote == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
+    if( quote != 0 && ( text.front() != 'r' || text.substr( 1, quote - 1 ).find_first_not_of( '#' ) != std::string_view::npos ) )
+    {
+        return std::nullopt;
+    }
+    const std::size_t hashes = quote ? quote - 1 : 0;
+    if( text.size() <= quote + 1 + hashes || text[text.size() - 1 - hashes] != '"'
+        || ( hashes && text.substr( text.size() - hashes ) != text.substr( 1, hashes ) ) )
+    {
+        return std::nullopt;
+    }
+    const auto path = text.substr( quote + 1, text.size() - quote - 2 - hashes );
+    if( ( quote == 0 && path.find( '\\' ) != std::string_view::npos ) || path.empty() || path.front() == '/' )
+    {
+        return std::nullopt;
+    }
+    return path;
+}
+
+// The call's one argument, comments (named extras) skipped; null when there is not exactly one.
+inline TSNode rustSoleArgument( TSNode call )
+{
+    const TSNode args = fieldChild( call, NodeField::Arguments );
+    TSNode sole{};
+    for( std::uint32_t i = 0, n = ts_node_is_null( args ) ? 0 : ts_node_named_child_count( args ); i < n; ++i )
+    {
+        const TSNode a = ts_node_named_child( args, i );
+        if( !ts_node_is_extra( a ) && !ts_node_is_null( std::exchange( sole, a ) ) )
+        {
+            return TSNode{};
+        }
+    }
+    return sole;
+}
+
+// `Path::new(env!("CARGO_MANIFEST_DIR"))` followed by any number of literal `.join(…)`s, as a manifest-relative path.
+inline std::optional<std::string> rustManifestInput( TSNode node, std::string_view src )
+{
+    std::vector<std::string_view> parts;   // outermost join first
+    for( ;; )
+    {
+        const TSNode arg = !ts_node_is_null( node ) && kindIs( ts_node_type( node ), "call_expression" ) ? rustSoleArgument( node ) : TSNode{};
+        if( ts_node_is_null( arg ) )
+        {
+            return std::nullopt;
+        }
+        const TSNode fn = fieldChild( node, NodeField::Function );
+        const auto callee = nodeTextOf( fn, src );
+        if( equalsIgnoringAsciiSpace( callee, "Path::new" ) || equalsIgnoringAsciiSpace( callee, "std::path::Path::new" ) )
+        {
+            if( !kindIs( ts_node_type( arg ), "macro_invocation" ) || !equalsIgnoringAsciiSpace( nodeTextOf( arg, src ), "env!(\"CARGO_MANIFEST_DIR\")" ) )
+            {
+                return std::nullopt;
+            }
+            break;
+        }
+        const auto part = kindIs( ts_node_type( fn ), "field_expression" ) && nodeTextOf( fieldChild( fn, NodeField::Field ), src ) == "join"
+            ? rustPlainPath( nodeTextOf( arg, src ) ) : std::nullopt;
+        if( !part )
+        {
+            return std::nullopt;
+        }
+        parts.push_back( *part );
+        node = fieldChild( fn, NodeField::Value );
+    }
+    std::string path;
+    for( auto it = parts.rbegin(); it != parts.rend(); ++it )
+    {
+        path.append( path.empty() ? "" : "/" ).append( *it );
+    }
+    return path;
+}
+
+inline void captureRustTestInput( TSNode call, std::uint32_t file, std::string_view src, std::vector<RawRustFixtureRead>& readers )
+{
+    if( !kindIs( ts_node_type( call ), "call_expression" ) )
+    {
+        return;
+    }
+    const auto callee = nodeTextOf( fieldChild( call, NodeField::Function ), src );
+    if( !equalsIgnoringAsciiSpace( callee, "fs::read_dir" ) && !equalsIgnoringAsciiSpace( callee, "std::fs::read_dir" ) )
+    {
+        return;
+    }
+    auto path = rustManifestInput( rustSoleArgument( call ), src );
+    if( path && !path->empty() )
+    {
+        readers.push_back( { file, rustInFileTestScope( call, src ), std::move( *path ) } );
+    }
+}
+
 // JS/TS: the harness block is a CALL whose callee is one of three bare identifiers, and the def is
 // declared somewhere inside its arguments. The member forms (`it.only`, `test.each`, `describe.skip`)
 // are a DOCUMENTED GAP, not an oversight — they need their own probe and gate arm, and the bare forms

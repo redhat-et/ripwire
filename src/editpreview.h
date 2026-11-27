@@ -162,6 +162,8 @@ inline IngestResult previewMerge( const IngestResult& ing, std::uint32_t fileId,
     out.crawlSkips      = ing.crawlSkips;
     out.fileHealth      = ing.fileHealth;
     out.docText         = ing.docText;
+    out.rustTestFiles = ing.rustTestFiles;
+    out.rustTestInputReaders = ing.rustTestInputReaders;
     if( fileId < out.fileHealth.size() && !one.fileHealth.empty() )
     {
         out.fileHealth[ fileId ] = one.fileHealth[0];

@@ -21,7 +21,7 @@ Run from the repo root with changes staged or unstaged, or the PR branch checked
 | Question | Run |
 |---|---|
 | did I just change a contract someone depends on? (per symbol, right after an edit) | `ripwire <dir> --edit-check=SYM` |
-| which tests must I run — and is anything untested in the blast radius? | `ripwire <dir> --test-gate` (exit 4 if either is non-empty) |
+| which tests must I run — and where is coverage unproven? | `ripwire <dir> --test-gate` (exit 4 for tests to run, untested code, or unresolved Rust test reach) |
 | which tests reach these files | `ripwire <dir> --affected=F1,F2`, or `ripwire <dir> --situ` for the whole mid-task report |
 | the review bundle for the diff (callers, blast radius, tests, co-change, owners) | `ripwire <dir> --pr-context --legend=compact` (vs a base: `--pr-context=main`) |
 | can I delete this one symbol? | `ripwire <dir> --safe-delete=SYM` |

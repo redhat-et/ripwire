@@ -206,6 +206,7 @@ if python3 - "$TMP/pn.fresh" "$TMP/pn.bin" "$ROOT" <<'PY'
 import copy, pathlib, re, struct, sys, xml.etree.ElementTree as ET
 from collections import Counter
 
+# Cache v58 adds the tenth head count and trailing Rust fixture-read family; Include flags keep the same width.
 # readFileRecord/writeBind in ingest_cache.h, lean cache v57 (lane asserted-signal, train m5-1126-3: 56 -> 57, queries/python/tags.scm records the `assert` statement as a call reference named `assert`, no record shape change, walked layout unchanged; lane c1-one-parse, ONE-PARSE #729: 55 -> 56, one record shape for both verb classes: every record carries the subtoken dictionary (u32 count + u64 each) before the defs, and every RawRef a valueUse u8 after trailingLambda, both taken below; lane tangle-rule: 54 -> 55, a DEF record gains maxBlock10 u32 + cross u8 after nestArmCut, a record this lean fixture never holds, walked layout unchanged; lane qd-tangle, train ge2: 53 -> 54, a DEF record gains steer u8 + deepDispatch u32 + nestArmCut u8 after maxNest, a record this lean fixture never holds, walked layout unchanged; lane rust-self-chain, train 1117d2: 52 -> 53, LocalBindKind::RecvCall appended (readBind's kind bound moves), a Rust record no Python fixture writes, walked rows and layout unchanged; lane failure-default, TRAIN-1111h: 51 -> 52, the construct-hit tag table gains an appended failure-default tag value, walked rows and layout unchanged; lane qd-constructs: 50 -> 51, the record head gains a ninth family count and the record ends with the construct-hit family, both taken below; lane clones-persist: 49 -> 50, a DEF record ends with a clone-key presence u8 (+ the u64 key), a record this lean fixture never holds, layout of the walked records unchanged; lane warm-direct: 48 -> 49, the record head gains the eight family counts after FileHealth, taken below; train 42b: 46 -> 48, lane alias-import's appended LocalBindKind::ReExport (its placeholder 47), a TS/JS record no Python fixture writes, layout unchanged; train 40: 44 -> 46 for lane js-def-naming, its PLACEHOLDER 45: appended LocalBindKind::JsObjectLiteral, a JS/TS record no Python fixture writes, layout unchanged; train 37b: 43 -> 44, lane rust-degraded: FileHealth gains useBoundsBlanked, a sixth u32 (the walker below skips 6 * 4); train 36: 40 -> 43, #155 appends a `trailingLambda` u8 to every RawRef after `forwarded`, taken below; train 34: 39 -> 40 appended LocalBindKind::JsRebind only, a JS/TS record no Python fixture writes; train 33: 38 -> 39 moved the number only, above every live 38; lane l6-iface fix round 1: 37 -> 38 appended LocalBindKind::ImplBlock only;
 # lane l6-iface: 36 -> 37 appended LocalBindKind::DispatchType only, no
 # record layout change; train renumbers) (train 30: 34 -> 36 moved the number only, above three lanes'
@@ -215,7 +216,7 @@ from collections import Counter
 # string searches: walk the counted arrays and require complete file coverage, clean parse health and exact EOF.
 blob = pathlib.Path(sys.argv[2]).read_bytes()
 endian = '<' if sys.byteorder == 'little' else '>'
-assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 57, 'update the cache walker for a new layout'
+assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 58, 'update the cache walker for a new layout'
 table, count = struct.unpack_from(endian + 'QI', blob, len(blob) - 24)
 assert count == 5 == struct.unpack_from(endian + 'I', blob, 21)[0], 'all five fixtures must be cached'
 assert table + count * 32 == len(blob) - 24, 'cache table bounds'
@@ -239,7 +240,7 @@ for i in range(count):
     take(4 * 8)  # content hash and size/mtime/ctime
     health = struct.unpack(endian + '6I', take(6 * 4))   # v44: + useBoundsBlanked (0: no Python file is re-parsed)
     assert health[0] == health[1] == health[5] == 0 and health[2] > 0, (path, 'fixture must parse cleanly', health)
-    take(9 * 4)  # v49: the head copy of the family counts (each family's own count follows below); v51: nine, + construct hits
+    take(10 * 4)  # v49: the head copy of the family counts (each family's own count follows below); v51: nine, + construct hits; v58: ten, + Rust fixture reads
     take(8 * number('I'))  # v56: the subtoken dictionary every record carries (a def-free fixture may still hold one)
     assert number('I') == 0, 'fixture must contain no definitions'
     for _ in range(number('I')):  # RawRef: only its variable-length strings affect the walk
@@ -263,6 +264,7 @@ for i in range(count):
     for _ in range(4):  # FFI aliases, route defs/uses, const-opens: absent in this Python fixture
         assert number('I') == 0, 'unexpected auxiliary fact'
     take(number('I') * 9)  # v51: --quality-delta construct hits (startByte, line u32; tag u8), fixed size
+    assert number('I') == 0, 'Python files do not record Rust fixture reads'
     assert pos == end, (path, 'cache walker desynchronised')
     facts[path] = (incs, binds)
 

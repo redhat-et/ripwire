@@ -668,6 +668,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     retargetRustMacroAliases( result );   // RUST-MACRO-PATH: `define_rejection!` through `use … as define_rejection;` names the macro
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
+    classifyRustTestFiles( result, raw.rustFixtureReads );
     result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index
     // QD-CONSTRUCTS-AT-INGEST: the --quality-delta construct hits of every file the pool parsed or read from its record.
     // A memory-cut parse left files without them, and so did a pool that ran without the pass (ingest.h

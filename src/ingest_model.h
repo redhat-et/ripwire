@@ -19,6 +19,302 @@ namespace rw
 namespace
 {
 
+struct RustTestMount
+{
+    std::uint32_t from, to;
+    bool test;
+};
+
+struct RustTestReader
+{
+    std::uint32_t file;
+    std::string directory;
+    bool test, disabled = false;
+};
+
+struct RustTestMountGraph
+{
+    std::vector<RustTestMount> edges;
+    std::vector<char> incoming;
+    std::vector<std::uint32_t> off;
+};
+
+constexpr unsigned RustProductionMode = 1, RustTestsMode = 2, RustInputMode = 4;
+
+inline std::vector<RustTestReader> rustFixtureReaders( const IngestResult& ing, const RustCrateRoots& roots,
+                                                        std::span<const RawRustFixtureRead> reads )
+{
+    NearestManifest manifestOf( roots.manifestAt );
+    std::vector<RustTestReader> readers;
+    for( const auto& read : reads )
+    {
+        const auto source = rootRelPath( ing, read.fileId );
+        const auto parent = includerDir( source );
+        const auto manifest = manifestOf( source.substr( 0, parent.empty() ? 0 : parent.size() + 1 ) );
+        if( manifest == kNoFile )
+        {
+            continue;
+        }
+        const auto dir = includerDir( rootRelPath( ing, roots.manifestFiles[manifest] ) );
+        auto directory = dir.empty() ? lexicalNormalize( read.path ) : lexicalNormalize( std::string( dir ) + "/" + read.path );
+        if( directory == "testdata" || directory.ends_with( "/testdata" ) )
+        {
+            readers.push_back( { read.fileId, std::move( directory ), read.testScope } );
+        }
+    }
+    return readers;
+}
+
+// The RustSite resolve.h's buildPreciseIncludeAdjWithContext builds for a Rust `mod` include.
+inline RustSite rustIncludeSite( const RustCrateRoots& roots, const Include& inc, std::vector<std::string_view>& inlineMods )
+{
+    const auto dir = roots.dirOf[inc.fileId];
+    roots.inlineChainAt( inc.fileId, inc.byte, inlineMods );
+    return { dir == kNoFile ? std::string_view() : std::string_view( roots.dirs[dir] ), dir != kNoFile,
+             roots.isRoot[inc.fileId] != 0, inlineMods };
+}
+
+inline RustTestMountGraph buildRustTestMountGraph( const IngestResult& ing, const RustCrateRoots& roots,
+                                                  const HashMap<std::string, std::uint32_t>& files )
+{
+    RustTestMountGraph mounts;
+    mounts.incoming.resize( ing.files.size() );
+    std::vector<std::string_view> inlineMods;
+    for( const Include& inc : ing.includes )
+    {
+        const auto source = rootRelPath( ing, inc.fileId );
+        if( !inc.target.starts_with( "mod:" ) || includeLangOf( source ) != IncludeLang::Rust )
+        {
+            continue;
+        }
+        inlineMods.clear();
+        const RustSite site = rustIncludeSite( roots, inc, inlineMods );
+        const auto to = resolveRustImport( source, inc.target, files, site );
+        if( to != kNoFile && to != inc.fileId )
+        {
+            mounts.incoming[to] = 1;
+            mounts.edges.push_back( { inc.fileId, to, inc.rustTestMount } );
+        }
+    }
+    std::ranges::sort( mounts.edges, {}, &RustTestMount::from );
+    mounts.off.resize( ing.files.size() + 1 );
+    for( const auto& edge : mounts.edges )
+    {
+        ++mounts.off[edge.from + 1];
+    }
+    std::partial_sum( mounts.off.begin(), mounts.off.end(), mounts.off.begin() );
+    return mounts;
+}
+
+struct RustTestReach
+{
+    const RustCrateRoots& roots;
+    const RustTestMountGraph& mounts;
+    std::vector<std::uint8_t> reached;
+    std::vector<char> inputSeeds;
+    std::vector<std::pair<std::uint32_t, unsigned>> work;
+
+    RustTestReach( const RustCrateRoots& crateRoots, const RustTestMountGraph& graph, std::uint32_t count )
+        : roots( crateRoots ), mounts( graph ), reached( count ), inputSeeds( count ) {}
+
+    unsigned modes( std::uint32_t f ) const { return reached[f]; }
+
+    void visit( std::uint32_t state, unsigned mode )
+    {
+        const auto fresh = mode & ~unsigned( reached[state] );
+        if( fresh )
+        {
+            reached[state] |= std::uint8_t( fresh );
+            work.emplace_back( state, fresh );
+        }
+    }
+
+    void seedRoots( const IngestResult& ing )
+    {
+        for( std::uint32_t f = 0; f < inputSeeds.size(); ++f )
+        {
+            const auto path = rootRelPath( ing, f );
+            if( path.ends_with( ".rs" ) && ( roots.isRoot[f] || ( !mounts.incoming[f] && !inputSeeds[f] ) ) )
+            {
+                visit( f, isTestPath( path ) ? RustTestsMode : RustProductionMode );
+            }
+            if( inputSeeds[f] )
+            {
+                visit( f, RustInputMode );
+            }
+        }
+    }
+
+    void classify( const IngestResult& ing )
+    {
+        std::ranges::fill( reached, 0 );
+        work.clear();
+        seedRoots( ing );
+        for( std::size_t i = 0; i < work.size(); ++i )
+        {
+            const auto [ state, mode ] = work[i];
+            if( mode == RustInputMode )
+            {
+                continue;
+            }
+            for( auto e = mounts.off[state]; e < mounts.off[state + 1]; ++e )
+            {
+                const auto& edge = mounts.edges[e];
+                visit( edge.to, edge.test ? RustTestsMode : mode );
+            }
+        }
+    }
+};
+
+// Keys borrow directory strings from readers after the last insertion into that vector.
+using RustTestDataChildren = HashMap<std::string_view, std::vector<std::uint32_t>>;
+using RustTestReaderModes = HashMap<std::string_view, unsigned>;
+
+inline RustTestDataChildren indexRustTestDataChildren( const IngestResult& ing, std::uint32_t count, const std::vector<RustTestReader>& readers )
+{
+    RustTestDataChildren children;
+    if( readers.empty() )
+    {
+        return children;
+    }
+    for( const auto& reader : readers )
+    {
+        children.try_emplace( reader.directory );
+    }
+    for( std::uint32_t f = 0; f < count; ++f )
+    {
+        if( const auto it = children.find( includerDir( rootRelPath( ing, f ) ) ); it != children.end() )
+        {
+            it->second.push_back( f );
+        }
+    }
+    return children;
+}
+
+inline void seedRustTestInputs( const std::vector<RustTestReader>& readers, const RustTestDataChildren& children, RustTestReaderModes& readerModes,
+                                RustTestReach& reach )
+{
+    readerModes.clear();
+    for( const auto& reader : readers )
+    {
+        if( reader.disabled )
+        {
+            continue;
+        }
+        const bool test = reader.test || !( reach.modes( reader.file ) & RustProductionMode );
+        readerModes[reader.directory] |= test ? RustTestsMode : RustProductionMode;
+    }
+    std::ranges::fill( reach.inputSeeds, 0 );
+    for( const auto& [directory, mode] : readerModes )
+    {
+        if( mode == RustTestsMode )
+        {
+            for( auto f : children.find( directory )->second )
+            {
+                reach.inputSeeds[f] = 1;
+            }
+        }
+    }
+}
+
+inline void disableRustTestInputReaders( std::vector<RustTestReader>& readers, const RustTestReach& reach )
+{
+    for( auto& reader : readers )
+    {
+        reader.disabled = reader.disabled || reach.modes( reader.file ) == RustInputMode;
+    }
+}
+
+inline RustTestReaderModes stabilizeRustTestInputs( const IngestResult& ing, const RustTestDataChildren& children,
+                                                   std::vector<RustTestReader>& readers, RustTestReach& reach )
+{
+    RustTestReaderModes readerModes;
+    // A production reader vetoes data-only status. Seeding only removes reach, so a reader only loses its production bit
+    // or is disabled as data, and the seeds settle. Stop when the seeds the last classify used are the ones its reach implies:
+    // the returned modes and the reach then agree.
+    std::vector<char> used;
+    seedRustTestInputs( readers, children, readerModes, reach );
+    while( !readers.empty() && used != reach.inputSeeds )
+    {
+        used = reach.inputSeeds;
+        reach.classify( ing );
+        disableRustTestInputReaders( readers, reach );
+        seedRustTestInputs( readers, children, readerModes, reach );
+    }
+    return readerModes;
+}
+
+inline void emitRustTestFileRoles( IngestResult& ing, std::uint32_t count, const RustTestReach& reach )
+{
+    ing.rustTestFiles.assign( count, RustTestFileRole::Ordinary );
+    for( std::uint32_t f = 0; f < count; ++f )
+    {
+        const auto mode = reach.modes( f );
+        if( mode & RustProductionMode )
+        {
+            continue;
+        }
+        if( mode & RustTestsMode )
+        {
+            ing.rustTestFiles[f] = RustTestFileRole::Test;
+        }
+        else if( mode & RustInputMode )
+        {
+            ing.rustTestFiles[f] = RustTestFileRole::Input;
+        }
+    }
+}
+
+inline void emitRustTestInputReaders( IngestResult& ing, const std::vector<RustTestReader>& readers, const RustTestDataChildren& children,
+                                      const RustTestReaderModes& readerModes )
+{
+    for( const auto& reader : readers )
+    {
+        const auto mode = readerModes.find( reader.directory );
+        if( reader.disabled || mode == readerModes.end() || mode->second != RustTestsMode )
+        {
+            continue;
+        }
+        for( auto f : children.find( reader.directory )->second )
+        {
+            if( ing.rustTestFiles[f] == RustTestFileRole::Input )
+            {
+                ing.rustTestInputReaders.push_back( { f, reader.file } );
+            }
+        }
+    }
+    const auto key = []( const RustTestInputReader& p ) { return std::pair{ p.inputFileId, p.readerFileId }; };
+    auto& pairs = ing.rustTestInputReaders;
+    std::ranges::sort( pairs, {}, key );
+    pairs.erase( std::ranges::unique( pairs, {}, key ).begin(), pairs.end() );
+}
+
+// Recompute across all files after reusing per-file facts: a one-file edit can change the status
+// of an unchanged module. Production/test/input provenance are independent until the final cut.
+inline void classifyRustTestFiles( IngestResult& ing, std::span<const RawRustFixtureRead> reads )
+{
+    if( reads.empty() && std::ranges::none_of( ing.includes, &Include::rustTestMount ) )
+    {
+        return;
+    }
+
+    const auto files = normalizedFileIndex( ing );
+    const auto& roots = rustCrateRootsOf( ing, files );
+    if( roots.empty() )
+    {
+        return;
+    }
+    const auto count = std::uint32_t( ing.files.size() );
+    auto readers = rustFixtureReaders( ing, roots, reads );
+    const auto mounts = buildRustTestMountGraph( ing, roots, files );
+    RustTestReach reach( roots, mounts, count );
+    reach.classify( ing );
+    const auto children = indexRustTestDataChildren( ing, count, readers );
+    const auto readerModes = stabilizeRustTestInputs( ing, children, readers, reach );
+    emitRustTestFileRoles( ing, count, reach );
+    emitRustTestInputReaders( ing, readers, children, readerModes );
+}
+
 // 3a) dedup definitions: some grammars' tags patterns overlap (Go: type_spec + the
 //     struct/interface specializations both fire; Rust: a fn inside an impl matches both
 //     the method and the function pattern). Two matches with the same (fileId, startByte,

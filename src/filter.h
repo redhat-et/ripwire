@@ -100,6 +100,23 @@ inline bool isTestPath( std::string_view p ) noexcept
     return false;
 }
 
+inline RustTestFileRole rustTestFileRole( const IngestResult& ing, std::uint32_t file ) noexcept
+{
+    return file < ing.rustTestFiles.size() ? ing.rustTestFiles[file] : RustTestFileRole::Ordinary;
+}
+
+inline bool isRunnableTestFile( const IngestResult& ing, std::uint32_t file ) noexcept
+{
+    const auto role = rustTestFileRole( ing, file );
+    return file < ing.files.size() && role != RustTestFileRole::Input
+        && ( role == RustTestFileRole::Test || isTestPath( rootRelPath( ing, file ) ) );
+}
+
+inline bool isTestCodeFile( const IngestResult& ing, std::uint32_t file ) noexcept
+{
+    return rustTestFileRole( ing, file ) == RustTestFileRole::Input || isRunnableTestFile( ing, file );
+}
+
 // ── L8: the WHOLE test partition — path OR in-file convention ────────────────────────────────────────────
 // isTestPath above is a FILE question and cannot see the four mainstream conventions that put test code
 // inside a production source file (Rust's own `#[cfg(test)] mod tests`, Python `class Test*` / module-level
@@ -112,10 +129,6 @@ inline bool isTestPath( std::string_view p ) noexcept
 // re-deriving either half — the second copy is what would drift, exactly as hasDirSegment was factored out
 // above for the same reason.
 //
-// Deliberately NOT rerouted through this predicate: the FILE-keyed verbs (--affected / --situ /
-// --test-gate / --pr-context / --exercises) which answer "which test FILES should I run?". An in-file test
-// gives an agent no separate file to run, and naming a `src/` file as a test to run would be a wrong
-// answer, not a better one. Those keep asking isTestPath, and test/testscopecheck.sh arm 10b pins it.
 inline bool isTestSymbol( const IngestResult& ing, std::size_t symbolIndex ) noexcept
 {
     if( symbolIndex >= ing.symbols.size() )
@@ -127,7 +140,12 @@ inline bool isTestSymbol( const IngestResult& ing, std::size_t symbolIndex ) noe
     {
         return true;
     }
-    return s.fileId < ing.files.size() && isTestPath( rootRelPath( ing, s.fileId ) );
+    return isTestCodeFile( ing, s.fileId );
+}
+
+inline bool seedsTestCoverage( const IngestResult& ing, std::size_t n ) noexcept
+{
+    return isTestSymbol( ing, n ) && rustTestFileRole( ing, ing.symbols[n].fileId ) != RustTestFileRole::Input;
 }
 
 // ── §P11 first-screen ORDERING tiers ─────────────────────────────────────────────────────────────────────
@@ -1198,7 +1216,7 @@ inline void applyIgnoreTests( IngestResult& ing )
     std::vector<char> drop( ing.files.size(), 0 );
     for( std::size_t f = 0; f < ing.files.size(); ++f )
     {
-        drop[f] = isTestPath( rootRelPath( ing, std::uint32_t( f ) ) ) ? 1 : 0;   // #228: a tests/ ABOVE the root is not this tree's
+        drop[f] = isTestCodeFile( ing, std::uint32_t( f ) );
     }
 
     std::vector<NodeId> remap( ing.symbols.size(), kNoNode );

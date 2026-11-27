@@ -401,7 +401,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kSituBlastFilesShown` = `8`
 
-`src/situ.h` — discloses: `partners_capped`, `tests_capped`, `untested_capped` — probe value `64` — **1 verb(s) respond**
+`src/situ.h` — discloses: `partners_capped`, `tests_capped`, `unresolved_test_reach_capped`, `untested_capped` — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

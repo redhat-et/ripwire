@@ -1,0 +1,7 @@
+### Fixed — Report Rust fixture readers and unresolved test reach (#810)
+
+`--test-gate` lists inline Rust tests and helpers in modules mounted only for testing. Changed fixture data names its runnable test file with `fixture_reader="1"` (JSON: `true`). This recognizes only `fs::read_dir` or `std::fs::read_dir` applied to `Path::new(env!("CARGO_MANIFEST_DIR")).join(...)` with literal segments, and only indexed direct children of directories named `testdata`. A production reader prevents the directory from being classified as test data. Module ownership follows the existing Rust import resolver.
+
+Calls through declined Rust trait dispatch are not proven coverage. The gate reports the resulting obligations separately as `<ur>` rows (JSON: `unresolved_test_reach_symbols`), counts them in `unresolved_test_reach`, and exits 4. On a cut, `shown_unresolved_test_reach` and `unresolved_test_reach_capped` describe the window. One `--limit`/`--offset` window spans the `<u>` rows and then the `<ur>` rows; `total`, `has_more` and `next_offset` describe that window. `--plan-lanes` discloses unresolved reach and treats it as a coverage gap.
+
+The shared Rust test partition also changes test filtering, ranking, coverage and quality reports: fixtures do not seed coverage, and `--affected` and `--situ` list runnable test-only modules rather than fixture inputs. Existing indexes and warm snapshots rebuild once after upgrading.

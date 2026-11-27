@@ -353,7 +353,7 @@ struct Config
     bool             handoff     = false;                  // --handoff: the continuation packet for the NEXT session — <verified> disk truth (branch/sha,
                                                             // changed files+symbols, blast radius, tests-to-run) + <heuristic> labeled suggestions
                                                             // (co-change partners, committed notes, plan/design doc pointers). Composes with --token-budget.
-    bool             testGate    = false;                  // --test-gate[=FILES]: TDAD-parity regression contract — tests-to-run + untested blast radius (exit 4 if obligations)
+    bool             testGate    = false;                  // --test-gate[=FILES]: tests to run and reach without proven coverage (exit 4 for obligations)
     std::string_view testGateFiles;                        // --test-gate=FILES: explicit changed files (else the current git diff)
     bool             scanSkills  = false;                  // --scan-skills[=DIR]: scan skill files for injection/exfiltration patterns
     std::string_view scanSkillsDir;                        // --scan-skills=DIR: explicit dir (else repo-local + Claude + Codex homes)
@@ -1419,9 +1419,8 @@ inline constexpr char kHelpHead[] =
         "                               plan/design doc pointers via a branch+commit-subject query). Empty diff is fine — the packet still\n"
         "                               carries branch/sha + heuristics. Composes with --token-budget=N (drops heuristic rows tail-first,\n"
         "                               disclosed as withheld= in the header; verified rows are never dropped). Single-root only.\n"
-        "    --test-gate[=F1,F2]        before a PR: name the tests to run and the untested blast radius; exit 4 if either is non-empty\n"
-        "                               agent self-check before a PR (pair with --quality-delta): names the tests to run + the UNTESTED blast radius;\n"
-        "                               exit 4 if either obligation is non-empty (run the tests, then rely on green). (default = git diff)\n"
+        "    --test-gate[=F1,F2]        before a PR: tests to run and the blast radius without proven test coverage (default = git diff)\n"
+        "                               Exit 4 for tests to run, untested code, or unresolved Rust trait-dispatch reach.\n"
         "                               A FILES item that resolves to no indexed file is named (unused=N, <unused item= reason= near=>) and\n"
         "                               the gate answers for the rest, but NEVER exits 0 for it: 4 when an obligation gates, else 6 (partial,\n"
         "                               as --quality-delta); only a list with NO usable item refuses (exit 1)\n"
@@ -3077,7 +3076,7 @@ inline constexpr char kHelpTail[] =
         "                               shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities\n"
         "                               shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and\n"
         "                               --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window\n"
-        "                               takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every\n"
+        "                               takes the PRIMARY listing (--test-gate's <u> then <ur> rows as one list; its <t> rows repeat on every\n"
         "                               page, complete). --edit-check is the same shape for a different reason: its\n"
         "                               <c> rows split into the ANSWER (callers flagged incompatible=\"1\", with their\n"
         "                               complete sites_l=) and the CONTEXT (unflagged callers). Only the context pages\n"

@@ -483,7 +483,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
         r.name      = name;
         refs.push_back( std::move( r ) );
     }
-    includes.push_back( { fileId, spec.isAngle, spec.lazyInClosure && reach.insideFn, false, ts_node_start_byte( directive ), false, spec.text } );
+    includes.push_back( { fileId, spec.isAngle, spec.lazyInClosure && reach.insideFn, false, ts_node_start_byte( directive ), false, false, spec.text } );
 }
 
 }   // namespace

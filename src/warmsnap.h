@@ -79,7 +79,8 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 11;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 27;                        // bump on ANY layout change in the three sections
+                                                                    // 27: Rust Test/Input roles and fixture reader pairs in MODEL (above the M2 slot table 11-26)
                                                                     // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
                                                                     // 8-10: reserved (M2 slot table 11-26: #752, #754, M2 C1 stages)
                                                                     // 11: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig

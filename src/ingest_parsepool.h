@@ -133,6 +133,7 @@ struct RawFacts
     std::vector<RouteDef>     routeDefs;   // B6.3: HTTP server-side route registrations
     std::vector<RawRouteUse>  routeUses;   // B6.3: HTTP client-side calls (pre fromSymbol attribution)
     std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
+    std::vector<RawRustFixtureRead> rustFixtureReads;
     std::vector<ConstructHit> constructs;  // QD-CONSTRUCTS-AT-INGEST: --quality-delta construct hits (collectConstructHits)
 };
 
@@ -225,6 +226,7 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
                               + willGrow( out.routeDefs, hit.routeDefs.size() )
                               + willGrow( out.routeUses, hit.routeUses.size() )
                               + willGrow( out.constOpens, hit.constOpens.size() )
+                              + willGrow( out.rustFixtureReads, hit.rustFixtureReads.size() )
                               + willGrow( out.constructs, hit.constructs.size() );
 
     scan.health[ fileId ]          = hit.health;   // §L1
@@ -238,6 +240,7 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
     appendRelabelled( hit.routeUses, fileId, out.routeUses );     // B6.3
     appendRelabelled( hit.constOpens, fileId, out.constOpens );   // parser version 82
     appendRelabelled( hit.constructs, fileId, out.constructs );   // QD-CONSTRUCTS-AT-INGEST
+    appendRelabelled( hit.rustFixtureReads, fileId, out.rustFixtureReads );
     return growths;
 }
 
@@ -251,7 +254,7 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
 struct WarmHitTotals
 {
     std::size_t defs = 0, refs = 0, incs = 0, binds = 0;
-    std::size_t ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0, constructs = 0;
+    std::size_t ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0, constructs = 0, rustFixtureReads = 0;
 };
 
 // One pass over the fileId space: fill `candidates` (a record head present in the blob, hash not yet compared) and `hits`
@@ -283,6 +286,7 @@ inline WarmHitTotals markCacheHits( const CacheRecords& cache, const IngestFileS
         tot.routeDefs   += head->counts.routeDefs;
         tot.routeUses   += head->counts.routeUses;
         tot.constOpens  += head->counts.constOpens;
+        tot.rustFixtureReads += head->counts.rustFixtureReads;
         tot.constructs  += head->counts.constructs;
     }
     return tot;
@@ -309,6 +313,7 @@ inline void reserveWarmFamilies( std::vector<RawFacts>& tFacts, const WarmHitTot
         tf.routeDefs.reserve( share( tot.routeDefs ) );
         tf.routeUses.reserve( share( tot.routeUses ) );
         tf.constOpens.reserve( share( tot.constOpens ) );
+        tf.rustFixtureReads.reserve( share( tot.rustFixtureReads ) );
         tf.constructs.reserve( share( tot.constructs ) );
     }
 }
@@ -598,7 +603,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
                 {
                     captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
-                                      TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
+                                      TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ), &out.rustFixtureReads );
                     rereadMacroArguments( macroArgWork, cursor, { *pending.le, pending.fileId, pending.bytes, root, std::span<const RawDef>( out.defs ).subspan( firstNewDefIndex ) },
                                           out.refs, tagsShortfall );
                 } );
@@ -864,7 +869,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 underExtractScope<ExtractPhase::TagsFacts>( le->lang, [ & ]
                 {
                     captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall,
-                                      TagsCapture::Full, cjsExportStem( le->lang, path ) );
+                                      TagsCapture::Full, cjsExportStem( le->lang, path ), &out.rustFixtureReads );
                     rereadMacroArguments( macroArgWork, cursor, { *le, static_cast<std::uint32_t>( fileId ), bytes, root, std::span<const RawDef>( out.defs ).subspan( firstNewDefIndex ) },
                                           out.refs, shortfall );
                 } );
@@ -964,9 +969,11 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     mergeFamily( tFacts, &RawFacts::routeUses, raw.routeUses );
     mergeFamily( tFacts, &RawFacts::constOpens, raw.constOpens );
     mergeFamily( tFacts, &RawFacts::constructs, raw.constructs );
+    mergeFamily( tFacts, &RawFacts::rustFixtureReads, raw.rustFixtureReads );
     orderByFile( raw.incs );
     orderByFile( raw.constOpens );
     orderByFile( raw.constructs );
+    orderByFile( raw.rustFixtureReads );
     return raw;
 }
 
@@ -1268,7 +1275,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown } );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown }, raw.rustFixtureReads );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
         }
         if( parseRich && !captureValueUses )

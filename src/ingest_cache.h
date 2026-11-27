@@ -171,7 +171,7 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signal (the M5's ingest slot) — queries/python/tags.scm records the `assert`
+constexpr std::uint32_t kCacheVersion = 58;           // 58: Rust test mount bit + fixture-read family. 57: lane asserted-signal (the M5's ingest slot) — queries/python/tags.scm records the `assert`
                                                       //    STATEMENT as a call reference named `assert`, so an older blob of a .py file lacks those references.
                                                       //    No record shape changes; the slot is taken because a lane holds no kParserVer number (the train may
                                                       //    fold it into one). Above main's 56 (lane c1-one-parse), whose one-blob record shape this merged tree also carries.
@@ -2545,7 +2545,7 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; bool constructsAbsent = false; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; std::vector<RawRustFixtureRead> rustFixtureReads; bool constructsAbsent = false; };
 
 // Empty every family of a decode scratch, keeping each array's capacity for the next record (WARM-DIRECT reuse).
 inline void clearFileFactsKeepCapacity( FileFacts& f ) noexcept
@@ -2559,6 +2559,7 @@ inline void clearFileFactsKeepCapacity( FileFacts& f ) noexcept
     f.routeUses.clear();
     f.constOpens.clear();
     f.constructs.clear();
+    f.rustFixtureReads.clear();
     f.constructsAbsent = false;
 }
 
@@ -2569,7 +2570,8 @@ struct FileFactCounts
 {
     std::uint32_t defs = 0, refs = 0, incs = 0, binds = 0, ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0;
     std::uint32_t constructs = 0;   // v51 (QD-CONSTRUCTS-AT-INGEST): the ninth family, after constOpens
-    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens | constructs ) == 0; }
+    std::uint32_t rustFixtureReads = 0;   // v58
+    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens | constructs | rustFixtureReads ) == 0; }
 };
 
 // A record's head: everything a warm run decides on before the body is decoded — the stat gate, the hit test, the
@@ -2973,6 +2975,15 @@ inline void   writeRouteDef( ByteW& w, const RouteDef& d ) { w.u32( d.line ); w.
 inline RouteDef readRouteDef( ByteR& r ) { RouteDef d; d.line = r.u32(); d.method = r.enumU8<HttpMethod>( kHttpMethodCount ); d.path = r.str(); d.handlerName = r.str(); return d; }
 inline void   writeRouteUse( ByteW& w, const RawRouteUse& u ) { w.u32( u.startByte ); w.u32( u.line ); w.u8( std::uint8_t( u.method ) ); w.str( u.path ); }
 inline RawRouteUse readRouteUse( ByteR& r ) { RawRouteUse u; u.startByte = r.u32(); u.line = r.u32(); u.method = r.enumU8<HttpMethod>( kHttpMethodCount ); u.path = r.str(); return u; }
+inline void writeRustFixtureReads( ByteW& w, const std::vector<RawRustFixtureRead>& reads, const rw::SmallVec<std::uint32_t, 2>& rows )
+{
+    w.u32( std::uint32_t( rows.size() ) );
+    for( const std::uint32_t i : rows )
+    {
+        w.u8( reads[i].testScope ? 1 : 0 );
+        w.str( reads[i].path );
+    }
+}
 
 // Minimum serialized bytes of one row per family, beside kMinRefRecordBytes and minDefRecordBytes: an honest count is
 // bounded by the bytes left / its row minimum (readFileRecord's countFits, the warm planner's headCountsFit).
@@ -2983,6 +2994,7 @@ inline constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (li
 inline constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
 inline constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
 inline constexpr std::size_t kConstructRecordBytes    = 9;   // v51: 2×u32 (startByte,line) + 1×u8 (tag) — fixed size
+inline constexpr std::size_t kMinRustFixtureReadBytes = 5;   // 1×u8 (testScope) + 1×str(len u32, empty)
 // v51: the HEAD's construct count when the record's pool ran no construct pass (ingest.h WantConstructHits): the hits are
 // unknown, not zero. The body then holds a zero count; a --quality-delta ingest treats the record as a miss.
 inline constexpr std::uint32_t kConstructsAbsent      = 0xFFFFFFFFu;
@@ -3012,6 +3024,7 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     c.routeUses  = r.u32();
     c.constOpens = r.u32();
     c.constructs = r.u32();                  // v51; kConstructsAbsent = never computed for this record
+    c.rustFixtureReads = r.u32();
     head.constructsAbsent = c.constructs == kConstructsAbsent;
     if( head.constructsAbsent )
     {
@@ -3029,7 +3042,8 @@ inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength ) no
                              + std::uint64_t( c.incs ) * kMinIncRecordBytes + std::uint64_t( c.binds ) * kMinBindRecordBytes
                              + std::uint64_t( c.ffis ) * kMinFfiRecordBytes + std::uint64_t( c.routeDefs ) * kMinRouteDefRecordBytes
                              + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes
-                             + std::uint64_t( c.constructs ) * kConstructRecordBytes;
+                             + std::uint64_t( c.constructs ) * kConstructRecordBytes
+                             + std::uint64_t( c.rustFixtureReads ) * kMinRustFixtureReadBytes;
     return need <= recLength;
 }
 
@@ -3140,8 +3154,8 @@ inline bool readFileRecord( ByteR& r, std::vector<std::uint64_t>& fileDict,
         const bool          isLazy     = r.flagU8();   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
         const bool          isSymbolic = r.flagU8();   // parser version 82: a Ruby constant target, resolved by index, never by path
         const std::uint32_t byte       = r.u32();       // parser version 82: the directive's start byte (lexical nesting recovery)
-        const bool          isValueUse = r.flagU8();   // parser version 93 / format 21: argument or rescue origin — not narrow evidence
-        ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, isValueUse, r.str() } );
+        const std::uint8_t flags = r.enumU8<std::uint8_t>( 4 );   // bit 0: value use; bit 1: Rust test mount
+        ffOut.incs.push_back( Include{ 0, isAngle, isLazy, isSymbolic, byte, ( flags & 1 ) != 0, ( flags & 2 ) != 0, r.str() } );
     }
     const std::uint32_t nb = r.u32();
     if( !countFits( nb, kMinBindRecordBytes, head.counts.binds ) )
@@ -3211,6 +3225,16 @@ inline bool readFileRecord( ByteR& r, std::vector<std::uint64_t>& fileDict,
         ch.line      = r.u32();
         ch.tag       = r.enumU8<std::uint8_t>( kConstructTagCount );   // a tag past the table is a corrupt record
         ffOut.constructs.push_back( ch );
+    }
+    const std::uint32_t nReads = r.u32();
+    if( !countFits( nReads, kMinRustFixtureReadBytes, head.counts.rustFixtureReads ) )
+    {
+        return false;
+    }
+    ffOut.rustFixtureReads.reserve( nReads );
+    for( std::uint32_t j = 0; j < nReads && r.ok; ++j )
+    {
+        ffOut.rustFixtureReads.push_back( { 0, r.flagU8(), r.str() } );
     }
     return r.ok;
 }
@@ -3425,10 +3449,10 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     out.entryOf.assign( crawledFiles.size(), CacheRecords::kNoCacheEntry );
     out.head.resize( crawledFiles.size() );
 
-    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 15 u32 (6 health fields and the 9
-    // family counts readRecordHead reads, v51's construct count the ninth). One prefix read covers every key up to 416
+    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 16 u32 (6 health fields and the 10
+    // family counts readRecordHead reads, v51's construct count the ninth). One prefix read covers every key up to 412
     // bytes; a longer key takes a second read of exactly what the head needs (test/statgatecheck.sh (f)).
-    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 15 * 4;
+    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 16 * 4;
     constexpr std::size_t kHeadProbeBytes = 512;
     std::string headBuf;
     {
@@ -3520,7 +3544,7 @@ struct CacheFileIndexes
 {
     std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
     std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
-    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex, constructIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex, constructIndex, rustFixtureReadIndex;
 };
 
 inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
@@ -3528,7 +3552,8 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
                                                const std::vector<Include>& incs, const std::vector<RawBind>& binds,
                                                const std::vector<BindingAlias>& ffis,
                                                const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,
-                                               const std::vector<ConstOpen>& constOpens, const std::vector<ConstructHit>& constructs )
+                                               const std::vector<ConstOpen>& constOpens, const std::vector<ConstructHit>& constructs,
+                                               const std::vector<RawRustFixtureRead>& rustFixtureReads )
 {
     CacheFileIndexes ix;
     ix.defIndex.resize( fileCount );
@@ -3540,6 +3565,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     ix.routeUseIndex.resize( fileCount );
     ix.constOpenIndex.resize( fileCount );
     ix.constructIndex.resize( fileCount );
+    ix.rustFixtureReadIndex.resize( fileCount );
 
     // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
     // the seven hand-written loops this replaces did.
@@ -3562,6 +3588,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     group( routeUses, ix.routeUseIndex );   // B6.3
     group( constOpens, ix.constOpenIndex ); // parser version 82
     group( constructs, ix.constructIndex ); // v51
+    group( rustFixtureReads, ix.rustFixtureReadIndex );
     return ix;
 }
 
@@ -3728,7 +3755,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
                        const std::vector<ConstOpen>& constOpens,                                             // parser version 82
-                       const ConstructHitsToSave& constructHits )                                            // v51
+                       const ConstructHitsToSave& constructHits,                                             // v51
+                       const std::vector<RawRustFixtureRead>& rustFixtureReads )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
 
@@ -3742,7 +3770,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t      F  = files.size();
-    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens, constructHits.hits );
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens, constructHits.hits, rustFixtureReads );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -3898,6 +3926,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             }
             const bool constructsKnownHere = f >= constructHits.known.size() || constructHits.known[f] != 0;
             w.u32( constructsKnownHere ? std::uint32_t( ix.constructIndex[f].size() ) : kConstructsAbsent );   // v51
+            w.u32( std::uint32_t( ix.rustFixtureReadIndex[f].size() ) );
             {
                 // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
                 // file's defs (nested spans re-tokenize the same text), so hoisting each distinct hash into
@@ -3985,7 +4014,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u8( incs[i].isLazy     ? 1 : 0 );
                 w.u8( incs[i].isSymbolic ? 1 : 0 );
                 w.u32( incs[i].byte );
-                w.u8( incs[i].isValueUse ? 1 : 0 );
+                w.u8( std::uint8_t( incs[i].isValueUse | incs[i].rustTestMount << 1 ) );   // bit 0: value use; bit 1: Rust test mount
                 w.str( incs[i].target );
             }
             w.u32( std::uint32_t( ix.bindIndex[f].size() ) );
@@ -4023,6 +4052,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( constructHits.hits[i].line );
                 w.u8( constructHits.hits[i].tag );
             }
+            writeRustFixtureReads( w, rustFixtureReads, ix.rustFixtureReadIndex[f] );
             table.push_back( CacheEntry{ row.pathHash, recOffset,
                                          f < fileHash.size() ? fileHash[f] : 0,
                                          std::uint32_t( w.b.size() - recStart ),

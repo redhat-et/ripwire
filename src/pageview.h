@@ -427,17 +427,18 @@ inline const char* pageDisclosureChained( char* buf, std::size_t bufCap, std::si
 // numbers to learn what was cut). A caller must never pass a name the element already uses for something
 // else: `anchors=` on <doc> counts EVERY anchor in the doc, not the failed ones these rows list, and reusing
 // it would rebuild the dark=/dark_gates= count-vs-bool collision §P8 renamed its way out of.
-inline std::string secondaryCutAttrs( const char* noun, std::size_t shown, std::size_t total, const char* totalAttr = nullptr )
+inline std::string secondaryCutAttrs( const char* noun, std::size_t shown, std::size_t total, const char* totalAttr = nullptr,
+                                     const PageSyntax& syn = kXmlPageSyntax )
 {
     if( shown >= total )
     {
         return {};   // nothing was cut: the element is byte-identical to what it was
     }
-    std::string a = " shown_" + std::string( noun ) + "=\"" + std::to_string( shown )
-                  + "\" " + std::string( noun ) + "_capped=\"1\"";
+    auto a = syn.json ? std::format( ",\"shown_{}\":{},\"{}_capped\":true", noun, shown, noun )
+                      : std::format( " shown_{}=\"{}\" {}_capped=\"1\"", noun, shown, noun );
     if( totalAttr != nullptr )
     {
-        a += " " + std::string( totalAttr ) + "=\"" + std::to_string( total ) + "\"";
+        a += syn.json ? std::format( ",\"{}\":{}", totalAttr, total ) : std::format( " {}=\"{}\"", totalAttr, total );
     }
     return a;
 }

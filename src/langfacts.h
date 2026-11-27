@@ -499,6 +499,9 @@ struct LangFacts
     /// without any call in the tree (issue #493). quality.h's registersItself reads this column; nothing else does.
     bool attributeRegistersTests = false;
 
+    /// Rust: tags capture can record manifest-relative fixture directory reads.
+    bool manifestRelativeFixtureReads = false;
+
     /// Rust: a method named `drop` is `Drop::drop`, which the compiler runs when a value leaves scope, so no call names it
     /// (issue #494). rustDropImplMethodIds (quality.h) reads this column, and only for a method inside a Drop impl block.
     bool dropRunsAtScopeExit = false;
@@ -604,7 +607,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go, .assertionCalls = kGoAssertionCalls },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust, .assertionCalls = kRustAssertionCalls },
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .manifestRelativeFixtureReads = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust, .assertionCalls = kRustAssertionCalls },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,

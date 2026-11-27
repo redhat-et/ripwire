@@ -377,7 +377,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     // --test-gate[=FILES] (A4-R2): TDAD-parity regression contract — the --situ/--affected machinery packaged as
     // one gate. Report (tests to run + untested blast radius) is ALWAYS printed; the EXIT CODE is the gate, like
     // --quality-delta. Default change set = git diff. exit 4 (not 2/3 — quality-delta=2, token-budget=3) when
-    // there are obligations (impacted tests to run OR a non-empty untested blast radius); exit 0 when neither.
+    // there are obligations (tests to run, untested symbols or unresolved test reach); exit 0 without obligations or unused items.
     if( cfg.testGate )
     {
         std::vector<char>           changed;

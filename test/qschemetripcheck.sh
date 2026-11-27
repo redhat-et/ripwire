@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-28, #810 rebased onto main ownnpqsy (#812 train m5-1126-4, which took kCacheVersion 57): RE-PINNED with
+#   UPDATE_GOLDEN=1 for kCacheVersion 57 -> 58 and its mirror (Rust test mount flag and fixture-read records); kParserVer
+#   stays 350, since 58 already rejects every older blob. kQSnapCacheScheme stays unchanged: the snapshot key carries the
+#   cache identity. Hash 9027d36de8…377afe3b.
 # 2026-11-27, train m5-1126-4 merged with origin/main e00a29bfc (#819 ONE-PARSE merged): RE-DERIVED with UPDATE_GOLDEN=1 on
 #   the MERGED sources rather than taken from either side, because both sides had already re-pinned (the train
 #   406ec22c68...f091e15a6, main 232a5bc864...b818ce3b) and a picked side can describe neither tree. The derivation came back

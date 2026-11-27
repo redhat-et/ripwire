@@ -216,7 +216,7 @@ struct LaneFileRow
 struct ExecutionSignals
 {
     std::size_t claims = 0, files = 0, maxCcx = 0, sumCcx = 0, ambiguousCalls = 0;
-    std::size_t blastReaches = 0, contractTouches = 0, conflicts = 0, untested = 0, testsTotal = 0;
+    std::size_t blastReaches = 0, contractTouches = 0, conflicts = 0, untested = 0, unresolvedTestReach = 0, testsTotal = 0;
     std::uint32_t moduleSpan = 0;
     bool blastCapped = false, testsCapped = false;
 };
@@ -250,6 +250,7 @@ struct Lane
     std::size_t              testTotal      = 0;
     bool                     testsCapped    = false;
     std::size_t              untested       = 0;
+    std::size_t              unresolvedTestReach = 0;
     std::vector<std::string> notes;
     std::uint32_t            moduleSpan     = 0;    // distinct call-graph modules (or files, for the edgeless)
     ExecutionRecommendation  execution;             // advisory resource choice; never a semantic task verdict
@@ -275,6 +276,7 @@ inline ExecutionSignals executionSignals( const Lane& lane, const std::vector<Pa
     out.moduleSpan    = lane.moduleSpan;
     out.blastReaches  = lane.blastReaches;
     out.untested      = lane.untested;
+    out.unresolvedTestReach = lane.unresolvedTestReach;
     out.testsTotal    = lane.testTotal;
     out.blastCapped   = lane.blastCapped;
     out.testsCapped   = lane.testsCapped;
@@ -305,7 +307,7 @@ static inline void appendExecutionCaveats( ExecutionRecommendation& out, const E
     {
         out.caveats.emplace_back( "untested-is-upper-bound" );
     }
-    if( s.testsTotal == 0 )
+    if( s.testsTotal == 0 || s.unresolvedTestReach > 0 )
     {
         out.caveats.emplace_back( "coverage-partial" );
     }
@@ -328,11 +330,12 @@ inline ExecutionRecommendation recommendExecution( const ExecutionSignals& s )
         return std::count( conditions.begin(), conditions.end(), true );
     };
 
+    const bool coverageGap = s.untested > 0 || s.unresolvedTestReach > 0;
     if( s.claims == 0 )
     {
         out.rule = "insufficient-claims";
     }
-    else if( satisfied( { s.contractTouches > 0 && satisfied( { s.moduleSpan >= 2, s.blastReaches >= 20, s.untested > 0 } ) > 0,
+    else if( satisfied( { s.contractTouches > 0 && satisfied( { s.moduleSpan >= 2, s.blastReaches >= 20, coverageGap } ) > 0,
                            s.blastCapped, s.testsCapped, s.maxCcx >= 20, s.blastReaches >= 100, s.moduleSpan >= 5 } ) > 0 )
     {
         out.model = "gpt-5.6-sol";
@@ -350,11 +353,11 @@ inline ExecutionRecommendation recommendExecution( const ExecutionSignals& s )
                           s.ambiguousCalls == 0, s.contractTouches == 0, s.conflicts == 0, !s.blastCapped, !s.testsCapped } ) == 10 )
     {
         out.model = "gpt-5.6-luna";
-        out.reasoning = s.testsTotal > 0 && s.untested == 0 ? "low" : "medium";
+        out.reasoning = s.testsTotal > 0 && !coverageGap ? "low" : "medium";
         out.rule = "bounded-low-risk";
     }
     else if( satisfied( { s.moduleSpan >= 2, s.maxCcx >= 10, s.sumCcx >= 40, s.blastReaches >= 20,
-                          s.ambiguousCalls > 0, s.untested > 0, s.conflicts > 0 } ) > 0 )
+                          s.ambiguousCalls > 0, coverageGap, s.conflicts > 0 } ) > 0 )
     {
         out.reasoning = "high";
         out.rule = "moderate-cross-module";
@@ -573,7 +576,7 @@ inline std::vector<std::uint32_t> buildHotspotRanks( const IngestResult& ing, co
 }
 
 // ── the blast radius (READ territory, never claimed) + the test obligations ───────────────────────────────
-inline void buildLaneReach( const IngestResult& ing, const Graph& g, const std::vector<char>& testReach, Lane& lane )
+inline void buildLaneReach( const IngestResult& ing, const Graph& g, const TestGateReach& testReach, Lane& lane )
 {
     const std::size_t symbolCount = ing.symbols.size();
     std::vector<char> isClaim( symbolCount, 0 );
@@ -605,9 +608,10 @@ inline void buildLaneReach( const IngestResult& ing, const Graph& g, const std::
         lane.blastFiles.push_back( p );
     }
 
-    const TestGateResult gate = computeTestGateForSymbols( ing, g, lane.claimNodes, &testReach );
+    const TestGateResult gate = computeTestGateForSymbols( ing, g, lane.claimNodes, testReach );
     lane.testTotal            = gate.tests.size();
     lane.untested             = gate.untested.size();
+    lane.unresolvedTestReach  = gate.unresolvedTestReach.size();
     for( std::uint32_t f : gate.tests )
     {
         if( lane.tests.size() >= kMaxTestRows ) { lane.testsCapped = true; break; }
@@ -897,14 +901,13 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
 
     // §7.4 — both halves, always.
     addWarning( result.warnings, "tests-are-symbol-granular", "warn",
-                "tests_to_run and untested are computed from each lane's claimed SYMBOLS (not its whole claimed files), but a "
+                "tests_to_run, untested and unresolved_test_reach are computed from each lane's claimed SYMBOLS, but a "
                 "test is still selected at FILE granularity: the row names a test FILE, never a test case, so running it runs "
-                "more than the lane needs. untested is an UPPER BOUND on the lane's real gap." );
+                "more than the lane needs. untested is an upper-bound estimate; unresolved_test_reach is possible Rust test reach, not coverage." );
     addWarning( result.warnings, "test-surface-is-partial", "warn",
-                "Tests are found by walking the call graph forward from symbols in test-path files, so a suite of shell scripts "
-                "reaches nothing in the source tree this way and does not appear; and isTestPath treats every path under test/ "
-                "as a test, so a fixture can be named as a test to run. Neither an empty nor a populated list is a substitute "
-                "for running the suite." );
+                "Tests are found from test-path files, Rust test modules and inline Rust tests; this call walk cannot find "
+                "shell suites. Path conventions may still mistake a fixture for a runnable test. Neither an empty nor a "
+                "populated list is a substitute for running the suite." );
 
     // §7.6 — the plan is advisory and it is stamped.
     addWarning( result.warnings, "claims-are-advisory", "info",
@@ -1161,7 +1164,7 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
 
     // the per-lane lenses: files + hotspot rank, blast radius, test obligations, notes, module span
     const std::vector<std::uint32_t> hotspotRank = buildHotspotRanks( ing, in.churn );
-    const std::vector<char>          testReach   = testSeedForwardReach( ing, g );   // §3 perf hoist: ONE forward walk for N lanes
+    const TestGateReach               testReach   = buildTestGateReach( ing, g );   // one pair of walks for all lanes
     const Communities                cm          = communities( g );
     for( Lane& lane : result.lanes )
     {
@@ -1256,11 +1259,12 @@ inline void writeExecution( std::FILE* out, const ExecutionRecommendation& execu
     rw::emitTo( out, "{{\"policy\":\"{}\",\"model\":\"{}\",\"reasoning\":\"{}\",\"rule\":\"{}\",\"basis\":\"{}\","
                        "\"signals\":{{\"claims\":{},\"files\":{},\"module_span\":{},\"max_ccx\":{},\"sum_ccx\":{},"
                        "\"ambiguous_calls\":{},\"blast_reaches\":{},\"contract_touches\":{},\"conflicts\":{},"
-                       "\"untested\":{},\"tests_total\":{},\"blast_capped\":{},\"tests_capped\":{}}},\"caveats\":",
+                       "\"untested\":{},\"tests_total\":{},\"blast_capped\":{},\"tests_capped\":{}{}}},\"caveats\":",
                   execution.policy, execution.model, execution.reasoning, execution.rule, execution.basis,
                   s.claims, s.files, s.moduleSpan, s.maxCcx, s.sumCcx, s.ambiguousCalls, s.blastReaches,
                   s.contractTouches, s.conflicts, s.untested, s.testsTotal,
-                  s.blastCapped ? "true" : "false", s.testsCapped ? "true" : "false" );
+                  s.blastCapped ? "true" : "false", s.testsCapped ? "true" : "false",
+                  s.unresolvedTestReach ? std::format( ",\"unresolved_test_reach\":{}", s.unresolvedTestReach ) : std::string{} );
     writePathArray( out, execution.caveats );
     rw::emitRaw( out, "}" );
 }
@@ -1303,8 +1307,10 @@ inline void writeLane( std::FILE* out, const Lane& lane )
     rw::emitRaw( out, "},\"tests_to_run\":" );
     writePathArray( out, lane.tests );
     rw::emitTo( out, ",\"tests_total\":{},\"tests_capped\":{},\"tests_granularity\":\"claimed-symbols\","
-                       "\"untested\":{},\"module_span\":{},\"notes\":",
-                  lane.testTotal, lane.testsCapped ? "true" : "false", lane.untested, lane.moduleSpan );
+                       "\"untested\":{}{},\"module_span\":{},\"notes\":",
+                  lane.testTotal, lane.testsCapped ? "true" : "false", lane.untested,
+                  lane.unresolvedTestReach ? std::format( ",\"unresolved_test_reach\":{}", lane.unresolvedTestReach ) : std::string{},
+                  lane.moduleSpan );
     writePathArray( out, lane.notes );
     rw::emitRaw( out, ",\"execution\":" );
     writeExecution( out, lane.execution );
