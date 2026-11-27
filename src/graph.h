@@ -11164,6 +11164,166 @@ inline HashMap<std::string, FlatRecvType> buildVarTypeBindingTable( const Ingest
     return varType;
 }
 
+// The per-edge accumulator the resolve loop folds each call site into, and buildGraph/4 flattens. At file scope (it was
+// local to buildGraph) so the extracted flatten phase can name it; `marks` carries resolve.h EdgeMark (EDGE-FLAGS).
+// confSum is a FLOAT SUM IN SITE ORDER: non-associative, so any future partition of the resolve loop must keep all of
+// one edge's sites in one partition, or the low bits move and the ranking with them (see src/pagerank.cpp's note).
+struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };
+
+// buildGraph/4. Flatten the edge accumulator, cap and sort by (from, to) — deterministic regardless of map order —
+// then build the out-edge CSR, the weighted out-degree, the optional per-edge provenance / name-only / anchor-miss
+// columns, and the in-edge CSR. `acc` is CONSUMED: it is released as soon as it has been flattened (G1c), so the sort
+// and the CSR arrays stack on the edge list alone. The two provenance facts the caller owns are passed in rather than
+// re-derived — whether a SCIP overlay was supplied, and whether any site committed a one-implementor dispatch edge.
+// This is the phase test/verify_csr.cpp reaches, which is the one indexed test in buildGraph's production radius.
+inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std::uint64_t, EdgeAcc>& acc,
+                                 const ScipOverlay* scip, bool anyImplSite )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
+    const std::size_t N = ing.symbols.size();
+    // flatten + cap + sort by (from, to) — deterministic regardless of map order
+    struct E { NodeId from, to; float w; std::uint8_t marks; };   // marks: the accumulator's EdgeMark bits, carried through the sort
+    std::vector<E> edges;
+    edges.reserve( acc.size() );
+    for( const auto& [ k, e ] : acc )
+    {
+        float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
+        if( w > 8.f )
+        {
+            w = 8.f;
+        }
+        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
+    }
+    releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
+    std::vector<E> edgeScratch;
+    sortutil::radixSortByFromTo( edges, edgeScratch );
+
+    // out-edges (by source) + weighted out-degree
+    g.outOff.assign( N + 1, 0 );
+    for( const E& e : edges )
+    {
+        ++g.outOff[e.from + 1];
+    }
+    for( std::size_t i = 0; i < N; ++i )
+    {
+        g.outOff[i + 1] += g.outOff[i];
+    }
+    g.outTargets.resize( edges.size() );
+    g.outVals.resize( edges.size() );
+    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR an ES
+    // named-import binding pinned one OR the resolver had to split at least one call — a corpus that resolves
+    // cleanly keeps it EMPTY so serialize emits no prov= at all (zero token cost, byte-identical to before;
+    // test/golden.xml is the standing proof).
+    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
+    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split";
+    //   4 = an ES named-import binding named the module and the export → prov="import".
+    //   5 = a receiver's QUALIFIED written type chose this edge by its last name alone → prov="final-segment".
+    //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
+    // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
+    std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
+    for( const E& e : edges )
+    {
+        anyMarks |= e.marks;
+    }
+    if( memstats::enabled() )   // M0 + EDGE-FLAGS: how many flattened edges carry each mark (test/edgemarkcheck.sh counts them)
+    {
+        std::array<std::size_t, 8> perBit{};
+        std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
+        for( const E& e : edges )
+        {
+            for( std::size_t b = 0; b < perBit.size(); ++b )
+            {
+                perBit[ b ] += ( e.marks >> b ) & 1u;
+            }
+            nameOnlyRows += ( e.marks & ( kEdgeMarkProven | kEdgeMarkLink ) ) == 0 ? 1u : 0u;
+        }
+        rw::emitTo( stderr, "[mem] edge marks edges={} split={} binding={} import={} final-segment={} impl-only={} proven={} link={} anchor-miss={} name-only={}\n",
+                    edges.size(), perBit[ 0 ], perBit[ 1 ], perBit[ 2 ], perBit[ 3 ], perBit[ 4 ], perBit[ 5 ], perBit[ 6 ], perBit[ 7 ], nameOnlyRows );
+    }
+    if( scip || ( anyMarks & kEdgeMarksProv ) != 0 || anyImplSite )
+    {
+        g.outProv.assign( edges.size(), 0u );
+    }
+    const auto anchorMissed = []( const E& e ) noexcept
+    {
+        return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
+    };
+    if( std::any_of( edges.begin(), edges.end(), anchorMissed ) )
+    {
+        g.outAnchorMiss.assign( edges.size(), 0u );
+    }
+    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
+    // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
+    const auto hedged = []( const E& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
+    const auto marked = [ & ]( const E& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
+    if( std::any_of( edges.begin(), edges.end(), marked ) )
+    {
+        g.outNameOnly.assign( edges.size(), 0u );
+    }
+    {
+        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
+        for( const E& e : edges )
+        {
+            const std::uint32_t pos = cur[ e.from ]++;
+            g.outTargets[ pos ] = e.to;
+            g.outVals[ pos ]    = e.w;
+            g.wOutDeg[ e.from ] += e.w;
+            // one value per edge, by resolve.h edgeProvenance's fixed precedence: scip PINS an edge (precise), binding and
+            // import NAME the mechanism that resolved it, split says the resolver could not choose, final-segment says it
+            // chose by a qualified type's last name. A binding edge that is also a split keeps the more specific label;
+            // the symbol's amb= counts it either way, so nothing is lost by the ordering.
+            if( !g.outProv.empty() )
+            {
+                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), e.marks );
+            }
+            if( !g.outNameOnly.empty() )
+            {
+                ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
+                std::uint8_t kind = 0;
+                if( ( e.marks & kEdgeMarkLink ) != 0 )
+                {
+                    kind = anchorMissed( e ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
+                }
+                else if( hedged( e ) )
+                {
+                    kind = kEdgeName;
+                }
+                g.outNameOnly[ pos ] = kind;
+            }
+            if( !g.outAnchorMiss.empty() )
+            {
+                g.outAnchorMiss[ pos ] = anchorMissed( e ) ? 1u : 0u;
+            }
+        }
+    }
+
+    rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
+
+    // in-edge CSR (row = target) for PageRank
+    std::vector<std::uint32_t> inDeg( N, 0 );
+    for( const E& e : edges )
+    {
+        ++inDeg[e.to];
+    }
+    g.inEdges = sparseCsr<float>( N, N, edges.size() );
+    {
+        auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
+        ro[0] = 0;
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            ro[i + 1] = ro[i] + inDeg[i];
+        }
+        std::vector<std::uint32_t> cur( ro, ro + N );
+        for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
+    }
+    DASSERT( verifyCsr( g.inEdges, N ) );   // structural, so CHECKED in debug and not promised in release — see Diagnostics.h
+    DASSERT( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
+    // One site record per declined call (recordDecline): at most one per reference, so the uint32 record and reference
+    // indices cannot wrap, and the four columns stay parallel.
+    ENSURES( g.declinedSiteCaller.size() <= ing.references.size() && g.declinedSiteList.size() == g.declinedSiteCaller.size()
+             && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11416,7 +11576,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
-    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };   // marks: resolve.h EdgeMark (EDGE-FLAGS)
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( std::min<std::size_t>( N, ing.references.size() ) );   // past the 4-bucket / 0.8-load rehash cascade. G1a: one edge per SYMBOL,
                         // not per reference — the table ends at 1.5-8 edges a symbol, and reserve( references ) zero-filled 16-32 MiB of buckets on
@@ -14731,150 +14890,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         releaseStorage( rule3MemoMember );
         releaseStorage( symFileId );
     }
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
-    // flatten + cap + sort by (from, to) — deterministic regardless of map order
-    struct E { NodeId from, to; float w; std::uint8_t marks; };   // marks: the accumulator's EdgeMark bits, carried through the sort
-    std::vector<E> edges;
-    edges.reserve( acc.size() );
-    for( const auto& [ k, e ] : acc )
-    {
-        float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
-        if( w > 8.f )
-        {
-            w = 8.f;
-        }
-        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
-    }
-    releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
-    std::vector<E> edgeScratch;
-    sortutil::radixSortByFromTo( edges, edgeScratch );
-
-    // out-edges (by source) + weighted out-degree
-    g.outOff.assign( N + 1, 0 );
-    for( const E& e : edges )
-    {
-        ++g.outOff[e.from + 1];
-    }
-    for( std::size_t i = 0; i < N; ++i )
-    {
-        g.outOff[i + 1] += g.outOff[i];
-    }
-    g.outTargets.resize( edges.size() );
-    g.outVals.resize( edges.size() );
-    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR an ES
-    // named-import binding pinned one OR the resolver had to split at least one call — a corpus that resolves
-    // cleanly keeps it EMPTY so serialize emits no prov= at all (zero token cost, byte-identical to before;
-    // test/golden.xml is the standing proof).
-    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
-    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split";
-    //   4 = an ES named-import binding named the module and the export → prov="import".
-    //   5 = a receiver's QUALIFIED written type chose this edge by its last name alone → prov="final-segment".
-    //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
-    // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
-    std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
-    for( const E& e : edges )
-    {
-        anyMarks |= e.marks;
-    }
-    if( memstats::enabled() )   // M0 + EDGE-FLAGS: how many flattened edges carry each mark (test/edgemarkcheck.sh counts them)
-    {
-        std::array<std::size_t, 8> perBit{};
-        std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
-        for( const E& e : edges )
-        {
-            for( std::size_t b = 0; b < perBit.size(); ++b )
-            {
-                perBit[ b ] += ( e.marks >> b ) & 1u;
-            }
-            nameOnlyRows += ( e.marks & ( kEdgeMarkProven | kEdgeMarkLink ) ) == 0 ? 1u : 0u;
-        }
-        rw::emitTo( stderr, "[mem] edge marks edges={} split={} binding={} import={} final-segment={} impl-only={} proven={} link={} anchor-miss={} name-only={}\n",
-                    edges.size(), perBit[ 0 ], perBit[ 1 ], perBit[ 2 ], perBit[ 3 ], perBit[ 4 ], perBit[ 5 ], perBit[ 6 ], perBit[ 7 ], nameOnlyRows );
-    }
-    if( scip || ( anyMarks & kEdgeMarksProv ) != 0 || anyImplSite )
-    {
-        g.outProv.assign( edges.size(), 0u );
-    }
-    const auto anchorMissed = []( const E& e ) noexcept
-    {
-        return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
-    };
-    if( std::any_of( edges.begin(), edges.end(), anchorMissed ) )
-    {
-        g.outAnchorMiss.assign( edges.size(), 0u );
-    }
-    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
-    // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
-    const auto hedged = []( const E& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
-    const auto marked = [ & ]( const E& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
-    if( std::any_of( edges.begin(), edges.end(), marked ) )
-    {
-        g.outNameOnly.assign( edges.size(), 0u );
-    }
-    {
-        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
-        for( const E& e : edges )
-        {
-            const std::uint32_t pos = cur[ e.from ]++;
-            g.outTargets[ pos ] = e.to;
-            g.outVals[ pos ]    = e.w;
-            g.wOutDeg[ e.from ] += e.w;
-            // one value per edge, by resolve.h edgeProvenance's fixed precedence: scip PINS an edge (precise), binding and
-            // import NAME the mechanism that resolved it, split says the resolver could not choose, final-segment says it
-            // chose by a qualified type's last name. A binding edge that is also a split keeps the more specific label;
-            // the symbol's amb= counts it either way, so nothing is lost by the ordering.
-            if( !g.outProv.empty() )
-            {
-                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), e.marks );
-            }
-            if( !g.outNameOnly.empty() )
-            {
-                ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
-                std::uint8_t kind = 0;
-                if( ( e.marks & kEdgeMarkLink ) != 0 )
-                {
-                    kind = anchorMissed( e ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
-                }
-                else if( hedged( e ) )
-                {
-                    kind = kEdgeName;
-                }
-                g.outNameOnly[ pos ] = kind;
-            }
-            if( !g.outAnchorMiss.empty() )
-            {
-                g.outAnchorMiss[ pos ] = anchorMissed( e ) ? 1u : 0u;
-            }
-        }
-    }
-
-    rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
-
-    // in-edge CSR (row = target) for PageRank
-    std::vector<std::uint32_t> inDeg( N, 0 );
-    for( const E& e : edges )
-    {
-        ++inDeg[e.to];
-    }
-    g.inEdges = sparseCsr<float>( N, N, edges.size() );
-    {
-        auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
-        ro[0] = 0;
-        for( std::size_t i = 0; i < N; ++i )
-        {
-            ro[i + 1] = ro[i] + inDeg[i];
-        }
-        std::vector<std::uint32_t> cur( ro, ro + N );
-        for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
-    }
-    DASSERT( verifyCsr( g.inEdges, N ) );   // structural, so CHECKED in debug and not promised in release — see Diagnostics.h
-    DASSERT( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
-    // One site record per declined call (recordDecline): at most one per reference, so the uint32 record and reference
-    // indices cannot wrap, and the four columns stay parallel.
-    ENSURES( g.declinedSiteCaller.size() <= ing.references.size() && g.declinedSiteList.size() == g.declinedSiteCaller.size()
-             && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
-    }
+    flattenEdgesIntoCsr( g, ing, acc, scip, anyImplSite );   // buildGraph/4
 
 
     // doc↔code edges: isDocLink refs (markdown `backtick` → code name) → mentions[codeDef] += docFileNode.
