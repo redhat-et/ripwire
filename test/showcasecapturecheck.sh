@@ -142,6 +142,7 @@ for name, okv in results:
 PYEOF
 b12_10_out="$( python3 "$TMP/check_marker.py" "$SCRIPT" )"
 echo "$b12_10_out" | while IFS= read -r line; do [ -n "$line" ] && printf '  %s\n' "$line"; done
+[ -n "$b12_10_out" ] || no "zero-evidence premise (showcasecapturecheck.sh:145): the text the next arm judges is empty, so its verdict proves nothing"
 if echo "$b12_10_out" | grep -q '^EXTRACT_FAIL'; then
     no "(B) could not extract fmt_block/explode from $SCRIPT via ast — $( echo "$b12_10_out" | grep EXTRACT_FAIL )"
 elif echo "$b12_10_out" | grep -q '^FAIL'; then

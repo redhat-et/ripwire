@@ -97,8 +97,13 @@ fx_copy(){   # SRC DST → a fresh copy of a fixture (its working-tree edit incl
 ds_rows(){ printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="defect-shape" '; }                       # every defect-shape row
 ds_row(){  ds_rows | grep "defect=\"$1\"" | grep " sym=\"$2\""; }                                           # FACET SYM
 ds_row_p(){ ds_rows | grep "defect=\"$1\"" | grep " p=\"$2:"; }                                             # FACET PATH (a file-anchored row)
-ds_any_sym(){ ds_rows | grep " sym=\"$1\""; }
-ds_any_p(){ ds_rows | grep " p=\"$1:"; }
+# DS_NONE_SKIP=FACET (set by a section, empty by default): the "any facet" absences below leave that facet's rows out. The
+# vacuous-assert sections set it to zero-evidence: their negatives read the run's status, and a twinless absence on a
+# checked run is a zero-evidence row by design (§4e judges that facet with its own arms).
+DS_NONE_SKIP=""
+ds_skip(){ if [ -n "$DS_NONE_SKIP" ]; then grep -v "defect=\"$DS_NONE_SKIP\""; else cat; fi; }
+ds_any_sym(){ ds_rows | grep " sym=\"$1\"" | ds_skip; }
+ds_any_p(){ ds_rows | grep " p=\"$1:" | ds_skip; }
 ds_judge(){  # LABEL ROW WANT
     local label="$1" row="$2"
     case "$3" in
@@ -1156,6 +1161,7 @@ gating_split "$L" 0
 #   outside a test path, a presence test on a variable derived from the capture, a requirement inside a
 #   { …; } group, and an elif chain. A capture
 #   derived from another capture (TAG="$( printf '%s' "$OUT" | grep -o … )") is followed back to its run.
+DS_NONE_SKIP=zero-evidence   # §4 and §4b: their negatives claim a read status, not a twin (see the harness)
 fx_init vac
 mkdir -p "$WORK/vac/test" "$WORK/vac/scripts"
 VHDR="$( cat <<'EOF'
@@ -1656,6 +1662,8 @@ vpair n_sqsub t_redir "a single-quoted pattern inside \"\$( )\" is a word, not a
     || no "$L: $vpairs of 12 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 
+DS_NONE_SKIP=""
+
 # ── 4c) UNCHECKED-STATUS (QD-UNCHECKED-STATUS): a dropped I/O or child status, C/C++ and Python ─────────────────
 #   A call whose return IS the status (pclose, rename, write, system, fflush; fclose / close of a stream or descriptor
 #   the function wrote; waitpid with the child's status dropped too; Python subprocess.run with no check=,
@@ -2142,6 +2150,170 @@ fx_run_ref uafix HEAD..HEAD^
 if [ "$QD_OK" = 1 ]; then
     n="$( ds_rows | grep -c 'defect="unhandled-arm"' )"
     if [ "$n" = 0 ]; then ok "$L: the fixing direction prints no unhandled-arm row"; else no "$L: the fixing direction printed $n unhandled-arm rows"; fi
+fi
+
+# ── 4e) ZERO-EVIDENCE (CR-QD-3): an arm that passes on a successful run's empty answer, with no twin ──────────
+#   vacuous-assert asks whether a FAILED run can read as PASS; zero-evidence asks the same of a run that exits 0 and
+#   prints nothing (a broken verb, an empty page): its status is read, so only the text can catch it. Positives: an
+#   absence grep on a checked capture; a cmp of two checked runs' files (a determinism arm); the same cmp whose one presence grep reads a 2< input. Negatives, each a positive
+#   with what makes it sound: a presence twin on the same capture; a presence twin on one of the cmp'd files; an arm
+#   whose claim IS emptiness ([ -z ]); a statement a vacuous-assert shape already names (one row, not two). The
+#   positives' rows are the premise of every negative, and the arm counts its pairs and fails short of all.
+fx_init zev
+mkdir -p "$WORK/zev/test"
+for f in t_zabs t_zcmp t_zredir n_ztwin n_ztwinfile n_zempty n_zva; do
+    printf '%s' "$VHDR" >"$WORK/zev/test/$f.sh"
+done
+fx_commit zev
+cat >>"$WORK/zev/test/t_zabs.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )" || no "the list run failed"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/zev/test/t_zcmp.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null || no "run a failed"
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null || no "run b failed"
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+# 2< reads cfg.txt: a presence grep on an input is no evidence of run a's output, so the cmp still has none.
+cat >>"$WORK/zev/test/t_zredir.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2<"$TMPDIR/cfg.txt" || no "run a failed"
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null || no "run b failed"
+grep -q 'mode' "$TMPDIR/cfg.txt" && ok "the config names a mode" || no "the config names no mode"
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/zev/test/n_ztwin.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )" || no "the list run failed"
+printf '%s' "$OUT" | grep -q '<list' && ok "the list has its root" || no "no list root"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/zev/test/n_ztwinfile.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null || no "run a failed"
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null || no "run b failed"
+grep -q '<list' "$TMPDIR/a.txt" && ok "run a has its root" || no "run a has no root"
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/zev/test/n_zempty.sh" <<'EOF'
+OUT="$( "$BIN" --quiet 2>/dev/null )" || no "the quiet run failed"
+[ -z "$OUT" ] && ok "quiet prints nothing" || no "quiet printed: $OUT"
+EOF
+cat >>"$WORK/zev/test/n_zva.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+fx_run zev
+L="zero-evidence"
+for f in t_zabs t_zcmp t_zredir; do
+    ds_has_p "$L" zero-evidence "test/$f.sh" minor
+done
+zpairs=0
+zpair(){  # NEG TWIN WHY — the negative prints no zero-evidence row, and its positive twin's row proves the form was read
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence in $1 off a failed run"; return; }
+    if [ -z "$( ds_row_p zero-evidence "test/$2.sh" )" ]; then no "$L: $1: the premise twin $2 printed no row, so its absence proves nothing"; return; fi
+    local row; row="$( ds_row_p zero-evidence "test/$1.sh" )"
+    if [ -z "$row" ]; then ok "$L: no zero-evidence row in test/$1.sh ($3; twin $2 fires)"; zpairs=$(( zpairs + 1 )); else no "$L: false positive in test/$1.sh ($3): $row"; fi
+}
+zpair n_ztwin t_zabs "a presence grep on the same capture is the twin"
+zpair n_ztwinfile t_zcmp "a presence grep on a cmp'd file is the twin"
+zpair n_zempty t_zabs "[ -z ] claims emptiness: an empty answer IS the pass"
+zpair n_zva t_zabs "the unchecked capture is vacuous-assert's site: one row, not two"
+[ "$zpairs" = 4 ] && ok "$L: all $zpairs negative arms print 0 zero-evidence rows beside a firing twin" \
+    || no "$L: $zpairs of 4 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
+[ -n "$( ds_row_p vacuous-assert test/n_zva.sh )" ] && ok "$L: n_zva keeps its vacuous-assert row" \
+    || no "$L: n_zva should keep its vacuous-assert row (the premise that the statement was va's)"
+gating_split "$L" 0
+
+# ── 4f) COUNT-DRIFT (CR-QD-3): a count word whose list disagrees with itself or with the tree's name array ──────────
+#   Baseline: a C++ name array kShapeNames (circle, square, triangle), a doc and a help string that say "three shapes"
+#   and list them. The edit adds hexagon to the array, so the unchanged doc and help string now drift (the 712 case: a
+#   kind added, the docs' count not); a new doc says "two modes" and lists three (self), another wraps its list before a
+#   backticked name. Negatives: a correct new list, prose after a count, a gloss that itself lists, a count with no
+#   list, a list that matches a struct aggregate's four strings (not an array, so no name set), a list that one array
+#   holds exactly while a bigger array (declared first) also holds it, a list inside a fenced code block. Round-2 rows:
+#   adjacent literals in a name array are ONE member ("plat" "inum"), and a comma between two string values ends the
+#   text run (kRows). Then the fix (every text says its true count) prints no count-drift row.
+fx_init cdr
+mkdir -p "$WORK/cdr/src" "$WORK/cdr/docs"
+cat >"$WORK/cdr/src/shapes.h" <<'EOF'
+#pragma once
+inline constexpr const char* kShapeNames[] = { "circle", "square", "triangle" };
+inline constexpr const char* kHelp = "--shape=NAME   one of the three shapes: circle, square and triangle\n";
+inline int shapeCount() { return 3; }
+EOF
+cat >"$WORK/cdr/docs/shapes.md" <<'EOF'
+# Shapes
+
+The three shapes: circle, square and triangle.
+EOF
+cat >"$WORK/cdr/src/labels.h" <<'EOF'
+#pragma once
+struct Labels { const char* a; const char* b; const char* c; const char* d; };
+inline constexpr Labels kLabels = { "alpha", "beta", "gamma", "delta" };
+EOF
+# A brace list that opens the file (no `;`, `{` or `}` before it): the array-type look-back ran out at token 0, and its
+# `b-- > 0` wrapped the unsigned (G1 -fsanitize=integer abort; editcheckcheck (g) hit it on this repo's own
+# test/falseedgefix/c/copy.c). No name set. The asan CI job runs this gate on the instrumented binary.
+printf '#pragma once\nauto kCompass = { "north", "south", "east" };\n' >"$WORK/cdr/src/first.h"
+# kAllModes first: the covering set must be the exact one (kSafeModes), not the first superset ("holds 4; missing debug").
+printf '#pragma once\ninline constexpr const char* kAllModes[] = { "fast", "slow", "safe", "debug" };\ninline constexpr const char* kSafeModes[] = { "fast", "slow", "safe" };\n' >"$WORK/cdr/src/modesets.h"
+# Adjacent literals are one array element: "sil" "ver" is silver. The edit adds "plat" "inum", so tiers.md drifts.
+printf '#pragma once\ninline constexpr const char* kTiers[] = { "gold", "sil" "ver", "bronze" };\n' >"$WORK/cdr/src/tiers.h"
+printf '# Tiers\n\nThe three tiers: gold, silver and bronze.\n' >"$WORK/cdr/docs/tiers.md"
+for f in modes wrap ok prose gloss bare agg exact fence; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
+# A list whose last item is "an", shorter than the "and " separator it is tested against and a prefix of it: libstdc++'s
+# string_view compare( pos, n, s ) subtracted the lengths as unsigned there (G1 abort on the Linux asan leg only; libc++
+# does not). Also a negative: "two" and two items, no row.
+printf '# tail\n\n' >"$WORK/cdr/docs/tail.md"
+fx_commit cdr
+printf 'The two modes: fast, an\n' >>"$WORK/cdr/docs/tail.md"   # after the commit: a false positive would be new
+sed -i.bak 's/"bronze" }/"bronze", "plat" "inum" }/' "$WORK/cdr/src/tiers.h" && rm -f "$WORK/cdr/src/tiers.h.bak"
+printf 'The three safe modes: fast, slow and safe.\n' >>"$WORK/cdr/docs/exact.md"
+printf '```\nThe two modes: fast, slow and safe.\n```\n' >>"$WORK/cdr/docs/fence.md"
+printf '#pragma once\ninline constexpr const char* kRows[] = { "The two modes: fast, slow and safe", "Details" };\n' >"$WORK/cdr/src/rows.h"
+sed -i.bak 's/"triangle" }/"triangle", "hexagon" }/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
+printf 'The two modes: fast, slow and safe.\n' >>"$WORK/cdr/docs/modes.md"
+printf 'The four shapes: circle, square, triangle and hexagon.\n' >>"$WORK/cdr/docs/ok.md"
+printf 'Three changes carry it: the walk, the cap and the legend.\n' >>"$WORK/cdr/docs/prose.md"
+printf 'The three flaky arms: memguard (B6b, B21) and pargates.\n' >>"$WORK/cdr/docs/gloss.md"
+printf 'Two passes run before the scan.\n' >>"$WORK/cdr/docs/bare.md"
+printf 'The four kinds: alpha,\n`beta`, gamma.\n' >>"$WORK/cdr/docs/wrap.md"
+printf 'The three options: alpha, beta, gamma.\n' >>"$WORK/cdr/docs/agg.md"
+fx_run cdr
+L="count-drift"
+ds_has_p "$L" count-drift docs/shapes.md minor
+ds_has_p "$L" count-drift src/shapes.h minor
+ds_has_p "$L" count-drift docs/modes.md minor
+ds_has_p "$L" count-drift docs/wrap.md minor   # a soft line break before a backticked name is not a fence
+ds_has_p "$L" count-drift docs/tiers.md minor
+ds_has_p "$L" count-drift src/rows.h new-symbol   # a comma ends the run: "safe" is not joined to "Details" (kRows is new code)
+row="$( ds_row_p count-drift docs/tiers.md )"
+printf '%s' "$row" | grep -q 'why="says 3, kTiers holds 4; missing platinum"' && ok "$L: adjacent literals are one name-array member (sil+ver, plat+inum)" \
+    || no "$L: the tiers row should carry why=\"says 3, kTiers holds 4; missing platinum\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/shapes.md )"
+printf '%s' "$row" | grep -q 'why="says 3, kShapeNames holds 4; missing hexagon"' && ok "$L: the name-set row says which array and names the missing member" \
+    || no "$L: the name-set row should carry why=\"says 3, kShapeNames holds 4; missing hexagon\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/modes.md )"
+printf '%s' "$row" | grep -q 'why="says 2, lists 3"' && ok "$L: the self row says the count and the list's length" \
+    || no "$L: the self row should carry why=\"says 2, lists 3\": ${row:-<no row>}"
+cpairs=0
+for nf in ok prose gloss bare agg tail exact fence; do
+    if [ "$QD_OK" = 1 ] && [ -n "$( ds_row_p count-drift docs/modes.md )" ]; then
+        row="$( ds_row_p count-drift "docs/$nf.md" )"
+        if [ -z "$row" ]; then ok "$L: no count-drift row in docs/$nf.md (twin docs/modes.md fires)"; cpairs=$(( cpairs + 1 )); else no "$L: false positive in docs/$nf.md: $row"; fi
+    fi
+done
+[ "$cpairs" = 8 ] && ok "$L: all $cpairs negative docs print 0 count-drift rows beside a firing twin (agg: a struct aggregate is no name set; exact: the exact array covers; fence: code is not prose)" \
+    || no "$L: $cpairs of 8 negative docs passed beside a firing twin (want all; zero means nothing was judged)"
+gating_split "$L" 0
+sed -i.bak 's/the three shapes: circle, square and triangle/the four shapes: circle, square, triangle and hexagon/' "$WORK/cdr/src/shapes.h" && rm -f "$WORK/cdr/src/shapes.h.bak"
+printf '# Shapes\n\nThe four shapes: circle, square, triangle and hexagon.\n' >"$WORK/cdr/docs/shapes.md"
+printf '# modes\n\nThe three modes: fast, slow and safe.\n' >"$WORK/cdr/docs/modes.md"
+printf '# wrap\n\nThe three kinds: alpha,\n`beta`, gamma.\n' >"$WORK/cdr/docs/wrap.md"
+printf '# Tiers\n\nThe four tiers: gold, silver, bronze and platinum.\n' >"$WORK/cdr/docs/tiers.md"
+sed -i.bak 's/The two modes/The three modes/' "$WORK/cdr/src/rows.h" && rm -f "$WORK/cdr/src/rows.h.bak"
+fx_run cdr
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep -c 'defect="count-drift"' )"
+    if [ "$n" = 0 ]; then ok "$L: the fixed texts print no count-drift row"; else no "$L: the fixed texts printed $n count-drift rows: $( ds_rows | grep 'defect="count-drift"' | head -3 )"; fi
 fi
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────

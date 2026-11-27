@@ -1680,14 +1680,14 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "facet", "r facet=failure-default: an error-masking row whose growth includes a read/parse/spawn failure returned as an empty success; it never gates by itself", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "similar", "r similar=N: the params list is new or grew and holds N>=3 adjacent same-typed params (C/C++); a swapped call compiles; pass a named struct; never gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands or shrunk member, an unhandled-arm row's values with no outcome (add the arm or a default)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands or shrunk member, an unhandled-arm row's values with no outcome (add the arm or a default), a count-drift row's count against what its list or the tree's name array holds", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // fix= rides on complexity rows WITHOUT why= (repeateddecision.h), so a row of its own: under the why row a complexity-only
     // answer emitted fix= with no definition (legendcoveragecheck G, quality-delta-refs-default | r@fix).
     { "fix", "r fix=: the shape the row calls for, with its lines (name the decision once / name the loop once: one condition or loop body repeated); report-only", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
-    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm / zero-evidence / count-drift (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "call", "r call=: the call an unchecked-status row drops the status of; its p= is that site's line. Fix: check it (check=True) or (void) it with a reason", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },

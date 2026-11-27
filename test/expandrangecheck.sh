@@ -115,12 +115,14 @@ rc=$?
 "$BIN" "$CORPUS" --expand=bigFunction:0-5 --no-cache >"$TMP/mal0.xml" 2>"$TMP/mal0.err"
 rc=$?
 if [ $rc -eq 0 ]; then ok "malformed range (0-5) exits 0 (degrades, no crash)"; else no "malformed range (0-5) crashed/failed (rc=$rc)"; fi
+[ -s "$TMP/mal0.xml" ] || no "zero-evidence premise (expandrangecheck.sh:118): the file the next arm judges is empty, so its verdict proves nothing"
 grep -q 'lines="' "$TMP/mal0.xml" && no "malformed range (0-5) still emitted a lines= marker" || ok "malformed range (0-5) degrades to whole-body"
 
 # 7c) malformed range (missing dash) also degrades cleanly.
 "$BIN" "$CORPUS" --expand=bigFunction:5 --no-cache >"$TMP/mal5.xml" 2>"$TMP/mal5.err"
 rc=$?
 if [ $rc -eq 0 ]; then ok "malformed range (5, no dash) exits 0 (degrades, no crash)"; else no "malformed range (5, no dash) crashed/failed (rc=$rc)"; fi
+[ -s "$TMP/mal5.xml" ] || no "zero-evidence premise (expandrangecheck.sh:124): the file the next arm judges is empty, so its verdict proves nothing"
 grep -q 'lines="' "$TMP/mal5.xml" && no "malformed range (5, no dash) still emitted a lines= marker" || ok "malformed range (5, no dash) degrades to whole-body"
 
 # 8) UTF-8 safety: a 1-line slice landing exactly on the café (UTF-8) comment line must stay valid UTF-8

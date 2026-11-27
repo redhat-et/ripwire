@@ -73,6 +73,7 @@ printf '# Notes\n\n## Alpha\n\nsecond draft\n\n## Beta\n\nstable text\n' > "$MD/
 printf '# Notes\n\n## Alpha\n\nthird draft\n\n## Beta\n\nstable text\n' > "$MD/notes.md"
 OMD="$( cd "$MD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 EMD="$( cd "$MD" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? )"
+[ -n "$OMD" ] || no "zero-evidence premise (qualitysignalcheck.sh:76): the text the next arm judges is empty, so its verdict proves nothing"
 printf '%s' "$OMD" | grep -q 'kind="short-horizon-churn"' \
     && { no "churn evidence: markdown Section wrongly flagged (doc sections exempt from churn)"; printf '%s\n' "$OMD" | tr '>' '\n' | grep '<r '; } \
     || ok "churn evidence: thrashed markdown section silent (Section symbols exempt)"

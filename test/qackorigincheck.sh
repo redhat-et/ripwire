@@ -108,6 +108,7 @@ run --quality-delta >"$TMP/p1b" 2>/dev/null; rc1b=$?
 if [ -n "$AKEY" ]; then
     printf '# legacy pre-r27 ack file\nack dead-code %s 0 legacy bare token\n' "$AKEY" > "$ACKS"
     run --quality-delta >"$TMP/p1c" 2>/dev/null
+    [ -s "$TMP/p1c" ] || no "zero-evidence premise (qackorigincheck.sh:111): the file the next arm judges is empty, so its verdict proves nothing"
     grep -q 'freshOrphan' "$TMP/p1c" \
         && { no "legacy bare ack stopped suppressing the new-symbol row it was recorded for"; tr '<' '\n' < "$TMP/p1c" | grep freshOrphan | head -2; } \
         || ok "a LEGACY bare ack still suppresses the new-symbol row it was recorded for (migration preserves meaning)"

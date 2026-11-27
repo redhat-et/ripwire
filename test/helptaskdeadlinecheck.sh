@@ -205,6 +205,7 @@ else
 fi
 "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" >"$E/c.plain" 2>/dev/null
 "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" --deadline-ms=120000 >"$E/c.after" 2>/dev/null; rc=$?; note_rc $rc
+[ -s "$E/c.plain" ] || no "zero-evidence premise (helptaskdeadlinecheck.sh:208): the file the next arm judges is empty, so its verdict proves nothing"
 if cmp -s "$E/c.plain" "$E/c.after"; then
     ok "(C) the next call answers in time, byte-identical to the plain run"
 else
