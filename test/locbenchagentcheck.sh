@@ -20,8 +20,14 @@ export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-echo "BIN=$BIN $( "$BIN" --version 2>/dev/null | head -1 )"
+echo "BIN=$BIN $( "$BIN" --version 2>&1 | head -1 )"
 command -v python3 >/dev/null 2>&1 || { echo "locbenchagentcheck: python3 required"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "locbenchagentcheck: git required"; exit 2; }
-[ -x "$BIN" ] || { echo "locbenchagentcheck: no ripwire binary at $BIN — build first"; exit 2; }
+# HONOURING the seam, not merely having it (binoverridecheck arm (4), CI red on dea88104e): BIN's DIRECTORY is
+# what this gate's arms use -- it is put on the child's PATH to prove the child cannot reach ripwire -- so no arm
+# ever invokes the binary, and under a stub that FAILS on every invocation all 88 arms passed and the gate exited
+# 0. `[ -x "$BIN" ]` cannot see that: a deliberately-broken stub is executable. The binary must therefore RUN, and
+# a binary that does not is a loud exit 2 rather than a silent green. The printed first line keeps the stub's own
+# stderr (2>&1, not 2>/dev/null) so the version field is never blank without saying why.
+"$BIN" --version >/dev/null 2>&1 || { echo "locbenchagentcheck: BIN=$BIN does not run — build first (cmake --build build -j)"; exit 2; }
 python3 "$ROOT/bench/locbench/test_agent_loc.py" "$BIN"
