@@ -192,8 +192,8 @@ On Windows the installer does not apply: download the `windows-x64` zip instead 
 
    **To use the tool**, build the fast binary the released one is built as. `scripts/pgobuild.sh`
    instruments, trains and re-optimizes in one command, into `build_pgo/` — Release, plus link-time
-   optimization, plus profile-guided optimization, which is 14-25% faster cold than the default
-   build and byte-identical in output:
+   optimization, plus profile-guided optimization, which is 6-16% faster cold than the default
+   build (14-25% against an LTO-off baseline) and byte-identical in output:
 
    ```bash
    scripts/pgobuild.sh
