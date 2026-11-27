@@ -3326,14 +3326,8 @@ inline constexpr std::size_t kRoleShown         = 2;     // test, build and docs
 inline constexpr std::size_t kUnitBuildShown    = 2;
 inline constexpr std::size_t kPartnersRead      = 400;   // the strongest partners sorted into roles (each is a disk stat)
 
-inline bool switchOff( const char* name ) noexcept
-{
-    if( const EnvNumber knob = readEnvNumber( name ); knob.parsed )
-    {
-        return knob.value == 0;
-    }
-    return false;   // unset, empty or not a number: the feature stays on
-}
+// unset, empty or not a number: the feature stays on
+inline bool switchOff( const char* name ) noexcept { return readEnvNumber( name ).isZero(); }
 
 inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
 
