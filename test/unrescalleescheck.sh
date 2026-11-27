@@ -46,7 +46,7 @@ fail=0
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 python3 - "$BIN" "$ROOT" "$TMP" <<'PY' || no "the arms above did not all pass (or the checker itself failed): python rc != 0"
-import json, os, re, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys, time
 
 BIN, ROOT, TMP = sys.argv[1], sys.argv[2], sys.argv[3]
 FIX = os.path.join( ROOT, "test", "unrescalleesfix" )
@@ -176,6 +176,11 @@ say( mny.ok and mny.unres == [ { "n": "p9,p8,p7,p6,p5,p4,p3,p2", "calls": "11", 
 # ── (H) the warm snapshot ──────────────────────────────────────────────────────────────────────────────────────────
 print( "=== (H) the warm snapshot keeps the records ===" )
 warm = os.path.join( TMP, "warm" ); shutil.copytree( FIX, warm )
+# a file stamped inside the snapshot's racy window (a fresh copy) keeps the save from being trusted: age the copy past it
+past = time.time() - 60
+for d, _, fs in os.walk( warm ):
+    for f in fs:
+        os.utime( os.path.join( d, f ), ( past, past ) )
 env = dict( os.environ, HOME = os.path.join( TMP, "home" ), TMPDIR = os.path.join( TMP, "tmp" ), RIPWIRE_SNAPSHOT_STATS = "1" )
 os.makedirs( env[ "HOME" ] ); os.makedirs( env[ "TMPDIR" ] )
 outs = [ run( warm, "--callees=c/run.c:run", env = env, cache = True ) for _ in range( 3 ) ]
