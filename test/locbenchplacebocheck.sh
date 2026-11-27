@@ -20,8 +20,13 @@
 set -u
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+# The gate binary seam (lane rules 11-26): the binary is named and its version printed on the FIRST line, so a
+# run cannot silently test some other build. RIPWIRE_BIN is what pargates.py and regression.sh set; $1 is the
+# compatible fallback for a hand run. A binary that does not run fails the gate (exit 2) rather than being
+# ignored or reported as a property failure.
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "BIN=$BIN $( "$BIN" --version 2>&1 | head -n 1 )"
 command -v python3 >/dev/null 2>&1 || { echo "locbenchplacebocheck: python3 required"; exit 2; }
-[ -x "$BIN" ] || { echo "locbenchplacebocheck: no ripwire binary at $BIN — build first"; exit 2; }
+"$BIN" --version >/dev/null 2>&1 || { echo "locbenchplacebocheck: BIN=$BIN does not run — build first (cmake --build build -j)"; exit 2; }
 python3 "$ROOT/bench/locbench/test_placebo_arms.py" "$BIN"
