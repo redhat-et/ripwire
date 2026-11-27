@@ -25,6 +25,7 @@ repo root or the subsystem; a `git-url` or several roots (`ripwire dir1 dir2 --r
 | what past sessions or design docs already say (do this first; a doc may already answer) | `ripwire <dir> --recall="<the task>"` |
 | the one-call orient: ranked map, subsystems, program entries, the files the ranking left out (`<inv>`) | `ripwire <dir>` (once per session) |
 | an architecture summary a human can read: modules, god-files by `afferent`, cycles | `ripwire <dir> --report` |
+| new to the repo itself: an overview, how it is organized, where to start (about a quarter of `--for`'s bytes) | `ripwire <dir> --brief="<the question>"` |
 | "where is the code for X / how does X work" | `ripwire <dir> --for="<the task in your own words>"` |
 | everything at once under a budget: ranking + top bodies + callers + notes + tests | `ripwire <dir> --pack-task="<task>" --legend=compact` |
 | a file-by-file view, or cohesive modules | `ripwire <dir> --tree --legend=compact` · `ripwire <dir> --communities --legend=compact` |
@@ -63,7 +64,7 @@ on a symbol means K of its calls hit an ambiguous name — read the source if th
 |---|---|
 | every rung in full: `--recall` dump rules, `--for` routing and selectors, thin-answer widening, budgets | `ladder.md` |
 | orienting N agents at once (`--partition=N`, `--plan-lanes`), or a big repo (`--zoom`, `--mermaid`, `--export`) | `partition-zoom.md` |
-| one page to paste into a fresh code-editing subagent: `--brief="TASK"` (layout, quoted build/test commands, entries, act ranges, edges; 2.5/4/6 KB) | `subagent-brief.md` |
+| one page to paste into a fresh code-editing subagent: `--brief="TASK"` (layout, quoted build/test commands, entries, act ranges, edges, ranked files; 3.5/5/7 KB) | `subagent-brief.md` |
 | writing a brief for a subagent: the three-moment block to paste (`--for` before reading source; `--expand`/`--callers`/`--impact` before the first edit; `--quality-delta` then `--test-gate` before done) | `subagent-brief.md` |
 | honesty signals in full, field notes, resuming, mid-task reads | `notes-resume.md` |
 | the map-before-you-read discipline for any read, mid-task (`--expand`, symbol-range reads, edit verbs) | `map-before-you-read.md` |

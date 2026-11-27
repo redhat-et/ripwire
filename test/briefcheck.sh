@@ -4,7 +4,7 @@
 #
 # WHY. --brief is pasted into a fresh subagent's prompt, so every byte is paid once per lane and a wrong line is acted on.
 # The two promises a reader cannot check by eye are the ones gated here: the page stays under its size class's cap
-# (2.5 / 4 / 6 KB by indexed files < 1K / < 10K / more; --brief-bytes overrides, 512..8192), and a build/test command is
+# (3.5 / 5 / 7 KB by indexed files < 1K / < 10K / more; --brief-bytes overrides, 512..8192), and a build/test command is
 # QUOTED from a file that exists (a manifest or a doc's fenced block), never guessed: a tree with neither says `none found`.
 #
 # ARMS (each counts what it saw and FAILs on zero)
@@ -15,7 +15,7 @@
 #        `<build>none found` with build_source="none", and NO command head (make cmake npm pytest go cargo tox) appears in
 #        its <build> — the negative arm.
 #   (S)  skip: vendored and generated dirs are marked (skip) in the layout, ordinary code dirs are not.
-#   (O)  drop order: under --brief-bytes=512 dropped= is a prefix of conventions,attrs,layout_depth,entry,edges,where_else,qs in
+#   (O)  drop order: under --brief-bytes=512 dropped= is a prefix of conventions,attrs,layout_depth,ranked,entry,edges,where_else,qs in
 #        that order, the act and build sections are still there, and over="1" is set exactly when the fixed sections
 #        alone outgrow the budget.
 #   (D)  determinism: two runs are byte-identical; every page is well-formed XML (xmllint when present, else python).
@@ -40,6 +40,8 @@
 #        the line that lists the exemplar, history="1"; the hot file and the sweep-only file are absent. The same tree cut to
 #        one commit (a shallow clone's shape) answers history="0" with no history slot; RIPWIRE_BRIEF_COCHANGE=0 and
 #        RIPWIRE_BRIEF_UNITBUILD=0 each remove exactly their half.
+#   (R)  BRIEF-R3: a "like X: path" task takes that path as the exemplar; <ranked> holds only indexed files no other slot names;
+#        RIPWIRE_BRIEF_RANKED=0 removes it.
 #   (Q)  BRIEF-R2, synthetic fixtures: a TS package whose pipe is re-exported through a barrel (pipes/index.ts) and the
 #        package index.ts — both named in <entry> as `surface:`; a Python package whose __init__.py imports the unit; a Go module
 #        whose root file imports the unit's package (named), while a root file that does not import it is not; a test file that
@@ -115,7 +117,7 @@ brief() { ( cd "$1" && "$BIN" . --no-cache "--brief=$TASK" "${@:2}" 2>/dev/null 
 attr() { python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"<brief [^>]*\b"+sys.argv[1]+r"=\"([^\"]*)\"", t); print(m.group(1) if m else "")' "$1"; }
 
 classOf() { case "$1" in medium) echo medium ;; large) echo large ;; *) echo small ;; esac; }
-capOf() { case "$1" in medium) echo 4096 ;; large) echo 6144 ;; *) echo 2560 ;; esac; }
+capOf() { case "$1" in medium) echo 5120 ;; large) echo 7168 ;; *) echo 3584 ;; esac; }
 pageLen() { python3 -c 'import sys; print(len(open(sys.argv[1], "rb").read().rstrip(b"\n")))' "$1"; }
 built=0
 for f in cmake python node bare medium large; do
@@ -183,7 +185,7 @@ brief "$TMP/cmake" --brief-bytes=512 > "$TMP/o.out"
 dr=$( attr dropped < "$TMP/o.out" )
 python3 - "$dr" <<'PY' > "$TMP/o.probe"
 import sys
-order = "conventions,attrs,layout_depth,entry,edges,where_else,qs".split(",")
+order = "conventions,attrs,layout_depth,ranked,entry,edges,where_else,qs".split(",")
 got = [x for x in sys.argv[1].split(",") if x]
 print("OK" if got and got == order[:len(got)] else "BAD")
 PY
@@ -471,6 +473,37 @@ sect "$TMP/q4h.out" entry | grep -qF 'Python/lifecycle.c' && no "(Q) RIPWIRE_BRI
 dq=$( attr dropped < "$TMP/q5.out" )
 case ",$dq," in *,attrs,*) case "$( sect "$TMP/q5.out" entry )" in *"Programs/app.c -> Modules/main.c"*) nq=$(( nq + 1 )) ;; *) no "(Q) attrs did not shed the entry's line/kind: $( sect "$TMP/q5.out" entry )" ;; esac ;; *) no "(Q) premise: 1024 B did not reach the attrs step (dropped=\"$dq\")" ;; esac
 if [ "$nq" = 11 ]; then ok "(Q) round 2: TS barrel + index and Python roots as surface, Go importer named and a non-importer not, subject tests + dir + same-tree helper, trampoline chain, attrs shed first, three OFF switches (11 of 11)"; else no "(Q) round 2 $nq of 11"; fi
+
+# ─── (R) round 3: --for's ranked files the rest does not name, and a "like X: path" exemplar (BRIEF-R3) ─────────────────
+mk_r3() {
+    local p="$TMP/r3py"
+    mkdir -p "$p/enc" "$p/tests"
+    printf '[project]\nname = "enc"\n' > "$p/pyproject.toml"
+    printf 'class Codec:\n    def encode(self, s):\n        raise NotImplementedError\n' > "$p/enc/base.py"
+    for n in alpha beta gamma delta epsilon zeta eta theta iota kappa; do
+        printf 'from enc.base import Codec\nfrom enc.registry import register\n\n@register\nclass %sCodec(Codec):\n    def encode(self, s):\n        return s\n' "$n" > "$p/enc/$n.py"
+    done
+    printf 'REGISTRY = []\n\ndef register(cls):\n    REGISTRY.append(cls)\n    return cls\n' > "$p/enc/registry.py"
+    printf 'from enc.alpha import alphaCodec\n\ndef test_alpha():\n    assert alphaCodec().encode("x") == "x"\n' > "$p/tests/test_alpha.py"
+}
+mk_r3
+R3_TASK="add one more (like alphaCodec: enc/alpha.py)"   # words no sibling holds, so the question sites do not already list the family
+qbrief "$TMP/r3py" "$R3_TASK" > "$TMP/r1.out"
+qbrief "$TMP/r3py" "$R3_TASK" RIPWIRE_BRIEF_RANKED=0 > "$TMP/r1r.out"
+nr=0
+sect "$TMP/r1.out" like | grep -qx 'enc/alpha.py' && nr=$(( nr + 1 )) || no "(R) the \"like X: path\" exemplar is not that path: $( grep -o '<like[^/]*/like>' "$TMP/r1.out" )"
+rk="$( sect "$TMP/r1.out" ranked )"
+[ -n "$rk" ] && nr=$(( nr + 1 )) || no "(R) premise: no <ranked> slot on a family of 10 sibling codecs"
+python3 - "$TMP/r1.out" "$TMP/r3py" <<'PY' && nr=$(( nr + 1 )) || no "(R) a ranked path is not an indexed file, or another slot already names it"
+import os, re, sys
+t = open(sys.argv[1]).read(); m = re.search(r"<ranked>(.*?)</ranked>", t)
+paths = m.group(1).split(" · ") if m else []
+rest = t[:m.start()] + t[m.end():] if m else t
+ok = paths and all(os.path.isfile(os.path.join(sys.argv[2], p)) and p not in rest for p in paths)
+sys.exit(0 if ok else 1)
+PY
+grep -q '<ranked>' "$TMP/r1r.out" && no "(R) RIPWIRE_BRIEF_RANKED=0 kept <ranked>" || nr=$(( nr + 1 ))
+if [ "$nr" = 4 ]; then ok "(R) round 3: like X: path is the exemplar, ranked files are indexed and named nowhere else, OFF switch (4 of 4)"; else no "(R) round 3 $nr of 4"; fi
 
 [ "$fail" = 0 ] && echo "briefcheck: PASS" || echo "briefcheck: FAIL"
 exit "$fail"
