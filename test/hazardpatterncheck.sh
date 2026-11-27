@@ -516,6 +516,7 @@ memceiling_new.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
 regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)
 ingest_parsepool.h	collectWantedConstructHits	1	the RIPWIRE_TEST_EXTRACT_THROW test seam, off unless the variable is set; its one caller is the parse worker body inside its try (ingest_parsepool.h), whose catch( ... ) reports FileExtractThrew: the file reads extract-partial and its constructsKnown flag clears (qdconstructscheck X, qbasecachecheck D drive it)
+infra/strkern.h	Literal	2	consteval only: the constructor runs at compile time alone, where a throw is a compile error (a non-NUL-ended array or an embedded NUL is refused at build time; strkerncheck arm 2c); nothing is ever thrown at run time
 REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys

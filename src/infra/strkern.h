@@ -68,6 +68,8 @@
 #include <string_view>
 #include <type_traits>     // std::is_array_v / is_convertible_v — find's literal vs runtime-needle overloads
 
+#include "platform.h"      // ALWAYS_INLINE — find's dispatch is inlined into every caller
+
 #if defined( __ARM_NEON )
     #include <arm_neon.h>
 #elif defined( __AVX2__ )
@@ -829,11 +831,7 @@ inline constexpr LeadByteTable kCommonLeadBytes = []
 
 // find's dispatch is INLINED into every caller: its early outs (from past the end, empty needle, needle longer than the rest) are
 // then a compare or two where std's are, instead of a call. The measured cost of a call was 1.5 ns on a 1.3 ns std answer.
-#if defined( _MSC_VER ) && !defined( __clang__ )
-    #define RW_STRKERN_ALWAYS_INLINE __forceinline
-#else
-    #define RW_STRKERN_ALWAYS_INLINE [[gnu::always_inline]] inline
-#endif
+// ALWAYS_INLINE is platform.h's, the one spelling per compiler front end.
 
 // THE string-find utility (CONTRIBUTING.md §3 "String search"): the first occurrence of `needle` in `hay` at or after `from`, or
 // std::string_view::npos. Contract: byte-identical to `hay.find( needle, from )` for EVERY input — npos when `from > hay.size()`
@@ -844,7 +842,7 @@ inline constexpr LeadByteTable kCommonLeadBytes = []
 // exists for that test alone (KernelPath::Scalar runs the scalar twin with no dispatch). It is the fastest find at every measured
 // size — never slower than std in any cell of bench/bench_strkern_find.cpp, which fails red if it ever is — so it is the one to
 // use everywhere (see the dispatch note above).
-[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t findIn( std::string_view hay, std::string_view needle, std::size_t from, KernelPath path ) noexcept
+[[nodiscard]] ALWAYS_INLINE std::size_t findIn( std::string_view hay, std::string_view needle, std::size_t from, KernelPath path ) noexcept
 {
     if( from > hay.size() ) { return std::string_view::npos; }
     const std::size_t left = hay.size() - from, m = needle.size();
@@ -881,7 +879,7 @@ struct Literal
 };
 
 // find( hay, "literal", from ): the literal overload (a string literal reaches only this one).
-[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t find( std::string_view hay, Literal needle, std::size_t from = 0 ) noexcept
+[[nodiscard]] ALWAYS_INLINE std::size_t find( std::string_view hay, Literal needle, std::size_t from = 0 ) noexcept
 {
     const std::string_view n( needle.text, needle.size );
     if( !needle.commonLead || from > hay.size() || hay.size() - from < needle.size + kFindBlockStarts - 1 ) { return hay.find( n, from ); }
@@ -893,7 +891,7 @@ struct Literal
 // array does not compile (spell it std::string_view( buf ) to search its strlen bytes, as std does).
 template<class Needle>
     requires( std::is_convertible_v<const Needle&, std::string_view> && !std::is_array_v<Needle> )
-[[nodiscard]] RW_STRKERN_ALWAYS_INLINE std::size_t find( std::string_view hay, const Needle& needle, std::size_t from = 0, KernelPath path = KernelPath::Vector ) noexcept
+[[nodiscard]] ALWAYS_INLINE std::size_t find( std::string_view hay, const Needle& needle, std::size_t from = 0, KernelPath path = KernelPath::Vector ) noexcept
 {
     return findIn( hay, std::string_view( needle ), from, path );
 }
@@ -1319,7 +1317,7 @@ inline void lineStarts( std::string_view text, Vec& out, FinalLineStart final = 
     return set;
 }
 
-// The ASCII classes the "C" locale's <cctype> predicates name — the only locale ripwire runs in — so a scan loop needs no libc
+// The ASCII classes the "C" locale's <cctype> predicates name — the only locale this tool runs in — so a scan loop needs no libc
 // call per byte. A byte >= 0x80 is in none of them, as in the "C" locale.
 inline constexpr Byteset256 kAsciiSpace = bytesetOf( " \t\n\v\f\r" );   // std::isspace
 inline constexpr Byteset256 kAsciiDigit = bytesetOf( "0123456789" );    // std::isdigit
