@@ -7378,10 +7378,9 @@ struct IdentityNarrower
     const rw::FileSetStore&                              fileIncludes;
     const std::vector<std::uint32_t>&                    symFileId;
 
-    mutable std::string                                   keyScope;        // "Class::callee"
-    mutable rw::SmallVec<NodeId, 2>                       hits;            // the answer, copied out by the caller at once
-    mutable std::vector<NodeId>                           classWalk;       // nameable classes, then a walk frontier
-    mutable std::vector<NodeId>                           classNext;
+    mutable std::string                                   keyText;         // memberKey's buffer
+    mutable rw::SmallVec<NodeId, 2>                       nameableHits;    // keepNameableHits' subset of `own`, copied out by the caller at once
+    mutable std::vector<NodeId>                           nameable;        // nameableClasses' answer, ascending
     mutable std::vector<NodeId>                           plausible;       // plausibleClasses' answer
     // a generation-stamped set over the symbol ids: next() empties it in O(1) (the stamp vector is sized once, never cleared)
     struct StampSet
@@ -7404,11 +7403,60 @@ struct IdentityNarrower
             return fresh;
         }
     };
-    mutable StampSet                                      seen;            // the class walks' visited set (markSeen)
+    // steps (2)-(3) walk classes level by level. The walk's state travels as one value, handed to each step explicitly; the
+    // instance below is reused scratch (the resolve loop runs it for every claim). One visited set over the symbol ids holds
+    // the classes queued AND the definitions answered, so a definition reached through two same-named classes answers once.
+    struct ClassLevelWalk
+    {
+        std::vector<NodeId>     level;   // the classes being visited
+        std::vector<NodeId>     next;    // the level they queue
+        StampSet                seen;
+        rw::SmallVec<NodeId, 2> hits;    // the definitions answered, each once
+
+        void start( NodeId from, std::size_t symbolCount )
+        {
+            seen.next( symbolCount );
+            level.assign( 1, from );
+            hits.clear();
+        }
+        void markVisited( NodeId id ) noexcept   // `id` counts as reached (the ancestor walk never re-enters its receiver)
+        {
+            seen.insert( id );
+        }
+        bool queue( NodeId cls )   // true when `cls` was not reached before (it is then on the next level)
+        {
+            if( !seen.insert( cls ) )
+            {
+                return false;
+            }
+            next.push_back( cls );
+            return true;
+        }
+        void addHit( NodeId def )
+        {
+            if( seen.insert( def ) ) { hits.push_back( def ); }
+        }
+        // visitLevel( level ) for each level in turn, at most maxDepth of them, each queueing the next; the walk stops early
+        // when visitLevel returns true, and says whether it did
+        bool forEachLevel( int maxDepth, const auto& visitLevel )
+        {
+            for( int depth = 0; depth < maxDepth && !level.empty(); ++depth )
+            {
+                next.clear();
+                if( visitLevel( std::span<const NodeId>( level ), depth ) )
+                {
+                    return true;
+                }
+                level.swap( next );
+            }
+            return false;
+        }
+    };
+    mutable ClassLevelWalk                                classWalk;
     mutable HashMap<std::string, rw::SmallVec<NodeId, 2>> subclassMemo;    // step 3 per (receiver class, callee)
     mutable const Reference*                              claimRef       = nullptr;
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
-    mutable bool                                          lookupLexical  = false;   // classWalk came from an enclosing class or a class qualifier
+    mutable bool                                          lookupLexical  = false;   // nameable came from an enclosing class or a class qualifier
     // NARROW-MEMO: two pure functions the class walk asks again for every same-named class (envoy holds hundreds of
     // `Impl` and `Config`), memoised for the loop. Neither memo reaches output: each returns what the walk computes.
     //   ancestorMemo: a class NAME -> every name derivesFromName reaches from it (chaUp is fixed for the loop; keyed
@@ -7481,16 +7529,16 @@ struct IdentityNarrower
         {
             return &own;
         }
-        hits.clear();
+        nameableHits.clear();
         for( NodeId h : own )
         {
-            if( memberNameable( h, ids ) ) { hits.push_back( h ); }
+            if( memberNameable( h, ids ) ) { nameableHits.push_back( h ); }
         }
-        if( hits.size() == own.size() )
+        if( nameableHits.size() == own.size() )
         {
             return &own;
         }
-        return hits.empty() ? nullptr : &hits;
+        return nameableHits.empty() ? nullptr : &nameableHits;
     }
 
     // steps (2)-(3), from the one class a claim can stand on; `own` when there is none or the ancestry explains nothing
@@ -7508,16 +7556,20 @@ struct IdentityNarrower
         }
         bool declaredAlong = false;
         bool ambiguous     = false;
-        if( inheritedDefinitions( r, receiverClass, ids, declaredAlong, ambiguous ) )
+        if( const rw::SmallVec<NodeId, 2>* const inherited = inheritedDefinitions( r, receiverClass, ids, declaredAlong, ambiguous ) )
         {
             claimRef = &r;
-            return &hits;
+            return inherited;
         }
-        if( !ambiguous && declaredAlong && subclassDefinitions( r, receiverClass, ids ) )
+        if( ambiguous || !declaredAlong )
+        {
+            return own;
+        }
+        if( const rw::SmallVec<NodeId, 2>* const split = subclassDefinitions( r, receiverClass, ids ) )
         {
             claimRef      = &r;
             subclassClaim = true;
-            return &hits;
+            return split;
         }
         return own;
     }
@@ -7527,7 +7579,7 @@ struct IdentityNarrower
     NodeId claimableClass( std::string_view typeName, const Reference& r, const ClassIdentity& ids ) const
     {
         const std::uint32_t callerFile = symFileId[ r.fromSymbol ];
-        plausibleClasses( classWalk, callerFile, ids );
+        plausibleClasses( nameable, callerFile, ids );
         const auto sameName = ids.classesByName.find( std::string( typeName ) );
         if( plausible.size() != 1 || sameName == ids.classesByName.end() )
         {
@@ -7613,19 +7665,19 @@ struct IdentityNarrower
     {
         for( NodeId c : named )
         {
-            if( pick( c ) ) { classWalk.push_back( c ); }
+            if( pick( c ) ) { nameable.push_back( c ); }
         }
-        return !classWalk.empty();
+        return !nameable.empty();
     }
 
-    // the classes the written type NAMES at this call, into classWalk in id order: through a qualifier; bare, outward from the
+    // the classes the written type NAMES at this call, into nameable in id order: through a qualifier; bare, outward from the
     // caller's class — a class nested directly in an enclosing class wins, then one nested in that class's ancestors — then
     // from an unknown caller's written scope; past all of those the namespace-level classes of that name. `verifiedNamespace`
     // separates an EXCLUSION from a CLAIM: to drop a hit, a namespace qualifier names every namespace-level class of its name
     // (none is provably excluded); to claim, only those whose file shows it defines something in that namespace.
     void nameableClasses( WrittenType type, const Reference& r, const ClassIdentity& ids, const ChaUpNames& chaUp, bool verifiedNamespace ) const
     {
-        classWalk.clear();
+        nameable.clear();
         lookupLexical    = false;
         const auto named = ids.classesByName.find( std::string( type.name ) );
         if( named == ids.classesByName.end() )
@@ -7706,7 +7758,7 @@ struct IdentityNarrower
     {
         const NodeId owner = ids.ownerClass[ hit ];
         return ids.ownerAmbiguous[ hit ] == 0 && owner != kNoNode && ids.enclosingClass[ owner ] != kNoNode
-            && !std::binary_search( classWalk.begin(), classWalk.end(), owner ) && fileVisibleFrom( callerFile, fileOf( owner, ids ), ids );
+            && !std::binary_search( nameable.begin(), nameable.end(), owner ) && fileVisibleFrom( callerFile, fileOf( owner, ids ), ids );
     }
 
     // a hit's owning class among the nameable ones? An unknown owner keeps the hit; an ambiguous out-of-line owner is
@@ -7720,13 +7772,13 @@ struct IdentityNarrower
         }
         if( ids.ownerAmbiguous[ member ] == 0 )
         {
-            return std::binary_search( classWalk.begin(), classWalk.end(), owner );
+            return std::binary_search( nameable.begin(), nameable.end(), owner );
         }
         const Symbol& m      = ( *ids.symbols )[ member ];
         const auto    scoped = ids.classesByName.find( m.scope );
         return scoped != ids.classesByName.end() && std::ranges::any_of( scoped->second, [ & ]( NodeId c )
         {
-            return fileOf( c, ids ) == m.fileId && std::binary_search( classWalk.begin(), classWalk.end(), c );
+            return fileOf( c, ids ) == m.fileId && std::binary_search( nameable.begin(), nameable.end(), c );
         } );
     }
 
@@ -7813,20 +7865,33 @@ struct IdentityNarrower
         }
     }
 
-    // the definitions under keyScope ("Class::callee") owned by class `cls` — or, when their owner is ambiguous or unknown,
-    // plausibly it — appended to hits
-    // true when `cls` owns a definition under keyScope, whether or not an earlier step of the walk appended it already
-    bool appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
+    // "Class::callee", or "Scope::Class::callee" with a scope, in the one key buffer: valid until the next memberKey
+    const std::string& memberKey( std::string_view scope, std::string_view cls, std::string_view callee ) const
     {
-        const auto it = canonByName.find( keyScope );   // the text lookup: visitAncestor's, and a callee CANON-SPLIT cannot key
+        keyText.clear();
+        if( !scope.empty() )
+        {
+            keyText.append( scope ).append( "::" );
+        }
+        keyText.append( cls ).append( "::" ).append( callee );
+        return keyText;
+    }
+
+    // the definitions under `key` ("Class::callee") owned by class `cls` — or, when their owner is ambiguous or unknown,
+    // plausibly it — added to the walk's hits
+    // true when `cls` owns a definition under `key`, whether or not an earlier step of the walk added it already. `key` is
+    // usually memberKey's buffer: it is read before anything here could build another key.
+    bool appendOwnedDefinitions( const std::string& key, NodeId cls, const ClassIdentity& ids, ClassLevelWalk& walk ) const
+    {
+        const auto it = canonByName.find( key );   // the text lookup: visitAncestor's, and a callee CANON-SPLIT cannot key
         if( it == canonByName.end() )
         {
             return false;
         }
-        return appendOwnedOf( &it->second, cls, ids );
+        return appendOwnedOf( &it->second, cls, ids, walk );
     }
     // appendOwnedDefinitions for canonByName's entry `defs` (found by its key text or by CANON-SPLIT's ids; null: no entry)
-    bool appendOwnedOf( const rw::SmallVec<NodeId, 2>* defs, NodeId cls, const ClassIdentity& ids ) const
+    bool appendOwnedOf( const rw::SmallVec<NodeId, 2>* defs, NodeId cls, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
         if( defs == nullptr )
         {
@@ -7841,10 +7906,7 @@ struct IdentityNarrower
                 continue;
             }
             owns = true;
-            if( markSeen( d ) )
-            {
-                hits.push_back( d );   // a definition plausible for two same-named classes of one walk is appended once
-            }
+            walk.addHit( d );   // a definition plausible for two same-named classes of one walk is added once
         }
         return owns;
     }
@@ -7897,17 +7959,6 @@ struct IdentityNarrower
         return answer.all ? std::span<const NodeId>( named.data(), named.size() ) : std::span<const NodeId>( answer.some );
     }
 
-    // a fresh visited generation over the symbol ids (the stamp vector is sized once, never cleared)
-    void nextSeenGeneration( const ClassIdentity& ids ) const
-    {
-        seen.next( ids.symbols->size() );
-    }
-
-    bool markSeen( NodeId id ) const noexcept
-    {
-        return seen.insert( id );
-    }
-
     // two KNOWN, distinct owning classes that share a name among the definitions — a union of namesakes, not one type's answer
     // (an unknown owner was admitted only as plausibly the walked class, so it never counts against it)
     static bool definedBySameNamedClasses( const rw::SmallVec<NodeId, 2>& defs, const ClassIdentity& ids ) noexcept
@@ -7929,12 +7980,13 @@ struct IdentityNarrower
     }
 
     // step (2): from the receiver class up the REAL inheritance level by level; the shallowest level whose classes define the
-    // callee answers into hits (several defining classes at one level: their union, an honest split — unless two of them are
+    // callee answers (several defining classes at one level: their union, an honest split — unless two of them are
     // namesakes, then `ambiguous`). `declaredAlong` reports a bodiless declaration of the callee on any class visited.
     // INHERITED-MEMO (lane PF2, 2026-11-21): the answer — hits, the result, whether a bodiless declaration was met, and the
     // ambiguity verdict a defining level gave — depends on the receiver class and the callee NAME only (every table it reads
     // is fixed for the loop), and the walk ran again for every call: after RECV-CONE-MEMO it was 6,342 of 10,110 samples of
-    // a cold llvm-project resolve loop. Kept per (class, callee); a replay leaves `hits` as the walk left it.
+    // a cold llvm-project resolve loop. Kept per (class, callee). The answer: the kept definitions when a level answers
+    // unambiguously (valid until the next narrow), nullptr otherwise.
     struct InheritedAnswer
     {
         rw::SmallVec<NodeId, 2> hits;
@@ -7945,7 +7997,8 @@ struct IdentityNarrower
     mutable HashMap<std::string, InheritedAnswer> inheritedMemo;
     mutable std::string                           inheritedKey;
     mutable std::size_t                           inheritedAsks = 0, inheritedWalks = 0;   // RIPWIRE_STATS `[mem] inherited`
-    bool inheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
+    const rw::SmallVec<NodeId, 2>* inheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong,
+                                                         bool& ambiguous ) const
     {
         ++inheritedAsks;
         inheritedKey.assign( std::to_string( receiverClass ) ).push_back( '#' );
@@ -7955,49 +8008,50 @@ struct IdentityNarrower
         {
             ++inheritedWalks;
             InheritedAnswer answer;
-            answer.result = walkInheritedDefinitions( r, receiverClass, ids, answer.declared, answer.ambiguous );
-            answer.hits   = hits;
+            answer.result = walkInheritedDefinitions( r, receiverClass, ids, classWalk, answer.declared, answer.ambiguous );
+            answer.hits   = classWalk.hits;
             kept          = inheritedMemo.find( inheritedKey );   // the walk inserts into no memo of this one, but re-find rather than trust it
             kept->second  = std::move( answer );
         }
         const InheritedAnswer& answer = kept->second;
-        hits          = answer.hits;
         declaredAlong = answer.declared || declaredAlong;
         if( !answer.hits.empty() )
         {
             ambiguous = answer.ambiguous;   // the walk sets it only where a level's hits answer
         }
-        return answer.result;
+        return answer.result ? &answer.hits : nullptr;
     }
-    bool walkInheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
+    // the walk inheritedDefinitions keeps: the answering level's definitions are left in walk.hits
+    bool walkInheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, ClassLevelWalk& walk, bool& declaredAlong,
+                                   bool& ambiguous ) const
     {
-        nextSeenGeneration( ids );
-        markSeen( receiverClass );
-        classWalk.assign( 1, receiverClass );
-        for( int depth = 0; depth < 16 && !classWalk.empty(); ++depth )
+        walk.start( receiverClass, ids.symbols->size() );
+        walk.markVisited( receiverClass );
+        bool answered = false;
+        walk.forEachLevel( 16, [ & ]( std::span<const NodeId> level, int depth )
         {
-            hits.clear();
-            classNext.clear();
-            for( NodeId c : classWalk )
+            walk.hits.clear();
+            for( NodeId c : level )
             {
-                declaredAlong = visitAncestor( r, c, depth > 0, ids ) || declaredAlong;
+                declaredAlong = visitAncestor( r, c, depth > 0, ids, walk ) || declaredAlong;
             }
-            if( !hits.empty() )
+            if( walk.hits.empty() )
             {
-                std::sort( hits.begin(), hits.end() );   // each definition appended once (markSeen): the id order own's hits have
-                ambiguous = definedBySameNamedClasses( hits, ids );
-                return !ambiguous;
+                return false;
             }
-            classWalk.swap( classNext );
-        }
-        return false;
+            std::sort( walk.hits.begin(), walk.hits.end() );   // each definition added once: the id order own's hits have
+            ambiguous = definedBySameNamedClasses( walk.hits, ids );
+            answered  = !ambiguous;
+            return true;
+        } );
+        return answered;
     }
 
-    // the definitions under keyScope that the template's specializations hold (ClassIdentity::specializationDefs), when the
+    // the definitions under `key` that the template's specializations hold (ClassIdentity::specializationDefs), when the
     // specialization's file sees the class's: the family split one instantiation picks from
-    void appendSpecializationDefinitions( NodeId cls, const ClassIdentity& ids ) const
+    void appendSpecializationDefinitions( const std::string& key, NodeId cls, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
-        const auto it = ids.specializationDefs.find( keyScope );
+        const auto it = ids.specializationDefs.find( key );
         if( it == ids.specializationDefs.end() )
         {
             return;
@@ -8006,23 +8060,23 @@ struct IdentityNarrower
         for( NodeId d : it->second )
         {
             const std::uint32_t defFile = fileOf( d, ids );
-            if( ( defFile == classFile || fileVisibleFrom( defFile, classFile, ids ) ) && markSeen( d ) )
+            if( defFile == classFile || fileVisibleFrom( defFile, classFile, ids ) )
             {
-                hits.push_back( d );
+                walk.addHit( d );
             }
         }
     }
 
     // one class of the ancestor walk: whether it DECLARES the callee; its definitions appended (not at the receiver's own
     // level, which step 1 judged); its plausible direct bases queued
-    bool visitAncestor( const Reference& r, NodeId c, bool appendDefinitions, const ClassIdentity& ids ) const
+    bool visitAncestor( const Reference& r, NodeId c, bool appendDefinitions, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
-        keyScope.assign( ( *ids.symbols )[ c ].name ).append( "::" ).append( r.calleeName );
-        const bool declares = ids.declared.find( keyScope ) != ids.declared.end();
+        const std::string& key      = memberKey( {}, ( *ids.symbols )[ c ].name, r.calleeName );
+        const bool         declares = ids.declared.find( key ) != ids.declared.end();
         if( appendDefinitions )
         {
-            appendOwnedDefinitions( c, ids );
-            appendSpecializationDefinitions( c, ids );
+            appendOwnedDefinitions( key, c, ids, walk );
+            appendSpecializationDefinitions( key, c, ids, walk );
         }
         const auto up = ids.realUp.find( c );
         for( std::string_view base : ( up == ids.realUp.end() ) ? std::span<const std::string_view>{} : std::span<const std::string_view>( up->second ) )
@@ -8034,37 +8088,35 @@ struct IdentityNarrower
             }
             for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
-                if( markSeen( b ) ) { classNext.push_back( b ); }
+                walk.queue( b );
             }
         }
         return declares;
     }
 
     // step (3): the callee's definitions in the REAL subclasses of the receiver class, transitively — every runtime target of a
-    // virtual call on a type whose ancestry declares the callee but defines it nowhere. Memoised per (class, callee).
-    bool subclassDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids ) const
+    // virtual call on a type whose ancestry declares the callee but defines it nowhere. Memoised per (class, callee): the
+    // kept definitions (valid until the next narrow), nullptr when there are none.
+    const rw::SmallVec<NodeId, 2>* subclassDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids ) const
     {
         std::string memoKey = std::to_string( receiverClass ).append( "#" ).append( r.calleeName );
-        if( const auto hit = subclassMemo.find( memoKey ); hit != subclassMemo.end() )
+        auto        kept    = subclassMemo.find( memoKey );
+        if( kept == subclassMemo.end() )
         {
-            hits = hit->second;
-            return !hits.empty();
-        }
-        hits.clear();
-        nextSeenGeneration( ids );
-        classWalk.assign( 1, receiverClass );
-        for( int depth = 0; depth < 32 && !classWalk.empty(); ++depth )
-        {
-            classNext.clear();
-            for( NodeId c : classWalk )
+            ClassLevelWalk& walk = classWalk;
+            walk.start( receiverClass, ids.symbols->size() );
+            walk.forEachLevel( 32, [ & ]( std::span<const NodeId> level, int )
             {
-                visitSubclassesOf( r, c, ids );
-            }
-            classWalk.swap( classNext );
+                for( NodeId c : level )
+                {
+                    visitSubclassesOf( r, c, ids, walk );
+                }
+                return false;
+            } );
+            std::sort( walk.hits.begin(), walk.hits.end() );   // each definition added once
+            kept = subclassMemo.emplace( std::move( memoKey ), walk.hits ).first;
         }
-        std::sort( hits.begin(), hits.end() );   // each definition appended once (markSeen)
-        subclassMemo.emplace( std::move( memoKey ), hits );
-        return !hits.empty();
+        return kept->second.empty() ? nullptr : &kept->second;
     }
 
     // does `d`'s base clause, read from d's own file, plausibly mean `c` among the classes of c's name (`named`)? Memoised per
@@ -8087,8 +8139,8 @@ struct IdentityNarrower
     }
 
     // the real subclasses of `c` whose base clause, read from their own file, plausibly means `c`: their definitions of the
-    // callee appended, each queued once
-    void visitSubclassesOf( const Reference& r, NodeId c, const ClassIdentity& ids ) const
+    // callee added, each queued once
+    void visitSubclassesOf( const Reference& r, NodeId c, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
         const std::string& cname = ( *ids.symbols )[ c ].name;
         const auto         down  = ids.realDown.find( cname );
@@ -8099,23 +8151,22 @@ struct IdentityNarrower
         }
         for( NodeId d : down->second )
         {
-            if( !clauseMeans( d, c, named->second, ids ) || !markSeen( d ) )
+            if( !clauseMeans( d, c, named->second, ids ) || !walk.queue( d ) )
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
-            if( !appendClassDefinitions( r, d, ids ) )
+            if( !appendClassDefinitions( r, d, ids, walk ) )
             {
-                appendInheritedBody( r, d, ids );
+                appendInheritedBody( r, d, ids, walk );
             }
-            classNext.push_back( d );
         }
     }
 
-    // `cls`'s own definitions of the callee appended; true when it owns one. CPP-PTR-ALIAS (C1): a nested class defined OUT OF
+    // `cls`'s own definitions of the callee added to the walk's hits; true when it owns one. CPP-PTR-ALIAS (C1): a nested class defined OUT OF
     // LINE (`class Mgr::RangeTimerImpl : public Timer { bool enabled() … }`) scopes its members by the written name,
     // "Mgr::RangeTimerImpl", never by the class's own name alone; ownedBy keeps that class's definitions only (an in-class
     // nested class keys by its own name, and the second key misses, harmlessly)
-    bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids ) const
+    bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
         const Symbol& c = ( *ids.symbols )[ cls ];
         ++canonSplit.asks;
@@ -8126,19 +8177,17 @@ struct IdentityNarrower
             {
                 return false;   // no key of canonByName ends in "::callee": neither lookup below can hit
             }
-            bool owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, false, ids ), *callee ), cls, ids );
+            bool owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, false, ids ), *callee ), cls, ids, walk );
             if( !c.scope.empty() )
             {
-                owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, true, ids ), *callee ), cls, ids ) || owns;
+                owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, true, ids ), *callee ), cls, ids, walk ) || owns;
             }
             return owns;
         }
-        keyScope.assign( c.name ).append( "::" ).append( r.calleeName );
-        bool owns = appendOwnedDefinitions( cls, ids );
+        bool owns = appendOwnedDefinitions( memberKey( {}, c.name, r.calleeName ), cls, ids, walk );
         if( !c.scope.empty() )
         {
-            keyScope.assign( c.scope ).append( "::" ).append( c.name ).append( "::" ).append( r.calleeName );
-            owns = appendOwnedDefinitions( cls, ids ) || owns;
+            owns = appendOwnedDefinitions( memberKey( c.scope, c.name, r.calleeName ), cls, ids, walk ) || owns;
         }
         return owns;
     }
@@ -8320,7 +8369,7 @@ struct IdentityNarrower
         return std::span<const NodeId>( lv.classes.data() + from, lv.ends[ depth ] - from );
     }
 
-    void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids ) const
+    void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids, ClassLevelWalk& walk ) const
     {
         for( std::size_t depth = 0; depth < 16; ++depth )
         {
@@ -8332,7 +8381,7 @@ struct IdentityNarrower
             bool found = false;
             for( NodeId c : level )
             {
-                found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
+                found = ( depth > 0 && appendClassDefinitions( r, c, ids, walk ) ) || found;
             }
             if( found )
             {
