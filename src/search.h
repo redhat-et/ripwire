@@ -1246,7 +1246,6 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
             DISCLOSE( Diagnostics::answerRefused, "the verdict makes --regex refuse by name (the file and the cause on stderr, exit 1); no hit is reported",
                       "grep: the regex engine abandoned a match (catastrophic backtracking?) — the verb refuses the answer" );
         }
-        scanned = text.size();   // the literal branch's cursor is not shared with this one; keep it honest
         return { scan.verdict == RegexVerdict::Exhausted, scan.skippedLineCount };
     }
     else

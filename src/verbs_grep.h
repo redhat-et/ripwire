@@ -996,7 +996,7 @@ std::vector<GrepHitRef> grepHitRefs( const rw::Config& cfg, const rw::IngestResu
 }
 
 // The dispatch context whole: amp/tested are non-null only when a co-run (--metrics) computed them at dispatch build
-// time — grep itself never asks for the analysis (R1's no-new-analysis rule); root and valueUses feed L4's reads pass.
+// time — grep itself never asks for the analysis (R1's no-new-analysis rule); root and d.valueUses feed L4's reads pass.
 int emitGrepReport( const MainDispatch& d )
 {
     using namespace rw;
@@ -1007,7 +1007,6 @@ int emitGrepReport( const MainDispatch& d )
     const std::vector<std::uint8_t>*  tested     = d.testedPtr;
     const GrepScanPhases*             prefetched = d.grepPhases;
     const std::string&                root       = d.root;
-    const bool                        valueUses  = d.valueUses;
     const std::string          pat( cfg.grep );
 
     // §P0.4: an invalid --regex used to scan nothing and print hits="0" at exit 0 with an EMPTY stderr —
