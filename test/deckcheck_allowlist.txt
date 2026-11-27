@@ -160,3 +160,5 @@
 --url	curl's URL option (and its @file URL-list form, curl ≥ 8.13), named in changelog.d/353-net-exfil-flow.md as a destination the --scan-skills net-exfil proof refuses to vouch for — a foreign tool flag, not a ripwire flag
 --location	curl's follow-redirects option, named in changelog.d/353-net-exfil-flow.md as an option in option position that withholds the --scan-skills local-dest WARN — a foreign tool flag, not a ripwire flag
 --arm-cells	hooks/ripwire-nudge.sh's own flag ("ripwire-nudge.sh --arm-cells") that prints the first-edit factorial assignment for a list of session ids, quoted in changelog.d/first-edit-factorial.md and docs/SUBSTITUTION_METER.md, not a ripwire flag
+--shard-plan	test/pargates.py's own flag ("pargates.py --shard-plan") that lists each CI shard's gates, quoted in changelog.d/ci-gate-split.md, not a ripwire flag
+--leak-future	bench/cochange/backtest.py's own gate-only flag ("backtest.py --leak-future" reads history at the tip, the defect test/cochangebacktestcheck.sh must catch), quoted in changelog.d/cochange-backtest.md, not a ripwire flag

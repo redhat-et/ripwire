@@ -858,6 +858,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
              + "\",\"line\":" + std::to_string( s.line )
              + ",\"handle\":\"" + mcpdetail::jsonEscape( handleFor( ix, id ) ) + "\""
              + ( rw::isTestedByReach( ing, chTested.testReach, id ) ? ",\"tested\":true" : "" )
+             + ( rw::isAssertedByReach( ing, chTested.testReach, id ) ? ",\"asserted\":true" : "" )   // lane asserted-signal: the CLI row's asserted="1"
              + ( rw::isTestSymbol( ing, id ) ? ",\"test\":true" : "" )   // TIER-FOLLOWUP: the CLI row's test="1" (never beside tested)
              + ( via ? ",\"via\":\"name\"" : "" )   // FE-B: the CLI row's via="name", the same edge bit (defattrib.h, one pass)
              + linkFrag
@@ -3722,7 +3723,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
-                  kTestedRowLegend, impactTestedPartitionLegend( radius.tests, /*testsIgnored=*/false ),   // A6; IMPACT-TEST-TIER, as on the CLI (the server never drops tests)
+                  ( std::string( kTestedRowLegend ) + assertedLensLegend( false, anyAssertedRowIn( ing, impTestReach, show, ipw.begin, ipw.end ) ) ).c_str(),   // lane asserted-signal: present-only
+                  impactTestedPartitionLegend( radius.tests, /*testsIgnored=*/false ),   // A6; IMPACT-TEST-TIER, as on the CLI (the server never drops tests)
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   ( unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ) + implsLegend( imContract.contracts > 0 ) ).c_str(),   // H1, BODILESS-SEED: exactly when the root carries them, as on the CLI
                   std::string( allNextLegend( imAllNext ) )   // BAND DC: exactly when the root carries all_next=, as on the CLI

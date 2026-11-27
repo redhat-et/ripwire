@@ -2937,7 +2937,7 @@ inline CaptureFate qualifyElixirReference( const TagsFile& file, TagsSinks& sink
     return CaptureFate::Keep;
 }
 
-// A C++ or Rust reference's qualifier as written. Returns RULE3-MEMBER-GUARD fix 4's Rust path-call qualifier as written, when
+// A C++, ObjC++ (std-rooted only) or Rust reference's qualifier as written. Returns RULE3-MEMBER-GUARD fix 4's Rust path-call qualifier as written, when
 // longer than one segment ("" otherwise) — set by readReceiverFacts once the receiver fields are.
 inline std::string qualifyPathReference( const TagsFile& file, const TagsMatch& m, RawRef& r )
 {
@@ -2951,6 +2951,17 @@ inline std::string qualifyPathReference( const TagsFile& file, const TagsMatch& 
         // Reference::qualifierRootsStd and graph.h::keepStdQualifiedCandidates.
         r.qualifierRootsStd = cppQualifiedChainRootsStd( m.name.node, file.src );
         cppResplitRefName( r, m.name.text );            // H4 RE-SPLIT at 3+ segments, operator tails, `template` disambiguator
+    }
+    else if( langFacts( lang ).lexicalStdQualifier && r.role == RefRole::Call )
+    {
+        // OBJCXX-STD-QUALIFIER: ObjC++'s `std::X()` arrives as error recovery beside a bare call (ingest_names.h
+        // objcxxStdQualifierBefore), so the std-rooted chain is read back lexically and the call takes the same
+        // keepStdQualifiedCandidates guard a .cpp/.cu/.metal call does. A non-std chain stays unqualified, as before.
+        if( const std::optional<std::string_view> immediate = objcxxStdQualifierBefore( m.name.node, file.src ) )
+        {
+            r.qualifier         = std::string( *immediate );
+            r.qualifierRootsStd = true;
+        }
     }
     else if( langFacts( lang ).bangMacros && r.role == RefRole::Macro )
     {

@@ -309,6 +309,39 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     return ingestTrackedTree( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
+// The BEFORE side of the parse-error delta: the edited file's ERROR/MISSING count as it is on disk now.
+//
+// The run's own ingest already measured it (FileHealth.errNodes), and a warm run carries that measurement through the
+// content cache (v13) and the warm snapshot — so it is read off the index, and the second single-file parse this
+// preview used to make of the UNEDITED file is not paid. On this repo's 1.2 MB src/graph.h that was a second full
+// parse of the biggest file in the tree, made to learn one number the index held.
+//
+// The parse remains the answer whenever the index cannot vouch for the number: fileBytes==0 is FileHealth's NOT
+// MEASURED (a record written before v13, or a file the pool never parsed), and a parsed length that is not the length
+// read from disk now means the index measured other bytes. Reading NOT MEASURED as zero would refuse every payload
+// into a file that already parses degraded — the delta exists so that refusal is about the payload, not the file.
+// `fromIndex` says which of the two answered (RIPWIRE_STATS `[stats] edit-preview … error_baseline=index|parse`).
+struct ErrBaseline
+{
+    std::uint32_t errNodes  = 0;
+    bool          fromIndex = false;
+};
+
+inline ErrBaseline errNodesOnDisk( const IngestResult& ing, std::uint32_t fileId, const std::string& src, const std::string& tmpDir,
+                                   const std::string& rel, std::size_t maxFileBytes, bool captureValueUses )
+{
+    if( fileId < ing.fileHealth.size() )
+    {
+        const FileHealth& h = ing.fileHealth[ fileId ];
+        if( h.fileBytes != 0 && h.fileBytes == src.size() )
+        {
+            return { h.errNodes, true };
+        }
+    }
+    const IngestResult baseOne = ingestOneFile( tmpDir, rel, src, maxFileBytes, captureValueUses );
+    return { baseOne.fileHealth.empty() ? 0u : baseOne.fileHealth[0].errNodes, false };
+}
+
 // E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
 // kPreviewOverwriteBudgetBytes the CDATA is the head, with shown= its size, capped="1" and elided_lines= the rest.
 // The CDATA goes through appendCdataSafe like every served body (a ]]> inside the span is split, never broken).
@@ -416,17 +449,18 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     }
     quality::TmpTreeGuard guard{ tmpRoot };
 
-    // The BEFORE parse is taken here rather than read off ing.fileHealth, so the ERROR-node comparison is
-    // apples-to-apples even when the working-tree parse came from the content cache (where fileBytes==0
-    // means NOT MEASURED and would silently become a zero baseline that refuses every payload).
-    const IngestResult baseOne = ingestOneFile( tmpRoot + "/base", relPath, src,      maxFileBytes, captureValueUses );
     const IngestResult headOne = ingestOneFile( tmpRoot + "/head", relPath, newBytes, maxFileBytes, captureValueUses );
     if( headOne.files.empty() )
     {
         return refuse( "the payload could not be parsed: the spliced file did not survive the crawl" );
     }
-    const std::uint32_t errBefore = baseOne.fileHealth.empty() ? 0u : baseOne.fileHealth[0].errNodes;
+    const ErrBaseline   before    = errNodesOnDisk( ing, fsym.fileId, src, tmpRoot + "/base", relPath, maxFileBytes, captureValueUses );
+    const std::uint32_t errBefore = before.errNodes;
     const std::uint32_t errAfter  = headOne.fileHealth.empty() ? 0u : headOne.fileHealth[0].errNodes;
+    if( memstats::enabled() )   // how many files this preview parsed: the spliced one, plus the on-disk one when the index could not vouch
+    {
+        rw::emitTo( stderr, "[stats] edit-preview parses={} error_baseline={}\n", before.fromIndex ? 1 : 2, before.fromIndex ? "index" : "parse" );
+    }
     if( errAfter > errBefore )
     {   // a DELTA, not an absolute: a file that already parses degraded (a macro-heavy header) must not make
         // every payload refuse — that refusal would be right about the file and wrong about the payload.

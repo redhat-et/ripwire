@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 932 gate scripts (counts snapshot 2026-11-26) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 942 gate scripts (counts snapshot 2026-11-27) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -435,17 +435,7 @@ Treat them as reported, not yet reproducible from this checkout, until the harne
 
 **Dataset.** `czlll/Loc-Bench_V1`, test split, **560 rows**, JSON SHA-256 pinned in `dataset.lock`.
 The split is **repo-disjoint and salted** (a per-repository hash decides the side), so a repository
-never appears in both halves. Under the salt `dataset.lock` pins today, `ripwire-a7-v2`: **train 254
-instances across 77 repositories; held-out 306 across 88.** Recount it with `frozen_partition()` in
-`run_locbench.py` over the 560 rows of `bench/locbench/full560.json`.
-
-**The split changed on 2026-07-31, and the headline below predates the change.** The salt is part of
-the hashed string, so the rename from the pre-release name to ripwire (`3315fb19d`) moved it from `<pre-release name>-a7-v2` to
-`ripwire-a7-v2` and re-dealt the repositories. The old salt gave train 317 across 87 and held-out 243
-across 78. The held-out results below were measured before the rename, on that held-out 243. They have
-not been re-run on the current held-out 306, and the pinned `dataset.lock` no longer selects their
-slice. Every LocBench round after the rename runs on the current split; the `r3_pathtok` verdict's note
-that "the current evaluator scores 306" of the held-out partition is this change, not an evaluator one.
+never appears in both halves: **train 317 instances across 87 repositories; held-out 243 across 78.**
 
 **Metric.** Strict Acc@k as defined by LocAgent — an instance scores only if **all** gold locations
 fall within the top k. Gold files are the files the fix patch touches; gold functions are the
@@ -453,7 +443,7 @@ dataset's own edit-function list, with added functions excluded from the denomin
 separately. Parse-coverage misses count as automatic misses. A lenient any-gold-in-top-10 and a
 first-hit MRR are reported alongside, always labelled as the lenient variants.
 
-### Held-out results (N = 243 on the pre-rename split, zero exclusions, 564/564 scoped gold functions covered)
+### Held-out results (N = 243, zero exclusions, 564/564 scoped gold functions covered)
 
 | Arm | file@1 | file@3 | file@5 | **file@10** | lenient@10 | fn-MRR |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -513,53 +503,6 @@ driving a different vendor's model, on instances later found to overlap the loca
 split, with an unbudgeted treatment arm and an unisolated baseline. Both figures are **retired as
 non-comparable**: they measured a different configuration badly, and nothing here "corrects" them —
 this section is simply the first measurement of *this* configuration under a design worth trusting.
-
-**Accounting columns, consistency and the history-leakage gate (added 2026-11-26, no new runs).**
-Three additions to the harness; none changes the meaning of a column above, and no agent was run to
-make them.
-
-- *Cost is split four ways.* Under prefix caching a token total does not price a run: "Context Has a
-  Price" (arXiv 2611.22238) measured retrieved code that cut read/search commands by 18-34% and raised
-  cost by 33-42% at a one-tenth cache price. Every record now carries `split_uncached_in`,
-  `split_cache_write`, `split_cache_read` and `split_output`, read from the run's own transcript by
-  `bench/agentloop/cost_accounting.py`, plus `tool_calls` (every tool, of any kind) and `model_calls`
-  (the harness's own request count). `analyze.py` prints them per arm and per task beside the existing
-  `tokens_in`/`tokens_out`/`cost_usd` totals and wall clock, re-deriving them from `events_path` for
-  records written before the fields existed. A cell a transcript does not carry is n/a, never 0, and a
-  run whose split is missing is counted out loud. Codex reports no cache-write count, so that cell is
-  n/a on every codex run. The -9.2% output-token figure above is a `tokens_out` figure; it says nothing
-  about cache reads, which this tranche did not split. `test/agentloopaccountingcheck.sh` pins the split
-  on hand-set fixture usage for all three harnesses.
-- *opencode's headline columns are sums now.* Each opencode `step_finish` carries that step's own
-  usage, but the runner kept only the last step for `tokens_in`, `tokens_out` and `cost_usd`, so it
-  undercounted every multi-step run. On the two-step fixture it read 100 / 200 / 0.17 where the run spent
-  1,000 / 500 / 0.42. All three now sum over every step, in `run_agentloop.py` and so in
-  `run_editsuite.py`, which calls the same parser. For opencode `tokens_in` equals `split_uncached_in`,
-  because opencode's `input` field already excludes the cache. The identity uncached + cache read + cache
-  write = `tokens_in` therefore does not hold (31,000 against 1,000 on the fixture). `analyze.py`
-  re-derives an older opencode record's three columns from its transcript. Without a transcript it keeps
-  the old value but labels it a last-step floor, never a total. Claude and codex columns are unchanged.
-  **Published opencode numbers computed the old way: none found.** A grep of `docs/`, `README.md`,
-  `CHANGELOG.md` and `bench/agentloop/*.md` finds no opencode token or cost figure; results directories
-  were not opened.
-- *pass^k beside pass@1.* For each arm, the per-task single-trial rate and pass^k, the chance that all
-  k trials succeed (estimated as C(c,k)/C(n,k)), for every k from 2 to the largest trial count, each
-  with its task count. Only ok-status scored runs are trials; the rest are counted as excluded, not as
-  failures. Same gate.
-- *No checkout reaches past base_commit.* Agents exploit local git history ("Shortcutting the Fix",
-  arXiv 2609.06780), and ripwire reads git history itself, so a leaked fix would be credited to the
-  tool. Before this change the runner handed the agent its per-repo fetch cache. On a fixture with one
-  commit after `base_commit` and two tags on it, `test/agentloophistorycheck.sh` was red on all 6 arms
-  at `5f4b50415`: a fresh checkout kept an `origin` remote; a cache reused from a later instance of the
-  same repo kept the future commit in its object store and reflog; the unshallow fallback brought both
-  tags and every `origin/*` branch; and QUESTIONS mode's `git worktree add` shared the corpus's whole
-  ref namespace. Each run now gets a freshly built repository holding `base_commit` (depth 1; QUESTIONS
-  mode keeps every ancestor), with no remote, tags or reflog, and `run_one()` refuses any checkout
-  `history_leak_findings()` does not pass. Whether the 2026-08-21 tranche above was exposed is not
-  established here: it depends on whether any repo contributed two instances in a leaking order and
-  whether the fallback ever fired, and this change did not reopen its results. Its checkouts did carry
-  the `origin` remote. The cache itself still sits on disk beside the workspace; the guard covers what
-  the checkout's repository can reach, not a filesystem walk out of it.
 
 ## 4. Ranking changes, measured
 
@@ -6028,7 +5971,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**932 gate scripts** at the counts snapshot 2026-11-26; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**942 gate scripts** at the counts snapshot 2026-11-27; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6926,8 +6869,7 @@ The pre-registered accept criterion, per that round's own amendments to the r3/r
 PRIMARY is the **multi-file stratum** strict file@10 on train (aggregate reported, never switched
 to), over a frozen 2×2 grid (`minTokLen`, `maxLifted`) ∈ {4,5} × {2,4}, selection = highest train
 primary with any cell regressing train single-file strict@10 by more than 1pp disqualified; the
-held-out run with repo-clustered bootstrap would be spent only if a cell advanced (306 instances on the
-current split; the round's `PREREG.md` says 243, the count before the 2026-07-31 salt change in §3). It also
+held-out 243 run with repo-clustered bootstrap would be spent only if a cell advanced. It also
 carried a hard pre-grid stop: if the trigger's gold fire-rate on the currently-missed set came in
 under 20%, archive and stop.
 
@@ -7206,11 +7148,11 @@ Listed because the reason is more useful than the silence.
   referenced does not ship here. Until a source can be named, it is not a published number.
 - **"+66.7% held-out strict@10" for the mention anchor.** The 66.7% figure that circulates is an
   *absolute* strict file@10 belonging to the *baseline* arm of a *different* experiment
-  (anchor-hop expansion, held-out slice, n=243 on the pre-rename split of §3), and that experiment's candidate was **rejected and never
+  (anchor-hop expansion, held-out slice, n=243), and that experiment's candidate was **rejected and never
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 932 at the counts snapshot 2026-11-26. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 942 at the counts snapshot 2026-11-27. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites

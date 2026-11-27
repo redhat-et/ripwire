@@ -48,6 +48,7 @@
 #include <limits.h>    // PATH_MAX (hasEnclosingGitRepo realpath buffer)
 #include "infra/pipefields.h"  // PipeFieldReader — the record walk's deadline-keeping read
 #include "infra/os.h"  // rw::os::stat — the zero-popen .git walk-up pre-check; popen/pclose/realpath/localtime_r
+#include "gitrootfacts.h"  // gitDiscoveryView — the .git walk-up (hasEnclosingGitRepo) and the toplevel memo's freshness key
 
 namespace rw
 {
@@ -1325,19 +1326,33 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
 // The repo TOPLEVEL enclosing `absDir` (absolute and already realpath'd), or empty when `absDir` is not inside
 // a git repo at all. realpath'd on the way out so it compares byte-for-byte with a realpath'd file path — on
 // this platform `/tmp` is a symlink to `/private/tmp`, and an unresolved toplevel would fail every prefix test
-// it exists for. MEMOIZED per directory: a directory's toplevel cannot change under a running process, and up
-// to six miners in this file each build their own index in one run.
+// it exists for. MEMOIZED per directory, because up to six miners in this file each build their own index in one run
+// — but a directory's toplevel CAN change under a long-lived MCP or LSP server (`git init` in the root or in a
+// subdirectory of an outer repo, a `.git` removed, a gitfile rewritten, core.worktree edited), so each answer keeps the
+// GitDiscoveryView it was computed under (gitrootfacts.h, a realpath and two stats per level) and git is asked again
+// whenever the view no longer matches. A root git provably cannot see answers "" with no git child at all.
+struct GitToplevelMemo
+{
+    std::string      top;
+    GitDiscoveryView view;
+};
+
 inline std::string gitRepoToplevel( const std::string& absDir )
 {
-    static std::mutex                        toplevelMutex;
-    static HashMap<std::string, std::string> toplevelByProbeDir;
+    static std::mutex                            toplevelMutex;
+    static HashMap<std::string, GitToplevelMemo> toplevelByProbeDir;
 
+    GitDiscoveryView view = gitDiscoveryView( absDir );
+    if( view.provesNoRepo() )
+    {
+        return {};
+    }
     {
         const std::lock_guard<std::mutex> lock{ toplevelMutex };
         const auto                        it = toplevelByProbeDir.find( absDir );
-        if( it != toplevelByProbeDir.end() )
+        if( it != toplevelByProbeDir.end() && it->second.view == view )
         {
-            return it->second;
+            return it->second.top;
         }
     }
 
@@ -1356,7 +1371,7 @@ inline std::string gitRepoToplevel( const std::string& absDir )
     }
 
     const std::lock_guard<std::mutex> lock{ toplevelMutex };
-    toplevelByProbeDir[ absDir ] = top;
+    toplevelByProbeDir[ absDir ] = GitToplevelMemo{ top, std::move( view ) };
     return top;
 }
 
@@ -3603,7 +3618,8 @@ inline std::string enclosingGitWorkTree( const std::string& root )
 
 inline bool hasEnclosingGitRepo( const std::string& root )
 {
-    return !enclosingGitWorkTree( root ).empty();
+    const GitDiscoveryView view = gitDiscoveryView( root );   // the ONE walk-up (gitrootfacts.h); an unresolvable root has no marks → no repo (degrade)
+    return view.hasDotGit();
 }
 
 // ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────

@@ -5,7 +5,9 @@ because a re-ranked top-10 looks plausible either way. This loop makes that impo
 come from real sessions, the labels are written before the ranker is run, and nothing ships without
 a held-out delta.
 
-Read `docs/EVALS.md` §1 (the instruments) and §4 (ranking changes, measured) before you start.
+Read `docs/EVALS.md` §1 (the instruments) and §4 (ranking changes, measured) before you start, and
+orient on the ranker with `./build/ripwire . --for="<the ranking change, in words>"` before you open
+`src/`.
 
 ## Step 0 — recalibrate labels, once, at the START
 
@@ -43,13 +45,20 @@ So: read the source, decide the answer, write the row. **Then** run the ranker. 
 were harvested from the tool's own output can only ever confirm the tool. These labels are allowed
 to say the current ranker is wrong, and they have.
 
+Both lanes score **frozen corpora**, not the live tree: the recall lane a snapshot of every tracked
+`*.md` (2026-08-07), the ranking lane every crawled file (2026-08-19), unpacked fresh per run
+(`bench/recalleval/make_snapshot.py`). A new label's gold must exist in that snapshot —
+`test/recallevalcheck.sh` fails on a skipped label. A gold that is newer than the snapshot needs a
+re-freeze, which is its own commit with its own `docs/EVALS.md` §4 entry, never folded into a ranker
+change.
+
 Split discipline: cases you author now are **held-out**. Do not tune against them and then report
 them as the result. If you tune, tune on a train split and report the held-out one.
 
 ## Step 3 — change the ranker, measure, keep or drop
 
 ```bash
-python3 bench/recalleval/run_recalleval.py .      # the held-out retrieval eval
+python3 bench/recalleval/run_recalleval.py        # the held-out eval, both frozen lanes (--lane recall|ranking)
 ./build/ripwire . --eval-retrieval                # known-item retrieval, four rankers, MRR + recall@1/5/10
 ./build/ripwire . --eval                          # co-change recall vs BM25
 python3 bench/locbench/run_locbench.py --help     # localization, frozen public dataset, repo-disjoint split
@@ -57,9 +66,12 @@ python3 bench/locbench/run_locbench.py --help     # localization, frozen public 
 
 The bars a change must clear, all three, before it can ship:
 
-- **pollution@5** — fixture and generated-path contamination in the top 5. Must not rise.
-- **MRR strict** — must not fall.
+- **pollution@5** — fixture and generated-path contamination in the top 5 (`pollution5`). Must not rise.
+- **MRR strict** — the ranking lane's `mrr_strict`. Must not fall.
 - **the recall lane** — `bench/recalleval/labels_recall.tsv`. Must not fall.
+
+`test/recallevalcheck.sh` holds the floors for both lanes; a change that needs a floor moved owes the
+reason in that gate's header, the way every earlier move is recorded there.
 
 A change that improves one bar and breaks another has not won; say which trade it makes and let me
 decide. A change that moves nothing measurable **does not ship** — record it as a negative result
@@ -75,8 +87,9 @@ State the corpus and the N with every number. A delta with no N is not a result.
   returned — check the gold is actually indexed before you call it a ranker miss.
 - **A refusal names the flag, the problem, and an example.** If a mined query makes a selector
   refuse, that is a refusal-quality finding, not a ranking finding — file it separately.
-- The retrieval evals are **benchmarks, not goldens**: on a live repository the numbers move as
-  documents and commits land. The gate suite is the golden. Never pin a benchmark number as a gate.
+- The live-tree evals (`--eval-retrieval`, `--eval-mined`, `--eval`) are **benchmarks, not goldens**:
+  their numbers move as documents and commits land, so never pin one as a gate. The frozen recalleval
+  lanes are the exception, and only because their corpus cannot move.
 
 ## Process
 

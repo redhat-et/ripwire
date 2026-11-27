@@ -326,11 +326,13 @@ for _g in \
     archcheck \
     archhonestcheck \
     archmetricscheck \
+    archunqualifiedcheck \
     argvdiffcheck \
     arisefollowupcheck \
     ariseshimcheck \
     aritycheck \
     artifactcheck \
+    assertedcheck \
     astqueryregexcheck \
     astrocheck \
     atcheck \
@@ -404,6 +406,7 @@ for _g in \
     cloneoperandcheck \
     clonepersistcheck \
     clsrecvcheck \
+    cochangebacktestcheck \
     cochangeboostcheck \
     cochangecliocheck \
     cochangesurprisecheck \
@@ -510,6 +513,7 @@ for _g in \
     editplanrecheckcheck \
     editplanrollbackmsgcheck \
     editpreviewcheck \
+    editpreviewwarmcheck \
     editroundtripcheck \
     edittargetfileabscheck \
     eliximportcheck \
@@ -836,6 +840,7 @@ for _g in \
     mergescoutlonglinecheck \
     metalcheck \
     meterdisclosurecheck \
+    metriclegendcheck \
     metricscheck \
     modifierguardcheck \
     moduleconstcheck \
@@ -864,6 +869,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    norepogitcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
@@ -985,6 +991,7 @@ for _g in \
     qualnamecheck \
     qualnewcheck \
     qualnscallcheck \
+    querycachereusecheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \
@@ -1076,6 +1083,7 @@ for _g in \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
+    rustturbofishcheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1097,6 +1105,7 @@ for _g in \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \
+    shardapartcheck \
     shellgateindexcheck \
     shellnestcheck \
     showcasecapturecheck \
@@ -1119,6 +1128,7 @@ for _g in \
     skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
+    skillshapecheck \
     skilltruthcheck \
     skipclassifycheck \
     skippedcheck \

@@ -4,9 +4,11 @@ You are bringing **Visual Basic .NET** into ripwire as a first-class language. T
 vendored tree-sitter grammar, symbol and call extraction, the disclosures that say what the grammar
 cannot see, and a red-first gate. The extension is `.vb`.
 
-This prompt is self-contained. `prompts/add-a-language.md` is the general form of the path and is
-worth reading. Every step VB needs is repeated here, together with what was verified about the VB
-grammar landscape on **2026-09-11**. Re-check anything dated before you rely on it.
+`prompts/add-a-language.md` is the general path; follow it for the mechanics. This prompt adds what
+is specific to VB: the grammar landscape (verified **2026-09-11**, re-checked **2026-11-26**), the
+corpora, and the design decisions. Re-check anything dated before you rely on it.
+
+Status (2026-11-26): #165 is open with no claim. Nothing under `src/` or `queries/` mentions VB.
 
 **The short version:** a VB.NET tree-sitter grammar exists, but it is not usable as a dependency
 today. It has no license file, no upstream maintenance since July 2025 and no test corpus, and it
@@ -40,10 +42,7 @@ Work in a git worktree, not the main checkout. Run gates in the foreground.
   [scip-dotnet v0.2.0](https://github.com/sourcegraph/scip-dotnet/releases) (2023-06-05). The
   project's plan is to support every language on that table first-class, as well as we can
   ([#70](https://github.com/redhat-et/ripwire/issues/70)).
-  - ripwire already indexes Java, TypeScript, JavaScript, Rust, C, C++, Ruby, Python, C#, Dart and
-    PHP.
-  - Kotlin landed in [#126](https://github.com/redhat-et/ripwire/pull/126) (merged 2026-09-11), and
-    Scala has its own kit.
+  - ripwire indexes every language on that table except Scala (its own kit, #159) and Visual Basic.
   - **Visual Basic is the other gap.**
 - **First-class means the whole tool**, not a navigation-only row. That covers bodies, complexity,
   clones, lint, `--match`, parse health and the call graph, all from the one offline binary without
@@ -105,11 +104,16 @@ Downstream fixes exist, but **none is upstream**:
   next-line `Inherits`/`Implements`, `Handles`, `AddHandler`/`RaiseEvent`, `As New`, member-level
   `#Region` and nested types.
 - A [fork](https://github.com/Kellett/tree-sitter-vb-dotnet) (2026-08-25) carries a longer fix list,
-  including parenthesised `(Of ...)`, import aliases, nullable types and a `word` token.
+  including parenthesised `(Of ...)`, import aliases, nullable types and a `word` token. On 2026-08-26
+  (`176b9587e48b`) it also added an MIT `LICENSE` written by the fork's author, naming CodeAnt AI as
+  the 2025 copyright holder.
 - [Another fork](https://github.com/jamie8johnson/tree-sitter-vb-dotnet) (2026-03-07) adds a LICENSE
   file.
 
-None of them combines the grammar fixes with a license from the original author.
+None of them combines the grammar fixes with a license from the original author. Whether the
+Kellett fork's downstream-added license is enough to vendor is an **owner call**: ask on #165 before
+you plan Route A around it. Re-checked 2026-11-26: upstream is unchanged (last push 2025-07-28), issue
+#7 still has no comments, and PR #8 stays closed unmerged.
 
 ### Not candidates
 
@@ -244,53 +248,40 @@ Start this only after STEP 0 clears the bar. It follows the path Dart took (comm
 - Index `.vb` only. `.vbhtml` is Razor markup with VB islands, and belongs to a later round that is
   disclosed.
 
-### STEP 1: vendor the grammar (guardrail G3)
+**Orient first.** Before opening files, run
+`./build/ripwire . --for="register a new tree-sitter language: Lang enum, kLangTable row, kLangFacts row, tags.scm"`
+and `./build/ripwire . --for="C# csharp extraction tags.scm using imports test attributes"`. Before you
+write a helper or the gate, `--exemplar="<what you are writing>"`; `test/csharpcheck.sh` and
+`test/dartcheck.sh` are the nearest gates.
 
-- **`CMakeLists.txt`:**
-  - Add `add_ts_grammar( <name> <git-url> <full-commit-sha> )` with an ABI comment in the style of
-    the C# and Dart lines.
-  - Add the name to the grammar list, beside `csharp dart elixir`.
-  - Add `$<TARGET_OBJECTS:ts_<name>>` to the link line and `ts_<name>` to the object list.
-  - Add `add_ripwire_fuzzer( <name> tree_sitter_<entry> <name> )`.
-- **`third_party/deps/<name>/`:** the generated `src/parser.c`, `src/tree_sitter/*.h` and the
-  grammar's `LICENSE`, all verbatim.
-- **`THIRD_PARTY.md`:** one row with the directory, name and ABI, authors, license, SHA, URL and
-  size.
-- The build must still complete with the network off.
+### STEPS 1–2: vendor and register (add-a-language STEPS 1–2, data first)
 
-### STEP 2: register the language
+The files have moved since add-a-language.md's Elixir reconstruction; Lua and PHP (`a8b99318f`),
+GDScript (`1ca964b89`) and Clojure (`3205e4c85`) show the current set.
 
-- **`src/model.h`:**
-  - Append to `enum class Lang`. **Append only**: the value is serialized into the cache.
-  - `kLangCount` spells out the last enumerator, so update it too.
-  - Add the `langTag` case.
-- **`src/ingest_crawl.h`:** add the `kLangTable` row and bump the `std::array<LangEntry, N>` size.
-- **`src/ingest.cpp`:** add the `tree_sitter_<entry>` declaration and the dispatch.
-- **Tables sized by `kLangCount`:** `kLangName` in `src/tsprobe.cpp` and `kLangColors` in
-  `src/htmlexport.h`. Both `static_assert` against `kLangCount`.
-- **`src/verbs_doctor.h`:** the declaration and the probe row.
-- **`src/lintrules.h`:** the name map and the extension map. Add to `dependencyCapable()` only
-  together with dependency edges.
-- **Registration tables:** `src/lintcatalog.h`, `src/nonlocalstate.h` (the unanalyzed-language
-  table) and `src/clones.h`.
-- **`src/serialize.h`:** the token calibration row. C# and PHP both carry a reasoned 2.55 that has
-  not yet been measured.
-- **`src/cli.h`:** the language line in `--help`. Then re-pin `test/printf_parity.manifest`.
-- **C# arms worth reading first:**
-  - `src/ingest_metrics.h`: complexity keywords and parameter-list node kinds.
-  - `src/naminglens.h`: C# shares a naming rule with C++, C, ObjC and Java.
-  - `src/ingest_names.h`: `csharpAttrIsTestMarker`. `Test`, `Fact` and `TestMethod` are the same
-    attributes VB writes as `<Fact>`.
-  - `src/pattern.h`: the `--match` wrapper row.
-- **Docs:** `README.md` (the language list and the per-language paragraph) and
-  `docs/ARCHITECTURE.md`.
-- **Gates that enumerate grammars:**
-  - `test/dependencypincheck.sh`
-  - `test/ripwirepubliccheck.sh` (`_grammars`)
-  - `test/fuzz/run.sh` and `test/fuzz/seeds/<name>/valid`
-  - `test/g1configcheck.sh` (seed count)
-  - the doctor grammar count in `test/dartcheck.sh` and `test/elixircheck.sh` (both pin `23` today)
-  - a `test/gateexitcheck.sh` row for your gate
+- **Vendoring.** `add_ts_grammar` with a full SHA and an ABI comment in the style of the C# and Dart
+  lines, plus the grammar list, link line, object list and `add_ripwire_fuzzer` in `CMakeLists.txt`;
+  the generated `src/parser.c`, `src/tree_sitter/*.h` and `LICENSE` verbatim under
+  `third_party/deps/<name>/`; a `THIRD_PARTY.md` row with ABI, license, SHA and size. The build must
+  still complete with the network off.
+- **The language is data.** `queries/<name>/tags.scm`, and one `kLangFacts` row in
+  `src/langfacts.h` (a missing row does not compile). C#'s row is the one to read beside it.
+- **Registration.** The `enum class Lang` append and `langTag` case in `src/model.h`, the `kLangTable`
+  row in `src/ingest_crawl.h`, its `kLintExtRows`/`kLangTokenRows` mirrors in `src/lintrules.h`. The
+  compile-time checks in `src/ingest_crawl.h` and `src/main.cpp` (`7ece90b40`) name every remaining
+  table you missed (`kLangName` in `src/tsprobe.cpp`, `kLangColors` in `src/htmlexport.h`, the
+  catalog, `kUnanalyzedLangs`, the clone masks), and `test/langidentitycheck.sh` refuses a new
+  `== Lang::X` compare in a shared file. Add to `dependencyCapable()` only together with dependency
+  edges. `src/serialize.h`'s token calibration row: C# carries a reasoned 2.55, not yet measured.
+- **C# arms worth reading first:** complexity keywords and parameter-list kinds in
+  `src/ingest_metrics.h`; the naming rule C# shares with C++, C, ObjC and Java in `src/naminglens.h`;
+  `csharpAttrIsTestMarker` in `src/ingest_names.h` (`Test`, `Fact` and `TestMethod` are the
+  attributes VB writes as `<Fact>`); the `--match` wrapper row in `src/pattern.h`.
+- **Gates and docs that enumerate grammars:** `test/dependencypincheck.sh`, `test/ripwirepubliccheck.sh`,
+  `test/fuzz/run.sh` with `test/fuzz/seeds/<name>/valid`, `test/g1configcheck.sh`, the doctor grammar
+  count in `test/dartcheck.sh` and `test/elixircheck.sh` (both pin `27` today), a
+  `test/gateexitcheck.sh` row; the `--help` language line in `src/cli.h` (then re-pin
+  `test/printf_parity.manifest`), `README.md` and `docs/ARCHITECTURE.md`.
 
 ### STEP 3: extraction
 
@@ -302,11 +293,10 @@ Start this only after STEP 0 clears the bar. It follows the path Dart took (comm
 - These names change if the grammar does.
 - Spans and bodies live in `src/ingest_sidecap.h`.
 
-### STEP 4: extraction identity, in one commit
+### STEP 4: extraction identity
 
-- `kParserVer` (`src/ingest_cache.h`) and `kIngestParserVerMirror` (`src/quality.h`) must be equal.
-  Otherwise `test/qextractionkeycheck.sh` fails with a message that reads like an unrelated bug.
-- `kCacheVersion` and `kIngestCacheVersionMirror` move only if a record's shape changes.
+As add-a-language STEP 4: `kParserVer` and `kIngestParserVerMirror` in one commit, a number the
+maintainers assign in the PR. `kCacheVersion` moves only if a record's shape changes.
 
 ### STEP 5: relations, in a separate round
 
@@ -338,12 +328,12 @@ Each subsection ends in decisions your plan must make, and each decision needs a
   identifiers as the same when their lowercase mappings are the same
   ([Language independence](https://learn.microsoft.com/en-us/dotnet/standard/language-independence)).
 
-**What ripwire does today** (as of `766913d0`):
+**What ripwire does today** (re-checked 2026-11-26):
 
-- Call resolution looks names up byte-exactly (`byName` in `src/graph.h`), and no language folds
-  case there.
-- Case-insensitive helpers exist for other jobs: `rw::ciEqualAscii` in `src/arch.h`, and the
-  whole-name match `--for` uses in `src/lexical.h`.
+- Call resolution looks names up byte-exactly, and no language folds case there.
+- The one ASCII fold is `strkern::lowerFoldedEquals` / `lowerFoldedStartsWith`
+  (`src/infra/strkern.h`), which since 2026-11-25 replaced the private copies in `src/arch.h` and
+  `src/docparse.h`. Reuse it; do not add a third fold.
 
 **Decide:**
 
@@ -510,34 +500,14 @@ is CompactGUI.
 
 ### The risk: the Kotlin lesson
 
-While reviewing Kotlin ([#126](https://github.com/redhat-et/ripwire/pull/126)), maintainers measured
-what an unguarded bridge did.
-
-**What happened:**
-
-1. Kotlin↔Java bare-name admission in `langCompatible` (`src/graph.h`) let test-only Kotlin
-   `body()` functions join Java calls' candidate sets.
-2. Java's `Response.body` stopped being a unique global name.
-3. The resolver's locality ladder (same file, then same directory, then a unique global, else no
-   edge) dropped the calls.
-4. On square/retrofit, `Response.body` went from **279 callers to 5**. Files Java never references
-   deleted 253 Java (caller, callee) pairs, and every header gauge stayed where it was.
-
-**The fix was an own-language-first rule.** A Java or Kotlin reference admits the other language's
-candidates only when its own language defines no candidate of that name.
-
-- With the rule, retrofit is back to 279 callers.
-- Its stated cost is one Kotlin pair across retrofit, ktor and nowinandroid: a same-directory
-  cross-language target can lose to same-named own-language definitions elsewhere.
-
-**Current status.**
-
-- #126 merged on 2026-09-11, so that filter is on `main`: `keepOwnJvmLanguageCandidates` in
-  `src/graph.h`.
-- [#136](https://github.com/redhat-et/ripwire/pull/136) has merged (d752d953), so those silent drops
-  now show as `declined=`.
-
-Generalise that filter for a VB↔C# bridge instead of writing a second one beside it.
+Kotlin↔Java bare-name admission (#126) let test-only Kotlin `body()` functions join Java calls'
+candidate sets; the locality ladder then declined the now-ambiguous calls, and on square/retrofit
+Java's `Response.body` went from **279 callers to 5** with every header gauge unmoved. The fix is an
+own-language-first rule: a Java or Kotlin reference admits the other language's candidates only when
+its own language defines none. It is on main as `keepOwnJvmLanguageCandidates` (`src/graph.h`); the
+bridge itself is the `edgeFamily` column of `src/langfacts.h`, which `langCompatible` reads, and such
+drops now show as `declined=` (#136). Generalise that filter for a VB↔C# bridge instead of writing a
+second one beside it.
 
 **Case folding makes the .NET version worse.** A folded VB lookup for `tostring` meets every C#
 `ToString`, `Equals` and `Dispose` in the solution.
@@ -545,7 +515,7 @@ Generalise that filter for a VB↔C# bridge instead of writing a second one besi
 ### Recommendation
 
 - **Round 1 is VB-only.**
-  - `langCompatible` admits VB↔VB and nothing else.
+  - `langCompatible` admits VB↔VB and nothing else: the VB row leaves `edgeFamily` empty.
   - Prove it on a mixed corpus: the set of C# (caller, callee) pairs is identical with and without
     the `.vb` files present.
 - **Round 2 is a separate PR, after an owner go-ahead.** It adds a .NET bridge with
@@ -605,16 +575,13 @@ Generalise that filter for a VB↔C# bridge instead of writing a second one besi
 - [ ] `./build/ripwire . --quality-delta --legend=compact` is clean, then `--test-gate` passes, then
       the full suite passes in the foreground: `python3 test/pargates.py . ./build/ripwire -j 6`.
 
+**Done means** for the grammar round: the STEP 0 table at or near the bar, on a licensed SHA. For the
+integration round: `bash test/vbcheck.sh` red on the base binary and green on yours, plus the boxes
+above.
+
 ---
 
 ## 8. Known traps
-
-**Version bumps and their mirrors.**
-
-- `kParserVer` and `kIngestParserVerMirror` move together, in one commit.
-- Parallel lanes claim the same next number. #126 hit that twice while rebasing, and re-bumped to
-  the next free value each time rather than keeping either side's number.
-- Choose your number at merge time, not at branch time.
 
 **The qschemetrip re-pin.**
 
@@ -635,21 +602,12 @@ a capture recorded on your branch describes a tree that no longer exists after t
 | `test/printf_parity.manifest` | re-pin after the `--help` text moves |
 
 **A clean merge with the wrong population.** Git merges text, not meaning. Other language PRs append
-to `enum class Lang` too (#233 adds GDScript), and a textually clean merge can still leave:
-
-- `kLangCount` naming the wrong last enumerator
-- `kLangTable`'s array size one short
-- two lanes sharing the same `kParserVer`
-
-The Dart landing found seven per-language arrays sized off `Lang::Elixir + 1`. Appending Dart
-silently dropped it from the `--skipped` language census: 2,959 files and 39,570 symbols went
-missing. After every merge, run:
-
-1. a clean rebuild
-2. the doctor grammar count
-3. `test/langcensuscheck.sh`
-4. `test/qextractionkeycheck.sh`
-5. a `--skipped` run that shows your `<lang>` row
+to `enum class Lang` too (Zig, #166, is in flight). The compile-time checks catch a stale `kLangCount`
+or a missing table row; they cannot catch two lanes sharing one serialized value or one
+`kParserVer`. The Dart landing, before those checks, silently dropped 2,959 files from the
+`--skipped` census. After every merge: a clean rebuild, the doctor grammar count,
+`test/langcensuscheck.sh`, `test/qextractionkeycheck.sh`, and a `--skipped` run that shows your
+`<lang>` row.
 
 **A binary that cannot exist.** Touching `src/model.h` while a build runs, or building across a
 branch switch, produces objects that disagree on `sizeof(Symbol)`. Rebuild with
@@ -673,24 +631,14 @@ that the right file wins.
 ## 9. What the PR description must contain
 
 1. **The grammar decision** (Route A or B), with the license status at the pinned SHA and a link.
-2. **STEP 0 numbers**, for each corpus:
-   - its SHA
-   - the clean-file fraction, with designer files separate
-   - the error-byte share
-   - the work list
-   - both instruments
+2. **STEP 0 numbers** per corpus: SHA, clean-file fraction (designer files separate), error-byte
+   share, the work list, both instruments.
 3. **The blind spots disclosed**, and where each shows up in the output: root namespace, late
-   binding, XML literals, preprocessor branches, runtime functions, `Handles` dispatch, and
-   non-ASCII folding.
-4. **The case-folding design**: where it folds, what folds, how ambiguity is disclosed, and the
-   determinism evidence.
-5. **The cross-language decision**, with the C# byte-identity or pair-conservation evidence behind
-   it.
-6. **Before and after numbers** on the non-VB corpora: byte-identical, or every difference
-   explained.
-7. **The version moves**: `kParserVer`, any cache or scheme bump and why, plus the gates and
-   sanitizer runs.
-8. **What is deferred**, each item with its reason.
+   binding, XML literals, preprocessor branches, runtime functions, `Handles` dispatch, non-ASCII
+   folding.
+4. **The case-folding design** and **the cross-language decision**, each with its evidence.
+5. **Before and after on non-VB corpora**, the version moves, the gates and sanitizer runs, and what
+   is deferred with its reason.
 
 ---
 
@@ -699,7 +647,7 @@ that the right file wins.
 Do not write code yet. Write a plan that contains:
 
 - **The route** (A or B) and the evidence for it, including whether issue #7 has moved since
-  2026-09-11.
+  2026-11-26, and the owner's answer on the Kellett fork's license.
 - **STEP 0 as you will run it:** the grammar SHA, the corpora and their SHAs, the instruments, and
   the report table.
 - **The lanes, in order:**

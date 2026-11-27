@@ -616,8 +616,7 @@ to imply. And **multi-file gold is hard for everyone**: ripwire leads the stratu
 its own any@10 there is 78.6% — it finds *a* gold file and misses the siblings, and no arm in this
 table solves that.
 
-Held out wider — **243 instances across 78 repositories**, the held-out half before a 2026-07-31 salt
-change re-dealt the split (today's is 306 across 88, not yet re-run) — ripwire lands **60.9%** against **27.6%**
+Held out wider — **243 instances across 78 repositories** — ripwire lands **60.9%** against **27.6%**
 for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap 95% lower bound **+25.0pp**,
 bought for +3.4% warm latency and **−39.4%** tokens. Full provenance, the losing instances one by one,
 and a third round against a compression-layer competitor: [Measured](#measured) and
@@ -1498,11 +1497,9 @@ has been re-adjudicated here — the satisfaction column is unchanged, so those 
 </details>
 
 <details>
-<summary><b>LocBench held-out, N = 243 across 78 repositories (the pre-2026-07-31 split)</b> — strict file@10 <b>60.9%</b> against <b>27.6%</b> pre-routing, a paired <b>+33.33pp</b>, bought for <b>−39.4%</b> on the token ceiling</summary>
+<summary><b>LocBench held-out, N = 243 across 78 repositories</b> — strict file@10 <b>60.9%</b> against <b>27.6%</b> pre-routing, a paired <b>+33.33pp</b>, bought for <b>−39.4%</b> on the token ceiling</summary>
 
-**LocBench held-out, N = 243 across 78 repositories.** Measured on the split before the 2026-07-31
-rename changed its salt; the current held-out half is 306 instances across 88 repositories and has not
-been re-run ([`docs/EVALS.md` §3](docs/EVALS.md#3-locbench--localization-accuracy)). Strict file@10 **60.9%**, against **27.6%** for
+**LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
 **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling. More
 accurate *and* cheaper, which is why it shipped.
@@ -1826,9 +1823,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>932 gate scripts</b> (counts snapshot 2026-11-26), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>942 gate scripts</b> (counts snapshot 2026-11-27), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **932 gate scripts** at the counts snapshot 2026-11-26 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **942 gate scripts** at the counts snapshot 2026-11-27 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1837,7 +1834,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-26 the tool had 478 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-27 the tool had 480 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names

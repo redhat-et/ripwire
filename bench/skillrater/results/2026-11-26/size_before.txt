@@ -1,0 +1,20 @@
+skill                         desc_B  body_B   refs_B nrefs
+ripwire-before-you-build         340    2728     7658     1
+ripwire-change-check             317    3259    18165     3
+ripwire-find-bug                 320    2542     8558     1
+ripwire-fresh-eyes               380    3204    43576     6
+ripwire-graph-query              319    2027     4208     1
+ripwire-handoff                  289    2121     7149     1
+ripwire-layers                   298    2225     5930     1
+ripwire-mcp                      292    3205    43819     7
+ripwire-navigate                 306    2615    20087     3
+ripwire-opt-remarks              267    1691    12377     1
+ripwire-orient                   410    4266    44831     6
+ripwire-perf-target              310    2536     9180     1
+ripwire-quality-bar              340    3599    50933     6
+ripwire-reuse-first              320    2191     5027     1
+ripwire-router                   281    4231    23407     5
+ripwire-security-scan            313    2672    11025     2
+ripwire-write-tests              359    2131     3938     1
+TOTAL (17 skills)               5461   47243   319868    47
+est. tokens (bytes/4): desc 1365  body 11811  refs 79967  all 93143

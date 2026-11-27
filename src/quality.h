@@ -83,6 +83,13 @@ inline const char*        kBaselineFile  = ".ripwire_quality_baseline";
 constexpr std::uint32_t   kMinCloneTokens = 18;     // matches the --clones default (so both verbs see the same clones)
 constexpr std::uint32_t   kCcxBar         = 15;     // P8 (L7): situ.h spells this as kTestGateCcxBarMirror (test-gate root ccx_bar=) — the static_assert below the constants keeps them equal     // SonarSource cognitive-complexity bar — a regression must end up OVER this
 
+// WHAT A BAR IS (lane metric-labels, 2026-11-26; docs/METHODOLOGY.md §9.3). kCcxBar, kLocBar, kNestBar and kParamBar are
+// delta heuristics, not smell detectors: a row says a change made a function worse AND left it past a bar, never that the
+// function is a Long Method or any other labelled smell, and a function under every bar is not certified clean. None was
+// fitted to human smell labels. The one human-labelled length reference on record is MLCQ Long Method >= 26 lines, MCC 0.777
+// (arXiv 2611.01636, single author, preprint; reviewers' own cutoffs ran 17 to 34 lines), and on five Java systems no single
+// size/complexity threshold separated the files later refactored (SPLASH 2026 SRC). Recorded as a reference point only:
+// kLocBar stays 60 and no default moves on a citation — a bar moves on a measurement of this tool's own rows.
 // Q1 — bars for the MEASURED agent-code failure modes: agent code runs 2.3×
 // verbose, erodes structure in 77% of trajectories, drifts contracts. Each per-symbol kind mirrors ccx's
 // "grew AND now over a bar" discipline (`now > was && now > BAR`) — a bar so a benign +1 line / +1 nest of an
@@ -3131,6 +3138,10 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
 // exists, but a --since window matched zero commits". popen failure degrades to false.
 inline bool gitRepoHasHistory( const std::string& root )
 {
+    if( gitRootProvablyNoRepo( root ) )
+    {
+        return false;   // git cannot find a repository from here, so it is not asked (gitrootfacts.h; re-read every call, never stale)
+    }
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " rev-parse --verify --quiet HEAD 2>/dev/null";
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
@@ -3320,8 +3331,14 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 55;   // MUST equal ingest.cpp's kCacheVersion (gated); 55 = lane tangle-rule (def record block facts maxBlock10 + cross), 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 342;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 57;   // MUST equal ingest.cpp's kCacheVersion (gated); 57 = lane asserted-signal (Python assert statement refs; above main's 55), 55 = lane tangle-rule (def record block facts maxBlock10 + cross), 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 350;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 350 = 2026-11-26 (train m5-1126-5): ONE number above #769's placeholder 344 (rich 345; Rust turbofish calls) and
+                                                          //   #778's placeholder 348 (rich 349; ObjC++ std::-qualified calls). Rich file tag 351.
+                                                          // --- history: lane objcxx-std-qualified carried 348 (placeholder) ---
+                                                          // 348 = 2026-11-26 (lane objcxx-std-qualified, PLACEHOLDER above drafts #769's 344 and the
+                                                          //   RESOLVER lane's possible 346; rich file tag 349): ObjC++ `std::X()` carries its std-rooted qualifier.
+                                                          // --- history: 342 ---
                                                           // 342 = 2026-11-22 (IN9): the 0.7.0 train (340, rich 341) merged with origin/main b576a95e3 (337, #715,
                                                           //   rich 338) — ONE number above both. Rich file tag 343. Both histories below.
                                                           // --- history: the 0.7.0 train carried 340 ---
@@ -4265,37 +4282,11 @@ inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>&
     return kept;
 }
 
-// Hygiene: within one (repo, excludes) FAMILY, keep at most `keep` HEAD-snapshot cache files (newest by mtime);
-// delete older ones so HEAD-sha churn (a new file per commit) cannot grow the cache dir without bound. Scoping
-// per family (repoHex-exclHex prefix) — not per bare repo — means alternating --exclude configs do not evict
-// one another (the lean/rich lesson). `keepPath` (the file we are about to use) is always retained regardless of
-// mtime granularity. Degrade-only: any filesystem error is swallowed via the error_code overloads — eviction is
-// best-effort hygiene, never a correctness or crash risk.
-// The prefix-generic body: keep the `keep` newest ".bin"/".cache" files whose name begins with `prefix`, delete older
-// ones, always retain `keepPath`. Both the qheadsnap (ingest) and qsnap (Snapshot) cache families share this
-// (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
-//
-// A5 (cache-dir hygiene) generalization: a THIRD shape of sweep showed up (see sweepStaleCacheBlobsOnce below) —
-// age-then-size across the WHOLE "ripwire-*" family rather than a keep-N-newest cap on one sub-family — so this
-// is the rule-of-three consolidation the paragraph above already anticipated, not a second copy-pasted sweeper.
-// Two independent, optional passes run BEFORE the original count cap (each a no-op at its zero default, so the
-// qheadsnap/qsnap call sites below are byte-for-byte unaffected):
-//   maxAgeDays > 0     — delete any matching blob older than that many days outright.
-//   maxTotalBytes > 0  — if the family's surviving total still exceeds it, delete oldest-first until under.
-// `keepPath` is never deleted by any pass, in every case.
-//
-// Y4: covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
-// sharded one `resolveCacheBlobPath`/blobShardHex now write into (matching entries under `dir`'s 2-hex-char
-// subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
-// layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
-// bounded set (never an open-ended recursive walk of a shared $TMPDIR that may hold unrelated large trees).
-//
-// P1-1: the byte-budget pass additionally PINS the root `keepPath` belongs to (see evictBySizeBudget). That
-// needs no new parameter and no plumbing — the pin key is a function of `keepPath`, which every call site
-// already passes — and it cannot reach the keep-N call sites below, which run with maxTotalBytes == 0.
-inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
-                                 const std::string& keepPath, std::size_t keep,
-                                 double maxAgeDays = 0.0, std::uintmax_t maxTotalBytes = 0 )
+// Every ".bin"/".cache" file under `dir` whose name begins with `prefix`, in BOTH blob layouts — the legacy flat one
+// (directly under `dir`) and the sharded one resolveCacheBlobPath writes (`dir`'s 2-hex-char subdirectories, an exact
+// bounded set, never an open-ended recursive walk). Best-effort: an unreadable dir or shard contributes nothing.
+// Shared by evictOldCacheFamily and seedHeadSnapCache, so the family the seed reads is the family the evictor caps.
+inline std::vector<CacheBlobStat> listCacheFamily( const std::string& dir, const std::string& prefix )
 {
     namespace fs = std::filesystem;
 
@@ -4350,13 +4341,13 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     fs::directory_iterator it( fs::path( dir ), ec ), end;
     if( ec )
     {
-        return; // unreadable cache dir → nothing to evict, no crash
+        return {}; // unreadable cache dir → an empty family, no crash
     }
     for( ; it != end; it.increment( ec ) )
     {
         if( ec )
         {
-            return;
+            return {};   // a listing cut short is no listing: the evictor must never act on part of a family
         }
         const std::string name = it->path().filename().string();
         if( name.size() == 2 && std::isxdigit( static_cast<unsigned char>( name[0] ) ) && std::isxdigit( static_cast<unsigned char>( name[1] ) ) )
@@ -4386,6 +4377,44 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     {
         scanOneDir( sd );
     }
+    return mine;
+}
+
+// Hygiene: within one (repo, excludes) FAMILY, keep at most `keep` HEAD-snapshot cache files (newest by mtime);
+// delete older ones so HEAD-sha churn (a new file per commit) cannot grow the cache dir without bound. Scoping
+// per family (repoHex-exclHex prefix) — not per bare repo — means alternating --exclude configs do not evict
+// one another (the lean/rich lesson). `keepPath` (the file we are about to use) is always retained regardless of
+// mtime granularity. Degrade-only: any filesystem error is swallowed via the error_code overloads — eviction is
+// best-effort hygiene, never a correctness or crash risk.
+// The prefix-generic body: keep the `keep` newest ".bin"/".cache" files whose name begins with `prefix`, delete older
+// ones, always retain `keepPath`. Both the qheadsnap (ingest) and qsnap (Snapshot) cache families share this
+// (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
+//
+// A5 (cache-dir hygiene) generalization: a THIRD shape of sweep showed up (see sweepStaleCacheBlobsOnce below) —
+// age-then-size across the WHOLE "ripwire-*" family rather than a keep-N-newest cap on one sub-family — so this
+// is the rule-of-three consolidation the paragraph above already anticipated, not a second copy-pasted sweeper.
+// Two independent, optional passes run BEFORE the original count cap (each a no-op at its zero default, so the
+// qheadsnap/qsnap call sites below are byte-for-byte unaffected):
+//   maxAgeDays > 0     — delete any matching blob older than that many days outright.
+//   maxTotalBytes > 0  — if the family's surviving total still exceeds it, delete oldest-first until under.
+// `keepPath` is never deleted by any pass, in every case.
+//
+// Y4: covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
+// sharded one `resolveCacheBlobPath`/blobShardHex now write into (matching entries under `dir`'s 2-hex-char
+// subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
+// layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
+// bounded set (never an open-ended recursive walk of a shared $TMPDIR that may hold unrelated large trees).
+//
+// P1-1: the byte-budget pass additionally PINS the root `keepPath` belongs to (see evictBySizeBudget). That
+// needs no new parameter and no plumbing — the pin key is a function of `keepPath`, which every call site
+// already passes — and it cannot reach the keep-N call sites below, which run with maxTotalBytes == 0.
+inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
+                                 const std::string& keepPath, std::size_t keep,
+                                 double maxAgeDays = 0.0, std::uintmax_t maxTotalBytes = 0 )
+{
+    namespace fs = std::filesystem;
+
+    std::vector<CacheBlobStat> mine = listCacheFamily( dir, prefix );
 
     // age pass: outright delete anything past the cutoff (disabled when maxAgeDays == 0).
     if( maxAgeDays > 0.0 )
@@ -4529,6 +4558,53 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
                                     const std::string& keepPath, std::size_t keep = 2 )
 {
     evictOldCacheFamily( dir, "ripwire-qheadsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
+}
+
+// EDITCHECK-PREVIEW-FAST — a NEW HEAD starts from the previous HEAD's parse, not from nothing.
+//
+// The qheadsnap ingest cache is named by HEAD sha, so the first --edit-check, --edit-check --dry-run preview or
+// --quality-delta after ANY commit found no blob and re-parsed the whole committed tree: on this repo (4,996 files),
+// after a one-file commit, `cache-stats reparsed=4991 reused=5`. The first-edit hook measured the first plain
+// --edit-check after a new HEAD at 10.11 s on a warm cache; once the blob exists it answers in 0.25 s. Nothing about a
+// record is tied to the sha it was written under: every record is validated per file on load (parser identity, content hash, and the stat gate's
+// ctime, which an extraction cannot forge — ingest_cache.h), and the blob is root-relative. So a record whose file the
+// commit did not change is exactly the record a cold parse of this commit would write, and one whose file did change
+// simply misses. When this HEAD's blob is absent, the newest blob of the SAME (repo, excludes) family is copied to its
+// name first, and the ingest reparses only what the commit changed. Copied (tmp + rename), never renamed or linked:
+// the older blob is still the right one for its own sha, and a concurrent run reading it must not see it move.
+// Best-effort — a filesystem failure leaves the target absent, which is the cold parse this replaces.
+inline void seedHeadSnapCache( const std::string& dir, const std::string& repoHex, const std::string& exclHex, const std::string& targetPath )
+{
+    namespace fs = std::filesystem;
+    std::error_code existsEc;
+    if( targetPath.empty() || fs::exists( fs::path( targetPath ), existsEc ) || existsEc )
+    {
+        return;
+    }
+    std::vector<CacheBlobStat> family = listCacheFamily( dir, "ripwire-qheadsnap-" + repoHex + "-" + exclHex + "-" );
+    std::erase_if( family, [ & ]( const CacheBlobStat& b ) { return b.path == targetPath; } );   // a `.seed.<pid>` temp never ends in .bin: not listed
+    if( family.empty() )
+    {
+        return;
+    }
+    // newest first; the path breaks an mtime tie so two runs pick the same seed
+    const auto newest = std::ranges::min_element( family, []( const CacheBlobStat& a, const CacheBlobStat& b )
+                                                  { return a.mtime != b.mtime ? a.mtime > b.mtime : a.path < b.path; } );
+    const std::string tmp = targetPath + ".seed." + std::to_string( os::getpid() );
+    std::error_code   copyEc;
+    std::error_code   renameEc;
+    fs::copy_file( fs::path( newest->path ), fs::path( tmp ), fs::copy_options::overwrite_existing, copyEc );
+    if( !copyEc )
+    {
+        fs::rename( fs::path( tmp ), fs::path( targetPath ), renameEc );
+    }
+    if( copyEc || renameEc )
+    {
+        std::error_code rmEc;
+        fs::remove( fs::path( tmp ), rmEc );
+        DISCLOSE( Diagnostics::answerUnchanged, "the new HEAD's ingest starts cold instead of from the previous HEAD's records: same answer, slower",
+                  "quality: could not seed the HEAD-snapshot ingest cache" );
+    }
 }
 
 // A4-P1 (round 2) — the HEAD-snapshot *Snapshot* cache. The qheadsnap INGEST cache above only skips the parse;
@@ -5620,6 +5696,10 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     //    parse — byte-identical output either way. The working-tree side's excludes are applied here too
     //    (A4-F5) so both trees see the same file set. (Keys were computed once in step 1.)
     const std::string cachePath  = useCache ? headSnapCachePath( repoHex, exclHex, headSha ) : std::string{};
+    if( useCache )
+    {
+        seedHeadSnapCache( cacheDirLadder(), repoHex, exclHex, cachePath );   // a new HEAD reparses what the commit changed, not the tree
+    }
     IngestResult headIng = ingestTrackedTree( tmpRoot.c_str(), excludes, useCache ? std::string_view( cachePath ) : std::string_view{}, maxFileBytes );
 
     // Hygiene: cap each (repo, excludes) family to the 2 newest files (delete older sha's). Done AFTER the

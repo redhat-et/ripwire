@@ -1,5 +1,15 @@
 # TypeScript aliases and workspace packages: draw the file-graph edge, or say the graph is partial
 
+> **Solved (2026-11-26).** All four slices are on `main`. Part 1, an in-tree alias or workspace import that draws
+> no edge is counted on the root (`imports_unresolved="N" graph_partial="1"`), landed in [#336](https://github.com/redhat-et/ripwire/pull/336)
+> (train 20). Part 2, tsconfig `paths` and `baseUrl`, workspace package names and `package.json` `imports` resolved
+> into real `--deps`, `--arch`, `--report` and `--impact` edges, landed in [#340](https://github.com/redhat-et/ripwire/pull/340) (0.6.5,
+> train 21), closing [#220](https://github.com/redhat-et/ripwire/issues/220), reported by @srinchow. Both were maintainer lanes;
+> [#717](https://github.com/redhat-et/ripwire/pull/717) later made a `paths` alias pin the named-import call binding as well, fixing
+> [#711](https://github.com/redhat-et/ripwire/issues/711). `test/depsprecisecheck.sh` carries the #220 arms. Run on this kit's own script, the alias
+> tree now prints the relative tree's answer: two cycles, `ccd="11"`, `--arch` exit 2; a `./f.js` specifier reaches
+> `f.ts`. This kit stays as a worked example; nothing in it remains open.
+
 **Large overall · four slices, the first two good-first-issue sized · issue #220 · no prerequisite**
 
 You are fixing ripwire's **file graph** for TypeScript and JavaScript monorepos. `--deps` resolves only
