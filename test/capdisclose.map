@@ -259,3 +259,11 @@ kSiblingsWiden	none:a premise threshold, not a cut: fewer siblings than this and
 kSweepCeil	none:a filter bound: commits wider than the repo's 90th-percentile commit (clamped to 12..50 files) are formatter passes and mass moves, dropped from the co-change counts by design; they carry no unit-level coupling
 kSweepFloor	none:a filter bound: commits wider than the repo's 90th-percentile commit (clamped to 12..50 files) are formatter passes and mass moves, dropped from the co-change counts by design; they carry no unit-level coupling
 kUnitBuildShown	none:a pointer bound: <build> names at most 2 unit build files (the nearest manifest above the anchor and above its tests first); the root manifests are quoted on their own lines
+# lane/brief-r2 (2026-11-26): the package surface, the main hand-off chain and the subject tests added 7 caps (32).
+kBarrelReadBytes	none:a read bound: a JS/TS file is judged a barrel from its first 16 KiB; a longer file is not a barrel by shape, so a miss only leaves an importer unlisted, never claimed absent
+kHandOffDepth	none:a search bound: a main with no direct cross-file callee is followed through same-file callees at most 3 deep; the delegates are a ranked pointer list, never a census
+kMinHomeTests	none:a premise threshold, not a cut: a test home dir holds at least 2 test files that call the anchor's siblings; below it no dir is named, nothing is dropped
+kMinSupportUsers	none:a premise threshold, not a cut: a test-support file is imported by at least 2 of those test files; below it none is named, nothing is dropped
+kSubjectTestsShown	none:a pointer bound: where-else names at most 2 test files that call into the anchor, best first; where-else's own cap discloses its overflow as +N
+kSurfaceHops	none:a search bound: the package surface walks at most 4 importer hops up from the anchor; the surface is a ranked pointer list, never a census, so a farther re-exporter is unseen and never claimed absent
+kSurfaceShown	none:a pointer bound: <entry> names at most 4 package-surface files, --for's own re-exports first; the entry rows after them are unchanged
