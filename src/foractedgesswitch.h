@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 #include <string_view>
 
 #include "foractlineswitch.h"   // kActClause / kActClauseWide — the act line's two clauses
@@ -65,6 +66,19 @@ inline constexpr std::string_view kActOpen = "<act read=\"", kActClose = "\"/>";
         at = comma + 1;
     }
     return kOpen.size() + ( at - 1 ) + kClose.size();
+}
+
+// The <act/> element as it shipped before this lane: its first `kActShippedRanges` ranges (the whole element when it has no more). The
+// θ6 tiny shape (fortinyshape.h) copies the act element and keeps the 3-range act clause: on it only EDGES applies, and it has its own
+// edges line (BRIEF), so the wide line's added ranges stay off it and the tiny answer is the one served before this lane.
+[[nodiscard]] inline std::string shippedActElement( std::string_view element )
+{
+    const std::size_t keep = uncountedActBytes( element, kActShippedRanges );
+    if( keep >= element.size() )
+    {
+        return std::string( element );
+    }
+    return std::string( element.substr( 0, keep - kActClose.size() ) ).append( kActClose );
 }
 
 // The top-level element names of the two lines foractedges.h writes.

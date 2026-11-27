@@ -568,7 +568,7 @@ inline constexpr std::string_view kSummarizedBlocks[] = { "sigs", "bodies", "cal
     const auto shown = std::ranges::count( lines, '\n' ) + 1;   // the listed rows: kTinyRows plus the same-name rows, of total=
     out.append( "<sigs shown=\"" ).append( std::to_string( shown ) ).append( "\" total=\"" ).append( total ).append( "\"" );
     out.append( "><![CDATA[" ).append( lines ).append( "]]></sigs>" );
-    if( act != blocks.end() ) { out.append( doc.substr( act->begin, act->end - act->begin ) ); }
+    if( act != blocks.end() ) { out.append( actedges::shippedActElement( doc.substr( act->begin, act->end - act->begin ) ) ); }   // ACT-EDGES: 3 ranges
     out.append( edgesLine );
     out.append( "<more" ).append( nextAttrXml( moreCall ) ).append( "/>" );
     out.append( "</ctx>" );
