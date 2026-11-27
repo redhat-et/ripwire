@@ -394,7 +394,10 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
 // (no facts to replay), and RIPWIRE_NO_RECORD_FIRST=1 restores the edit rule.
 static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result, const CacheLoadStats& cacheStats, const CacheSaveFacts& saved )
 {
-    const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale;
+    // an intact MODEL for this tree is already on disk (a racy-window run that did not load it still checks its digest,
+    // so a corrupt one is replaced on this run rather than the next)
+    const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale &&
+                        warmsnap::sectionIntact( snap, warmsnap::Sec::Model );
     const bool parsed = result.reparsedFiles != 0;
     if( stored || !warmsnap::mayStoreBuilt( snap, result.reparsedFiles, result.memoryStop.isSet() ) || ( parsed && !saved.written ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
     {

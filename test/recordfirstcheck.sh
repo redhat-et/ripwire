@@ -71,11 +71,11 @@ use(){ CD="$TMP/cache/$1"; mkdir -p "$CD"; }
 run()
 {
     local root="$1" out="$2"; shift 2
-    ( cd "$root" && env TMPDIR="$CD/" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 ${RUNENV:-} "$BIN" . "$@" >"$out" 2>"$out.err" </dev/null )
+    ( cd "$root" && env TMPDIR="$CD/" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 ${RUNENV:-} "$BIN" . "$@" >"$out" 2>"$out.err" </dev/null ) || no "run ${out##*/}: exit $?"
     grep '^ripwire: snapshot-stats ' "$out.err" >"$out.stats" || : >"$out.stats"
 }
 # full ROOT OUT [args...] — the reference: no cache, every stage built
-full(){ local root="$1" out="$2"; shift 2; ( cd "$root" && env ${RUNENV:-} "$BIN" . --no-cache "$@" >"$out" 2>/dev/null </dev/null ); }
+full(){ local root="$1" out="$2"; shift 2; ( cd "$root" && env ${RUNENV:-} "$BIN" . --no-cache "$@" >"$out" 2>/dev/null </dev/null ) || no "full ${out##*/}: exit $?"; }
 has(){ grep -q -- "$2" "$1.stats"; }
 served(){ has "$1" 'model=loaded' && has "$1" 'graph=loaded'; }
 st(){ sed 's/^ripwire: snapshot-stats //' "$1.stats" 2>/dev/null; [ -s "$1.stats" ] || printf 'no snapshot-stats line'; }

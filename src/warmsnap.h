@@ -53,10 +53,11 @@
 // A refusal changes cost, never content: the run walks, decodes and resolves as it always did, then records again.
 //
 // WHEN IT IS RECORDED (RECORD-FIRST, kVersion 12). Every run records what it built: a run that parsed too, so the second
-// call is served (until 10, only a run that re-extracted nothing stored, and the third call was the first served one).
+// call is served (until 10, only a run that re-extracted nothing stored, and the third call was the first served one);
+// after a run inside the racy window, which records no TREE, that call loads the GRAPH and builds the MODEL again.
 // The MODEL and the GRAPH are keyed on content (the tree key), so they are recorded inside the racy window; the TREE
-// section's signatures are not, and wait for a run outside it. The file is MAPPED read-only, never copied into memory,
-// and WRITTEN as a stream, section by section, as each is produced (SnapWriter): neither a section nor the file is built
+// section's signatures are not, and wait for a run outside it. The file is MAPPED read-only (read into memory only when
+// the map fails), and WRITTEN as a stream, section by section, as each is produced (SnapWriter): neither a section nor the file is built
 // whole in memory (the MODEL's reference and binding row streams still are, before their frame is written).
 #include "model.h"
 #include "infra/depwatch.h"
@@ -1404,7 +1405,7 @@ inline void saveSnapshot( Session& s )
     }
     if( !writeSectionsBefore( s, Sec( kSectionCount ) ) )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's snapshot is not there, and it walks and resolves as before" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; no replacement snapshot was published, so the next run reads the one already on disk, if any, as before" );
         s.writer.reset();   // the holder removes the temp
         return;
     }
@@ -1426,7 +1427,7 @@ inline void saveSnapshot( Session& s )
     s.releaseFile();   // every carried byte is in the temp now; Windows will not rename over a mapped file
     if( !written || !closed || !w.temp.commit( s.path ) )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's snapshot is not there, and it walks and resolves as before" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; no replacement snapshot was published, so the next run reads the one already on disk, if any, as before" );
         s.writer.reset();
         return;
     }
