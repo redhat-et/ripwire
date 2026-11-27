@@ -243,12 +243,12 @@ std::vector<rw::IngestResult> grepReadsRoots( const MainDispatch& d )
     std::vector<IngestResult> parts;
     if( !d.multiRoot )
     {
-        parts.push_back( one( d.root, {}, cfg.noCache || !cfg.cacheFile.empty() ? std::string() : defaultCachePath( d.root, true ) ) );
+        parts.push_back( one( d.root, {}, cfg.noCache || !cfg.cacheFile.empty() ? std::string() : defaultCachePath( d.root ) ) );
         return parts;
     }
     for( const WorkspaceRoot& r : d.ws )
     {
-        parts.push_back( one( r.arg, r.label, cfg.noCache ? std::string() : defaultCachePath( r.arg, true ) ) );
+        parts.push_back( one( r.arg, r.label, cfg.noCache ? std::string() : defaultCachePath( r.arg ) ) );
         if( parts.back().memoryStop.isSet() || memguard::overHardLimit() )
         {
             break;   // the next root would only add to an ingest already over the line

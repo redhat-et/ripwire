@@ -899,7 +899,7 @@ add(S4B, f"{BIN} . --dmm=HEAD~3..HEAD", "The range form: tree HEAD vs tree HEAD~
 add(S4B, f"{BIN} . --cochange --cochange-groups", "Modularity-violation GROUPS instead of pairs: \"X co-changes with {A,B,C}, none of which it depends on\" — a greedy cover, disclosed as greedy.", timeout=600)
 add(S4B, f"{BIN} . --cochange --cochange-recur=2", "Only pairs whose co-change RECURS in 2+ sub-windows of the mined window (sub_windows= is the denominator) — a one-off sprint stops reading like a structural defect.", timeout=600)
 add(S4B, f"{BIN} . --html={html_out} --color-by=community", "The HTML graph with the initial colour mode set to community (the page embeds all five modes and keeps a live selector).", post=f"wc -c {html_out}")
-add(S4B, f"{BIN} . --index-out={idx_out}", "CI generate-and-exit: cold-parse and write BOTH committable cache families (lean + rich), no map on stdout.", timeout=600,
+add(S4B, f"{BIN} . --index-out={idx_out}", "CI generate-and-exit: cold-parse once and write the committable parse blob under both names (lean + rich), no map on stdout.", timeout=600,
     post=f"wc -c {idx_out}.lean.ripwirecache {idx_out}.rich.ripwirecache")   # sizes only — an `ls -l` here leaked the owner column into the public capture (ripwirepubliccheck arm 5)
 add(S4B, f"{BIN} . --cache={idx_out}.lean.ripwirecache --top-k=3", "Consume the lean artifact in a PR job: restore-equivalence, never blob-byte-identity.")
 add(S4B, f"{BIN} . --pin-census={census_out} --top-k=3", "Eval-only: a per-call-site census of WHICH mechanism resolved each call, and the canonical id of every surviving target.", post=f"head -8 {census_out}; wc -l {census_out}")

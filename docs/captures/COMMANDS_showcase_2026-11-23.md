@@ -6708,7 +6708,7 @@ Artifact written:
 
 ## `./build/ripwire . --index-out=<scratch>/aux/ci_index`
 
-*CI generate-and-exit: cold-parse and write BOTH committable cache families (lean + rich), no map on stdout.*
+*CI generate-and-exit: cold-parse once and write the committable parse blob under both names (lean + rich), no map on stdout.*
 
 **wall time: 1.51s**
 

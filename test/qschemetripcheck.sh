@@ -34,6 +34,19 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, train m5-1126-4 merged with origin/main e00a29bfc (#819 ONE-PARSE merged): RE-PINNED with UPDATE_GOLDEN=1 on the
+#   MERGED sources. Both sides had already re-pinned, so NEITHER value described this tree: the train carried
+#   406ec22c68...f091e15a6 and main carried 232a5bc864...b818ce3b. kCacheVersion stays 57 (lane asserted-signal) and is now
+#   above main's 56 (lane c1-one-parse), whose one-blob record shape — the subtoken dictionary before the defs and the
+#   valueUse u8 on every ref — this merged tree also carries, so 57 describes BOTH changes. kParserVer and its mirror stay
+#   350 (train m5-1126-5's landing renumber; main never moved off 342). kQSnapCacheScheme is UNTOUCHED: the extraction key
+#   moves, the snapshot blob shape does not, and the qsnap key carries the producer identity.
+# 2026-11-27, lane c1-one-parse (#819 ONE-PARSE) merged with origin/main fe284b2af: RE-PINNED ONCE with UPDATE_GOLDEN=1 on the
+#   MERGED sources. Both sides had already re-pinned, so NEITHER value was correct: #819 carried 4410144026…e77d5831 and main
+#   carried e640115f3e…ccbd8342 (the 11-26 cr-qd3 entry below). A merge that picks a side here ships a pin that describes
+#   neither tree. #819 takes kCacheVersion 55 -> 56 and its kIngestCacheVersionMirror for the one-blob record shape (a
+#   valueUse byte, 61 -> 62 B per ref record); kQSnapCacheScheme is UNTOUCHED, and the qsnap key carries the producer
+#   identity, so no blob from another build is read. Hash 232a5bc864…b818ce3b.
 # 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
 #   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
 #   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57

@@ -5024,11 +5024,11 @@ $ ./build/ripwire . --cache=<scratch>/aux/warm2.ripwirecache --top-k=3
 
 **Answers:** cold-parse the tree, write the committable index artifact, and exit without a map CI generate-and-exit: cold-parse the tree and write the committable index artifact, then exit 0 with NO map on stdout.
 
-Writes BOTH families — BASE.lean.ripwirecache (map/ nav/--pr-context) and BASE.rich.ripwirecache (--for/--exemplar/--metrics/--uses are RICH, a lean-only artifact leaves them cold). Consume in a PR job with --cache=BASE.lean.ripwirecache (or .rich.). --exclude shapes the crawl and therefore the blob content. Same-architecture speed cache: consumed on a different arch it self-heals to a full cold parse (correct, slower). NOT byte-identical run-to-run (the header stamps the blob write time); the contract is RESTORE-EQUIVALENCE (a --cache restore == a cold parse), never blob-byte-identity.
+Writes BASE.lean.ripwirecache and BASE.rich.ripwirecache, ONE parse blob under both names (it serves every verb: map/nav/--pr-context and the rich --for/--exemplar/--metrics/--uses alike). Consume in a PR job with --cache=BASE.lean.ripwirecache (or .rich.). --exclude shapes the crawl and therefore the blob content. Same-architecture speed cache: consumed on a different arch it self-heals to a full cold parse (correct, slower). NOT byte-identical run-to-run (the header stamps the blob write time); the contract is RESTORE-EQUIVALENCE (a --cache restore == a cold parse), never blob-byte-identity.
 
 **Try it**
 
-_CI generate-and-exit: cold-parse and write BOTH committable cache families (lean + rich), no map on stdout._
+_CI generate-and-exit: cold-parse once and write the committable parse blob under both names (lean + rich), no map on stdout._
 
 ```
 $ ./build/ripwire . --index-out=<scratch>/aux/ci_index
