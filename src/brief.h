@@ -71,7 +71,7 @@ inline constexpr std::string_view kSchemaAttr = " schema=\"ripwire.brief/v1\"";
 inline constexpr std::string_view kLegend =   // every term present: the fit charges this size, the page prints compactLegend's present-only subset
     "<!-- ripwire brief schema=ripwire.brief/v1: paths root-relative; path:l-e lines; (skip) do not read; Read act ranges in one turn. "
     "task= task_cut=1 at= root= files= langs= size_class=: task, cut, commit, base, corpus. bytes= budget= dropped= over=1: size, cap, "
-    "shed, still over. confidence= build_source= history=1: --for's, <build> source, co-change mined. act_shipped= read= s= f= "
+    "shed, still over. confidence= build_source= history=1: pick confidence, build line source, co-change mined. act_shipped= read= s= f= "
     "ambiguous=: act ranges, edge symbol, import, like candidates -->";
 inline constexpr std::string_view kLegendFull =
     "<!-- ripwire brief: one page to paste into a fresh code-editing subagent's prompt. Paths are root-relative; path:l-e is a line "
@@ -79,11 +79,16 @@ inline constexpr std::string_view kLegendFull =
     "the task (task_cut=1: the echo was cut). at= is the commit the page was read at; root= the directory every path is relative to. "
     "files= counts the indexed files, langs= lists their languages by file count, size_class= picks the class cap. bytes= is the "
     "page's size in the default dialect, budget= its cap; dropped= lists the sections shed to fit, in drop order; over=1: the fixed "
-    "sections alone outgrow the budget. confidence= is --for's confidence in its pick. build_source= says where the <build> lines "
+    "sections alone outgrow the budget. confidence= is the for lens's confidence in its pick. build_source= says where the build lines "
     "were quoted from (manifest, docs+manifest, none). history=1: co-change was mined from git history (0: too little history). "
-    "<task act_shipped=> counts the act ranges --for shipped; <act read=> lists the ranges to Read. <e s=> names an edge's symbol; "
-    "<i f=> the imported name. <like ambiguous=> counts the exemplar candidates. -->";
+    "task act_shipped= counts the act ranges the for lens shipped; act read= lists the ranges to Read. e s= names an edge's symbol; "
+    "i f= the imported name. like ambiguous= counts the exemplar candidates. -->";
 static_assert( kLegend.size() < kLegendFull.size(), "the compact legend is the shorter one" );
+static_assert( kLegend.substr( 4, kLegend.size() - 7 ).find( "--" ) == std::string_view::npos
+                   && kLegendFull.substr( 4, kLegendFull.size() - 7 ).find( "--" ) == std::string_view::npos,
+               "an XML comment may not hold \"--\": the page must stay well-formed" );
+static_assert( kLegend.find( '<', 1 ) == std::string_view::npos && kLegendFull.find( '<', 1 ) == std::string_view::npos,
+               "no tag spelling inside the legend: readers locate <build>, <act read=> by their tags" );
 
 // The compact legend for one page: a term rides iff the page carries its attribute (task_cut=, dropped=, over=, <e s=>, <i f=>,
 // ambiguous= are present-only). With every term present it is kLegend, the size the fit charges, so a page never outgrows its fit.
@@ -98,7 +103,7 @@ inline std::string compactLegend( const LegendTerms& t )
     out.append( on( t.taskCut, "task_cut=1 " ) ).append( "at= root= files= langs= size_class=: task, " ).append( on( t.taskCut, "cut, " ) );
     out.append( "commit, base, corpus. bytes= budget=" ).append( on( t.dropped, " dropped=" ) ).append( on( t.over, " over=1" ) ).append( ": size, cap" );
     out.append( on( t.dropped, ", shed" ) ).append( on( t.over, ", still over" ) );
-    out.append( ". confidence= build_source= history=1: --for's, <build> source, co-change mined. act_shipped= read=" );
+    out.append( ". confidence= build_source= history=1: pick confidence, build line source, co-change mined. act_shipped= read=" );
     out.append( on( t.edgeSymbol, " s=" ) ).append( on( t.importName, " f=" ) ).append( on( t.ambiguous, " ambiguous=" ) ).append( ": act ranges" );
     out.append( on( t.edgeSymbol, ", edge symbol" ) ).append( on( t.importName, ", import" ) ).append( on( t.ambiguous, ", like candidates" ) ).append( " -->" );
     return out;
@@ -3323,8 +3328,11 @@ inline constexpr std::size_t kPartnersRead      = 400;   // the strongest partne
 
 inline bool switchOff( const char* name ) noexcept
 {
-    const EnvNumber knob = readEnvNumber( name );
-    return knob.parsed && knob.value == 0;
+    if( const EnvNumber knob = readEnvNumber( name ); knob.parsed )
+    {
+        return knob.value == 0;
+    }
+    return false;   // unset, empty or not a number: the feature stays on
 }
 
 inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
@@ -4135,6 +4143,7 @@ inline std::string composeBrief( const BriefInputs& in )
                                                             .importName = doc.find( "<i f=\"" ) != std::string::npos,
                                                             .ambiguous  = doc.find( " ambiguous=\"" ) != std::string::npos } );
     ASSUME( compact.size() <= kLegend.size(), "the present-only legend is never larger than the one the fit charged" );
+    DASSERT( compactLegend( LegendTerms{} ) == kLegend, "kLegend spells compactLegend with every term present" );
     std::size_t bytes = 0;
     for( int pass = 0; pass < 3; ++pass )   // bytes= counts itself: converge on the digit count
     {

@@ -22,7 +22,7 @@
 #   (R)  refusals: --brief with --for, --brief-bytes without --brief, --brief-bytes=100 each exit non-zero with no brief;
 #        an unwritable TMPDIR (no buffer for the --for page) exits non-zero with stdout EMPTY, no leaked --for page.
 #   (C)  MCP: tools/list advertises `brief`; a call answers a <brief> root; bytes=100 is refused.
-#   (S)  schema="ripwire.brief/v1" and a legend naming every attribute the page carries; --legend=full differs only in it.
+#   (G)  schema="ripwire.brief/v1" and a legend naming every attribute the page carries; --legend=full differs only in it.
 #   (L)  the shared --brief= row: beside --plan-lanes, --brief=FILE is still the lane file (a lane plan with one lane per
 #        line, no <brief> root); the subagent brief takes --brief= only without --plan-lanes.
 #   (X)  round-2 detectors, one synthetic fixture each (autoconf-only C, a Go module, a Cargo workspace): the project's own
@@ -109,7 +109,10 @@ brief() { ( cd "$1" && "$BIN" . --no-cache "--brief=$TASK" "${@:2}" 2>/dev/null 
 attr() { python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"<brief [^>]*\b"+sys.argv[1]+r"=\"([^\"]*)\"", t); print(m.group(1) if m else "")' "$1"; }
 
 classOf() { case "$1" in medium) echo medium ;; large) echo large ;; *) echo small ;; esac; }
-capOf() { case "$1" in medium) echo 4096 ;; large) echo 6144 ;; *) echo 2560 ;; esac; }
+# Each class cap is its content room (2560/4096/6144) plus the 379 B the legend's attribute definitions and schema= add over the
+# 104-B notes comment (brief.h kLegendDefsBytes): a legend edit that moves this must re-pin it here, so the fit change is seen.
+LEGEND_DEFS=379
+capOf() { case "$1" in medium) echo $(( 4096 + LEGEND_DEFS )) ;; large) echo $(( 6144 + LEGEND_DEFS )) ;; *) echo $(( 2560 + LEGEND_DEFS )) ;; esac; }
 pageLen() { python3 -c 'import sys; print(len(open(sys.argv[1], "rb").read().rstrip(b"\n")))' "$1"; }
 built=0
 for f in cmake python node bare medium large; do
@@ -220,7 +223,7 @@ else
     else no "(R) no temp buffer (glibc): rc=$rc, $nb B, <brief> x$nbrief, <ctx> (--for root) x$nfor (want rc=0, 1, 0)"; fi
 fi
 
-# ─── (S) schema and legend: the page explains itself in both dialects ──────────────────────────────────────────────────────
+# ─── (G) schema and legend: the page explains itself in both dialects ──────────────────────────────────────────────────────
 # The default (compact) page carries schema="ripwire.brief/v1" and a legend that names every attribute the page carries
 # (present-only: an absent attribute's term is not printed); --legend=full is the same page with the worded legend.
 brief "$TMP/cmake" > "$TMP/s.def"; brief "$TMP/cmake" --legend=full > "$TMP/s.full"; brief "$TMP/cmake" --brief-bytes=512 > "$TMP/s.cut"
@@ -241,7 +244,9 @@ for path in sys.argv[ 1: ]:
     miss = sorted( a for a in attrs if not re.search( r"(?<![\w:.-])" + re.escape( a ) + r"\s*=", leg ) )
     if miss: bad.append( path + ": undefined " + ",".join( miss ) )
 dd, dl, db, da = parts( sys.argv[ 1 ] ); fd, fl, fb, fa = parts( sys.argv[ 2 ] ); cd, cl, cb, ca = parts( sys.argv[ 3 ] )
-if db != fb: bad.append( "full and compact differ outside the legend" )
+if db != fb:
+    k = next( ( i for i in range( min( len( db ), len( fb ) ) ) if db[ i ] != fb[ i ] ), min( len( db ), len( fb ) ) )
+    bad.append( "full and compact differ outside the legend at %d: [%s] vs [%s]" % ( k, db[ max( 0, k - 40 ):k + 60 ], fb[ max( 0, k - 40 ):k + 60 ] ) )
 if not len( dl ) < len( fl ): bad.append( "compact legend not shorter than full" )
 if "dropped" in ca and "dropped=" not in cl: bad.append( "cut page: dropped= undefined" )
 if "dropped" not in da and "dropped=" in dl: bad.append( "uncut page names dropped= (present-only)" )
@@ -249,7 +254,7 @@ if "dropped" not in ca: bad.append( "premise: the 512-B page dropped nothing" )
 print( "OK %d" % seen if not bad and seen > 0 else "BAD " + "; ".join( bad ) + " (attrs seen %d)" % seen )
 PY
 )
-case "$sres" in OK*) ok "(S) schema= and a legend naming every attribute (${sres#OK } seen), present-only dropped=, full = compact outside the legend" ;; *) no "(S) $sres" ;; esac
+case "$sres" in OK*) ok "(G) schema= and a legend naming every attribute (${sres#OK } seen), present-only dropped=, full = compact outside the legend" ;; *) no "(G) $sres" ;; esac
 
 # ─── (L) --plan-lanes --brief=FILE keeps its meaning ───────────────────────────────────────────────────────────────
 printf 'add a retry to the client\nrename the parser entry\n' > "$TMP/lanes.txt"

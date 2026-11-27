@@ -221,6 +221,7 @@ struct Config
                                                             // fills laneBrief; parseArgs moves it here when --plan-lanes is absent and sets forTask to it, so
                                                             // the run is prepared exactly as a --for run is; runBrief (verbs_brief.h) answers before --for does
     int              briefBytes = 0;                       // --brief-bytes=N (512..8192, with --brief): the brief's byte budget; 0 = the size class decides
+    bool             briefFullLegend = false;              // --brief with --legend=full: the worded legend; the brief's own --for still runs the default posture
     bool             anchor = false;                       // --anchor (with --for, EXPERIMENTAL): seed PPR personalization from the lexical anchors and blend graph expansion into the lens rank (LARGER-style; graph.h anchoredLexicalRank)
     bool             noVerbRoute = false;                  // RT1 --no-verb-route (with --for): never answer a --for question with the verb it names (verbs_forroute.h); the routed answer's next= spells it
     bool             noRoute = false;                      // --no-route (with --for/--query): force plain subtoken+body BM25 (the pre-default-routing behavior). Routing is the DEFAULT: a deterministic confidence-gated query-shape classifier picks name-exact vs subtoken+body and prints which/why in the header (lexical.h chooseForRanker). --route is still accepted (now a no-op: routing is already on). Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace / sanitizer report / compiler diagnostic, or as a pasted issue-template form, the document tier scores down (repo meta-docs — issue templates, CONTRIBUTING, changelogs — twice as hard) and route= says so; --no-route has no route= to disclose it in, so it does not demote either. Routing also orders doc-mention surfacing (filter.h docNoiseSymbolMultipliers): change logs and translated duplicates of a default-language doc are lifted last and to x0.35 of the usual height (BM25 untouched), unless the task asks about changes or translations or names the file.
@@ -6181,6 +6182,47 @@ inline void validateConfig( Config& c ) noexcept
     }
 }
 
+// ONE --brief= row, two verbs: beside --plan-lanes it is the lane file (laneBrief, validatePlanLanes); alone it is the subagent brief's task.
+// --brief=TASK runs the --for core for TASK (brief.h), so the run is prepared as a --for run: forTask carries the task from here on and
+// validateConfig holds the brief to every --for rule. false: a misuse was refused on stderr (the caller marks the run not ok).
+static inline bool prepareBriefRun( Config& c )
+{
+    if( !c.laneBrief.empty() && !c.planLanesFlag )
+    {
+        c.brief = c.laneBrief;
+        c.laneBrief = {};
+    }
+    if( !c.brief.empty() )
+    {
+        if( !c.forTask.empty() || c.packTaskFlag )
+        {
+            rw::emitRaw( stderr, "ripwire: --brief runs its own --for for its task — pass --brief=TASK alone, not with --for or --pack-task\n" );
+            return false;
+        }
+        if( c.json || c.columnar || c.candidates )
+        {
+            rw::emitRaw( stderr, "ripwire: --brief prints one XML page to paste into a subagent's prompt — it has no --json, --columnar or --format=candidates form\n" );
+            return false;
+        }
+        c.forTask = c.brief;
+        // The brief reads its own --for page, so that page is always the default posture's: --legend chooses only the brief's legend
+        // comment, never what the brief is composed from (compactlegendcheck (U): the two dialects differ in that comment alone).
+        c.briefFullLegend = c.legend == "full";
+        c.legend          = {};
+    }
+    else if( c.briefBytes != 0 )
+    {
+        rw::emitRaw( stderr, "ripwire: --brief-bytes sizes a --brief answer — pass it with --brief=TASK\n" );
+        return false;
+    }
+    if( c.briefBytes != 0 && c.briefBytes < 512 )
+    {
+        refuseFlagValue( "--brief-bytes", "an integer in 512..8192", std::to_string( c.briefBytes ).c_str(), "--brief-bytes=4096" );
+        return false;
+    }
+    return true;
+}
+
 inline Config parseArgs( int argc, char** argv ) noexcept
 {
     Config c;
@@ -6598,39 +6640,8 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         c.stable = true;
     }
 
-    // ONE --brief= row, two verbs: beside --plan-lanes it is the lane file (laneBrief, validatePlanLanes); alone it is the subagent brief's task.
-    // --brief=TASK runs the --for core for TASK (brief.h), so the run is prepared as a --for run: forTask carries the task from here on and
-    // validateConfig holds the brief to every --for rule. A --for or --pack-task given beside it is two tasks, refused by name.
-    if( !c.laneBrief.empty() && !c.planLanesFlag )
+    if( !prepareBriefRun( c ) )
     {
-        c.brief = c.laneBrief;
-        c.laneBrief = {};
-    }
-    if( !c.brief.empty() )
-    {
-        if( !c.forTask.empty() || c.packTaskFlag )
-        {
-            rw::emitRaw( stderr, "ripwire: --brief runs its own --for for its task — pass --brief=TASK alone, not with --for or --pack-task\n" );
-            c.ok = false;
-            return c;
-        }
-        if( c.json || c.columnar || c.candidates )
-        {
-            rw::emitRaw( stderr, "ripwire: --brief prints one XML page to paste into a subagent's prompt — it has no --json, --columnar or --format=candidates form\n" );
-            c.ok = false;
-            return c;
-        }
-        c.forTask = c.brief;
-    }
-    else if( c.briefBytes != 0 )
-    {
-        rw::emitRaw( stderr, "ripwire: --brief-bytes sizes a --brief answer — pass it with --brief=TASK\n" );
-        c.ok = false;
-        return c;
-    }
-    if( c.briefBytes != 0 && c.briefBytes < 512 )
-    {
-        refuseFlagValue( "--brief-bytes", "an integer in 512..8192", std::to_string( c.briefBytes ).c_str(), "--brief-bytes=4096" );
         c.ok = false;
         return c;
     }
