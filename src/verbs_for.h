@@ -131,6 +131,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
                                                                       //   tail (pack-task, candidates) keep the H2
                                                                       //   MaxScore pruning.
 {
+    PROFILE_SCOPE_DESCRIBE( "for/rank: computeLensRanking TOTAL (route + lexical scoring + every rank reshape)" );
     using namespace rw;
     const Config&                     cfg       = d.cfg;
     const IngestResult&               ing       = d.ing;
@@ -416,6 +417,7 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
                              rw::RedactCounts* redact,       // §B0/W3-N1: REQUIRED — <sig> is emitted text
                              std::string_view candRootArg )  // R-R: the single-root root its p=/id= are relative to
 {
+    PROFILE_SCOPE_DESCRIBE( "for/dialect: emitCandidates (--format=candidates rows)" );
     int capN = topK;
     if( adaptive )
     {
@@ -1179,6 +1181,7 @@ inline constexpr std::string_view kForCompactBundleLegend =
 inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRouteAttr, bool withTaskEcho,
                                       std::string_view extraNotes )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/header: forLensHeaderText (root attrs + legend assembly)" );
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.sibliftNote.size() + p.expandNote.size() + p.docMentionNote.size() + p.floorNote.size()
@@ -1526,6 +1529,7 @@ struct ForLensPricedHeader
 
 inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const ForLensRootFinish& f )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/header: finishForLensHeaderPriced (price the finished header)" );
     // T3: the bundle=auto disclosure attributes, then budget_bytes= (its presence is decided by the sigs render),
     // then the INDEXING-cap attributes (root facts of the RANKING, so on the root est_tokens prices rather than in
     // the ladder's input). All three go in BEFORE est_tokens is computed, so the number measures a header that
@@ -1704,6 +1708,7 @@ inline void forLensJsonSoftRefill( const PackSigs& packSigs, const ForLensJsonIn
 
 inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/dialect: emitForLensJsonPass (one JSON render pass)" );
     using namespace rw;
 
     // the SAME budget arithmetic the XML bundle runs: default kForPayloadBudgetBytes, an explicit
@@ -2016,6 +2021,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
 // The --json bundle: one render (forbudget-soft: no charged "sigs_next" to pay for, so no payment-mode re-renders).
 inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/dialect: emitForLensJson (JSON dialect TOTAL)" );
     return emitForLensJsonPass( out, header, in );
 }
 
@@ -2165,6 +2171,7 @@ inline std::string forRankShapingFlags( const rw::Config& cfg )
 inline constexpr std::size_t kForDetailFloorShareDivisor = 4;   // the floor's cap = bundleBudget / this
 std::size_t forDetailFirstBodyFloor( const rw::IngestResult& ing, const std::vector<rw::NodeId>& detailIds, std::size_t bundleBudget )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/bodies: forDetailFirstBodyFloor (--detail body floor)" );
     for( const rw::NodeId id : detailIds )   // packBodies' own skip rule: an invalid id or a module scope is no body
     {
         if( id >= ing.symbols.size() || ing.symbols[id].kind == rw::SymKind::ModuleScope )
@@ -2204,6 +2211,7 @@ std::size_t forDetailFirstBodyFloor( const rw::IngestResult& ing, const std::vec
 std::vector<rw::NodeId> computeAutoBodyCandidateIds( const rw::IngestResult& ing, const std::vector<rw::NodeId>& lensSurfaceIds,
                                                      const std::vector<float>& lensRank, const std::vector<rw::RouteAnchorDef>& anchorDefs )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/bodies: computeAutoBodyCandidateIds (auto-body candidate set)" );
     std::vector<rw::NodeId> candidateSurface;
     if( !anchorDefs.empty() )
     {
@@ -2237,6 +2245,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
                                         std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
                                         const std::vector<rw::RouteAnchorDef>& anchorDefs, bool viaLegendInHead, bool splitLegendInHead = false )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/bodies: buildForAutoBodies (pack the auto bodies)" );
     ForAutoBodiesResult out;
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const bool             fabSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
@@ -2442,6 +2451,7 @@ inline std::size_t enrichmentLegendBytesEmitted( const ForEnrichmentPlan& plan, 
 // spelling, read by buildForCompactHops and by the header's via="name" question (FE-B), so the two cannot disagree.
 inline std::vector<rw::NodeId> forCompactHopIds( const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: forCompactHopIds (compact-bundle hop set)" );
     std::vector<rw::NodeId> hopIds;
     for( rw::NodeId sid : lensSurfaceIds )
     {
@@ -2505,6 +2515,7 @@ inline ForOwnerPlan forOwnerHopPlan( const rw::IngestResult& ing, const rw::Grap
                                      const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                      const std::vector<rw::NodeId>& hopIds )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: forOwnerHopPlan (owner-hop plan)" );
     ForOwnerPlan plan;
     if( std::getenv( "RIPWIRE_NO_OWNER_HOP" ) != nullptr )
     {
@@ -2559,6 +2570,7 @@ inline std::vector<rw::NodeId> forOwnerHopNodes( const ForOwnerPlan& plan, const
 inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult& ing, const ForOwnerPlan& plan,
                                    std::size_t leftBytes, std::string_view rootArg )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: forHopOwners (resolve the hop owners)" );
     rw::HopOwners owners;
     owners.rows        = plan.rowIds.size();
     owners.words.assign( plan.rowWords.begin(), plan.rowWords.end() );
@@ -2591,6 +2603,7 @@ inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult
 // by the --detail section and by the header's via="name" question (FE-B).
 inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const std::vector<float>& lensRank, int detail, int forTopN )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/bodies: forDetailIds (--detail body id set)" );
     const std::size_t        S = ing.symbols.size();
     std::vector<rw::NodeId> ids( S );
     for( rw::NodeId i = 0; i < S; ++i )
@@ -2624,6 +2637,7 @@ static_assert( kForHopsBudgetCutLegendCompact.size() < kForHopsBudgetCutLegend.s
 // are not read at all never enter (the row writer says unread for them); a corpus with no value use pays one scan and no byte.
 inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std::vector<rw::NodeId>& hopNodes )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: forHopValueRefs (value refs for the hop nodes)" );
     rw::HopValueRefs out;
     std::vector<std::string_view> names;
     for( const rw::NodeId id : hopNodes )
@@ -2707,6 +2721,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
                                           std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
                                           const ForSectionPromises& promised )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: buildForCompactHops (compact bundle hops)" );
     static const ForOwnerPlan kNoOwners{};
     const ForOwnerPlan&       ownerPlan       = promised.owners != nullptr ? *promised.owners : kNoOwners;
     const bool                viaLegendInHead = promised.viaLegendInHead;
@@ -2801,6 +2816,7 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
                                         rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget,
                                         const ForSectionPromises& promised )   // FE-B via="name" in the head + the owner plan
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: buildForEnrichment TOTAL (bodies-or-hops enrichment)" );
     const std::size_t   committed = committedBytes + plan.attrReserve;
     ForAutoBodiesResult out       = plan.compact
         ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, promised )
@@ -2875,6 +2891,7 @@ inline rw::CallerHopRender subjectCallerHop( const RankedHopPosture& p, const rw
 inline std::vector<rw::NodeId> forCallerHopIds( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& lensSurfaceIds,
                                                 const std::vector<float>& lensRank, const std::vector<rw::RouteAnchorDef>& anchorDefs, bool nameExactBodies )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/hops: forCallerHopIds (caller-hop id set)" );
     if( !nameExactBodies || cfg.json || cfg.tokenBudget > 0 || !rw::forCallerHopOn() )
     {
         return {};
@@ -2891,6 +2908,7 @@ inline std::vector<rw::NodeId> forCallerHopIds( const rw::Config& cfg, const rw:
 inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
                                          std::size_t bundleBudget, std::size_t spentBytes, std::size_t* shownRows = nullptr )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: renderForFileTailXml (render the file-grain tail)" );
     std::vector<char> esc;
     const std::size_t share  = std::max<std::size_t>( bundleBudget > spentBytes ? bundleBudget - spentBytes : 0u, rw::kForFileTailShellReserve );
     const auto        render = [ & ]( std::size_t shown ) { return rw::renderFileTailXml( tail, shown, esc ); };
@@ -2913,6 +2931,7 @@ inline std::size_t forSoftTrailingFloorBytes( const rw::Config& cfg, const rw::I
                                               const ForEnrichmentPlan& plan, std::size_t bundleBudget, const rw::RedactCounts* redactPtr,
                                               const ForSectionPromises& promised, const rw::FileTail& tailAtCut )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/budget: forSoftTrailingFloorBytes (soft-target trailing floor)" );
     std::size_t floorBytes = renderForFileTailXml( tailAtCut, cfg.tokenBudget, bundleBudget, bundleBudget ).size();
     if( plan.compact && bundleBudget > 0 )
     {
@@ -2932,6 +2951,7 @@ inline std::size_t forSoftTrailingFloorBytes( const rw::Config& cfg, const rw::I
 inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::vector<rw::ForNamedHeaderRow>& rows,
                                         std::string_view rootArg )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/header: renderForHdrRowsXml (named header rows)" );
     if( rows.empty() )
     {
         return {};
@@ -2947,6 +2967,7 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
 inline int emitForCandidatePage( const rw::IngestResult& ing, const std::vector<float>& lensRank, const rw::AdaptiveCut& forCut,
                                  const rw::ForCandidatePageReq& req )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/dialect: emitForCandidatePage (candidates page)" );
     // the CLI half of the shared page (forpage.h owns the doc): write it to stdout. One
     // implementation, three dialects — the CLI bundle verbs and the MCP twins all build the SAME
     // document. rw::emitRaw (#362 review's ask): the repo's own stdout writer, not the raw stream call.
@@ -3057,6 +3078,7 @@ inline bool literalAnchorBlockOn( const MainDispatch& d )
 }
 inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served, std::span<const rw::NodeId> answerIds = {} )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: appendLiteralAnchorBlock (literal anchor block)" );
     const rw::Config& cfg = d.cfg;
     if( !literalAnchorBlockOn( d ) )
     {
@@ -3079,6 +3101,7 @@ inline std::size_t forHeldBlocksBudget( const rw::Config& cfg ) noexcept
 
 inline void appendForTaskRowBlocks( const MainDispatch& d )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: appendForTaskRowBlocks (task row blocks)" );
     const rw::Config& cfg = d.cfg;
     if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
@@ -3095,6 +3118,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
 template <class Run>
 std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: captureGraphVerbDoc (run a graph sub-verb under stdout capture)" );
     std::fflush( stdout );   // everything before the block is out before stdout is pointed at the capture
     std::FILE* const capture = std::tmpfile();
     const int        saved   = capture != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
@@ -3408,6 +3432,7 @@ inline void ledgerFollowsEdit( rw::ForAnswerLedger* ledger, const std::optional<
 
 inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: appendForFileSyms (file-syms block)" );
     StdoutCapture&                             capture = answer.capture;
     const std::optional<rw::PricedRootInputs>& price   = answer.price;
     if( !capture.wanted() )
@@ -3506,6 +3531,7 @@ inline bool emitWindowingGraphVerb( const rw::GraphSubjectArgs& args, std::strin
 // Returns whether the block (or its held tag) was printed.
 inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const rw::NodeId> served )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: appendSubjectGraphVerbBlock (subject graph-verb block)" );
     const rw::Config& cfg = d.cfg;
     if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
@@ -3624,6 +3650,7 @@ inline rw::HandoffWindow reaskHandoffWindow( const MainDispatch& d, std::string_
 
 inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/post: appendSentenceReask (sentence re-ask block)" );
     const rw::Config& cfg = d.cfg;
     if( subjectBlockPrinted || cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
@@ -3653,6 +3680,7 @@ inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/pass: runForLensPass TOTAL (assemble + emit the bundle)" );
     using namespace rw;
     const std::string forAtStamp( mode.forAtStamp );
     const Config&                     cfg          = d.cfg;
@@ -5727,6 +5755,7 @@ struct ForPostureRender
 };
 inline ForPostureRender renderForPostureCaptured( const MainDispatch& pd )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/fit: renderForPostureCaptured (one captured posture render)" );
     ForPostureRender r;
     StderrCapture    err( true );
     StdoutCapture    out( true );
@@ -5812,6 +5841,7 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
 // prints blocks a budget holds (forbudgetfit.h kForHeldBlocks) and does not fit whole is rendered once more with them held.
 inline int runForLensFitted( const MainDispatch& d )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/fit: runForLensFitted TOTAL (budget-fitted re-render)" );
     const rw::Config& cfg     = d.cfg;
     rw::Config        posture = cfg;
     posture.tokenBudget       = 0;
@@ -5971,6 +6001,7 @@ inline std::optional<std::string> forTinyShape( const rw::Config& cfg, std::stri
 
 inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/legend-first: runForLensLegendFirstAct" );
     const rw::Config& cfg = d.cfg;
     if( cfg.legendAnswerFirst || !rw::actline::actLineOn() || cfg.json || cfg.columnar || cfg.candidates )
     {
@@ -5994,6 +6025,7 @@ inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
 
 std::optional<int> runForLens( const MainDispatch& d )
 {
+    PROFILE_SCOPE_DESCRIBE( "for: runForLens TOTAL (the whole --for answer, every pass)" );
     if( d.cfg.forTask.empty() )
     {
         return std::nullopt;
@@ -6093,6 +6125,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
 std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger* ledger )
 {
+    PROFILE_SCOPE_DESCRIBE( "for: runForLensPosture (ranking then the render pass)" );
     const rw::Config& cfg = d.cfg;
     rw::armRowFeatures( forFileSymsWanted( d ) && cfg.pageLimit == 0 && cfg.pageOffset == 0 );   // ROW-FEATURE-DUMP: one getenv when unset
     rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
