@@ -1373,9 +1373,9 @@ inline bool writeSectionsBefore( Session& s, Sec k )
     return w.ok && w.finished == std::size_t( k );
 }
 
-// Stream section `k` through `write( Out& )`: the one way a MODEL or GRAPH section this run built reaches the file.
+// Stream section `k` through `fill( Out& )`: the one way a MODEL or GRAPH section this run built reaches the file.
 template <class Fn>
-inline void recordSection( Session& s, Sec k, Fn&& write )
+inline void recordSection( Session& s, Sec k, Fn&& fill )
 {
     if( !writeSectionsBefore( s, k ) )
     {
@@ -1384,7 +1384,7 @@ inline void recordSection( Session& s, Sec k, Fn&& write )
     Out o;
     o.sink = s.writer.get();
     s.writer->beginSection();
-    write( o );
+    fill( o );
     s.writer->endSection();
     ( k == Sec::Model ? s.modelFresh : s.graphFresh ) = true;
 }

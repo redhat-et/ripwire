@@ -709,7 +709,9 @@ struct dirwatch_event
     void* p = bytes == 0 ? MAP_FAILED : ::mmap( nullptr, bytes, PROT_READ, MAP_SHARED, fd, 0 );
     return p == MAP_FAILED ? nullptr : static_cast<const char*>( p );
 }
-[[gnu::always_inline]] inline void file_unmap( const char* p, std::size_t bytes ) noexcept { ::munmap( const_cast<char*>( p ), bytes ); }
+// Not inlined, on purpose: one munmap call site for the warm snapshot's view, apart from the large-block route's own
+// (test/largeallocpeakcheck.sh S counts the binary's munmap sites to catch a replaced operator delete inlined into a caller).
+[[gnu::noinline]] inline void file_unmap( const char* p, std::size_t bytes ) noexcept { ::munmap( const_cast<char*>( p ), bytes ); }
 
 // mem_footprint: bytes this process holds. macOS: TASK_VM_INFO phys_footprint (what Activity Monitor and the
 //   jetsam killer count — compressed and swapped pages included). Linux: resident pages from /proc/self/statm.
