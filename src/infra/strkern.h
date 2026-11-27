@@ -508,13 +508,60 @@ inline std::size_t findByte( const char* p, std::size_t n, char needle ) noexcep
 // parallel across a block of start positions, and only a start where both agree pays `verify( at )`, which tests the bytes between.
 // The first such start (the smallest), or n when there is none or span > n. One loop for every needle length, so find3 and
 // findNeedle below cannot drift apart; `verify` is how they differ (one middle byte, or a memcmp of the whole needle).
+// How the end-byte filter sees a haystack byte: as is (find, find3), or A-Z-folded (ciFindLiteral). One loop serves both, so the
+// case-insensitive find cannot drift from the exact one; the policy is applied to each loaded block, word and tail byte before the
+// compare, and the needle's ends arrive already in the folded form. The fold is section 2's Tempesta identity, `(unsigned char)( c - 'A' )
+// < 26`: NEON spells it with its unsigned compare, AVX2 with the 0x80 bias, SWAR with swarLowerFold8. Bytes >= 0x80 never fold.
+struct ExactBytes
+{
+    static char          one( char c ) noexcept { return c; }
+    static std::uint64_t swar8( std::uint64_t x ) noexcept { return x; }
+#if defined( __ARM_NEON )
+    static uint8x16_t vec( uint8x16_t v ) noexcept { return v; }
+#elif defined( __AVX2__ )
+    static __m256i vec( __m256i v ) noexcept { return v; }
+#endif
+};
+struct AsciiLowerBytes
+{
+    static char one( char c ) noexcept
+    {
+        return static_cast<unsigned char>( c - 'A' ) < 26 ? char( c + 0x20 ) : c;
+    }
+    static std::uint64_t swar8( std::uint64_t x ) noexcept { return swarLowerFold8( x ); }
+#if defined( __ARM_NEON )
+    static uint8x16_t vec( uint8x16_t v ) noexcept
+    {
+  #if defined( STRKERN_MUTATE )
+        const uint8x16_t kSpan = vdupq_n_u8( 25 );   // MUTATION: 'Z' stops folding in ciFindLiteral's filter. SIMD only.
+  #else
+        const uint8x16_t kSpan = vdupq_n_u8( 26 );
+  #endif
+        const uint8x16_t isUp = vcltq_u8( vsubq_u8( v, vdupq_n_u8( 'A' ) ), kSpan );
+        return vorrq_u8( v, vandq_u8( isUp, vdupq_n_u8( 0x20 ) ) );
+    }
+#elif defined( __AVX2__ )
+    static __m256i vec( __m256i v ) noexcept
+    {
+        const __m256i biased = _mm256_sub_epi8( v, _mm256_set1_epi8( char( 'A' + 0x80 ) ) );
+  #if defined( STRKERN_MUTATE )
+        const __m256i kBound = _mm256_set1_epi8( char( 0x99 ) );   // MUTATION: 'Z' stops folding in ciFindLiteral's filter. SIMD only.
+  #else
+        const __m256i kBound = _mm256_set1_epi8( char( 0x9A ) );   // 26 ^ 0x80: the signed spelling of < 26
+  #endif
+        const __m256i isUp   = _mm256_cmpgt_epi8( kBound, biased );
+        return _mm256_or_si256( v, _mm256_and_si256( isUp, _mm256_set1_epi8( 0x20 ) ) );
+    }
+#endif
+};
+
 struct NeedleEnds
 {
     char        first = 0;
     char        last  = 0;
     std::size_t span  = 0;   // the needle's length: `last` sits at start + span - 1
 };
-template<class Verify>
+template<class Fold = ExactBytes, class Verify>
 inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
 {
     const auto [ first, last, span ] = ends;
@@ -531,6 +578,8 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
         std::uint64_t a = 0, b = 0;
         std::memcpy( &a, p + k, 8 );
         std::memcpy( &b, p + k + span - 1, 8 );
+        a = Fold::swar8( a );
+        b = Fold::swar8( b );
         // both masks are exact, so their AND marks exactly the starts where the first and last bytes agree
         std::uint64_t mask = swarZeroByteMask( a ^ n0 ) & swarZeroByteMask( b ^ nl );
         while( mask != 0 )
@@ -546,7 +595,7 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
     }
     for( ; k + span <= n; ++k )
     {
-        if( p[ k ] == first && p[ k + span - 1 ] == last && verify( k ) )
+        if( Fold::one( p[ k ] ) == first && Fold::one( p[ k + span - 1 ] ) == last && verify( k ) )
         {
             return k;
         }
@@ -554,7 +603,7 @@ inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEn
     return n;
 }
 
-template<class Verify>
+template<class Fold = ExactBytes, class Verify>
 inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
 {
     const auto [ first, last, span ] = ends;
@@ -568,8 +617,8 @@ inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends
     const uint8x16_t sl = vdupq_n_u8( static_cast<std::uint8_t>( last ) );
     while( k + span + 15 <= n )                // sixteen starts, each with the whole needle in range
     {
-        const uint8x16_t v0   = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) );
-        const uint8x16_t vl   = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k + span - 1 ) );
+        const uint8x16_t v0   = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) ) );
+        const uint8x16_t vl   = Fold::vec( vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k + span - 1 ) ) );
         std::uint64_t    mask = neonNibbleMask( vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( vl, sl ) ) );
         while( mask != 0 )
         {
@@ -591,8 +640,8 @@ inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends
     const __m256i sl = _mm256_set1_epi8( last );
     while( k + span + 31 <= n )                // thirty-two starts, each with the whole needle in range
     {
-        const __m256i v0   = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) );
-        const __m256i vl   = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k + span - 1 ) );
+        const __m256i v0   = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) ) );
+        const __m256i vl   = Fold::vec( _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k + span - 1 ) ) );
         std::uint32_t mask = std::uint32_t( _mm256_movemask_epi8( _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( vl, sl ) ) ) );
         while( mask != 0 )
         {
@@ -606,7 +655,7 @@ inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends
         k += 32;
     }
 #endif
-    const std::size_t tail = findByEndBytes_scalar( p + k, n - k, ends, [ &verify, k ]( std::size_t at ) { return verify( k + at ); } );
+    const std::size_t tail = findByEndBytes_scalar<Fold>( p + k, n - k, ends, [ &verify, k ]( std::size_t at ) { return verify( k + at ); } );
     return tail == n - k ? n : k + tail;
 }
 
@@ -626,6 +675,13 @@ struct MiddleByteMatches
     const char* needle;
     bool        operator()( std::size_t at ) const noexcept { return p[ at + 1 ] == needle[ 1 ]; }
 };
+struct LowerFoldedNeedleMatches   // ciFindLiteral's verify: the whole span, A-Z-folded, against the lowered needle
+{
+    const char* p;
+    const char* needleLowered;
+    std::size_t m;
+    bool        operator()( std::size_t at ) const noexcept { return lowerFoldedEquals( p + at, needleLowered, m ); }
+};
 struct WholeNeedleMatches
 {
     const char* p;
@@ -635,10 +691,10 @@ struct WholeNeedleMatches
 };
 
 // The first start the end-byte filter and `verify` both accept, on the path asked for.
-template<class Verify>
+template<class Fold = ExactBytes, class Verify>
 inline std::size_t findByEndBytesOn( KernelPath path, const char* p, std::size_t n, NeedleEnds ends, const Verify& verify ) noexcept
 {
-    return path == KernelPath::Scalar ? findByEndBytes_scalar( p, n, ends, verify ) : findByEndBytes( p, n, ends, verify );
+    return path == KernelPath::Scalar ? findByEndBytes_scalar<Fold>( p, n, ends, verify ) : findByEndBytes<Fold>( p, n, ends, verify );
 }
 
 // Three-byte needle — the trigram probe shape: the first and THIRD bytes filter, byte 1 is the verify. Returns n when the needle
@@ -672,6 +728,23 @@ inline std::size_t findNeedle( const char* p, std::size_t n, const char* needle,
     if( needle.empty() ) { return from; }
     const std::size_t left = hay.size() - from;
     const std::size_t at   = findNeedle( hay.data() + from, left, needle.data(), needle.size(), path );
+    return at == left ? std::string_view::npos : from + at;
+}
+
+// The ASCII case-insensitive twin of find: the first start at or after `from` where `hay`, A-Z-folded, equals `needleLowered`, or
+// std::string_view::npos. `needleLowered` is lowered once by the caller (an upper-case byte in it never matches, as for
+// lowerFoldedEquals). Contract: byte-identical to folding every A-Z byte of `hay` to lower case and calling std::string_view::find,
+// for EVERY input; bytes >= 0x80 never fold (no locale, no UTF-8 case mapping). D3 in test/verify_strkern.cpp is the property test.
+[[nodiscard]] inline std::size_t ciFindLiteral( std::string_view hay, std::string_view needleLowered, std::size_t from = 0,
+                                                KernelPath path = KernelPath::Vector ) noexcept
+{
+    if( from > hay.size() ) { return std::string_view::npos; }
+    const std::size_t m = needleLowered.size();
+    if( m == 0 ) { return from; }
+    const char* const p    = hay.data() + from;
+    const std::size_t left = hay.size() - from;
+    const std::size_t at   = findByEndBytesOn<AsciiLowerBytes>( path, p, left, { needleLowered[ 0 ], needleLowered[ m - 1 ], m },
+                                                                LowerFoldedNeedleMatches{ p, needleLowered.data(), m } );
     return at == left ? std::string_view::npos : from + at;
 }
 

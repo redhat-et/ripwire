@@ -457,11 +457,10 @@ inline std::string lowerCopy( std::string_view s )
 template< std::size_t N >
 inline std::size_t countPhrases( std::string_view hay, const std::string_view ( &needles )[N] )
 {
-    const std::string lowered = lowerCopy( hay );
-    std::size_t       found   = 0;
-    for( const std::string_view w : needles )
+    std::size_t found = 0;
+    for( const std::string_view w : needles )   // ciFindLiteral folds `hay` in registers: no lowered copy
     {
-        found += ( lowered.find( w ) != std::string::npos ) ? 1u : 0u;
+        found += ( strkern::ciFindLiteral( hay, w ) != std::string_view::npos ) ? 1u : 0u;
     }
     return found;
 }
