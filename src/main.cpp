@@ -4741,7 +4741,8 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         DISCLOSE( Diagnostics::answerRefused, "the run exits non-zero naming the failed read-back on stderr; no answer is printed",
                   "runWithCompactLegend: the captured answer could not be read back whole" );
         rw::emitRaw( stderr, "ripwire: compact legend: could not read the captured answer back whole — nothing is printed rather than a "
-                             "truncated answer; rerun with --legend=full\n" );
+                             "truncated answer. The verb itself ran: check its effect before rerunning one that edits (--legend=full "
+                             "prints without this capture)\n" );
         return rc != 0 ? rc : 1;
     }
     if( refOnlyCapture || seenOnlyCapture )

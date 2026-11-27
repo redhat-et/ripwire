@@ -113,7 +113,7 @@ else:
 mcp_slice > "$TMP/s3k.txt"
 RIPWIRE_TEST_READ_ERROR="app.py" mcp_slice > "$TMP/s3.txt"
 if ! grep -q '__ERROR__' "$TMP/s3k.txt" && grep -q 'total' "$TMP/s3k.txt"; then
-    if grep -q 'cannot read .*app.py' "$TMP/s3.txt"; then ok "(s3) MCP slice answers an error naming the file read part-way"; else no "(s3) MCP slice under the seam: $( head -c 200 "$TMP/s3.txt" )"; fi
+    if grep -q '^__ERROR__:.*cannot read .*app.py' "$TMP/s3.txt"; then ok "(s3) MCP slice answers an error naming the file read part-way"; else no "(s3) MCP slice under the seam: $( head -c 200 "$TMP/s3.txt" )"; fi
 else no "(s3) premise: the MCP slice answers without the seam: $( head -c 200 "$TMP/s3k.txt" )"; fi
 RIPWIRE_TEST_READ_ERROR="app.py" run s4 --export=cc.json
 locs(){ python3 -c '
