@@ -1,5 +1,15 @@
 # TypeScript/JavaScript literal receivers: a built-in method never binds an unrelated user function
 
+> **Solved (2026-11-26).** A built-in method called on a string, template, array, regex, number or boolean literal,
+> or on a chain that stays certain, no longer binds an unrelated same-named user function; the call is counted as
+> external instead, in [#244](https://github.com/redhat-et/ripwire/pull/244) by @csy20, closing
+> [#163](https://github.com/redhat-et/ripwire/issues/163) and [#59](https://github.com/redhat-et/ripwire/issues/59); the
+> `--uses`, LSP and MCP twin (`declined_literal_calls=`) followed in
+> [#411](https://github.com/redhat-et/ripwire/pull/411) by @lennix1337. The KNOWN GAP arms described below are flipped:
+> `test/fieldnarrowcheck.sh`'s `(kg-ts)` block now asserts no edge into `unrelated.ts` with `graph_ambiguous="0"` on TS,
+> JS and TSX corpora, and keeps both controls. This kit stays as a worked example; nothing in its scope remains open
+> (the `KNOWN GAP` comment still at `test/fieldnarrowcheck.sh:640` is a stale header with no arms under it).
+
 You are fixing a **confident false edge** in ripwire's call graph for TypeScript and JavaScript, and you
 are doing it the way the last attempt did not: by the receiver's **type**, starting where the syntax
 proves that type.
@@ -11,11 +21,6 @@ makes literal receivers, and member chains that start from one, stop binding use
 be their target. Every other member call keeps today's behaviour, byte for byte.
 
 Work in a git worktree, not the main checkout, and run gates in the foreground.
-
-> **Status (2026-09-16).** Issue #163 is claimed by @csy20, and their plan is agreed on the issue. Read
-> that thread before you start anything, and offer help there rather than opening a parallel branch.
-> The plan's updates since it was written: take the next free `kParserVer` at rebase, and rebase after
-> PR #235 lands (see "Known traps").
 
 ---
 

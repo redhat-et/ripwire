@@ -1,28 +1,30 @@
 # prompts/ — run the loops this tool was built with
 
 Each file here is a **self-contained orchestrator prompt**. Paste one into your coding agent at the
-root of a ripwire checkout; it needs nothing else from this directory to work. They encode the
+root of a ripwire checkout; two, `improve-for-my-language.md` and `improve-quality-panel.md`, run from
+your own repository instead. A prompt needs nothing else from this directory to work. They encode the
 workflow rather than describing it, so an agent can pick one up and work the way the project works.
 
-Every prompt ends the same way: **it writes a plan and stops for your go-ahead.** Nothing runs
-before you approve it. Read the plan, cut what you disagree with, then say go.
+Every prompt ends the same way: **it writes a plan and stops for your go-ahead.** Nothing that changes
+the tree or posts anywhere runs before you approve it; read-only orientation (`--for`, `--recall`) is
+how it writes the plan. Read the plan, cut what you disagree with, then say go.
 
 | Prompt | Who it is for | What it produces |
 | --- | --- | --- |
 | [`add-a-language.md`](add-a-language.md) | Anyone who wants a language ripwire does not index yet | A vendored grammar, extraction, disclosed blind spots and a red-first gate — the path the Elixir grammar actually took, file by file, including the parse-rate measurement that decides whether to start at all |
-| [`cobol-measure-on-your-corpus.md`](cobol-measure-on-your-corpus.md) | Anyone with COBOL to point it at — public IBM i corpora first, and optionally production code they cannot share, which is a separate, aggregate-only section | Parse rates by artifact kind and PERFORM/CALL/COPY recall **split by tier**, tree edges apart from token-fallback edges, for the two-pass two-grammar stack; occurrence counts for the constructs our roadmap is still guessing at (CICS, embedded SQL, COPY REPLACING, nested programs, free format); and a yes/no on whether a SCIP resolver can produce `typed_enclosing_range`, which is what decides whether the fork can go away (#70). |
+| [`cobol-measure-on-your-corpus.md`](cobol-measure-on-your-corpus.md) | Anyone with COBOL to point it at — public IBM i corpora first, and optionally production code they cannot share, which is a separate, aggregate-only section | Parse rates by artifact kind and PERFORM/CALL/COPY recall **split by tier**, tree edges apart from token-fallback edges, for the two-pass two-grammar stack; occurrence counts for the constructs our roadmap is still guessing at (CICS, embedded SQL, COPY REPLACING, nested programs, free format); and a yes/no on whether a SCIP resolver can produce `typed_enclosing_range`, which is what decides whether the fork can go away (#70). One round is already posted on #70 (2026-10-10); more corpora are the gap. |
 | [`improve-for-my-language.md`](improve-for-my-language.md) | Anyone running ripwire on their own repository — a first session included; the maintainer plan is a labelled section at the end | Transcript-grounded gaps for one language — grammar coverage, symbol kinds, ranking, legends, first-run friction — as an issue-ready report with a reproduction per finding. |
 | [`improve-quality-panel.md`](improve-quality-panel.md) | Anyone whose panel shortlist they can judge — run it from your OWN codebase | Per-family agreement verdicts from blind reads of real functions, misses diagnosed by pipeline stage, and an ordered plan in which any ranking change owes a pre-registered calibration round. |
-| [`full-audit.md`](full-audit.md) | A maintainer, anyone deciding whether to trust the tool, or anyone willing to run it against their own large repository | A severity-ranked, gated audit across six lenses — bugs and hostile inputs, measured performance at the scale rung, verb-to-moment matching, token efficiency, an ecosystem scan of papers and repos with real momentum, and the honesty of the output — after first proving each instrument can see what it measures. |
+| [`full-audit.md`](full-audit.md) | A maintainer, anyone deciding whether to trust the tool, or anyone willing to run it against their own large repository | A severity-ranked, gated audit across six lenses — bugs and hostile inputs, measured performance at the scale rung, verb-to-moment matching, token efficiency, an ecosystem scan of papers and repos with real momentum, and the honesty of the output — after first proving each instrument can see what it measures. Tracked on [#152](https://github.com/redhat-et/ripwire/issues/152): claim a lens there first. |
 | [`dogfood-gaps.md`](dogfood-gaps.md) | Anyone who wants findings instead of opinions | A real task done using only ripwire for navigation, with every fallback to grep or a whole-file read logged as a product gap at the moment it happened. |
 | [`capture-audit.md`](capture-audit.md) | Anyone checking whether the output is honest | A fresh showcase capture read by parallel adversarial lenses, and the findings turned into family-wide gates. |
 | [`ranking-eval-loop.md`](ranking-eval-loop.md) | Anyone who thinks the ranker missed | Real retrieval misses mined from your own sessions, turned into held-out labels, and a ranking change measured against them — or dropped. |
 | [`fresh-agent-onboarding.md`](fresh-agent-onboarding.md) | Anyone shipping ripwire to other agents | A zero-context agent's transcript as evidence: which verbs it found, misused, or never discovered — and the help/skill/description fixes that follow. |
 | [`sibling-sweep.md`](sibling-sweep.md) | Anyone who just landed a fix | Every unfixed sibling of a mechanism the output discloses, found by enumerating the emitter family in source instead of trusting the docs. |
-| [`head-to-head.md`](head-to-head.md) | Anyone who needs a number they can defend | A paired comparison against a competitor or a bare-grep baseline, with tokens-to-correct-answer and wall time, and the losses examined instead of buried. |
+| [`head-to-head.md`](head-to-head.md) | Anyone who needs a number they can defend | A paired comparison against a competitor or a bare-grep baseline, with completeness, tokens-to-correct-answer and wall time, and the losses examined instead of buried. |
 | [`build-showcase.md`](build-showcase.md) | Anyone presenting the tool to someone else | A deck, one-pager or HTML page built only from numbers this repo's gates pin, each slide citing its instrument, with one honest counterexample. |
 | [`command-tour.md`](command-tour.md) | A new user, and the docs | Every verb run live on this repo with its output explained, plus a filed drift finding for any verb whose help, reference entry and live behavior disagree. |
-| [`help-wanted/`](help-wanted/README.md) | Anyone who wants a scoped problem to take on, with the research already done | An index of the help-wanted kits: one detailed prompt per open problem, its difficulty, and the `help wanted` issue to claim it on. |
+| [`help-wanted/`](help-wanted/README.md) | Anyone who wants a scoped problem to take on, with the research already done | An index of the help-wanted kits: one detailed prompt per open problem, its difficulty and the `help wanted` issue to claim it on, plus the solved kits and who solved them. |
 
 **Before you start any of them:** build the tool, because most prompts need a binary to measure
 against.

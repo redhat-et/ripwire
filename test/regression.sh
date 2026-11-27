@@ -1118,6 +1118,7 @@ for _g in \
     skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
+    skillshapecheck \
     skilltruthcheck \
     skipclassifycheck \
     skippedcheck \
@@ -1126,7 +1127,9 @@ for _g in \
     slicediffcheck \
     sliceflowcheck \
     sliceflowsenscheck \
+    slotbasecheck \
     slotjoincheck \
+    slotregcheck \
     snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \

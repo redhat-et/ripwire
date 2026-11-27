@@ -1,5 +1,7 @@
 # ripwire-opt-remarks — reference: optremarks-reference (read on demand; the recipe is in SKILL.md)
 
+Contents: The one rule · Step 0 — profile first, or you will optimize a millisecond · Step 1 — collect · Step 2 — the remark classes, and what each one is worth here · Real signal · Restated algorithm — dismiss as a class · Real but not worth it — the calibration case · The cost-model classes have a wholesale answer · Step 3 — the measurement a fix has to survive · Anti-patterns this pass actually hit
+
 # Triaging clang optimization remarks in this repo
 
 > Nearest neighbours:

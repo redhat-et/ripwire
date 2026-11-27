@@ -1,5 +1,7 @@
 # ripwire-perf-target — reference: perf-reference (read on demand; the recipe is in SKILL.md)
 
+Contents: 1. Pin the measured evidence · 2. Navigate the measured surface · 3. Maintenance/change-risk context · 4. Static dependency + shape hypotheses · 4a2. Join the measured heat onto the static findings · 4b. If the profile points at MEMORY, not compute · 5. Expand measured candidates · 6. Re-measure · Output
+
 # Performance targeting with ripwire
 
 > Nearest neighbours:

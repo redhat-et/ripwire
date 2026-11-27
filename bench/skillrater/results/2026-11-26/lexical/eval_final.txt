@@ -1,0 +1,45 @@
+ripwire --eval-skills  (skill routing over K=16 candidate skills [ripwire-router excluded]; 214 positive + 68 negative prompts; corpus 'test/skillevalfix/prompts.tsv'; split test=183 dev=99)
+  arm           hit@1   hit@2     mrr   sep-auc   fire/abstain@ORACLE-th (upper bound)
+  overlap       54.7%   69.6%   0.683     0.656    46.8% (th=0.250)
+  name          12.6%   20.6%   0.277     0.571    25.9% (th=0.000)
+  bm25-desc     68.7%   79.0%   0.778     0.902    67.4% (th=4.564)
+  bm25-full     62.1%   74.3%   0.744     0.913    62.8% (th=5.279)
+  for-routed    65.9%   76.2%   0.762     0.924    65.6% (th=3.158)
+  random         6.3%   12.7%   0.213     0.500   <- floor (uniform-random ranking; auc 0.5 by definition)
+  provenance hit@1 (bm25-desc): router 20/26, desc 27/28, judged 100/160 (desc rows quote the descriptions - expect them easiest; judged is the honest number)
+  judged-only hit@1 per arm: overlap 76/160, name 18/160, bm25-desc 100/160, bm25-full 93/160, for-routed 99/160
+  router-magnet: with ripwire-router ADMITTED as a candidate it takes top-1 on 8/214 positive prompts (bm25-desc arm) - why it is excluded above
+  per-skill (bm25-desc): name / permitted-rows / won / pos-fires / false-fires / neg-fires
+    ripwire-before-you-build    16     8    13     5     4
+    ripwire-change-check        13     6     9     3     3
+    ripwire-find-bug            15    10    12     2     3
+    ripwire-fresh-eyes          18    10    12     2     3
+    ripwire-graph-query         11    11    14     3     4
+    ripwire-handoff             11     9    11     2     5
+    ripwire-layers              11     9    15     6     7
+    ripwire-mcp                 12    10    13     3     4
+    ripwire-navigate            12     6     9     3     6
+    ripwire-opt-remarks          9     9    11     2     4
+    ripwire-orient              28    14    18     4     4
+    ripwire-perf-target         11     8    13     5     1
+    ripwire-quality-bar         12     6    15     9     3
+    ripwire-reuse-first         11    10    19     9     7
+    ripwire-security-scan       11     7     8     1     0
+    ripwire-write-tests         16    14    22     8    10
+  misses (overlap):
+  misses (name):
+  misses (bm25-desc):
+  misses (bm25-full):
+  misses (for-routed):
+  split=test (N=183: 130 positive + 53 negative):
+    split=test  overlap       52.3%   64.6%   0.653     0.657
+    split=test  name          13.1%   21.5%   0.280     0.602
+    split=test  bm25-desc     63.8%   73.1%   0.736     0.889
+    split=test  bm25-full     56.9%   70.0%   0.710     0.912
+    split=test  for-routed    63.8%   72.3%   0.742     0.938
+  split=dev (N=99: 84 positive + 15 negative):
+    split=dev   overlap       58.3%   77.4%   0.731     0.638
+    split=dev   name          11.9%   19.0%   0.271     0.456
+    split=dev   bm25-desc     76.2%   88.1%   0.843     0.917
+    split=dev   bm25-full     70.2%   81.0%   0.796     0.901
+    split=dev   for-routed    69.0%   82.1%   0.794     0.864

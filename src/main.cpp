@@ -3346,9 +3346,11 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
     std::string().swap( snap.graphOut );
     if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
     {
-        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={}\n", snap.treeReplayed ? "replayed" : "walked",
-                    snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built", rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ],
-                    rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0 );
+        // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={}\n",
+                    snap.treeReplayed ? "replayed" : "walked", snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built",
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ],
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ] );
     }
 }
 

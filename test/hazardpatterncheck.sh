@@ -543,6 +543,7 @@ infra/os_win32.cpp	realpath	malloc	1	Windows body of os::realpath( path, nullptr
 infra/profileScope.h	alloc	new	1	profiling build only: pushed into RecordArena::m_blocks, deleted by ~RecordArena
 infra/profileScope.h	create	new	1	profiling build only: registered in m_threads, deleted when the thread retires
 infra/profileScope.h	registry	new	1	profiling build only: the registry core is leaked on purpose so retire() is safe during static destruction
+valuerefindex.h	buildBase	new	1	handed in the same statement to NarrowBase::index, a std::unique_ptr; ValueRefIndex( const Narrowed& ) is private, so std::make_unique cannot reach it
 infra/svector.h	grow	new	1	the spilled buffer is owned by the svector: delete[] on every regrow, clear and destruction
 ingest_astquery.h	astQueryGrouped	ts_parser_parse_string	1	the tree is deleted by hand in the same block after the walk
 ingest_astquery.h	astQueryGrouped	ts_query_cursor_new	1	deleted by hand after the file loop; the per-file catch keeps a throw from leaving the loop early

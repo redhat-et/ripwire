@@ -1,5 +1,7 @@
 # ripwire MCP reference — edit-verb safety contract + server internals
 
+Contents: The 3 MCP edit verbs — span-addressed writes, no read-then-d · Listing fewer tools — --mcp-tools {#mcp-tools} · Remote transport — --listen reference {#remote-transport} · Server behavior worth knowing
+
 Reference for `ripwire-mcp`. Load this when you're about to call one of the 3 edit verbs (need the exact
 failure-mode contract) or need to reason about server staleness/rebuild/personalization internals.
 
