@@ -82,16 +82,34 @@ def parse_tsv(block):
     return rows, unparsed
 
 
+# ONE clock, generous, and far above the slowest cell. Two clocks close together is what cost a
+# measurement window: an inner 600 s per-request deadline sat just under a 900 s outer bound, the
+# inner one fired, and from outside the kill was indistinguishable from a normal finish. There is now
+# a single bound on the whole session and the result says in words how the run ended, so no reader has
+# to infer it. llvm-project's slowest observed session is ~75 s (a 35 s index build plus eight ~2 s
+# queries) under a profile build, so 1800 s is ~24x headroom: it bounds a hang without ever being the
+# thing that stops a working run.
+SESSION_TIMEOUT_S = 1800.0
+
+
 def run_session(prof_bin, root, tasks):
     env = dict(os.environ)
     env["RIPWIRE_MCP_TIMINGS"] = "1"   # one `ripwire-timing verb=… wall_ms=…` line per request
     errf = tempfile.NamedTemporaryFile("w+", prefix="forsession-err-", suffix=".txt", delete=False)
     with errf, open(os.devnull, "wb") as devnull:
-        done = subprocess.run([prof_bin, "--mcp"], input=build_stream(root, tasks),
-                              stdout=devnull, stderr=errf, env=env, text=True)
+        try:
+            done = subprocess.run([prof_bin, "--mcp"], input=build_stream(root, tasks),
+                                  stdout=devnull, stderr=errf, env=env, text=True,
+                                  timeout=SESSION_TIMEOUT_S)
+            ended = f"the server exited normally, rc={done.returncode}"
+            rc = done.returncode
+        except subprocess.TimeoutExpired:
+            ended = (f"KILLED at the {SESSION_TIMEOUT_S:.0f}s session bound — this cell FAILED, it did "
+                     f"not finish; nothing below is a complete session")
+            rc = -1
         errf.flush()
         errf.seek(0)
-        return done.returncode, errf.read(), errf.name
+        return rc, errf.read(), errf.name, ended
 
 
 def report(rows, tasks):
@@ -125,8 +143,9 @@ def main():
     limit = int(sys.argv[4]) if len(sys.argv) > 4 else 99
     tasks = [t.strip() for t in open(tasks_file) if t.strip()][:limit]
 
-    rc, err, err_path = run_session(prof_bin, root, tasks)
-    print(f"# session over {root}: {len(tasks)} `for` calls, a different task each time (rc={rc})")
+    rc, err, err_path, ended = run_session(prof_bin, root, tasks)
+    print(f"# session over {root}: {len(tasks)} `for` calls, a different task each time")
+    print(f"# HOW IT ENDED: {ended}")
     for line in err.splitlines():
         if line.startswith("ripwire-timing"):
             print("  " + line)
