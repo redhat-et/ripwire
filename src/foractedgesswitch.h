@@ -1,5 +1,5 @@
-// foractedgesswitch.h — the SWITCH of lane ACT-EDGES (11-26; foractedges.h is the EDGES line, foractline.h the wide act line):
-// ACT-8 and the EDGES line on a `--for` page 1. Its own small header, as forrouteswitch.h is for ROUTING,
+// foractedgesswitch.h — the SWITCH of lane ACT-EDGES (11-26; foractedges.h is the EDGES and WHERE lines, foractline.h the wide act
+// line): ACT-8, the EDGES line and the WHERE line on a `--for` page 1. Its own small header, as forrouteswitch.h is for ROUTING,
 // because foranswerfirst.h and forpages.h (which count the act line's bytes) decide with it and must not include the act line's
 // encoder (it includes them).
 //
@@ -17,7 +17,7 @@
 namespace rw::actedges
 {
 
-// ON by default (owner 11-25 "these look great", ship ON in one PR). RIPWIRE_ACT_EDGES=0 turns them off: every answer is then
+// ON by default (owner 11-25 "these look great", ship ON in one PR). RIPWIRE_ACT_EDGES=0 turns all three off: every answer is then
 // byte-identical to the one served before this lane (test/actedgescheck.sh (O)). The A/B arms (each part measured alone): a number
 // 1..6 is a mask of the parts it keeps, kPartAct8 (1) | kPartEdges (2) | kPartWhere (4). Any other value, or unset, keeps all three.
 inline constexpr unsigned kPartAct8  = 1;
@@ -66,18 +66,22 @@ inline constexpr std::size_t kActShippedRanges = 3;
     return kOpen.size() + ( at - 1 ) + kClose.size();
 }
 
-// The top-level element name of the line foractedges.h writes.
+// The top-level element names of the two lines foractedges.h writes.
 [[nodiscard]] inline bool isLaneLine( std::string_view name ) noexcept
 {
-    return name == "edges";
+    return name == "edges" || name == "where";
 }
 
-// The clause of the line foractedges.h writes (here so forpages.h can measure it without that header).
+// The clauses of the two lines foractedges.h writes (here so forpages.h can measure them without that header).
 inline constexpr std::string_view kEdgesClause =
     "<!-- the edges line: per act-line symbol (its first 3 ranges) NAME: called by P:L N (non-test callers), calls P:L N (callees in "
     "other non-test files); exact-resolved first, then by name; not ones an act range holds; (+K) K more of that kind -->";
+inline constexpr std::string_view kWhereClause =
+    "<!-- the where line: beside the act files, tests= that call an act symbol or are named after an act file, docs= that name one in "
+    "backticks, changelog= nearest at or above the top act file, build= the build file listing the first test or an act file; "
+    "X_total= all found; absent = none found -->";
 
-// THE FULL-LEGEND BYTES THIS LANE ADDS to a page-1 document `view`: the edges clause and the wide act clause's extra over
+// THE FULL-LEGEND BYTES THIS LANE ADDS to a page-1 document `view`: the edges and where clauses and the wide act clause's extra over
 // the shipped one. θ5's refill (forpages.h coreEnds) sizes page 1 by the page the FULL legend would deliver; without this the long
 // clauses would grow that target and pull rows ONTO page 1 under the core legend. With it, the target is the page before this lane,
 // so the lines' bytes come out of the bottom of page 1 (owner rule "answers to the top, then cut the bottom").
@@ -85,6 +89,7 @@ inline constexpr std::string_view kEdgesClause =
 {
     std::size_t extra = 0;
     extra += view.find( kEdgesClause ) != std::string_view::npos ? kEdgesClause.size() : 0;
+    extra += view.find( kWhereClause ) != std::string_view::npos ? kWhereClause.size() : 0;
     extra += view.find( actline::kActClauseWide ) != std::string_view::npos ? actline::kActClauseWide.size() - actline::kActClause.size() : 0;
     return extra;
 }

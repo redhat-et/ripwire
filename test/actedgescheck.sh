@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 # actedgescheck.sh — LANE ACT-EDGES (src/foractedgesswitch.h, src/foractedges.h, src/foractline.h ACT-8): on a `--for` page 1 the act
 # line lists up to 8 ranges (the top 3 sigs rows, then the next ranged ones), and right after it an EDGES line (callers and other-file
-# callees of the act line's first 3 symbols). RIPWIRE_ACT_EDGES=0 is off.
-# ARMS (every one NEW: a binary without the lane writes at most 3 ranges and no <edges>, so A/E fail)
+# callees of the act line's first 3 symbols) and a WHERE line (their tests, docs, changelog, build file). RIPWIRE_ACT_EDGES=0 is off.
+# ARMS (every one NEW: a binary without the lane writes at most 3 ranges and no <edges>/<where>, so A/E/W fail)
 #   (A)  ACT-8: Q1's act read= holds 4..8 ranges, the first 3 the top 3 sigs <d> rows, none held by an earlier one; the full legend
 #        (--legend=full) carries the wide clause once
 #   (E)  EDGES: Q1 has <edges>; each group "NAME: called by P:L N, ..; calls P:L N" names an act symbol; every P:L is a line of a real
 #        file whose text holds N; no P:L inside an act range; at most 2 callers and 2 callees shown per group
+#   (W)  WHERE, on test/actedgesfix (a parser with a test, a doc, a changelog and a CMake test list; src/ has no tests or docs beside
+#        it): QF's <where> names tests/test_parser.cpp, docs/parser.md, CHANGELOG.md and tests/CMakeLists.txt; on Q1 and QF every path
+#        a <where> names exists under the root; tests= paths are test paths
 #   (P)  BYTES FROM THE BOTTOM: at the default size no row is pulled onto ON page 1, and it grows by the lane's own bytes at most (they
 #        may use room page 1 had); at the smallest --page-bytes the OFF page 1 still holds its rows at, the ON page 1 withholds more
 #        and is at most the OFF page 1 plus the core-legend clauses (200 B): the lane's bytes are counted and come off the bottom
 #   (P2) NEVER FROM AN ITEM: at the smallest --page-bytes the OFF answer is served whole at (one page, found to the byte), the ON
 #        answer is served whole too: the lane's bytes never push a whole answer's last rows onto a page 2 (mf1-ninja-01 R3, measured)
-#   (K)  THE ARMS: RIPWIRE_ACT_EDGES=1 is ACT-8 alone (no <edges>), =2 EDGES alone (3 ranges)
+#   (K)  THE ARMS: RIPWIRE_ACT_EDGES=1 is ACT-8 alone (no <edges>, no <where>), =2 EDGES alone (3 ranges), =4 WHERE alone
 #   (B)  BUDGET: a --token-budget the ON answer fits returns it with the lines; MCP `for` carries the wide act line and <edges>
-#   (O)  OFF: RIPWIRE_ACT_EDGES=0 writes <= 3 ranges (more only in θ17's edit form, as main), no <edges>, no lane clause; with RIPWIRE_PARENT_BIN (a binary from before
+#   (O)  OFF: RIPWIRE_ACT_EDGES=0 writes <= 3 ranges (more only in θ17's edit form, as main), no <edges>, no <where>, no lane clause; with RIPWIRE_PARENT_BIN (a binary from before
 #        the lane) every OFF answer is the parent's byte for byte (Q1, Q2, Q1 page 2, Q1 whole, --legend=full, --legend=first, --json,
 #        --token-budget, MCP)
 #   (D)  well formed (xmllint) and deterministic (two ON runs)
-#   (M)  MUTATION NEGATIVE CONTROLS: A's and E's detectors FAIL on the OFF page
+#   (M)  MUTATION NEGATIVE CONTROLS: A's, E's and W's detectors FAIL on the OFF page
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -39,6 +42,8 @@ fail = 0
 def ok(m): print("  PASS  " + m)
 def no(m):
     global fail; fail = 1; print("  FAIL  " + m)
+FIX = "test/actedgesfix"
+QF = "how does the parser parse the header body and footer"   # the fixture's act symbols have a test, a doc, a changelog, a build list
 QM = "rank symbols by pagerank and serialize the map"         # an MCP `for` task that carries an act line (actlinecheck (M))
 def run(argv, env=None, binary=None, root="src"):
     e = dict(os.environ); e.update(env or {})
@@ -57,22 +62,26 @@ def mcp(args, env=None, binary=None):
     return ""
 OFF = {"RIPWIRE_ACT_EDGES": "0"}
 WIDE = "the act line: read= P:L-E of the top 3 sigs d rows by r=, then the next ranged ones, up to 8 ranges"
-LANE_CLAUSES = (WIDE, "the edges line:", "edges: per act symbol")
+LANE_CLAUSES = (WIDE, "the edges line:", "the where line:", "edges: per act symbol", "where: tests= docs=")
 prose = lambda t: re.sub(r'<!\[CDATA\[.*?\]\]>', '', t, flags=re.S)   # a clause outside the rows (a row may quote the source that defines it)
 def lane(t):
-    """the page's own act element and the line right after it -> (read= value, <edges> CDATA text), each None when absent; anchored at the first <act/> OUTSIDE every CDATA section (a row may quote the source that writes them)"""
+    """the page's own act element and the lines right after it -> (read= value, <edges> CDATA text, <where> attributes text), each
+    None when absent; anchored at the first <act/> OUTSIDE every CDATA section (a row may quote the source that writes them)"""
     spans = [(m.start(), m.end()) for m in re.finditer(r'<!\[CDATA\[.*?\]\]>', t, re.S)]
     m = next((m for m in re.finditer(r'<act read="([^"]*)"/>', t) if not any(a <= m.start() < b for a, b in spans)), None)
-    if not m: return None, None
-    e = re.match(r'<edges><!\[CDATA\[(.*?)\]\]></edges>', t[m.end():], re.S)
-    return m.group(1), e.group(1) if e else None
+    if not m: return None, None, None
+    rest = t[m.end():]
+    e = re.match(r'<edges><!\[CDATA\[(.*?)\]\]></edges>', rest, re.S)
+    w = re.match(r'<where([^>]*)/>', rest[e.end():] if e else rest)
+    return m.group(1), e.group(1) if e else None, w.group(1) if w else None
 def act(t):
     v = lane(t)[0]
     return [] if not v else [(x.rsplit(":", 1)[0], *map(int, x.rsplit(":", 1)[1].split("-"))) for x in v.split(",")]
 has_edges = lambda t: lane(t)[1] is not None
 def lane_len(t):   # the bytes of the page's act element and the lane lines after it
-    v, e = lane(t)
-    return ( len(v) + len('<act read=""/>') if v is not None else 0 ) + ( len(e) + len('<edges><![CDATA[]]></edges>') if e is not None else 0 )
+    v, e, w = lane(t)
+    return ( len(v) + len('<act read=""/>') if v is not None else 0 ) + ( len(e) + len('<edges><![CDATA[]]></edges>') if e is not None else 0 ) + ( len(w) + len('<where/>') if w is not None else 0 )
+has_where = lambda t: lane(t)[2] is not None
 def held(rs, p, l, e): return any(q == p and a <= l and b >= e for q, a, b in rs)
 def act_ok(t):   # A's detector
     a = act(t)
@@ -102,9 +111,20 @@ def edges_ok(t, root="src"):   # E's detector
             x = line_of(p, l, root)
             if x is None or n not in x or held(a, p, l, l): return False
     return True
+def where_attrs(t):
+    w = lane(t)[2]
+    return dict(re.findall(r' (\w+)="([^"]*)"', w)) if w is not None else {}
+def where_ok(t, root="src"):   # W's detector
+    w = where_attrs(t)
+    if not w: return False
+    for k in ("tests", "docs", "changelog", "build"):
+        for p in (w.get(k, "").split(",") if w.get(k) else []):
+            if not os.path.exists(os.path.join(ROOT, root, p.rstrip("/"))): return False
+            if k == "tests" and not re.search(r'(^|/)(tests?|__tests__)/|_test\.|test_', p): return False
+    return True
 attr = lambda t, k: int((re.search(r' ' + k + r'="(\d+)"', t.split(">", 1)[0]) or [0, "0"])[1])
-A1, A2 = run(["--for=" + Q1]), run(["--for=" + Q2])
-O1, O2 = run(["--for=" + Q1], OFF), run(["--for=" + Q2], OFF)
+A1, A2, AF = run(["--for=" + Q1]), run(["--for=" + Q2]), run(["--for=" + QF], root=FIX)
+O1, O2, OF = run(["--for=" + Q1], OFF), run(["--for=" + Q2], OFF), run(["--for=" + QF], OFF, root=FIX)
 FULL = run(["--for=" + Q1, "--legend=full"])
 # A
 if act_ok(A1): ok(f"(A) Q1: act read= holds {len(act(A1))} ranges, none held by an earlier one")
@@ -120,6 +140,13 @@ else: no(f"(A) Q2: an act range is held by an earlier one: {act(A2)}")
 # E
 if edges_ok(A1): ok(f"(E) Q1: <edges> with {len(edges_groups(A1))} group(s), every P:L a real line holding N, none inside an act range")
 else: no(f"(E) Q1: <edges> missing or malformed: {edges_groups(A1)}")
+# W
+want = {"tests": "tests/test_parser.cpp", "docs": "docs/parser.md", "changelog": "CHANGELOG.md", "build": "tests/CMakeLists.txt"}
+wf = where_attrs(AF)
+if where_ok(AF, FIX) and all(wf.get(k) == v for k, v in want.items()): ok(f"(W) fixture: <where> {wf}: test, doc, changelog and build list, every path exists")
+else: no(f"(W) fixture: <where> {wf}, want {want}, every path existing")
+if not has_where(A1) or where_ok(A1): ok(f"(W) Q1: <where> {where_attrs(A1)}: every path it names exists")
+else: no(f"(W) Q1: <where> names a path that does not exist: {where_attrs(A1)}")
 # P
 b_on, b_off, grow = len(A1.encode()), len(O1.encode()), lane_len(A1) - lane_len(O1)
 if b_on - b_off <= grow + 200 and attr(A1, "withheld_bytes") + 200 >= attr(O1, "withheld_bytes"):
@@ -154,10 +181,13 @@ if paged(run(["--for=" + Q1, f"--page-bytes={lo}"], OFF)) and not paged(run(["--
 else: no("(P2) premise: the OFF answer is not paged at 1000 B and whole at 200000 B")
 # K
 k1, k2 = run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "1"}), run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "2"})
-if act_ok(k1) and not has_edges(k1): ok("(K) =1: ACT-8 alone")
+if act_ok(k1) and not has_edges(k1) and not has_where(k1): ok("(K) =1: ACT-8 alone")
 else: no("(K) =1 is not ACT-8 alone")
-if len(act(k2)) <= 3 and edges_ok(k2): ok("(K) =2: EDGES alone")
+if len(act(k2)) <= 3 and edges_ok(k2) and not has_where(k2): ok("(K) =2: EDGES alone")
 else: no("(K) =2 is not EDGES alone")
+k4 = run(["--for=" + QF], {"RIPWIRE_ACT_EDGES": "4"}, root=FIX)
+if len(act(k4)) <= 3 and not has_edges(k4) and where_ok(k4, FIX): ok("(K) =4: WHERE alone")
+else: no("(K) =4 is not WHERE alone")
 # B
 big = run(["--for=" + Q1, "--token-budget=60000"])
 if has_edges(big) and act_ok(big): ok("(B) a budget the answer fits carries the wide act line and <edges>")
@@ -170,24 +200,25 @@ off_args = [["--for=" + Q1], ["--for=" + Q2], ["--for=" + Q1, "--page-bytes=1200
             ["--for=" + Q1, "--legend=first"], ["--for=" + Q1, "--json"], ["--for=" + Q1, "--token-budget=60000"]]
 offs = {" ".join(a): (a, run(a, OFF)) for a in off_args}
 offs["mcp"] = (None, mcp({"task": QM}, OFF))
+offs["fixture"] = ("fix", OF)
 edit = lambda t: 'body_form="edit"' in t.split(">", 1)[0]   # θ17's edit form appends the edit file's body ranges on main too
-bad = [k for k, (_, t) in offs.items() if not (t and (len(act(t)) <= 3 or edit(t)) and not has_edges(t) and not any(c in prose(t) for c in LANE_CLAUSES))]
-if not bad: ok(f"(O) RIPWIRE_ACT_EDGES=0: <= 3 ranges (edit form aside), no <edges>, no lane clause on {len(offs)} answers")
+bad = [k for k, (_, t) in offs.items() if not (t and (len(act(t)) <= 3 or edit(t)) and not has_edges(t) and not has_where(t) and not any(c in prose(t) for c in LANE_CLAUSES))]
+if not bad: ok(f"(O) RIPWIRE_ACT_EDGES=0: <= 3 ranges (edit form aside), no <edges>/<where>, no lane clause on {len(offs)} answers")
 else: no(f"(O) an OFF answer is empty or carries a lane line or clause: {bad}")
 if PARENT:
     for k, (a, t) in offs.items():
-        p = mcp({"task": QM}, binary=PARENT) if a is None else run(a, binary=PARENT)
+        p = mcp({"task": QM}, binary=PARENT) if a is None else run(["--for=" + QF], binary=PARENT, root=FIX) if a == "fix" else run(a, binary=PARENT)
         if t == p: ok(f"(O) {k}: the OFF answer is the parent's byte for byte")
         else: no(f"(O) {k}: the OFF answer moved against the parent")
 else: ok("(O) no RIPWIRE_PARENT_BIN: parent comparison skipped (the lane runs it)")
 # D
-for k, t in (("Q1", A1), ("Q2", A2), ("Q1 full", FULL)):
+for k, t in (("Q1", A1), ("Q2", A2), ("QF", AF), ("Q1 full", FULL)):
     if subprocess.run(["xmllint", "--noout", "-"], input=t.encode(), capture_output=True).returncode == 0: ok(f"(D) {k}: well formed")
     else: no(f"(D) {k}: xmllint rejects it")
 if run(["--for=" + Q1]) == A1: ok("(D) two ON runs byte-identical")
 else: no("(D) two ON runs differ")
 # M
-if not act_ok(O1) and not edges_ok(O1): ok("(M) mutation: A's and E's detectors fail on the OFF page")
+if not act_ok(O1) and not edges_ok(O1) and not where_ok(OF, FIX): ok("(M) mutation: A's, E's and W's detectors fail on the OFF pages")
 else: no("(M) a detector passed the OFF page")
 print("actedgescheck: " + ("PASS" if fail == 0 else "FAIL"))
 sys.exit(fail)

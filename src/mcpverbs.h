@@ -29,7 +29,7 @@
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "forrowlines.h"   // MR1: rowlines::encodeRows — the CLI --for's row form, on the MCP `for` bundle
 #include "foractline.h"    // BR1: actline::insertActLine — the CLI --for's act line, on the MCP `for` bundle
-#include "foractedges.h"   // ACT-EDGES: insertActEdges — the CLI --for's EDGES line, on the MCP `for` bundle
+#include "foractedges.h"   // ACT-EDGES: insertActEdges — the CLI --for's EDGES and WHERE lines, on the MCP `for` bundle
 #include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "forqsites.h"     // θ11 (RIPWIRE_THETA11=1): the CLI --for's question-sites block, the same one inside this bundle's root
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
@@ -3245,7 +3245,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             return;
         }
-        // ACT-EDGES (foractedges.h): the CLI's EDGES line, right after the act line, through the same ledger; under
+        // ACT-EDGES (foractedges.h): the CLI's EDGES and WHERE lines, right after the act line, through the same ledger; under
         // budget_tokens only while est_tokens= stays within it, as the act line is.
         std::string was = limit > 0 ? out : std::string();
         if( rw::actedges::insertActEdges( out, ing, ix.g, flRootArg, &ledger ) && limit > 0 && rw::actline::detail::rootEstTokens( out ) > limit )

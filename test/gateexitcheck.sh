@@ -293,7 +293,7 @@ if seen == len( FIXTURES ):
 # is "a number that is printed but not checked". If you add a row, force the gate to fail and read the
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
-    "actedgescheck.sh":        ( "its arms accumulate inside one exec'd python3 heredoc (fail, sys.exit(fail)), so the heredoc's rc IS the script's. rc READ, not inferred: run against main 09995f4bb (no wide act line, no <edges>: 9 arms red) it exits 1 (2026-11-26)", 1 ),
+    "actedgescheck.sh":        ( "its arms accumulate inside one exec'd python3 heredoc (fail, sys.exit(fail)), so the heredoc's rc IS the script's. rc READ, not inferred: run against main 09995f4bb (no wide act line, no <edges>/<where>: 11 arms red) it exits 1 (2026-11-26)", 1 ),
     "routingcheck.sh":         ( "its arms accumulate inside one exec'd python3 heredoc (fail, sys.exit(fail)), so the heredoc's rc IS the script's. rc READ, not inferred: run against main d847bd3f3 (no file_gap_pct=, no edit-form default: 7 arms red) it exits 1 (2026-11-25)", 1 ),
     "tailsymtermscheck.sh":    ( "its arms accumulate inside one TRAILING python3 heredoc (sys.exit(1 if fails)); its rc IS the script's. rc READ, not inferred: run against the pre-lane main binary (no tsym=, 7 arms fail) and against /usr/bin/true (every run empty), it exits 1 both times (2026-11-14)", 1 ),
     "bodilessseedcheck.sh":    ( "its arms accumulate inside one embedded Python block (sys.exit(1 if nfail)), the script's last command. rc READ, not inferred: run against main d624cff5f (no impls=, 16 arms red) and a stub binary that exits 3, it exits 1 both times (2026-11-14)", 1 ),

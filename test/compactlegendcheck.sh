@@ -449,10 +449,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # and impact.xml only: graphlegend.h kTestedRowLegend now says how a test reaches the row and that reaching is not asserting
 # ("transitively reaches it" -> "transitively reaches it over call edges; reached, not asserted"), string for string, nothing
 # else. Checked mechanically: the reverse replacement of that one phrase gives the previous pin byte for byte. +39 B each.
-# RE-ANCHORED 2026-11-26 (lane ACT-EDGES, src/foractline.h ACT-8), for.xml only: the act line lists up to 8 ranges (geometry.cpp:4-9,
-# geometry.h:6-10, geometry.h:13-13 added) and the wide act clause replaces the 3-range one, est_tokens= 2460 -> 2502. Checked
-# mechanically: the SAME binary with RIPWIRE_ACT_EDGES=0 prints the previous pin byte for byte (at= masked), with the arm's own
-# setup. 6354 -> 6460 B.
+# RE-ANCHORED 2026-11-26 (lane ACT-EDGES, src/foractedges.h), for.xml only: the act line lists up to 8 ranges (geometry.cpp:4-9,
+# geometry.h:6-10, geometry.h:13-13 added), a <where docs="notes.md"/> line follows it, the wide act clause replaces the 3-range one
+# and the where clause joins the leading legend run, est_tokens= 2460 -> 2629. Checked mechanically: the SAME binary with
+# RIPWIRE_ACT_EDGES=0 prints the previous pin byte for byte (at= masked), with the arm's own setup. 6354 -> 6777 B.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

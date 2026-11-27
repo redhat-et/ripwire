@@ -13,7 +13,7 @@
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
 #include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
 #include "foractline.h"     // BR1: the act line — the page's top undelivered ranges, read in one turn
-#include "foractedges.h"    // ACT-EDGES: the EDGES line after the act line
+#include "foractedges.h"    // ACT-EDGES: the EDGES and WHERE lines after the act line
 #include "fortinyshape.h"   // THETA6 (default on; RIPWIRE_TINY_SHAPE=0 off): the named-location tiny shape
 #include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
@@ -5795,7 +5795,7 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
              .tailSameDir = rw::answerfirst::tailSameDirOn() };
 }
 
-// ACT-EDGES (foractedges.h): the EDGES line right after the act line, on the same raw render, re-priced through its ledger.
+// ACT-EDGES (foractedges.h): the EDGES and WHERE lines right after the act line, on the same raw render, re-priced through its ledger.
 // `maxEstTokens` > 0 (a budget's limit): kept only while the answer's est_tokens= stays within it, as the act line is.
 inline void forActEdges( const MainDispatch& d, std::string& doc, rw::ForAnswerLedger* ledger, std::size_t maxEstTokens = 0 )
 {

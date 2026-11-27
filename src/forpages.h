@@ -240,8 +240,9 @@ inline constexpr std::string_view kCorePageClause =
 inline constexpr std::string_view kCoreRootClause   = "root= the crawl root, p= relative to it; at= this commit; ";
 inline constexpr std::string_view kCoreActClause    = "act read= P:L-E ranges of the top rows: Read ALL in ONE turn (parallel ranged Reads); ";
 inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no ptr= is a lower same-file sibling (p= sym= r=), not the answer; ";
-// ACT-EDGES (foractedges.h): the edges line, defined on page 1 as the act line is.
+// ACT-EDGES (foractedges.h): the edges and where lines, defined on page 1 as the act line is.
 inline constexpr std::string_view kCoreEdgesClause = "edges: per act symbol NAME: called by / calls P:L N (other files, exact first), (+K) more; ";
+inline constexpr std::string_view kCoreWhereClause = "where: tests= docs= changelog= build= files beside the act files, X_total= all found; ";
 [[nodiscard]] inline std::string pagingActLegend( std::string_view legend, bool paged )
 {
     std::string body;
@@ -250,6 +251,7 @@ inline constexpr std::string_view kCoreEdgesClause = "edges: per act symbol NAME
     body += legend.find( "<!-- the act line:" ) != std::string_view::npos ? kCoreActClause : std::string_view();
     body += legend.find( "<!-- demote:" ) != std::string_view::npos ? kCoreDemoteClause : std::string_view();
     body += legend.find( "<!-- the edges line:" ) != std::string_view::npos ? kCoreEdgesClause : std::string_view();
+    body += legend.find( "<!-- the where line:" ) != std::string_view::npos ? kCoreWhereClause : std::string_view();
     if( body.empty() )
     {
         return body;
@@ -332,7 +334,7 @@ struct Stream
     std::vector<Cut>                cuts;
     std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
     std::vector<std::size_t>        gone;   // LD1: the document-legend clauses page 1 sheds to the later pages that use them (scope::shed)
-    std::vector<std::pair<std::size_t, std::size_t>> lane;   // ACT-EDGES: the counted lane bytes (wide act ranges, <edges>)
+    std::vector<std::pair<std::size_t, std::size_t>> lane;   // ACT-EDGES: the counted lane bytes (wide act ranges, <edges>, <where>)
 };
 
 // KB1: find the key-body group (its legend comment, then <bodies of="key">) among the stream's blocks and mark every cut with the group
@@ -420,7 +422,10 @@ struct LegendRuns
     const auto clauses = [ &off ]( std::size_t from, std::size_t to )
     {
         std::string run = off.substr( from, to - from );
-        if( const std::size_t at = run.find( actedges::kEdgesClause ); at != std::string::npos ) { run.erase( at, actedges::kEdgesClause.size() ); }
+        for( const std::string_view c : { actedges::kWhereClause, actedges::kEdgesClause } )
+        {
+            if( const std::size_t at = run.find( c ); at != std::string::npos ) { run.erase( at, c.size() ); }
+        }
         if( const std::size_t at = run.find( actline::kActClauseWide ); at != std::string::npos ) { run.replace( at, actline::kActClauseWide.size(), actline::kActClause ); }
         off.replace( from, to - from, run );
     };

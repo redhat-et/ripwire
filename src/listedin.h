@@ -55,6 +55,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -526,6 +527,22 @@ inline std::vector<ManifestLine> splitLines( const Manifest& man )
 namespace listeddetail
 {
 
+// Every directory from the one holding the file `rel` names up to the root, nearest first, each with its on-disk twin (`disk` = the
+// file's own directory on disk): `visit( dir, disk )` returns false to stop. The one upward walk the manifest reader below and the
+// --for where line's changelog (foractedges.h) share.
+template<class Visit>
+inline void walkDirsUp( std::string_view rel, std::filesystem::path disk, Visit&& visit )
+{
+    const std::size_t cut = rel.rfind( '/' );
+    std::string_view  dir = rel.substr( 0, cut == std::string_view::npos ? 0 : cut );
+    while( visit( dir, std::as_const( disk ) ) && !dir.empty() )
+    {
+        const std::size_t up = dir.rfind( '/' );
+        dir  = up == std::string_view::npos ? std::string_view() : dir.substr( 0, up );
+        disk = disk.parent_path();
+    }
+}
+
 // The manifests of every shown file's directory and ancestors, nearest first, each directory once (vendored directories never read).
 inline std::vector<Manifest> manifestsAbove( const IngestResult& ing, const std::vector<std::uint32_t>& files, bool& filesCapped )
 {
@@ -533,28 +550,16 @@ inline std::vector<Manifest> manifestsAbove( const IngestResult& ing, const std:
     std::vector<Manifest>    manifests;
     for( const std::uint32_t f : files )
     {
-        const std::string_view rel  = rootRelPath( ing, f );
-        std::filesystem::path  disk = std::filesystem::path( diskPath( ing, f ) ).parent_path();
-        const std::size_t      cut  = rel.rfind( '/' );
-        std::string_view       dir  = rel.substr( 0, cut == std::string_view::npos ? 0 : cut );
-        while( true )
-        {
-            if( std::ranges::find( seenDirs, dir ) == seenDirs.end() )
-            {
-                seenDirs.emplace_back( dir );
-                if( !isVendoredDir( dir ) )
-                {
-                    readDirManifests( dir, disk, manifests, filesCapped );
-                }
-            }
-            if( dir.empty() )
-            {
-                break;
-            }
-            const std::size_t up = dir.rfind( '/' );
-            dir  = up == std::string_view::npos ? std::string_view() : dir.substr( 0, up );
-            disk = disk.parent_path();
-        }
+        walkDirsUp( rootRelPath( ing, f ), std::filesystem::path( diskPath( ing, f ) ).parent_path(),
+                    [ & ]( std::string_view dir, const std::filesystem::path& disk )
+                    {
+                        if( std::ranges::find( seenDirs, dir ) == seenDirs.end() )
+                        {
+                            seenDirs.emplace_back( dir );
+                            if( !isVendoredDir( dir ) ) { readDirManifests( dir, disk, manifests, filesCapped ); }
+                        }
+                        return true;
+                    } );
     }
     return manifests;
 }
