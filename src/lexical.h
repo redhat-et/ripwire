@@ -886,6 +886,10 @@ struct LexMatchTfTable
             terms.nameDf.assign( uniqueCount, 0 );
             foldRowInto( terms.nameDf.data(), nameDf.data(), admitted );
         }
+        // the match-width rows are spent: free them here, or `std::move( fields )` at the caller (which only selects this
+        // overload) keeps a second S x matches matrix alive through evidence, margins and scoring (CodeRabbit #721)
+        std::vector<int>().swap( tf );
+        std::vector<int>().swap( nameDf );
         return terms;
     }
 
