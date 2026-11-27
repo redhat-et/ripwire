@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# RIPWIRE_TEST_DEPS: src/mcp.h, src/gitstampcache.h, src/gitstampstore.h, src/gitstamp.h
 # mcpstampcheck.sh — card AT-STAMP-MCP: the STAMP record serves the MCP server's `at=` stamp too, and the stamp
 # stays LIVE while it does.
 #
@@ -36,6 +37,10 @@
 #      re-reading its dependencies) — C must FAIL there. An arm that passes under its own mutant could not have
 #      caught the defect it names. On a binary that arms no record at all (main) nothing can freeze, so M is red
 #      there too, and says so.
+#
+# The RIPWIRE_TEST_DEPS line at the top is manifest_declared evidence for --test-gate / --affected: this gate drives
+# the server over a FIFO and names no source path in its text, so without it `--test-gate=src/mcp.h` lists seven other
+# shell gates and not this one (measured on 3c66337f6: script_gates_unresolved_dynamic=648).
 #
 # Usage: bash test/mcpstampcheck.sh [BIN]      or   RIPWIRE_BIN=./build/ripwire bash test/mcpstampcheck.sh
 set -u
