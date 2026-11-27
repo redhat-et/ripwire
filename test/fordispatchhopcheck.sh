@@ -82,6 +82,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_DISPATCH_HOP
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): (P5) compares the page with and without <dispatch>; without it a named location would take the tiny shape, so both twins are full pages
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "fordispatchhopcheck: BIN=$BIN"
 fail=0

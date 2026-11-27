@@ -194,6 +194,7 @@ if [ -z "$MISSFULL" ]; then ok "(G2) the full legend documents dirs_capped, dirs
 
 # (H) NO CUT, NO VOCABULARY: a tier under both caps must carry none of the three attributes
 if "$BIN" "$ROOT/test/mapinvfix" --no-cache --top-k=3 >"$TMP/small" 2>/dev/null; then
+    [ -s "$TMP/small" ] || fail "zero-evidence premise (lstiercapcheck.sh:197): the file the next arm judges is empty, so its verdict proves nothing"
     if grep -q 'dirs_capped\|dirs_total\|dirs_next' "$TMP/small"; then fail "(H) the small fixture's uncut tier claims a row cut"; else ok "(H) an uncut tier carries no dirs_capped / dirs_total / dirs_next"; fi
 else
     fail "(H) the map of test/mapinvfix did not run"

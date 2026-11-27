@@ -255,6 +255,14 @@ Discloses: `defs_capped`, `files_capped`, `syms_capped`
 | `kFileRowCap` | `40` | — | — |
 | `kSymbolRowCap` | `40` | — | — |
 
+### `src/countdrift.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxListBytes` | `512` | — | — |
+
 ### `src/crossref.h`
 
 Discloses: **none**
@@ -771,6 +779,16 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kTailTermMaxWords` | `64` | — | — |
+
+### `src/fortinyshape.h`
+
+Discloses: `d2_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kEdgeCap` | `4` | — | — |
+| `kSpreadEdgeMax` | `6` | — | — |
+| `kTinyRows` | `8` | — | ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines |
 
 ### `src/forunused.h`
 

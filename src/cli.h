@@ -23,6 +23,7 @@
 #include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 #include "forrowsform.h" // rw::rowlines::kRowsLines / defaultRowsName — --rows= and the rows= of --version
 #include "foractlineswitch.h" // rw::actline::defaultActName — the act= of --version
+#include "fortinyshapeswitch.h" // rw::tinyshape::defaultTinyName — the tiny= of --version
 #include "forbodiesform.h" // rw::bodyptr::kBodiesInline / kBodiesPointer — --bodies='s closed set (NB1)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
@@ -1942,7 +1943,10 @@ inline constexpr char kHelpHead[] =
         "                               vacuous-assert (Bash test scripts) and unchecked-status (a dropped pclose/rename/write/system/fflush/close/waitpid status in C/C++; Python\n"
         "                               subprocess.run without check=, subprocess.call, os.system; the row carries call=) and unhandled-arm (a C/C++ switch with no\n"
         "                               default: that leaves an in-tree enum's enumerator out, a shell case with no *) arm whose result is read, a Python if/elif\n"
-        "                               or match ending a value-returning function with no else; the row carries why=) — report-only, always sev=\"minor\".\n"
+        "                               or match ending a value-returning function with no else; the row carries why=) and zero-evidence (a Bash test script's arm\n"
+        "                               that passes when its runs exit 0 and print nothing - an absence grep, a cmp of two answers - with no twin arm on that\n"
+        "                               evidence) and count-drift (a count word whose list of names in Markdown or a C/C++ string disagrees with\n"
+        "                               itself or with the tree's string array of those names; the row carries why=) — report-only, always sev=\"minor\".\n"
         "                               A site is new only when its text occurs more often than in the baseline: a moved one is not.\n"
         "                               Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone\n"
         // §B7.2 (CA4): the strict-sha staleness rule and — the part that matters — the fact that this verb
@@ -2001,7 +2005,7 @@ inline constexpr char kHelpHead[] =
         "                               change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer\n"
         "                               the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the\n"
         "                               never-gating api-surface new-symbol rows; a defect-shape facet (format-arity,\n"
-        "                               utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm) selects that shape alone. Matching nothing refuses (exit 1) rather\n"
+        "                               utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift) selects that shape alone. Matching nothing refuses (exit 1) rather\n"
         "                               than falling back to acking everything. Whatever you leave unacked stays visible.\n"
         "    --scope=GLOB[,GLOB...]     (with --quality-delta/--quality-ack) file findings by OWNERSHIP when one tree has several writers\n"
         "                               (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
@@ -6173,8 +6177,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // THIS environment (lines; elements under RIPWIRE_NO_ROWLINES), so an experiment records it without an answer byte.
             // act= (BR1, foractline.h) names whether a --for page carries its act line in THIS environment (off under RIPWIRE_NO_ACTLINE).
             // act= sits BEFORE rows=: test/rowlinescheck.sh (R4) reads ", rows=lines, built_from=" as one run.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
-                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
+            // tiny= (THETA6, fortinyshapeswitch.h) names whether a --for answer may take the tiny named-location shape in THIS
+            // environment: on by default, off under RIPWIRE_TINY_SHAPE=0.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, tiny={}, act={}, rows={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
+                        kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, rw::tinyshape::defaultTinyName(),
+                        rw::actline::defaultActName(), rw::rowlines::defaultRowsName(),
                         kRipwireGitStamp );
             std::exit( 0 );
         }

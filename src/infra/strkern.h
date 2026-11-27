@@ -10,7 +10,8 @@
 //
 // Every kernel takes ( const char*, std::size_t ) — never a NUL terminator, never a std::string — so a
 // future SIMD-backed string type can adopt them unchanged, and so a kernel can run over the interior of a
-// mapped file. Every kernel has a `_scalar` twin that is ALWAYS compiled and always callable: it is the
+// mapped file. Every kernel has a `_scalar` twin that is ALWAYS compiled and always callable (find3 and findNeedle reach theirs,
+// findByEndBytes_scalar, through a KernelPath::Scalar argument rather than a second spelling): it is the
 // oracle test/strkerncheck.sh compares the vector path against, and it is the code that actually runs on
 // a target with neither NEON nor AVX2. The scalar twins are portable C++ — no intrinsic, no UB, no
 // unaligned type-punned load (every wide read goes through std::memcpy).
@@ -503,42 +504,49 @@ inline std::size_t findByte( const char* p, std::size_t n, char needle ) noexcep
     return tail == n - k ? n : k + tail;
 }
 
-// Three-byte needle — the trigram probe shape. Muła's "check an anomalous first and last byte, then
-// verify": the first and THIRD bytes are compared in parallel across a whole block, and only the handful
-// of positions where both agree pay a three-byte verify. Returns n when the needle does not occur, and
-// when n < 3.
-inline std::size_t find3_scalar( const char* p, std::size_t n, const char* needle ) noexcept
+// Muła's "check an anomalous first and last byte, then verify": a needle's FIRST byte and its LAST (at `span - 1`) are compared in
+// parallel across a block of start positions, and only a start where both agree pays `verify( at )`, which tests the bytes between.
+// The first such start (the smallest), or n when there is none or span > n. One loop for every needle length, so find3 and
+// findNeedle below cannot drift apart; `verify` is how they differ (one middle byte, or a memcmp of the whole needle).
+struct NeedleEnds
 {
-    if( n < 3 )
+    char        first = 0;
+    char        last  = 0;
+    std::size_t span  = 0;   // the needle's length: `last` sits at start + span - 1
+};
+template<class Verify>
+inline std::size_t findByEndBytes_scalar( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
+{
+    const auto [ first, last, span ] = ends;
+    if( span == 0 || span > n )
     {
         return n;
     }
     constexpr std::uint64_t kOnes = 0x0101010101010101ull;
-    const std::uint64_t     n0    = kOnes * static_cast<unsigned char>( needle[ 0 ] );
-    const std::uint64_t     n2    = kOnes * static_cast<unsigned char>( needle[ 2 ] );
+    const std::uint64_t     n0    = kOnes * static_cast<unsigned char>( first );
+    const std::uint64_t     nl    = kOnes * static_cast<unsigned char>( last );
     std::size_t             k     = 0;
-    while( k + 10 <= n )                       // needs 8 bytes at k AND 8 bytes at k + 2
+    while( k + span + 7 <= n )                 // eight starts k..k+7, each with the whole needle in range
     {
         std::uint64_t a = 0, b = 0;
         std::memcpy( &a, p + k, 8 );
-        std::memcpy( &b, p + k + 2, 8 );
-        // both masks are exact, so their AND marks exactly the positions where bytes 0 and 2 of the
-        // needle agree; only byte 1 is left to verify (Mula's first/last-byte filter, serial spelling).
-        std::uint64_t m = swarZeroByteMask( a ^ n0 ) & swarZeroByteMask( b ^ n2 );
-        while( m != 0 )
+        std::memcpy( &b, p + k + span - 1, 8 );
+        // both masks are exact, so their AND marks exactly the starts where the first and last bytes agree
+        std::uint64_t mask = swarZeroByteMask( a ^ n0 ) & swarZeroByteMask( b ^ nl );
+        while( mask != 0 )
         {
-            const std::size_t at = k + ( std::size_t( std::countr_zero( m ) ) >> 3 );
-            if( p[ at + 1 ] == needle[ 1 ] )
+            const std::size_t at = k + ( std::size_t( std::countr_zero( mask ) ) >> 3 );
+            if( verify( at ) )
             {
                 return at;
             }
-            m &= m - 1;
+            mask &= mask - 1;
         }
         k += 8;
     }
-    for( ; k + 3 <= n; ++k )
+    for( ; k + span <= n; ++k )
     {
-        if( std::memcmp( p + k, needle, 3 ) == 0 )
+        if( p[ k ] == first && p[ k + span - 1 ] == last && verify( k ) )
         {
             return k;
         }
@@ -546,59 +554,125 @@ inline std::size_t find3_scalar( const char* p, std::size_t n, const char* needl
     return n;
 }
 
-inline std::size_t find3( const char* p, std::size_t n, const char* needle ) noexcept
+template<class Verify>
+inline std::size_t findByEndBytes( const char* p, std::size_t n, NeedleEnds ends, Verify&& verify ) noexcept
 {
-    if( n < 3 )
+    const auto [ first, last, span ] = ends;
+    if( span == 0 || span > n )
     {
         return n;
     }
     std::size_t k = 0;
 #if defined( __ARM_NEON )
-    const uint8x16_t s0 = vdupq_n_u8( static_cast<std::uint8_t>( needle[ 0 ] ) );
-    const uint8x16_t s2 = vdupq_n_u8( static_cast<std::uint8_t>( needle[ 2 ] ) );
-    while( k + 18 <= n )                       // 16 bytes at k AND 16 bytes at k + 2
+    const uint8x16_t s0 = vdupq_n_u8( static_cast<std::uint8_t>( first ) );
+    const uint8x16_t sl = vdupq_n_u8( static_cast<std::uint8_t>( last ) );
+    while( k + span + 15 <= n )                // sixteen starts, each with the whole needle in range
     {
-        const uint8x16_t v0 = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) );
-        const uint8x16_t v2 = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k + 2 ) );
-        std::uint64_t    m  = neonNibbleMask( vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( v2, s2 ) ) );
-        while( m != 0 )
+        const uint8x16_t v0   = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k ) );
+        const uint8x16_t vl   = vld1q_u8( reinterpret_cast<const std::uint8_t*>( p + k + span - 1 ) );
+        std::uint64_t    mask = neonNibbleMask( vandq_u8( vceqq_u8( v0, s0 ), vceqq_u8( vl, sl ) ) );
+        while( mask != 0 )
         {
             // one NIBBLE per input byte, so the lowest set bit sits at 4 * byteIndex and clearing the
-            // candidate means clearing its whole nibble — `m &= m - 1` (the bit-per-byte idiom) would
+            // candidate means clearing its whole nibble — `mask &= mask - 1` (the bit-per-byte idiom) would
             // spin on the other three bits of the same byte.
-            const int lowBit = std::countr_zero( m );
-            const std::size_t at = k + ( std::size_t( lowBit ) >> 2 );
-            if( p[ at + 1 ] == needle[ 1 ] )
+            const int         lowBit = std::countr_zero( mask );
+            const std::size_t at     = k + ( std::size_t( lowBit ) >> 2 );
+            if( verify( at ) )
             {
                 return at;
             }
-            m &= ~( 0xFull << ( lowBit & ~3 ) );
+            mask &= ~( 0xFull << ( lowBit & ~3 ) );
         }
         k += 16;
     }
 #elif defined( __AVX2__ )
-    const __m256i s0 = _mm256_set1_epi8( needle[ 0 ] );
-    const __m256i s2 = _mm256_set1_epi8( needle[ 2 ] );
-    while( k + 34 <= n )                       // 32 bytes at k AND 32 bytes at k + 2
+    const __m256i s0 = _mm256_set1_epi8( first );
+    const __m256i sl = _mm256_set1_epi8( last );
+    while( k + span + 31 <= n )                // thirty-two starts, each with the whole needle in range
     {
-        const __m256i v0 = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) );
-        const __m256i v2 = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k + 2 ) );
-        std::uint32_t m  = std::uint32_t( _mm256_movemask_epi8(
-                               _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( v2, s2 ) ) ) );
-        while( m != 0 )
+        const __m256i v0   = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k ) );
+        const __m256i vl   = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( p + k + span - 1 ) );
+        std::uint32_t mask = std::uint32_t( _mm256_movemask_epi8( _mm256_and_si256( _mm256_cmpeq_epi8( v0, s0 ), _mm256_cmpeq_epi8( vl, sl ) ) ) );
+        while( mask != 0 )
         {
-            const std::size_t at = k + std::size_t( std::countr_zero( m ) );
-            if( p[ at + 1 ] == needle[ 1 ] )
+            const std::size_t at = k + std::size_t( std::countr_zero( mask ) );
+            if( verify( at ) )
             {
                 return at;
             }
-            m &= m - 1;
+            mask &= mask - 1;
         }
         k += 32;
     }
 #endif
-    const std::size_t tail = find3_scalar( p + k, n - k, needle );
+    const std::size_t tail = findByEndBytes_scalar( p + k, n - k, ends, [ &verify, k ]( std::size_t at ) { return verify( k + at ); } );
     return tail == n - k ? n : k + tail;
+}
+
+// Which path a dispatching kernel runs: the compiled vector path (NEON or AVX2; the scalar loop on a target with neither), or the scalar
+// twin every target compiles, the oracle test/strkerncheck.sh compares the vector path against. One entry per kernel, so a caller and
+// the gate name the same function and the path is an argument, not a second spelling.
+enum class KernelPath : std::uint8_t
+{
+    Vector,
+    Scalar,
+};
+
+// The verifies: find3's one byte between its ends, and findNeedle's whole needle.
+struct MiddleByteMatches
+{
+    const char* p;
+    const char* needle;
+    bool        operator()( std::size_t at ) const noexcept { return p[ at + 1 ] == needle[ 1 ]; }
+};
+struct WholeNeedleMatches
+{
+    const char* p;
+    const char* needle;
+    std::size_t m;
+    bool        operator()( std::size_t at ) const noexcept { return std::memcmp( p + at, needle, m ) == 0; }
+};
+
+// The first start the end-byte filter and `verify` both accept, on the path asked for.
+template<class Verify>
+inline std::size_t findByEndBytesOn( KernelPath path, const char* p, std::size_t n, NeedleEnds ends, const Verify& verify ) noexcept
+{
+    return path == KernelPath::Scalar ? findByEndBytes_scalar( p, n, ends, verify ) : findByEndBytes( p, n, ends, verify );
+}
+
+// Three-byte needle — the trigram probe shape: the first and THIRD bytes filter, byte 1 is the verify. Returns n when the needle
+// does not occur, and when n < 3.
+inline std::size_t find3( const char* p, std::size_t n, const char* needle, KernelPath path = KernelPath::Vector ) noexcept
+{
+    return findByEndBytesOn( path, p, n, { needle[ 0 ], needle[ 2 ], 3 }, MiddleByteMatches{ p, needle } );
+}
+
+// A needle of any length: its first and last bytes filter, a memcmp of the whole needle verifies. The first occurrence (the smallest
+// start), so a caller looping from `hit + 1` sees every occurrence, overlapping ones included, in order: exactly std::string_view::find.
+// Returns n when the needle does not occur, and when m > n; an empty needle occurs at 0. Measured over this repository's 131 MB
+// (search.h grepScanText, 2026-11-26, arm64, warm, one thread): std::string::find 36-85 ms for a needle whose first byte is a common
+// letter, this kernel 6-10 ms; a needle whose first byte is rare stays where it was (5-9 ms).
+inline std::size_t findNeedle( const char* p, std::size_t n, const char* needle, std::size_t m, KernelPath path = KernelPath::Vector ) noexcept
+{
+    return m == 0 ? 0 : findByEndBytesOn( path, p, n, { needle[ 0 ], needle[ m - 1 ], m }, WholeNeedleMatches{ p, needle, m } );
+}
+
+// THE string-find utility (CONTRIBUTING.md §3 "String search"): the first occurrence of `needle` in `hay` at or after `from`, or
+// std::string_view::npos. Contract: byte-identical to `hay.find( needle, from )` for EVERY input — npos when `from > hay.size()`
+// or there is no occurrence, `from` for an empty needle — so a call site swaps one for the other with no other change, and walking from
+// `hit + 1` yields every occurrence, overlapping ones included, in order. The proof is D2 in test/verify_strkern.cpp, a property
+// test against std::string_view::find over every `from` of chosen and random inputs, on both paths, in exact-size heap buffers
+// under ASan + UBSan (test/strkerncheck.sh). The scalar/NEON/AVX2 choice is made inside; `path` exists for that test alone.
+// Use it in hot loops over file text; a one-off probe of a short string gains nothing over std::string_view::find.
+[[nodiscard]] inline std::size_t find( std::string_view hay, std::string_view needle, std::size_t from = 0,
+                                       KernelPath path = KernelPath::Vector ) noexcept
+{
+    if( from > hay.size() ) { return std::string_view::npos; }
+    if( needle.empty() ) { return from; }
+    const std::size_t left = hay.size() - from;
+    const std::size_t at   = findNeedle( hay.data() + from, left, needle.data(), needle.size(), path );
+    return at == left ? std::string_view::npos : from + at;
 }
 
 // A 256-bit byte set that carries BOTH of the representations its users need, DERIVED ONCE at

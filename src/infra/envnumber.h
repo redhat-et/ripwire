@@ -19,6 +19,8 @@ struct EnvNumber
     bool             parsed = false;   // non-empty, and every character a digit of one in-range number
     std::uint64_t    value  = 0;       // valid only when parsed
     std::string_view text;             // the raw value ("" when unset)
+    // The number 0, exactly: how every on-by-default switch spells "off" (a variable set to 0).
+    [[nodiscard]] bool isZero() const noexcept { return parsed && value == 0; }
 };
 inline EnvNumber readEnvNumber( const char* name ) noexcept
 {

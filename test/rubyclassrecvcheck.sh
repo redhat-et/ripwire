@@ -1302,6 +1302,7 @@ if ! "$BIN" "$FIX" --cache="$DIR/c.bin" >"$DIR/warm.xml" 2>"$DIR/warm.err"
 then
     no "the warm cache run exited non-zero: $( head -3 "$DIR/warm.err" )"
 fi
+[ -s "$DIR/cold.xml" ] || no "zero-evidence premise (rubyclassrecvcheck.sh:1305): the file the next arm judges is empty, so its verdict proves nothing"
 if cmp -s "$DIR/cold.xml" "$DIR/warm.xml"
 then
     ok "warm run == cold run"

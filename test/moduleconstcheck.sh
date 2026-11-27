@@ -30,6 +30,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): rank 1 and weak= are read off the full page's <d> rows; the tiny lines are the same rows in the same order (tinyshapecheck (T))
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/moduleconstfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

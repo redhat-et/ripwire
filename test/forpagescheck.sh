@@ -152,10 +152,14 @@ def join(pages):
     for k, d in enumerate(pages, 1):
         b = page_body(d)
         if not stream.startswith(b, cur):
-            # a continuation page may open with a re-opened section tag; a page may end with a synthetic close
+            # a continuation page may open with a re-opened section tag, after that section's block-local legend when page 1 does
+            # not hold it (forpages.h reopenedLegend: the comments glued before the tag in the stream, verbatim); a page may end
+            # with a synthetic close
             if k > 1:
-                m = re.match(r"<[A-Za-z_][\w-]*(?:\s[^<>]*[^/])?>", b)
-                if m and m.group(0) in opens and not stream.startswith(b[:len(m.group(0))], cur): b = b[m.end():]
+                m = re.match(r"((?:<!--(?:(?!-->).)*-->)*)(<[A-Za-z_][\w-]*(?:\s[^<>]*[^/])?>)", b, re.S)
+                if m and m.group(2) in opens and not stream.startswith(b[:m.end()], cur):
+                    at = stream.find(m.group(2)); glued = stream[trailing_comments_start(stream[:at]):at]
+                    if m.group(1) in ("", glued): b = b[m.end():]
             if not stream.startswith(b, cur):
                 m = re.search(r"</[A-Za-z_][\w-]*>$", b)
                 if m: b = b[:m.start()]

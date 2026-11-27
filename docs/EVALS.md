@@ -6298,8 +6298,9 @@ Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only; record
 leaves the function no worse (or acks it).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six
-facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`), shapes this project's own
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries eight
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`,
+`zero-evidence`, `count-drift`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity, a new function at the ceiling (QD-ENTRY-CEILING) and a tangled new function (TANGLE-GATE-B)). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6355,6 +6356,27 @@ shell/Python commits of this tree, 4,000 tmux C commits and 3,000 textual commit
 to a result-giving switch/case/chain. Recall is therefore the synthetic replay in `test/defectshapecheck.sh` (C++, Python and
 shell fixes reversed give 3 of 3 rows, and an appended enumerator gives the row on an untouched switch). A row costs 200-226 B
 (mean 212). The compact legend adds 16 B to every --quality-delta answer (the facet name), and 195 B when a row is present.
+
+CR-QD-3 (2026-11-25) adds two `sev="minor"` facets taken from CodeRabbit review findings. The figures below are pinned
+by tracked files; the harvest that chose them (CodeRabbit items on #623-#747, their classification, and the measurements
+of the three candidates that did not ship: silent cap, COSTLY-REACH hoist, derived cache) lives outside this repository
+and is not published here.
+
+- `zero-evidence` (Bash test scripts): an arm that passes when every run it reads exits 0 and prints nothing, with no
+  twin arm that can fail on that empty answer. A twin reads the same run, the file its stdout or stderr went to, or a
+  variable captured or derived from them. It extends vacuous-assert to checked runs, where the status check does not
+  help. On `test/*.sh` at d847bd3f3 it finds 30 sites. 26 were real, mostly determinism and warm-equals-cold `cmp`
+  arms and absence arms with no presence check. The dogfood commit of this change gives each of them a premise arm (`[ -s
+  FILE ] || no` or `[ -n "$V" ] || no`), so those 26 are pinned by the test files themselves. The 4 that stay are not defects:
+  `test/jsverbscheck.sh:73`, `test/w2verbscheck.sh:124` and `test/selectorhonestycheck.sh:236` judge an answer whose
+  emptiness is the expected state (a past-the-end page, a refusal), and `test/qdclonepaircheck.sh:164` has a twin
+  reached through a helper's parameterized path. Precision 26/30 = 87 % (Wilson 95 % [0.70, 0.95]).
+- `count-drift` (Markdown and C/C++ string literals): a count word that introduces a list of names, wrong against the
+  list or against the tree's string-literal array of those names (`why=` says which and names the missing members).
+  The #712 seed was `--quality-kinds` help and COMMANDS.md saying "twelve" after `tangle` made thirteen in `kQualityKindNames`
+  (80e60ca7d), and it is found at both sites. This tree at the PR head has 0 sites. `test/defectshapecheck.sh` §4f pins
+  the self, name-set, C++-literal and wrapped-list positives, five premise-counted negatives and the quiet-on-fix arm. Precision
+  beyond the fixture and the seed is not measured.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
