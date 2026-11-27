@@ -1099,7 +1099,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // D4 (src/quality.h ratchetAttrsXml): present when the tangle ratchet read its reference point
     { "ratchet_ref", "ratchet_ref=TAG ratchet_judged=N: N tangle rows' functions compared with their best since TAG; ratchet_unread= / ratchet_cut=1: versions not measured", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     // CR712-SHSTATUS-DEPTH (src/verbs_quality.h QdRootFields::shellCut): present when not 0
-    { "shell_cut", "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; deeper code not judged", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "shell_cut", "shell_cut=N: shell files whose parse stopped at nesting depth 64; such a file's defect-shape scan is discarded whole", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, ceiling=, tangle", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped: self-registering test/bench macros or Rust #[test]; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
