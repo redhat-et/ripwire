@@ -610,8 +610,8 @@ struct McpIndex
 // diverged from the CLI's twice over: a different offset basis, and a key that followed the SPELLING of the
 // root (a trailing slash or a symlinked checkout minted a second blob).
 //
-// ONE-PARSE (MCP half): the server reads and writes the CLI's RICH blob (`ripwire-<rootKey>-rich-<tag>.bin`, main.cpp
-// defaultCachePath with captureValueUses), not a third file of its own. Its ingest is the CLI rich verbs' ingest with the
+// ONE-PARSE (MCP half): the server reads and writes the CLI's blob (`ripwire-<rootKey>-<tag>.bin`, main.cpp
+// defaultCachePath; one family for every verb class since format 56), not a third file of its own. Its ingest is the CLI rich verbs' ingest with the
 // CLI defaults — no excludes, kDefaultMaxFileBytes, captureValueUses, .gitignore respected, the workspace label passed the
 // same way — so the records are the same records, and a server started after a CLI `--for` (or the reverse) loads the
 // tree warm instead of parsing it a second time (envoy: 350 G of a cold parse per server start). Two writers on one blob
@@ -619,8 +619,8 @@ struct McpIndex
 // RootBlobFamily::Mcp stays in the table only so the eviction sweep keeps reading the root key of blobs older servers wrote.
 inline std::string mcpCachePath( const std::string& root )
 {
-    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Rich );
-    ENSURES( path.ends_with( ".bin" ), "the MCP index is the CLI rich family's .bin blob, flat or sharded" );
+    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Parse );
+    ENSURES( path.ends_with( ".bin" ), "the MCP index is the CLI's .bin blob, flat or sharded" );
     return path;
 }
 

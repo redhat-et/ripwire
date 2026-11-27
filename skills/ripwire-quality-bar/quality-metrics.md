@@ -77,9 +77,11 @@ degrades on (large-N studies):
   too), a byte cap plus an ellipsis with no
   UTF-8 back-off (`utf8-cut`), a keep-first dedup over a severity field (`dedup-first`), a test
   script's absence assertion that passes on a crash (`vacuous-assert`), and a dropped I/O or child status
-  (`unchecked-status`: `pclose`, `rename`, `fclose` of a written stream, `subprocess.run` with no `check=`), and a
+  (`unchecked-status`: `pclose`, `rename`, `fclose` of a written stream, `subprocess.run` with no `check=`), a
   classifier that gives a value it does not name no outcome (`unhandled-arm`: a switch with no `default:` missing an
-  in-tree enumerator, a shell case with no `*)`, a Python if/elif that falls off to `None`). The last five are `sev="minor"`.
+  in-tree enumerator, a shell case with no `*)`, a Python if/elif that falls off to `None`), a test arm that passes on
+  a successful run's empty answer with no twin (`zero-evidence`), and a count word whose list of names is wrong
+  (`count-drift`). The last seven are `sev="minor"`.
 - **Pass-rate ≠ design quality**: fewer than half of test-passing agent patches satisfy design constraints
   (DesignBench) — tests passing is not evidence the delta is clean.
 - One-time "write good code" prompting cuts initial verbosity/erosion by about a third but does **not**

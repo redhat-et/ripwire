@@ -124,10 +124,11 @@ if [ -n "$SRC_PARSERVER" ] && [ "$G_LEAN" = "$SRC_PARSERVER" ]; then
 else
     no "(B) parser_ver_lean=\"${G_LEAN:-<absent>}\" != kParserVer (${SRC_PARSERVER:-?})"
 fi
-if [ -n "$SRC_PARSERVER" ] && [ "$G_RICH" = "$(( SRC_PARSERVER + 1 ))" ]; then
-    ok "(B) parser_ver_rich=\"$G_RICH\" matches parserVerFor(true) = kParserVer + 1"
+# ONE-PARSE (kCacheVersion 56): one blob family, so the rich class carries the same stamp (it was kParserVer + 1).
+if [ -n "$SRC_PARSERVER" ] && [ "$G_RICH" = "$SRC_PARSERVER" ]; then
+    ok "(B) parser_ver_rich=\"$G_RICH\" matches kParserVer (one blob family since format 56)"
 else
-    no "(B) parser_ver_rich=\"${G_RICH:-<absent>}\" != kParserVer+1 ($(( SRC_PARSERVER + 1 )))"
+    no "(B) parser_ver_rich=\"${G_RICH:-<absent>}\" != kParserVer (${SRC_PARSERVER:-?})"
 fi
 if [ "$G_ARCH" = "$SRC_ARCH" ]; then
     ok "(B) artifact_arch=\"$G_ARCH\" matches this host's (endianness | sizeof(void*)<<1)"
@@ -233,14 +234,14 @@ open(sys.argv[2],'wb').write(bytes(b))
 " "$GOOD" "$TMP/f_sum.bin"
 expect "a damaged header+table checksum" "$TMP/f_sum.bin" "checksum"
 
-# The LEAN/RICH split, which is the trap src/ingest_cache.h's own comment warns about: a team that
-# commits only one family gets no warm hit on the verbs served by the other. One row must say so.
+# ONE-PARSE (kCacheVersion 56): the two --index-out files are one blob family, so either serves both verb classes. Until 56
+# a team that committed only one family got no warm hit on the verbs the other served, and this row named the mismatch.
 "$BIN" "$FIXTURE" --cache="$RICH" --doctor > "$TMP/d_rich.xml" 2>/dev/null
 RR="$( row "$TMP/d_rich.xml" )"
-if [ "$( attr lean "$RR" )" = "parser-version" ] && [ "$( attr rich "$RR" )" = "ok" ]; then
-    ok "(D) a RICH-only artifact reads lean=\"parser-version\" rich=\"ok\" — the family mismatch is named, not fused"
+if [ "$( attr lean "$RR" )" = "ok" ] && [ "$( attr rich "$RR" )" = "ok" ] && cmp -s "$GOOD" "$RICH"; then
+    ok "(D) the rich --index-out artifact reads lean=\"ok\" rich=\"ok\", and the two --index-out files are the same bytes (one family)"
 else
-    no "(D) a RICH-only artifact reads lean=\"$( attr lean "$RR" )\" rich=\"$( attr rich "$RR" )\", expected parser-version / ok"
+    no "(D) the rich artifact reads lean=\"$( attr lean "$RR" )\" rich=\"$( attr rich "$RR" )\" (expected ok / ok), or the two --index-out files differ"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -252,11 +253,11 @@ fi
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 TH="$TMP/thrash"; mkdir -p "$TH"; cp "$FIXTURE"/*.c "$TH/"
 "$BIN" "$TH" >/dev/null 2>&1
-AUTO="$( find "$TMPDIR" -name 'ripwire-*-lean*.bin' -newer "$TH/a.c" 2>/dev/null | head -1 )"
+AUTO="$( find "$TMPDIR" -name 'ripwire-*-c*p*.bin' -newer "$TH/a.c" 2>/dev/null | grep -E '/ripwire-[0-9a-f]{16}-c[0-9]+p[0-9]+\.bin$' | head -1 )"
 if [ -n "$AUTO" ]; then
-    ok "(D2) a cold run wrote the auto lean blob"
+    ok "(D2) a cold run wrote the auto blob"
 else
-    no "(D2) no auto lean blob after a cold run"
+    no "(D2) no auto blob after a cold run"
 fi
 if [ -n "$AUTO" ]; then
     patch_u32 "$AUTO" "$TMP/th_other.bin" 4 $(( SRC_CACHEVER - 1 )) && cp "$TMP/th_other.bin" "$AUTO"
@@ -292,12 +293,12 @@ TK_LEAN="$( attr lean_path "$( row "$TMP/tk_doc.xml" )" )"
 TK_RICH="$( attr rich_path "$( row "$TMP/tk_doc.xml" )" )"
 TK_LB="$( basename "${TK_LEAN:-none}" )"
 TK_RB="$( basename "${TK_RICH:-none}" )"
-printf '%s' "$TK_LB" | grep -qE "^ripwire-[0-9a-f]{16}-lean-c${SRC_CACHEVER}p${SRC_PARSERVER}\.bin\$" \
-    && ok "(D3) the auto lean name carries this build's tag: $TK_LB" \
-    || no "(D3) the auto lean name '$TK_LB' does not carry c${SRC_CACHEVER}p${SRC_PARSERVER} — another format would read and rewrite this path"
-printf '%s' "$TK_RB" | grep -qE "^ripwire-[0-9a-f]{16}-rich-c${SRC_CACHEVER}p$(( SRC_PARSERVER + 1 ))\.bin\$" \
-    && ok "(D3) the auto rich name carries the rich class's tag: $TK_RB" \
-    || no "(D3) the auto rich name '$TK_RB' does not carry c${SRC_CACHEVER}p$(( SRC_PARSERVER + 1 ))"
+printf '%s' "$TK_LB" | grep -qE "^ripwire-[0-9a-f]{16}-c${SRC_CACHEVER}p${SRC_PARSERVER}\.bin\$" \
+    && ok "(D3) the auto name carries this build's tag: $TK_LB" \
+    || no "(D3) the auto name '$TK_LB' does not carry c${SRC_CACHEVER}p${SRC_PARSERVER} — another format would read and rewrite this path"
+[ "$TK_RB" = "$TK_LB" ] \
+    && ok "(D3) both verb classes name the one blob (ONE-PARSE): $TK_RB" \
+    || no "(D3) the rich class names '$TK_RB', not the one blob '$TK_LB'"
 if [ -f "$TK_LEAN" ]; then
     TK_KEY="$( printf '%s' "$TK_LB" | sed -E 's/^ripwire-([0-9a-f]{16})-.*/\1/' )"
     TK_FLAT="$( dirname "$( dirname "$TK_LEAN" )" )"       # the cache dir: <dir>/<2-hex shard>/<name>
@@ -331,30 +332,32 @@ fi
     && ok "(D3) --cache=PATH writes exactly the file the user named (not build-keyed)" \
     || no "(D3) --cache=PATH did not write the named file verbatim"
 
-# (D3) the #334 review, M1 — ONE --cache file shared by a lean verb and a rich verb of THIS build. The refusal used to
-#      say "another ripwire build wrote it"; the same build wrote it. Both directions, the number the other class
-#      stamps named as such (it may also be an older build's, which the line says too).
+# (D3) the #334 review, M1 — ONE --cache file shared by a lean verb and a rich verb of THIS build. Until format 56 the two
+#      classes stamped different parser numbers and each refused the other's file; since ONE-PARSE every record is the
+#      rich one, so the class switch is a full hit both ways and prints no refusal.
 rm -f "$TMP/shared.ripwirecache"
 "$BIN" "$TK" --cache="$TMP/shared.ripwirecache" >/dev/null 2>&1
-"$BIN" "$TK" --cache="$TMP/shared.ripwirecache" --for=alphaaa >/dev/null 2>"$TMP/m1_rich.err"
-grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $SRC_PARSERVER, this binary $(( SRC_PARSERVER + 1 )): this build's lean verb class writes that number" "$TMP/m1_rich.err" \
-    && ok "(D3) a rich run over a lean-written --cache file names this build's lean class, not another build" \
-    || no "(D3) the rich run misattributes the lean-written blob: $( grep -m1 'not used' "$TMP/m1_rich.err" )"
-"$BIN" "$TK" --cache="$TMP/shared.ripwirecache" >/dev/null 2>"$TMP/m1_lean.err"
-grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER + 1 )), this binary $SRC_PARSERVER: this build's rich verb class writes that number" "$TMP/m1_lean.err" \
-    && ok "(D3) a lean run over a rich-written --cache file names this build's rich class, not another build" \
-    || no "(D3) the lean run misattributes the rich-written blob: $( grep -m1 'not used' "$TMP/m1_lean.err" )"
+RIPWIRE_CACHE_STATS=1 "$BIN" "$TK" --cache="$TMP/shared.ripwirecache" --for=alphaaa >/dev/null 2>"$TMP/m1_rich.err"   # status: the cache-stats line is the verdict; a failed run prints none and the M1 arms below FAIL
+RIPWIRE_CACHE_STATS=1 "$BIN" "$TK" --cache="$TMP/shared.ripwirecache" >/dev/null 2>"$TMP/m1_lean.err"   # status: the cache-stats line is the verdict; a failed run prints none and the M1 arms below FAIL
+for k in rich lean; do
+    st="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' "$TMP/m1_$k.err" | head -1 )"
+    { ! grep -q 'not used' "$TMP/m1_$k.err" && [ "$st" = "cache-stats reparsed=0 reused=2 files=2" ]; } \
+        && ok "(D3) a $k run over the other class's --cache file is a full hit, no refusal ($st)" \
+        || no "(D3) a $k run over the other class's --cache file did not share it: ${st:-no cache-stats line} $( grep -m1 'not used' "$TMP/m1_$k.err" )"
+done
 
 # (D3) the #334 review, N1 — the advice follows WHO named the file. An AUTOMATIC blob carries this build's own name, so
-#      a stamp from the other verb class there means a hand-copied file; "give each verb class its own --cache file"
-#      would be advice about a flag the user never passed.
+#      another parser stamp there means a hand-copied file; "two builds alternating on one cache file" would be advice
+#      about a flag the user never passed.
 if [ -f "$TK_LEAN" ]; then
     patch_u32 "$TK_LEAN" "$TMP/tk_rich_stamp.bin" 8 $(( SRC_PARSERVER + 1 )) && cp "$TMP/tk_rich_stamp.bin" "$TK_LEAN"
     rm -f "$TK_OTHER" "$TK_LEGACY"
     "$BIN" "$TK" >/dev/null 2>"$TMP/n1_auto.err"
-    grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER + 1 )), this binary $SRC_PARSERVER: this build's rich verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand)" "$TMP/n1_auto.err" \
-        && ok "(D3) on an automatic blob the other-class refusal says 'copied in by hand', not '--cache' advice" \
+    grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER + 1 )), this binary $SRC_PARSERVER: another ripwire build wrote it; an automatic cache file holds that only when copied in by hand)" "$TMP/n1_auto.err" \
+        && ok "(D3) on an automatic blob the parser-stamp refusal says 'copied in by hand', not '--cache' advice" \
         || no "(D3) the automatic-blob refusal gives the wrong advice: $( grep -m1 'not used' "$TMP/n1_auto.err" )"
+else
+    no "(D3) N1: no automatic blob to stamp"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════

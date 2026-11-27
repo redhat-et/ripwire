@@ -820,6 +820,7 @@ for _g in \
     mcprobustcheck \
     mcpslicecheck \
     mcpstalecheck \
+    mcpstampcheck \
     mcpstdiolinecapcheck \
     mcpstrictschemacheck \
     mcptoolprunecheck \

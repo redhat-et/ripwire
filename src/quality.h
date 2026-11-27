@@ -30,7 +30,7 @@
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
 #include "similarargs.h"        // the similar-argument-list scanner (the params kind's report-only similar= facet)
-#include "defectshape.h"        // the defect-shape kind's six scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm)
+#include "countdrift.h"         // the defect-shape kind's eight scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
@@ -1411,7 +1411,7 @@ inline std::uint64_t defectFileAnchor( std::string_view relPath )
     return pathQualifiedKey( relPath, "<file>", "" );
 }
 
-// A site value's low three bits are its facet (six facets, room for eight; QD-UNCHECKED-STATUS widened two bits to
+// A site value's low three bits are its facet (eight facets, the room is full; QD-UNCHECKED-STATUS widened two bits to
 // three, so every site value moved once: kQSnapCacheScheme 37).
 inline constexpr std::uint64_t kDefectFacetMask = 7;
 static_assert( defectshape::kFacetCount <= kDefectFacetMask + 1, "every facet fits the site value's facet bits" );
@@ -3224,7 +3224,7 @@ constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 // ─── THE ROOT KEY — one canonical spelling, for every cache family ────────────────────────────────────
 //
 // The 16-hex field every cache blob's filename carries, identifying the ROOT the blob belongs to:
-// `ripwire-<rootKey>-{lean,rich}-c<format>p<parser>.bin` (main.cpp::defaultCachePath),
+// `ripwire-<rootKey>-c<format>p<parser>.bin` (main.cpp::defaultCachePath),
 // `ripwire-mcp-<rootKey>-c<format>p<parser>.cache` (mcpindex.h::mcpCachePath) and `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`
 // (shaKeyedCachePath below: qheadsnap, qsnap, qbody, qhist, qms, qchurn, stier). It is what makes
 // "which root does this blob belong to?" answerable from the NAME alone — see cacheBlobRootKey and the
@@ -3331,7 +3331,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 57;   // MUST equal ingest.cpp's kCacheVersion (gated); 57 = lane asserted-signal (Python assert statement refs; above main's 55), 55 = lane tangle-rule (def record block facts maxBlock10 + cross), 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 57;   // MUST equal ingest.cpp's kCacheVersion (gated); 57 = lane asserted-signal (Python assert statement refs; above main's 56), 56 = lane c1-one-parse (one blob family, ref valueUse byte), 55 = lane tangle-rule (def record block facts maxBlock10 + cross), 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
 constexpr std::uint32_t kIngestParserVerMirror    = 350;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 350 = 2026-11-26 (train m5-1126-5): ONE number above #769's placeholder 344 (rich 345; Rust turbofish calls) and
                                                           //   #778's placeholder 348 (rich 349; ObjC++ std::-qualified calls). Rich file tag 351.
@@ -3901,31 +3901,26 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 // #334 (follow-up). Both root-keyed families were keyed by root and verb class only, so two builds of different
 // formats — an installed release and a local build, or two installed versions — that alternate on one tree
 // refused and rewrote each other's blob on EVERY run (`format-version — not used`, reparsed=N reused=0, one path).
-// The auto names now carry the pair that decides whether a blob is readable at all, (kCacheVersion, the class's
-// parserVer): `ripwire-<rootKey>-lean-c<format>p<parser>.bin`, `ripwire-<rootKey>-rich-c<format>p<parser>.bin` and
-// `ripwire-mcp-<rootKey>-c<format>p<parser>.cache`, the rich/MCP parser number being the lean one + 1. Two builds of one format still share a blob (a rebuild of the same
-// tree must not go cold); two formats never meet at one path.
+// The auto names now carry the pair that decides whether a blob is readable at all, (kCacheVersion, kParserVer):
+// `ripwire-<rootKey>-c<format>p<parser>.bin` and `ripwire-mcp-<rootKey>-c<format>p<parser>.cache`. Until format 56 the verb
+// classes kept two blobs, `-lean-` and `-rich-` (the rich parser number the lean one + 1); ONE-PARSE made them one
+// (ingest_cache.h, "ONE blob family"), so a name of either older shape is now always another build's. Two builds of one
+// format still share a blob (a rebuild of the same tree must not go cold); two formats never meet at one path.
 //
 // THE TAG IS NEVER 16 HEX: `c<digits>p<digits>` always holds a 'p', so cacheBlobRootKey's "first 16-hex field"
 // rule below still reads the root key and nothing else, in every shape. Only [a-z0-9.-] appear, so the name
 // stays valid on NTFS. An explicit `--cache=PATH` is NOT tagged: that file is the user's, named by them, and is
 // often a committed `--index-out` artifact a CI job consumes by its exact name.
 //
-// The mirror pair lives in this header (see kIngestParserVerMirror); ingest_cache.h static_asserts that
-// `ingestParserVerFor` agrees with its own parserVerFor for both classes, so the tag cannot drift from the
-// header stamp the blob carries.
-inline constexpr std::uint32_t ingestParserVerFor( bool captureValueUses ) noexcept
-{
-    return kIngestParserVerMirror + ( captureValueUses ? 1u : 0u );
-}
+// The mirror lives in this header (see kIngestParserVerMirror); ingest_cache.h static_asserts it equals kParserVer, so the tag
+// cannot drift from the header stamp the blob carries.
 
-// The families whose whole key IS the root — the main parse cache's two verb classes (main.cpp::defaultCachePath)
-// and the MCP index (mcpindex.h::mcpCachePath, always the rich class) — as ONE table: the builder and the eviction
+// The families whose whole key IS the root — the main parse cache, one blob for every verb class and for the MCP server
+// (main.cpp::defaultCachePath, mcpindex.h::mcpCachePath), and the MCP index older servers wrote — as ONE table: the builder and the eviction
 // pin below read the same rows, so "is this blob this build's?" cannot disagree with "what does this build write?".
 enum class RootBlobFamily : std::uint8_t
 {
-    Lean,
-    Rich,
+    Parse,
     Mcp,
     Count
 };
@@ -3933,23 +3928,19 @@ enum class RootBlobFamily : std::uint8_t
 struct RootBlobShape
 {
     std::string_view prefix;       // before the 16-hex root key
-    std::string_view classField;   // between the key and the build tag ("" for the MCP index)
     std::string_view ext;
-    bool             rich;         // which parserVer the tag names
 };
 
 inline constexpr RootBlobShape kRootBlobShapes[] = {
-    { "ripwire-",     "-lean", ".bin",   false },
-    { "ripwire-",     "-rich", ".bin",   true  },
-    { "ripwire-mcp-", "",      ".cache", true  },
+    { "ripwire-",     ".bin"   },
+    { "ripwire-mcp-", ".cache" },
 };
 static_assert( std::size( kRootBlobShapes ) == static_cast<std::size_t>( RootBlobFamily::Count ), "one shape per root-keyed family" );
 
-// Everything after the root key, build tag included: `-lean-c<format>p<parser>.bin`, `-rich-c<format>p<parser+1>.bin`,
-// `-c<format>p<parser+1>.cache`.
+// Everything after the root key, build tag included: `-c<format>p<parser>.bin`, `-c<format>p<parser>.cache`.
 inline std::string rootBlobTail( const RootBlobShape& shape )
 {
-    return std::format( "{}-c{}p{}{}", shape.classField, kIngestCacheVersionMirror, ingestParserVerFor( shape.rich ), shape.ext );
+    return std::format( "-c{}p{}{}", kIngestCacheVersionMirror, kIngestParserVerMirror, shape.ext );
 }
 
 // The builder for every root-keyed family. They sat in different translation units and each open-coded the same
@@ -3961,7 +3952,7 @@ inline std::string rootKeyedCachePath( const std::string& root, RootBlobFamily f
     const RootBlobShape& shape = kRootBlobShapes[ static_cast<std::size_t>( family ) ];
     const std::string    after = rootBlobTail( shape );
     // Bounded: the longest prefix is "ripwire-mcp-" (12), the key is 16 hex, and the longest tail is
-    // "-rich-c<u32>p<u32>.bin" (32 at ten digits a side) — 60 of the 63 usable bytes.
+    // "-c<u32>p<u32>.cache" (29 at ten digits a side) — 57 of the 63 usable bytes.
     EXPECTS( shape.prefix.size() + 16 + after.size() < 64, "a root-keyed cache name is a fixed-width prefix, key and build-tagged tail" );
     char tail[ 64 ];
     rw::formatTo( tail, sizeof( tail ), "{}{}{}", shape.prefix, cacheRootKeyHex( root ), after );
@@ -3973,8 +3964,8 @@ using OwnBuildBlobTails = std::array<std::string, static_cast<std::size_t>( Root
 
 inline OwnBuildBlobTails ownBuildBlobTails()
 {
-    static_assert( std::tuple_size_v<OwnBuildBlobTails> == 3, "one tail per kRootBlobShapes row, in row order" );
-    return OwnBuildBlobTails{ rootBlobTail( kRootBlobShapes[ 0 ] ), rootBlobTail( kRootBlobShapes[ 1 ] ), rootBlobTail( kRootBlobShapes[ 2 ] ) };
+    static_assert( std::tuple_size_v<OwnBuildBlobTails> == 2, "one tail per kRootBlobShapes row, in row order" );
+    return OwnBuildBlobTails{ rootBlobTail( kRootBlobShapes[ 0 ] ), rootBlobTail( kRootBlobShapes[ 1 ] ) };
 }
 
 // `c<digits>p<digits>` — the tag shape, and nothing else.
@@ -4035,9 +4026,9 @@ inline bool isOtherBuildRootBlob( std::string_view name, const OwnBuildBlobTails
 
 // P1-1 (2026-09-10 full audit) — THE PIN KEY. Every cache blob's filename carries the SAME 16-hex root
 // field, and since the follow-up round it really is the same one: `defaultCachePath` writes
-// `ripwire-<rootKey>-{lean,rich}-<tag>.bin`, `mcpCachePath` writes `ripwire-mcp-<rootKey>-<tag>.cache` and
+// `ripwire-<rootKey>-<tag>.bin` (`-lean-<tag>` / `-rich-<tag>` before format 56), `mcpCachePath` writes `ripwire-mcp-<rootKey>-<tag>.cache` and
 // `shaKeyedCachePath` writes `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`, all three through the ONE
-// canonical `cacheRootKeyHex` above — so ONE root's every family (lean, rich, mcp, qheadsnap, qsnap, qbody,
+// canonical `cacheRootKeyHex` above — so ONE root's every family (parse, mcp, qheadsnap, qsnap, qbody,
 // qhist, qms, qchurn, stier) spells the same key in the same place. That makes "which root does this blob
 // belong to?" answerable from the NAME alone, with no plumbing: the byte-budget sweep reads the key off the
 // very blob it is about to write (`keepPath`) and pins its siblings.
@@ -4858,10 +4849,15 @@ inline void seedHeadSnapCache( const std::string& dir, const std::string& repoHe
 // v38 (2026-11-19, lane QD-UNHANDLED-ARM) — no blob shape change; the defect-shape SITE SET grew. A sixth facet, unhandled-arm,
 // adds sites in C/C++ (checked against the tree's enum table), Python and every Bash file (not only test scripts), so a v37 blob
 // holds none of them and a head scan would read every existing one as added. Bumped 37 -> 38.
-// v39 is held by lane CR-QD-3 (#750).
+// v39 was reserved by lane CR-QD-3 (#750) and never shipped: TANGLE-RULE landed first as v40, so CR-QD-3 took v41.
 // v40 (2026-11-25, lane TANGLE-RULE) — a BLOB SHAPE change: the Snapshot gained tangleCapBySym and its known byte (after the tangle
 // map's), the block facts the tangle cap reads (model.h TangleInputs::maxBlock10, ::cross). A v38 blob is short by one map. Bumped 38 -> 40.
-constexpr std::uint32_t kQSnapCacheScheme = 40;
+// v41 (2026-11-26, lane CR-QD-3, #750) — no blob shape change; the defect-shape SITE SET grew. A seventh facet, zero-evidence, adds
+// sites in every Bash test script (an arm that passes on a successful run's empty answer, with no twin), and an eighth,
+// count-drift, adds sites in Markdown and in C/C++ string literals (a count word whose list disagrees with itself or with the
+// tree's name array), so a v40 blob holds none of them and a head scan would read every existing one as added. Markdown
+// files now also leave a presence record. Bumped 40 -> 41.
+constexpr std::uint32_t kQSnapCacheScheme = 41;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -6926,7 +6922,8 @@ inline bool cloneGroupHeldAcrossRenames( const CloneGroup& cg, const std::vector
 // Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
 // the same rule error-masking counts by) or on the file. Languages: C++ (format-arity, utf8-cut,
 // dedup-first, unchecked-status, unhandled-arm), C (unchecked-status, unhandled-arm), Python (format-arity,
-// unchecked-status, unhandled-arm), Bash (unhandled-arm; vacuous-assert under a test-script path). Each scanned file also
+// unchecked-status, unhandled-arm), Bash (unhandled-arm; vacuous-assert and zero-evidence under a test-script path); count-drift in
+// Markdown and in C/C++ string literals, against the tree's name arrays (cFamilyDefectTables). Each scanned file also
 // leaves its presence record; a file that does not read leaves the unreadable record instead and contributes
 // no site (a partial read is evidence of nothing, forEachSymbolBody's rule) — the delta then judges no current
 // site in that file against it. Sorted by key; deterministic (files in id order, scanners pure).
@@ -6948,16 +6945,32 @@ inline std::vector<std::string> cFamilyMacroNames( const IngestResult& ing )
     return names;
 }
 
-// unhandled-arm's closed sets: every enum the index's C-family files define with its enumerators written out, tree-wide (a
-// switch in one file decides an enum another file defines). The baseline filter applies: a file outside the baseline
-// contributes no enum. A degraded --quality-delta=A..B holds only the changed files, so it checks switches against their
-// enums alone (an enum it cannot see decides no switch: no site, on both sides).
-inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+// The defect-shape scanner a file goes through. qd's lint extension table (langOfPath) has no Markdown row, since no lint
+// rule reads prose, so a Markdown path is classified here: it goes through count-drift.
+inline DefectScan defectScanOf( std::string_view rel )
 {
-    defectshape::EnumTable table;
+    const std::string ext = docparse::lowerExtOf( rel );
+    return langFacts( ext == ".md" || ext == ".markdown" ? Lang::Markdown : langOfPath( rel ) ).defectScan;
+}
+
+// The tree-wide tables the defect-shape scanners judge a file against, from one read of the C-family files.
+// unhandled-arm's closed sets: every enum the index's C-family files define with its enumerators written out (a switch in
+// one file decides an enum another file defines). count-drift's name sets: every string-literal array of names those
+// files define (a doc that says "the twelve kinds" is checked against the array the kinds are named in). The baseline
+// filter applies: a file outside the baseline contributes nothing. A degraded --quality-delta=A..B holds only the changed
+// files, so it checks against their tables alone (an enum or name set it cannot see decides nothing: no site, on both sides).
+struct DefectTreeTables
+{
+    defectshape::EnumTable    enums;
+    defectshape::NameSetTable names;
+};
+inline DefectTreeTables cFamilyDefectTables( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+{
+    DefectTreeTables                  t;
+    std::vector<defectshape::NameSet> nameSets;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        const DefectScan scan = langFacts( langOfPath( relForHash( ing.files[f], root ) ) ).defectScan;
+        const DefectScan scan = defectScanOf( relForHash( ing.files[f], root ) );
         if( !fileIsInBaseline( fileInBaseline, f ) || ( scan != DefectScan::Cpp && scan != DefectScan::C ) )
         {
             continue;
@@ -6967,12 +6980,14 @@ inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::st
         {
             for( auto& d : defectshape::cEnumsOf( *bytes ) )
             {
-                table.add( std::move( d ) );
+                t.enums.add( std::move( d ) );
             }
+            defectshape::appendNameSetsOfCpp( *bytes, nameSets );
         }
     }
-    table.seal();
-    return table;
+    t.enums.seal();
+    t.names = defectshape::NameSetTable( std::move( nameSets ) );
+    return t;
 }
 
 // `macroOverride`, when given, is the macro-name set to scan C++ files against instead of this index's own — the whole
@@ -6985,7 +7000,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
     const std::vector<std::string> ownMacros  = macroOverride == nullptr ? cFamilyMacroNames( ing ) : std::vector<std::string>{};
     const std::vector<std::string>& treeMacros = macroOverride == nullptr ? ownMacros : *macroOverride;
-    const defectshape::EnumTable    enums      = cFamilyEnumTable( ing, root, fileInBaseline );
+    const DefectTreeTables          tables     = cFamilyDefectTables( ing, root, fileInBaseline );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( !fileIsInBaseline( fileInBaseline, f ) )
@@ -6993,7 +7008,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             continue;
         }
         const std::string_view rel  = relForHash( ing.files[f], root );
-        const DefectScan       scan = langFacts( langOfPath( rel ) ).defectScan;
+        const DefectScan       scan = defectScanOf( rel );
         if( scan == DefectScan::None )
         {
             continue;
@@ -7022,11 +7037,15 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         std::vector<defectshape::Site> sites;
         if( scan == DefectScan::Cpp && defectshape::cppMayHoldShapes( src ) )
         {
-            sites = defectshape::scanCpp( src, fnSpans, &treeMacros, &enums );
+            sites = defectshape::scanCpp( src, fnSpans, &treeMacros, &tables.enums );
         }
         else if( scan == DefectScan::C && ( defectshape::mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos ) )
         {
-            sites = defectshape::scanC( src, fnSpans, &enums );
+            sites = defectshape::scanC( src, fnSpans, &tables.enums );
+        }
+        else if( scan == DefectScan::Markdown )
+        {
+            sites = defectshape::scanCountDriftMarkdown( src, tables.names );
         }
         else if( scan == DefectScan::Python )
         {
@@ -7044,6 +7063,11 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             {
                 ++*shellCut;
             }
+        }
+        if( scan == DefectScan::Cpp || scan == DefectScan::C )   // count-drift: a count word in a string literal (help, legend text)
+        {
+            std::vector<defectshape::Site> drift = defectshape::scanCountDriftCpp( src, tables.names );
+            sites.insert( sites.end(), std::make_move_iterator( drift.begin() ), std::make_move_iterator( drift.end() ) );
         }
         if( defectshape::looksGenerated( rel, src ) )   // unhandled-arm judges no generated switch: the fix is in the generator
         {
@@ -8556,7 +8580,7 @@ struct Regression
     std::string   facet;          // B10.2 — optional classification facet (attribute NAME chosen by the kind in main.cpp):
                                   //   short-horizon-churn: "self" | "ambient"; api-surface: "new-symbol" | "contract-change";
                                   //   defect-shape: "format-arity" | "utf8-cut" | "dedup-first" | "vacuous-assert" | "unchecked-status" |
-                                  //   "unhandled-arm". Empty = no facet.
+                                  //   "unhandled-arm" | "zero-evidence" | "count-drift". Empty = no facet.
     bool          isNewSymbol = false;// r26 ORIGIN axis: true = the finding exists ONLY because the code is new (emitted origin="new-symbol",
                                   //   counted in new-symbol=, never gates); false = preexisting-worse. See the ORIGIN block in computeDelta.
     bool          isMoved     = false;// MOVED-BODY: a new-symbol row whose body this diff REMOVED from another name or file (emitted
@@ -8640,7 +8664,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "short-horizon-churn",        "churn"   },   // self / ambient
     { "api-surface",                "surface" },   // new-symbol / contract-change
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
-    { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm
+    { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm / zero-evidence / count-drift
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
     { "params",                     "similar" },   // QD-SWAP-1117: the longest run of adjacent same-typed parameters (similarargs.h)
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major

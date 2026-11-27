@@ -13,7 +13,7 @@
 
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
-// (kCacheVersion + kParserVer + parserVerFor), content/blob hashing, FileFacts, the ByteW/ByteR
+// (kCacheVersion + kParserVer), content/blob hashing, FileFacts, the ByteW/ByteR
 // codecs with every def/ref/bind/ffi/route record writer/reader and their record-minima tripwire,
 // and loadCache/saveCache themselves. The one place the on-disk cache blob's shape is spelled out.
 // Same contract as every ingest_*.h: reopens `namespace rw` and the unnamed namespace inside it —
@@ -106,6 +106,8 @@ struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
     std::uint32_t litAt = 0;             // MEM-R1a: a registrar Value ref's 1 + object-literal start byte (model.h Reference::litAt)
+    bool          valueUse = false;      // ONE-PARSE: a row only the rich family reads (a value-use site, a blanked macro's type use).
+                                         //   The one blob holds every record rich; a lean ingest drops these rows (dropRichOnlyFacts)
 };
 
 // MEM-REF-SHRINK (model.h, beside Reference's own budget): Reference minus fromSymbol, in the same 64 B on every ABI (MEM-R1a:
@@ -172,7 +174,11 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signal (the M5's ingest slot) — queries/python/tags.scm records the `assert`
                                                       //    STATEMENT as a call reference named `assert`, so an older blob of a .py file lacks those references.
                                                       //    No record shape changes; the slot is taken because a lane holds no kParserVer number (the train may
-                                                      //    fold it into one). Above main's 55 (lane tangle-rule); 56 is another lane's slot.
+                                                      //    fold it into one). Above main's 56 (lane c1-one-parse), whose one-blob record shape this merged tree also carries.
+                                                      // 56: lane c1-one-parse (ONE-PARSE, #729) — ONE blob family: every record is the rich one
+                                                      //    (each def's subtoken stats, every value-use row), and a ref record gains the
+                                                      //    `valueUse` byte that marks the rows only the rich family reads, so a lean verb
+                                                      //    takes its facts from the same record (dropRichOnlyFacts).
                                                       // 55: lane tangle-rule — a def record gains the block facts (RawDef::maxBlock10 u32, ::cross u8, after nestArmCut).
                                                       // 54: lane qd-tangle — a def record gains the steering-locals byte, the dispatch-deep u16 and the arm-nesting cut byte (RawDef::steer, ::deepDispatch, ::nestArmCut, after maxNest).
                                                       // 53: lane rust-self-chain — LocalBindKind RecvCall (appended; readBind's kind bound moves).
@@ -2072,29 +2078,14 @@ constexpr std::uint8_t kArtifactArch =
       static_cast<std::uint8_t>( ( std::endian::native == std::endian::big ) ? 1u : 0u )  // bit 0: endianness
     | static_cast<std::uint8_t>( sizeof( void* ) << 1 );                                   // bits 1..: pointer width (bytes)
 
-// The lean/rich cache FAMILY split (documented against reality per a reviewer note).
-// captureValueUses gets its OWN parserVer so a lean blob and a value-uses ("rich") blob can never cross-hit;
-// the caller (main.cpp:587) sets it via `needsValueUses = !usesSym.empty() || metrics || !forTask.empty() ||
-// !exemplar.empty()`. So which verbs each committed artifact accelerates, precisely:
-//   LEAN  (captureValueUses=false): the DEFAULT map, all nav/read verbs (--callers/--callees/--around/
-//         --expand/--impact/--path/--grep/--match), --pr-context, --affected, AND --situ (it is NOT in
-//         needsValueUses — the DESIGN's "--situ needs rich" aside is backwards; the lean artifact serves it).
-//   RICH  (captureValueUses=true): --for, --exemplar, --metrics (and its --hotspots/quality lenses), and
-//         --uses. NB: --for is the flagship orientation verb every CLAUDE.md session opens with, and it is
-//         RICH — so a team that commits ONLY the lean artifact gets NO warm hit on --for/--exemplar/--metrics
-//         (those cold-parse unless the rich artifact is also committed). "Lean accelerates the common
-//         orientation path" therefore overstates: lean speeds the default map + nav/read + --pr-context;
-//         --for-led sessions need the rich family too. See the ingest-report to the wiring wave for the
-//         measured lean-vs-rich blob sizes and the both-families recommendation.
-inline constexpr std::uint32_t parserVerFor( bool captureValueUses ) noexcept
-{
-    return kParserVer + ( captureValueUses ? 1u : 0u );   // lean and full-use caches must never cross-hit
-}
-
-// The auto blob's NAME carries the same pair its header does (quality.h rootBlobTail): a build tag that disagreed
-// with the stamp would put a blob this binary refuses at the path it reads, which is the #334 thrash back again.
-static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && quality::ingestParserVerFor( true ) == parserVerFor( true ),
-               "quality.h's ingestParserVerFor must derive both classes exactly as parserVerFor does — the build tag names what the header stamps" );
+// ONE blob family (ONE-PARSE, kCacheVersion 56, #729). Until 56 the verb classes kept two blobs per root, a lean one (the
+// map, the nav and read verbs) and a rich one (--for, --exemplar, --metrics, --uses and the other needsValueUses verbs, cli.h),
+// stamped with two parser numbers so they could never cross-hit. Each class cold-parsed the same tree, and the lean blob gave a
+// rich verb nothing: a --for straight after a map re-parsed every file. Now every record is the RICH record (the value-use rows,
+// marked RawRef::valueUse, and each def's subtoken stats), whichever verb class wrote it, and the blob carries kParserVer alone.
+// A lean ingest takes its facts out of the same record and drops what only the rich family reads (ingest_parsepool.h
+// dropRichOnlyFacts), so a lean fact is a PROJECTION of the rich parse. That is checked, not assumed: test/oneparsecheck.sh
+// compares the warm snapshot's MODEL and GRAPH sections a projected lean run records with the ones a lean parse records.
 
 // T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes
 // arch.h (which defines its OWN fnv1a64 for the baseline-hash path, quality.h's canonId hashing, etc.
@@ -2131,11 +2122,11 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // v15 — the OFFSET-TABLE blob frame.
 //
-// WHY. `main.cpp::defaultCachePath` keys the warm-by-default blob on realpath(root) + the lean/rich
-// class only, and that is DELIBERATE and stays: folding the exclude set into the key was built,
+// WHY. `main.cpp::defaultCachePath` keys the warm-by-default blob on realpath(root) only (one blob family since
+// format 56), and that is DELIBERATE and stays: folding the exclude set into the key was built,
 // measured and REVERTED (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03 — one
 // blob per configuration on a 158K-file root thrashed the cache directory's 2 GiB sweep and took the
-// battery from 7 min to 62). One superset blob per (root, class) is therefore the contract, and the
+// battery from 7 min to 62). One superset blob per root is therefore the contract, and the
 // two costs it used to carry are paid off by SHAPE instead:
 //   * a subset run (--exclude / --max-file-size) used to deserialise the whole superset it then threw
 //     away — now the offset table lets it read ONLY its own records;
@@ -2148,7 +2139,7 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 //   HEADER — 25 bytes at offset 0, byte-identical in shape to v14:
 //     [ 0: 4)  u32  magic         kCacheMagic "CTPK"
 //     [ 4: 8)  u32  version       kCacheVersion
-//     [ 8:12)  u32  parserVer     parserVerFor( captureValueUses )   (the lean/rich family split)
+//     [ 8:12)  u32  parserVer     kParserVer (one blob family since format 56)
 //     [12:13)  u8   arch          kArtifactArch (endianness | pointer width << 1)
 //     [13:21)  u64  blobWriteNs   diagnostic write stamp; NOT the racy-rule reference
 //     [21:25)  u32  entryCount    file records == offset-table entries; cross-checked against the trailer
@@ -2325,7 +2316,7 @@ inline bool preadExact( int fd, void* dst, std::size_t n, std::uint64_t off ) no
 // Open `path` and validate its v15 frame: header guard, exact-fit invariant, table checksum, per-entry
 // bounds and ordering. Shared by loadCache (which reads records out of it) and saveCache (which copies
 // the records this run did not crawl out of it). Never throws, never partially trusts.
-inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses )
+inline CacheFrame openCacheFrame( const std::string& path )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/cache: open + validate blob frame (header, trailer, offset table)" );
     CacheFrame frame;
@@ -2388,10 +2379,10 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
             frame.foundStamp = version;
             return frame;
         }
-        if( parserVer != parserVerFor( captureValueUses ) )
+        if( parserVer != kParserVer )
         {
             DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
-                      "ingest: cache blob parserVer mismatch (older binary, or the other lean/rich family) — rejected and rebuilt (full reparse)" );
+                      "ingest: cache blob parserVer mismatch (another binary's extraction) — rejected and rebuilt (full reparse)" );
             frame.reason     = CacheReject::ParserVersion;
             frame.foundStamp = parserVer;
             return frame;
@@ -2499,9 +2490,9 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
 // re-run on EVERY invocation — see docs/EVALS.md "card A3", which measured that and rejected a freshness
 // attribute on the CLI map for it. This is a FORMAT verdict about an artifact, not a freshness verdict
 // about an index.
-inline CacheReject inspectCacheArtifact( const std::string& path, bool captureValueUses )
+inline CacheReject inspectCacheArtifact( const std::string& path )
 {
-    return openCacheFrame( path, captureValueUses ).reason;
+    return openCacheFrame( path ).reason;
 }
 
 // ── the blob's IDENTITY, for the warm snapshot that is derived from it (src/warmsnap.h) ───────────────────────────
@@ -2521,12 +2512,12 @@ inline CacheReject inspectCacheArtifact( const std::string& path, bool captureVa
 // returns it, so it is never read out of a blob this build would refuse.
 //
 // Nothing (0 of 2^64 values aside) when there is no blob at `path` this build can read — absent, another format,
-// another parser family, truncated or corrupt. A blob whose tableSum is exactly 0 is indistinguishable from that
+// another parser number, truncated or corrupt. A blob whose tableSum is exactly 0 is indistinguishable from that
 // and simply never carries a snapshot: the cost is one unstored run, and the answer is the same either way.
-inline std::optional<std::uint64_t> cacheBlobIdentity( const std::string& path, bool captureValueUses )
+inline std::optional<std::uint64_t> cacheBlobIdentity( const std::string& path )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/cache: the blob's identity (trailer tableSum), for the warm snapshot's name" );
-    const CacheFrame frame = openCacheFrame( path, captureValueUses );
+    const CacheFrame frame = openCacheFrame( path );
     if( !frame.ok || frame.tableSum == 0 )
     {
         return std::nullopt;
@@ -2673,13 +2664,12 @@ struct ByteR
     }
 };
 
-// withLex (B0.2 / v10 H3): the RICH family (captureValueUses=true) persists each def's doc/body subtoken
+// withLex (B0.2 / v10 H3): the rich record (every record since format 56, ONE-PARSE) persists each def's doc/body subtoken
 // stats. v10 encoding: the FILE record carries a sorted per-file subtoken DICTIONARY (see saveCache), and
 // each def row stores dict-relative indices at the narrowest width the dict size allows + tfs at the
 // narrowest width this def's max tf needs — exact integers either way (widths chosen from maxima, never
-// lossy), ~3 B/pair instead of the raw 12 B/pair of v9. The LEAN family never computes them, so its
-// record shape is unchanged; the two families can never cross-hit (parserVerFor), so one flag at both
-// (de)serialize seams keeps the formats in lock-step.
+// lossy), ~3 B/pair instead of the raw 12 B/pair of v9. Every record carries them (one blob family since format 56);
+// writeDef keeps the flag for the minima tripwire, which measures the row with and without the extra.
 inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 {
     return dictCount <= 0x100 ? 1u : dictCount <= 0x10000 ? 2u : 4u;   // indices go up to dictCount-1
@@ -2820,7 +2810,7 @@ inline void readRefQualifier( ByteR& r, std::string_view qualifier, RawRef& x )
     x.qualifier = qualifier.substr( 0, 2 );
     x.litAt     = std::uint32_t( litAt );
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); writeRefQualifier( w, r ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); writeRefQualifier( w, r ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); w.u8( r.valueUse ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2841,18 +2831,16 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // `qualifierRootsStd` u8 then added a 9th u8 — 40 -> 41, kCacheVersion 25; FE-A's `memberCall` u8 and `memberRoot`
 // str then added a 10th u8 and a 6th str — 41 -> 46, kCacheVersion 28; FE-B's `memberPath` and `memberCtor` strs then
 // added a 7th and 8th str — 46 -> 54, kCacheVersion 29; fcall-forward fix 1's `forwarded` u8 then added a 12th u8 —
-// 59 -> 60, kCacheVersion 33; #155's `trailingLambda` u8 then added a 13th u8 — 60 -> 61, kCacheVersion 41).
+// 59 -> 60, kCacheVersion 33; #155's `trailingLambda` u8 then added a 13th u8 — 60 -> 61, kCacheVersion 41; ONE-PARSE's
+// `valueUse` u8 then added a 14th u8 — 61 -> 62, kCacheVersion 56).
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
 inline constexpr std::size_t kMinDefRecordBytesLean      = 104;  // 19×u32 + 20×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50; QD-TANGLE steer u8 + deepDispatch u32 + nestArmCut u8: 93 -> 99, v54; QD-TANGLE BLOCK FACTS maxBlock10 u32 + cross u8: 99 -> 104, v55)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
-inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
+inline constexpr std::size_t kMinRefRecordBytes          = 62;   // 3×u32 + 14×u8 + 9×str(len u32, empty)
 
-inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
-{
-    return kMinDefRecordBytesLean + ( captureValueUses ? kMinDefRecordBytesRichExtra : 0 );
-}
+inline constexpr std::size_t kMinDefRecordBytes = kMinDefRecordBytesLean + kMinDefRecordBytesRichExtra;   // every def record is the rich one (format 56)
 
 // runtime tripwire: serialize a DEFAULT-CONSTRUCTED (all-empty) RawDef/RawRef through the real
 // writer functions and ASSUME the byte count matches the hand-pinned constants above. This is the runtime
@@ -2974,7 +2962,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); const std::string_view qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.view() ); x.setComposeRel( r.view() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); readRefQualifier( r, qualifier, x ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.view(); x.setMemberPath( r.view() ); x.setMemberCtor( r.view() ); x.setMemberVia( r.view() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); const std::string_view qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.view() ); x.setComposeRel( r.view() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); readRefQualifier( r, qualifier, x ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.view(); x.setMemberPath( r.view() ); x.setMemberCtor( r.view() ); x.setMemberVia( r.view() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); x.valueUse = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.view(); b.typeName = r.view(); b.importedName = r.view(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
@@ -3035,9 +3023,9 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
 // A head's counts fit the record they came from: every row of every family needs at least its minimum bytes, so the sum
 // bounds what an honest record can claim. The warm planner reserves from these counts before the body (and its checksum)
 // is read, so this is what keeps a damaged head from asking reserve() for more than the blob could ever hold.
-inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength, bool captureValueUses ) noexcept
+inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength ) noexcept
 {
-    const std::uint64_t need = std::uint64_t( c.defs ) * minDefRecordBytes( captureValueUses ) + std::uint64_t( c.refs ) * kMinRefRecordBytes
+    const std::uint64_t need = std::uint64_t( c.defs ) * kMinDefRecordBytes + std::uint64_t( c.refs ) * kMinRefRecordBytes
                              + std::uint64_t( c.incs ) * kMinIncRecordBytes + std::uint64_t( c.binds ) * kMinBindRecordBytes
                              + std::uint64_t( c.ffis ) * kMinFfiRecordBytes + std::uint64_t( c.routeDefs ) * kMinRouteDefRecordBytes
                              + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes
@@ -3051,7 +3039,7 @@ inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength, boo
 // own last byte, so a corrupt count can never walk into the next record.
 // Returns false on any corruption; `relOut` is the record's own stored root-relative path key, which
 // the caller compares against the key it looked up (the pathHash-collision guard).
-inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::uint64_t>& fileDict,
+inline bool readFileRecord( ByteR& r, std::vector<std::uint64_t>& fileDict,
                             std::string& relOut, FileFacts& ffOut )
 {
     // count validation: a corrupt on-disk count (e.g. 0xFFFFFFFF) must never reach reserve() — the throw
@@ -3060,7 +3048,6 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // the same self-healing reparse path as a truncated record.
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
-    const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
     // v49: a FAMILY count must also equal the head's copy, which the warm planner reserved from before this body was
     // read. The dictionary count has no head copy (it passes kNoHeadCount). One lambda, so every count is bounded by the bytes
     // left at the line that names it, before any reserve() or resize() sizes from it.
@@ -3097,7 +3084,6 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.ctimeNs   = head.ctimeNs;
     ffOut.health    = head.health;
     ffOut.constructsAbsent = head.constructsAbsent;
-    if( captureValueUses )
     {
         // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be strictly
         // ascending (readDef's sorted-row invariant hangs on it); anything else is corrupt.
@@ -3130,7 +3116,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.defs.reserve( nd );
     for( std::uint32_t j = 0; j < nd && r.ok; ++j )
     {
-        ffOut.defs.push_back( readDef( r, captureValueUses, fileDict ) );
+        ffOut.defs.push_back( readDef( r, /*withLex=*/true, fileDict ) );
     }
     const std::uint32_t nr = r.u32();
     if( !countFits( nr, kMinRefRecordBytes, head.counts.refs ) )
@@ -3253,30 +3239,16 @@ struct CacheLoadStats
 // names the number it found and the one this binary reads, so the cause is on the line. It is APPENDED: the line up
 // to "rewrites it" is unchanged, and gates grep that prefix (test/localscountcheck.sh, test/cachefuzzcheck.sh).
 //
-// WHO WROTE IT (the #334 review, M1). A parser stamp equal to this build's OTHER verb class is what one --cache file
-// shared by a lean and a rich verb holds, and it used to be blamed on "another ripwire build". The stamp alone
-// cannot tell that apart from an older build whose parserVer was one lower or higher (a rich class of kParserVer-1
-// stamps exactly this build's lean number), so that case names both. The advice then depends on WHO named the file:
-// a --cache file the user named is fixed by giving each class its own file; an automatic file carries this build's
-// own name (quality.h isThisBuildRootBlobName), which no build writes with another stamp, so it was copied in by
-// hand — and "two builds alternating on one cache file" cannot happen to it either.
-inline std::string_view cacheRejectCause( const CacheFrame& frame, bool captureValueUses, bool automaticPath ) noexcept
+// WHO WROTE IT (the #334 review, M1). Since format 56 one blob serves both verb classes, so a stamp that is not this build's
+// was written by another ripwire build. The advice depends on WHO named the file: an automatic file carries this build's own
+// name (quality.h isThisBuildRootBlobName), which no build writes with another stamp, so it was copied in by hand.
+inline std::string_view cacheRejectCause( bool automaticPath ) noexcept
 {
-    if( frame.reason == CacheReject::ParserVersion && frame.foundStamp == parserVerFor( !captureValueUses ) )
-    {
-        if( automaticPath )
-        {
-            return captureValueUses ? "this build's lean verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand"
-                                    : "this build's rich verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand";
-        }
-        return captureValueUses ? "this build's lean verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file"
-                                : "this build's rich verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file";
-    }
     return automaticPath ? "another ripwire build wrote it; an automatic cache file holds that only when copied in by hand"
                          : "another ripwire build wrote it; two builds alternating on one cache file re-parse every run";
 }
 
-inline void noteCacheReject( const std::string& path, const CacheFrame& frame, bool captureValueUses )
+inline void noteCacheReject( const std::string& path, const CacheFrame& frame )
 {
     if( frame.reason == CacheReject::Absent )
     {
@@ -3291,8 +3263,8 @@ inline void noteCacheReject( const std::string& path, const CacheFrame& frame, b
         const bool        automatic = quality::isThisBuildRootBlobName( std::string_view( path ).substr( slash == std::string::npos ? 0 : slash + 1 ),
                                                                         quality::ownBuildBlobTails() );
         rw::formatTo( detail, sizeof( detail ), " (blob {} {}, this binary {}: {})",
-                      format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : parserVerFor( captureValueUses ),
-                      cacheRejectCause( frame, captureValueUses, automatic ) );
+                      format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : kParserVer,
+                      cacheRejectCause( automatic ) );
     }
     rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it{}\n",
                 path.c_str(), cacheRejectName( frame.reason ), rw::cstr( detail ) );
@@ -3315,7 +3287,6 @@ struct CacheRecords
     std::vector<CachedRecordHead> head;               // per crawled fileId; meaningful only where entryOf names an entry
     std::string                   rootDir;            // the crawl's root: a decoded key is compared root-relative
     std::size_t                   records          = 0;   // crawled files with a usable record head
-    bool                          captureValueUses = false;
 
     static constexpr std::uint32_t kNoCacheEntry = 0xFFFFFFFFu;
 
@@ -3369,7 +3340,7 @@ struct CacheRecords
         bool        decoded = false;
         {
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: decode one cache record (readFileRecord)" );
-            decoded = readFileRecord( r, captureValueUses, dict, rel, out );
+            decoded = readFileRecord( r, dict, rel, out );
         }
         if( !decoded )
         {
@@ -3411,17 +3382,17 @@ struct CacheRecords
 // tautology (a floored mtime is always < an unfloored LATER timestamp), so a same-granule post-hash edit could slip
 // through undetected. Left at -1 on any miss/corrupt/version-mismatch/unstatable-path (the result is empty then too),
 // which makes every stat-gate check see a racy entry and re-hash — the safe default.
-inline CacheRecords loadCache( const std::string& path, std::string_view rootDir, bool captureValueUses,
+inline CacheRecords loadCache( const std::string& path, std::string_view rootDir,
                                const std::vector<std::string>& crawledFiles, CacheLoadStats& stats )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: loadCache (offset table + record heads)" );
     CacheRecords out;
     stats = CacheLoadStats{};
 
-    auto frame = std::make_unique<CacheFrame>( openCacheFrame( path, captureValueUses ) );
+    auto frame = std::make_unique<CacheFrame>( openCacheFrame( path ) );
     if( !frame->ok )
     {
-        noteCacheReject( path, *frame, captureValueUses );
+        noteCacheReject( path, *frame );
         return out;
     }
     stats.blobWriteNs = frame->mtimeNs;
@@ -3507,7 +3478,7 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
             ByteR            r{ headBuf.data(), headBuf.data() + want };
             std::string_view rel;
             CachedRecordHead h;
-            if( !readRecordHead( r, rel, h ) || !headCountsFit( h.counts, e.recLength, captureValueUses ) )
+            if( !readRecordHead( r, rel, h ) || !headCountsFit( h.counts, e.recLength ) )
             {
                 // A head that does not parse, or claims more rows than its record can hold, is a corrupt record: that
                 // file reparses. Its checksum (checked in the worker) would refuse it too; this keeps reserve() honest.
@@ -3531,7 +3502,6 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     stats.recordsRead     = out.records;
     out.frame             = std::move( frame );
     out.rootDir           = std::string( rootDir );
-    out.captureValueUses  = captureValueUses;
     return out;
 }
 
@@ -3758,8 +3728,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
                        const std::vector<ConstOpen>& constOpens,                                             // parser version 82
-                       const ConstructHitsToSave& constructHits,                                             // v51
-                       bool captureValueUses )
+                       const ConstructHitsToSave& constructHits )                                            // v51
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
 
@@ -3795,7 +3764,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // validate — absent, foreign version/parserVer/arch, torn — CARRY is simply empty and this run
     // writes its own file set, which is exactly v14's behaviour and self-heals on the next wider run.
     const CachePathKeys              keys  = buildCachePathKeys( files, rootDir );
-    const CacheFrame                 prev  = openCacheFrame( path, captureValueUses );
+    const CacheFrame                 prev  = openCacheFrame( path );
     std::vector<CacheEntry>          carry;
     const std::vector<CacheWriteRow> plan  = buildCacheWritePlan( keys.order, keys.pathHashes, prev.entries, carry );
 
@@ -3870,7 +3839,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // rejects a foreign-arch (endian/pointer-width) blob before trusting any raw-int record bytes.
     w.u32( kCacheMagic );
     w.u32( kCacheVersion );
-    w.u32( parserVerFor( captureValueUses ) );
+    w.u32( kParserVer );
     w.u8( kArtifactArch );
     w.u64( (std::uint64_t)blobWriteNs );
     w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
@@ -3929,7 +3898,6 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             }
             const bool constructsKnownHere = f >= constructHits.known.size() || constructHits.known[f] != 0;
             w.u32( constructsKnownHere ? std::uint32_t( ix.constructIndex[f].size() ) : kConstructsAbsent );   // v51
-            if( captureValueUses )
             {
                 // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
                 // file's defs (nested spans re-tokenize the same text), so hoisting each distinct hash into
@@ -4001,11 +3969,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 std::size_t rowOffset = 0; // running slot offset into pairDictIndex
                 for( std::uint32_t i : ix.defIndex[f] )
                 {
-                    writeDef( w, defs[i], captureValueUses, fileDict.size(), pairDictIndex.data() + rowOffset );
-                    if( captureValueUses )
-                    {
-                        rowOffset += defs[i].lex.tokenHashes.size();
-                    }
+                    writeDef( w, defs[i], /*withLex=*/true, fileDict.size(), pairDictIndex.data() + rowOffset );
+                    rowOffset += defs[i].lex.tokenHashes.size();
                 }
             }
             w.u32( std::uint32_t( ix.refIndex[f].size() ) );

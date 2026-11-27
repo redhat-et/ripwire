@@ -29,7 +29,7 @@ full command reference. Run `ripwire --help` for the current flag list. The bina
 `--help`, report this guide as a defect.
 
 <details>
-<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 85 papers are folded. A survey of 240 tools is separate.</summary>
+<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 50 repositories and 85 papers are folded. A survey of 240 tools is separate.</summary>
 
 The counts come from `docs/LINEAGE.md`. Counts are current as of 2026-11-26. Nineteen of the folded papers are from 2026, two published in the last two months, and none in the last thirty days. The survey describes 240 tools that contributed no lesson. The two sets are disjoint, so the counts add.
 
@@ -192,8 +192,8 @@ On Windows the installer does not apply: download the `windows-x64` zip instead 
 
    **To use the tool**, build the fast binary the released one is built as. `scripts/pgobuild.sh`
    instruments, trains and re-optimizes in one command, into `build_pgo/` — Release, plus link-time
-   optimization, plus profile-guided optimization, which is 14-25% faster cold than the default
-   build and byte-identical in output:
+   optimization, plus profile-guided optimization, which is 6-16% faster cold than the default
+   build (14-25% against an LTO-off baseline) and byte-identical in output:
 
    ```bash
    scripts/pgobuild.sh

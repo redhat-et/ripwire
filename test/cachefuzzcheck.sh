@@ -1024,14 +1024,17 @@ for i in range(n):
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
     s(); skip(4 * 8 + 6 * 4 + 9 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49, 9 since v51)
-    for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
+    dict_count = u32(); skip(8 * dict_count)                              # cache v56 (ONE-PARSE): every record carries the subtoken dictionary
+    idx_w = 1 if dict_count <= 0x100 else 2 if dict_count <= 0x10000 else 4   # ingest_cache.h lexDictIndexWidth
+    for _ in range(u32()):                                                # defs (every def carries its subtoken rows since v56)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
             pmin["def.paramsMin"] = (p + 14 * 4, struct.unpack_from("<I", blob, p + 14 * 4)[0], struct.unpack_from("<I", blob, p + 13 * 4)[0])
         skip(17 * 4 + 9 + 2 * 4); site("def.kind"); site("def.lang"); s(); s(); skip(8)   # #150: +1 u8 (scopeRootsStd); cache v26: +2 u32 (fnScopeStart/End) before kind; cache v33: +1 u32 (paramsMin) after params; cache v54: steer u8 + deepDispatch u32 + nestArmCut u8 after maxNest; cache v55: maxBlock10 u32 + cross u8 after nestArmCut
         has_key = blob[p]; skip(1 + (8 if has_key else 0))               # cache v50: clone-key presence u8, then the u64 key when 1
+        skip(4); tok = u32(); tf_w = u8(); skip(tok * (idx_w + tf_w))   # cache v56: dlWeighted u32, tokenCount u32, tfWidth u8, then the rows
     for _ in range(u32()):                                                # refs
-        skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(1); site("ref.forwarded"); site("ref.trailingLambda")   # line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8, #155's trailingLambda u8
+        skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(1); site("ref.forwarded"); site("ref.trailingLambda"); skip(1)   # cache v56: + valueUse u8 before the baseBind tail; line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8, #155's trailingLambda u8
     for _ in range(u32()):                                                # includes
         site("include.isAngle"); skip(2 + 4 + 1); s()
     for _ in range(u32()):                                                # binds

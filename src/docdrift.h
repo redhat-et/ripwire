@@ -103,6 +103,7 @@
 #include "mention.h"            // mention_detail::pathSuffixMatches — the whole-segment suffix match
 #include "workspace.h"          // wsdetail::segmentsOf
 #include "infra/sortutil.h"     // svLess — the language-builtin tables sort and search in byte order, never through operator<
+#include "infra/strkern.h"      // strkern::ciFindLiteral — the ASCII case-insensitive find
 #include "smallvec.h"           // rw::SmallVec — small basename→path lists
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
 #include "gitstamp.h"           // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
@@ -1200,28 +1201,8 @@ inline void scanDocLine( std::string_view line, std::uint32_t lineNo, bool inFen
 // true" — the second question is what the four lanes above already answered, and answering it twice is how a
 // verb starts inventing verdicts. See the header for the two signals that were measured and rejected.
 
-// A whole-word, case-insensitive find. ASCII only on purpose: every phrase in the tables below is ASCII, and
-// a locale-aware fold would make the verdict depend on the environment, which the det-gate forbids.
-inline std::size_t findNoCase( std::string_view hay, std::string_view needle ) noexcept
-{
-    if( needle.empty() || needle.size() > hay.size() )
-    {
-        return std::string_view::npos;
-    }
-    for( std::size_t i = 0; i + needle.size() <= hay.size(); ++i )
-    {
-        std::size_t k = 0;
-        while( k < needle.size() && std::tolower( (unsigned char)hay[i + k] ) == (unsigned char)needle[k] )
-        {
-            ++k;
-        }
-        if( k == needle.size() )
-        {
-            return i;
-        }
-    }
-    return std::string_view::npos;
-}
+// The case-insensitive finds below are strkern::ciFindLiteral. ASCII only on purpose: every phrase in the tables is lower-case
+// ASCII, and a locale-aware fold would make the verdict depend on the environment, which the det-gate forbids.
 
 // An ISO calendar date — YYYY-MM-DD, year 1900..2099 — at `i`. This is the ONE date spelling the lane reads.
 // "July 2026", "07/24" and a bare "2026-07" were all tried and all admit a doc that merely MENTIONS a month:
@@ -1306,7 +1287,7 @@ inline bool namesAMoment( std::string_view rest ) noexcept
     const std::string_view tail = rest.substr( i );
     for( std::string_view w : { "today", "this writing", "writing", "this note", "that note", "head", "then" } )
     {
-        if( tail.size() >= w.size() && findNoCase( tail.substr( 0, w.size() ), w ) == 0 )
+        if( tail.size() >= w.size() && strkern::ciFindLiteral( tail.substr( 0, w.size() ), w ) == 0 )
         {
             return true;
         }
@@ -1318,7 +1299,7 @@ inline bool hasAsOfHedge( std::string_view line )
 {
     for( std::string_view p : kAsOfPhrase )
     {
-        if( findNoCase( line, p ) != std::string_view::npos )
+        if( strkern::ciFindLiteral( line, p ) != std::string_view::npos )
         {
             return true;
         }
@@ -1329,7 +1310,7 @@ inline bool hasAsOfHedge( std::string_view line )
     constexpr std::string_view kAsOf = "as of";
     for( std::size_t from = 0; from < line.size(); )
     {
-        const std::size_t at = findNoCase( line.substr( from ), kAsOf );
+        const std::size_t at = strkern::ciFindLiteral( line.substr( from ), kAsOf );
         if( at == std::string_view::npos )
         {
             break;
@@ -1360,9 +1341,10 @@ inline bool opensWithIsoDate( std::string_view line ) noexcept
 // the closed vocabularies they are meant to be.
 inline std::size_t findWordNoCase( std::string_view hay, std::string_view word ) noexcept
 {
+    if( word.empty() ) { return std::string_view::npos; }   // an empty word is in no sentence
     for( std::size_t from = 0; from + word.size() <= hay.size(); )
     {
-        const std::size_t rel = findNoCase( hay.substr( from ), word );
+        const std::size_t rel = strkern::ciFindLiteral( hay.substr( from ), word );
         if( rel == std::string_view::npos )
         {
             return std::string_view::npos;

@@ -34,6 +34,24 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, lane large-repo-perf merged with origin/main (#819/#823/#829 merged): RE-DERIVED with UPDATE_GOLDEN=1
+#   on the MERGED sources rather than taken from either side, because both sides had already re-pinned. kCacheVersion
+#   stays 57 and is now above main's 56 (lane c1-one-parse), whose one-blob record shape this tree also carries;
+#   kParserVer and its mirror stay 350. kQSnapCacheScheme untouched.
+# 2026-11-27, lane c1-one-parse (#819 ONE-PARSE) merged with origin/main fe284b2af: RE-PINNED ONCE with UPDATE_GOLDEN=1 on the
+#   MERGED sources. Both sides had already re-pinned, so NEITHER value was correct: #819 carried 4410144026…e77d5831 and main
+#   carried e640115f3e…ccbd8342 (the 11-26 cr-qd3 entry below). A merge that picks a side here ships a pin that describes
+#   neither tree. #819 takes kCacheVersion 55 -> 56 and its kIngestCacheVersionMirror for the one-blob record shape (a
+#   valueUse byte, 61 -> 62 B per ref record); kQSnapCacheScheme is UNTOUCHED, and the qsnap key carries the producer
+#   identity, so no blob from another build is read. Hash 232a5bc864…b818ce3b.
+# 2026-11-26, lane cr-qd3 (#750) rebased onto main f7cfcec7a (#743 TANGLE-RULE took kQSnapCacheScheme 40): RE-PINNED ONCE with
+#   UPDATE_GOLDEN=1 from the rebased build. #750's scheme moves 39 -> 41 (one above main's 40; v39 never shipped). Watched text
+#   is main's tangle-cap snapshot fields plus #750's defectSitesOf scans. kCacheVersion and kParserVer unchanged. Hash
+#   e640115f3e…ccbd8342.
+# 2026-11-25, lane cr-qd3 (rebased onto main fec2ab27c): RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf (a manifest function) now also
+#   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
+#   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
+#   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
 # 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
 #   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
 #   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57

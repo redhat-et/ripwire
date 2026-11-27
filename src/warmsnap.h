@@ -765,7 +765,7 @@ inline std::uint64_t layoutKey() noexcept
 // RIPWIRE_PARALLEL_WORKERS is an observer for the same reason: it caps warmsnap::parallelFor's workers, and no answer
 // may depend on how many ran (test/parallelforcheck.sh arm C). Listing it here is what keeps setting it from re-keying
 // the cache and costing a full re-index — a seam that is not inert is not a seam.
-inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes, bool captureValueUses,
+inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes,
                                    std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits,
                                    bool crawlTreeAllTracked )
 {
@@ -777,7 +777,6 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     o.str( os::getcwd( cwd, sizeof( cwd ) ) != nullptr ? cwd : "?" );
     o.strs( excludes );
     o.u64( maxFileBytes );
-    o.u8( captureValueUses ? 1 : 0 );
     o.str( excludeLabel );
     o.u8( respectGitignore ? 1 : 0 );
     o.u32( extractionStamp );
@@ -805,20 +804,31 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     return depwatch::digest64( o.bytes );
 }
 
-// The options key of the VIEW the graph is built from. --ignore-tests is applied by main() between the model and the graph
-// (filter.h applyIgnoreTests), and the GRAPH section's own guard is three counts (symbols, files, references): a test file
-// that contributes bindings only — `let x: Foo;`, `using namespace std;`, `extern int x;` — leaves all three equal, so a
-// graph resolved from one view was served to the other. Each view is now its own configuration (its own name, its own
-// eviction group), and the flagless key is returned unchanged, so no flagless snapshot is renamed.
-inline std::uint64_t viewKeyOf( std::uint64_t optionsKey, bool ignoreTests )
+// The options key of the VIEW the model and graph are built as, from the one parse the options key names.
+//   * The verb class. Since ONE-PARSE (ingest_cache.h, "ONE blob family") both classes read the same blob, so the class is
+//     not an input of the parse and left optionsKeyOf; it still decides the MODEL (a lean ingest drops the rich-only rows)
+//     and so the graph, and each class keeps its own snapshot.
+//   * --ignore-tests, applied by main() between the model and the graph (filter.h applyIgnoreTests). The GRAPH section's own
+//     guard is three counts (symbols, files, references): a test file that contributes bindings only — `let x: Foo;`,
+//     `using namespace std;`, `extern int x;` — leaves all three equal, so a graph resolved from one view was served to the
+//     other.
+// Each view is its own configuration (its own name, its own eviction group). The flagless lean key is the options key itself.
+inline std::uint64_t viewKeyOf( std::uint64_t optionsKey, bool ignoreTests, bool valueUses )
 {
-    if( !ignoreTests )
+    if( !ignoreTests && !valueUses )
     {
         return optionsKey;
     }
     Out o;
     o.u64( optionsKey );
-    o.str( "--ignore-tests" );
+    if( ignoreTests )
+    {
+        o.str( "--ignore-tests" );
+    }
+    if( valueUses )
+    {
+        o.str( "value-uses" );
+    }
     return depwatch::digest64( o.bytes );
 }
 

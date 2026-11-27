@@ -1131,6 +1131,7 @@ void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
         r.lang      = cx.lang;
         const bool isWrite = isMember ? isMemberWriteTarget( shape.access ) : isWriteTarget( n );
         r.role      = shape.typeMention ? RefRole::Type : ( isWrite ? RefRole::Write : RefRole::Read );
+        r.valueUse  = true;   // ONE-PARSE: a rich-family row; a lean ingest drops it (ingest_parsepool.h dropRichOnlyFacts)
         r.name      = finalSegment( src.substr( a, b - a ) );   // bare identifier → already final segment
         if( isMember )
         {
@@ -1508,6 +1509,7 @@ inline void appendBlankedMacroUses( const MemberMacroReparse& work, Lang lang, s
         use.line      = span.line;
         use.lang      = lang;
         use.role      = RefRole::Type;
+        use.valueUse  = true;   // ONE-PARSE: a rich-family row (dropRichOnlyFacts)
         use.name      = std::string( bytes.substr( span.startByte, span.nameEndByte - span.startByte ) );
         refs.push_back( std::move( use ) );
     }

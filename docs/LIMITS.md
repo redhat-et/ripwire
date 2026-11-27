@@ -255,6 +255,14 @@ Discloses: `defs_capped`, `files_capped`, `syms_capped`
 | `kFileRowCap` | `40` | — | — |
 | `kSymbolRowCap` | `40` | — | — |
 
+### `src/countdrift.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxListBytes` | `512` | — | — |
+
 ### `src/crossref.h`
 
 Discloses: **none**
@@ -1772,6 +1780,14 @@ Discloses: `capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDeadExportedRowsShown` | `100` | — | exported rows printed (shown= capped=1; total= stays whole) |
+
+### `src/warmsnap.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxParallelWorkers` | `256` | — | — |
 
 ### `src/warmsnap_model.h`
 

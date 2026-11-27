@@ -105,7 +105,7 @@ measurements are in [docs/EVALS.md](docs/EVALS.md).*
 </details>
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 85 papers folded — McCabe (1976) through to <b>two published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 50 repositories and 85 papers folded — McCabe (1976) through to <b>two published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
 
 Beside those sits a labelled survey of **240 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -181,7 +181,9 @@ agent's context every session, whether or not it calls them.
 ### How ripwire compares
 
 Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22:
-ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. **Bold** = the best value in a
+ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. ripwire's column is a
+profile-guided release build (`scripts/pgobuild.sh`, what CI ships), not the default `cmake --build build` (LTO on,
+PGO off) that PGO beats by 6-16% cold. **Bold** = the best value in a
 row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070-comparison-tables-measured-2026-11-22).
 
 #### Speed
@@ -1560,7 +1562,8 @@ four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
 stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
 warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
-**≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
+**≈167× fewer**. Two opt-in builds go faster still — PGO by **6–16% cold over the default build** (14–25% against an
+LTO-off baseline) — with **byte-identical**
 output on every one.
 
 </details>
@@ -1599,7 +1602,7 @@ via `PL2_CACHE_MISS_LD`).
 </details>
 
 <details>
-<summary>The two opt-in faster builds — LTO on by default, PGO at 14–25% cold, and why the output stays byte-identical</summary>
+<summary>The two opt-in faster builds — LTO on by default, PGO at 6–16% cold over that default, and why the output stays byte-identical</summary>
 
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
@@ -1666,10 +1669,10 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>49 repositories, 85 papers and a 240-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>50 repositories, 85 papers and a 240-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**49 repositories and 85 papers** into one deterministic executable, alongside a labelled
+**50 repositories and 85 papers** into one deterministic executable, alongside a labelled
 survey of 240 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables

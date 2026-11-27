@@ -21,10 +21,10 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **49 repositories** and **85 papers** are folded, and
+**The counts, derived from the tables below:** **50 repositories** and **85 papers** are folded, and
 a labelled survey of **240 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 49 folded *plus* 240 surveyed — not 49 picked
+is never repeated in §3b, which makes the field study 50 folded *plus* 240 surveyed — not 50 picked
 out of 240. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
 taking this paragraph's word for it. Arm E9 checks this second restatement of the pair independently
@@ -294,6 +294,7 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 | [Daniel Lemire's blog code, 2023-07-13](https://github.com/lemire/Code-used-on-Daniel-Lemire-s-blog/tree/master/2023/07/13/src) | The nibble-table classifier as working SSE code, and the SWAR case fold that lowercases eight bytes with high-bit arithmetic and no per-byte branch. | `classMasks` (the two-stage lookup tables) and `swarLowerFold8` in `src/infra/strkern.h`; the fused subtoken hash in `src/lexindex.h` folds its bytes with it |
 | [StringZilla](https://github.com/ashvardanian/StringZilla) | On NEON there is no `pmovmskb`: `vshrn_n_u16( …, 4 )` plus one 64-bit lane read is the movemask; a 256-bit byte set is tested sixteen bytes at a time as two table lookups over `(byte >> 3, byte & 7)`; the portable path is the exact SWAR has-zero-byte probe. | `neonNibbleMask`/`neonByteMask`, `Byteset256` + `findByteset`, `swarZeroByteMask` in `src/infra/strkern.h`; the XML and JSON escapers (`src/serialize.h`, `src/infra/jsonesc.h`) copy clean runs between the bytes the set finds |
 | [Tempesta FW `fast_str`](https://github.com/tempesta-tech/blog/tree/master/fast_str) | Lowercase A–Z branchlessly as one wrapping subtract and one unsigned compare, with the 0x80-bias spelling when the ISA only compares signed bytes; classify with the same two-stage shuffle at 32 bytes per step. | `lowerFoldAscii` / `lowerFoldedEquals` and the AVX2 path of `classMasks` in `src/infra/strkern.h` |
+| [Wojciech Muła, *SIMD-friendly algorithms for substring searching*](http://0x80.pl/articles/simd-strfind.html) | Compare a needle's first and last bytes across a whole block of start positions, and verify only the starts where both agree: one filter for every needle length, and a needle whose first byte is common no longer stops the scan at every copy of it. | `findByEndBytes` / `findByEndBytes_scalar` in `src/infra/strkern.h`, behind `rw::strkern::find` (the literal scan in `src/search.h`) and `find3` (the regex prefilter's trigram probe) |
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
 with scope breadcrumbs — the one rung of the detail ladder that is still missing here — was designed
@@ -318,7 +319,7 @@ hardening of `src/skillscan.h` — the `--scan-skill`/`--scan-skills` scanner an
 informed by ideas from SkillSpector, surveyed as related work: in 0.6.7, `EXFILTRATE:net-exfil` is graded by whether a
 credential-shaped source is on the line (issue #353). No SkillSpector code or pattern text is included today. A
 counted lineage row, with exact per-rule attribution, will be added once the planned port of its code-based checks
-lands; until then it is not in the table above, and the counts stay at 49 repositories.
+lands; until then it is not in the table above, and the counts stay at 50 repositories.
 
 ### 3b. Surveyed — the labelled landscape
 
