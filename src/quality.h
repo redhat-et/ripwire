@@ -1418,7 +1418,7 @@ inline constexpr std::uint64_t kDefectFacetMask = 7;
 // SILENT-CAP-2: the room past eight. Facets 0..6 are spelled in the three bits. The value 7 there is the EXTENSION mark:
 // the next three bits then hold the facet less 7 (count-drift 0, silent-cap 1, room to 14). Widening the mask instead
 // would move every released site value and every ack of one again (CR712-ACK-KEY-MASK); this way facets 0..6 keep
-// theirs, and only count-drift's moved, in the build after the one that introduced it (kQSnapCacheScheme 41).
+// theirs, and only count-drift's moved, in the build after the one that introduced it (kQSnapCacheScheme 42).
 inline constexpr std::uint64_t kDefectExtShift     = 3;
 inline constexpr std::uint64_t kDefectExtFacetMask = kDefectFacetMask | ( kDefectFacetMask << kDefectExtShift );   // the six bits an extension facet takes
 static_assert( defectshape::kFacetCount <= 2 * kDefectFacetMask + 1, "every facet fits the site value's facet bits (three, or three and the extension's three)" );

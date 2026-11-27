@@ -81,8 +81,8 @@ degrades on (large-N studies):
   classifier that gives a value it does not name no outcome (`unhandled-arm`: a switch with no `default:` missing an
   in-tree enumerator, a shell case with no `*)`, a Python if/elif that falls off to `None`), a test arm that passes on
   a successful run's empty answer with no twin (`zero-evidence`), a count word whose list of names is wrong
-  (`count-drift`), and a C++ loop or walk that stops at a constant limit and leaves no trace (`silent-cap`; about half
-  its rows are real, so read the row as a question). The last eight are `sev="minor"`.
+  (`count-drift`), and a C++ loop or walk that stops at a constant limit and leaves no trace (`silent-cap`; about seven
+  of its rows in ten are real, so read the row as a question). The last eight are `sev="minor"`.
 - **Pass-rate ≠ design quality**: fewer than half of test-passing agent patches satisfy design constraints
   (DesignBench) — tests passing is not evidence the delta is clean.
 - One-time "write good code" prompting cuts initial verbosity/erosion by about a third but does **not**

@@ -2318,11 +2318,13 @@ fi
 
 # ── 4g) SILENT-CAP (SILENT-CAP-2): a stop at a constant limit that leaves no trace ───────────────────────────────
 #   Baseline: every function as a stub. The edit gives each its body. Three positives, one per reported shape (a bare stop,
-#   a loop condition beside another one, a substr cut), each on a constant nothing else names. Eight negatives, each
+#   a loop condition beside another one, a substr cut), each on a constant nothing else names. Thirteen negatives, each
 #   judged only beside the firing positive and counted (zero judged = FAIL): a flag the stop branch sets and the caller
 #   that prints it, a caller that names the limit, a total counted beside the keep, a static_assert that ties the limit, a
 #   limit that is the caller's parameter, a bare number (a stated miss: 0 real in 81 on this project's tree), a stop
-#   that returns a value the function returns nowhere else. Then the fix (a caller names the limit) quiets that row alone.
+#   that returns a value the function returns nowhere else; and the five shapes the first hand read found false (owner
+#   11-26): a loop that only rewrites scalars, a list that grows again after the capped loop, a keep whose caller counts
+#   beside the call, a total kept beside the list, a list whose last element is compared after the walk. Then the fix (a caller names the limit) quiets that row alone.
 fx_init scap
 mkdir -p "$WORK/scap/src"
 SCAP_HDR='#include <cstddef>
@@ -2337,6 +2339,11 @@ inline constexpr std::size_t kCallerCap = 3;
 inline constexpr std::size_t kTotalCap = 3;
 inline constexpr std::size_t kLegendCap = 3;
 inline constexpr std::size_t kStatusCap = 3;
+inline constexpr std::size_t kBoostCap = 3;
+inline constexpr std::size_t kSeedCap = 3;
+inline constexpr std::size_t kNoteCap = 3;
+inline constexpr std::size_t kDirCap = 3;
+inline constexpr std::size_t kChainCap = 3;
 static_assert( kLegendCap == 3, "the legend says three rows" );
 struct Out { std::vector<int> rows; bool capped = false; std::size_t total = 0; };
 '
@@ -2353,6 +2360,12 @@ std::vector<int> legendStop( const std::vector<int>& in ) { return in; }
 std::vector<int> requestedStop( const std::vector<int>& in, std::size_t limit ) { (void)limit; return in; }
 std::vector<int> numberStop( const std::vector<int>& in ) { return in; }
 int statusStop( const std::vector<int>& in ) { return int( in.size() ); }
+void boostLoop( std::vector<int>& rank, const std::vector<std::size_t>& order ) { (void)rank; (void)order; }
+std::vector<int> seedLoop( const std::vector<int>& in, const std::vector<int>& named ) { (void)named; return in; }
+void noteRow( std::vector<int>& rows, int v ) { (void)rows; (void)v; }
+Out noteCaller( const std::vector<int>& in ) { return Out{ in }; }
+std::vector<int> dirKeep( const std::vector<int>& in ) { return in; }
+bool chainKeep( const std::vector<int>& in ) { return in.empty(); }
 EOF
 } >"$WORK/scap/src/caps.cpp"
 fx_commit scap
@@ -2485,6 +2498,75 @@ int statusStop( const std::vector<int>& in )
     }
     return int( kept );
 }
+void boostLoop( std::vector<int>& rank, const std::vector<std::size_t>& order )
+{
+    for( std::size_t i = 0; i < order.size() && i < kBoostCap; ++i )
+    {
+        const std::size_t id = order[i];
+        if( rank[id] < 100 )
+        {
+            rank[id] = rank[id] * 2;
+        }
+    }
+}
+std::vector<int> seedLoop( const std::vector<int>& in, const std::vector<int>& named )
+{
+    std::vector<int> seeds;
+    for( std::size_t k = 0; k < in.size() && seeds.size() < kSeedCap; ++k )
+    {
+        seeds.push_back( in[k] );
+    }
+    for( const int v : named )
+    {
+        seeds.push_back( v );
+    }
+    return seeds;
+}
+void noteRow( std::vector<int>& rows, int v )
+{
+    if( rows.size() < kNoteCap )
+    {
+        rows.push_back( v );
+    }
+}
+Out noteCaller( const std::vector<int>& in )
+{
+    Out out;
+    std::size_t seen = 0;
+    for( const int v : in )
+    {
+        ++seen;
+        noteRow( out.rows, v );
+    }
+    out.capped = seen > out.rows.size();
+    return out;
+}
+std::vector<int> dirKeep( const std::vector<int>& in )
+{
+    const std::size_t dirTotal = in.size();
+    std::vector<int> files;
+    for( const int v : in )
+    {
+        if( files.size() < kDirCap )
+        {
+            files.push_back( v );
+        }
+    }
+    std::fputs( dirTotal > 9 ? "many" : "few", stdout );
+    return files;
+}
+bool chainKeep( const std::vector<int>& in )
+{
+    std::vector<int> chain;
+    for( const int v : in )
+    {
+        if( chain.size() < kChainCap )
+        {
+            chain.push_back( v );
+        }
+    }
+    return !in.empty() && chain.back() == in.back();
+}
 EOF
 } >"$WORK/scap/src/caps.cpp"
 fx_run scap
@@ -2509,8 +2591,13 @@ spair legendStop    "a static_assert ties kLegendCap"
 spair requestedStop "the limit is the caller's parameter"
 spair numberStop    "a bare number is not reported (a stated miss)"
 spair statusStop    "the stop returns -1, which the function returns nowhere else"
-[ "$spairs" = 8 ] && ok "$L: all $spairs negative functions print 0 silent-cap rows beside a firing twin" \
-    || no "$L: $spairs of 8 negative functions passed beside a firing twin (want all; zero means nothing was judged)"
+spair boostLoop     "the loop appends nothing and calls nothing: it only rewrites values that exist either way"
+spair seedLoop      "the list grows again after the loop: the limit bounded one source, not the list"
+spair noteRow       "noteCaller counts (++seen) beside the call"
+spair dirKeep       "dirTotal is kept beside the list"
+spair chainKeep     "chain.back() is compared once the walk is over"
+[ "$spairs" = 13 ] && ok "$L: all $spairs negative functions print 0 silent-cap rows beside a firing twin" \
+    || no "$L: $spairs of 13 negative functions passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 printf 'bool stopSays( const std::vector<int>& in )\n{\n    return silentStop( in ).size() >= kStopCap;\n}\n' >>"$WORK/scap/src/caps.cpp"
 fx_run scap

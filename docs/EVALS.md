@@ -6403,16 +6403,26 @@ Every found seed that has a fix commit (6 of the 12) prints no row on the fix tr
 **Precision.** Every row hand read, three labels: real (silent, and reachable on an input the tool accepts), guard (silent, a
 runaway guard not reachable in practice), false (disclosed in a way the check does not read, or a work bound that cuts no answer).
 
-| tree | files | rows | real | guard | unsure | false | real / rows | Wilson 95 % |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| this project's `src/` | 326 | 23 | 11 | 1 | 2 | 9 | 48 % | [0.29, 0.67] |
-| envoy (non-test) | 4,313 | 4 | 2 | 0 | 0 | 2 | 50 % | [0.15, 0.85] |
-| dgl (non-test) | 265 | 0 | - | - | - | - | - | - |
+| tree | files | rows | real | guard | false | real / rows | Wilson 95 % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| this project's `src/`, first rule | 326 | 23 | 12 | 1 | 10 | 52 % | [0.33, 0.71] |
+| this project's `src/`, after the 11-26 round | 326 | 17 | 12 | 1 | 4 | 71 % | [0.47, 0.87] |
+| envoy (non-test), both rounds | 4,313 | 4 | 2 | 0 | 2 | 50 % | [0.15, 0.85] |
+| dgl (non-test) | 265 | 0 | - | - | - | - | - |
 
-The false classes, by count on this tree: a work bound that cuts no answer row (4: a fold's scope, a seed window, a boost's top-k, a
-line's kept hits), a list sample beside a count the check does not connect (3), a continuation handle refused by design when it is too
-long (1), a cache whose completeness is tested after the loop through the list's last element (1). On envoy both false rows are protocol
-refusals that return an error. Below 80 %, so the facet is report-only and its legend states the measured share.
+The first hand read left 2 rows unsure; read again, one is real (a dispatch answer keeps two call sites and drops the rest uncounted)
+and one is false (a doc-body ride-along on rows the answer already prints). The 11-26 round took the two largest false classes:
+
+- a work bound that cuts no answer row (4 rows, 2 removed): a loop that appends nothing and calls nothing (a boost given to a
+  file's first k symbols), and a list that grows again after the capped loop (the cap bounded one source, not the list). The 2 left
+  are an additive fold's scope and a line's kept hits: both append under the cap exactly as a real cut does.
+- a list sample beside a count (3 rows, 2 removed): a keep whose caller counts beside the call (`++r.tests; noteSite( … )`), and a
+  name with `total` in it kept beside the list. The 1 left is a rollup's top directories with no total printed.
+- one cheap rule beside them: a list whose last element is compared after the walk (a cache's completeness test).
+
+The 4 false rows left on this tree: the fold scope, the line's kept hits, the rollup's top directories, the doc-body ride-along. On
+envoy both false rows are protocol refusals that return an error. No seed was lost in the round (12 of 43 before and after). 71 % is
+below the 80 % a gating facet needs, so the facet is report-only and its legend states the measured share.
 
 **What the measurement removed.** A bare number as the limit: 81 such sites on this tree; of the 13 hand read none was real (7
 line windows or grammar bounds, 6 runaway guards), so a number is not reported. A `std::min( x.size(), kMax )` clamp: 15 rows, most

@@ -50,12 +50,14 @@ enum class CapVerdict : std::uint8_t
     DistinctReturn,   // the stop branch returns a value the function returns nowhere else
     HasElse,          // a keep site with an else branch (or whose branch jumps away, so what follows is its else)
     Probe,            // a loop that leaves on a find (return / break in its body, a found flag beside the limit): a bounded search
+    WorkBound,        // a loop that appends nothing and calls nothing (it only sets scalars), or whose list grows again after it
+    CallerCounts,     // a function that calls this one counts beside the call (++n; note( rows, x )): the total is the caller's
     TreeNames,        // another function of the tree names the limit outside a silent stop (the caller's capped=, the renderer's shown=)
     LegendTied,       // a static_assert ties the constant to legend text
 };
-inline constexpr std::array<std::string_view, 13> kCapVerdictNames = { "silent",        "literal-limit",  "limit-named",     "counter-read", "end-retested",
+inline constexpr std::array<std::string_view, 15> kCapVerdictNames = { "silent",        "literal-limit",  "limit-named",     "counter-read", "end-retested",
                                                                        "total-read",    "total-counted",  "branch-records",  "distinct-return", "has-else",
-                                                                       "probe",         "tree-names",     "legend-tied" };
+                                                                       "probe",         "work-bound",     "caller-counts",   "tree-names",   "legend-tied" };
 
 enum class CapShape : std::uint8_t { Loop, Stop, Keep, Cut };
 inline constexpr std::array<std::string_view, 4> kCapShapeNames = { "loop", "stop", "keep", "cut" };
@@ -671,9 +673,95 @@ private:
                     r.verdict     = CapVerdict::Probe;
                     r.shapeSilent = false;
                 }
+                else if( setsScalarsOnly( close + 1, r.end, r.cmp.counter ) )
+                {
+                    r.verdict = CapVerdict::WorkBound;
+                }
                 raws_.push_back( std::move( r ) );
             }
         }
+    }
+
+    // Does the loop body [s, e] keep nothing: no appending call, no `+=`, no call made as a statement, no store indexed by
+    // the counter? Then the limit bounds work on values that exist either way (a boost given to the first k), not a list.
+    bool setsScalarsOnly( std::size_t s, std::size_t e, std::string_view counter ) const noexcept
+    {
+        for( std::size_t k = s; k <= e && k < sc_.close; ++k )
+        {
+            if( is( k, "+=" ) || is( k, "<<" ) )
+            {
+                return false;
+            }
+            if( isIdent( k ) && is( k + 1, "(" ) && !is( k, "if" ) && !is( k, "for" ) && !is( k, "while" ) && !is( k, "switch" )
+                && ( isAppendMethod( text( k ) ) || cppStatementStartsAt( src_, toks_, pathStart( k ) ) ) )
+            {
+                return false;
+            }
+            if( is( k, "[" ) )
+            {
+                const std::size_t close = matchClose( src_, toks_, k );
+                if( close < sc_.close && is( close + 1, "=" ) && holdsWord( k + 1, close, counter ) )
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // The first token of the member path that ends at `k` (`a.b->c` at c gives a).
+    std::size_t pathStart( std::size_t k ) const noexcept
+    {
+        while( k >= sc_.open + 3 && ( is( k - 1, "." ) || is( k - 1, "->" ) || is( k - 1, "::" ) ) && isIdent( k - 2 ) )
+        {
+            k -= 2;
+        }
+        return k;
+    }
+
+    // Is the list `name` appended to after token `after` (the loop's end): the limit bounded one source, not the list?
+    bool appendedAfter( std::string_view name, std::size_t after ) const noexcept
+    {
+        for( std::size_t k = after + 1; k + 3 < sc_.close; ++k )
+        {
+            if( isIdent( k ) && text( k ) == name && ( is( k + 1, "+=" ) || ( ( is( k + 1, "." ) || is( k + 1, "->" ) ) && isIdent( k + 2 ) && is( k + 3, "(" ) && isAppendMethod( text( k + 2 ) ) ) ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Is the last element of the list `name` read after token `after` (`chain.back()` compared once the walk is over)?
+    bool backReadAfter( std::string_view name, std::size_t after ) const noexcept
+    {
+        for( std::size_t k = after + 1; k + 3 < sc_.close; ++k )
+        {
+            if( isIdent( k ) && text( k ) == name && ( is( k + 1, "." ) || is( k + 1, "->" ) ) && is( k + 2, "back" ) && is( k + 3, "(" ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Does the function hold a name with a `total` token (dirTotal, out.total, totalRows) other than the site's own counter:
+    // a count kept beside the list?
+    bool namesTotal( std::string_view counter ) const
+    {
+        for( std::size_t k = sc_.open + 1; k < sc_.close; ++k )
+        {
+            if( !isIdent( k ) || is( k + 1, "(" ) || text( k ) == counter )
+            {
+                continue;
+            }
+            const std::vector<std::string> parts = nameTokens( text( k ) );
+            if( std::find( parts.begin(), parts.end(), "total" ) != parts.end() )
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool holdsWord( std::size_t s, std::size_t e, std::string_view w ) const noexcept
@@ -1258,9 +1346,16 @@ private:
             {
                 r.verdict = CapVerdict::CounterRead;
             }
-            if( r.verdict == CapVerdict::Silent && ( r.shape == CapShape::Stop || r.shape == CapShape::Keep ) && totalCountedBeside( r ) )
+            if( r.verdict == CapVerdict::Silent && ( r.shape == CapShape::Stop || r.shape == CapShape::Keep ) && ( totalCountedBeside( r ) || namesTotal( r.cmp.counter ) ) )
             {
                 r.verdict = CapVerdict::TotalCounted;
+            }
+            if( r.verdict == CapVerdict::Silent && r.cmp.counterIsSize && r.shape != CapShape::Cut )
+            {
+                const std::size_t after = loopEndAround( r );
+                r.verdict = r.shape == CapShape::Loop && appendedAfter( r.cmp.counter, after ) ? CapVerdict::WorkBound
+                          : backReadAfter( r.cmp.counter, after )                             ? CapVerdict::EndRetested
+                                                                                              : CapVerdict::Silent;
             }
             if( r.verdict == CapVerdict::Silent && r.shape == CapShape::Loop )
             {
@@ -1291,6 +1386,36 @@ private:
     }
 
 public:
+    // The functions this one calls as a statement with a count grown before the call in the same block (`++r.tests;
+    // noteSite( r.testAt, f, l );`): the callee's keep is counted here.
+    void countedCallees( std::vector<std::string>& out ) const
+    {
+        for( std::size_t k = sc_.open + 2; k + 1 < sc_.close; ++k )
+        {
+            if( !isIdent( k ) || !is( k + 1, "(" ) || !cppStatementStartsAt( src_, toks_, k ) || !is( k - 1, ";" ) )
+            {
+                continue;
+            }
+            int depth = 0;
+            for( std::size_t j = k - 1; j-- > sc_.open + 1; )
+            {
+                if( is( j, ")" ) || is( j, "]" ) || is( j, "}" ) )
+                {
+                    ++depth;
+                }
+                else if( ( is( j, "(" ) || is( j, "[" ) || is( j, "{" ) ) && depth-- == 0 )
+                {
+                    break;
+                }
+                else if( depth == 0 && is( j, "++" ) )
+                {
+                    out.emplace_back( text( k ) );
+                    break;
+                }
+            }
+        }
+    }
+
     // The constants this function names outside every silent stop shape and clamp (call after findings()): each one is a
     // limit some code of the tree can tell a reader about.
     void namedConstants( std::vector<std::string>& out ) const
@@ -1322,6 +1447,7 @@ struct CapFileScan
     std::vector<CapFinding>  findings;
     std::vector<std::string> named;
     std::vector<std::string> asserted;
+    std::vector<std::string> counted;   // functions some caller counts beside (FnScan::countedCallees)
 };
 
 inline CapFileScan capScanCpp( std::string_view src, const std::vector<detail::Tok>& toks )
@@ -1341,7 +1467,9 @@ inline CapFileScan capScanCpp( std::string_view src, const std::vector<detail::T
             out.named.push_back( std::string( fn ) + '\x1f' + std::move( n ) );
         }
         out.findings.insert( out.findings.end(), std::make_move_iterator( found.begin() ), std::make_move_iterator( found.end() ) );
+        scan.countedCallees( out.counted );
     }
+    rw::sortutil::sortUnique( out.counted );
     for( std::size_t k = 0; k + 1 < toks.size(); ++k )
     {
         if( toks[k].kind == TokKind::Ident && tokIs( src, toks[k], "static_assert" ) && tokIs( src, toks[k + 1], "(" ) )
@@ -1371,15 +1499,17 @@ struct CapTreeNames
 {
     std::vector<std::string> named;
     std::vector<std::string> asserted;
+    std::vector<std::string> counted;
 
     void add( CapFileScan& scan )
     {
+        counted.insert( counted.end(), std::make_move_iterator( scan.counted.begin() ), std::make_move_iterator( scan.counted.end() ) );
         named.insert( named.end(), std::make_move_iterator( scan.named.begin() ), std::make_move_iterator( scan.named.end() ) );
         asserted.insert( asserted.end(), std::make_move_iterator( scan.asserted.begin() ), std::make_move_iterator( scan.asserted.end() ) );
     }
     void seal()
     {
-        for( std::vector<std::string>* names : { &named, &asserted } )
+        for( std::vector<std::string>* names : { &named, &asserted, &counted } )
         {
             rw::sortutil::sortUnique( *names );
         }
@@ -1390,9 +1520,17 @@ struct CapTreeNames
 // function other than its own names it outside a silent stop. Other verdicts, and limits that are not names, stand.
 inline CapVerdict capResolve( const CapFinding& f, const CapTreeNames& tree )
 {
-    if( f.verdict != CapVerdict::Silent || f.limitKind != CapLimit::Named )
+    if( f.verdict != CapVerdict::Silent )
     {
         return f.verdict;
+    }
+    if( !f.function.empty() && f.shape != CapShape::Loop && std::binary_search( tree.counted.begin(), tree.counted.end(), f.function ) )
+    {
+        return CapVerdict::CallerCounts;
+    }
+    if( f.limitKind != CapLimit::Named )
+    {
+        return CapVerdict::Silent;
     }
     if( std::binary_search( tree.asserted.begin(), tree.asserted.end(), f.limit ) )
     {

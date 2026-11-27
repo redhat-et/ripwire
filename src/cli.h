@@ -1956,7 +1956,7 @@ inline constexpr char kHelpHead[] =
         "                               evidence) and count-drift (a count word whose list of names in Markdown or a C/C++ string disagrees with\n"
         "                               itself or with the tree's string array of those names; the row carries why=) and silent-cap (a C++ loop or walk\n"
         "                               that stops at a constant limit with no flag, count or total beside it and no other function naming the limit;\n"
-        "                               the row carries why=; about half its rows are real) — report-only, always sev=\"minor\".\n"
+        "                               the row carries why=; about seven of its rows in ten are real) — report-only, always sev=\"minor\".\n"
         "                               A site is new only when its text occurs more often than in the baseline: a moved one is not.\n"
         "                               Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone\n"
         // §B7.2 (CA4): the strict-sha staleness rule and — the part that matters — the fact that this verb
