@@ -192,8 +192,8 @@ On Windows the installer does not apply: download the `windows-x64` zip instead 
 
    **To use the tool**, build the fast binary the released one is built as. `scripts/pgobuild.sh`
    instruments, trains and re-optimizes in one command, into `build_pgo/` — Release, plus link-time
-   optimization, plus profile-guided optimization, which is 14-25% faster cold than the default
-   build and byte-identical in output:
+   optimization, plus profile-guided optimization, which is 6-16% faster cold than the default
+   build (14-25% against an LTO-off baseline) and byte-identical in output:
 
    ```bash
    scripts/pgobuild.sh
@@ -342,7 +342,7 @@ identity of the index, and says which one is at fault.
 
 ### 5. Command families
 
-The `--help` output groups 201 long flags advertised in `--help` into seven families. The `--help=`
+The `--help` output groups 202 long flags advertised in `--help` into seven families. The `--help=`
 column below is the argument that prints one family: `ripwire --help=navigate`. `ripwire
 --help=--FLAG` prints one flag's full text — the caveats, the units, what it refuses and why.
 `ripwire --help=all` is the whole catalog, about 46,000 tokens.

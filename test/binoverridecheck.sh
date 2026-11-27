@@ -38,7 +38,7 @@ command -v python3 >/dev/null 2>&1 || { no "python3 is required by binoverridech
 
 python3 - "$ROOT" <<'PY' || fail=1
 import concurrent.futures as cf
-import os, re, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile
 
 ROOT = sys.argv[1]
 T = os.path.join( ROOT, "test" )
@@ -131,6 +131,7 @@ EXEMPT = {
     "skillshapecheck.sh":        "checks skills/*/ line counts and Contents: lines against planted copies; pure file check",
     "roundcderivecheck.sh":      "gates bench/roundc-h2h/derive_questions.py (#492, #540): it runs a COPY of that python harness against a stub git it writes itself and reads only the harness's exit code, stderr and questions.json; no ripwire binary is bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so a broken binary cannot turn it red",
     "ripwirepubliccheck.sh":     "checks git-tracked files for leaked private content; pure file/grep check",
+    "shardapartcheck.sh":        "gates test/pargates.py's shard plan (--shard-plan runs no gate and needs no binary) against the workflow's shard counts and skip lists, plus a synthetic root and the binoverride hint table; build/ripwire is never bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so (2b)'s static tell needs no exemption row for it, the same shape as skipclassifycheck below",
     "skipclassifycheck.sh":      "meta-check of test/pargates.py's SKIPPED-vs-PASSED classification: it drives pargates.py over synthetic probe corpora with a fake binary it writes itself, so build/ripwire is never bound or executed — the file contains neither RIPWIRE_BIN nor $BIN (so (2b)'s static tell needs no exemption row for it), the same shape as pargatescheck above",
     "svectorcheck.sh":           "compiles isolated $CXX probes for the svector container; never invokes build/ripwire",
     "textpoolcheck.sh":          "compiles and runs its OWN header-only harness (test/textpool_harness.cpp, no ripwire objects) twice, plain and sanitized; build/ripwire is never bound or executed -- its usage line says BIN is unused and the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it). Run against the sentinel its two harness compiles only time out, which masks rather than flags (CodeRabbit #608)",
@@ -224,6 +225,21 @@ def run_one( g ):
 
 # ── (4) run every non-exempt gate pointed at the sentinel, modest parallelism (this gate is itself one
 #    entry in test/pargates.py's own -j budget, competing with the rest of the suite for CPU) ────────────
+#    DISPATCH ORDER (2026-11-26, lane GATE-SPLIT): longest-first, not by name. The pool hands gates out in toRun's
+#    order, so a slow gate whose name sorts late starts when the other workers are nearly done and runs alone: on
+#    a timed staged run (main 5f4b50415, 869 gates, 6 workers) vendorpatchcheck started at 248.8 s and ran 64.9 s,
+#    a 37 s tail on a 313.8 s wall. The hints are .github/binoverride-weights.json: per gate, the larger of that
+#    run's and an unstaged run's seconds against the sentinel (unstaged, the HEAD-binary builder gates are slow, so
+#    they start first). Replayed against the measured durations: 313.7 s -> 276.5 s staged, 333.4 s -> 303.4 s
+#    unstaged. A gate with no row is unknown, so it goes FIRST (pargates.py's rule for its own scheduler); a
+#    missing or unreadable table leaves every gate unknown, which is plain name order. Output and verdicts do not
+#    depend on the order: results is keyed by gate and every report below is sorted. test/shardapartcheck.sh (D).
+try:
+    with open( os.path.join( ROOT, ".github", "binoverride-weights.json" ) ) as fh:
+        HINT = { k: float( v ) for k, v in json.load( fh ).items() if isinstance( v, ( int, float ) ) }
+except ( OSError, ValueError, AttributeError ):
+    HINT = {}
+toRun.sort( key=lambda g: ( -HINT.get( g, float( "inf" ) ), g ) )
 results = {}
 with cf.ThreadPoolExecutor( max_workers=6 ) as ex:
     for g, rc, out in ex.map( run_one, toRun ):

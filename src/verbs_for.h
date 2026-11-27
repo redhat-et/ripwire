@@ -946,7 +946,35 @@ inline void spliceTailTermsClause( std::string& header, bool compact, bool prese
     const std::string_view tailClause = compact ? kForCompactLegendTail : rw::kForFileTailLegend;
     rw::spliceClauseAfter( header, tailClause, presentOnlyClause( present, compact, rw::kForCompactFileTailTermsLegend, rw::kForFileTailTermsLegend ) );
 }
-inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
+// TAIL-CLAUSE: does a <t> row this answer PRINTS name a file's module scope (sym=/tsym= list item <file-scope>)? The header's
+// modScopePresent walks the <d>/<hops> row head only; an owner ranked past it reaches the document as a tail pointer row.
+// The name is ingest_model.h kModuleScopeName (ingest-TU-only, so spelled here; affectedcheck (8g) pins the two together).
+inline constexpr std::string_view kForTailOwnerName = "<file-scope>";
+inline bool fileTailNamesModuleScope( const rw::FileTail& t, std::size_t shown )
+{
+    const auto names = []( std::string_view list )
+    {
+        for( std::size_t at = 0; at <= list.size(); )
+        {
+            const std::size_t end = std::min( list.find( ',', at ), list.size() );
+            if( list.substr( at, end - at ) == kForTailOwnerName )
+            {
+                return true;
+            }
+            at = end + 1;
+        }
+        return false;
+    };
+    for( std::size_t i = 0; i < shown && i < t.syms.size(); ++i )
+    {
+        if( names( t.syms[i] ) || ( i < t.termSyms.size() && names( t.termSyms[i] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+inline constexpr std::string_view kForCompactLegendTailCodeFirst ="; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
     "past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them";
@@ -5181,6 +5209,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
         std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
         bool tailTermNames = rw::fileTailTermNamesShown( forFileTailShown, tailShownRows );   // TAIL-SYM-TERMS: its clause rides only then
+        bool tailModScope  = fileTailNamesModuleScope( forFileTailShown, tailShownRows );   // TAIL-CLAUSE: a printed <t> row names an owner
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -5221,6 +5250,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                 tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
                 tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
                 tailTermNames = rw::fileTailTermNamesShown( refilledTail, tailShownRows );
+                tailModScope  = fileTailNamesModuleScope( refilledTail, tailShownRows );
                 return true;
             }
             forSigsCut         = firstCut;
@@ -5395,6 +5425,13 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             headerParts.callerHopPresent = true;   // the ranked clause rides beside the element it defines
             headerParts.callerHopRanked  = true;
+            headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+        }
+        // TAIL-CLAUSE (#60 8f): the module-scope clause rides on every owner the document prints — the row head decided it before
+        // the header, and a tail pointer row naming <file-scope> is in the answer too
+        if( tailModScope && !headerParts.modScopePresent )
+        {
+            headerParts.modScopePresent = true;
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
         }
         // SIZE-1 (size-trim): present-only on the FINAL rows. layer=/implementors=/<field> were decided from the ranked set before

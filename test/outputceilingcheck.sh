@@ -19,6 +19,8 @@
 #   --expand=<many definitions> (PG1): unserved_next= (selectors, or past 16 of them --offset=K) serves each definition once
 #   the map   file groups (and, inside a large inventory, its ls rows): page= pages= withheld_bytes= has_more= and
 #              next="--page-bytes=24000:K" (page_next= when the root already has a next=); the pages rebuild --page-bytes=0's map
+#   --batch    whole <q> sub-answers (audit 2026-11-26): offset= shown= has_more= next_offset= and next="--batch=F --offset=K";
+#              a <q> over a page alone is served whole (over_ceiling=1, one stderr line); the pages rebuild --page-bytes=0's batch
 #
 # Arm classes (LANE_CONSTRAINTS §17): [P] a NEW bar — RED on the parent 36a95d732, its control; [C] holds on every binary;
 # [N] must NOT change (needs BASE_BIN); [M] a mutation control: the same check FAILS on a doctored chain.
@@ -364,6 +366,93 @@ rc, cagain, _ = run(BIN, CLONEW, ["--clones"])
 say(cagain == cpages[0], "(K7) [C] determinism: the default page is byte-identical across two runs")
 rc, _, err = run(BIN, CLONEW, ["--clones", "--page-bytes=0", "--limit=5"])
 say(rc != 0 and "--clones' own page size" in err, "(K8) [P] --page-bytes=0 with --limit=N refuses: two sizes (exit %d)" % rc)
+
+# ── (B) --batch: whole <q> sub-answers, paged under the ceiling (research audit 2026-11-26 item 2) ────────────────────
+# Each sub-verb bounds its own answer; sixteen of them together did not, and the CLI printed batchText whole at any size. A page
+# carries whole <q> rows only, so the rows between the legend's end and </batch>, page after page, must BE the whole batch's.
+def batch_rows(doc):
+    """The <q> rows of a batch document: everything between its legend comment and </batch> (None when it is not a batch)."""
+    i, j = doc.find("-->"), doc.rfind("</batch>")
+    return doc[i + 3:j] if 0 <= i < j else None
+
+
+def batch_chain(binary, root, first_args):
+    """Follow the root's next= from the first page; returns [(rc, stdout, stderr)]."""
+    pages, args = [], first_args
+    for _ in range(40):
+        rc, out, err = run(binary, root, args)
+        pages.append((rc, out, err))
+        nxt = root_attr(out, "batch", "next")
+        if rc != 0 or not nxt:
+            break
+        args = shlex.split(nxt)
+    return pages
+
+
+QIDX = re.compile(r'<q i="(\d+)"')
+BOVER_LINE = "fetch_body:giant_body"   # the 1,400-line body whole (48,235 B measured): one sub-answer past the ceiling by itself
+B16, B2, BOVER = os.path.join(W, "b16.txt"), os.path.join(W, "b2.txt"), os.path.join(W, "bover.txt")
+w(B16, "".join("grep:mod%02d_fn\n" % k for k in range(16)))
+w(B2, "grep:mod00_fn\ngrep:mod01_fn\n")
+w(BOVER, "grep:mod00_fn\n" + BOVER_LINE + "\ngrep:mod01_fn\n")
+rc, bwhole, berr = run(BIN, BIG, ["--batch=" + B16, "--page-bytes=0"])
+say(rc == 0 and len(bwhole) > CEILING and "ripwire: --page-bytes=0" in berr,
+    "(B0) [P] --batch --page-bytes=0 (refused on the parent) is the whole 16-query batch: %d chars, over the ceiling, and stderr names its size (exit %d)" % (len(bwhole), rc))
+bchain = batch_chain(BIN, BIG, ["--batch=" + B16])
+bpages = [o for _, o, _ in bchain]
+say(len(bpages[0]) <= CEILING and root_attr(bpages[0], "batch", "has_more") == "1" and root_attr(bpages[0], "batch", "next") is not None,
+    "(B1) [P] a default 16-query --batch prints %d chars <= %d, has_more=\"1\" and a next=" % (len(bpages[0]), CEILING))
+say(len(bpages) > 1 and ceiling_ok(bpages) and all(rc == 0 for rc, _, _ in bchain), "(B2) [P] every page of the next= chain is <= %d chars (%d pages, max %d)" % (CEILING, len(bpages), max(map(len, bpages))))
+say(root_attr(bpages[-1], "batch", "has_more") == "0" and root_attr(bpages[-1], "batch", "next") is None,
+    "(B3) [P] the chain ends: the last page says has_more=\"0\" and names no next=")
+brows = [batch_rows(p) or "" for p in bpages]
+say(len(bpages) > 1 and "".join(brows) == batch_rows(bwhole), "(B4) [P] the pages' <q> rows rebuild --page-bytes=0's whole batch byte for byte (%d vs %d B)" % (len("".join(brows)), len(batch_rows(bwhole) or "")))
+bqs = [int(i) for r in brows for i in QIDX.findall(r)]
+say(len(bpages) > 1 and bqs == list(range(16)), "(B5) [P] the %d pages carry every <q> exactly once, in order (%s)" % (len(bpages), bqs))
+say(all(well_formed(p) for p in bpages), "(B6) [C] every --batch page is well-formed XML")
+say(len(brows) < 2 or "".join(brows[:1] + brows[2:]) != batch_rows(bwhole), "(B7) [M] mutation: the rebuild check FAILS when one page's rows are dropped")
+rc, bagain, _ = run(BIN, BIG, ["--batch=" + B16])
+say(bagain == bpages[0], "(B8) [C] determinism: the first page is byte-identical across two runs")
+rc, _, err = run(BIN, BIG, ["--batch=" + B16, "--offset=16"])
+say(rc == 1 and "past the last of this batch's 16 sub-answers" in err, "(B9) [P] an --offset past the last sub-answer refuses, naming the count (exit %d)" % rc)
+rc, _, err = run(BIN, BIG, ["--batch=" + B16, "--page-bytes=6000"])
+say(rc != 0 and "--batch pages by whole <q> sub-answers" in err, "(B10) [P] --page-bytes=N>0 beside --batch refuses, naming its unit (exit %d)" % rc)
+rc, _, err = run(BIN, BIG, ["--batch=" + B16, "--page-bytes=0", "--offset=3"])
+say(rc != 0 and "does not combine with --offset" in err, "(B11) [P] --page-bytes=0 beside --offset=K refuses: one page or the whole (exit %d)" % rc)
+rc, _, err = run(BIN, BIG, ["--batch=" + B16, "--limit=3"])
+say(rc != 0 and "honored only by" in err, "(B12) [C] --batch --limit still refuses (§A5a): the ceiling is the batch's page size (exit %d)" % rc)
+# one sub-answer larger than a page by itself: served alone and whole, disclosed on the root and on stderr
+rc, owhole, _ = run(BIN, BIG, ["--batch=" + BOVER, "--page-bytes=0"])
+ochain = batch_chain(BIN, BIG, ["--batch=" + BOVER])
+opages = [o for _, o, _ in ochain]
+alone = [(o, e) for _, o, e in ochain if root_attr(o, "batch", "over_ceiling") == "1"]
+say(len(alone) == 1 and root_attr(alone[0][0], "batch", "shown") == "1" and QIDX.findall(alone[0][0]) == ["1"] and len(alone[0][0]) > CEILING,
+    "(B13) [P] a <q> larger than a page is served alone on its own page, whole, over_ceiling=\"1\" (%d pages; alone: %s)"
+    % (len(opages), [len(o) for o, _ in alone]))
+say(len(alone) == 1 and "sub-answer q=1 is larger than a page" in alone[0][1] and str(len(alone[0][0].rstrip("\n").encode())) in alone[0][1],
+    "(B14) [P] that page's stderr names the sub-answer and the page's size")
+say("".join(batch_rows(p) or "" for p in opages) == batch_rows(owhole) and [int(i) for p in opages for i in QIDX.findall(batch_rows(p) or "")] == [0, 1, 2],
+    "(B15) [P] the oversized batch's pages still rebuild its whole rows, every <q> once")
+# stdin and a non-default legend: next= replays the batch spelling and the flags that shaped the sub-answers
+r = subprocess.run([BIN, BIG, "--batch=-"], input=open(B16, "rb").read(), capture_output=True)
+sin = r.stdout.decode("utf8", "replace")
+say(len(sin) <= CEILING and (root_attr(sin, "batch", "next") or "").startswith("--batch=- --offset="),
+    "(B16) [P] --batch=- pages too, and its next= replays --batch=- (%r)" % root_attr(sin, "batch", "next"))
+rc, fwhole, _ = run(BIN, BIG, ["--batch=" + B16, "--legend=full", "--page-bytes=0"])
+fchain = [o for _, o, _ in batch_chain(BIN, BIG, ["--batch=" + B16, "--legend=full"])]
+say(len(fchain) > 1 and " --legend=full" in (root_attr(fchain[0], "batch", "next") or "") and ceiling_ok(fchain)
+    and "".join(batch_rows(p) or "" for p in fchain) == batch_rows(fwhole),
+    "(B17) [P] under --legend=full the next= replays it and the pages rebuild that posture's whole rows (%d pages)" % len(fchain))
+rc, bfit, _ = run(BIN, BIG, ["--batch=" + B2])
+say(rc == 0 and root_attr(bfit, "batch", "offset") is None and bfit.count("<q i=") == 2 and len(bfit) <= CEILING,
+    "(B18) [C] a batch that fits carries no page attributes (%d B)" % len(bfit))
+if BASE:
+    for args in (["--batch=" + B2], ["--batch=" + B2, "--legend=full"], ["--batch=" + B2, "--legend=compact"]):
+        _, a, _ = run(BIN, BIG, args)
+        _, b, _ = run(BASE, BIG, args)
+        say(a == b, "(N-B) [N] %s, under the ceiling, is byte-identical to the parent (%d B)" % (" ".join(os.path.basename(x) for x in args), len(a)))
+    _, b, _ = run(BASE, BIG, ["--batch=" + B16])
+    say(bwhole == b, "(N-B) [N] --batch --page-bytes=0's stdout is the parent's unpaged batch byte for byte (%d B; the size line is stderr only)" % len(b))
 
 # ── (X) --expand=<a name with > 16 definitions, several per file>: the unserved chain reaches every one, once (PG1) ──
 # multi/  8 files x 5 structs, each with str_of() of 40 lines: 40 definitions, five per file — so a FILE:LINE:NAME selector

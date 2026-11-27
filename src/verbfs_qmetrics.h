@@ -16,7 +16,9 @@
 //
 //   qmetrics — the DERIVED columns only (graph.h fillQMetricsTested, fillQMetricsLcom4). The direct columns (callerCount,
 //   cbo: CSR row lengths and one pass over composeEdges) are filled live on every run, as before, from the same code.
-//     shape    S = ing.symbols.size(); ing.files.size(); g.wOutDeg.size() (forwardReach's N)
+//   tested= and asserted= are one reach (graph.h testSymbolForwardReach); asserted= also reads which TEST symbols assert
+//   (graph.h assertingTestSymbols: their own Call/Macro sites, and the in-edges between test symbols), so those enter too.
+//     shape    S = ing.symbols.size(); ing.files.size(); g.wOutDeg.size() (forwardReach's N); g.inEdges.rows()
 //     files    ing.crawlRoot and every ing.files[ f ] text (isTestSymbol -> isTestPath( rootRelPath ); LCOM4's class key)
 //     symbols  per symbol: id, fileId, kind, testScope, name, scope (isTestSymbol; LCOM4's class / method attribution)
 //     refs     per reference whose fromSymbol is a Method of this index and that is not an IX-1 slot record (exactly the
@@ -25,7 +27,14 @@
 //              `nm == fld` test), which no order and no other reference can change — so an edit that only adds, removes or
 //              reorders references LCOM4 never collects keeps the key
 //     graph    g.outOff and g.outTargets (forwardReach, method-calls-method); per compose edge ownerSym and fieldName
-//              (LCOM4's declared fields), in order
+//              (LCOM4's declared fields), in order; g.inEdges' row offsets and column indices (assertingTestSymbols' helper
+//              closure walks them)
+//     asserts  (lane asserted-signal) the MULTISET of ( fromSymbol, role, lang, calleeName TEXT, written-receiver TEXT ) over
+//              every Call/Macro reference a TEST symbol makes that is not an IX-1 slot record: everything the vocabulary match
+//              (graph.h isAssertionSite) can read. An assertion call is usually EXTERNAL (`EXPECT_EQ`, `assert`), so adding one
+//              moves no edge: without this component the graph stays equal and a served record would hand out a stale asserted=.
+//              It is the refs stream's second multiset, kept as its own component so a miss says asserts and a mutant can blind
+//              it alone. Which symbols are tests comes from files + symbols, so an edit that moves either moves this one too
 //   impure — the whole mask (graph.h computeImpure = propagateImpure over the seed sites).
 //     shape    S; g.inEdges.rows()
 //     refs     the seed sites: the MULTISET of fromSymbol over every reference isImpureSeed admits (a CALL of a side-effecting
@@ -42,7 +51,7 @@
 // the thread count or timing. Anything else recomputes, exactly as before (the miss path IS
 // computeQMetricsComputed / computeImpureComputed, unchanged), and offers its result.
 //
-// THE KEY IS KEPT AS NAMED COMPONENTS so a miss names the first input that moved (why=shape|files|symbols|refs|graph), and each
+// THE KEY IS KEPT AS NAMED COMPONENTS so a miss names the first input that moved (why=shape|files|symbols|refs|graph|asserts), and each
 // mutation arm of test/qmetricscheck.sh blinds exactly one of them (RIPWIRE_FAULT_VERBFS_QMETRICS_*; constexpr false under
 // NDEBUG).
 //
@@ -81,7 +90,7 @@ namespace rw::verbfs
 {
 
 // ── the record file ─────────────────────────────────────────────────────────────────────────────────────────────────
-inline constexpr std::uint32_t kQmRecordVersion = 1;   // bump on ANY payload layout change of either part below
+inline constexpr std::uint32_t kQmRecordVersion = 2;   // bump on ANY payload layout change of either part below; 2 = the asserted column
 
 // A part of this file: its number in the header (outside verbfs::Part's 1.., so no other part's reader takes it) and its name in
 // the record's file name and on the stats line.
@@ -101,9 +110,10 @@ enum class QmKey : std::uint8_t
     Symbols,
     Refs,
     Graph,
+    Asserts,   // lane asserted-signal: the test symbols' Call/Macro sites (the table at the top)
     Count
 };
-inline constexpr const char* kQmKeyNames[] = { "shape", "files", "symbols", "refs", "graph" };
+inline constexpr const char* kQmKeyNames[] = { "shape", "files", "symbols", "refs", "graph", "asserts" };
 static_assert( std::size( kQmKeyNames ) == std::size_t( QmKey::Count ), "every key component needs its name on the stats line" );
 
 enum class ImKey : std::uint8_t
@@ -205,6 +215,7 @@ struct FaultQmNoRefs;
 struct FaultQmNoFiles;
 struct FaultQmNoSyms;
 struct FaultQmNoSum;
+struct FaultQmNoAsserts;
 struct QmFaults
 {
     bool anyDigest = false;   // serve whatever is stored, fitted to this index's symbol count
@@ -213,25 +224,29 @@ struct QmFaults
     bool noFiles   = false;   // ... only in the files component
     bool noSyms    = false;   // ... only in the symbols component
     bool noSum     = false;   // a payload whose checksum fails is read
+    bool noAsserts = false;   // ... only in the asserts component (lane asserted-signal)
 
     // the first switch that is on, for the stats line (null: none)
     const char* name() const noexcept
     {
         const std::pair<bool, const char*> named[] = { { anyDigest, "anydigest" }, { noGraph, "nograph" }, { noRefs, "norefs" },
-                                                       { noFiles, "nofiles" },     { noSyms, "nosyms" },   { noSum, "nosum" } };
+                                                       { noFiles, "nofiles" },     { noSyms, "nosyms" },   { noSum, "nosum" },
+                                                       { noAsserts, "noasserts" } };
         const auto on = std::ranges::find_if( named, []( const std::pair<bool, const char*>& n ) { return n.first; } );
         return on != std::end( named ) ? on->second : nullptr;
     }
     bool blinds( std::string_view component ) const noexcept
     {
-        return ( noGraph && component == "graph" ) || ( noRefs && component == "refs" ) || ( noFiles && component == "files" ) || ( noSyms && component == "symbols" );
+        return ( noGraph && component == "graph" ) || ( noRefs && component == "refs" ) || ( noFiles && component == "files" ) || ( noSyms && component == "symbols" )
+            || ( noAsserts && component == "asserts" );
     }
 };
 inline QmFaults qmFaults() noexcept
 {
     return { rw::faultSwitchOnOnce<FaultQmAnyDigest>( "RIPWIRE_FAULT_VERBFS_QMETRICS_ANYDIGEST" ), rw::faultSwitchOnOnce<FaultQmNoGraph>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOGRAPH" ),
              rw::faultSwitchOnOnce<FaultQmNoRefs>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOREFS" ), rw::faultSwitchOnOnce<FaultQmNoFiles>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOFILES" ),
-             rw::faultSwitchOnOnce<FaultQmNoSyms>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS" ), rw::faultSwitchOnOnce<FaultQmNoSum>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM" ) };
+             rw::faultSwitchOnOnce<FaultQmNoSyms>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS" ), rw::faultSwitchOnOnce<FaultQmNoSum>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOSUM" ),
+             rw::faultSwitchOnOnce<FaultQmNoAsserts>( "RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS" ) };
 }
 
 // ── the digest: fixed blocks, folded in block order ──────────────────────────────────────────────────────────────────
@@ -323,6 +338,40 @@ inline std::uint64_t textDigest( std::string_view text ) noexcept
     return TextPool::hashOf( text );   // the bytes, never the pool id
 }
 
+// The in-edge CSR, digested by its bytes: rows + 1 offsets, then the column indices they bound.
+inline std::uint64_t inEdgesDigest( const Graph& g, std::uint64_t seed ) noexcept
+{
+    const std::size_t    rows = g.inEdges.rows();
+    const std::uint32_t* ro   = g.inEdges.rowOffsets();
+    const std::size_t    nnz  = rows != 0 && ro != nullptr ? ro[ rows ] : 0;
+    std::uint64_t        h    = bytesDigest( ro, ro != nullptr ? rows + 1 : 0, seed );
+    absorbInto( h, bytesDigest( g.inEdges.colIndices(), nnz, seed ^ 0x434f'4c53ull ) );
+    return h;
+}
+
+// The asserts component (the table at the top): every Call/Macro site of a test symbol, by its bytes.
+inline std::uint64_t testCallSitesDigest( const IngestResult& ing )
+{
+    const std::size_t         S = ing.symbols.size();
+    std::vector<std::uint8_t> isTest( S, 0 );
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        isTest[ i ] = isTestSymbol( ing, i ) ? 1 : 0;
+    }
+    return multisetDigest( ing.references.size(), 0x4153'5345'5254'5321ull, [ & ]( std::size_t k, std::uint64_t& d ) noexcept
+    {
+        const Reference& r = ing.references[ k ];
+        if( r.fromSymbol == kNoNode || r.fromSymbol >= S || isTest[ r.fromSymbol ] == 0 || ( r.role != RefRole::Call && r.role != RefRole::Macro ) || isSlotJoinRecord( r ) )
+        {
+            return false;
+        }
+        d = hashutil::hashMix( hashutil::packPair( r.fromSymbol, ( std::uint32_t( r.role ) << 8 ) | std::uint32_t( r.lang ) ) );
+        d = hashutil::hashMix( d ^ textDigest( r.calleeName ) );
+        d = hashutil::hashMix( d ^ textDigest( assertionReceiverOf( r ) ) );
+        return true;
+    } );
+}
+
 // Everything the derived QMetrics columns read (see the table at the top), one digest per component.
 inline std::vector<std::uint64_t> qmetricsKey( const IngestResult& ing, const Graph& g )
 {
@@ -333,6 +382,7 @@ inline std::vector<std::uint64_t> qmetricsKey( const IngestResult& ing, const Gr
     absorbInto( shape, S );
     absorbInto( shape, ing.files.size() );
     absorbInto( shape, g.wOutDeg.size() );
+    absorbInto( shape, g.inEdges.rows() );
     key[ std::size_t( QmKey::Shape ) ] = shape;
 
     key[ std::size_t( QmKey::Files ) ] = rowsDigest( ing.files.size(), textDigest( ing.crawlRoot ), [ & ]( std::size_t f, std::uint64_t& h ) noexcept { absorbInto( h, textDigest( ing.files[ f ] ) ); } );
@@ -362,6 +412,7 @@ inline std::vector<std::uint64_t> qmetricsKey( const IngestResult& ing, const Gr
         }
         return false;
     } );
+    key[ std::size_t( QmKey::Asserts ) ] = testCallSitesDigest( ing );
 
     std::uint64_t graph = bytesDigest( g.outOff.data(), g.outOff.size(), 0x4752'4150'484f'5554ull );
     absorbInto( graph, bytesDigest( g.outTargets.data(), g.outTargets.size(), 0x4752'4150'4854'4752ull ) );
@@ -370,6 +421,7 @@ inline std::vector<std::uint64_t> qmetricsKey( const IngestResult& ing, const Gr
         absorbInto( h, g.composeEdges[ e ].ownerSym );
         absorbInto( h, textDigest( g.composeEdges[ e ].fieldName ) );
     } ) );
+    absorbInto( graph, inEdgesDigest( g, 0x5145'494e'4544'4745ull ) );
     key[ std::size_t( QmKey::Graph ) ] = graph;
     return key;
 }
@@ -481,13 +533,16 @@ inline const char* missOf( const QmKeyed* record, Why recordWhy, std::span<const
     return record->symbolCount == symbolCount ? nullptr : "shape";
 }
 
-inline void emitPartStats( const QmPart& part, bool served, const char* why, std::size_t symbolCount, bool wrote, const QmFaults& faults )
+// `asserted` (qmetrics only; SIZE_MAX = not printed): the asserted= rows of the answer this use returns, so test/qmetricscheck.sh can
+// see a stale served column before any stdout surface prints QMetrics::asserted (the map rows are serialize.h's, not yet wired).
+inline void emitPartStats( const QmPart& part, bool served, const char* why, std::size_t symbolCount, bool wrote, const QmFaults& faults,
+                           std::size_t asserted = SIZE_MAX )
 {
     if( memstats::enabled() )
     {
         const char* const fault = faults.name();
-        rw::emitTo( stderr, "[verbfs] {} served={} why={} symbols={} wrote={}{}{}\n", part.name, served ? 1 : 0, why, symbolCount, wrote ? 1 : 0, fault != nullptr ? " fault=" : "",
-                    fault != nullptr ? fault : "" );
+        rw::emitTo( stderr, "[verbfs] {} served={} why={} symbols={} wrote={}{}{}{}\n", part.name, served ? 1 : 0, why, symbolCount, wrote ? 1 : 0, fault != nullptr ? " fault=" : "",
+                    fault != nullptr ? fault : "", asserted != SIZE_MAX ? " asserted=" + std::to_string( asserted ) : std::string() );
     }
 }
 
@@ -495,6 +550,7 @@ inline void emitPartStats( const QmPart& part, bool served, const char* why, std
 struct QmRecord : QmKeyed
 {
     std::vector<std::uint8_t>  tested;       // one per symbol: 0 / 1
+    std::vector<std::uint8_t>  asserted;     // one per symbol: 0 / 1, never above tested (lane asserted-signal)
     std::vector<std::uint32_t> lcom4At;      // the symbols whose lcom4 is not kLcom4NA, ascending
     std::vector<std::uint32_t> lcom4Value;   // parallel to lcom4At
 };
@@ -504,10 +560,18 @@ inline bool readQmPayload( std::string_view payload, QmRecord& r )
     warmsnap::In in{ payload };
     readKeyed( in, r );
     in.vec( r.tested );
+    in.vec( r.asserted );
     in.vec( r.lcom4At );
     in.vec( r.lcom4Value );
-    if( !VALIDATE( in.ok && in.left() == 0 && r.key.size() == std::size_t( QmKey::Count ) && r.tested.size() == r.symbolCount && r.lcom4At.size() == r.lcom4Value.size(),
+    if( !VALIDATE( in.ok && in.left() == 0 && r.key.size() == std::size_t( QmKey::Count ) && r.tested.size() == r.symbolCount && r.asserted.size() == r.symbolCount
+                       && r.lcom4At.size() == r.lcom4Value.size(),
                    "verbfs qmetrics: the record's arrays disagree" ) )
+    {
+        return false;
+    }
+    // asserted= rides only beside tested= (graph.h isAssertedByReach), so a stored row above its tested row is a damaged record
+    const bool assertedOk = std::ranges::equal( r.asserted, r.tested, []( std::uint8_t a, std::uint8_t t ) { return a <= t; } );
+    if( !VALIDATE( assertedOk, "verbfs qmetrics: a stored asserted row is not a tested row" ) )
     {
         return false;
     }
@@ -541,6 +605,7 @@ inline bool keepQMetrics( const ArmedRoot& armed, std::vector<std::uint64_t> key
     rec->key         = std::move( key );
     rec->symbolCount = q.tested.size();
     rec->tested      = q.tested;
+    rec->asserted    = q.asserted;
     for( std::uint32_t i = 0; i < std::uint32_t( q.lcom4.size() ); ++i )
     {
         if( q.lcom4[ i ] != kLcom4NA )
@@ -552,6 +617,7 @@ inline bool keepQMetrics( const ArmedRoot& armed, std::vector<std::uint64_t> key
     warmsnap::Out o = beginRecord();
     writeKeyed( o, *rec );
     o.vec( rec->tested );
+    o.vec( rec->asserted );
     o.vec( rec->lcom4At );
     o.vec( rec->lcom4Value );
     if( !commitQmRecord( kQMetricsPart, armed.rootKey, o ) )
@@ -569,6 +635,7 @@ inline QMetrics storedQMetrics( const IngestResult& ing, const Graph& g, const Q
     QMetrics          q = sizedQMetrics( S );
     fillQMetricsDirect( ing, g, q );
     std::copy_n( rec.tested.begin(), std::min( S, rec.tested.size() ), q.tested.begin() );   // equal sizes unless the any-digest mutant
+    std::copy_n( rec.asserted.begin(), std::min( S, rec.asserted.size() ), q.asserted.begin() );
     for( std::size_t k = 0; k < rec.lcom4At.size(); ++k )
     {
         if( rec.lcom4At[ k ] < S )
@@ -592,8 +659,9 @@ inline QMetrics serveQMetrics( const IngestResult& ing, const Graph& g )
     const char* const          miss   = missOf( loaded.record.get(), loaded.why, key, kQmKeyNames, ing.symbols.size(), faults );
     if( miss == nullptr )
     {
-        emitPartStats( kQMetricsPart, true, "ok", ing.symbols.size(), false, faults );
-        return storedQMetrics( ing, g, *loaded.record );
+        QMetrics q = storedQMetrics( ing, g, *loaded.record );
+        emitPartStats( kQMetricsPart, true, "ok", ing.symbols.size(), false, faults, std::size_t( std::ranges::count( q.asserted, std::uint8_t( 1 ) ) ) );
+        return q;
     }
     QMetrics q     = computeQMetricsComputed( ing, g );
     bool     wrote = false;
@@ -605,7 +673,7 @@ inline QMetrics serveQMetrics( const IngestResult& ing, const Graph& g )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "a qmetrics record that could not be assembled is not written: the next run computes in full, as today" );
     }
-    emitPartStats( kQMetricsPart, false, miss, ing.symbols.size(), wrote, faults );
+    emitPartStats( kQMetricsPart, false, miss, ing.symbols.size(), wrote, faults, std::size_t( std::ranges::count( q.asserted, std::uint8_t( 1 ) ) ) );
     return q;
 }
 

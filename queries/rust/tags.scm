@@ -1,8 +1,8 @@
 ; ripwire Rust tags — vendored from tree-sitter-rust v0.23.2 queries/tags.scm.
 ; Kept verbatim except: (1) the @reference.implementation patterns are dropped (impl blocks are
 ; not calls; they'd inflate edges without modeling call flow — calls drive edges, not declarations);
-; (2) H4 W3 adds the two `::`-path / turbofish call patterns below (upstream has neither, so
-; upstream loses the dominant Rust call form too); (3) H4 W3 moves the @definition.method capture
+; (2) H4 W3 adds the `::`-path / turbofish call patterns below (upstream has neither, so
+; upstream loses the dominant Rust call form too; RUST-TURBOFISH completes the turbofish set); (3) H4 W3 moves the @definition.method capture
 ; from the `declaration_list` wrapper onto the `function_item` — see the note at that pattern.
 
 ; ADT definitions
@@ -104,14 +104,29 @@
     function: (scoped_identifier
         name: (identifier) @name)) @reference.call
 
-; H4: turbofish on a BARE function — `generic::<u32>(1)` — contains no `::`-PATH at all; its `function:`
-; child is a distinct node kind, `generic_function(function: identifier)`. VERIFIED that the scoped
-; variant `generic_function(function: (scoped_identifier))` does NOT occur (0 hits on the fixture:
-; `Vec::<u32>::new` parses as scoped_identifier-over-generic_type, covered above), so this one nesting
-; is the whole form. No cast trap here — Rust has no `static_cast<T>(x)` call-shaped keyword.
+; Turbofish on the CALLEE itself — `generic::<u32>(1)`, `W::assoc::<u8>(2)`, `crate::m::f::<T>(x)`, `w.meth::<u32>(4)` —
+; wraps the callee in `generic_function(function: <callee>, type_arguments: …)`. One pattern per callee kind, the
+; same three kinds the plain call patterns above take, so the @name node (and its parent: the scoped_identifier
+; or field_expression the qualifier/receiver readers climb to) is the SAME node it is for the call written
+; without the turbofish. RUST-TURBOFISH: H4 claimed the scoped variant "does NOT occur (0 hits on the fixture)";
+; the fixture only spelled `Vec::<u32>::new` (turbofish on the TYPE: scoped_identifier-over-generic_type,
+; covered above). Turbofish on a path FUNCTION or a METHOD does occur — `--match` on test/rustturbofishcheck.sh's
+; corpus finds `W::tf_assoc` and `w.tf_meth` under generic_function — and both were calls no pattern
+; captured (--callers on zed missed half its caller files). No cast trap here — Rust has no
+; `static_cast<T>(x)` call-shaped keyword.
 (call_expression
     function: (generic_function
         function: (identifier) @name)) @reference.call
+
+(call_expression
+    function: (generic_function
+        function: (scoped_identifier
+            name: (identifier) @name))) @reference.call
+
+(call_expression
+    function: (generic_function
+        function: (field_expression
+            field: (field_identifier) @name))) @reference.call
 
 ; EDGE-PRELUDE-VETO: a macro invocation (`assert!`, `json!`, `format!`) is captured as @reference.macro, so the reference carries
 ; RefRole::Macro: it binds only to an indexed `macro_rules!` of that name (graph.h namespaceCompatible), never to a function, module
