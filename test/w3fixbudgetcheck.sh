@@ -571,6 +571,7 @@ done
 # and the silence half: a SHORT task within budget must not carry the field at all (absent = measured-and-fine,
 # the §P0.1 honest-limit convention — a field that is always present cannot mean anything)
 "$BIN" "$CORPUS" --no-cache --recall="header floor" --max-tokens=4000 >"$TMP/r.short" 2>/dev/null
+[ -s "$TMP/r.short" ] || no "zero-evidence premise (w3fixbudgetcheck.sh:574): the file the next arm judges is empty, so its verdict proves nothing"
 head -1 "$TMP/r.short" | grep -q 'over_ceiling' \
     && no "--recall: a short task inside its budget still emits over_ceiling — the field is decoration" \
     || ok "--recall: over_ceiling ABSENT on a short task inside its budget (silence means measured-and-fine)"

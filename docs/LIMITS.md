@@ -255,6 +255,14 @@ Discloses: `defs_capped`, `files_capped`, `syms_capped`
 | `kFileRowCap` | `40` | — | — |
 | `kSymbolRowCap` | `40` | — | — |
 
+### `src/countdrift.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxListBytes` | `512` | — | — |
+
 ### `src/crossref.h`
 
 Discloses: **none**

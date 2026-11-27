@@ -140,9 +140,10 @@ enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None 
 /// Python's locals live until the function returns (no block closes a slot); every other shape's live until their block closes.
 enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CSharp, Go, Rust };
 
-/// --quality-delta defect-shape: the scanner a language's files go through (quality.h defectSitesOf; cFamilyEnumTable reads the
-/// two C-family ones for unhandled-arm's enums). None: the language has no defect-shape sites.
-enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash };
+/// --quality-delta defect-shape: the scanner a language's files go through (quality.h defectSitesOf; cFamilyDefectTables reads the
+/// two C-family ones for unhandled-arm's enums and count-drift's name sets). Markdown has the count-drift facet only. None: the
+/// language has no defect-shape sites.
+enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash, Markdown };
 
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
@@ -523,7 +524,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
       .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
-    { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable, .defectScan = DefectScan::Markdown },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
