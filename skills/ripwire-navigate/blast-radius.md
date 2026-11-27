@@ -36,9 +36,8 @@ than no number. `ripwire --help` carries the range, and a gate holds it to it.) 
 - **Every navigation call after** (`--callers`, `--uses`, `--impact`, `--expand`): add
   `--legend=compact`. Across a seven-call session that is ~34% fewer bytes, ~2,900 tokens.
 
-The MCP server already defaults to compact for this reason — the tool description carries the schema, so
-the legend would be redundant on every call. The CLI defaults to `full` because a human reading one map
-needs it. If you are an agent making repeated calls, you are the case the CLI default is not tuned for.
+The CLI and the MCP server both default to compact now; the commands in these skills still spell the flag
+(owner decision A1-2, 2026-09-12) so they read the same on a pre-0.6.2 binary, where the default was `full`.
 
 ## `--callers` is 1-hop — don't let it answer "is it safe to change X?"
 

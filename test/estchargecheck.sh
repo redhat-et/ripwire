@@ -169,6 +169,23 @@ t = open( sys.argv[ 1 ], encoding="utf-8", errors="surrogateescape" ).read()
 t = re.sub( r"<!\[CDATA\[.*?\]\]>", "", t, flags = re.S )
 sys.exit( 0 if re.search( r"<graph\b[^>]*>", t ) else 1 )' "$1"
 }
+# pad_graph_element IN OUT: OUT is IN with its first <graph ...>...</graph> ELEMENT replaced by equal-length padding. Both
+# ends are matched OUTSIDE CDATA, as has_graph_element reads it: a "<graph" literal inside a delivered source body is
+# body text, and padding from it would blank the body and leave the real element (CodeRabbit #721; arm A11U-CDATA).
+pad_graph_element(){
+    python3 -c 'import re, sys
+t = open( sys.argv[ 1 ], encoding="utf-8", errors="surrogateescape" ).read()
+cdata = [ ( m.start(), m.end() ) for m in re.finditer( r"<!\[CDATA\[.*?\]\]>", t, flags = re.S ) ]
+def markup( m ):
+    return not any( a <= m.start() < b for a, b in cdata )
+start = next( ( m for m in re.finditer( r"<graph\b", t ) if markup( m ) ), None )
+assert start is not None, "no <graph> element outside CDATA"
+close = next( ( m for m in re.compile( r"</graph>" ).finditer( t, start.start() ) if markup( m ) ), None )
+assert close is not None, "no </graph> outside CDATA after the element opens"
+span = t[ start.start():close.end() ]
+out = t[ :start.start() ] + " " * len( span.encode( "utf-8", "surrogateescape" ) ) + t[ close.end(): ]
+open( sys.argv[ 2 ], "w", encoding="utf-8", errors="surrogateescape" ).write( out )' "$1" "$2"
+}
 # #11 A11's charge predicate (see the SOFT TARGET note at A11)
 # a11_charged BARE GRAPH: exit 0 when GRAPH is BARE plus bytes AND est_tokens moved by those bytes' price; prints the numbers
 a11_charged(){
@@ -1329,6 +1346,27 @@ w0="$( a7r_sigs "$A7R/w0.xml" )"; w1="$( a7r_sigs "$A7R/w1.xml" )"
     || no "#11 A7R wide ceiling: <sigs> differs with --with-graph at --token-budget=8000 (or is not cut) — the reserve shrank a sig share that had room"
 }
 
+est_11_cdata(){
+# A11U-CDATA (CodeRabbit #721): the padding above must find the ELEMENT, not a "<graph" literal in a CDATA body ahead of it
+# (a --with-graph answer on this repo's src/ can deliver a body that spells one). Fixture: a body whose CDATA holds a fake
+# <graph ...>...</graph>, then the real element. The pad must blank the real one and leave the CDATA byte for byte. Premise
+# (the fixture is live): the CDATA-blind substitution this arm replaced pads the fake and leaves the real element standing.
+printf '%s\n' '<ctx est_tokens="40"><bodies><b n="emit"><![CDATA[out += "<graph nodes=\"9\">fake</graph>";]]></b></bodies>' \
+    '<graph nodes="2" edges="1"><e s="a" t="b"/></graph></ctx>' >"$TMP/a11u_cdata.xml"
+a11u_cdata_why=""
+pad_graph_element "$TMP/a11u_cdata.xml" "$TMP/a11u_cdata.pad" 2>/dev/null || a11u_cdata_why="$a11u_cdata_why pad-refused"
+[ -s "$TMP/a11u_cdata.pad" ] && has_graph_element "$TMP/a11u_cdata.pad" && a11u_cdata_why="$a11u_cdata_why real-element-left"
+grep -qF '<![CDATA[out += "<graph nodes=\"9\">fake</graph>";]]>' "$TMP/a11u_cdata.pad" 2>/dev/null || a11u_cdata_why="$a11u_cdata_why cdata-changed"
+[ "$( bytes_of "$TMP/a11u_cdata.pad" 2>/dev/null )" = "$( bytes_of "$TMP/a11u_cdata.xml" )" ] || a11u_cdata_why="$a11u_cdata_why size-changed"
+python3 -c 'import re, sys
+t = open( sys.argv[ 1 ] ).read()
+out = re.sub( r"<graph\b.*?</graph>", lambda m: " " * len( m.group( 0 ) ), t, count = 1, flags = re.S )
+sys.exit( 0 if "fake" not in out and "<graph nodes=\"2\"" in out else 1 )' "$TMP/a11u_cdata.xml" || a11u_cdata_why="$a11u_cdata_why premise:blind-pad-did-not-hit-the-fake"
+[ -z "$a11u_cdata_why" ] \
+    && ok "#11 A11U-CDATA: the padding skips a fake <graph> inside CDATA and blanks the real element (premise: a CDATA-blind pad hits the fake)" \
+    || no "#11 A11U-CDATA: the <graph> padding is not CDATA-aware:$a11u_cdata_why"
+}
+
 est_11_a7d(){
 # ── #11 A7D (fix round 4, review rv-wrap-recipe-k29 F1; rule 5 — never a silent cut): under --token-budget the compact
 # <hops> section is never DROPPED with no element when the target is spent. The arm corpus is on the conceptual route.
@@ -1600,11 +1638,8 @@ a11_refuses_twin "#11 A11U" "$TMP/ptu_bare.out" "$TMP/ptu_graph.out"
 # A11U NEGATIVE CONTROL 2 (CodeRabbit #721): the graph answer with its <graph> element replaced by EQUAL-LENGTH padding
 # (est_tokens kept). Bytes and est_tokens are those of the charged answer, so the arithmetic still passes and only the
 # presence guard can refuse it: a refusal here proves the guard, not the byte delta.
-python3 -c 'import re, sys
-t = open( sys.argv[ 1 ], encoding="utf-8", errors="surrogateescape" ).read()
-out = re.sub( r"<graph\b.*?</graph>", lambda m: " " * len( m.group( 0 ).encode( "utf-8", "surrogateescape" ) ), t, count = 1, flags = re.S )
-assert out != t, "no <graph> element to strip"
-open( sys.argv[ 2 ], "w", encoding="utf-8", errors="surrogateescape" ).write( out )' "$TMP/ptu_graph.out" "$TMP/ptu_graph.nograph" \
+pad_graph_element "$TMP/ptu_graph.out" "$TMP/ptu_graph.nograph" \
+    && ! has_graph_element "$TMP/ptu_graph.nograph" \
     && [ "$( bytes_of "$TMP/ptu_graph.nograph" )" = "$( bytes_of "$TMP/ptu_graph.out" )" ] \
     && ! a11_charged "$TMP/ptu_bare.out" "$TMP/ptu_graph.nograph" >/dev/null \
     && ok "#11 A11U negative control: a byte-equal answer with the <graph> block padded out is refused (only the presence guard can refuse it)" \
@@ -2713,10 +2748,10 @@ fi
 # #5 8 + #5b 11 + #5c + #5d 3 (mapbytes_of; #5d's legend arm reads #5's mt1500.out); #14 19; every other section
 # stands alone (<= 8 s). A dependency missed here shows up as a diff between two serial runs in opposite chain orders.
 POOL_ROSTER=( est_1 est_2 est_3 est_4 est_5 est_5b est_5c est_5d est_6 est_7 est_8 est_9 est_10 est_11 est_11_sweep
-              est_11_a7r est_11_a7d est_12 est_13 est_14 est_14f est_14g est_c1c2 est_c4 est_15 est_16 est_17 est_18 est_19 )
+              est_11_a7r est_11_a7d est_11_cdata est_12 est_13 est_14 est_14f est_14g est_c1c2 est_c4 est_15 est_16 est_17 est_18 est_19 )
 POOL_CHAINS=( "est_11 est_11_a7r est_11_a7d" "est_11_sweep" "est_15 est_16 est_17" "est_1 est_2 est_3 est_7 est_8 est_9 est_10"
               "est_5 est_5b est_5c est_5d" "est_14" "est_14f" "est_14g" "est_c1c2" "est_c4" "est_19" "est_18" "est_6"
-              "est_4" "est_12" "est_13" )
+              "est_4" "est_12" "est_13" "est_11_cdata" )
 for pool_s in "${POOL_ROSTER[@]}"; do
     pool_n=0
     for pool_c in "${POOL_CHAINS[@]}"; do

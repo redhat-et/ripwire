@@ -1,5 +1,13 @@
 # Resolve nested `std::` calls by their whole qualifier chain
 
+> **Solved (2026-11-26).** A `std::`-qualified call now binds only a definition inside namespace `std`, judged by its
+> whole qualifier chain (`std::ranges::move`, `std::chrono::duration_cast`), in [#331](https://github.com/redhat-et/ripwire/pull/331)
+> (train 18, a maintainer lane), closing [#150](https://github.com/redhat-et/ripwire/issues/150). The `test/stdqualcheck.sh` §11 arms this kit calls
+> `KNOWN GAP` are flipped; that block now opens "Was a KNOWN GAP section". This kit stays as a worked example; the
+> optional ObjC++ part (step 5 below) is still open: tree-sitter-objc leaves `std::` in an ERROR node, so
+> `bridge.mm`'s `std::unreachable()` still binds `Cursor::unreachable`, pinned by the §7 `FLOOR` arm at
+> `test/stdqualcheck.sh:182`, with no issue tracking it yet.
+
 You are fixing how ripwire resolves C++ calls into **nested standard-library namespaces**:
 `std::ranges::move`, `std::chrono::duration_cast`, `std::filesystem::exists`. Today such a call can
 bind to an in-repo definition it has nothing to do with, at full confidence, with no `amb=` to warn

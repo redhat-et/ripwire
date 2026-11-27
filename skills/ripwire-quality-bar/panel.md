@@ -1,5 +1,7 @@
 # ripwire-quality-bar — reference: panel (read on demand; the recipe is in SKILL.md)
 
+Contents: Before you converge: the wide-angle read — --quality-panel · Read the structural row as a PROFILE — nest= alone is a max,
+
 # The quality-bar convergence loop
 
 > Routing:

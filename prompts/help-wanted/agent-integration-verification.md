@@ -29,9 +29,19 @@ It has already happened once. [#48](https://github.com/redhat-et/ripwire/issues/
 opencode against ripwire 0.4.0 found that opencode rejected a tool with *"input_schema does not
 support oneOf, allOf, or anyOf at the top level"*. No gate had seen it; one person with the real
 agent did, and it was fixed. [#68](https://github.com/redhat-et/ripwire/issues/68) (openclaw) and
-[#69](https://github.com/redhat-et/ripwire/issues/69) (Hermes) already ask for this check on two
-agents. As #68 puts it: **a FAIL is the useful outcome.** It is the only way the project learns that
-a recipe it publishes does not work.
+[#69](https://github.com/redhat-et/ripwire/issues/69) (Hermes) ask for this check on two more agents.
+As #68 puts it: **a FAIL is the useful outcome.** It is the only way the project learns that a recipe
+it publishes does not work.
+
+Where those two stand on 2026-11-26, as examples of what a report produces:
+
+- **Hermes (#69):** a live run on 2026-10-05 (Phase 1 4/0; Phase 2 CLI behaviour passing; MCP
+  registration working) led to two fixes: the `mcp add` form and the hook-slot wording. Still open:
+  quoting a path that contains spaces, porting the hook, and steering the agent to the MCP tools.
+- **openclaw (#68):** Phase 1 passed 4/0 on ripwire 0.6.5 (2026-10-08). Phase 2 and the four live
+  claims have never been run on a real openclaw.
+
+No report exists yet for any of the five agents this kit covers.
 
 ---
 
@@ -52,7 +62,8 @@ a recipe it publishes does not work.
 
 ### What the recipes print today
 
-Captured from a build of `main` at `766913d0`. Re-capture from your binary; do not trust this table
+Captured from a build of `main` at `766913d0`, and re-checked at `09995f4b` (2026-11-26): the stanzas,
+rules files and aider line below are unchanged. Re-capture from your binary; do not trust this table
 over it.
 
 | Agent | Primary | Config the recipe names | Stanza | Rules file | Skills line |
@@ -63,8 +74,14 @@ over it.
 | opencode | CLI first, MCP alternative | `opencode.json` or `~/.config/opencode/opencode.json` | `{"mcp":{"ripwire":{"type":"local","command":["ripwire","--mcp"]}}}` | `AGENTS.md` (also `~/.config/opencode/AGENTS.md`) | none |
 | aider | ranked repo map, no MCP | none | none — `ripwire . --for="<your task>" > .ripwire-map.txt`, then `aider --read .ripwire-map.txt` | `CONVENTIONS.md` | none |
 
-Every MCP recipe advertises **31 tools**. A `tools/list` over the server's stdio answers 31 tools in
-41,908 bytes on that build.
+One addition since `766913d0`: the opencode recipe also names `bash skills/install.sh --opencode
+--hook-legend-seen`, a plugin that adds `--legend-seen=<session file>` to each ripwire call. It
+installs no skills, so the table's "none" stands, but if you take that line, its effect on the CLI
+path is part of what you verify.
+
+At `09995f4b` the server advertises **33 tools**: a `tools/list` over its stdio answers 33 tools in
+40,170 bytes (`test/mcpmanifestcheck.sh` measures the same number). Read the count from your own
+binary, never from this kit.
 
 **What phase 1 checks for these five agents today:** that `ripwire wrap <agent>` exits 0, and a note
 that there is no skills line. That is all. For every one of them, the script's automated half proves
@@ -101,7 +118,7 @@ launched from the Dock or a desktop launcher may not see `~/.local/bin` either. 
    MCP configuration applies to the **legacy Cascade agent only**. It says the default agent for new
    tabs reads MCP servers from different config files. Test the agent a new user actually gets.
 2. **A tool budget.** The same page states a limit of **100 total tools** at any time. ripwire alone
-   registers 31. Record what happens alongside the user's other servers.
+   registers 33. Record what happens alongside the user's other servers.
 3. **`.windsurfrules`.** Is it still read?
 
 **Gemini CLI**
@@ -111,7 +128,7 @@ launched from the Dock or a desktop launcher may not see `~/.local/bin` either. 
    The recipe names only the user file. Record whether a project file overrides it.
 2. **Schema rewriting.** The same page says Gemini sanitizes tool parameter schemas: it removes
    `$schema` and strips `additionalProperties`. #48 proves schema acceptance is client-specific. Does
-   `/mcp` (or `gemini mcp list`) show all 31 tools as available, and does a tool call **with
+   `/mcp` (or `gemini mcp list`) show every tool `tools/list` advertises as available, and does a tool call **with
    arguments** succeed?
 3. **`GEMINI.md`.** Does the agent answer from it?
 
@@ -144,6 +161,12 @@ launched from the Dock or a desktop launcher may not see `~/.local/bin` either. 
 
 ## How to reproduce and measure
 
+0. **Orient with ripwire first.** Run `./build/ripwire . --for="wrap agent recipe MCP stanza
+   wrapCommandToken verify-agent-integration phase 1"` before opening files, and
+   `./build/ripwire . --uses=kAgentTargets` to see every reader of the agent table. Before you add a
+   phase 1 check, run `./build/ripwire . --exemplar="a phase 1 check in verify-agent-integration.sh"`.
+   Before you call a fix done, run `./build/ripwire . --quality-delta --legend=compact`, then
+   `./build/ripwire . --test-gate`.
 1. **Identify everything.** `ripwire --version`, the agent's version from the agent itself, OS and
    architecture, and how each was installed.
 2. **Run phase 1:** `bash scripts/verify-agent-integration.sh <agent>`. It installs into a throwaway
@@ -210,7 +233,7 @@ launched from the Dock or a desktop launcher may not see `~/.local/bin` either. 
 5. Phase 2's pass criteria fit the agent: an MCP tool call, a CLI run, or a map-grounded answer.
 6. `INSTALL.md` states what was verified live, on which versions, and when — the way #131 corrected
    the Hermes paragraph — and nothing it does not know.
-7. Gates green in the foreground: `test/agenttablecheck.sh`, `test/wrapverbscheck.sh`,
+7. **Done means** gates green in the foreground: `test/agenttablecheck.sh`, `test/wrapverbscheck.sh`,
    `test/opencodewrapcheck.sh` (for opencode), `test/deckcheck.sh` (it scans `INSTALL.md`),
    `test/ripwirepubliccheck.sh`, `test/manifestcheck.sh`, and `bash -n` on the script.
 

@@ -32,7 +32,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
-echo "savecachecheck: BIN=$BIN  TMP=$TMP"
+echo "savecachecheck: BIN=$BIN ($( "$BIN" --version 2>/dev/null | head -1 ))  TMP=$TMP"
 
 WORK="$TMP/proj"
 mkdir -p "$WORK"
@@ -222,6 +222,37 @@ else
     else
         no "(w5) warm after refused -> accepted: rc=$rc_w5, blob moved: $( [ "$( blobsum )" = "$s4" ] && echo no || echo yes )"
     fi
+fi
+
+# ── (w6) a binary-sniffed SOURCE file must not make the first warm run a re-parse ──────────────────
+# The cold path skipped a file looksBinary() sniffed (a NUL byte: llvm's clang/test/Lexer/newline-nul.c and four
+# more) BEFORE hashing it, so its record was stored as hash 0. The next run's prewarm hash never matched that, the file
+# counted as a re-parse (llvm: reparsed=5 on call 2) and the whole blob was rewritten (840 MB). The hash is now taken
+# before the sniff. Under RIPWIRE_NO_WARMSNAP so run 2 really runs the parse pool (a served run prints reparsed=0 by
+# construction). The tree is aged past the racy slack first, so no record is legitimately re-stamped on run 2.
+NB="$TMP/nb"; mkdir -p "$NB"
+NBC="$TMP/nb.cache"
+printf 'int nbKeep( void )\n{\n    return 1;\n}\n' > "$NB/k.c"
+printf 'int nbNul( void ) { return 0; }\n/* \000 */\n' > "$NB/nul.c"
+nbrun(){ RIPWIRE_NO_WARMSNAP=1 RIPWIRE_CACHE_STATS=1 "$BIN" "$NB" --cache="$NBC" --no-stable >"$TMP/nb.out" 2>"$TMP/nb.err"; }
+nbsum(){ { shasum -a 256 "$NBC" 2>/dev/null || sha256sum "$NBC" 2>/dev/null; } | awk '{print $1}'; }
+if [ "$( tr -d '\000' < "$NB/nul.c" | wc -c )" -ge "$( wc -c < "$NB/nul.c" )" ]; then
+    no "(w6) premise: the fixture holds no NUL byte"
+else
+    sleep 3
+    nbrun; rc_n1=$?; n1=$( nbsum ); cp "$TMP/nb.out" "$TMP/nb.out1"; cp "$TMP/nb.err" "$TMP/nb.err1"
+    nbrun; rc_n2=$?; n2=$( nbsum )
+    if [ "$rc_n1" -eq 0 ] && grep -q 'cache-stats reparsed=[1-9]' "$TMP/nb.err1"; then ok "(w6) premise: run 1 is cold ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err1" ))"
+    else no "(w6) premise: run 1 is not a cold parse: rc=$rc_n1 $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err1" )"; fi
+    if [ "$rc_n2" -eq 0 ] && grep -q 'cache-stats reparsed=0 ' "$TMP/nb.err"; then
+        ok "(w6) the run after a cold run over a NUL-byte source file re-parses nothing ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err" ))"
+    else
+        no "(w6) the first warm run re-parsed the binary-sniffed file: rc=$rc_n2, $( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]*' "$TMP/nb.err" )"
+    fi
+    if [ -n "$n1" ] && [ "$n1" = "$n2" ]; then ok "(w6) ...and leaves the blob byte-identical"
+    else no "(w6) the first warm run rewrote the blob ($n1 -> $n2) for a file that did not change"; fi
+    if cmp -s "$TMP/nb.out1" "$TMP/nb.out" && grep -q 'n="nbKeep"' "$TMP/nb.out"; then ok "(w6) ...and both runs print the same map"
+    else no "(w6) the cold and warm maps differ, or the fixture did not index: $( cmp "$TMP/nb.out1" "$TMP/nb.out" 2>&1 | head -1 )"; fi
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
