@@ -5,6 +5,7 @@
 
 #include "fordottedstring.h"   // STRING-IMPORT: the dotted strings that name a --callers target
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "pathanswer.h" // PATH-ANSWER: the one --path answer writer, shared with MCP path_between
@@ -2266,25 +2267,16 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
 
     // ── read + re-parse the ONE file holding the definition ────────────────────────────────────────────
-    const std::string& path = diskPath( ing, sym.fileId );
-    std::string        src;
-    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
-    {
-        char        buf[ 4096 ];
-        std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
-        {
-            src.append( buf, n );
-        }
-        std::fclose( in );
-    }
-    else
+    const std::string&               path    = diskPath( ing, sym.fileId );
+    const std::optional<std::string> srcRead = rw::readFileToEnd( path );   // a read that fails part-way is unreadable, never a shorter file
+    if( !srcRead )
     {
         DISCLOSE( Diagnostics::answerRefused, "--slice exits 1 naming the unreadable file on stderr; no slice is printed",
                   "slice: definition file unreadable" );
         rw::emitTo( stderr, "ripwire: --slice: cannot read {} — the slice re-parses the definition's file and has nothing to walk\n", path.c_str() );
         return 1;
     }
+    const std::string& src = *srcRead;
 
     const ::TSLanguage* grammar = sliceGrammarForFile( path );
     slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );   // re-scanned below on a seed pre-pick

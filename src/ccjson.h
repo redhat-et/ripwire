@@ -27,6 +27,7 @@
 #include "model.h"
 #include "graph.h"
 #include "infra/jsonesc.h"     // A4-F27: canonical escape core; ccJsonEscape below is a thin wrapper
+#include "infra/readall.h"     // readEndedWhole — whether this streaming read stopped at the end or on an error
 
 #include <algorithm>
 #include <cstdint>
@@ -53,7 +54,8 @@ struct CcFileMetrics
 };
 
 // physical line count of a file (newline count; +1 for a final line with no trailing newline).
-// Degrades to 0 if the file cannot be opened (deleted between crawl and export).
+// Degrades to 0 if the file cannot be opened (deleted between crawl and export) or read to its end: a read that
+// failed part-way is unreadable, never a shorter count.
 inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
 {
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
@@ -77,7 +79,12 @@ inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
             }
         }
     }
+    const bool unreadable = !readEndedWhole( fp, path );
     std::fclose( fp );
+    if( unreadable )
+    {
+        return 0;
+    }
     if( sawByte && !lastNl )
     {
         ++lines; // final line without a trailing '\n'

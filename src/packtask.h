@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
+#include "infra/readall.h"    // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -766,16 +767,9 @@ inline const std::string& d1ReadSrcCached( const IngestResult& ing, std::uint32_
     {
         return it->second;
     }
-    std::string body;
-    if( std::FILE* in = std::fopen( diskPath( ing, fileId ).c_str(), "rb" ) )
-    {
-        char buf[ 4096 ];  std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
-        {
-            body.append( buf, n );
-        }
-        std::fclose( in );
-    }
+    // A file that cannot be read to its end is cached as unreadable (""), as one that cannot be opened is: its
+    // signatures degrade to name+p+rel, never a signature cut from a prefix.
+    std::string body = rw::readFileToEnd( diskPath( ing, fileId ) ).value_or( std::string() );
     return cache.emplace( fileId, std::move( body ) ).first->second;
 }
 

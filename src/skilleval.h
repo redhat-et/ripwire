@@ -37,6 +37,7 @@
 #include "eval.h"               // maxPoolToFiles — the file-pooling convention shared with --eval-mined
 #include "search.h"             // normSet — sorted-unique for the query token set
 #include "infra/Diagnostics.h"  // ASSUME
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 #include <algorithm>
 #include <cmath>
@@ -283,8 +284,11 @@ inline bool parseSplit( std::string_view s, Split& out )
 inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& candidates,
                          std::vector<PromptRow>& rows )
 {
-    std::ifstream in( path );
-    if( !in ) { rw::emitTo( stderr, "ripwire --eval-skills: cannot open '{}'\n", path.c_str() ); return false; }
+    // Read whole first: an ifstream's getline ends the same way at a read error as at end of file (a directory reads as
+    // an empty corpus), and a dropped row fabricates the sample exactly as a skipped one would.
+    const std::optional<std::string> text = rw::readFileToEnd( path );
+    if( !text ) { rw::emitTo( stderr, "ripwire --eval-skills: cannot read '{}' to its end\n", path.c_str() ); return false; }
+    std::istringstream in( *text );
 
     HashMap<std::string, std::uint32_t> indexOfSkill;
     for( std::uint32_t c = 0; c < candidates.size(); ++c )

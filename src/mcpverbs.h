@@ -2,6 +2,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::open_memstream — the verb response buffers
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -5737,24 +5738,15 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     }
 
     // ── read + re-parse the ONE file holding the definition ───────────────────────────────────────────
-    const std::string& path = diskPath( ing, sym.fileId );
-    std::string        src;
-    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
-    {
-        char        buf[ 4096 ];
-        std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
-        {
-            src.append( buf, n );
-        }
-        std::fclose( in );
-    }
-    else
+    const std::string&               path    = diskPath( ing, sym.fileId );
+    const std::optional<std::string> srcRead = rw::readFileToEnd( path );   // a read that fails part-way is unreadable, never a shorter file
+    if( !srcRead )
     {
         DISCLOSE( Diagnostics::answerRefused, "the MCP slice answers an error naming the unreadable file; no slice is served",
                   "mcp slice: definition file unreadable" );
         return SliceReply{ {}, "cannot read " + path + " — the slice re-parses the definition's file and has nothing to walk" };
     }
+    const std::string& src = *srcRead;
 
     const ::TSLanguage* grammar = sliceGrammarForFile( path );
     slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );

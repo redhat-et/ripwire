@@ -1006,6 +1006,7 @@ for _g in \
     rankbycheck \
     reachcheck \
     readabilitycheck \
+    readerrorcheck \
     readmedriftcheck \
     readmeexamplecheck \
     recallanchorcheck \

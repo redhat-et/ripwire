@@ -30,6 +30,7 @@
 #include "infra/statclock.h"    // rw::saturatingNanoseconds — the staleness stat reads without signed overflow past 2262
 #include "quality.h"            // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
 #include "infra/Diagnostics.h"  // DISCLOSE — no-op in release; the visible line on a watcher-degrade path
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include "infra/os.h"    // rw::os — stat + the nanosecond stat fields, open/close, flock, and the directory watcher
@@ -354,27 +355,9 @@ namespace mcpdetail
     // state) is distinguishable from a missing/unreadable one.
     inline std::string readFileBytes( const std::string& path, bool& readOk )
     {
-        readOk = false;
-        std::FILE* in = std::fopen( path.c_str(), "rb" );
-        if( !in )
-        {
-            return {};
-        }
-        std::string s;
-        char b[ 8192 ];
-        std::size_t n;
-        while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
-        {
-            s.append( b, n );
-        }
-        const bool err = std::ferror( in ) != 0;
-        std::fclose( in );
-        if( err )
-        {
-            return {};
-        }
-        readOk = true;
-        return s;
+        std::optional<std::string> read = readFileToEnd( path );   // stops at the first short count: no read past an error
+        readOk                          = read.has_value();
+        return read ? std::move( *read ) : std::string();
     }
 
     // FNV-1a 64 over a byte range — the per-file content fingerprint the EDIT verbs verify against.

@@ -35,6 +35,7 @@
 #include "infra/namesplit.h"    // namesplit::isIdentChar — the ONE ASCII identifier-byte test
 #include "cppscopechain.h"      // editCheckBlankComments / editCheckParamOpen / EditCheckBraceLexer / editCheckWrittenQualifier / the parameter-list readers
 #include "infra/ownedfile.h"    // the source read
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 #include <algorithm>
 #include <cstdint>
@@ -97,15 +98,9 @@ private:
         {
             return { fileId, std::string( spliced.bytes ), true };
         }
-        std::string body;
-        OwnedFile   in = openOwnedFile( diskPath( ing, fileId ).c_str(), "rb" );
-        char        buf[ 4096 ];
-        for( std::size_t n = 0; in && ( n = std::fread( buf, 1, sizeof( buf ), in.file ) ) > 0; )
-        {
-            body.append( buf, n );
-        }
-        const bool whole = in && std::ferror( in.file ) == 0;
-        return { fileId, std::move( body ), whole };
+        std::optional<std::string> body = readFileToEnd( diskPath( ing, fileId ) );
+        const bool                 whole = body.has_value();
+        return { fileId, whole ? std::move( *body ) : std::string(), whole };
     }
 
     const IngestResult&           ing;

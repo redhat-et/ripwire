@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/readall.h"   // appendRestOf — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 // verbs_change.h — the change/diff-awareness family, moved VERBATIM from main.cpp in the 2026-08-29
@@ -600,7 +601,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
 // concern; the MCP verb takes the trace text as a request argument) stays here.
 
 // read the --from-trace source — a FILE, or '-' for stdin (the --batch precedent). nullopt (after printing the
-// reason) only when a NAMED file cannot be opened; '-' and an empty file are fine.
+// reason) only when a NAMED file cannot be opened or read to its end; '-' and an empty file are fine.
 std::optional<std::string> readTraceText( const std::string& src )
 {
     std::string text;
@@ -615,12 +616,13 @@ std::optional<std::string> readTraceText( const std::string& src )
     }
     std::FILE* f = std::fopen( src.c_str(), "rb" );
     if( !f ) { rw::emitTo( stderr, "ripwire: --from-trace: cannot open '{}'\n", src.c_str() ); return std::nullopt; }
-    char buf[ 4096 ]; std::size_t n;
-    while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
-    {
-        text.append( buf, n );
-    }
+    const bool readWhole = rw::appendRestOf( f, text, src );
     std::fclose( f );
+    if( !readWhole )
+    {
+        rw::emitTo( stderr, "ripwire: --from-trace: cannot read '{}' to its end — no frames are mapped from part of a trace\n", src.c_str() );
+        return std::nullopt;
+    }
     return text;
 }
 

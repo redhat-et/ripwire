@@ -10,6 +10,7 @@
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "filter.h"   // isToolOrVendoredPath — the shipped-not-authored path tier --lint's order sorts last (LT1)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
                        // pilot conversion used to spell the fallback here; the choice now lives in one header.
 #if !defined( RIPWIRE_MAIN_TU )
@@ -586,19 +587,12 @@ struct ProfScopeRow
 // silently, because "annotated zero findings" and "read the wrong file" must never look alike.
 std::optional<std::vector<ProfScopeRow>> parseProfTsv( const std::string& path )
 {
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
-    if( fp == nullptr )
+    const std::optional<std::string> read = rw::readFileToEnd( path );   // unreadable, or a read that failed part-way
+    if( !read )
     {
         return std::nullopt;
     }
-    std::string all;
-    char        buf[ 4096 ];
-    std::size_t got = 0;
-    while( ( got = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
-    {
-        all.append( buf, got );
-    }
-    std::fclose( fp );
+    const std::string& all = *read;
 
     const auto splitTabs = []( std::string_view lineText )
     {
