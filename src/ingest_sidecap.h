@@ -2952,7 +2952,7 @@ inline std::string qualifyPathReference( const TagsFile& file, const TagsMatch& 
         r.qualifierRootsStd = cppQualifiedChainRootsStd( m.name.node, file.src );
         cppResplitRefName( r, m.name.text );            // H4 RE-SPLIT at 3+ segments, operator tails, `template` disambiguator
     }
-    else if( lang == Lang::ObjC && r.role == RefRole::Call )
+    else if( langFacts( lang ).lexicalStdQualifier && r.role == RefRole::Call )
     {
         // OBJCXX-STD-QUALIFIER: ObjC++'s `std::X()` arrives as error recovery beside a bare call (ingest_names.h
         // objcxxStdQualifierBefore), so the std-rooted chain is read back lexically and the call takes the same
