@@ -11045,6 +11045,70 @@ inline void fillJniBindLabels( Graph& g, const IngestResult& ing )
     }
 }
 
+// buildGraph/1c. file → directory id (path up to the last '/'). The interning table escapes nowhere — only the per-file
+// ids do — so it lives here rather than in buildGraph's frame.
+inline std::vector<std::uint32_t> buildFileDirIndex( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1c: fileDir (dir interning)" );
+    HashMap<std::string, std::uint32_t> dirIds;
+    std::vector<std::uint32_t>          fileDir( ing.files.size(), 0 );
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        std::string_view p     = ing.files[f];
+        const std::size_t sl   = p.rfind( '/' );
+        std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
+        fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
+    }
+    return fileDir;
+}
+
+// buildGraph/1d. name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
+// inline (no per-name malloc) and size() is branch-free — the measured-best value type for this write-once /
+// read-hot (the resolve loop) shape (see bench/bench_svector3.cpp). Iterates in insertion order exactly like
+// std::vector, so the resolved graph — and the output — is unchanged.
+inline HashMap<std::string, rw::SmallVec<NodeId, 2>> buildByNameTable( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
+    byName.reserve( ing.symbols.size() );   // ≤ one entry per symbol → skip the rehash cascade
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
+        {
+            continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
+                        // a def, but admits NO call edge — the byName table feeds both call binding and the
+                        // common-name damping, so an untyped `response.code` must not become a column's
+                        // caller, and 200 `name` columns must not damp a model's real `def name`.
+                        // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
+                        // later behind an evidence rule (receiver proven to be the owning model).
+        }
+        if( notNamed( s ) )
+        {
+            continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
+        }
+        byName[ s.name ].push_back( s.id );
+    }
+    return byName;
+}
+
+// buildGraph/1f. canonical scope::name → definition ids (E#4): lets a qualified call `A::b()` resolve to the `b` whose
+// enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph ambiguity. Definitions
+// only (body present); the obj.method()/unqualified halves stay bare-name (and keep their honest `amb`). C++ only
+// (scope is populated for Lang::Cpp). The reused key buffer escapes nowhere, so it lives here too.
+inline void buildCanonicalScopeTables( const IngestResult& ing, HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                       HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonFamilyByName )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1f: canonByName (scope::name -> def ids)" );
+    canonByName.reserve( ing.symbols.size() );
+    std::string canonKey;
+    for( const Symbol& s : ing.symbols )
+    {
+        // a definition under scope::name; a C++ specialization's definition again under its template's family key, and
+        // any symbol a specialization scopes (declarations too) as that specialization's existence marker
+        indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
+    }
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11077,46 +11141,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         return !multiRoot || ing.fileRoot[ ing.symbols[ candSym ].fileId ] == ing.fileRoot[ refFileId ];
     };
 
-    // file → directory id (path up to the last '/')
-    HashMap<std::string, std::uint32_t> dirIds;
-    std::vector<std::uint32_t>          fileDir( ing.files.size(), 0 );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1c: fileDir (dir interning)" );
-        for( std::size_t f = 0; f < ing.files.size(); ++f )
-        {
-            std::string_view p     = ing.files[f];
-            const std::size_t sl   = p.rfind( '/' );
-            std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
-            fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
-        }
-    }
+    const std::vector<std::uint32_t> fileDir = buildFileDirIndex( ing );   // buildGraph/1c
 
-    // name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
-    // inline (no per-name malloc) and size() is branch-free — the measured-best value type for this
-    // write-once (here) / read-hot (resolve below) shape (see bench/bench_svector3.cpp). Iterates in
-    // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
-    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
-    byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
-            {
-                continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
-                            // a def, but admits NO call edge — the byName table feeds both call binding and the
-                            // common-name damping, so an untyped `response.code` must not become a column's
-                            // caller, and 200 `name` columns must not damp a model's real `def name`.
-                            // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
-                            // later behind an evidence rule (receiver proven to be the owning model).
-            }
-            if( notNamed( s ) )
-            {
-                continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
-            }
-            byName[ s.name ].push_back( s.id );
-        }
-    }
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName = buildByNameTable( ing );   // buildGraph/1d
 
     // B2.2 minimum arity: read every declaration's minimum BEFORE the collapse below folds declarations away.
     const std::vector<std::uint16_t> paramsMinOf = paramsMinAcrossDeclarations( ing, byName );
@@ -11142,17 +11169,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // keep their honest `amb`). C++ only (scope is populated for Lang::Cpp).
     HashMap<std::string, rw::SmallVec<NodeId, 2>> canonByName;
     HashMap<std::string, rw::SmallVec<NodeId, 2>> canonFamilyByName;   // C++ specializations under their template's `T::name`, plus existence markers (resolve.h)
-    canonByName.reserve( N );
-    std::string canonKey;
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1f: canonByName (scope::name -> def ids)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            // a definition under scope::name; a C++ specialization's definition again under its template's family key, and
-            // any symbol a specialization scopes (declarations too) as that specialization's existence marker
-            indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
-        }
-    }
+    buildCanonicalScopeTables( ing, canonByName, canonFamilyByName );   // buildGraph/1f
 
     // Rule 2c class-name set (docs/EVALS.md "Phase 4b"): every Class/Struct/Interface definition NAME in the corpus, so
     // `Cls.m()` can read its receiver token as the type it names (Narrower::rule2cClassNameRecv) — and the assignment
