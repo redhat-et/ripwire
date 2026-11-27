@@ -501,7 +501,18 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
     {
         return false;
     }
-    ing.references.resize( rowCount );
+    {
+        // SEPARATE SCOPE, because these are two full write passes over the same memory and only one of
+        // them is parallel. `Reference` is 64 B and is NOT trivially default constructible (every field
+        // carries an `= 0` NSDMI), so resize() VALUE-INITIALISES every row -- at llvm-project scale,
+        // where the map header accounts for at least 5.69 M call references before the non-call roles,
+        // that is ~400-580 MB written SERIALLY and then written again by the decode below. Whether the
+        // zero-fill or the decode owns the 254.6 ms this function costs is not something the enclosing
+        // scope could ever say, and the two call for completely different changes.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: resize the reference vector (serial value-init of 64 B rows)" );
+        ing.references.resize( rowCount );
+    }
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: the parallel reference decode itself" );
     parallelFor( refStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
         VarIn         row = refStream.chunk( c );
