@@ -529,8 +529,8 @@ if [ -x "$REALBIN" ]; then
     # The system layer /etc/codex is read too and a gate cannot sandbox it: a discovery key there keeps every PRESENT case's primer.
     ssdx_sys=""
     for ssd_f in /etc/codex/config.toml /etc/codex/managed_config.toml; do
-        [ -r "$ssd_f" ] && grep -qE 'project_doc_max_bytes|project_doc_fallback_filenames|project_root_markers' "$ssd_f" 2>/dev/null \
-            && ssdx_sys="the system file $ssd_f names a discovery key"
+        [ -r "$ssd_f" ] && grep -qE 'project_doc_max_bytes|project_doc_fallback_filenames|project_root_markers|projects|trust_level' "$ssd_f" 2>/dev/null \
+            && ssdx_sys="the system file $ssd_f names a discovery key or project trust"
     done
   if [ -n "$ssdx_sys" ]; then
     echo "  SKIP  Codex dedup (3i7): $ssdx_sys on this machine"
@@ -627,9 +627,39 @@ if [ -x "$REALBIN" ]; then
         ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$SSDREPO/AGENTS.md"
     done
     printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
+    # CodeRabbit #831 round 2: the cwd's own [projects] table decides before the Git root's (Codex: "Cwd keys always take precedence
+    # over repository-root keys"), in either table order; and a trust mention in another layer (a profile, a project .codex/config.toml;
+    # /etc/codex is out of the sandbox) may override the user's entry, so no project file counts then
+    SSDX_CWDP="$( cd "$SSDCWD" && pwd -P )"
+    for ssd_case in "cwd untrusted after a trusted Git root|$SSDX_TRUST$( printf '\n[projects."%s"]\ntrust_level = "untrusted"' "$SSDX_CWDP" )" \
+                    "cwd untrusted before a trusted Git root|$( printf '[projects."%s"]\ntrust_level = "untrusted"' "$SSDX_CWDP" )"$'\n'"$SSDX_TRUST"; do
+        ssd_name="${ssd_case%%|*}"; printf '%s\n' "${ssd_case#*|}" > "$CODEX_HOME/config.toml"
+        ssd_n="$( grep -c '^\[projects\.' "$CODEX_HOME/config.toml" )"; ssd_t="$( grep -c '^trust_level' "$CODEX_HOME/config.toml" )"
+        [ "$ssd_n" = 2 ] && [ "$ssd_t" = 2 ] || no "Codex dedup ($ssd_name): planted $ssd_n tables and $ssd_t trust_level lines, want 2 and 2"
+        ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$SSDREPO/AGENTS.md"
+    done
+    printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
+    for ssd_case in "a profile's config.toml marking the Git root untrusted|$CODEX_HOME/work.config.toml|$( printf '[projects."%s"]\ntrust_level = "untrusted"' "$( cd "$SSDREPO" && pwd -P )" )" \
+                    "a project .codex/config.toml naming trust_level|$SSDREPO/.codex/config.toml|trust_level = \"untrusted\""; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; mkdir -p "${ssd_file%/*}"; printf '%s\n' "${ssd_rest#*|}" > "$ssd_file"
+        ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$ssd_file" "$SSDREPO/AGENTS.md"
+    done
     ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssdx_keep "the block in CLAUDE.md, which Codex does not read" "$SSDCWD/CLAUDE.md"; rm -f "$SSDCWD/CLAUDE.md"
-    [ "$ssdx_cases" -eq 12 ] && [ "$ssdx_kept" -eq 12 ] && ok "Codex dedup NOT DELIVERED: 12 of 12 keep the primer" \
-        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 12 of 12)"
+    [ "$ssdx_cases" -eq 16 ] && [ "$ssdx_kept" -eq 16 ] && ok "Codex dedup NOT DELIVERED: 16 of 16 keep the primer" \
+        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 16 of 16)"
+    # controls: a trusted cwd table wins over an untrusted Git root one; a trust mention in another layer still leaves the global file
+    ssdx_ctl=0
+    printf '[projects."%s"]\ntrust_level = "untrusted"\n[projects."%s"]\ntrust_level = "trusted"\n' "$( cd "$SSDREPO" && pwd -P )" "$SSDX_CWDP" > "$CODEX_HOME/config.toml"
+    ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssd_p="$( ssdx_has "$SSDREPO/AGENTS.md" )"; ssd_out="$( ssdx_run xctl1 )"
+    if [ "${ssd_p:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssdx_ctl=$(( ssdx_ctl + 1 )); ok "Codex dedup PRESENT (a trusted cwd table over an untrusted Git root): silent"
+    else no "Codex dedup PRESENT (trusted cwd over untrusted root): planted=${ssd_p:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDREPO/AGENTS.md"; printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
+    printf '[projects."/elsewhere"]\ntrust_level = "untrusted"\n' > "$CODEX_HOME/work.config.toml"
+    ssd_plant "$CODEX_HOME/AGENTS.md" "$SSD_CODEX"; ssd_p="$( ssdx_has "$CODEX_HOME/AGENTS.md" )"; ssd_out="$( ssdx_run xctl2 )"
+    if [ "${ssd_p:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssdx_ctl=$(( ssdx_ctl + 1 )); ok "Codex dedup PRESENT (global AGENTS.md, a profile naming trust): silent"
+    else no "Codex dedup PRESENT (global AGENTS.md with a profile naming trust): planted=${ssd_p:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$CODEX_HOME/AGENTS.md" "$CODEX_HOME/work.config.toml"
+    [ "$ssdx_ctl" -eq 2 ] || no "Codex dedup trust controls: $ssdx_ctl of 2"
     # Claude is not deduped against AGENTS.md (Claude Code reads CLAUDE.md), even when AGENTS.md holds Claude's own block
     ssd_plant "$SSDCWD/AGENTS.md" "$SSD_BLURB"; ssd_out="$( ssd_run xclaude )"
     [ -n "$ssd_out" ] && [ "$ssd_out" = "$SSD_ABS" ] && ok "Codex dedup: the Claude primer still speaks with AGENTS.md holding its block" \

@@ -1452,8 +1452,9 @@ claudeMdHoldsBlurb()
 # it); root-first, and no file is added once the combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it).
 # CONSERVATIVE where that is not modelled: a file only counts when every byte up to its end lies within 32 KiB, the global file
 # included; a config.toml (system /etc/codex, user-level, any profile, or a project .codex/ one) naming project_doc_max_bytes,
-# project_doc_fallback_filenames or project_root_markers keeps the primer; trust is read only from a `[projects."<root or DIR>"]`
-# table in the user config.toml whose trust_level is "trusted" (any other spelling: untrusted, project files not matched);
+# project_doc_fallback_filenames or project_root_markers keeps the primer; trust is read only from the user config.toml's
+# `[projects."DIR"]` table, else its `[projects."<root>"]` one, with trust_level "trusted" (any other spelling: untrusted), and any
+# trust mention in another layer (system, managed, profile, project) keeps the primer;
 # carriage returns ignored. test/hookcheck.sh (3i7) pins each case (the /etc/codex layer is out of a gate's sandbox).
 codexDiscoveryKeys() # FILE...: true when a readable config file names a key that changes AGENTS.md discovery or its byte limit
 {
@@ -1465,37 +1466,71 @@ codexDiscoveryKeys() # FILE...: true when a readable config file names a key tha
     done
     return 1
 }
-codexProjectTrusted() # CONFIG ROOT DIR: true when CONFIG has a [projects."ROOT"] or [projects."DIR"] table with trust_level = "trusted"
-{
-    local text line p in=0
-    claudeMdRead "$1" || return 1
+codexTrustOf() # CONFIG PATH: prints the trust_level of CONFIG's [projects."PATH"] table: its value, `-` for a table without one, nothing
+{              # when CONFIG has no such table (or cannot be read)
+    local text line in=0 found=0 val=""
+    claudeMdRead "$1" || return 0
     while IFS= read -r line
     do
         line="${line%$'\r'}"
         if [[ "$line" =~ ^[[:space:]]*\[ ]]
         then
             in=0
-            for p in "$2" "$3"
-            do
-                [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*$ ]] && [ "${BASH_REMATCH[1]}" = "$p" ] && in=1
-            done
-        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*\"trusted\" ]]
+            [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*$ ]] && [ "${BASH_REMATCH[1]}" = "$2" ] && in=1 && found=1
+        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]
         then
-            return 0
+            val="${BASH_REMATCH[1]}"
         fi
     done <<< "$text"
+    [ "$found" = 1 ] && printf '%s' "${val:--}"
+    return 0
+}
+# codexProjectTrusted CONFIG ROOT DIR: true when CONFIG trusts the project. As Codex resolves it (codex-rs config/src/project_trust.rs
+# at rust-v0.164.0: "Cwd keys always take precedence over repository-root keys"), DIR's own [projects."DIR"] table decides when it
+# exists, and ROOT's only when it does not; a table without trust_level counts as untrusted (conservative).
+codexProjectTrusted()
+{
+    local v
+    v="$( codexTrustOf "$1" "$3" )"
+    [ -n "$v" ] || v="$( codexTrustOf "$1" "$2" )"
+    [ "$v" = trusted ]
+}
+# codexTrustElsewhere FILE...: true when a config layer other than the user config.toml mentions project trust ([projects] or
+# trust_level). Codex merges every layer's projects map before resolving trust, and a managed layer sits above the user one
+# (config/src/loader/project_discovery.rs), so such a mention may override the user's entry: the primer is kept (conservative).
+# Out of the hook's sight, so not honoured: an MDM profile and cloud-managed config.
+codexTrustElsewhere()
+{
+    local f text
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *trust_level* || "$text" == *projects* ]] && return 0
+    done
     return 1
 }
 agentsMdHoldsBlurb()
 {
-    local d="${1%/}" want="$2" f text size top cwd total=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
+    local d="${1%/}" want="$2" f text size top="" cwd="" total=0 project=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
     local -a files=() dirs=()
     codexDiscoveryKeys "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/config.toml" "$home/"*.config.toml && return 1
+    local -a otherLayers=( "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/"*.config.toml )
     if [ -s "$home/AGENTS.override.md" ]; then files+=( "$home/AGENTS.override.md" )
     elif [ -s "$home/AGENTS.md" ]; then files+=( "$home/AGENTS.md" ); fi
     top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || top=""
     if [ -n "$top" ] && top="$( cd "$top" 2>/dev/null && pwd -P )" && cwd="$( cd "$d" 2>/dev/null && pwd -P )" \
         && { [ "$cwd" = "$top" ] || [[ "$cwd" == "$top"/* ]]; } && codexProjectTrusted "$home/config.toml" "$top" "$cwd"
+    then
+        d="$cwd"
+        while :
+        do
+            otherLayers+=( "$d/.codex/config.toml" )
+            [ "$d" = "$top" ] && break
+            d="${d%/*}"
+        done
+        codexTrustElsewhere "${otherLayers[@]}" || project=1   # another layer may override the trust: then no project file counts
+    fi
+    if [ "$project" = 1 ]
     then
         d="$cwd"
         while :
