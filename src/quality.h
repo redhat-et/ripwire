@@ -6484,6 +6484,15 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
         }
         r.commits.push_back( std::move( c ) );
     }
+    // The census is a disclosure, not a size, so it needs no allocation bound, but it has a consistency bound: every
+    // visited commit is one stream record (applyHistoryPolicy keeps a skipped bot commit as a record with no path), and a
+    // commit is counted as a bot or an agent commit at most once. A blob claiming more would put an impossible count in
+    // the header of every warm answer. exactMoves has no such bound (one commit can move many files) and is not checked.
+    // Gate: test/cachefuzzcheck.sh Part 5, qchurn_census_over_commits.
+    if( std::uint64_t( r.census.botCommits ) + r.census.agentCommits > r.commits.size() )
+    {
+        return false;
+    }
     out = std::move( r );
     return true;
 }
