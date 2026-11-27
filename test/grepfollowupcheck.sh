@@ -39,6 +39,9 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
+# GREP-SLIM: this gate pins the <enc> rows' own contract (callers=, defs=, cx=, dedupe, page scope, amp=); the default
+# answer leaves the plain rows out (enc_cut=, test/grepslimcheck.sh), so its runs keep every row with the kill switch.
+export RIPWIRE_GREP_SLIM=0
 
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }

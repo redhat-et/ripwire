@@ -1266,6 +1266,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "pattern_meta", "pattern_meta=: regex-shaped pieces of this LITERAL pattern, matched as text; complete=1 and hits= speak of that literal reading only (a zero may mean a regex was meant); next= is then the regex verb on it", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "unindexed_files_scanned", "unindexed_files_scanned=N: off-index text files also scanned; outside complete=", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "unindexed_hits", "unindexed_hits=N: hits in off-index files, NOT in hits=/total=; listed in the trailing unindexed element", false, "grep", MapHeaderRead::No, {}, "grep" },
+    // GREP-SLIM (verbs_grep.h grepSlimOn): the plain <enc> rows the answer leaves out, named and counted.
+    { "enc_cut", "enc_cut=N: N plain enc rows (an in= name's callers/defs/cx) not printed; the callers verb counts one", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "callers", "callers=N: 1-hop distinct callers of this name, all same-named defs (a FLOOR)", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "cx", "cx=N: cyclomatic complexity, max over same-named defs; absent when 0", true, "enc", MapHeaderRead::No, {}, "grep" },
     // count-floor (src/countfloor.h): the row's own floor marker, emitted only beside evidence of a miss for THAT row.

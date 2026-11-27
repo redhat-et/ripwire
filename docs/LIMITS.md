@@ -1756,6 +1756,7 @@ Discloses: `capped`, `hits_capped`, `importers_capped`, `unindexed_candidates_ca
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kGrepEncCutMinRows` | `3` | — | measured: one cut row beside a kept one grew s1.textual-16 by 53 B |
 | `kGrepHitRefsMax` | `4` | — | — |
 
 ### `src/verbs_lint.h`

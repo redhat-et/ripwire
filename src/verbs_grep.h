@@ -46,6 +46,7 @@ struct GrepEncOptions
     std::span<const rw::GrepCarrier>  carriers;     // L4: parallel to the rows (grepcarrier.h), or empty when no row is a carrier
     bool                              singleRoot;   // reads_at= paths strip rootPrefix exactly when the hit rows' p= do
     std::string_view                  rootPrefix;
+    bool                              slim;         // GREP-SLIM: print only the rows that say more than name/callers/defs/cx
 };
 
 // L4 (grepcarrier.h): a carrier row's reads=/reads_at= (the uses verb's read sites for its name; absent = not counted)
@@ -141,6 +142,82 @@ void emitGrepHandleLegend( bool enabled )
                  "means no content hash could be proven. -->" );
 }
 
+// The two lens values a metrics co-run attaches to an <enc> row: max amp= and any tested= over the row's name group.
+struct GrepEncLens
+{
+    std::uint32_t ampMax    = 0;
+    bool          anyTested = false;
+};
+
+GrepEncLens grepEncLens( const rw::GrepEncRow& row, const GrepEncOptions& opt )
+{
+    GrepEncLens lens;
+    for( const rw::NodeId id : row.ids )
+    {
+        if( opt.amp && id < opt.amp->size() )
+        {
+            lens.ampMax = std::max( lens.ampMax, (*opt.amp)[id] );
+        }
+        if( opt.tested && id < opt.tested->size() && (*opt.tested)[id] )
+        {
+            lens.anyTested = true;
+        }
+    }
+    return lens;
+}
+
+// GREP-SLIM (11-27, legend-allowlist finding 3): a plain <enc> row (name, callers=, defs=, cx=, and the callers_floor=/
+// floor_next= that qualify that count) repeats a name every hit's in= already prints, with stats no measured item read.
+// Kept: a row the caller asked for (handles), a lens a metrics co-run computed (amp=/tested=), an L4 carrier verdict
+// (reads=/vals=). The root's enc_cut= counts the rest, in both legend dialects (a payload cut, not a legend one: compact
+// stays a legend-only change of the full answer). A route evidence render keeps every row (partialwarn reads
+// callers_floor= there). RIPWIRE_GREP_SLIM=0 is the kill switch (base bytes).
+inline constexpr std::size_t kGrepEncCutMinRows = 3;   // measured: one cut row beside a kept one grew s1.textual-16 by 53 B
+inline constexpr const char* kGrepEncCutClause =
+    "enc_cut= on the root counts the plain enc rows this answer leaves out (no lens, carrier or handle attribute: only a "
+    "name with its callers/defs/cx); the in= of each hit still names its symbol, and the callers verb counts one. ";
+
+bool grepSlimOn( const MainDispatch& d )
+{
+    const char* const off = std::getenv( "RIPWIRE_GREP_SLIM" );
+    return !d.grepEncEveryRow && !( off != nullptr && std::string_view( off ) == "0" );
+}
+
+bool grepEncRowKept( std::span<const rw::GrepEncRow> rows, std::size_t r, const GrepEncOptions& opt )
+{
+    if( !opt.slim || opt.handles )
+    {
+        return true;
+    }
+    const GrepEncLens lens = grepEncLens( rows[r], opt );
+    if( lens.ampMax > 0 || lens.anyTested )
+    {
+        return true;
+    }
+    return r < opt.carriers.size() && opt.carriers[r].isCarrier
+        && !grepCarrierAttrs( opt.carriers[r], opt.singleRoot, opt.rootPrefix, opt.esc ).empty();
+}
+
+// What the slim tail does to one answer's enc rows: how many it leaves out (enc_cut=), and whether a row it PRINTS carries
+// callers_floor= (the full legend's floor clause rides only then).
+struct GrepEncCut
+{
+    std::size_t cutRows   = 0;
+    bool        keptFloor = false;
+};
+
+GrepEncCut grepEncCut( std::span<const rw::GrepEncRow> rows, std::span<const rw::CallerFloor> floors, const GrepEncOptions& opt )
+{
+    GrepEncCut out;
+    for( std::size_t r = 0; r < rows.size(); ++r )
+    {
+        const bool kept = grepEncRowKept( rows, r, opt );
+        out.cutRows += kept ? 0 : 1;
+        out.keptFloor = out.keptFloor || ( kept && r < floors.size() && floors[r].isFloor );
+    }
+    return out;
+}
+
 void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::GrepEncRow> rows,
                       std::span<const rw::CallerFloor> floors, const GrepEncOptions& opt )
 {
@@ -149,6 +226,10 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
     EXPECTS( floors.size() == rows.size() );   // emitGrepReport computes both from the same page (grepEncFloors)
     for( std::size_t r = 0; r < rows.size(); ++r )
     {
+        if( !grepEncRowKept( rows, r, opt ) )
+        {
+            continue;
+        }
         const GrepEncRow& row = rows[r];
         const auto en = rw::escapeXml( row.chain, opt.esc );
         rw::emitTo( stdout, "<enc n=\"{}\" callers=\"{}\"", std::string_view( en.data(), en.size() ), row.callerCount );
@@ -164,23 +245,12 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
         {
             rw::emitTo( stdout, " cx=\"{}\"", row.cx );
         }
-        std::uint32_t ampMax = 0;  bool anyTested = false;
-        for( const NodeId id : row.ids )
+        const GrepEncLens lens = grepEncLens( row, opt );
+        if( lens.ampMax > 0 )
         {
-            if( opt.amp && id < opt.amp->size() )
-            {
-                ampMax = std::max( ampMax, (*opt.amp)[id] );
-            }
-            if( opt.tested && id < opt.tested->size() && (*opt.tested)[id] )
-            {
-                anyTested = true;
-            }
+            rw::emitTo( stdout, " amp=\"{}\"", lens.ampMax );
         }
-        if( ampMax > 0 )
-        {
-            rw::emitTo( stdout, " amp=\"{}\"", ampMax );
-        }
-        if( anyTested )
+        if( lens.anyTested )
         {
             rw::emitTo( stdout, " tested=\"1\"" );
         }
@@ -1081,7 +1151,6 @@ int emitGrepReport( const MainDispatch& d )
     const std::vector<GrepHit> hits     = grepEnrichPage( ing, found, grepPage.begin, grepPage.end - grepPage.begin, cfg.grepBefore, cfg.grepAfter );
     const std::vector<GrepEncRow>  encRows   = grepEnclosingRows( ing, g, std::span<const GrepHit>( hits ) );   // R1b, before the legend
     const std::vector<CallerFloor> encFloors = grepEncFloors( ing, g, encRows );
-    const bool anyEncFloor = std::ranges::any_of( encFloors, []( const CallerFloor& f ) { return f.isFloor; } );
     const GrepPageCarriers         pageCarriers = grepPageCarriers( d, hits, encRows );   // L4, before the legend
     const std::vector<GrepCarrier>& encCarriers = pageCarriers.carriers;
     const bool anyCarrierAttr = std::ranges::any_of( encCarriers, []( const GrepCarrier& c ) { return ( c.readsKnown && c.reads > 0 ) || !c.vals.empty(); } );
@@ -1149,6 +1218,19 @@ int emitGrepReport( const MainDispatch& d )
     // scoped out here, not silently degraded: `root=` is simply absent and `p=` reads as it always did.
     const bool        singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
     const std::string rootPrefix = singleRoot ? rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) : std::string();
+    // R1b + GREP-SLIM: the <enc> block's options, fixed before the legend and the root, so both can name the rows the block leaves out (enc_cut=).
+    GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,
+                          cfg.roots.size() == 1 ? cfg.roots[0] : std::string_view(), esc, encCarriers, singleRoot, rootPrefix,
+                          grepSlimOn( d ) };
+    GrepEncCut encCut = grepEncCut( encRows, encFloors, encOpt );
+    // Tight-size rule: enc_cut= and its clause cost about 100 B. Cutting every row also drops the rows' own clauses, which
+    // always pays; beside a kept row (whose clauses stay) fewer than kGrepEncCutMinRows plain rows can cost more than they save.
+    if( encCut.cutRows > 0 && encCut.cutRows < encRows.size() && encCut.cutRows < kGrepEncCutMinRows )
+    {
+        encOpt.slim = false;
+        encCut      = grepEncCut( encRows, encFloors, encOpt );   // every row printed: cutRows 0, keptFloor = any floor
+    }
+    const std::string encCutAttr = encCut.cutRows > 0 ? " enc_cut=\"" + std::to_string( encCut.cutRows ) + "\"" : std::string();
     const auto         pathFor   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
         return singleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix ) : std::string_view( ing.files[ fileId ] );
@@ -1290,8 +1372,9 @@ int emitGrepReport( const MainDispatch& d )
                  // P3 (L7): next= on the root, defined where the reader meets it
                  "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
                  "the conceptual lens on a zero-hit answer. "
-                 "{}{} -->", anyEncFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "", anyCarrierAt ? kGrepCarrierAtClause : "",
+                 "{}{}{} -->", encCut.keptFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "", anyCarrierAt ? kGrepCarrierAtClause : "",
                  pageCarriers.skippedAttrs.empty() ? "" : kGrepCarrierSkipClause,
+                 encCut.cutRows > 0 ? kGrepEncCutClause : "",   // GREP-SLIM: after the next= sentence (its trailing space), before the page clause
                  grepHonestLexClause( !grepMetaAttr( cfg, pat, esc ).empty(), !found.occ.empty() ), rw::kPageRaiseCapClause );
     }
     emitGrepHandleLegend( cfg.grepHandles );
@@ -1346,7 +1429,7 @@ int emitGrepReport( const MainDispatch& d )
                                         /*collectionCapped=*/ hitsCapped != 0,   // H8: the cap hits_capped= names floors the root
                                         auxPage.end < aux.hits.size(), pageEnd ),   // ruling 192: has_more= spans the unindexed list too
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(), regexSkipAttr.c_str(),
-                 scanShortAttr.c_str(), rw::nextAttrXml( grepNext ).c_str() );
+                 ( scanShortAttr + encCutAttr ).c_str(), rw::nextAttrXml( grepNext ).c_str() );
     rw::emitTo( stdout, "{}", renderHistoryUnread( DiscloseAs::LegendComment ) );   // K51: its own definition, behind the root it marks
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
@@ -1435,8 +1518,6 @@ int emitGrepReport( const MainDispatch& d )
     emitGrepUnindexed( aux.hits, auxPage, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
-    const GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,
-                                cfg.roots.size() == 1 ? cfg.roots[0] : std::string_view(), esc, encCarriers, singleRoot, rootPrefix };
     emitGrepEncRows( ing, g, encRows, encFloors, encOpt );
 
     // ── R1a: the zero-hit follow-up — suggestions, labeled as such, never matches (helper above) ───

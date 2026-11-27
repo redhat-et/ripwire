@@ -5572,8 +5572,13 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      (**−30.2%** → **−32.3%**) at the capped view; −22.2% / −21.5% → **−23.1% / −22.3%**
      uncapped (`--limit=1000`). Independent corroboration:
      `test/grepbytescheck.sh` re-derives a **−40.2% median** payload cut on this repository's five
-     frozen *capped* queries — and, on twelve frozen *uncapped* small-hit queries, a
-     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**.
+     frozen *capped* queries — and, on twelve frozen *uncapped* small-hit queries, **≈ parity**:
+     a **4.0% median** payload cut on the dev machine, larger than plain grep on **4 of 12** (main
+     03cbe7115 + GREP-SLIM, 2026-11-27). Before GREP-SLIM left the plain `<enc>` rows and their legend
+     clauses out of the compact answer this arm was a **+61.5% median** payload *increase*, larger than
+     plain grep on 12 of 12. Near parity the SIGN follows the corpus path length (grep repeats the
+     absolute path on every line, ripwire prints a relative path once per file), so the gate pins a
+     ±40-point parity band for this arm, not a direction.
      **What "the view" means since 2026-08-19**: span tiers made `--grep`'s DEFAULT a filtered view of the
      same exhaustive scan, and this gate's instrument was deliberately pinned to `--grep-in=any` — the
      un-tiered emitter — in the same wave (`test/grepbytescheck.sh:114`, with the reason in its own header:
@@ -5592,7 +5597,8 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      as −41.4% (dev worktree), −55.8% (fresh single-branch clone), and −31.5%/−31.9% (the two CI
      platforms). What is environment-STABLE, and what the gate asserts on every run everywhere: the
      ≥30% kill-condition bar held in all four environments, and both directions held (capped always a
-     cut, uncapped always an increase). The gate also pins this paragraph's form and signs, so the
+     cut, uncapped always an increase until GREP-SLIM; since then the uncapped arm is held to the parity
+     band above). The gate also pins this paragraph's form and signs, so the
      claim cannot silently rot; magnitudes here are labelled by machine, not gated. *(Re-measured 2026-08-15 by the fix-grep lane, which corrected three
      instrument defects in that gate: the two arms were reading different corpora (ripwire the whole
      repo, grep only `src/`), `grep` was invoked by bare name, and all five frozen queries were

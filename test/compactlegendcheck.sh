@@ -449,6 +449,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # and impact.xml only: graphlegend.h kTestedRowLegend now says how a test reaches the row and that reaching is not asserting
 # ("transitively reaches it" -> "transitively reaches it over call edges; reached, not asserted"), string for string, nothing
 # else. Checked mechanically: the reverse replacement of that one phrase gives the previous pin byte for byte. +39 B each.
+# RE-ANCHORED BY HAND 2026-11-27 (lane GREP-SLIM, test/grepslimcheck.sh), grep.xml only: the four plain <enc> rows (distance,
+# perimeter, diagonal, Geometry Fixture::Symbols: no lens, carrier or handle attribute) leave the payload, the root gains
+# enc_cut="4" before next=, and the legend gains the kGrepEncCutClause sentence after the next= sentence. Nothing else moved;
+# undoing those three edits gives the previous pin byte for byte.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

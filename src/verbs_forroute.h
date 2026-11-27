@@ -196,10 +196,12 @@ inline std::optional<rw::partialwarn::RouteEvidence> routeEvidence( const MainDi
     rw::Config gc = d.cfg;
     gc.forTask    = {};
     gc.grep       = last;
-    const MainDispatch gd   = routeDispatch( d, gc );
+    MainDispatch gd         = routeDispatch( d, gc );
+    gd.grepEncEveryRow      = true;   // GREP-SLIM: rt2Evidence reads <enc callers_floor=> rows the slim tail leaves out
     const RouteRender  grep = renderRouteCaptured( [ & ] { return runGrep( gd ).value_or( 1 ); } );
     gc.grepIn = "any";   // RT2: the exhaustive view — every tier, and the <unindexed> section — for the fold
-    const MainDispatch ad      = routeDispatch( d, gc );
+    MainDispatch ad            = routeDispatch( d, gc );
+    ad.grepEncEveryRow         = true;
     const RouteRender  grepAny = renderRouteCaptured( [ & ] { return runGrep( ad ).value_or( 1 ); } );
     d.redactCounts = before;
     if( !defs.captured || !grep.captured || grep.rc != 0 || !grepAny.captured || grepAny.rc != 0 )

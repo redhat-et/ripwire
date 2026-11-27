@@ -569,6 +569,8 @@ struct MainDispatch
     int                                    pageRowCap = -1;        // PG1: the row cap the output ceiling chose for a --grep page (0 = every
                                                                     //   row, --page-bytes=0); -1 = the verb's own default (runGrepServed)
     std::size_t*                           pageRowsOut = nullptr;  // PG1: where --grep reports the rows its page window held (the longer list)
+    bool                                   grepEncEveryRow = false; // GREP-SLIM: a --grep render read by code, not printed (route evidence):
+                                                                    //   every <enc> row, plain ones included (verbs_grep.h grepSlimOn)
 };
 
 }   // namespace — part 1: the shared preamble helpers + the verb-dispatch context

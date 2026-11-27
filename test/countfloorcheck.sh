@@ -164,6 +164,9 @@ cat > "$W/md/notes.md" <<'EOF'
 - Added HEADING_MARKER environment variable
 EOF
 
+# GREP-SLIM: the compact --grep leaves the plain <enc> rows out (enc_cut=, test/grepslimcheck.sh); this gate reads the
+# floor marks ON those rows, which the slim tail never prints, so its grep runs keep every row (the kill switch).
+export RIPWIRE_GREP_SLIM=0
 run(){ ( cd "$W/$1" && shift && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 root_tag(){ nocomment "$1" | grep -oE "<$2 [^>]*>" | head -1; }
 attr(){ printf '%s' "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -e "s/^ $2=\"//" -e 's/"$//'; }
