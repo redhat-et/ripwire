@@ -53,7 +53,7 @@ That is quantity (1). Quantity (2) is a different thing again, made measurable b
 - **Binary under measurement**: the train tip `2ad2b6254c0d404ace336a58734846dfcf04c82f`, built as a plain
   dev build (no `CMAKE_BUILD_TYPE`), which is "as they ship today".
 - **Corpus**: this repository, which is the only corpus to hand with the full history a range replay needs
-  (`/Users/qgames/m5-work/repos/*` are depth-1 shallow clones; a `A..B` replay cannot run in them).
+  (the external corpus checkouts to hand are depth-1 shallow clones; a `A..B` replay cannot run in them).
 - **Ranges**: `bench/cloneprec/ranges.lock`, frozen before any run — **the last 40 first-parent merge
   commits reachable from the tip, each replayed as `C~1..C`**. One range is one landed change.
   - `n=40` is chosen to be directly comparable with the September figure, which was "40 replayed commits".

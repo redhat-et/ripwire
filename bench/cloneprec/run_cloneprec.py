@@ -92,8 +92,11 @@ def main():
     path = os.path.join( a.out, a.label + ".jsonl" )
     tot_rows = tot_gating = tot_comp = tot_minor = tot_disagree = 0
     with open( path, "w" ) as fh:
-        fh.write( json.dumps( { "record": "header", "label": a.label, "bin": a.bin,
-                                "version": ver, "root": a.root, "ranges": len( ranges ) } ) + "\n" )
+        # Record the binary by its VERSION (which carries the git sha) and never by an absolute
+        # path: a committed absolute home path is refused at push time, and rightly.
+        fh.write( json.dumps( { "record": "header", "label": a.label,
+                                "bin": "<worktree>/" + "/".join( a.bin.split( os.sep )[ -2: ] ),
+                                "version": ver, "root": "<worktree>", "ranges": len( ranges ) } ) + "\n" )
         for rng in ranges:
             cmd = [ a.bin, a.root, "--quality-delta=" + rng,
                     "--quality-kinds=duplication,new-clone-of-reused-helper",
