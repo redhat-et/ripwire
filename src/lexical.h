@@ -25,6 +25,7 @@
 #include "infra/pctenc.h"        // appendPercentEncoded — a refused RIPWIRE_TERMMARGIN value echoed on one line
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <charconv>
@@ -1097,12 +1098,30 @@ inline void addDocBodyFieldsFromPersistedStats( LexMatchTfTable& table, const In
     // query subtoken — no false negatives (dl above is already complete; tf for such a file is provably
     // zero), and a false positive just walks the cheap stats rows. Symbol ids are file-contiguous
     // (assigned in fileId,line,name order), so the test amortizes to one signature check per file.
-    const bool useFileSig      = ing.lexFileSig.size() == ing.files.size() * kLexFileSigWords;
+    // The query's own 512-bit signature, folded once (RANK-SPEED step 1): "some match hash's bit is set in the file's signature"
+    // is "some word of the two signatures shares a bit", so a file costs 8 ANDs instead of a walk of every match hash.
+    // `matchFilter`: the same idea one level down, a 4,096-bit set of the match hashes' bits 40-51 (no false negative, so
+    // the map probe below runs for every entry that can match and the sums are the ones it always made).
+    const bool                                   useFileSig = ing.lexFileSig.size() == ing.files.size() * kLexFileSigWords;
+    std::array<std::uint64_t, kLexFileSigWords>  querySig {};
+    std::array<std::uint64_t, 64>                matchFilter {};
+    const auto                                   filterBit = []( std::uint64_t h ) noexcept { return std::size_t( ( h >> 40 ) & 4095u ); };
+    for( const std::uint64_t h : matchHash )
+    {
+        querySig[ lexSigWord( h ) ] |= lexSigBit( h );
+        matchFilter[ filterBit( h ) >> 6 ] |= std::uint64_t( 1 ) << ( filterBit( h ) & 63u );
+    }
     const auto fileMayHoldTerm = [ & ]( std::uint32_t f )
     {
         const std::uint64_t* sig = ing.lexFileSig.data() + std::size_t( f ) * kLexFileSigWords;
-        return std::ranges::any_of( matchHash, [ sig ]( std::uint64_t h ) { return ( sig[ lexSigWord( h ) ] & lexSigBit( h ) ) != 0; } );
+        std::uint64_t        any = 0;
+        for( std::size_t w = 0; w < kLexFileSigWords; ++w )
+        {
+            any |= sig[ w ] & querySig[ w ];
+        }
+        return any != 0;
     };
+    const auto mayMatch = [ & ]( std::uint64_t h ) noexcept { return ( ( matchFilter[ filterBit( h ) >> 6 ] >> ( filterBit( h ) & 63u ) ) & 1u ) != 0; };
     std::uint32_t lastFileId       = kNoNode;
     bool          lastFileMayMatch = true;
     for( std::size_t i = 0; i < S; ++i )
@@ -1133,6 +1152,10 @@ inline void addDocBodyFieldsFromPersistedStats( LexMatchTfTable& table, const In
         {
             for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
             {
+                if( !mayMatch( rowHash[e] ) )
+                {
+                    continue;   // no match hash has this entry's filter bit: the probe could only miss
+                }
                 if( const auto it = rowIndexOfHash.find( rowHash[e] ); it != rowIndexOfHash.end() )
                 {
                     addStoredTerm( i, it->second, ing.lexTokenTfs[e] );
@@ -2283,7 +2306,7 @@ inline std::string routeLower( std::string_view w )
     return out;
 }
 
-// ONE lowercase-name index over all symbols, built once per query (was: a routeLower(s.name) heap allocation
+// ONE lowercase-name index over all symbols (the entries for the query's words: buildLowerNameIndex), built once per query (was: a routeLower(s.name) heap allocation
 // per size-matched symbol per word — O(contentWords × symbols) allocations, millions on a 100k-symbol tree).
 // A single probe per word replaces the O(symbols) linear scan; the routed-vs-plain decision is unchanged, it
 // was and remains a pure "does this word name a symbol" membership test.
@@ -2354,43 +2377,64 @@ inline void noteWholeNameSpelling( HashMap<std::string, NameAnchor>& names, cons
     }
 }
 
+// Does `span`, lowercased, spell `lowerKey`? The index's ONE key test: a routeLower'd word against a name or a name
+// subtoken compared in place (lexindex.h lexTokenEqualsLowered: the same ASCII fold routeLower and subtokens apply).
+inline bool spellsLowerKey( std::string_view span, std::string_view lowerKey ) noexcept
+{
+    return span.size() == lowerKey.size() && lexTokenEqualsLowered( span.data(), span.size(), lowerKey.data() );
+}
+
 // one symbol's whole name enters the index — and, for an Elixir callable indexed as `name/N`, its arity-less
 // spelling too: the source spells it `name`, and so does a query, so a plain word naming an Elixir function
 // is a whole-name hit (the route fires, the anchor names its defining file) rather than a carrier-only miss
 // (PR #81 review item 5). Each arity is a further definition of that spelling; extraDefs counts them.
-inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s )
+// Only a spelling that is one of `keys` enters: the index holds the entries its readers probe (buildLowerNameIndex).
+inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s, std::span<const std::string> keys )
 {
-    noteWholeNameSpelling( names, s, s.name );
+    const auto noteIfKey = [ & ]( std::string_view spelling )
+    {
+        if( std::ranges::any_of( keys, [ spelling ]( const std::string& key ) { return spellsLowerKey( spelling, key ); } ) )
+        {
+            noteWholeNameSpelling( names, s, spelling );
+        }
+    };
+    noteIfKey( s.name );
     if( s.lang == Lang::Elixir )
     {
         if( const std::string_view base = elixirBaseName( s.name ); base.size() != s.name.size() )
         {
-            noteWholeNameSpelling( names, s, base );
+            noteIfKey( base );
         }
     }
 }
 
-// one symbol's name-subtokens bump their tokens' carrier counts — one carrier per symbol per DISTINCT
-// subtoken ("split_split" counts once). Entries this pass creates stay wholeName=false: they measure
-// commonness and must never satisfy the whole-name membership test.
-inline void countNameCarriers( HashMap<std::string, NameAnchor>& names, const std::vector<std::string>& parts )
+// one symbol's name-subtokens (subtokens' split and its 2+ byte rule) bump their tokens' carrier counts — one carrier per
+// symbol per DISTINCT subtoken ("split_split" counts once). Entries this pass creates stay wholeName=false: they measure
+// commonness and must never satisfy the whole-name membership test. Only `keys` are counted; `carried` is scratch, one
+// flag per key.
+inline void countNameCarriers( HashMap<std::string, NameAnchor>& names, std::string_view name, std::span<const std::string> keys,
+                               std::vector<char>& carried )
 {
-    for( std::size_t k = 0; k < parts.size(); ++k )
+    carried.assign( keys.size(), 0 );
+    forEachLexSubtoken( name, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
     {
-        bool repeat = false;
-        for( std::size_t j = 0; j < k; ++j )
+        if( tokEndByte - tokStartByte < 2 )
         {
-            if( parts[ j ] == parts[ k ] )
-            {
-                repeat = true;
-                break;
-            }
+            return;   // the ≥2-byte drop subtokens applies
         }
-        if( repeat )
+        const std::string_view tok = name.substr( tokStartByte, tokEndByte - tokStartByte );
+        for( std::size_t k = 0; k < keys.size(); ++k )
+        {
+            carried[ k ] = carried[ k ] != 0 || spellsLowerKey( tok, keys[ k ] ) ? 1 : 0;
+        }
+    } );
+    for( std::size_t k = 0; k < keys.size(); ++k )
+    {
+        if( carried[ k ] == 0 )
         {
             continue;
         }
-        const auto [ at, inserted ] = names.try_emplace( parts[ k ], NameAnchor{ 0u, 0u, 1u, false } );
+        const auto [ at, inserted ] = names.try_emplace( keys[ k ], NameAnchor{ 0u, 0u, 1u, false } );
         if( !inserted )
         {
             ++at->second.carriers;
@@ -2398,21 +2442,36 @@ inline void countNameCarriers( HashMap<std::string, NameAnchor>& names, const st
     }
 }
 
-inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult& ing )
+// The lowercase-name index, for the routeLower'd words `lowerWords` its caller will probe it by. Each reader probes it by a
+// handful of query words and nothing else, and an entry depends only on its own key's events in NodeId order — a whole-name
+// definition (noteWholeNameDef) and one carrier per symbol whose distinct name subtokens hold the key (countNameCarriers) —
+// so building only the asked keys gives each the entry the whole-corpus index gave it, and a key no symbol names or carries
+// is absent from both. RANK-SPEED step 1: the whole-corpus build (a heap string and a hash insert per symbol name and per
+// name subtoken) was 0.15 s of a served vscode --for, and up to three of them ran per routed answer (M2, 2026-11-26).
+inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult& ing, const std::vector<std::string>& lowerWords )
 {
     HashMap<std::string, NameAnchor> names;
-    names.reserve( ing.symbols.size() );
-    std::vector<std::string> parts;
+    std::vector<std::string>         keys;   // distinct and non-empty: a repeated word is one key
+    for( const std::string& w : lowerWords )
+    {
+        if( !w.empty() && std::ranges::find( keys, w ) == keys.end() )
+        {
+            keys.push_back( w );
+        }
+    }
+    if( keys.empty() )
+    {
+        return names;
+    }
+    std::vector<char> carried;
     for( const Symbol& s : ing.symbols )
     {
         if( notLexRanked( s ) )
         {
             continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
         }
-        noteWholeNameDef( names, s );
-        parts.clear();
-        subtokens( s.name, parts );
-        countNameCarriers( names, parts );
+        noteWholeNameDef( names, s, keys );
+        countNameCarriers( names, s.name, keys, carried );
     }
     return names;
 }
@@ -2895,8 +2954,14 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     const std::uint32_t carrierCap = routeCarrierCap( ing );
     ImplausibleAnchor   imp;
 
-    // ONE lowercase-name index over all symbols, built once per query — see buildLowerNameIndex.
-    const HashMap<std::string, NameAnchor> lowerSymbolNames = buildLowerNameIndex( ing );
+    // ONE lowercase-name index, built once per query over the words it is probed by — see buildLowerNameIndex.
+    std::vector<std::string> lowerWords;
+    lowerWords.reserve( words.size() );
+    for( const std::string_view w : words )
+    {
+        lowerWords.push_back( routeLower( w ) );
+    }
+    const HashMap<std::string, NameAnchor> lowerSymbolNames = buildLowerNameIndex( ing, lowerWords );
     AnchorList                             anchors;
     std::vector<RouteAnchorDef>            anchorDefs;   // the same anchors, resolved (see collectRouteAnchorDef)
 

@@ -47,7 +47,8 @@
 #include "fortailterms.h" // tailTaskTerms / tailTermMask — TAIL-SYM-TERMS' task words and name/path evidence
 #include "forliteral.h"   // taskQuotesLiteral — a quoted message keeps a tail's config and docs listed
 #include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
-#include "graph.h"       // rankGraph — TAIL-SYM-TERMS' tie-break order
+#include "graph.h"
+#include "rankcache.h"   // plainGraphRank — TAIL-SYM-TERMS' tie-break order, rankGraph( g ) served once
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -1463,7 +1464,7 @@ inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexc
     return std::any_of( t.termSyms.begin(), t.termSyms.begin() + std::ptrdiff_t( n ), []( const std::string& s ) { return !s.empty(); } );
 }
 
-// TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), computed once per answer and
+// TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), asked for once per answer (rankcache.h serves it) and
 // only when a tail row can gain a name (the switch on and a task word to match); empty otherwise, and then no row gains one.
 // `tokenBudget` (--token-budget / MCP budget_tokens) > 0: empty too. The target's tail reserve prices the pre-card walk
 // (fileTailOldWalk), so a name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound).
@@ -1473,7 +1474,7 @@ inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task
     {
         return {};
     }
-    return std::move( rankGraph( g ).rank );
+    return plainGraphRank( g );   // rankGraph( g ).rank: the warm snapshot's stored copy, else computed once per graph (rankcache.h)
 }
 
 // `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
