@@ -182,8 +182,8 @@ agent's context every session, whether or not it calls them.
 
 Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22:
 ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. ripwire's column is a
-profile-guided release build (`scripts/pgobuild.sh`, what CI ships), not the plain `cmake --build build` of the
-Quick start; PGO is worth 14-25% cold on its own. **Bold** = the best value in a
+profile-guided release build (`scripts/pgobuild.sh`, what CI ships), not the default `cmake --build build` (LTO on,
+PGO off) that PGO beats by 6-16% cold. **Bold** = the best value in a
 row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070-comparison-tables-measured-2026-11-22).
 
 #### Speed
