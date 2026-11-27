@@ -682,7 +682,7 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
 
 // Research audit 2026-11-26 item 1: an MCP host hands the MODEL `content` and nothing else — 0 of 102 sampled Claude Code
 // results carried `_index` or `_fresh` — so an envelope sibling alone discloses a cut to the JSON-RPC client and not to
-// the agent. Every non-empty note is therefore said again INSIDE the answer, in the answer's own form, the same sentence as
+// the agent. Every non-empty note that limits or qualifies the answer is therefore said again INSIDE the answer, in the answer's own form, the same sentence as
 // the machine copy, and only when there is one (an answer with nothing to disclose is byte-identical):
 //   XML   a <notes><n k="KEY">sentence</n>…</notes> child of the root, after its rows and before its trailing comments and
 //         ref-posture <about> (which stays the root's LAST child) — so the answer is still ONE well-formed document for a
@@ -698,34 +698,48 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
 struct McpEnvelopeNotes
 {
     std::string_view assumedRoot;
-    std::string_view memoryStop;
+    std::string_view indexStop;     // the index that answered THIS request was cut by the memory guard
+    std::string_view anyStop;       // _memory_stop as the envelope says it: indexStop, or the generic sentence (a stop anywhere)
     std::string_view historyCut;
     std::string_view overCeiling;   // CL1: an answer served whole BY REQUEST past the output ceiling (memory_recall's budget_tokens)
-    bool             reindexed    = false;   // `_fresh:"reindexed"`, with the two counts mcpFreshFields emits beside it
-    std::size_t      staleFiles   = 0;
-    std::size_t      changedFiles = 0;
 };
 
-inline std::vector<std::pair<std::string_view, std::string>> mcpVisibleNotes( const McpEnvelopeNotes& n )
+// `_fresh` is NOT said in the answer either, and that is the contract, not an omission: it is about the CALL — whether
+// this server had to rebuild an index it already held — and it limits nothing (a reindexed answer is the answer a cold
+// server gives: test/mcpincrementalcheck.sh and test/freshnesscheck.sh compare exactly that, byte for byte). An answer
+// body is a function of the tree and the request, never of the session's history; `_fresh` stays the machine copy.
+inline std::vector<std::pair<std::string_view, std::string>> mcpVisibleNotes( std::string_view verb, const McpEnvelopeNotes& n )
 {
+    // a verb that runs its OWN ingest inside the tool answers from it: there the generic stop sentence is about this answer
+    const bool ownIngest = verb == "quality_delta" || verb == "quality_baseline" || verb == "edit_check";
     std::vector<std::pair<std::string_view, std::string>> notes;
     const auto add = [ & ]( std::string_view key, std::string_view sentence )
     {
         if( !sentence.empty() ) { notes.emplace_back( key, std::string( sentence ) ); }
     };
     add( "_assumed_root", n.assumedRoot );
-    add( "_memory_stop", n.memoryStop );
+    add( "_memory_stop", ownIngest ? n.anyStop : n.indexStop );
     add( "_history_cut", n.historyCut );
     add( "_over_ceiling", n.overCeiling );
-    if( n.reindexed )
-    {
-        add( "_fresh", "reindexed: files changed on disk since this server last read the tree, so the index was rebuilt before "
-                       "this answer (_stale_files=" + std::to_string( n.staleFiles ) + " _changed_files=" + std::to_string( n.changedFiles ) + ")" );
-    }
     return notes;
 }
 
 // Splice the notes into `payload` in its own form (above). Returns false when there was nothing to say (payload untouched).
+inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes );
+
+// The answer `body` with this request's notes said inside it (mcpSpliceNotes), or "" when it has none to say.
+inline std::string mcpAnswerWithNotes( std::string_view verb, const std::string& body, const McpEnvelopeNotes& n )
+{
+    std::string noted;
+    const auto  notes = mcpVisibleNotes( verb, n );
+    if( !notes.empty() )
+    {
+        noted = body;
+        mcpSpliceNotes( noted, notes );
+    }
+    return noted;
+}
+
 inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes )
 {
     if( notes.empty() )
@@ -1879,20 +1893,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     legenddict::openSessionWith( *body, *legendSession );   // served as-is; opens the session when reducible
                 }
                 const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
-                const McpIndex&   slot     = mcpIndexSlot();
-                // a verb that runs its OWN ingest inside the tool answers from it: there the generic sentence is about this answer
-                const bool        ownIngest = name == "quality_delta" || name == "quality_baseline" || name == "edit_check";
-                const auto        notes    = mcpVisibleNotes( McpEnvelopeNotes{ assumedRootNote, ownIngest ? memoryStopNote : visibleStopNote,
-                                                                                cutNote, overCeilingNote,
-                                                                                mcpRefreshedThisRequest( passesAtEntry ),
-                                                                                slot.lastStaleFiles, slot.lastChangedFiles } );
-                std::string noted;
-                if( !notes.empty() )
-                {
-                    noted = *body;
-                    mcpSpliceNotes( noted, notes );
-                    body = &noted;
-                }
+                const std::string noted    = mcpAnswerWithNotes( name, *body, McpEnvelopeNotes{ assumedRootNote, visibleStopNote, memoryStopNote,
+                                                                                                cutNote, overCeilingNote } );
+                body = noted.empty() ? body : &noted;
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )

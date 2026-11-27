@@ -14,7 +14,8 @@
 # form: XML gains a final <notes><n k="KEY">…</n></notes> child (still ONE well-formed document — CI #774 showed a second
 # plain-text block breaking every client and gate that joins the blocks), JSON gains a "_notes" member, plain text gains
 # trailing "KEY: sentence" lines. content[] stays ONE block.
-# `_memory_peak` is the one exception, and the gate pins it: the answer it rides is whole, its number differs run to run,
+# `_fresh` and `_memory_peak` are the exceptions, and the gate pins both. `_fresh` is about the call (did this server
+# rebuild an index it held), limits nothing, and a reindexed answer must equal a cold one. the answer it rides is whole, its number differs run to run,
 # and the CLI says it on stderr only — so it stays machine-only, and a deterministic answer stays byte-identical. The verb's own payload (the first block) is untouched, so a JSON payload stays parseable. A result that carries
 # none of them is byte-identical to before: one content block.
 #
@@ -24,7 +25,8 @@
 #   (V2) [P] _memory_stop       RIPWIRE_TEST_MEMGUARD=crawl:30 under --max-memory=64M (memguardcheck's B6 recipe)
 #   (V3) [C] _memory_peak       RIPWIRE_TEST_MEMGUARD=peak:1 under --max-memory=64M: in the envelope, NOT in content[]
 #   (V4) [P] _history_cut       RIPWIRE_GIT_WALK_COMMITS=100 over a 130-commit history (historywalkcheck's M1 recipe)
-#   (V5) [P] _fresh:"reindexed" a file edited between two calls; the block names both counts with the envelope's values
+#   (V5) [C] _fresh:"reindexed" a file edited between two calls: the envelope says it, and the ANSWER is the cold server's,
+#            byte for byte — `_fresh` is about the call, not the answer (mcpincrementalcheck / freshnesscheck pin the same)
 #   (V6) [C] a result with no disclosure has exactly one content block, and a disclosing JSON payload still parses
 #   (V7) [P] an XML answer that discloses (impact with path= omitted) is ONE well-formed document, <notes> inside the root
 set -u
@@ -162,9 +164,9 @@ edit = lambda: write(os.path.join(small, "a.c"), "int perimeter(int w, int h) { 
 r1, r2 = mcp([("grep", {"path": small, "pattern": "area"}), ("grep", {"path": small, "pattern": "area"})], between={0: edit})
 env2 = r2.get("result", {})
 say(env2.get("_fresh") == "reindexed", "(V5) [C] the edit between two calls is disclosed in the envelope (_fresh=%s)" % env2.get("_fresh"))
-want = ["reindexed", "_stale_files=%s" % env2.get("_stale_files"), "_changed_files=%s" % env2.get("_changed_files")]
-say(env2.get("_fresh") == "reindexed" and len(blocks(r2)) == 1 and all(w in said(blocks(r2)[0], "_fresh") for w in want),
-    "(V5) [P] ...and content[] says reindexed with both counts (%s)" % " ".join(want))
+(cold,) = mcp([("grep", {"path": small, "pattern": "area"})])
+say(env2.get("_fresh") == "reindexed" and blocks(r2) == blocks(cold) and "_fresh" not in blocks(r2)[0],
+    "(V5) [C] ...and the reindexed answer is byte-identical to a cold server's on the same tree: _fresh is about the call, machine-only")
 
 # ── (V6) controls ────────────────────────────────────────────────────────────────────────────────────────────────────
 say(env2.get("_fresh") != "reindexed" or len(blocks(r1)) == 1,
