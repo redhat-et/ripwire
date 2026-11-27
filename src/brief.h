@@ -556,7 +556,7 @@ inline std::vector<std::string> namedFiles( const Corpus& c, std::string_view ta
         std::sort( defs.begin(), defs.end(), [ & ]( std::string_view a, std::string_view b )
         {
             const bool ia = std::find( act.begin(), act.end(), a ) != act.end(), ib = std::find( act.begin(), act.end(), b ) != act.end();
-            return ia != ib ? ia : a < b;
+            return ia != ib ? ia : rw::sortutil::svLess( a, b );
         } );
         if( !defs.empty() && std::find( named.begin(), named.end(), defs.front() ) == named.end() && named.size() < 2 )
         {
