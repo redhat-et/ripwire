@@ -11540,6 +11540,119 @@ inline void fillRouteEdges( Graph& g, const IngestResult& ing, const HashMap<std
         g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
 }
 
+// buildGraph/2h. CHA-lite: the inheritance NAME graph, derived-name -> base-names and back, plus the subset whose base
+// clause the deriving class only DECLARED. Names, not ids, deliberately: a base clause is text until the implementor
+// pass binds it, and resolve.h's guarded base walk reads these tables as the graph its cone questions walk.
+inline void buildChaNameGraph( const IngestResult& ing, const RubyBaseScope& rubyBases, HashMap<std::string, std::vector<std::string>>& chaUp,
+                               HashMap<std::string, std::vector<std::string>>& chaDown, HashMap<std::string, std::vector<std::string>>& chaUpDeclared )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
+        for( const Reference& ir : ing.references )
+        {
+            if( !ir.isInherit )
+            {
+                continue;
+            }
+            if( const std::string* scoped = rubyBases.resolvedBase( std::size_t( &ir - ing.references.data() ) ); scoped && scoped->empty() )
+            {
+                continue;   // a Ruby base the tree never opens: nothing in-tree to walk to
+            }
+            if( const std::size_t at = std::size_t( &ir - ing.references.data() ); at < rubyBases.mixinRefs.size() && rubyBases.mixinRefs[ at ] != 0 )
+            {
+                continue;   // a Ruby mixin: only the Ruby overlay (buildRubyCha) carries it
+            }
+            std::string_view derivedName;
+            if( !ir.qualifier.empty() )
+            { // Rust impl → derived type name in qualifier
+                derivedName = ir.qualifier;
+            }
+            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
+                                                   || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
+            {
+                derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
+            }
+            if( derivedName.empty() || ir.calleeName.empty() )
+            {
+                continue;
+            }
+            chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
+            chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
+            std::vector<std::string>& declared = chaUpDeclared[ std::string( derivedName ) ];
+            if( std::find( declared.begin(), declared.end(), ir.calleeName ) == declared.end() )
+            {
+                declared.push_back( ir.calleeName );   // source order (ing.references is in (file, byte) order)
+            }
+        }
+        addTypeAliasBases( ing, chaUp );   // a typedef / using alias continues at its target class; dedup below is order-independent
+        for( auto& [ k, v ] : chaUp )   { sortutil::sortUnique( v ); }
+        for( auto& [ k, v ] : chaDown ) { sortutil::sortUnique( v ); }
+}
+
+// buildGraph/2i. The FFI binding alias tables: an extern-"C" symbol name to the C/C++ definitions that carry it, and
+// each ctypes CDLL handle variable by "<fileId>#<var>". THE GUARD IS INSIDE, where the phase is: a corpus with no
+// binding aliases does no work and enters no profile scope, exactly as before.
+inline void buildFfiAliasTables( const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                 HashMap<std::string, rw::SmallVec<NodeId, 2>>& externCAlias, HashMap<std::string, rw::SmallVec<NodeId, 2>>& pybindAlias, HashMap<std::string, char>& ctypesHandle )
+{
+    if( ing.bindingAliases.empty() )
+    {
+        return;
+    }
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: FFI binding alias tables" );
+        std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
+        std::vector<NodeId> tgt;
+        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
+        {
+            for( NodeId c : srcIds )
+            {
+                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC )
+                {
+                    tgt.push_back( c );
+                }
+            }
+        };
+        for( const BindingAlias& ba : ing.bindingAliases )
+        {
+            if( ba.kind == BindKind::CtypesHandle )
+            {
+                sk.clear();  Narrower::appendUint( sk, ba.fileId );  sk.push_back( '#' );  sk.append( ba.aliasName );
+                ctypesHandle[ sk ] = 1;
+                continue;
+            }
+            tgt.clear();
+            if( !ba.targetScope.empty() )                        // prefer the scope::name canonical target
+            {
+                sk.clear();  sk.append( ba.targetScope ).append( "::" ).append( ba.targetName );
+                const auto cit = canonByName.find( sk );
+                if( cit != canonByName.end() )
+                {
+                    pushCFamily( cit->second );
+                }
+            }
+            if( tgt.empty() )                                    // else the bare-name target
+            {
+                const auto bit = byName.find( ba.targetName );
+                if( bit != byName.end() )
+                {
+                    pushCFamily( bit->second );
+                }
+            }
+            if( tgt.empty() )
+            {
+                continue; // target not an in-repo C/C++ def → no alias edge
+            }
+            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
+                                                                            : externCAlias[ ba.aliasName ];
+            slot.insert( slot.end(), tgt.begin(), tgt.end() );
+        }
+        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
+        {
+            for( auto& [ k, v ] : m ) { sortutil::sortUnique( v ); }
+        };
+        dedup( pybindAlias );
+        dedup( externCAlias );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11677,62 +11790,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, rw::SmallVec<NodeId, 2>> pybindAlias;    // Python-visible name → C/C++ def ids
     HashMap<std::string, rw::SmallVec<NodeId, 2>> externCAlias;   // extern-C symbol name  → C/C++ def ids
     HashMap<std::string, char>                    ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
-    if( !ing.bindingAliases.empty() )
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: FFI binding alias tables" );
-        std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
-        std::vector<NodeId> tgt;
-        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
-        {
-            for( NodeId c : srcIds )
-            {
-                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC )
-                {
-                    tgt.push_back( c );
-                }
-            }
-        };
-        for( const BindingAlias& ba : ing.bindingAliases )
-        {
-            if( ba.kind == BindKind::CtypesHandle )
-            {
-                sk.clear();  Narrower::appendUint( sk, ba.fileId );  sk.push_back( '#' );  sk.append( ba.aliasName );
-                ctypesHandle[ sk ] = 1;
-                continue;
-            }
-            tgt.clear();
-            if( !ba.targetScope.empty() )                        // prefer the scope::name canonical target
-            {
-                sk.clear();  sk.append( ba.targetScope ).append( "::" ).append( ba.targetName );
-                const auto cit = canonByName.find( sk );
-                if( cit != canonByName.end() )
-                {
-                    pushCFamily( cit->second );
-                }
-            }
-            if( tgt.empty() )                                    // else the bare-name target
-            {
-                const auto bit = byName.find( ba.targetName );
-                if( bit != byName.end() )
-                {
-                    pushCFamily( bit->second );
-                }
-            }
-            if( tgt.empty() )
-            {
-                continue; // target not an in-repo C/C++ def → no alias edge
-            }
-            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
-                                                                            : externCAlias[ ba.aliasName ];
-            slot.insert( slot.end(), tgt.begin(), tgt.end() );
-        }
-        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
-        {
-            for( auto& [ k, v ] : m ) { sortutil::sortUnique( v ); }
-        };
-        dedup( pybindAlias );
-        dedup( externCAlias );
-    }
+    buildFfiAliasTables( ing, byName, canonByName, externCAlias, pybindAlias, ctypesHandle );   // buildGraph/2i
     const bool ffiActive = !pybindAlias.empty() || !externCAlias.empty();
 
     // P2-D one-hop type narrowing over the canonical scope::name map above (no new pass): Rule 1 pins `this->m()` / `self.m()` to the caller's enclosing class; Rule 2
@@ -11843,48 +11901,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // cannot reach an unrelated in-tree `Base` — and by the implementor pass below. Empty on a Ruby-free corpus.
     const RubyBaseScope rubyBases = buildRubyBaseScope( ing );
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
-        for( const Reference& ir : ing.references )
-        {
-            if( !ir.isInherit )
-            {
-                continue;
-            }
-            if( const std::string* scoped = rubyBases.resolvedBase( std::size_t( &ir - ing.references.data() ) ); scoped && scoped->empty() )
-            {
-                continue;   // a Ruby base the tree never opens: nothing in-tree to walk to
-            }
-            if( const std::size_t at = std::size_t( &ir - ing.references.data() ); at < rubyBases.mixinRefs.size() && rubyBases.mixinRefs[ at ] != 0 )
-            {
-                continue;   // a Ruby mixin: only the Ruby overlay (buildRubyCha) carries it
-            }
-            std::string_view derivedName;
-            if( !ir.qualifier.empty() )
-            { // Rust impl → derived type name in qualifier
-                derivedName = ir.qualifier;
-            }
-            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
-                                                   || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
-            {
-                derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
-            }
-            if( derivedName.empty() || ir.calleeName.empty() )
-            {
-                continue;
-            }
-            chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
-            chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
-            std::vector<std::string>& declared = chaUpDeclared[ std::string( derivedName ) ];
-            if( std::find( declared.begin(), declared.end(), ir.calleeName ) == declared.end() )
-            {
-                declared.push_back( ir.calleeName );   // source order (ing.references is in (file, byte) order)
-            }
-        }
-        addTypeAliasBases( ing, chaUp );   // a typedef / using alias continues at its target class; dedup below is order-independent
-        for( auto& [ k, v ] : chaUp )   { sortutil::sortUnique( v ); }
-        for( auto& [ k, v ] : chaDown ) { sortutil::sortUnique( v ); }
-    }
+    buildChaNameGraph( ing, rubyBases, chaUp, chaDown, chaUpDeclared );   // buildGraph/2h
     const RubyCha                  rubyCha   = buildRubyCha( ing, rubyBases, chaUp, chaDown );
     const ChaUpNames&              rubyUp    = rubyCha.merged ? rubyCha.up : chaUp;     // a Ruby call to self reads mixins too
     const RubySelfReach            rubyReach = buildRubySelfReach( ing, rubyUp, rubyCha.merged ? rubyCha.down : chaDown, rubyBases );
