@@ -1445,43 +1445,75 @@ claudeMdHoldsBlurb()
     return 1
 }
 # agentsMdHoldsBlurb DIR BLURB: the Codex counterpart (θ20, 2026-11-27): true when an AGENTS.md that Codex loads at session start
-# already holds BLURB word for word. Codex's documented discovery (learn.chatgpt.com/docs/agent-configuration/agents-md): the
-# global level in ${CODEX_HOME:-~/.codex} is AGENTS.override.md when non-empty, else AGENTS.md; then one file per directory from
-# the project root (the Git root) down to DIR, AGENTS.override.md before AGENTS.md; root-first, and no file is added once the
-# combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it). CONSERVATIVE where that is not modelled:
-# a file only counts when every byte up to its end lies within 32 KiB, the global file included; a config.toml (user-level,
-# any profile, or a project .codex/ one) naming project_doc_max_bytes, project_doc_fallback_filenames or project_root_markers
-# keeps the primer; carriage returns ignored. test/hookcheck.sh (3i7) pins each case.
-agentsMdHoldsBlurb()
+# already holds BLURB word for word. Codex's documented discovery (learn.chatgpt.com/docs/agent-configuration/agents-md; the
+# selection below follows codex-rs core/src/agents_md.rs at rust-v0.164.0): the global level in ${CODEX_HOME:-~/.codex} is
+# AGENTS.override.md when non-empty, else AGENTS.md; then, for a TRUSTED project only, one file per directory from the project root
+# (the Git root) down to DIR, where an AGENTS.override.md that exists is taken even when empty (no fallback to AGENTS.md beside
+# it); root-first, and no file is added once the combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it).
+# CONSERVATIVE where that is not modelled: a file only counts when every byte up to its end lies within 32 KiB, the global file
+# included; a config.toml (system /etc/codex, user-level, any profile, or a project .codex/ one) naming project_doc_max_bytes,
+# project_doc_fallback_filenames or project_root_markers keeps the primer; trust is read only from a `[projects."<root or DIR>"]`
+# table in the user config.toml whose trust_level is "trusted" (any other spelling: untrusted, project files not matched);
+# carriage returns ignored. test/hookcheck.sh (3i7) pins each case (the /etc/codex layer is out of a gate's sandbox).
+codexDiscoveryKeys() # FILE...: true when a readable config file names a key that changes AGENTS.md discovery or its byte limit
 {
-    local d="${1%/}" want="$2" f text size top total=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
-    local -a files=() dirs=()
-    for f in "$home/config.toml" "$home/"*.config.toml
+    local f text
+    for f in "$@"
     do
         claudeMdRead "$f" || continue
-        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 1
+        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 0
     done
-    top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || return 1
-    [ -n "$top" ] || return 1
-    top="$( cd "$top" 2>/dev/null && pwd -P )" && d="$( cd "$d" 2>/dev/null && pwd -P )" || return 1
-    [ "$d" = "$top" ] || [[ "$d" == "$top"/* ]] || return 1
-    while :
+    return 1
+}
+codexProjectTrusted() # CONFIG ROOT DIR: true when CONFIG has a [projects."ROOT"] or [projects."DIR"] table with trust_level = "trusted"
+{
+    local text line p in=0
+    claudeMdRead "$1" || return 1
+    while IFS= read -r line
     do
-        dirs=( "$d" ${dirs[@]+"${dirs[@]}"} )   # bash 3.2 + set -u: an empty array is unbound
-        [ "$d" = "$top" ] && break
-        d="${d%/*}"
-    done
-    for f in "${dirs[@]}"
-    do
-        [ -f "$f/.codex/config.toml" ] || continue
-        claudeMdRead "$f/.codex/config.toml" || continue
-        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 1
-    done
-    for f in "$home" "${dirs[@]}"
-    do
-        if [ -s "$f/AGENTS.override.md" ]; then files+=( "$f/AGENTS.override.md" )
-        elif [ -s "$f/AGENTS.md" ]; then files+=( "$f/AGENTS.md" ); fi
-    done
+        line="${line%$'\r'}"
+        if [[ "$line" =~ ^[[:space:]]*\[ ]]
+        then
+            in=0
+            for p in "$2" "$3"
+            do
+                [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*$ ]] && [ "${BASH_REMATCH[1]}" = "$p" ] && in=1
+            done
+        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*\"trusted\" ]]
+        then
+            return 0
+        fi
+    done <<< "$text"
+    return 1
+}
+agentsMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text size top cwd total=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
+    local -a files=() dirs=()
+    codexDiscoveryKeys "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/config.toml" "$home/"*.config.toml && return 1
+    if [ -s "$home/AGENTS.override.md" ]; then files+=( "$home/AGENTS.override.md" )
+    elif [ -s "$home/AGENTS.md" ]; then files+=( "$home/AGENTS.md" ); fi
+    top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || top=""
+    if [ -n "$top" ] && top="$( cd "$top" 2>/dev/null && pwd -P )" && cwd="$( cd "$d" 2>/dev/null && pwd -P )" \
+        && { [ "$cwd" = "$top" ] || [[ "$cwd" == "$top"/* ]]; } && codexProjectTrusted "$home/config.toml" "$top" "$cwd"
+    then
+        d="$cwd"
+        while :
+        do
+            dirs=( "$d" ${dirs[@]+"${dirs[@]}"} )   # bash 3.2 + set -u: an empty array is unbound
+            [ "$d" = "$top" ] && break
+            d="${d%/*}"
+        done
+        for f in "${dirs[@]}"
+        do
+            codexDiscoveryKeys "$f/.codex/config.toml" && return 1
+        done
+        for f in "${dirs[@]}"
+        do
+            if [ -f "$f/AGENTS.override.md" ]; then files+=( "$f/AGENTS.override.md" )   # taken even when empty
+            elif [ -s "$f/AGENTS.md" ]; then files+=( "$f/AGENTS.md" ); fi
+        done
+    fi
     for f in ${files[@]+"${files[@]}"}
     do
         size="$( wc -c < "$f" 2>/dev/null )"

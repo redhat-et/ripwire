@@ -523,8 +523,18 @@ if [ -x "$REALBIN" ]; then
     # agentsMdHoldsBlurb). PRESENT -> silent; ABSENT, STALE and NOT DELIVERED -> byte-identical to the block as SessionStart JSON.
     # NOT DELIVERED covers what Codex would not inject or might cut: a non-empty AGENTS.override.md beside the file (Codex takes one
     # file per directory, the override first), a file above the Git root, a file past the 32 KiB project_doc_max_bytes default, and
-    # a config.toml naming a discovery key (kept conservatively). Every arm counts what it planted and FAILS on zero.
+    # a config.toml naming a discovery key (kept conservatively), and (CodeRabbit #831) an EMPTY AGENTS.override.md (Codex takes it
+    # anyway) and an untrusted project (Codex loads no project file then). Every arm counts what it planted and FAILS on zero.
     # RED on the hook without agentsMdHoldsBlurb: every PRESENT arm prints the block.
+    # The system layer /etc/codex is read too and a gate cannot sandbox it: a discovery key there keeps every PRESENT case's primer.
+    ssdx_sys=""
+    for ssd_f in /etc/codex/config.toml /etc/codex/managed_config.toml; do
+        [ -r "$ssd_f" ] && grep -qE 'project_doc_max_bytes|project_doc_fallback_filenames|project_root_markers' "$ssd_f" 2>/dev/null \
+            && ssdx_sys="the system file $ssd_f names a discovery key"
+    done
+  if [ -n "$ssdx_sys" ]; then
+    echo "  SKIP  Codex dedup (3i7): $ssdx_sys on this machine"
+  else
     if command -v jq >/dev/null 2>&1; then
         SSDX_WANT="$( jq -n --arg m "$SSD_CODEX" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
     else
@@ -537,6 +547,10 @@ if [ -x "$REALBIN" ]; then
     if [ "${SSDX_LINES:-0}" -ge 10 ] && printf '%s' "$SSD_CODEX" | grep -q '^## ripwire' && [ "$SSD_CODEX" != "$SSD_BLURB" ]; then
         ok "Codex dedup: the wrap codex block to plant has $SSDX_LINES lines and differs from Claude's"
     else no "Codex dedup: the wrap codex block has ${SSDX_LINES:-0} lines or equals Claude's; every arm below is vacuous"; fi
+    # Codex reads a project's AGENTS.md files only when the project is trusted (CodeRabbit #831): the user config.toml trusts this
+    # fixture's Git root for every arm below except the untrusted ones, which rewrite it
+    SSDX_TRUST="$( printf '[projects."%s"]\ntrust_level = "trusted"\n' "$( cd "$SSDREPO" && pwd -P )" )"
+    printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
     SSDX_ABS="$( ssdx_run xabsent )"
     [ -n "$SSDX_ABS" ] && [ "$SSDX_ABS" = "$SSDX_WANT" ] \
         && ok "Codex dedup ABSENT: no AGENTS.md holds the block -> the block is sent, byte-identical to before (${#SSDX_ABS} B)" \
@@ -598,17 +612,31 @@ if [ -x "$REALBIN" ]; then
     for ssd_case in "user config.toml naming project_doc_max_bytes|$CODEX_HOME/config.toml|project_doc_max_bytes = 65536" \
                     "a profile's config.toml naming project_doc_fallback_filenames|$CODEX_HOME/work.config.toml|project_doc_fallback_filenames = [\"TEAM.md\"]" \
                     "project .codex/config.toml naming project_root_markers|$SSDREPO/.codex/config.toml|project_root_markers = []"; do
-        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; mkdir -p "${ssd_file%/*}"; printf '%s\n' "${ssd_rest#*|}" > "$ssd_file"
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; mkdir -p "${ssd_file%/*}"; printf '%s\n' "${ssd_rest#*|}" >> "$ssd_file"
         ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDCWD/AGENTS.md"; rm -f "$ssd_file" "$SSDCWD/AGENTS.md"
+        printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"   # the user-config arm appended to it; the others leave it as it was
     done
+    # CodeRabbit #831: an AGENTS.override.md that exists is taken even when empty, with no fallback to the AGENTS.md beside it
+    ssd_plant "$SSDCWD/AGENTS.md" "$SSD_CODEX"; : > "$SSDCWD/AGENTS.override.md"
+    ssdx_keep "an EMPTY AGENTS.override.md beside the AGENTS.md" "$SSDCWD/AGENTS.md"; rm -f "$SSDCWD/AGENTS.md" "$SSDCWD/AGENTS.override.md"
+    # CodeRabbit #831: an untrusted project's AGENTS.md files are not loaded; the global level still is (a PRESENT arm above)
+    for ssd_case in "an untrusted project: no [projects] table|model = \"x\"" \
+                    "an untrusted project: trust_level = \"untrusted\"|$( printf '[projects."%s"]\ntrust_level = "untrusted"' "$( cd "$SSDREPO" && pwd -P )" )" \
+                    "a [projects] table for another path|$( printf '[projects."%s/elsewhere"]\ntrust_level = "trusted"' "$( cd "$SSDREPO" && pwd -P )" )"; do
+        ssd_name="${ssd_case%%|*}"; printf '%s\n' "${ssd_case#*|}" > "$CODEX_HOME/config.toml"
+        ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$SSDREPO/AGENTS.md"
+    done
+    printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
     ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssdx_keep "the block in CLAUDE.md, which Codex does not read" "$SSDCWD/CLAUDE.md"; rm -f "$SSDCWD/CLAUDE.md"
-    [ "$ssdx_cases" -eq 8 ] && [ "$ssdx_kept" -eq 8 ] && ok "Codex dedup NOT DELIVERED: 8 of 8 keep the primer" \
-        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 8 of 8)"
+    [ "$ssdx_cases" -eq 12 ] && [ "$ssdx_kept" -eq 12 ] && ok "Codex dedup NOT DELIVERED: 12 of 12 keep the primer" \
+        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 12 of 12)"
     # Claude is not deduped against AGENTS.md (Claude Code reads CLAUDE.md), even when AGENTS.md holds Claude's own block
     ssd_plant "$SSDCWD/AGENTS.md" "$SSD_BLURB"; ssd_out="$( ssd_run xclaude )"
     [ -n "$ssd_out" ] && [ "$ssd_out" = "$SSD_ABS" ] && ok "Codex dedup: the Claude primer still speaks with AGENTS.md holding its block" \
         || no "Codex dedup: the Claude primer went silent or changed with AGENTS.md holding its block (out=${#ssd_out} B)"
     rm -f "$SSDCWD/AGENTS.md"
+    rm -f "$CODEX_HOME/config.toml"
+  fi
   fi
     unset CLAUDE_CONFIG_DIR CODEX_HOME
 else
