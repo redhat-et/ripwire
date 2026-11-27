@@ -504,53 +504,6 @@ split, with an unbudgeted treatment arm and an unisolated baseline. Both figures
 non-comparable**: they measured a different configuration badly, and nothing here "corrects" them —
 this section is simply the first measurement of *this* configuration under a design worth trusting.
 
-**Accounting columns, consistency and the history-leakage gate (added 2026-11-26, no new runs).**
-Three additions to the harness; none changes the meaning of a column above, and no agent was run to
-make them.
-
-- *Cost is split four ways.* Under prefix caching a token total does not price a run: "Context Has a
-  Price" (arXiv 2611.22238) measured retrieved code that cut read/search commands by 18-34% and raised
-  cost by 33-42% at a one-tenth cache price. Every record now carries `split_uncached_in`,
-  `split_cache_write`, `split_cache_read` and `split_output`, read from the run's own transcript by
-  `bench/agentloop/cost_accounting.py`, plus `tool_calls` (every tool, of any kind) and `model_calls`
-  (the harness's own request count). `analyze.py` prints them per arm and per task beside the existing
-  `tokens_in`/`tokens_out`/`cost_usd` totals and wall clock, re-deriving them from `events_path` for
-  records written before the fields existed. A cell a transcript does not carry is n/a, never 0, and a
-  run whose split is missing is counted out loud. Codex reports no cache-write count, so that cell is
-  n/a on every codex run. The -9.2% output-token figure above is a `tokens_out` figure; it says nothing
-  about cache reads, which this tranche did not split. `test/agentloopaccountingcheck.sh` pins the split
-  on hand-set fixture usage for all three harnesses.
-- *opencode's headline columns are sums now.* Each opencode `step_finish` carries that step's own
-  usage, but the runner kept only the last step for `tokens_in`, `tokens_out` and `cost_usd`, so it
-  undercounted every multi-step run. On the two-step fixture it read 100 / 200 / 0.17 where the run spent
-  1,000 / 500 / 0.42. All three now sum over every step, in `run_agentloop.py` and so in
-  `run_editsuite.py`, which calls the same parser. For opencode `tokens_in` equals `split_uncached_in`,
-  because opencode's `input` field already excludes the cache. The identity uncached + cache read + cache
-  write = `tokens_in` therefore does not hold (31,000 against 1,000 on the fixture). `analyze.py`
-  re-derives an older opencode record's three columns from its transcript. Without a transcript it keeps
-  the old value but labels it a last-step floor, never a total. Claude and codex columns are unchanged.
-  **Published opencode numbers computed the old way: none found.** A grep of `docs/`, `README.md`,
-  `CHANGELOG.md` and `bench/agentloop/*.md` finds no opencode token or cost figure; results directories
-  were not opened.
-- *pass^k beside pass@1.* For each arm, the per-task single-trial rate and pass^k, the chance that all
-  k trials succeed (estimated as C(c,k)/C(n,k)), for every k from 2 to the largest trial count, each
-  with its task count. Only ok-status scored runs are trials; the rest are counted as excluded, not as
-  failures. Same gate.
-- *No checkout reaches past base_commit.* Agents exploit local git history ("Shortcutting the Fix",
-  arXiv 2609.06780), and ripwire reads git history itself, so a leaked fix would be credited to the
-  tool. Before this change the runner handed the agent its per-repo fetch cache. On a fixture with one
-  commit after `base_commit` and two tags on it, `test/agentloophistorycheck.sh` was red on all 6 arms
-  at `5f4b50415`: a fresh checkout kept an `origin` remote; a cache reused from a later instance of the
-  same repo kept the future commit in its object store and reflog; the unshallow fallback brought both
-  tags and every `origin/*` branch; and QUESTIONS mode's `git worktree add` shared the corpus's whole
-  ref namespace. Each run now gets a freshly built repository holding `base_commit` (depth 1; QUESTIONS
-  mode keeps every ancestor), with no remote, tags or reflog, and `run_one()` refuses any checkout
-  `history_leak_findings()` does not pass. Whether the 2026-08-21 tranche above was exposed is not
-  established here: it depends on whether any repo contributed two instances in a leaking order and
-  whether the fallback ever fired, and this change did not reopen its results. Its checkouts did carry
-  the `origin` remote. The cache itself still sits on disk beside the workspace; the guard covers what
-  the checkout's repository can reach, not a filesystem walk out of it.
-
 ## 4. Ranking changes, measured
 
 ### Query-shape routing
@@ -11773,30 +11726,10 @@ preview; both surfaces route through one `editpreview::run`.
 
 **Cost, reported as a ledger and never as a gate.** On `src/` (130 files), warm: the post-hoc
 `--edit-check` is ~92 ms and the preview ~280 ms (three runs each, same machine, same warm caches). The
-delta was two single-file ingests — the spliced file and, for the honest error-node baseline, the original —
-plus one `buildGraph()` over the merged tree. The baseline parse was deliberate, because `fileBytes == 0` in
-`ing.fileHealth` means NOT MEASURED, and a silent zero baseline would refuse every payload.
-
-**2026-11-26 (EDITCHECK-PREVIEW-FAST): the baseline is read off the index when the index measured it.** The
-content cache has carried `FileHealth` since v13 and the warm snapshot carries it too, so on a warm run the
-count is the run's own measurement. `editpreview::errNodesOnDisk` reads it when `fileBytes` is non-zero and
-equals the length of the bytes on disk now, and parses the original exactly as before otherwise, so the
-zero-baseline trap above cannot be reached. `test/editpreviewwarmcheck.sh` (C) counts parses across the
-run (`RIPWIRE_CACHE_STATS`: 1, was 2) and (K) holds the refusal on the warm path. Release, medians, on a
-loaded machine (load average ~40 on 18 cores, not quiet): on this repo with `src/graph.h:rankGraphTeleport`
-(1.2 MB file), n=10, the warm preview went 0.945 s → 0.78 s wall and 1.335 s → 0.995 s CPU, against
-0.32–0.37 s for the post-hoc verb. Of what the preview still adds (~0.56 s CPU), about 0.33 s is the one
-remaining parse and about 0.22 s is the merged `buildGraph()`. On envoy (n=5) the preview is 7.14 s against
-a 2.12 s plain run, and on llvm (n=5) 37.56 s against 4.62 s. Those gaps are the merged `buildGraph()`,
-which this round does not change.
-
-The same lane measured the first-run-after-a-commit cost the agent hook reported (10.11 s for a plain
-`--edit-check` against a new HEAD, warm cache; its 15.36 s preview was a cold-cache run). The cost is the
-HEAD baseline: the qheadsnap ingest cache is named by HEAD sha, so the first edit-check of any kind after a commit
-re-parsed the whole committed tree (this repo: `reparsed=4991 reused=5`). `quality::seedHeadSnapCache`
-copies the newest blob of the same (repo, excludes) family to the new sha's name first. Its records are
-validated per file on load, so only what the commit changed is reparsed. Gate arm (H) checks this. The
-first preview after a one-file commit on this repo went 11.63 s → 8.20 s wall (n=5, same loaded machine).
+delta is two single-file ingests — the spliced file and, for the honest error-node baseline, the original —
+plus one `buildGraph()` over the merged tree. Deliberate: reading the "before" error count off
+`ing.fileHealth` instead would cost nothing, but `fileBytes == 0` there means NOT MEASURED, which on a
+cache-served parse becomes a silent zero baseline that refuses every payload.
 
 **Clean:** ASan/UBSan (`-fno-sanitize-recover=all`, committed LSan suppressions) over the whole 37-payload
 sweep and over the whole-repo map; three byte-identical preview runs; `xmllint --noout` on the preview
