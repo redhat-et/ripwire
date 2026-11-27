@@ -34,9 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# 2026-11-27, train m5-1126-4 merged with origin/main e00a29bfc (#819 ONE-PARSE merged): RE-PINNED with UPDATE_GOLDEN=1 on the
-#   MERGED sources. Both sides had already re-pinned, so NEITHER value described this tree: the train carried
-#   406ec22c68...f091e15a6 and main carried 232a5bc864...b818ce3b. kCacheVersion stays 57 (lane asserted-signal) and is now
+# 2026-11-27, train m5-1126-4 merged with origin/main e00a29bfc (#819 ONE-PARSE merged): RE-DERIVED with UPDATE_GOLDEN=1 on
+#   the MERGED sources rather than taken from either side, because both sides had already re-pinned (the train
+#   406ec22c68...f091e15a6, main 232a5bc864...b818ce3b) and a picked side can describe neither tree. The derivation came back
+#   EQUAL TO THE TRAIN'S value, and that is a result, not a shortcut that was available in advance: this pin covers the 35
+#   manifest functions plus the extraction identity (kCacheVersion + kParserVer), the merged tree carries the train's 57/350,
+#   and #819 moved none of the 35 bodies — so main's value differed only by its 56/342. kCacheVersion stays 57 and is now
 #   above main's 56 (lane c1-one-parse), whose one-blob record shape — the subtoken dictionary before the defs and the
 #   valueUse u8 on every ref — this merged tree also carries, so 57 describes BOTH changes. kParserVer and its mirror stay
 #   350 (train m5-1126-5's landing renumber; main never moved off 342). kQSnapCacheScheme is UNTOUCHED: the extraction key
