@@ -361,6 +361,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // graph.h StdMemberGate: the callees answer's <stdm> line, absent when the definitions made no such call (graphlegend.h kStdMemberCallsLegend).
     // Keyed on n= (read on <stdm> only): the attribute the full clause opens with, which compactlegendcheck (S) reads.
     { "n",                 "stdm n= calls=: of declined_calls=, calls named like a standard-type member of their language (C++ container/string/optional/smart pointer, Rust collection/string/Option/Result; n=) on a receiver no rule tied to an in-tree class (Rust: one of an in-tree type no rule typed too: a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a non-plain pattern, behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock); no edge or row (may be the std member)", false, "stdm" },
+    // CALLEE-GAP (graph.h unresolvedCallsMadeBy, graphlegend.h kUnresolvedCallsLegend): the callees answer's <unres> line, present-only.
+    { "n",                 "unres n= calls= more=: called names defined in-tree, yet no edge, row or dc (every def ruled out: other language, the qualifier, a local/indirect call); calls= sites, more= names not shown; not a reach claim", false, "unres" },
     // Reference-as-value round (graphlegend.h kValueRefs*Legend, src/valuerefs.h): every term absent at zero, present-only.
     // Each says what a value row does NOT mean in the same breath (checklist 3): matched by name, not a proven call.
     { "value_refs",        "value_refs=N: N vr rows, the function used as a VALUE (stored or passed), matched by name; not a proven call, in no count or reach" },

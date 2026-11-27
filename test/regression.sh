@@ -1209,6 +1209,7 @@ for _g in \
     type3clonecheck \
     typerefcheck \
     unreachablecheck \
+    unrescalleescheck \
     unresolvedcheck \
     usescheck \
     usesliteralcheck \

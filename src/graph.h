@@ -238,6 +238,13 @@ struct Graph
     // ( caller, kStdMemberNames flat index ), sorted after the resolve loop: the callees answer's <stdm> line.
     std::size_t                                    stdMemberDeclinedCalls = 0;
     std::vector<std::pair<NodeId, std::uint16_t>>  stdMemberDeclines;
+    // CALLEE-GAP: one entry per call the resolver left with NO edge and NO decline record although its name has an in-tree
+    // definition — disposition Unresolved (every definition filtered: another language, a known-indirect call, a local or
+    // closure, a refused ES import) or QualifiedExternal (the written Rust qualifier ruled every definition out) on a path not
+    // provably outside the tree — as
+    // ( caller, ing.references index ), sorted after the resolve loop. Read by unresolvedCallsMadeBy: the callees answer's
+    // <unres> line, which names these calls so a callee the graph could not bind is not silently absent. 8 B per such call.
+    std::vector<std::pair<NodeId, std::uint32_t>>  unresolvedSites;
     // lane fcall-forward fix 1: the ing.references indices (ascending) of the FORWARDED call references (model.h
     // Reference::forwarded) whose call the resolve loop kept — bound, proven, to a function or method. Every other forwarded
     // reference stands for no call the code makes, so the use-site index skips it too (verbs_navigate.h collectUseSites).
@@ -7002,13 +7009,22 @@ inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const 
 // Counts one call reference's disposition when its resolve-loop iteration ENDS — on every exit, each `continue`
 // included — so no exit needs a counter of its own, only the assignment naming what happened. A reference that
 // leaves naming nothing is counted Unaccounted, and the conservation line cannot balance silently.
+// CALLEE-GAP: an Unresolved exit also records its site (Graph::unresolvedSites), the same one place; the QualifiedExternal exit
+// records its own, only where the written path is not provably outside the tree (buildGraph's Rust scope guard).
 struct DispositionTally
 {
     const CallDisposition& disposition;
     CallDispositionCounts& counts;
+    std::vector<std::pair<NodeId, std::uint32_t>>& unresolvedSites;
+    NodeId                 caller;
+    std::size_t            site;
     ~DispositionTally()
     {
         ++counts[ std::size_t( disposition ) ];
+        if( disposition == CallDisposition::Unresolved && caller != kNoNode )
+        {
+            unresolvedSites.emplace_back( caller, std::uint32_t( site ) );
+        }
     }
 };
 
@@ -12632,7 +12648,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // From here on every exit names its disposition and the tally counts it when the iteration ends,
         // whichever `continue` ends it. An exit that names nothing is counted Unaccounted (DispositionTally).
         CallDisposition        disposition = CallDisposition::Unaccounted;
-        const DispositionTally tally{ disposition, subscript ? subscriptDispositions : g.callDispositions };
+        const DispositionTally tally{ disposition, subscript ? subscriptDispositions : g.callDispositions, g.unresolvedSites, r.fromSymbol, siteIndex };
         if( r.fromSymbol == kNoNode )
         {
             disposition = CallDisposition::FileScope;   // no caller node for an edge; the use-site index still lists the site
@@ -13784,6 +13800,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
             disposition = CallDisposition::QualifiedExternal;                   // qualified-external → no edge
+            // CALLEE-GAP: a path the layout cannot place outside the tree (an in-tree module or package whose `pub use` re-export
+            // the guard does not read: zed's `language_model::read_credentials`) is an in-tree call with no edge — the callees
+            // answer's <unres> line names it. `HashSet::new()` through `use std::…`, `env_logger::try_init()` stay unrecorded.
+            if( !recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, std::string( rustWrittenQualifierOf( r ) ) + "::" + r.calleeName ) )
+            {
+                g.unresolvedSites.emplace_back( r.fromSymbol, std::uint32_t( siteIndex ) );
+            }
             continue;
         }
 
@@ -14615,6 +14638,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     narrower.identity.levelsQueued );
     }
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
+    std::sort( g.unresolvedSites.begin(), g.unresolvedSites.end() );       // grouped by caller, then site: unresolvedCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the
     // edges are right and the census's conservation line is not. Every plain build says so, census or not.
     if( g.callDispositions[ std::size_t( CallDisposition::Unaccounted ) ] > 0 )
@@ -21711,6 +21735,60 @@ inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const 
     }
     ENSURES( out.names.empty() == ( out.calls == 0 ), "a named call and a listed name come together" );
     DASSERT( out.calls <= declinedCallsMadeBy( g, sources ), "every listed call is one of the declines the sources made" );
+    return out;
+}
+
+// CALLEE-GAP: the callees answer's <unres> line — the calls `sources` made that kept NO edge and NO decline record although
+// the called name has an in-tree definition (Graph::unresolvedSites). Distinct CALLED names in the order the body first
+// makes them (file, then line, then source order), at most kUnresolvedNamesCap, more = the distinct names past it, calls =
+// every such call. The one gap --callees otherwise left silent: graph_unresolved= counted it for the whole corpus, no row
+// named it here (BRIEF-SHAPE-AUDIT 11-25; cpython's PyErr_Occurred, zed's re-exported language_model::read_credentials).
+inline constexpr std::size_t kUnresolvedNamesCap = 8;
+struct UnresolvedCallsMade
+{
+    std::vector<std::string_view> names;   // shown, first-call order
+    std::size_t                   more  = 0;
+    std::size_t                   calls = 0;
+};
+inline UnresolvedCallsMade unresolvedCallsMadeBy( const IngestResult& ing, const Graph& g, std::span<const NodeId> sources )
+{
+    UnresolvedCallsMade out;
+    if( g.unresolvedSites.empty() )
+    {
+        return out;
+    }
+    EXPECTS( std::is_sorted( g.unresolvedSites.begin(), g.unresolvedSites.end() ), "buildGraph sorts the sites after its resolve loop" );
+    std::vector<std::uint32_t> refs;
+    for( const NodeId s : sources )
+    {
+        const auto lo = std::lower_bound( g.unresolvedSites.begin(), g.unresolvedSites.end(), std::pair<NodeId, std::uint32_t>( s, 0 ) );
+        for( auto it = lo; it != g.unresolvedSites.end() && it->first == s; ++it )
+        {
+            ASSUME( it->second < ing.references.size(), "the resolve loop records an ing.references index" );
+            refs.push_back( it->second );
+        }
+    }
+    out.calls = refs.size();
+    std::sort( refs.begin(), refs.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        const Reference& ra = ing.references[ a ];
+        const Reference& rb = ing.references[ b ];
+        if( ra.fileId != rb.fileId ) { return ra.fileId < rb.fileId; }
+        return ra.line != rb.line ? ra.line < rb.line : a < b;
+    } );
+    std::vector<std::string_view> seen;
+    for( const std::uint32_t ref : refs )
+    {
+        const std::string_view name = ing.references[ ref ].calleeName;
+        if( std::find( seen.begin(), seen.end(), name ) == seen.end() )
+        {
+            seen.push_back( name );
+        }
+    }
+    const std::size_t shown = std::min( seen.size(), kUnresolvedNamesCap );
+    out.names.assign( seen.begin(), seen.begin() + std::ptrdiff_t( shown ) );
+    out.more = seen.size() - shown;
+    ENSURES( out.names.empty() == ( out.calls == 0 ), "a recorded call and a listed name come together" );
     return out;
 }
 
