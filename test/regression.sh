@@ -890,6 +890,7 @@ for _g in \
     oswin32logiccheck \
     outlinecheck \
     outputceilingcheck \
+    ownedasksitescheck \
     overbudgetcommentcheck \
     ownerhopcheck \
     ownerscheck \

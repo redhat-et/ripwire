@@ -7433,6 +7433,42 @@ struct IdentityNarrower
     mutable HashMap<std::uint64_t, PlausibleAnswer>       plausibleMemo;
     mutable std::size_t                                   ownedAsks = 0, plausibleReads = 0;   // RIPWIRE_STATS `[mem] plausible`: ownedBy's out-of-line asks; plausibleOfName answers read
 
+    // OWNED-ASK-SITES (RIPWIRE_STATS `[mem] owned_sites`, test/ownedasksitescheck.sh). WHICH walk drives the out-of-line
+    // asks, because the ask VOLUME is the resolve loop's super-linear term and the fills behind it are not: measured
+    // 2026-11-27, envoy -> llvm-project is x779.5 in asks (41,943 -> 32,694,013) while files grow x7.30 and
+    // plausibleReads — the recomputations those asks hit — grow only x4.19 (4,505 -> 18,869). So the loop spends its one
+    // core ASKING, and a fix has to know which of the nested walks asks.
+    // A COUNT, never a time, deliberately: a profiler scope around a ~100 ns probe taken 47.5M times costs more than the
+    // thing it measures. The counts are deterministic and stderr-only under RIPWIRE_STATS; the ambient `askSite` below
+    // chooses a COUNTER's bucket and nothing else, so no answer depends on it.
+    enum class AskSite : std::uint8_t
+    {
+        Other = 0,   // every caller that names no site (ReceiverEvidence's own probes, ValueRefIndex, the Ruby side tables)
+        Cone,        // Narrower::guardedConeOwns — the guarded base-class cone: per cone name, per def, per meant class
+        Append,      // IdentityNarrower::appendOwnedOf — per def of a name
+        Level,       // Narrower::probeGuardedLevel — per def, per meant class of one walk level
+        kCount
+    };
+    mutable std::array<std::size_t, std::size_t( AskSite::kCount )> ownedAsksBySite {};
+    mutable AskSite                                       askSite = AskSite::Other;   // set by the enclosing walk, read where ownedAsks is counted
+
+    // Names the enclosing walk for every ask made inside it, and restores the previous name on each exit path. NESTING: the
+    // innermost scope owns the ask, so one ask lands in exactly ONE bucket and the buckets sum to ownedAsks — the invariant
+    // the gate's arm 2 holds, and what lets the attribution be read as a partition rather than a tally.
+    struct AskSiteScope
+    {
+        explicit AskSiteScope( const IdentityNarrower& narrower, AskSite site ) noexcept : owner( narrower ), previous( narrower.askSite )
+        {
+            owner.askSite = site;
+        }
+        ~AskSiteScope() { owner.askSite = previous; }
+        AskSiteScope( const AskSiteScope& )            = delete;
+        AskSiteScope& operator=( const AskSiteScope& ) = delete;
+
+        const IdentityNarrower& owner;
+        const AskSite           previous;
+    };
+
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
         : canonByName( canon ), fileIncludes( incl ), symFileId( symFile ) {}
@@ -7832,6 +7868,7 @@ struct IdentityNarrower
         {
             return false;
         }
+        const AskSiteScope askSiteHere( *this, AskSite::Append );   // OWNED-ASK-SITES
         const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
         bool owns = false;
         for( NodeId d : *defs )
@@ -7872,6 +7909,7 @@ struct IdentityNarrower
     bool ownedOutOfLine( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>& sameNamed, const ClassIdentity& ids ) const
     {
         ++ownedAsks;
+        ++ownedAsksBySite[ std::size_t( askSite ) ];   // OWNED-ASK-SITES: the innermost naming walk owns it (one ask, one bucket)
         const std::span<const NodeId> plausibleHere = plausibleOfName( sameNamed, fileOf( def, ids ), ids );   // defined out of line in another file
         return std::binary_search( plausibleHere.begin(), plausibleHere.end(), cls );
     }
@@ -9322,6 +9360,7 @@ struct Narrower
     {
         const ClassIdentity& ids = baseGuard->ids;
         GuardedProbe         out;
+        const IdentityNarrower::AskSiteScope askSiteHere( identity, IdentityNarrower::AskSite::Level );   // OWNED-ASK-SITES
         walkUnion.clear();
         for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
         {
@@ -9421,6 +9460,7 @@ struct Narrower
     {
         keepGuardedCone( cls, chaUp );
         const ClassIdentity& ids = baseGuard->ids;
+        const IdentityNarrower::AskSiteScope askSiteHere( identity, IdentityNarrower::AskSite::Cone );   // OWNED-ASK-SITES
         guardKey.assign( owner );
         const auto named   = ids.classesByName.find( guardKey );
         bool       reached = false;

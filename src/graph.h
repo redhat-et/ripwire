@@ -14603,6 +14603,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} cones={} meant_asks={} meant={}\n", gw.calls, gw.walks, gw.cones, narrower.meantAsks, gw.meant );
         rw::emitTo( stderr, "[mem] guarded_answer asks={} kept={}\n", gw.calls, gw.answered );
         rw::emitTo( stderr, "[mem] plausible owned_asks={} reads={}\n", narrower.identity.ownedAsks, narrower.identity.plausibleReads );
+        // OWNED-ASK-SITES: the owned_asks above, split by the walk that asked (resolve.h IdentityNarrower::AskSite). The
+        // buckets sum to owned_asks by construction — one ask, one innermost scope — which test/ownedasksitescheck.sh holds.
+        using AskSite              = IdentityNarrower::AskSite;
+        const auto& askSiteCounts  = narrower.identity.ownedAsksBySite;
+        rw::emitTo( stderr, "[mem] owned_sites cone={} level={} append={} other={}\n",
+                    askSiteCounts[ std::size_t( AskSite::Cone ) ], askSiteCounts[ std::size_t( AskSite::Level ) ],
+                    askSiteCounts[ std::size_t( AskSite::Append ) ], askSiteCounts[ std::size_t( AskSite::Other ) ] );
         rw::emitTo( stderr, "[mem] base_edges pairs={}\n", narrower.baseEdgePairs );
         rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
