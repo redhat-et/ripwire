@@ -229,6 +229,34 @@ hard way, across several trains, each time by a gate the verb-grep never reached
    header this can be most of the suite (hundreds of gates), and that size is the honest answer, not a
    sign to narrow the query: run the local intersection this sweep names and let CI carry the rest, but
    never conclude "no gate covers this" without having actually run the command.
+5. **Published-artifact gates — the class clause 2's sweep cannot reach.** A gate that validates a
+   COMMITTED ARTIFACT against the whole tree can red from a change in a file it never names, so neither a
+   verb grep nor clause 2's file sweep finds it: the gate's text contains none of your filenames. Captures,
+   pinned hashes, legend dictionaries and counts snapshots are all this shape. Live instance (PR #827): the
+   change touches `src/cli.h`, `src/compactlegend.h`, `docs/COMMANDS.md`, `test/printf_parity.manifest` and
+   a changelog fragment, and it reds `showcasecapturecheck`, which names none of them —
+
+   ```text
+   recorded in docs/captures/COMMANDS_showcase_2026-11-23.md:  dictv=82bb3d7addbeecea entries=1326
+   live from the branch's binary (ripwire . --legend-dict):     dictv=2fbfd1041fcbf942 entries=1326
+   ```
+
+   `dictv` is FNV-1a 64 of the definition LINES, so editing one existing definition's TEXT moves the hash
+   while `entries` holds, and arm (I) compares the two. The detection rule is the INVERSE of clause 2: ask
+   which committed artifacts your change could invalidate, not which gates mention your files.
+
+   Reading the reds it produces: **ubuntu reds = failing gates × 4 legs**, so 4 reds is ONE gate (#827's
+   four were all shard 1/4, on all four legs) and 16 would be one gate in every shard. Do the arithmetic
+   before concluding that several lanes share a cause — measured over 40 CI runs on 2026-11-27, 13 runs had
+   ubuntu shard reds and each lane was reding its OWN gates.
+
+   The rule was applied to THIS clause before it landed, which is the shortest demonstration of it: the
+   showcase capture pins `live=` for `CONTRIBUTING.md` (its `--doc-drift` anchors that have drifted and carry
+   no date), so editing this file is itself a candidate for moving a committed artifact. Measured rather than
+   assumed — `anchors="245" checked="169" drift="2" dated="0"` before the edit and identical after, every path
+   the clause cites verified to exist, and `showcasecapturecheck` ALL PASS on 31 arms either side. No
+   regeneration was needed; had `live=` moved, the capture would have had to be regenerated **in the same
+   commit**. "No action required" is the rule working, not the rule being skipped.
 
 ### The formatting gate — and the rule for when it disagrees with you
 

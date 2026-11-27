@@ -1463,17 +1463,39 @@ inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexc
     return std::any_of( t.termSyms.begin(), t.termSyms.begin() + std::ptrdiff_t( n ), []( const std::string& s ) { return !s.empty(); } );
 }
 
+// src/warmsnap_graph.h's non-taking read of the rank the warm snapshot served with this run's graph. DECLARED, not
+// included: this is the answer-rendering layer and that is the persistence layer, so the include edge stays out while a
+// signature drift is still a compile error where the definition lives.
+namespace warmsnap { const std::vector<float>* storedRankFor( const Graph& g ) noexcept; }
+
 // TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), computed once per answer and
 // only when a tail row can gain a name (the switch on and a task word to match); empty otherwise, and then no row gains one.
 // `tokenBudget` (--token-budget / MCP budget_tokens) > 0: empty too. The target's tail reserve prices the pre-card walk
 // (fileTailOldWalk), so a name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound).
+//
+// TIERANK-SERVED: uniform teleport makes this value a function of the GRAPH ALONE — no part of `task` reaches it — so a run
+// whose graph came from the warm snapshot already has it: the snapshot persists the default map's rank beside the graph it
+// ranks (warmsnap_graph.h storedDefaultRank). READ, never taken, so main.cpp's default-map arm and --lint still get theirs.
+// It was recomputed on every answer before, warm runs included: 399.7 ms per --for answer on llvm-project, 15.4% of the verb
+// (CLI, warm, 3 reps, 2026-11-27). Serving it is only correct because the two are the SAME BITS, which was measured and not
+// argued: an in-process probe compared the persisted array against a fresh rankGraph( g ) on served runs (graph=loaded) over
+// six corpora — jq 2,461 nodes, this repo 47,742, django 60,574, envoy 171,803, kubernetes 293,542, llvm-project 1,399,402 —
+// and found 0 differing elements, equal iteration counts and equal convergence flags on all six. The file cannot blur them
+// (warmsnap.h's RawRow: a float row is its computed bit pattern, read back by one memcpy) and the power iteration is
+// deterministic by contract. test/tierankservedcheck.sh is the standing guard on the answer's bytes.
 inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task, std::size_t tokenBudget )
 {
     if( tokenBudget > 0 || !tailSymTermsOn() || tailTaskTerms( task ).empty() )
     {
         return {};
     }
-    return std::move( rankGraph( g ).rank );
+    const std::vector<float>* served = warmsnap::storedRankFor( g );
+    std::vector<float>        rank   = served != nullptr ? *served : std::move( rankGraph( g ).rank );
+    if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )   // a declared observer (warmsnap.h kObservers), so saying this moves no snapshot key
+    {
+        rw::emitTo( stderr, "ripwire: tie_rank={} n={}\n", served != nullptr ? "served" : "computed", rank.size() );
+    }
+    return rank;
 }
 
 // `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
