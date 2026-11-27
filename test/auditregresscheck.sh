@@ -204,7 +204,7 @@ a4_spoof=$( attr_of "$TMP/owners.xml" '__C__x|1694000000.cpp' top )
 a4_nl=$( attr_of "$TMP/owners.xml" 'a&#10;b.cpp' top )
 [ "$a4_nl" = "real@x.com" ] && ok "A4 a<LF>b.cpp round-trips as ONE path and is owned by its author" \
                            || no "A4 a<LF>b.cpp is owned by '$a4_nl'"
-"$BIN" "$H" --for=nlFn >"$TMP/for-nl.xml" 2>/dev/null
+"$BIN" "$H" --for=nlFn --page-bytes=12000 >"$TMP/for-nl.xml" 2>/dev/null
 a4_churn=$( tr '>' '\n' <"$TMP/for-nl.xml" | grep -o 'churn="[0-9]*"' | head -1 | sed 's/[^0-9]//g' )
 [ "$a4_churn" = 1 ] && ok "A4 a<LF>b.cpp has churn=1 — one path, one commit" \
                     || no "A4 a<LF>b.cpp churn='$a4_churn', want 1"
