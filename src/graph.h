@@ -11109,6 +11109,27 @@ inline void buildCanonicalScopeTables( const IngestResult& ing, HashMap<std::str
     }
 }
 
+// buildGraph/1e. The decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its
+// per-root and per-family keys, and why a Kotlin body never evicts a Java declaration (or the reverse). Unlike the
+// phases above this one is in/out: it REWRITES each name's id list in `byName`, fills `rule3AltBody`, and accumulates
+// the prototypes it evicted into `freeDeclReach`. It returns the one fact the caller reads later (`rule3AltAny`,
+// read once at the Rule 3 preprocessor-alternative test) instead of writing it through a fourth reference. The
+// `beforeCollapse` scratch escapes nowhere, so it lives here.
+inline bool collapseDeclarationsIntoDefinitions( const IngestResult& ing, bool multiRoot,
+                                                 HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                                                 FreeDeclReach& freeDeclReach, std::vector<bool>& rule3AltBody )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
+    bool                rule3AltAny = false;
+    std::vector<NodeId> beforeCollapse;   // reused: a name's list as it stood, read only when the collapse shortened it
+    for( auto& [ name, ids ] : byName )
+    {
+        rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
+        freeDeclReach.collapse( ing, multiRoot, name, ids, beforeCollapse );   // collapseDeclarationsOfName, the evicted prototypes kept
+    }
+    return rule3AltAny;
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11148,20 +11169,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // B2.2 minimum arity: read every declaration's minimum BEFORE the collapse below folds declarations away.
     const std::vector<std::uint16_t> paramsMinOf = paramsMinAcrossDeclarations( ing, byName );
 
-    FreeDeclReach     freeDeclReach;              // CPP-FREE-VS-MEMBER: the prototypes the collapse below evicts, for the bare-call declaration rule
+    FreeDeclReach     freeDeclReach;              // CPP-FREE-VS-MEMBER: the prototypes the collapse evicts, for the bare-call declaration rule
     std::vector<bool> rule3AltBody( N, false );   // EXTQUAL-FIX1: a C-family function body beside its own prototype in one file (markPreprocessorAlternatives)
-    bool              rule3AltAny = false;
-    // decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its per-root and per-family
-    // keys, and why a Kotlin body never evicts a Java declaration (or the reverse).
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
-        std::vector<NodeId> beforeCollapse;   // reused: a name's list as it stood, read only when the collapse shortened it
-        for( auto& [ name, ids ] : byName )
-        {
-            rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
-            freeDeclReach.collapse( ing, multiRoot, name, ids, beforeCollapse );   // collapseDeclarationsOfName, the evicted prototypes kept
-        }
-    }
+    const bool        rule3AltAny = collapseDeclarationsIntoDefinitions( ing, multiRoot, byName, freeDeclReach, rule3AltBody );   // buildGraph/1e
 
     // canonical scope::name → definition ids (E#4): lets a qualified call `A::b()` resolve to the `b` whose
     // enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph
