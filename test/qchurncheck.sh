@@ -164,9 +164,13 @@ grep -q ' history_unread="1"' "$TMP/k_grep.out" \
     || no "K51: --grep --metrics on a failed walk is silent"
 krun "$TMP/k_full.out" --for=helper --legend=full
 grep -q 'history_unread=1: the git history walk' "$TMP/k_full.out" \
-    && ok "K51: the attribute is defined beside its root (a comment that reads it)" || no "K51: history_unread= is not defined in the document"
+    \
+        && ok "K51: the attribute is defined beside its root (a comment that reads it)" \
+        || no "K51: history_unread= is not defined in the document"
 xmllint --noout "$TMP/k_for.out" "$TMP/k_map.out" "$TMP/k_grep.out" "$TMP/k_full.out" 2>/dev/null \
-    && ok "K51: every disclosing document is well-formed XML" || no "K51: a disclosing document is malformed XML"
+    \
+        && ok "K51: every disclosing document is well-formed XML" \
+        || no "K51: a disclosing document is malformed XML"
 [ "$( nqchurn )" -eq "$kbefore" ] \
     && ok "K51: the failed walk was NOT cached (qchurn blobs $kbefore -> $( nqchurn ))" \
     || no "K51: a failed walk was stored as a qchurn blob ($kbefore -> $( nqchurn ))"
@@ -299,7 +303,9 @@ fi
 
 # ── xmllint clean (sanity — --for output is still well-formed XML under the cached path) ───────────────
 "$BIN" "$REPO" --for="helper" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
-    && ok "xmllint clean" || no "xmllint reported malformed XML"
+    \
+        && ok "xmllint clean" \
+        || no "xmllint reported malformed XML"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi

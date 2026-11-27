@@ -96,12 +96,18 @@ unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_CO
 # ── 10. oracles first: the fixture is what the arms claim ──────────────────────────────────────────────────────
 BOTS="$( git -C "$R1" log --format='%an %ae' | grep -cE '\[bot\]|action@github\.com' )"
 RENAMES="$( git -C "$R1" log -M100% --name-status --format= | grep -c '^R100' )"
-[ "$BOTS" = 50 ] && ok "oracle: git's own log holds 50 bot-authored commits" || no "oracle: $BOTS bot commits, want 50 — the fixture is not what the arms claim"
-[ "$RENAMES" = 9 ] && ok "oracle: git -M100% sees exactly 9 exact renames (one file move, four two-file directory moves)" || no "oracle: $RENAMES exact renames, want 9"
+[ "$BOTS" = 50 ] \
+    && ok "oracle: git's own log holds 50 bot-authored commits" \
+    || no "oracle: $BOTS bot commits, want 50 — the fixture is not what the arms claim"
+[ "$RENAMES" = 9 ] \
+    && ok "oracle: git -M100% sees exactly 9 exact renames (one file move, four two-file directory moves)" \
+    || no "oracle: $RENAMES exact renames, want 9"
 
 # ── 1. default --hotspots ─────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$R1" --hotspots --limit=50 > "$TMP/h.out" 2> "$TMP/h.err"; rc=$?
-[ "$rc" = 0 ] && ok "--hotspots exits 0" || no "--hotspots exit $rc: $( head -c 300 "$TMP/h.err" )"
+[ "$rc" = 0 ] \
+    && ok "--hotspots exits 0" \
+    || no "--hotspots exit $rc: $( head -c 300 "$TMP/h.err" )"
 CB="$( churn_of "$TMP/h.out" botfile.cpp )"
 [ "$CB" = 1 ] && ok "--hotspots: botfile.cpp keeps only its one human commit (churn=1)" \
     || no "--hotspots: botfile.cpp churn='$CB', want 1 (51 = the 50 bot commits still count)"
@@ -117,10 +123,14 @@ esac
 
 # ── 2. --include-bots brings the old ranking back ─────────────────────────────────────────────────────────────
 "$BIN" "$R1" --hotspots --limit=50 --include-bots > "$TMP/hb.out" 2> "$TMP/hb.err"; rc=$?
-[ "$rc" = 0 ] && ok "--include-bots is accepted" || no "--include-bots exit $rc: $( head -c 300 "$TMP/hb.err" )"
+[ "$rc" = 0 ] \
+    && ok "--include-bots is accepted" \
+    || no "--include-bots exit $rc: $( head -c 300 "$TMP/hb.err" )"
 CBB="$( churn_of "$TMP/hb.out" botfile.cpp )"
 ORDB="$( order_of "$TMP/hb.out" )"
-[ "$CBB" = 51 ] && ok "--include-bots: botfile.cpp churn=51 again" || no "--include-bots: botfile.cpp churn='$CBB', want 51"
+[ "$CBB" = 51 ] \
+    && ok "--include-bots: botfile.cpp churn=51 again" \
+    || no "--include-bots: botfile.cpp churn='$CBB', want 51"
 case "$ORDB" in
     "botfile.cpp "*) ok "--include-bots: botfile.cpp ranks first again (the old ranking)" ;;
     *) no "--include-bots: order '$ORDB', want botfile.cpp first" ;;
@@ -129,7 +139,9 @@ grep -q 'bots_included=50' "$TMP/hb.out" && ok "--include-bots says what it kept
     || no "--include-bots: no bots_included=50 on the answer"
 
 # ── 3. agent co-authored commits are counted and kept ─────────────────────────────────────────────────────────
-[ "$( num_of "$TMP/h.out" agent_commits )" = 1 ] && ok "agent_commits=1 disclosed" || no "no agent_commits=1 on the answer"
+[ "$( num_of "$TMP/h.out" agent_commits )" = 1 ] \
+    && ok "agent_commits=1 disclosed" \
+    || no "no agent_commits=1 on the answer"
 [ "$( churn_of "$TMP/h.out" human3.cpp )" = 2 ] && ok "the agent co-authored commit still counts (human3.cpp churn=2)" \
     || no "human3.cpp churn='$( churn_of "$TMP/h.out" human3.cpp )', want 2"
 
@@ -137,7 +149,9 @@ grep -q 'bots_included=50' "$TMP/hb.out" && ok "--include-bots says what it kept
 CM="$( churn_of "$TMP/h.out" sub/moved2.cpp )"
 [ "$CM" = 2 ] && ok "pure move: sub/moved2.cpp churn=2 — its two content commits, followed across the move, and the move adds none" \
     || no "pure move: sub/moved2.cpp churn='$CM', want 2 (1 = the move counted and the history lost)"
-[ "$( num_of "$TMP/h.out" renames )" = 9 ] && ok "renames=9 disclosed" || no "no renames=9 on the answer"
+[ "$( num_of "$TMP/h.out" renames )" = 9 ] \
+    && ok "renames=9 disclosed" \
+    || no "no renames=9 on the answer"
 
 # ── 5. a pure block move inside one file ──────────────────────────────────────────────────────────────────────
 [ "$( churn_of "$TMP/h.out" blockfile.cpp )" = 2 ] && ok "block move: blockfile.cpp churn=2 (init + ONE edit, not double-counted)" \
@@ -151,7 +165,9 @@ pairhit(){ tr '>' '\n' < "$1" | grep -E '^<pair ' | grep 'botfile\.cpp' | grep -
     || no "--cochange: the bot-only pair is still reported"
 [ "$( pairhit "$TMP/cb.out" )" -ge 1 ] && ok "--cochange --include-bots: the pair comes back" \
     || no "--cochange --include-bots: no botfile.cpp<->botlock.cpp pair (the arm above is vacuous)"
-grep -q 'bots_skipped=50' "$TMP/c.out" && ok "--cochange discloses bots_skipped=50" || no "--cochange: no bots_skipped=50"
+grep -q 'bots_skipped=50' "$TMP/c.out" \
+    && ok "--cochange discloses bots_skipped=50" \
+    || no "--cochange: no bots_skipped=50"
 dirpair(){ tr '>' '\n' < "$1" | grep -E '^<pair ' | grep 'pone\.cpp' | grep -c 'ptwo\.cpp'; }
 [ "$( dirpair "$TMP/c.out" )" = 0 ] && ok "--cochange: two files that only ever MOVED together are not a co-change pair" \
     || no "--cochange: dirA/pone.cpp<->dirA/ptwo.cpp reported — a directory moved out and back twice read as four co-changes"
@@ -162,11 +178,15 @@ rankpos(){ tr '>' '\n' < "$1" | grep -oE ' n="[A-Za-z0-9]+"' | grep -n "\"$2\"" 
 P_H="$( rankpos "$TMP/r.out" human1Fn )"; P_B="$( rankpos "$TMP/r.out" botFn )"
 [ -n "$P_H" ] && [ -n "$P_B" ] && [ "$P_H" -lt "$P_B" ] && ok "--rank-by=churn: human1Fn ($P_H) outranks botFn ($P_B)" \
     || no "--rank-by=churn: human1Fn at '$P_H', botFn at '$P_B' — want human1Fn first"
-grep -q 'bots_skipped=50' "$TMP/r.out" && ok "--rank-by=churn discloses bots_skipped=50" || no "--rank-by=churn: no bots_skipped=50"
+grep -q 'bots_skipped=50' "$TMP/r.out" \
+    && ok "--rank-by=churn discloses bots_skipped=50" \
+    || no "--rank-by=churn: no bots_skipped=50"
 
 # ── 8. --situ ─────────────────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$R1" --situ=human1.cpp > "$TMP/s.out" 2>/dev/null
-grep -q 'bots_skipped=50' "$TMP/s.out" && ok "--situ discloses bots_skipped=50" || no "--situ: no bots_skipped=50"
+grep -q 'bots_skipped=50' "$TMP/s.out" \
+    && ok "--situ discloses bots_skipped=50" \
+    || no "--situ: no bots_skipped=50"
 
 # ── 9. the warm churn cache keys on the bot policy ────────────────────────────────────────────────────────────
 forchurn(){ tr '>' '\n' < "$1" | grep -F 'n="botFn"' | grep -oE ' churn="[0-9]+"' | head -1 | tr -cd '0-9'; }
@@ -178,11 +198,15 @@ NBLOB="$( find "$QTMP/ripwire" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 
 [ "$F1" = 1 ] && [ "$F2" = 51 ] && [ "$F3" = 1 ] \
     && ok "qchurn: --for churn= answers 1 / 51 / 1 for default / --include-bots / default from one cache" \
     || no "qchurn: --for churn= answered '$F1' / '$F2' / '$F3', want 1 / 51 / 1 (a warm blob served the other policy)"
-[ "$NBLOB" = 2 ] && ok "qchurn: one blob per bot policy ($NBLOB)" || no "qchurn: $NBLOB blob(s), want 2 (one per policy)"
+[ "$NBLOB" = 2 ] \
+    && ok "qchurn: one blob per bot policy ($NBLOB)" \
+    || no "qchurn: $NBLOB blob(s), want 2 (one per policy)"
 
 # ── 11. determinism ───────────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$R1" --hotspots --limit=50 > "$TMP/h2.out" 2>/dev/null
-cmp -s "$TMP/h.out" "$TMP/h2.out" && ok "--hotspots is byte-identical across runs" || no "--hotspots differs between two runs"
+cmp -s "$TMP/h.out" "$TMP/h2.out" \
+    && ok "--hotspots is byte-identical across runs" \
+    || no "--hotspots differs between two runs"
 
 # ── 12. the combined-diff history walk asks git for no rename detection, and its record format is pinned ──────────
 # src/gitmine.h kGitLogRecordWalkArgs says why: any rename/copy detection (-M100% included), --follow, -B, a pickaxe or a
@@ -291,7 +315,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"cochange\",\"arguments\":{\"path\":\"$R2\",\"file\":\"c1.cpp\"}}}" \
   | ( cd "$R1" && perl -e 'alarm 120; exec @ARGV' "$BIN" "$R1" --mcp > "$TMP/mcp.out" 2>/dev/null )
 MCP1="$( grep '"id":2' "$TMP/mcp.out" )"; MCP2="$( grep '"id":3' "$TMP/mcp.out" )"
-[ -n "$MCP1" ] && [ -n "$MCP2" ] && ok "mcp: both cochange calls answered in one session" || no "mcp: missing answers (id2='${MCP1:0:80}' id3='${MCP2:0:80}')"
+[ -n "$MCP1" ] && [ -n "$MCP2" ] \
+    && ok "mcp: both cochange calls answered in one session" \
+    || no "mcp: missing answers (id2='${MCP1:0:80}' id3='${MCP2:0:80}')"
 printf '%s' "$MCP1" | grep -q '"_history_policy":"[^"]*bots_skipped=50' \
     && ok "mcp: the bot-fixture call's envelope carries _history_policy with bots_skipped=50" \
     || no "mcp: the bot-fixture call's envelope has no _history_policy bots_skipped=50"

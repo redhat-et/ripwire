@@ -16,6 +16,7 @@
 set -u
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # the fixture is a git repo: no inherited GIT_* / HOME config may reach it (gitenvhermeticcheck D)
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 SCRIPT="$ROOT/bench/cochange/backtest.py"

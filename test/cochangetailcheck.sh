@@ -206,11 +206,15 @@ for a in "--cochange=src/a.c" "--situ=src/a.c" "--situ=src/a.c,solo/q.c" "--pack
     run "$R" "$a" > "$TMP/d1"; run "$R" "$a" > "$TMP/d2"; cmp -s "$TMP/d1" "$TMP/d2" || { det=0; echo "    two runs of $a differ"; }
 done
 run "$W" --cochange=w/a.c > "$TMP/d1"; cmp -s "$TMP/d1" "$TMP/w1.xml" || { det=0; echo "    two runs of W --cochange differ"; }
-[ "$det" = 1 ] && ok "10. deterministic: every answer above is byte-identical across two runs" || no "10. a non-deterministic answer"
+[ "$det" = 1 ] \
+    && ok "10. deterministic: every answer above is byte-identical across two runs" \
+    || no "10. a non-deterministic answer"
 # 11
 bad=0
 for f in c1 c1f c2 c3 p1 p2 w1; do xmllint --noout "$TMP/$f.xml" 2>/dev/null || { bad=1; echo "    malformed: $f.xml"; }; done
-[ "$bad" = 0 ] && ok "11. every XML answer is well-formed" || no "11. a malformed answer"
+[ "$bad" = 0 ] \
+    && ok "11. every XML answer is well-formed" \
+    || no "11. a malformed answer"
 
 [ "$fail" = 0 ] && { echo "cochangetailcheck: PASS"; exit 0; }
 echo "cochangetailcheck: FAIL"; exit 1

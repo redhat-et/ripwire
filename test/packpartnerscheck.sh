@@ -68,7 +68,9 @@ TASK='fix `alpha_widget_resize` in a.c'
 
 # oracle: the fixture is what the arms claim
 AB="$( for h in $( git -C "$R" log --format=%H ); do git -C "$R" show --diff-filter=M --name-only --format= "$h" | grep -cxE 'a\.c|b\.c'; done | grep -cx 2 )"
-[ "$AB" = 5 ] && ok "(oracle) a.c and b.c share 5 commits, 1 of them the 31-file bulk commit" || no "(oracle) a.c and b.c share $AB commits, not 5 — the arms prove nothing"
+[ "$AB" = 5 ] \
+    && ok "(oracle) a.c and b.c share 5 commits, 1 of them the 31-file bulk commit" \
+    || no "(oracle) a.c and b.c share $AB commits, not 5 — the arms prove nothing"
 
 run(){ ( cd "$1" && "$BIN" . --pack-task="$2" "${@:3}" ) 2>/dev/null; }
 partners_of(){ python3 - "$1" <<'PY_EOF'
@@ -152,7 +154,9 @@ for b in 600 1000 1500 2000 2500 6000 60000; do
     run "$WIDE" "$TASK" --token-budget=$b > "$TMP/wm.xml"; n="$( attr_of "$TMP/wm.xml" partners shown )"; seq7="$seq7 $b:$n"
     { [ -n "$n" ] && [ "$n" -ge "$prev" ]; } || mono=0; prev="${n:-0}"
 done
-[ "$mono" = 1 ] && ok "7. shown= is monotone in the budget:$seq7" || no "7. shown= falls as the budget grows:$seq7"
+[ "$mono" = 1 ] \
+    && ok "7. shown= is monotone in the budget:$seq7" \
+    || no "7. shown= falls as the budget grows:$seq7"
 
 # 8
 if grep -q 'together= commits' "$TMP/af.xml" && grep -q 'partners_cut=N' "$TMP/af.xml"; then ok "8. the full legend defines together= and partners_cut="
@@ -173,7 +177,9 @@ else no "11. bulk_skipped='$BK' on <partners>, JSON: $( grep -o '"partners_bulk_
 # 10
 bad=0
 for f in a af a2 n e s w wbig; do [ -s "$TMP/$f.xml" ] || continue; xmllint --noout "$TMP/$f.xml" 2>/dev/null || { bad=1; echo "    malformed: $f.xml"; }; done
-[ "$bad" = 0 ] && ok "10. every answer is well-formed XML" || no "10. a malformed answer"
+[ "$bad" = 0 ] \
+    && ok "10. every answer is well-formed XML" \
+    || no "10. a malformed answer"
 
 [ "$fail" = 0 ] && { echo "packpartnerscheck: PASS"; exit 0; }
 echo "packpartnerscheck: FAIL"; exit 1

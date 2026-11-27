@@ -155,11 +155,15 @@ det=1
 for a in "--situ=a.c" "--situ=a.c,e.c" "--cochange=a.c" "--pack-task=$TASK1"; do
     run "$a" > "$TMP/d1"; run "$a" > "$TMP/d2"; cmp -s "$TMP/d1" "$TMP/d2" || { det=0; echo "    two runs of $a differ"; }
 done
-[ "$det" = 1 ] && ok "8. deterministic: every answer above is byte-identical across two runs" || no "8. a non-deterministic answer"
+[ "$det" = 1 ] \
+    && ok "8. deterministic: every answer above is byte-identical across two runs" \
+    || no "8. a non-deterministic answer"
 # 9
 bad=0
 for f in c1 c1f p1 p1f p2; do xmllint --noout "$TMP/$f.xml" 2>/dev/null || { bad=1; echo "    malformed: $f.xml"; }; done
-[ "$bad" = 0 ] && ok "9. every XML answer is well-formed" || no "9. a malformed answer"
+[ "$bad" = 0 ] \
+    && ok "9. every XML answer is well-formed" \
+    || no "9. a malformed answer"
 
 [ "$fail" = 0 ] && { echo "cochangefloorcheck: PASS"; exit 0; }
 echo "cochangefloorcheck: FAIL"; exit 1
