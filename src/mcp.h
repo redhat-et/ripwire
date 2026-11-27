@@ -25,6 +25,7 @@
 #include "gitstampcache.h"   // AT-STAMP-MCP: the STAMP record, armed once per tools/call (the at= stamp's two small git answers)
 #include "notfoundtext.h"   // BX2 FIX 9: a not-found answer's plain-text occurrences, as the CLI twin's
 
+#include "infra/profileScope.h"  // PROFILE_SCOPE — the per-request scope in dispatchMcpLine; ((void)0) unless -DRIPWIRE_PROFILE=ON
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
 #include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
 
@@ -1157,6 +1158,14 @@ struct McpDispatchResult
 inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, bool stable, bool noRedact,
                                           const McpDispatchPolicy& policy )
 {
+    // The PER-CALL unit of an agent session, and the only place it can be timed once for both transports.
+    // A long-lived server pays ingest and buildGraph ONCE and this scope PER REQUEST, so `calls=` here is
+    // what separates the per-session fixed cost from the per-query cost: reading a one-invocation cold
+    // figure as a per-query one is how personalized ranking came to look like 1% of the work when it is
+    // ~400 ms of every warm llvm query (bench/PROFILE.md, "the PER-WARM-QUERY cost of personalized
+    // ranking"). main.cpp's "query + emit" scope cannot serve this: the MCP server has its own dispatch
+    // and never enters dispatchMainBody, so before this scope the agent path had no per-call timer at all.
+    PROFILE_SCOPE_DESCRIBE( "mcp: handle one request (the per-call unit of a session)" );
     McpDispatchResult out;
     {
         // ── §H3: the FRAMING GATE — before a single field is read out of this frame ─────────────────────────
@@ -1711,6 +1720,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
             const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
+            resetGitHistoryCensus();   // lane/history-honesty: this request's _history_policy counts only its own walks (gitmine.h WHOSE HISTORY)
             ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
@@ -1724,6 +1734,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 const GitWalkCutMark cutsNow  = gitWalkCutMark();
                 const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
+                // `_history_policy`: what the history-signal tools' walks in THIS request left out (bots) and followed (exact moves)
+                const bool        historyTool = name == "cochange" || name == "situational_awareness" || name == "quality_delta" || name == "rank_by";
+                const std::string historyNote = historyTool ? gitHistoryPolicySentence() : std::string();
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1766,7 +1779,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
                      + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
-                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + mcpEnvelopeNoteField( "_history_policy", historyNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too

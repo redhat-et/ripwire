@@ -2,7 +2,11 @@
 # capture.sh BIN FIXDIR OUTDIR — the calls affectedfoldcheck.sh makes, one file per call, plus rc.txt. Run from anywhere:
 # every call is made with FIXDIR as cwd and the fixture named by its bare directory, so root= is the same bytes everywhere.
 # golden/ is this script's output for the binary at 994f0021f (before the fold); the gate runs it again on the binary
-# under test.
+# under test. Five of those files are NOT 994f0021f bytes any more: big/brace/odd/small.pack-task.xml and
+# small.situ.txt were re-taken on train/m5-1126-4 (2026-11-27) after #786 and #796 moved them deliberately. They are
+# byte-identity anchors for arm (E) only — no arm unfolds them — so re-taking costs the gate nothing, while re-taking
+# any file arm B/C/D reads would make it compare the new answer with itself. affectedfoldcheck.sh's header has the
+# reasoning and the reviewed per-file delta.
 set -u
 BIN="$1"; FIX="$2"; OUT="$3"; mkdir -p "$OUT"; : > "$OUT/rc.txt"
 cd "$FIX" || exit 2

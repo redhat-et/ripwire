@@ -1383,8 +1383,10 @@ inline bool editCheckVerdictOnlyTaken( const EditCheckVerdictFacts& f ) noexcept
 // document's would about THESE attributes — the arity hedge (incompatible= is a fact about the tree, never a proof of
 // binding), the floor tail every graph-count verb splices — and nothing about rows it does not carry. It is the full
 // dialect; the compact layer rewrites it like any other (L1: the payload is the same under both postures).
+// AT-STAMP-REUSE: `stampRead` receives the stamp whenever this reads it, so the full document built beside this candidate
+// carries the same value instead of starting the stamp's three git children again (test/editcheckstampcheck.sh).
 inline std::string editCheckVerdictOnlyText( const EditCheckVerdictFacts& f, const Graph& g, const std::string& root, const Symbol& fsym,
-                                             std::string_view relPath, bool singleRoot )
+                                             std::string_view relPath, bool singleRoot, std::optional<std::string>& stampRead )
 {
     if( !editCheckVerdictOnlyTaken( f ) )
     {
@@ -1394,6 +1396,7 @@ inline std::string editCheckVerdictOnlyText( const EditCheckVerdictFacts& f, con
     // working tree); an empty stamp (no git, no HEAD) or a dirty one owes the full document. The subprocess runs only once
     // every in-memory fact already chose the verdict, and its value IS the at= below.
     const std::string atStamp = gitstamp::stampAt( root );
+    stampRead                 = atStamp;
     if( atStamp.empty() || atStamp.find( "+dirty" ) != std::string::npos )
     {
         return {};
@@ -1504,7 +1507,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                                               renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
                                                   && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty(),
                                               callerIds.size() };
-    const std::string verdictLine = editCheckVerdictOnlyText( verdictFacts, g, root, fsym, ecPathRel( fsym.fileId ), ecSingleRoot );
+    // AT-STAMP-REUSE: one stamp per answer. Nothing between the candidate and the document writes to the work tree (both are
+    // strings built in this call), so a second read could only repeat the first, three git children later.
+    std::optional<std::string> stampRead;
+    const std::string verdictLine = editCheckVerdictOnlyText( verdictFacts, g, root, fsym, ecPathRel( fsym.fileId ), ecSingleRoot, stampRead );
 
     // card A1 — the preview sentence, FIRST, because every number below it is about bytes that are not on
     // disk and a reader who meets that fact at the end has already read the document as a fact about the tree.
@@ -1673,7 +1679,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // attribute) so an existing substring-adjacency assertion elsewhere (e.g. "status=\"x\" callers=\"N\"")
     // never silently breaks the way test/prcontextcheck.sh's did until this same placement rule was applied
     // there too.
-    out += gitstamp::atAttr( root );
+    out += stampRead ? gitstamp::atAttrOf( *stampRead ) : gitstamp::atAttr( root );   // the candidate's read, when it made one
     // §H4 §3.4: LAST, after at= — same placement rule, same reason (no existing attribute-adjacency
     // assertion in test/ can break on an attribute appended past the end of every group).
     out += graphCountFloorAttrXml( g );   // M15: gauge + marker

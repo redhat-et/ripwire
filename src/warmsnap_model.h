@@ -129,6 +129,7 @@ struct Stream
 };
 inline bool readStream( In& in, Stream& st )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: read one row stream's bytes (calls=2: refs, then binds)" );
     st.rowCount = std::size_t( in.u64() );
     in.vec( st.chunkAt );
     const std::size_t n  = in.count( 1 );
@@ -171,6 +172,7 @@ inline void writeTexts( Out& o, const std::vector<std::string_view>& texts )
 // the texts as views into the section: `ends` and the blob stay where the file's bytes are
 inline bool readTexts( In& in, std::vector<std::uint32_t>& ends, std::string_view& blob )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: read a text table (offsets + one blob, no per-string alloc)" );
     in.vec( ends );
     const std::size_t n  = in.count( 1 );
     const char* const at = in.take( n );
@@ -440,6 +442,7 @@ inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
 
 inline bool readSymbolFamily( In& in, std::vector<Symbol>& family, std::size_t fileCount )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: read one symbol family (calls=2: symbols, then fields)" );
     std::vector<SymRow>        rows;
     std::vector<std::uint32_t> nameEnds, scopeEnds;
     std::string_view           nameBlob, scopeBlob;
@@ -491,15 +494,38 @@ struct RowTables
 // Decode one row stream chunk by chunk, in parallel, straight into the model's rows. False: some row did not decode.
 inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_t>& refShapes, const RowTables& t, IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: decode the reference rows" );
     std::atomic<bool> bad{ false };
     const std::size_t rowCount = refStream.rowCount;
     if( rowCount > refStream.bytes.size() )   // readStream already held the count to the stream's bytes (a row is at least six): said again at the allocation
     {
         return false;
     }
-    ing.references.resize( rowCount );
+    {
+        // SEPARATE SCOPE, because these are two full write passes over the same memory and only one of
+        // them is parallel. `Reference` is 64 B and is NOT trivially default constructible (every field
+        // carries an `= 0` NSDMI), so resize() VALUE-INITIALISES every row -- at llvm-project scale,
+        // where the map header accounts for at least 5.69 M call references before the non-call roles,
+        // that is ~400-580 MB written SERIALLY and then written again by the decode below. Whether the
+        // zero-fill or the decode owns the 254.6 ms this function costs is not something the enclosing
+        // scope could ever say, and the two call for completely different changes.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: resize the reference vector (serial value-init of 64 B rows)" );
+        ing.references.resize( rowCount );
+    }
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: the parallel reference decode itself" );
+    // itemsPerWorker = 1: one item here is a 4096-row CHUNK costing ~163 us, so a single chunk is worth a
+    // worker. Under the 2048 default this decode ran on ONE core (measured effective threads 1.00 at both
+    // envoy's 287 chunks and llvm-project's 1,449) despite the format being cut into chunks precisely so
+    // that it could be decoded in parallel.
     parallelFor( refStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
+        // INSIDE the lambda, so this fires once per chunk and its total is THREAD time, while the
+        // scope outside is WALL. total_here / wall_outside is the effective thread count, and that
+        // ratio is what decides the change: near the core count means the region is already well
+        // parallelised and the only route left is less work per row; near 1 means the parallelism is
+        // not arriving and the fix is scheduling, not the row body. Guessing between those two is how
+        // a cache-locality rewrite gets written for a load-balance problem.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: one reference chunk (per-chunk THREAD time; /wall = effective threads)" );
         VarIn         row = refStream.chunk( c );
         std::uint32_t prevFile = 0, prevStart = 0, prevLine = 0, prevFrom = 0;
         const std::size_t last = std::min( refStream.rowCount, ( c + 1 ) * kRowsPerChunk );
@@ -552,12 +578,13 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
             if( x.fileId >= t.fileCount || !t.symOk( x.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 
 inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint64_t>& bindShapes, const RowTables& t, IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: decode the binding rows" );
     std::atomic<bool> bad{ false };
     const std::size_t rowCount = bindStream.rowCount;
     if( rowCount > bindStream.bytes.size() )
@@ -565,6 +592,7 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
         return false;
     }
     ing.bindings.resize( rowCount );
+    // itemsPerWorker = 1, for the same reason as the reference chunks above.
     parallelFor( bindStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
         VarIn         row = bindStream.chunk( c );
@@ -595,12 +623,13 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
             if( b.fileId >= t.fileCount || !t.symOk( b.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 
 inline bool readRowStreams( In& in, IngestResult& ing, std::size_t fileCount )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: read the row streams" );
     std::vector<std::uint32_t> nameEnds;
     std::string_view           nameBlob;
     std::vector<std::uint64_t> refShapes, bindShapes;
@@ -620,20 +649,30 @@ inline bool readRowStreams( In& in, IngestResult& ing, std::size_t fileCount )
         return false;
     }
     RowTables t{ nameEnds, nameBlob, std::vector<rw::InternedText>( nameEnds.size() ), fileCount, ing.symbols.size() };
-    parallelFor( t.names.size(), [ & ]( std::size_t i ) { t.names[ i ] = textAt( nameEnds, nameBlob, i ); } );
-    for( const std::uint64_t shape : refShapes )
     {
-        if( !VALIDATE( ( ( shape >> 16 ) & 0xff ) < kLangCount && ( ( shape >> 24 ) & 0xff ) < kRefRoleCount && ( ( shape >> 32 ) & 0xff ) < kRecvKindCount && ( shape >> 48 ) == 0,
-                       "warmsnap: a reference shape names a language, role or receiver this build does not know" ) )
-        {
-            return false;
-        }
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: build the interned-name table (parallelFor over the name count)" );
+        parallelFor( t.names.size(), [ & ]( std::size_t i ) { t.names[ i ] = textAt( nameEnds, nameBlob, i ); } );
     }
-    for( const std::uint64_t shape : bindShapes )
     {
-        if( !VALIDATE( ( shape & 0xff ) < kLocalBindKindCount && ( shape >> 33 ) == 0, "warmsnap: a binding shape names a kind this build does not know" ) )
+        // Scoped to the two loops ALONE, not to the rest of the function: a PROFILE_SCOPE lives to the
+        // end of its enclosing block, so declaring it beside these loops would have made it inclusive of
+        // readRefRows and readBindRows below and double-counted them against their own scopes.
+        PROFILE_SCOPE_DESCRIBE( "warmsnap/model: validate the ref + bind shape tables (serial, one VALIDATE per entry)" );
+        for( const std::uint64_t shape : refShapes )
         {
-            return false;
+            if( !VALIDATE( ( ( shape >> 16 ) & 0xff ) < kLangCount && ( ( shape >> 24 ) & 0xff ) < kRefRoleCount && ( ( shape >> 32 ) & 0xff ) < kRecvKindCount
+                               && ( shape >> 48 ) == 0,
+                           "warmsnap: a reference shape names a language, role or receiver this build does not know" ) )
+            {
+                return false;
+            }
+        }
+        for( const std::uint64_t shape : bindShapes )
+        {
+            if( !VALIDATE( ( shape & 0xff ) < kLocalBindKindCount && ( shape >> 33 ) == 0, "warmsnap: a binding shape names a kind this build does not know" ) )
+            {
+                return false;
+            }
         }
     }
     const bool decoded = readRefRows( refStream, refShapes, t, ing ) && readBindRows( bindStream, bindShapes, t, ing );
@@ -642,6 +681,7 @@ inline bool readRowStreams( In& in, IngestResult& ing, std::size_t fileCount )
 
 inline void readSideFamilies( In& in, IngestResult& ing, std::size_t fileCount )
 {
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: read the side families" );
     for( std::size_t i = 0, n = in.count( 13 ); i < n && in.ok; ++i )
     {
         Include inc;
@@ -744,6 +784,14 @@ inline bool readModel( std::string_view section, IngestResult& ing, BlobFacts& b
     const std::size_t symbolCount = ing.symbols.size();
     const auto        symOk       = [ & ]( NodeId id ) noexcept { return id == kNoNode || id < symbolCount; };
     const std::uint64_t endMark = in.u64();
+    // WHY THIS HAS ITS OWN SCOPE. Every `all_of` / `is_sorted` below is a FULL LINEAR PASS over a
+    // container the reads above have already walked once, so its cost is memory traffic the read
+    // already paid for and then paid again -- and at llvm-project scale these containers are large
+    // (lexTokenRowOffsets alone is symbolCount + 1). Whether that matters is a measurement, not an
+    // assumption: `warmsnap: load the model section` is 509.9 ms of a ~1,058 ms warm llvm run
+    // (bench/PROFILE.md), and until this scope is read against the three read scopes above, "the
+    // validation re-walk is the cost" is a hypothesis. Instrumented before anything is changed.
+    PROFILE_SCOPE_DESCRIBE( "warmsnap/model: validate the shape (re-walks what the reads just read)" );
     const bool shaped = in.ok && endMark == 0x454e'444d'4f44'454cull && in.p == in.e && ing.fileHealth.size() == fileCount && ing.nestRefusedFile.size() == fileCount
                      && ( ing.cloneKeys.empty() || ing.cloneKeys.size() == symbolCount )
                      && std::ranges::all_of( ing.aliasTargets, [ & ]( const AliasTarget& t ) { return t.id < symbolCount; } )

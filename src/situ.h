@@ -379,6 +379,216 @@ inline constexpr std::size_t kSituPartnerFileRowsShown = 4;   // section [1] —
 inline constexpr std::uint32_t kSituCochangeProbeFiles = 20;  // section [3] — changed files probed for co-change (cut-fix E: disclosed)
 inline constexpr std::size_t kSituSiblingRowsShown = 8;      // section [1] — L-D lexical sibling rows; a raisable DEFAULT
 
+// The test-of pair the backtest pre-registered (results/cofloor/decision_rule_tail.txt): the same stem once a test marker is
+// removed — _test .test _spec .spec tests test as a suffix, test_ test as a prefix — case-insensitive. Deliberately not
+// testmap.h isTestPartnerOf (case-sensitive, test_ prefix only, plus _unittest): the shipped rule is the one that was measured.
+inline std::string coTestBase( const std::string& stem )
+{
+    for( const std::string_view suf : { std::string_view( "_test" ), std::string_view( ".test" ), std::string_view( "_spec" ), std::string_view( ".spec" ),
+                                        std::string_view( "tests" ), std::string_view( "test" ) } )
+    {
+        if( stem.size() > suf.size() && stem.ends_with( suf ) )
+        {
+            return stem.substr( 0, stem.size() - suf.size() );
+        }
+    }
+    for( const std::string_view pre : { std::string_view( "test_" ), std::string_view( "test" ) } )
+    {
+        if( stem.size() > pre.size() && stem.starts_with( pre ) )
+        {
+            return stem.substr( pre.size() );
+        }
+    }
+    return {};
+}
+inline bool coTestOfPair( std::string_view a, std::string_view b )
+{
+    const std::string sa = mention_detail::asciiLower( mention_detail::pathStem( a ) ), sb = mention_detail::asciiLower( mention_detail::pathStem( b ) );
+    const std::string ta = coTestBase( sa ), tb = coTestBase( sb );
+    return ( !ta.empty() && ta == sb ) || ( !tb.empty() && tb == sa );
+}
+
+// (S) for ONE seed, built once per answer: a direct include/import edge either way (the precise adjacency surprising= reads),
+// a call edge either way between the files' symbols (markdown links are not calls), a test-of pair (coTestOfPair), or the
+// seed's own directory when it holds at most kCoTailSameDirMaxFiles indexed files. Lives here, not in gitmine.h, beside
+// siblift_detail::dirOf, the one directory-of-a-path primitive.
+class CoSeedLinks
+{
+public:
+    CoSeedLinks( const IngestResult& ing, const Graph* g, std::uint32_t seed, CoCouplingCache& cache )
+        : ing_( ing ), seed_( seed ), cache_( cache ), called_( ing.files.size(), 0 )
+    {
+        const std::string_view dir = siblift_detail::dirOf( ing.files[seed] );
+        std::size_t            inDir = 0;
+        for( const std::string& f : ing.files )
+        {
+            inDir += siblift_detail::dirOf( f ) == dir ? 1u : 0u;
+        }
+        smallDir_ = inDir <= kCoTailSameDirMaxFiles;
+        if( g != nullptr )
+        {
+            markCallEdges( *g );
+        }
+    }
+    bool linked( std::uint32_t other )
+    {
+        return ( other < called_.size() && called_[other] != 0 ) || cache_.get( ing_ ).hasDirectEdge( seed_, other )
+            || coTestOfPair( ing_.files[seed_], ing_.files[other] ) || ( smallDir_ && siblift_detail::dirOf( ing_.files[other] ) == siblift_detail::dirOf( ing_.files[seed_] ) );
+    }
+
+private:
+    void markCallEdges( const Graph& g )
+    {
+        const std::size_t nodes = std::min( g.outOff.empty() ? 0 : g.outOff.size() - 1, ing_.symbols.size() );
+        for( std::size_t u = 0; u < nodes; ++u )
+        {
+            for( std::uint32_t e = g.outOff[u]; e < g.outOff[u + 1]; ++e )
+            {
+                const NodeId v = g.outTargets[e];
+                if( v >= ing_.symbols.size() || ( !g.outNameOnly.empty() && ( g.outNameOnly[e] & 0x7f ) == 2 ) )   // 2: a markdown link
+                {
+                    continue;
+                }
+                markPair( ing_.symbols[u].fileId, ing_.symbols[v].fileId );
+            }
+        }
+    }
+    void markPair( std::uint32_t from, std::uint32_t to )
+    {
+        if( from == seed_ && to < called_.size() )
+        {
+            called_[to] = 1;
+        }
+        if( to == seed_ && from < called_.size() )
+        {
+            called_[from] = 1;
+        }
+    }
+    const IngestResult& ing_;
+    std::uint32_t       seed_;
+    CoCouplingCache&    cache_;
+    std::vector<char>   called_;   // file -> a call edge either way with the seed
+    bool                smallDir_ = false;
+};
+
+// The one-seed list: `cands` is cochangePartners at kCoTailSupport (deg desc, path asc). Support rows keep that order; then the
+// admitted 2-commit rows, in the same order, while the list holds fewer than kCoTailFillTo.
+inline std::vector<CoPartner> coCorroboratedTail( const IngestResult& ing, const Graph* g, std::uint32_t seed, const std::vector<CoPartner>& cands,
+                                                  CoCouplingCache& cache )
+{
+    std::vector<CoPartner> out;
+    for( const CoPartner& p : cands )
+    {
+        if( p.together >= kCoSupportFloor )
+        {
+            out.push_back( p );
+        }
+    }
+    std::optional<CoSeedLinks> links;
+    for( const CoPartner& p : cands )
+    {
+        if( out.size() >= kCoTailFillTo )
+        {
+            break;
+        }
+        if( p.together >= kCoSupportFloor )
+        {
+            continue;
+        }
+        CoPartner row = p;
+        if( p.deg >= kCoTailMinConfidence )
+        {
+            row.why = CoWhy::Confidence;
+        }
+        else if( ( links ? *links : links.emplace( ing, g, seed, cache ) ).linked( p.fileId ) )
+        {
+            row.why = CoWhy::Link;
+        }
+        else
+        {
+            continue;
+        }
+        out.push_back( row );
+    }
+    return out;
+}
+// One seed's partners from the shared sets: a one-seed question's list takes the tail, a several-seed question's does not.
+inline std::vector<CoPartner> coSeedPartners( const IngestResult& ing, const Graph* g, std::uint32_t seed, std::uint32_t& outCommits,
+                                              const std::vector<std::vector<std::uint32_t>>& sets, CoCouplingCache& cache, bool oneSeed )
+{
+    if( !oneSeed )
+    {
+        return cochangePartners( ing, ing.files[seed], outCommits, sets, nullptr, &cache );
+    }
+    return coCorroboratedTail( ing, g, seed, cochangePartners( ing, ing.files[seed], outCommits, sets, nullptr, &cache, kCoTailSupport ), cache );
+}
+
+// ── THE co-change partners of a SEED SET, merged — one rule for --situ's [3], its MCP facts, and --pack-task's <partners> ──
+// Each seed (seedMask[f] != 0, file-id order, the first probeCap of them) is answered from the SAME mined commit sets
+// (cochangePartners' precomputed overload, A4-P10); a partner outside the mask keeps its BEST seed's degree — and that
+// seed's shared-commit count, so together= and deg= are one pair's numbers — and the rows sort (deg desc, path asc), a
+// total order. Was written out inline twice in this file (writeSituation, computeSituationFacts); --pack-task is the third
+// reader, so it is one function now rather than a third copy.
+struct SeedPartner
+{
+    std::uint32_t fileId   = 0;
+    double        deg      = 0.0;   // the best seed's degree: the fraction of that seed's commits the partner is also in
+    std::uint32_t together = 0;     // commits that seed and the partner share (kCoSupportFloor or more; 2 on a tail row)
+    CoWhy         why      = CoWhy::Support;   // a one-seed list's tail rows say confidence or link (coCorroboratedTail)
+};
+struct SeedPartners
+{
+    std::vector<SeedPartner>                             rows;          // partners NOT in the mask, (deg desc, path asc)
+    std::uint32_t                                        probed = 0;    // seeds probed: fewer than the mask holds ⇒ rows is a FLOOR
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> seedCommits;   // (seed, its own commits in the window), probe order
+    bool                                                 tail = false;  // ONE seed: the corroborated tail applied (floor_tail="corroborated")
+};
+inline SeedPartners mergeSeedPartners( const IngestResult& ing, const std::vector<char>& seedMask,
+                                       const std::vector<std::vector<std::uint32_t>>& sets, std::uint32_t probeCap, CoCouplingCache& coupling,
+                                       const Graph* g )   // the one-seed tail's call-edge link (coCorroboratedTail)
+{
+    SeedPartners                        out;
+    HashMap<std::uint32_t, std::size_t> rowOf;   // partner file → its index in out.rows
+    const std::uint32_t                 F      = std::uint32_t( std::min( seedMask.size(), ing.files.size() ) );
+    const auto                          isSeed = [ & ]( std::uint32_t f ) { return f < seedMask.size() && seedMask[f] != 0; };
+    // ONE seed file in the mask (probed or not) is a one-seed question: its list takes the corroborated tail
+    out.tail = F - std::size_t( std::count( seedMask.begin(), seedMask.begin() + F, char( 0 ) ) ) == 1;
+    for( std::uint32_t f = 0; f < F && out.probed < probeCap; ++f )
+    {
+        if( !isSeed( f ) )
+        {
+            continue;
+        }
+        ++out.probed;
+        std::uint32_t commits = 0;
+        for( const CoPartner& p : coSeedPartners( ing, g, f, commits, sets, coupling, out.tail ) )
+        {
+            if( isSeed( p.fileId ) )
+            {
+                continue;
+            }
+            const auto it = rowOf.find( p.fileId );
+            if( it == rowOf.end() )
+            {
+                rowOf[p.fileId] = out.rows.size();
+                out.rows.push_back( SeedPartner{ p.fileId, p.deg, p.together, p.why } );
+            }
+            else if( p.deg > out.rows[it->second].deg )
+            {
+                out.rows[it->second] = SeedPartner{ p.fileId, p.deg, p.together, p.why };
+            }
+        }
+        out.seedCommits.emplace_back( f, commits );
+    }
+    // every support row above every tail row (only a one-seed list has any), then deg desc, path asc: coCorroboratedTail's order
+    std::sort( out.rows.begin(), out.rows.end(), [ & ]( const SeedPartner& a, const SeedPartner& b )
+               {
+                   const bool ta = a.why != CoWhy::Support, tb = b.why != CoWhy::Support;
+                   return ta != tb ? tb : a.deg != b.deg ? a.deg > b.deg : ing.files[a.fileId] < ing.files[b.fileId];
+               } );
+    return out;
+}
+
 // §B12.1 gave this the "showing N of M <noun>" form so a reader could see the gap without a second sentence;
 // C1 F-10 adds the machine half — pageview.h's shown=/total=/capped= spelled in prose, because --situ has no
 // XML root to carry attributes — and the exact pasteable follow-up. All of it appears ONLY on a cut section:
@@ -991,8 +1201,16 @@ inline void writeSituSiblingRows( std::FILE* out, const SituSiblings& sibs, Path
 
 // F2: the two causes the old "(none, or no git history)" conflated, told apart by the only fact that
 // separates them — how many commits the window actually contained.
-inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits )
+// `bulkSkipped`: the window's commits the 30-file cut left out. A window whose every commit was bulk mined 0 sets, and that zero is
+// the cut's, not missing history, so the line says which.
+inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits, std::uint32_t bulkSkipped = 0 )
 {
+    if( coCommits == 0 && bulkSkipped > 0 )
+    {
+        rw::emitTo( out, "        (the window above held {} commits, every one over 30 indexed files and left out as bulk — this zero is NOT a "
+                         "measurement of coupling)\n", bulkSkipped );
+        return;
+    }
     if( coCommits == 0 )
     {
         rw::emitRaw( out, "        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)\n" );
@@ -1216,41 +1434,19 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // (3) co-change partners NOT in the diff — "you usually edit these together; did you forget?"
     // A4-P10: mine the commit file-sets ONCE (not one `git log` popen per probed file) and answer every probe
     // from the shared sets — identical result (mining is deterministic for a fixed HEAD), no subprocess storm.
-    const auto                     coSets     = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    CommitWindowCensus             coCensus;   // SITU-BULK: a commit over 30 indexed files is dropped, and the drop is disclosed below
+    const auto                     coSets     = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot, &coCensus );
     CoCouplingCache                coCoupling( ing );   // prcontext-hoist: one include-coupling build for every probe
     const std::string              coWindow   = defaultWindowLabel( root, "18mo" );   // F2: see SituationFacts::coWindow
     const std::size_t              coCommits  = coSets.size();
-    HashMap<std::uint32_t, double> partnerDeg;
-    std::uint32_t                  probed = 0;
     std::size_t                    changedCount = 0;   // cut-fix E: the probe's denominator
     for( std::uint32_t f = 0; f < F; ++f )
     {
         changedCount += changedFile[f] ? 1u : 0u;
     }
-    for( std::uint32_t f = 0; f < F && probed < kSituCochangeProbeFiles; ++f )
-    {
-        if( !changedFile[f] )
-        {
-            continue;
-        }
-        ++probed;
-        std::uint32_t                commits = 0;
-        const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets, nullptr, &coCoupling );
-        for( const CoPartner& p : ps )
-        {
-            if( !changedFile[p.fileId] )
-            {
-                double& d = partnerDeg[p.fileId];
-                if( p.deg > d )
-                {
-                    d = p.deg;
-                }
-            }
-        }
-    }
-    std::vector<std::pair<std::uint32_t, double>> partners( partnerDeg.begin(), partnerDeg.end() );
-    std::sort( partners.begin(), partners.end(), [ & ]( const auto& a, const auto& b )
-               { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
+    const SeedPartners  merged = mergeSeedPartners( ing, changedFile, coSets, kSituCochangeProbeFiles, coCoupling, &g );
+    const std::uint32_t probed = merged.probed;
+    const std::vector<SeedPartner>& partners = merged.rows;   // each row prints its own together=: a percentage alone hides the count
     // §H6 (W3FIX): same undisclosed cap as [2] — 18 partners, 8 rows on this repo's own src/graph.h probe.
     // F2: window=/commits= ride on the header, so the count below is readable as a measurement — or as the
     // absence of one. --cochange, the component this composes, already emits both.
@@ -1264,18 +1460,24 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         : std::string();
     // 0.6.7 shallow tail: the window was mined from THIS root's fetched history; on a depth-limited clone the line carries the
     // shallow="1" the cochange verb's root carries (the at: line's +shallow suffix names the state, this names the measurement).
-    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}{}:\n",
-                  partners.size(), coWindow.c_str(), coCommits, gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
+    // floor=: the shared commits a partner needed (gitmine.h kCoSupportFloor) — the reason a 2-commit partner is not here
+    // floor_tail="corroborated": a one-seed list also takes corroborated 2-commit partners below the floor (each row's why=)
+    // SITU-BULK: commits= counts the kept sets; bulk_skipped= the commits the 30-file cut left out (present only when some were).
+    const std::string bulkCut = coCensus.bulkDropped > 0 ? " bulk_skipped=\"" + std::to_string( coCensus.bulkDropped ) + "\"" : std::string();
+    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\" floor=\"{}\"{}{}{}{}{}:\n",
+                  partners.size(), coWindow.c_str(), coCommits, kCoSupportFloor, merged.tail ? " floor_tail=\"corroborated\"" : "", bulkCut.c_str(),
+                  gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
                   situShowingNote( partnerShown, partners.size(), "files",
                                    situNextInvocation( page.selector, partners.size() ) ).c_str() );
     if( partners.empty() )
     {
-        writeSituEmptyCochangeLine( out, coCommits );
+        writeSituEmptyCochangeLine( out, coCommits, coCensus.bulkDropped );
     }
     for( std::size_t i = partnerPage.begin; i < partnerPage.end; ++i )
     {
-        const std::string_view rp = situPathRel( partners[i].first );
-        rw::emitTo( out, "        {}  (co-edited in {:.0f}% of commits)\n", std::string_view( rp.data(), rp.size() ), partners[i].second * 100.0 );
+        const std::string_view rp = situPathRel( partners[i].fileId );
+        rw::emitTo( out, "        {}  (co-edited in {:.0f}% of commits, together={}{}{})\n", std::string_view( rp.data(), rp.size() ), partners[i].deg * 100.0,
+                      partners[i].together, merged.tail ? ", why=" : "", merged.tail ? coWhyName( partners[i].why ) : std::string_view() );
     }
     // P3 (L7): the one follow-up — the gate that turns [2] into an exit code (4 while tests or the untested blast
     // radius are non-empty), on the same tree.
@@ -1299,6 +1501,9 @@ struct SituationFacts
     std::vector<TestRow>                          testRows;       // H2H-Graft F1: the tests to run, EVIDENCE order, with why
     std::vector<std::uint32_t>                    tests;          // the same rows as file ids, same order (pre-F1 consumers)
     std::vector<std::pair<std::uint32_t, double>> forgotten;     // (file, co-change degree) usually edited together but NOT in the diff (deg desc, path asc)
+    std::vector<std::uint32_t>                    forgottenTogether;   // PARALLEL to forgotten (SoA): the shared-commit count behind each degree
+    std::vector<CoWhy>                            forgottenWhy;        // PARALLEL to forgotten: why each is listed (meaningful when coTail)
+    bool                                          coTail = false;      // one seed: the corroborated tail applied (cochange_floor_tail)
     // F2 (round C): the WINDOW `forgotten` was mined in, and how many commits it actually saw. `forgotten`
     // is a COMPOSED number — --cochange, the component verb, refuses loudly (`commits="0" window="18mo@HEAD"`,
     // exit 1) on a tree whose window is empty, while every composing surface rendered a bare `(0)` and, in the
@@ -1311,6 +1516,7 @@ struct SituationFacts
     std::string                                   coWindow;      // the window label its co-change was mined in ("18mo@HEAD"), empty only if never mined
     std::size_t                                   coCommits = 0; // commits that window actually contained — 0 ⇒ the zero above is not a measurement
     bool                                          shallow = false; // 0.6.7: the root is a depth-limited clone — coCommits and hotspots' churn count only the fetched commits
+    std::uint32_t                                 coBulkSkipped = 0; // SITU-BULK: the window's commits over 30 indexed files, left out of coCommits and every partner
     std::vector<std::pair<std::uint32_t, std::uint64_t>> hotspots; // (changed file, cx×churn score) for high-risk changed files (score desc, path asc)
     std::vector<std::string>                      modulesTouched; // distinct TOP-LEVEL directory of each changed file (sorted)
     // THE SYMBOL-GRANULAR CHANGE SET's own facts (situ.h computeSymbolChangeSet) — carried on the FACTS, not
@@ -1405,44 +1611,33 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     //     changed file once (capped), deterministically.
     // A4-P10: mine the commit file-sets ONCE and answer every probe from the shared sets (was one `git log`
     // popen per probed file — up to 40 — the O(files)-subprocess storm). Deterministic for a fixed HEAD.
-    const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30 );
+    CommitWindowCensus             coCensus;   // SITU-BULK: the 30-file cut's drops travel with the window (coBulkSkipped)
+    const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, UINT32_MAX, &coCensus );
     CoCouplingCache                coCoupling( ing );   // prcontext-hoist: one include-coupling build for every probe
     facts.declDef  = declDefPartners( ing, changedFile );  // F3: same relationship, same rule, one implementation
     facts.siblings = lexicalSiblings( ing, changedFile );   // L-D: the same list the CLI report's [1] prints
     facts.coWindow = defaultWindowLabel( root, "18mo" );   // F2: the composed zero's window travels WITH the zero
     facts.coCommits = coSets.size();
+    facts.coBulkSkipped = coCensus.bulkDropped;
     facts.shallow   = gitstamp::isShallow( root );         // 0.6.7: ...and so does its qualification (the one probe)
-    HashMap<std::uint32_t, double> partnerDeg;
-    std::uint32_t                  probed = 0;
-    for( std::uint32_t f = 0; f < F && probed < 40; ++f )
+    const SeedPartners merged = mergeSeedPartners( ing, changedFile, coSets, /*probeCap=*/40, coCoupling, &g );
+    for( const auto& [ f, commits ] : merged.seedCommits )
     {
-        if( !changedFile[f] )
-        {
-            continue;
-        }
-        ++probed;
-        std::uint32_t                commits = 0;
-        const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets, nullptr, &coCoupling );
-        for( const CoPartner& p : ps )
-        {
-            if( !changedFile[p.fileId] )
-            {
-                double& d = partnerDeg[p.fileId];
-                if( p.deg > d )
-                {
-                    d = p.deg;
-                }
-            }
-        }
         const std::uint64_t score = ccxSum[f] * std::uint64_t( commits );      // hotspot = complexity × churn
         if( score > 0 )
         {
             facts.hotspots.push_back( { f, score } );
         }
     }
-    facts.forgotten.assign( partnerDeg.begin(), partnerDeg.end() );
-    std::sort( facts.forgotten.begin(), facts.forgotten.end(), [ & ]( const auto& a, const auto& b )
-               { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
+    facts.forgotten.reserve( merged.rows.size() );
+    facts.forgottenTogether.reserve( merged.rows.size() );
+    for( const SeedPartner& p : merged.rows )
+    {
+        facts.forgotten.emplace_back( p.fileId, p.deg );
+        facts.forgottenTogether.push_back( p.together );
+        facts.forgottenWhy.push_back( p.why );
+    }
+    facts.coTail = merged.tail;
     std::sort( facts.hotspots.begin(), facts.hotspots.end(), [ & ]( const auto& a, const auto& b )
                { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
 
@@ -1533,9 +1728,9 @@ inline int testGateExitCode( const TestGateResult& r ) noexcept
 // this repo's 5763 symbols) computes it ONCE and hands it in, instead of paying N redundant full forward
 // traversals. Every pre-existing call site keeps its own inline computation via the default argument below,
 // so their bytes are unchanged.
-// A6: the seed-collection loop now lives in graph.h::seedForwardReachIf, shared with
-// testSymbolForwardReach's isTestSymbol seeding — same traversal shape, deliberately different predicate
-// (see that function's banner for why isTestPath, not isTestSymbol, is the right one here).
+// A6: the seed-collection loop lives in graph.h::seedForwardReachIf. testSymbolForwardReach seeds by isTestSymbol
+// instead — same traversal shape, deliberately different predicate (see that function's banner for why isTestPath,
+// not isTestSymbol, is the right one here).
 inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Graph& g )
 {
     return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestPath( rootRelPath( ing, ing.symbols[i].fileId ) ); } );

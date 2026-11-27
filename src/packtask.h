@@ -31,6 +31,7 @@
 #include "forpage.h"       // PB1: computeFileTail / renderFileTailXml — --for's file tail, the same rows
 #include "nextverb.h"      // PB1: nextFlag / nextAttrXml — a dropped candidate's next=--expand
 #include "mention.h"       // PB1: taskNamesIndexedFile — the head round robin's verdict, as --for takes it
+#include "situ.h"          // <partners>: mergeSeedPartners — --situ's own merge of co-change partners across seeds
 
 #include <algorithm>
 #include <cstdio>
@@ -1498,6 +1499,7 @@ struct PackTaskJsonParts
     std::size_t                              notesKept;
     std::size_t                              testsTotal;
     std::size_t                              testsKept;
+    const std::string&                       partnersJson;    // <partners>' JSON twin (packTaskPartnersJson), "" on a --partition slice
 };
 
 inline void packTaskJsonTail( std::string& j, const PackTaskJsonParts& p )
@@ -1659,6 +1661,7 @@ inline void packTaskJsonTail( std::string& j, const PackTaskJsonParts& p )
         jFirstTest = false;
     }
     j += "]";
+    j += p.partnersJson;   // <partners>: the same kept prefix the XML element printed, or partners_none
     j += p.tailJson;   // PB1: the file tail's JSON twin (forpage.h renderFileTailJson), the same shown count; "" on a partition slice
 
     // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
@@ -1791,6 +1794,271 @@ inline void packTaskSettleRoot( std::string& whole, const std::string& headerStr
         whole.insert( rootOpenEnd + 1, rw::kEstModelledLegend );
     }
 }
+}
+
+// ── <partners>: the files that historically change WITH the files this task will touch ───────────────────────────────────
+// The files an agent is likely to FORGET: across 752 real bug-fix commits the median fix edits two files, and developers
+// miss a related change 45.7% of the time (research/RESEARCH_AUDIT_1126_*). The block is --situ's [3] turned around: the
+// seeds are not a diff but the ranking's first kCoBoostSeedCount distinct files (the key body's file first), and their
+// partners are merged by --situ's own rule (situ.h mergeSeedPartners). Names and support counts only — never a body.
+//
+// THE WINDOW is the co-change boost's, the last kCoBoostCommitWindow commits (gitRecentCommitFileSets), not --situ's 18
+// months: it is bounded on any repo (a date window read kubernetes' 12.8 K commits in 1.0 s, on every bundle) and a pure
+// function of HEAD, so the block does not move with the wall clock. The walk is a signal walk, so #777's bot policy applies,
+// and the element states THIS walk's own counts (bots_skipped=/agent_commits=/renames=, gitLogFileSets' outHistory) inside
+// the budget. Not #777's trailing sentence: it is 618 B outside the budget (packtaskcheck's ceiling arm breached on it at
+// --token-budget=2000, 5,737 B against 5,428 B), and its process-wide maximum is never reset in the MCP server.
+//
+// THE BUDGET. The six shares already sum to 100, so the block has no share of its own: it is granted up to
+// kPackTaskPartnersCapPct of the post-header budget, out of what the pool's sections left and then the tail's reserve, just
+// before the tail is filled, and it tops up in the reflow lap like the list sections. MEASURED on this repo at the default
+// budget: granted only the pool's leftover, a real task served 0 of its 4 partners (the head and tail spend everything), so
+// it draws on the tail too. The tail's floor is then 20% less the block's bytes (at most 3 points, a few tail rows), and only
+// on a tree with history: packtailsharecheck's fixture has none, so its floor arms are unchanged. A cut is
+// disclosed on the element (shown= of total=, partners_cut=); the shell is emitted even when no row fits, because the
+// element IS the disclosure.
+//
+// NO BLOCK, AND WHY — one root attribute, partners_none=: no_git (no repository above the root), no_history (the window
+// held no commit touching an indexed file), shallow (a depth-limited clone whose window held none), multi_root (no one
+// root to walk), no_seed (nothing ranked). Mined with no partner found is a MEASUREMENT, so it is the element with
+// total="0", never the attribute — and so is a window whose commits the bulk cut took (bulk_skipped=N: every commit over
+// 30 indexed files is left out, as in every co-change miner here, and the element counts them rather than hiding it). A --partition slice carries neither: the outer document has no per-slice history.
+inline constexpr std::size_t kPackTaskPartnersCapPct = 3;
+struct PackPartners
+{
+    std::vector<SeedPartner> rows;          // mergeSeedPartners' order: (best seed's deg desc, path asc)
+    std::size_t              commits = 0;   // commits the window held (after the 30-file bulk cut)
+    std::uint32_t            bulkSkipped = 0;   // commits the bulk cut left out (touched more than 30 indexed files): bulk_skipped=
+    GitHistoryCensus         history;           // THIS walk's #777 policy counts: bots_skipped= (bots_included=), agent_commits=, renames=
+    std::uint32_t            seeds   = 0;   // distinct seed files probed
+    bool                     tail    = false;   // one seed: the corroborated tail applied (floor_tail="corroborated", why= per row)
+    bool                     shallow = false;
+    bool                     mined   = false;   // the block renders
+    std::string_view         none;              // why it does not, when it does not ("" on a --partition slice)
+};
+
+inline PackPartners packTaskPartners( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& order, const std::vector<float>& rank,
+                                      NodeId keyId, const PackTaskInputs& in )
+{
+    PackPartners out;
+    if( in.innerBundle )
+    {
+        return out;
+    }
+    if( in.rootArg.empty() )
+    {
+        out.none = "multi_root";
+        return out;
+    }
+    const std::string root( in.rootArg );
+    if( !hasEnclosingGitRepo( root ) )
+    {
+        out.none = "no_git";
+        return out;
+    }
+    std::vector<char> seedMask( ing.files.size(), 0 );
+    const auto        addSeed = [ & ]( NodeId id )
+    {
+        if( id >= ing.symbols.size() || ing.symbols[id].fileId >= seedMask.size() || seedMask[ ing.symbols[id].fileId ] != 0 )
+        {
+            return;
+        }
+        seedMask[ ing.symbols[id].fileId ] = 1;
+        ++out.seeds;
+    };
+    addSeed( keyId );
+    for( std::size_t i = 0; i < order.size() && out.seeds < kCoBoostSeedCount && rank[ order[i] ] > 0.0f; ++i )
+    {
+        addSeed( order[i] );
+    }
+    if( out.seeds == 0 )
+    {
+        out.none = "no_seed";
+        return out;
+    }
+    CommitWindowCensus census;   // the bulk cut is a cut: counted here and disclosed as bulk_skipped= on the element
+    const auto         sets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit, UINT32_MAX, &census, &out.history );
+    out.commits     = sets.size();
+    out.bulkSkipped = census.bulkDropped;
+    out.shallow     = gitstamp::isShallow( root );
+    if( sets.empty() && out.bulkSkipped == 0 )   // a window whose every commit was bulk is a MEASUREMENT (total="0" bulk_skipped=N), not "no history"
+    {
+        out.none = out.shallow ? "shallow" : "no_history";
+        return out;
+    }
+    CoCouplingCache coupling( ing );
+    SeedPartners merged = mergeSeedPartners( ing, seedMask, sets, kCoBoostSeedCount, coupling, &g );
+    out.rows  = std::move( merged.rows );
+    out.tail  = merged.tail;
+    out.mined = true;
+    return out;
+}
+
+// #777's history_policy counts for THIS walk, present-only, in #777's own names: bots_skipped= (bots_included= under
+// --include-bots), agent_commits=, renames=. One spelling for both dialects: XML passes `="`/`"`, JSON `":`/"" (keys partners_*).
+inline std::string packTaskPartnersPolicyAttrs( const GitHistoryCensus& h, std::string_view open, std::string_view close )
+{
+    std::string out;
+    const auto  add = [ & ]( std::string_view name, std::uint32_t n )
+    {
+        if( n > 0 )
+        {
+            out += open == "=\"" ? " " : ",\"partners_";
+            out.append( name );
+            out.append( open );
+            out += std::to_string( n );
+            out.append( close );
+        }
+    };
+    add( gitIncludeBots() ? "bots_included" : "bots_skipped", h.botCommits );
+    add( "agent_commits", h.agentCommits );
+    add( "renames", h.exactMoves );
+    return out;
+}
+
+// The rows, rendered once (the budget and the reflow lap re-cut the same entries).
+template <class EscFn>
+inline std::vector<std::string> packTaskPartnerRows( const IngestResult& ing, const PackPartners& pp, std::string_view rootArg, EscFn&& ex )
+{
+    std::vector<std::string> rows;
+    rows.reserve( pp.rows.size() );
+    const std::string prefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    for( const SeedPartner& p : pp.rows )
+    {
+        const std::string_view path = rootArg.empty() ? std::string_view( ing.files[ p.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ p.fileId ], prefix );
+        rows.push_back( "<f p=\"" + ex( path ) + "\" together=\"" + std::to_string( p.together ) + "\""
+                        + ( pp.tail ? " why=\"" + std::string( coWhyName( p.why ) ) + "\"" : std::string() ) + "/>" );
+    }
+    return rows;
+}
+
+// The element at `budget`: the list section's cut, partners_cut= when it dropped a row, and the bare shell (still
+// counting total=) when not one row fits. "" only when the block is not mined.
+inline PackTaskSection packTaskPartnersSection( const PackPartners& pp, const std::vector<std::string>& rows, std::size_t budget )
+{
+    if( !pp.mined )
+    {
+        return {};
+    }
+    char extra[ 240 ];
+    rw::formatTo( extra, sizeof( extra ), " window=\"{} commits\" commits=\"{}\" seeds=\"{}\" floor=\"{}\"{}{}{}{}", kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor,
+                  pp.tail ? " floor_tail=\"corroborated\"" : "",
+                  pp.bulkSkipped > 0 ? " bulk_skipped=\"" + std::to_string( pp.bulkSkipped ) + "\"" : std::string(),
+                  packTaskPartnersPolicyAttrs( pp.history, "=\"", "\"" ), gitstamp::shallowAttr( pp.shallow ) );
+    const std::string cutAttr   = " partners_cut=\"" + std::to_string( rows.size() ) + "\"";
+    const std::string shellOpen = "<partners" + std::string( extra ) + " shown=\"0\" total=\"" + std::to_string( rows.size() ) + "\" capped=\""
+                                + ( rows.empty() ? "0\"" : "1\"" + cutAttr ) + ">";
+    // the wrapper's worst case: the shell's open tag (its partners_cut= at the widest count) plus the close tag
+    const std::size_t wrapReserve = shellOpen.size() + std::string_view( "</partners>" ).size();
+    PackTaskSection   section     = packTaskListSection( "partners", extra, rows, budget, wrapReserve );
+    if( section.xml.empty() )
+    {
+        section.xml  = shellOpen + "</partners>";
+        section.kept = 0;
+        return section;
+    }
+    if( section.kept < rows.size() )
+    {
+        std::string open = section.xml.substr( 0, section.xml.find( '>' ) + 1 );
+        setOpenTagAttr( open, "partners_cut", std::to_string( rows.size() - section.kept ) );
+        section.xml.replace( 0, section.xml.find( '>' ) + 1, open );
+    }
+    return section;
+}
+
+// The JSON twin: the same kept prefix, or the same partners_none reason. "" on a --partition slice.
+inline std::string packTaskPartnersJson( const IngestResult& ing, const PackPartners& pp, std::size_t kept, std::string_view rootArg )
+{
+    if( !pp.mined )
+    {
+        return pp.none.empty() ? std::string() : ",\"partners_none\":\"" + std::string( pp.none ) + "\"";
+    }
+    std::string j;
+    { char b[ 300 ];  rw::formatTo( b, sizeof( b ), ",\"partners_window\":\"{} commits\",\"partners_commits\":{},\"partners_seeds\":{},\"partners_floor\":{}{},\"partners_total\":{},\"partners_kept\":{}{}{}",
+                                    kCoBoostCommitWindow, pp.commits, pp.seeds, kCoSupportFloor, pp.tail ? ",\"partners_floor_tail\":\"corroborated\"" : "", pp.rows.size(), kept,
+                                    pp.bulkSkipped > 0 ? ",\"partners_bulk_skipped\":" + std::to_string( pp.bulkSkipped ) : std::string(),
+                                    pp.shallow ? ",\"partners_shallow\":true" : "" );  j += b; }
+    j += packTaskPartnersPolicyAttrs( pp.history, "\":", "" );
+    j += ",\"partners\":[";
+    const std::string prefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    for( std::size_t i = 0; i < kept && i < pp.rows.size(); ++i )
+    {
+        const std::string_view path = rootArg.empty() ? std::string_view( ing.files[ pp.rows[i].fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ pp.rows[i].fileId ], prefix );
+        j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( path ) + "\",\"together\":" + std::to_string( pp.rows[i].together )
+           + ( pp.tail ? ",\"why\":\"" + std::string( coWhyName( pp.rows[i].why ) ) + "\"" : std::string() ) + "}";
+    }
+    j += "]";
+    return j;
+}
+
+// The block as the assembler carries it, and its three turns there — the grant before the tail, the reflow lap, and the ledger +
+// root disclosure — each its own function so the assembler spends one line per turn (its complexity is the gated number).
+struct PackPartnersBlock
+{
+    PackPartners             data;
+    std::vector<std::string> rows;
+    std::size_t              budget = 0;
+    PackTaskSection          section;   // "" unless data.mined
+};
+
+// The first lap: up to the cap, out of `remaining`, charged by monotoneRoll (its candidate set never depends on budgetTokens and
+// `remaining` is non-decreasing in it, so the kept count is monotone). Returns what is left.
+inline std::size_t grantPackPartners( PackPartnersBlock& b, std::size_t remaining, std::size_t quotaBase )
+{
+    if( !b.data.mined )
+    {
+        return remaining;
+    }
+    b.budget                = std::min( remaining, quotaBase * kPackTaskPartnersCapPct / 100 );
+    b.section               = packTaskPartnersSection( b.data, b.rows, b.budget );
+    const MonotoneRoll roll = monotoneRoll( b.section.kept < b.rows.size(), b.budget, b.section.xml.size() );
+    return remaining > roll.charge ? remaining - roll.charge : 0;
+}
+
+// The reflow lap's turn: reflowListSection's rule over this block's own cut. Returns what it passes on.
+inline std::size_t reflowPackPartners( PackPartnersBlock& b, std::size_t reflow )
+{
+    if( reflow == 0 || !b.data.mined || b.section.kept >= b.rows.size() )
+    {
+        return reflow;
+    }
+    b.budget += reflow;
+    b.section = packTaskPartnersSection( b.data, b.rows, b.budget );
+    return b.section.kept < b.rows.size() || b.budget <= b.section.xml.size() ? 0 : b.budget - b.section.xml.size();
+}
+
+// The ledger clause (the other sections' "kept K of T" wording) and, when there is no block, the root's partners_none=.
+inline void notePackPartners( const PackPartnersBlock& b, std::string& report, std::string& rootAttrs )
+{
+    if( b.data.mined )
+    {
+        const std::size_t total = b.rows.size(), kept = b.section.kept;
+        report += " | partners: " + ( total == 0 ? std::string( "none" )
+                                                 : ( kept < total ? "kept " : "" ) + std::to_string( kept ) + " of " + std::to_string( total ) );
+        return;
+    }
+    if( !b.data.none.empty() )
+    {
+        rootAttrs += " partners_none=\"" + std::string( b.data.none ) + "\"";   // why there is no <partners> (PackPartners)
+    }
+}
+
+// The full legend's reading, rows-gated like the run= clause: present exactly when the element or the root attribute is.
+inline constexpr std::string_view kPackPartnersLegend =
+    " partners (after tests, before the tail): files that changed in the same commits as the ranking's first seeds= distinct "
+    "files (not the seeds), the ones a change there usually also edits; <f p= together=>: together= commits it shares with its "
+    "best seed (floor= or more, 3), rows by that seed's share of commits; floor_tail=corroborated (one seed): the list is filled to 10 with partners sharing "
+    "2 commits that are corroborated, below every other row, and each row's why= says which: support (3+), confidence (in at least half the seed's commits) "
+    "or link (an include, import or call edge either way, a test-of pair, or the same directory of 20 files or fewer); window= commits= the history read; bulk_skipped=N commits left out "
+    "for touching over 30 indexed files; bots_skipped=N (bots_included= under include-bots) bot-authored commits left out, "
+    "agent_commits=N kept commits a coding agent co-authored, renames= the exact file moves followed (each present when nonzero); shallow=1 a depth-limited clone, so a floor; up to 3 pct of the budget, out of what the sections above left, then the tail's; "
+    "partners_cut=N rows the budget cut. ";
+inline constexpr std::string_view kPackPartnersNoneLegend =
+    " partners_none= why no partners block: no_git (no repository), no_history (no commit in the window touched an indexed "
+    "file), shallow (a depth-limited clone with none), multi_root (no single root), no_seed (nothing ranked). ";
+inline std::string_view packTaskPartnersLegend( const PackPartners& pp )
+{
+    return pp.mined ? kPackPartnersLegend : pp.none.empty() ? std::string_view() : kPackPartnersNoneLegend;
 }
 
 // THE bundle assembler: builds the budget-shared bundle (ranking > key body > callers > notes > tests > file tail) for
@@ -2178,6 +2446,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const MonotoneRoll bodiesRoll = monotoneRoll( keyId != kNoNode && bodiesKept == 0, bodiesBudget, bodiesStr.size() );
     remaining = remaining > bodiesRoll.charge ? remaining - bodiesRoll.charge : 0;
 
+    // ── <partners> (emitted after tests): mined here, granted its bytes just before the tail below (see PackPartners above) ──
+    PackPartnersBlock partners{ .data = packTaskPartners( ing, g, order, rank, keyId, in ) };
+    partners.rows = packTaskPartnerRows( ing, partners.data, in.rootArg, ex );
+
     // ── section 6 — the file-grain tail (PB1): filled LAST, with everything the sections above left, cut at a row boundary ──
     //    (packTaskTailRowsToFit). A --partition slice carries none: its rank is masked to the slice, and the outer document's
     //    core states the task's files once.
@@ -2190,6 +2462,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     if( !in.innerBundle )
     {
         remaining += tailReserve;   // the tail's own share, back on top of whatever the sections above left
+        // <partners>: up to its cap, out of what the sections above left and then the tail's reserve. Its candidate set never
+        // depends on budgetTokens and `remaining` is non-decreasing in it, so the same monotoneRoll treatment keeps it monotone.
+        remaining = grantPackPartners( partners, remaining, quotaBase );
         tail = computeFileTail( ing, rank, lr.evidence, head.shownIds, in.rootArg, task );
         // the whole tail fits with bytes to spare while the head is cut: the head takes them first (W2-K.2's lap, the head's
         // turn), and the tail is rebuilt from the rows the wider head shows — a file can only move from the tail into the head.
@@ -2230,6 +2505,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     std::size_t reflow = remaining;
     reflow = reflowListSection( callers, "callers", callersAttr, callerRows, callersBudget, kPackTaskWrapReserveWide, reflow );
     reflow = reflowListSection( notes,   "notes",   "",          noteEntries, notesBudget,   kPackTaskWrapReserve,     reflow );
+    reflow = reflowPackPartners( partners, reflow );   // <partners>' turn, before the tests' (the last)
     // The tests section's own reflow lap — reflowListSection's rule (top up a section the first lap capped,
     // once, and pass nothing further on) over packTaskTestsSection's cut. It is the LAST section to reflow, so
     // its leftover goes nowhere and is not computed.
@@ -2274,11 +2550,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     if( jsonOut )
     {
         const RedactTallyFreeze tallyFreeze( in.redact );   // §B10.2: this second rendering must not re-bill the tally
+        const std::string       partnersJson = packTaskPartnersJson( ing, partners.data, partners.section.kept, in.rootArg );
         packTaskJsonTail( *jsonOut, PackTaskJsonParts{ ing, lr, in, task, renderFaults, rank, forClone, bodyIds, d1, d1SigRaw,
                                                        emittedBodies, head, notes, noteEntriesData, testFiles, testPartition,
                                                        tailJson, mentionNote, boostNote, sibliftNote, expandNote, docMentionNote,
                                                        keyId, budgetTokens, bundleBudget, bodiesTotal, bodiesKept, callersTotal,
-                                                       callersKept, notesTotal, notesKept, testsTotal, testsKept } );
+                                                       callersKept, notesTotal, notesKept, testsTotal, testsKept, partnersJson } );
     }
 
     const auto listStatus = []( std::size_t total, const std::string& body, std::size_t kept ) -> std::string
@@ -2348,6 +2625,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // same way M1 gave that path dropped_positive=. Same attribute names as the --for and MCP twins, so
     // mcpattrparitycheck still sees one spelling on every root.
     droppedPositiveAttr += lr.capAttrs;
+    notePackPartners( partners, report, droppedPositiveAttr );   // the ledger's partners clause, or the root's partners_none=
     if( renderFaults.failedMask != 0 )
     {
         // Not a budget fact: these sections' renders FAILED. Marked on the root (and on the section element itself),
@@ -2369,7 +2647,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // by a named local here, like report and droppedPositiveAttr above it. Binding the view straight to the
     // returned temporary is a dangling read the moment the full expression ends, and it showed as exactly
     // that: packtaskcheck's bundle was both malformed and non-deterministic (two runs, two sha256s).
-    const std::string runClauseStr = rw::runHintClauseIfRows( tests.kept, rw::runsAreRootRelative( ing, in.rootArg ) );   // the ONE gate: the section's own kept count
+    const std::string runClauseStr = rw::runHintClauseIfRows( tests.kept, rw::runsAreRootRelative( ing, in.rootArg ) )   // the ONE gate: the section's own kept count
+                                   + std::string( packTaskPartnersLegend( partners.data ) );                               // rows-gated the same way
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, sibliftNote, expandNote, report, droppedPositiveAttr, in.rootArg,
                                             runClauseStr, /*softBudget=*/in.softTarget && !in.innerBundle, pathFromNote };
@@ -2394,13 +2673,15 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string headerStr = buildHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
 
     std::string whole;
-    whole.reserve( headerStr.size() + sigsStr.size() + bodiesStr.size() + callersStr.size() + notesStr.size() + testsStr.size() + tailStr.size() + 8 );
+    whole.reserve( headerStr.size() + sigsStr.size() + bodiesStr.size() + callersStr.size() + notesStr.size() + testsStr.size()
+                   + partners.section.xml.size() + tailStr.size() + 8 );
     whole += headerStr;
     whole += sigsStr;
     whole += bodiesStr;
     whole += callersStr;
     whole += notesStr;
     whole += testsStr;
+    whole += partners.section.xml;
     whole += tailStr;
     whole += "</ctx>";
 

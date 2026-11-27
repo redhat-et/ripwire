@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, lane large-repo-perf merged with origin/main (#819/#823/#829 merged): RE-DERIVED with UPDATE_GOLDEN=1
+#   on the MERGED sources rather than taken from either side, because both sides had already re-pinned. kCacheVersion
+#   stays 57 and is now above main's 56 (lane c1-one-parse), whose one-blob record shape this tree also carries;
+#   kParserVer and its mirror stay 350. kQSnapCacheScheme untouched.
 # 2026-11-27, lane c1-one-parse (#819 ONE-PARSE) merged with origin/main fe284b2af: RE-PINNED ONCE with UPDATE_GOLDEN=1 on the
 #   MERGED sources. Both sides had already re-pinned, so NEITHER value was correct: #819 carried 4410144026…e77d5831 and main
 #   carried e640115f3e…ccbd8342 (the 11-26 cr-qd3 entry below). A merge that picks a side here ships a pin that describes
@@ -48,6 +52,25 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
 #   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
 #   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
+# 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
+#   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
+#   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57
+#   (lane asserted-signal) and kQSnapCacheScheme is unchanged: the extraction key moves, and the snapshot blob shape does not.
+#   Hash 0a151a98c9…87783b12.
+# 2026-11-26, lane objcxx-std-qualified (on origin/main f7cfcec7a): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 348 (PLACEHOLDER above drafts #769's 344 and the RESOLVER lane's possible 346, rich 349): an
+#   ObjC++ (.mm) call written `std::X()` carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore). kCacheVersion
+#   55 and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 7cacf91040…caef25.
+# 2026-11-26, lane rust-turbofish-callers (on main 5f4b50415): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 344 (PLACEHOLDER, rich 345): a Rust turbofish on a path function or a method is a call
+#   (queries/rust/tags.scm), and a transcriber's `f::<T>(` is read as a call (ingest_names.h readCallPath). kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 366b3fa9c3…9030201c.
+# 2026-11-26, lane asserted-signal (stacked on #770, 790ff59b5): RE-PINNED with UPDATE_GOLDEN=1. kCacheVersion and
+#   kIngestCacheVersionMirror 54 -> 57 (the M5's ingest slot): queries/python/tags.scm records the `assert` statement as a call
+#   reference named `assert`, so a v54 .py blob lacks those references. No record shape change; kParserVer 342 and
+#   kQSnapCacheScheme 38 unchanged (the qsnap key carries the producer identity). Hash 159a79d30b…bd8253dc on the lane's
+#   own base. RE-PINNED AGAIN on the merge with origin/main f18bba967 (#756 merged; main had moved kCacheVersion to 55, lane
+#   tangle-rule, pin e4355917b4…b71344719): 57 stays above it, and both histories ride the mirror comment. Hash de4fefdaf4…5339dcdc.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

@@ -57,6 +57,7 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "batchpage.h"             // CL1: the CLI --batch pages by whole <q> sub-answers under the output ceiling (cliBatchPage)
 #include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
@@ -3347,10 +3348,16 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
     if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
     {
         // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)
-        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={}\n",
+        // parallel_workers=: warmsnap::parallelFor's worker CEILING for this run (one per core, or
+        // RIPWIRE_PARALLEL_WORKERS). It is here so test/parallelforcheck.sh arm C can prove the two runs it
+        // compares really did use different worker counts before concluding that their maps agree — an arm that
+        // compares a run with itself passes while proving nothing, which is how that arm first read green on a
+        // tree that had no seam at all.
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={} parallel_workers={}\n",
                     snap.treeReplayed ? "replayed" : "walked", snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built",
                     rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ],
-                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ] );
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ],
+                    rw::warmsnap::parallelForWorkerCeiling() );
     }
 }
 
@@ -3362,7 +3369,12 @@ bool graphUnreadByWinner( const rw::Config& c, const char* winner )
                           && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 || std::strcmp( winner, "--whereis" ) == 0 );
     const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
                                     || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
-    return archWins && !modifierReadsGraph;
+    // STRAY-NO-GRAPH: --stray-content answers from git alone (crossref::computeStrayContent takes the root and the ref
+    // filter), and its --abi and --plan modes from the ingest as well (computeAbiCheck / computePlan take d.ing); runCrossRef
+    // never hands d.g to any of the three. Neither mode has a precedence row, so the winner reads --stray-content for all
+    // three shapes. test/straynographcheck.sh pins the bytes against a graph-built run.
+    const bool strayWins = winner != nullptr && std::strcmp( winner, "--stray-content" ) == 0;
+    return ( archWins || strayWins ) && !modifierReadsGraph;
 }
 
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
@@ -4613,6 +4625,42 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// The history-signal verbs (--hotspots, --rank-by=churn[-decay], --cochange, --situ, --quality-delta) say once, after the answer,
+// what their git walks left out (bot commits) and followed (exact moves) — gitmine.h WHOSE HISTORY. Other verbs that read history
+// for a secondary lens (the map's churn=, --for's co-change boost) apply the same policy and do not repeat the sentence.
+// --pack-task states its own walk's counts as attributes on <partners>, inside its budget (packtask.h PackPartners).
+static bool historySignalVerb( const rw::Config& cfg ) noexcept
+{
+    if( cfg.mcp || cfg.lsp || !cfg.listen.empty() )
+    {
+        return false;   // a server answers per request: the MCP envelope's _history_policy (mcp.h), never one line at exit
+    }
+    return cfg.hotspots || cfg.cochange || cfg.situ || cfg.qualityDelta
+        || cfg.rankBy == rw::RankBy::Churn || cfg.rankBy == rw::RankBy::ChurnDecay;
+}
+
+static void discloseHistoryPolicy( const rw::Config& cfg, char** argv )
+{
+    if( !historySignalVerb( cfg ) )
+    {
+        return;
+    }
+    const std::string sentence = rw::gitHistoryPolicySentence();
+    if( sentence.empty() )
+    {
+        return;
+    }
+    // the same stream rule as history_cut (discloseGitWalkCuts): a comment where the answer can hold one, never on a protocol stream
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--{}-->\n", rw::xmlCommentText( sentence ) );   // `--` is not well-formed in a comment
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
+    }
+}
+
 // Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
 // abstention (which prints without running the verb) both ask.
 static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
@@ -4884,6 +4932,7 @@ int main( int argc, char** argv )
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    rw::gGitIncludeBots.store( cfg.includeBots, std::memory_order_relaxed );   // the history walks' bot policy (gitmine.h WHOSE HISTORY), before any walk starts
     // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
     // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
     // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
@@ -4911,6 +4960,7 @@ static int finishMainRun( const rw::Config& cfg, char** argv )
     using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
+    discloseHistoryPolicy( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed
@@ -5024,6 +5074,62 @@ static int serveWholeAnswer( const rw::Config& cfg, Run&& run )
     }
     std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
     return rc;
+}
+
+// The flags a CLI batch page's next= replays: the ones that shape its sub-answers (runBatchSub's topK/stable, the legend
+// posture applyCompactToBatchSubs reads, redaction) and the crawl scope, so the next page is a page of the SAME batch.
+static std::string batchReplayFlags( const rw::Config& cfg )
+{
+    std::string out;
+    out += cfg.topKExplicit ? " --top-k=" + std::to_string( cfg.topK ) : std::string();
+    out += cfg.stable ? " --order=stable" : "";
+    out += cfg.legendDefaulted ? std::string() : " " + rw::nextFlag( "--legend=", cfg.legend );
+    out += cfg.noRedact ? " --no-redact" : "";
+    return out + crawlScopeFlags( cfg );
+}
+
+// CL1 (batchpage.h) for the CLI --batch: a batch that fits at no --offset, or one asked whole with --page-bytes=0, prints as
+// batchText wrote it — the second with the over-ceiling size line --for's whole answer prints. Past the ceiling it prints the
+// page from --offset=K, whole <q> sub-answers only, and a <q> over the ceiling alone gets one stderr line. The fit is priced on
+// the bytes the legend posture delivers, as serveWholeAnswer prices a whole answer. A printed answer reports the batch's
+// redaction tally after it, as the batch arm always did; a refusal prints neither.
+static int printCliBatch( const rw::Config& cfg, const std::string& whole, const rw::RedactCounts& redacted )
+{
+    const std::size_t offset    = std::size_t( std::max( cfg.pageOffset, 0 ) );
+    const std::size_t delivered = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( whole, compactLegendHint( cfg, whole ) ) : whole.size();
+    const bool        asWhole   = rw::wholeAnswerAsked( cfg ) || ( offset == 0 && delivered <= rw::kOutputCeilingChars );
+    const std::optional<rw::BatchRowSplit> split = asWhole ? std::nullopt : rw::splitBatchRows( whole );
+    if( asWhole || !split )
+    {
+        if( !asWhole )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the whole batch is printed: every sub-answer arrives, only the size is over the ceiling",
+                      "printCliBatch: batchText's document did not split into <q> rows — printed whole" );
+            rw::emitTo( stderr, "ripwire: --batch: this answer is {} B, over the {} B output ceiling, and could not be split into its <q> "
+                                "sub-answers; it is printed whole\n", delivered, rw::kOutputCeilingChars );
+        }
+        noteWholeAnswerOverCeiling( cfg, delivered );
+        rw::emitTo( stdout, "{}\n", whole );
+        reportRedactions( stderr, redacted );
+        return 0;
+    }
+    const rw::CliBatchPage page = rw::cliBatchPage( *split, offset, rw::nextFlag( "--batch=", cfg.batchFile ), batchReplayFlags( cfg ) );
+    if( !page.refusal.empty() )
+    {
+        rw::emitTo( stderr, "ripwire: --batch: {}\n", page.refusal );
+        return 1;
+    }
+    if( page.overBytes > 0 )
+    {
+        const std::size_t pageBytes = cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( page.text, compactLegendHint( cfg, page.text ) )
+                                                              : page.text.size();
+        rw::emitTo( stderr, "ripwire: --batch: sub-answer q={} is larger than a page, so this page carries it alone, whole: {} B, over the {} B "
+                            "output ceiling (an agent harness may show only a preview of it); narrow that sub-query to receive it inline\n",
+                    offset, pageBytes, rw::kOutputCeilingChars );
+    }
+    rw::emitTo( stdout, "{}\n", page.text );
+    reportRedactions( stderr, redacted );   // the whole batch ran, so its tally is every page's
+    return 0;
 }
 
 // --lint under --page-bytes=0: the whole answer through serveWholeAnswer; every other lint-family run as runLint serves it.
@@ -5903,10 +6009,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         {
             rw::applyCompactToBatchSubs( subs );
         }
-        std::fputs( batchText( subs, requested, kBatchCap ).c_str(), stdout );
-        std::fputc( '\n', stdout );
-        reportRedactions( stderr, rc );
-        return 0;
+        return printCliBatch( cfg, batchText( subs, requested, kBatchCap ), rc );
     }
 
     // Wave-4 remote ergonomics: a git-URL positional (https:// or git@) is shallow-cloned to a per-URL
@@ -6575,16 +6678,35 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
 
     // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
     // "after the graph" share; the verbs' own scopes nest inside it).
+    //
+    // MEASURED 2026-11-27 (lane/large-repo-perf, bench/PROFILE.md "Large-repo phase balance"): on a warm
+    // llvm-project `--for`, this one scope reads 2,920 ms, of which the already-instrumented ranking (398) and
+    // BM25 (207) account for ~605. The remaining ~2.3 s was a SINGLE UNLABELLED BUCKET — the largest per-query
+    // term in the whole profile, bigger than the ranking another lane is approximating — because the comment
+    // above is aspirational for the --for family: `runForLens`, `runForVerbRoute` and `runPackTask` carry no
+    // scopes of their own, so "the verbs' own scopes nest inside it" nested nothing.
+    //
+    // The four handler calls below are now bracketed, which answers WHICH handler owns the time. It does not
+    // answer what inside that handler owns it: `runForLens`/`runPackTask` live in verbs_for.h and
+    // `runForVerbRoute` in verbs_forroute.h, and splitting their interiors means editing those files. Four and
+    // not all ~50 handlers on purpose — these are the ones the large-repo profile actually lands in, and a
+    // scope per verb would cost a diff nobody can review for attribution nobody has asked for.
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
     // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
     // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
-    if( std::optional<int> handled = runForVerbRoute( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runForVerbRoute (--for routed to a nav verb)" );
+        if( std::optional<int> handled = runForVerbRoute( dsp ) )
+        {
+            return *handled;
+        }
     }
-    if( std::optional<int> handled = runForLens( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runForLens (the --for answer itself)" );
+        if( std::optional<int> handled = runForLens( dsp ) )
+        {
+            return *handled;
+        }
     }
 
     // §A2 (audit 2026-08-08) — the query family dispatches FIRST, as one contiguous block. A typed task
@@ -6594,9 +6716,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // --pack-task lost to --skipped/--hotspots but beat --lint, and --query lost to all ~50 — an order nobody
     // designed and no caller could infer. Intra-family order is X9(c)'s and UNCHANGED: --for (above) >
     // --pack-task > --query. Deliberate behaviour change; test/dispatchordercheck.sh pins every pair.
-    if( std::optional<int> handled = runPackTask( dsp ) )
     {
-        return *handled;
+        PROFILE_SCOPE_DESCRIBE( "verb/for: runPackTask (--pack-task)" );
+        if( std::optional<int> handled = runPackTask( dsp ) )
+        {
+            return *handled;
+        }
     }
 
     // --query owns no handler of its own: runDefaultMap serves it (the lexical-rank branch at its top) and is
@@ -6606,6 +6731,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // Guarded on --query, so a run without it still falls through the whole table exactly as before.
     if( !cfg.query.empty() )
     {
+        PROFILE_SCOPE_DESCRIBE( "verb/map: runDefaultMap (--query's lexical-rank branch)" );
         return runDefaultMap( dsp );
     }
 
