@@ -38,7 +38,9 @@
 #   (R9)  --legend=first is the legend-first order: the legend precedes the rows
 #   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
 #   (G3)  R1: a BODY-bearing section (<fold kind="bodies">, a non-key <bodies>) precedes <tail>
+#   (G4p) PREMISE: the probe's promoted body plus 24 tail rows fit the stop; red says "re-pin the probe", and (G4)/(G5b) wait on it
 #   (G4)  with it there, the guard still holds -- tail row 24 ends inside the page stop
+#   (G4b) ruling 120: with a body promoted, tail row 12 (kGuardTailRowsBody) ends inside the stop; (G5c) page 1 carries >= 12 tail rows
 #   (G5)  the DELIVERED page 1 carries a body AND still carries its first 24 tail rows
 #   (G3n) the non-vacuity control: the fixture must offer a post-tail body section to promote
 #   (G6)  R1b: AF2's RES section <lit> is still promoted and still DELIVERED on page 1, legend and all
@@ -589,7 +591,22 @@ PY_AF2
 # (G3) the body section is emitted ahead of <tail>; (G4) the guard still holds with it there; (G5) the DELIVERED page 1
 # carries a body AND still carries its first 24 tail rows. (G3n) is the non-vacuity arm: the fixture must present a
 # post-tail body section with G's preconditions met in the LEGACY order, or these arms assert nothing and say so.
-TASK_P="how does the page cut decide which sections land on page 1"
+# THE PROBE'S PREMISE, and why it is re-pinned (lane THETA6 on #742, 11-26; precedent CL1b above). (G4)/(G5b) demand 24 tail rows
+# inside the stop with a body promoted, a property of THIS probe on THIS tree, not a product guarantee: ruling 120 guarantees the body
+# class kGuardTailRowsBody (12) rows ((G4b)/(G5c) pin that). The old probe "how does the page cut decide which sections land on page 1"
+# held it by 1.1 KB until a ~10-line forpages.h edit pulled continuationPage into its <fold> (+1,046 B): row 24 ended at 12,380 and
+# page 1 carried 20 rows, with the main binary red the same way on that tree. (G4p) now says so instead of a bare (G4) red.
+# Candidates measured on that tree (row 24's end; margin = 12,000 - it; the fold promoted ahead of <tail>):
+#   page cut ... sections land on page 1   12,380  -380  fold 2,946      answer-first ordering promote a section   11,271  +729  fold 1,278
+#   tail decide which file rows to list    10,884 +1,116 fold 1,746      body section promoted ahead of tail rows  11,116  +884  fold   496
+#   legend hoist a section's comment       10,896 +1,104 fold 1,346      act line pick its read ranges             12,594  -594  fold 2,947
+#   crawl order assign symbol ids          12,943  -943  fold 3,510      jsrunner sandbox a script                 12,776  -776  fold 3,174
+#   gitignore matcher skip ignored files   12,923  -923  fold 3,342      bus factor count authors                  10,926 +1,074 fold   946
+#   security scan flag an exfiltration     11,587  +413  fold 3,028      deps verb resolve an include path         11,857  +143  fold 1,403
+#   clone detector hash token windows       9,947 +2,053 fold 1,776      mcp server answer the initialize request   9,727 +2,273 fold 1,586
+#   fold choose which bodies / warm snapshot key its cache / pagerank personalize the restart vector: no body promoted (G3 would fail)
+# Picked the largest margin with a body promoted, so a ~1 KB edit on this tree cannot flip it. If (G4p) reddens, re-pin from a fresh table.
+TASK_P="how does the mcp server answer the initialize request"
 cap "$WORK/p_new.xml" "$TASK_P" $OPTIN $WHOLE
 cap "$WORK/p_old.xml" "$TASK_P" $LEGACY
 cap "$WORK/p_page1.xml" "$TASK_P" $OPTIN
@@ -637,6 +654,7 @@ else:
 
 # ── (G3) the body section is emitted AHEAD of <tail> in the answer-first document.
 new = rd("p_new.xml"); tn = tops(new); nn = [x[0] for x in tn]
+premise = False   # (G4p) below; False when there is no <tail> to judge
 if "tail" not in nn:
     say(False, "(G3) the answer-first document has no <tail>")
 else:
@@ -646,11 +664,25 @@ else:
     behind = [x[0] for x in tn[ti + 1:] if x[0] in BODYSEC]
     say(bool(ahead), "(G3) a body section is emitted ahead of <tail>: ahead=%s behind=%s"
         % (",".join(ahead) or "NONE", ",".join(behind) or "none"))
-    # ── (G4) the guard still holds with it there: tail row 24 ends inside the stop (the file rung is not displaced).
+    # ── (G4p) THE PROBE'S PREMISE: the promoted body plus 24 tail rows fit the stop. Ruling 120 guarantees the body class only 12
+    # rows, so when they do not, the product is within its contract and the PROBE is what broke: say that, and judge (G4)/(G5b) only
+    # on a probe whose premise holds (see the re-pin note above TASK_P).
     rows = tailrows(new, tb, te)
-    say(len(rows) > K and rows[K - 1] <= STOP,
-        "(G4) with the body ahead of it, tail row %d still ends at %s <= %d (tail has %d rows)"
-        % (K, rows[K - 1] if len(rows) >= K else "?", STOP, len(rows)))
+    fold = sum(x[2] - x[1] for x in tn[:ti] if x[0] in BODYSEC)
+    premise = len(rows) > K and rows[K - 1] <= STOP
+    say(premise, "(G4p) premise: TASK_P's promoted body (%d B) and tail row %d end at %s <= %d (margin %s B)%s"
+        % (fold, K, rows[K - 1] if len(rows) >= K else "?", STOP, STOP - rows[K - 1] if len(rows) >= K else "?",
+           "" if premise else " -- premise broken: TASK_P fold grew to %d B; re-pin the probe (see CL1b)" % fold))
+    # ── (G4) the guard still holds with it there: tail row 24 ends inside the stop (the file rung is not displaced).
+    if premise:
+        say(len(rows) > K and rows[K - 1] <= STOP,
+            "(G4) with the body ahead of it, tail row %d still ends at %s <= %d (tail has %d rows)"
+            % (K, rows[K - 1] if len(rows) >= K else "?", STOP, len(rows)))
+    # ── (G4b) THE BODY CLASS'S OWN GUARANTEE (ruling 120, src/foranswerfirst.h kGuardTailRowsBody): with a body promoted, tail row 12
+    # ends inside the stop, on any probe.
+    KB = 12
+    say(len(rows) >= KB and rows[KB - 1] <= STOP,
+        "(G4b) ruling 120: with the body ahead of it, tail row %d ends at %s <= %d" % (KB, rows[KB - 1] if len(rows) >= KB else "?", STOP))
 
 # ── (G5) THE DELIVERED PAGE. Page 1 of the default paged call must carry a real body element AND its first 24 tail rows.
 # Both halves matter: the first is the gain, the second is the bar it must not buy the gain with.
@@ -660,7 +692,9 @@ nbody = sum(len(re.findall(r"<b\b[^>]*>", mask(p1)[x[1]:x[2]])) for x in bodies_
 say(nbody > 0, "(G5a) page 1 carries %d body element(s) in %s" % (nbody, ",".join(x[0] for x in bodies_on_page) or "no body section"))
 if "tail" in n1:
     i1 = n1.index("tail"); r1 = tailrows(p1, t1[i1][1], t1[i1][2])
-    say(len(r1) >= K, "(G5b) page 1 still carries its first %d tail rows (%d present)" % (K, len(r1)))
+    if "tail" in nn and premise:   # (G4p) judged the probe; a broken premise is already red and says why
+        say(len(r1) >= K, "(G5b) page 1 still carries its first %d tail rows (%d present)" % (K, len(r1)))
+    say(len(r1) >= 12, "(G5c) ruling 120: page 1 carries at least kGuardTailRowsBody (12) tail rows (%d present)" % len(r1))
 else:
     say(False, "(G5b) page 1 carries no <tail> at all -- the file rung was displaced whole")
 sys.exit(1 if bad else 0)

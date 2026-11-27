@@ -436,10 +436,24 @@ inline void markActLine( Stream& st )
     return out;
 }
 
-// Page k >= 2: a slim root (task= at= schema= est_tokens= + the disclosure), the re-opened section the page starts inside,
-// rows [start, end), the close of a section left open, the clauses page 1 shed that THESE rows carry (LD1, forpagelegend.h), and
-// the ref posture's pointer — no other legend.
-[[nodiscard]] inline std::string continuationPage( const Stream& st, const PageAsk& ask, const Cut& start, const Cut& end, std::size_t pages )
+// The block-local legend of the section `start` re-opens, when page 1 does not hold it: the comments glued before the section's
+// open tag (a cut never falls right after a comment), verbatim. A section that began on page 1 has its legend there; one that began
+// on a later page and runs on past it re-opens here with attributes and rows only that legend defines (<syms name_total= by=>, whose
+// legend is never in page 1's document legend), so the legend travels with its block. Empty otherwise.
+[[nodiscard]] inline std::string_view reopenedLegend( const Stream& st, const Cut& start, std::size_t pageOneEnd )
+{
+    if( start.openSec == std::string_view::npos ) { return {}; }
+    std::size_t first = start.openSec;
+    while( first > 0 && st.blocks[ first - 1 ].comment ) { --first; }
+    const std::size_t from = st.blocks[ first ].begin, to = st.blocks[ start.openSec ].begin;
+    return first == start.openSec || from < pageOneEnd ? std::string_view() : st.view.substr( from, to - from );
+}
+
+// Page k >= 2: a slim root (task= at= schema= est_tokens= + the disclosure), the re-opened section the page starts inside (with its
+// block-local legend when page 1 does not hold it: reopenedLegend), rows [start, end), the close of a section left open, the
+// clauses page 1 shed that THESE rows carry (LD1, forpagelegend.h), and the ref posture's pointer — no other legend.
+[[nodiscard]] inline std::string continuationPage( const Stream& st, const PageAsk& ask, const Cut& start, const Cut& end, std::size_t pages,
+                                                   std::size_t pageOneEnd )
 {
     const std::string_view v        = st.view;
     const std::string_view rootOpen = v.substr( st.openAt, st.openEnd - st.openAt );   // without its '>'
@@ -448,7 +462,11 @@ inline void markActLine( Stream& st )
     const std::string sections = sectionAttrs( st, end );
     out += pageAttrs( ask, { .page = ask.page, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
-    if( start.openSec != std::string_view::npos ) { out.append( openTagOf( v, st.blocks[ start.openSec ] ) ); }
+    if( start.openSec != std::string_view::npos )
+    {
+        out.append( reopenedLegend( st, start, pageOneEnd ) );
+        out.append( openTagOf( v, st.blocks[ start.openSec ] ) );
+    }
     out.append( v.substr( start.at, end.at - start.at ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
     out += scope::laterPageComment( st.gone, out );   // the slim root's task= is escaped: it spells no element or ` attr="`
@@ -631,7 +649,7 @@ inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
     if( pages == 1 || ( plan.wholeFirst && ask.page == 1 ) ) { return detail::servedWhole( doc, *st, ask, pages ); }
     const detail::Cut& end = st->cuts[ ends[ ask.page - 1 ] ];
     std::string out = ask.page == 1 ? detail::firstPage( *st, ask, end, pages )
-                                    : detail::continuationPage( *st, ask, st->cuts[ ends[ ask.page - 2 ] ], end, pages );
+                                    : detail::continuationPage( *st, ask, st->cuts[ ends[ ask.page - 2 ] ], end, pages, st->cuts[ ends[ 0 ] ].at );
     if( ask.page == 1 && out.size() >= doc.size() ) { return detail::servedWhole( doc, *st, ask, pages ); }   // paging saves nothing on page 1
     detail::pricePage( out );
     doc.swap( out );

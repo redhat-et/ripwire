@@ -227,3 +227,6 @@ kRoutedCarriedPageFloorBytes	none:RL1 a RESERVE, not a cut (verbs_forroute.h run
 kRoutedFitTries	none:RL1 a bound on how often the routed verb is re-rendered with a smaller row limit (fitRoutedVerb); when it is spent the question is NOT ROUTED and the --for answer is served byte for byte, so no row is cut by it
 kMcpCarriedFilePageFirstLimit	none:MR1 the FIRST row limit a routed MCP answer renders its carried file page at (mcpFittedFilePage), an upper start the fit scales DOWN by measured bytes; the cut it leads to is the file page's own window (has_more="1" next_offset=K, `for` limit=L offset=K), disclosed on the page root and proved lossless by mcpforroutepagecheck (L2)
 kActRows	legend
+kTinyRows	sink:shown
+kEdgeCap	sink:shown
+kSpreadEdgeMax	none:a shape test, not a cut: a named symbol with more cross-file edges than this, a caller among them, gets the full page; under it every edge is listed (shown=total) (THETA6-FINISH)
