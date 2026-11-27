@@ -727,17 +727,18 @@ inline std::vector<std::pair<std::string_view, std::string>> mcpVisibleNotes( st
 // Splice the notes into `payload` in its own form (above). Returns false when there was nothing to say (payload untouched).
 inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes );
 
-// The answer `body` with this request's notes said inside it (mcpSpliceNotes), or "" when it has none to say.
-inline std::string mcpAnswerWithNotes( std::string_view verb, const std::string& body, const McpEnvelopeNotes& n )
+// The answer to serve: `body` itself when this request has no note to say, else `scratch` holding `body` with the notes said
+// inside it (mcpSpliceNotes). No copy is made of an answer with nothing to disclose.
+inline const std::string* mcpAnswerWithNotes( std::string_view verb, const std::string* body, const McpEnvelopeNotes& n, std::string& scratch )
 {
-    std::string noted;
-    const auto  notes = mcpVisibleNotes( verb, n );
-    if( !notes.empty() )
+    const auto notes = mcpVisibleNotes( verb, n );
+    if( notes.empty() )
     {
-        noted = body;
-        mcpSpliceNotes( noted, notes );
+        return body;
     }
-    return noted;
+    scratch = *body;
+    mcpSpliceNotes( scratch, notes );
+    return &scratch;
 }
 
 inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes )
@@ -1893,9 +1894,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     legenddict::openSessionWith( *body, *legendSession );   // served as-is; opens the session when reducible
                 }
                 const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
-                const std::string noted    = mcpAnswerWithNotes( name, *body, McpEnvelopeNotes{ assumedRootNote, visibleStopNote, memoryStopNote,
-                                                                                                cutNote, overCeilingNote } );
-                body = noted.empty() ? body : &noted;
+                std::string noted;
+                body = mcpAnswerWithNotes( name, body, McpEnvelopeNotes{ assumedRootNote, visibleStopNote, memoryStopNote, cutNote, overCeilingNote }, noted );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
@@ -2643,8 +2643,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
-                        return t.empty() ? errResultMsg( -32602, emptyCause.empty() ? std::string( "no answer, cause unknown — no refs to compare" ) : emptyCause )
-                                         : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, emptyCause ) : textResult( t );
                     } );
                 }
                 else if( name == "flags" && !path.empty() )
