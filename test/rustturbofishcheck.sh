@@ -37,13 +37,14 @@ mkdir -p "$DIR/src"
 printf '[package]\nname = "tf"\nversion = "0.1.0"\nedition = "2021"\n' >"$DIR/Cargo.toml"
 cat >"$DIR/src/lib.rs" <<'R'
 pub mod util;
-pub mod c_free; pub mod c_path; pub mod c_mod; pub mod c_method; pub mod c_nested; pub mod c_macro; pub mod c_trans; pub mod c_plain; pub mod c_typed;
+pub mod c_free; pub mod c_path; pub mod c_mod; pub mod c_method; pub mod c_nested; pub mod c_macro; pub mod c_trans; pub mod c_trans2; pub mod c_plain; pub mod c_typed;
 pub struct W;
 impl W {
     pub fn tf_meth<T>(&self, x: T) -> T { x }
     pub fn tf_assoc<T>(x: T) -> T { x }
 }
 pub fn tf_free<T>(x: T) -> T { x }
+pub fn tf_decoy() {}
 pub struct Gen<T>(T);
 impl<T> Gen<T> { pub fn make(x: T) -> Gen<T> { Gen(x) } }
 pub struct V;
@@ -99,6 +100,19 @@ macro_rules! near {
 }
 pub fn call_trans(w: &crate::W) -> u64 { near!(); go!(w) }
 R
+cat >"$DIR/src/c_trans2.rs" <<'R'
+macro_rules! arr {
+    () => {
+        crate::W::tf_assoc::<[u8; 4]>([0; 4])
+    };
+}
+macro_rules! cmt {
+    () => {
+        crate::tf_free::</* > tf_decoy() */ u8>(1)
+    };
+}
+pub fn call_trans2() { arr!(); cmt!(); }
+R
 cat >"$DIR/src/c_plain.rs" <<'R'
 use crate::{tf_free, W};
 pub fn call_plain(w: &W) -> u32 { tf_free(1) + W::tf_assoc(2) + w.tf_meth(3) + crate::util::tf_deep(4) }
@@ -116,7 +130,7 @@ CM="$( callers tf_meth )";  UM="$( uses tf_meth )"
 CA="$( callers tf_assoc )"; UA="$( uses tf_assoc )"
 CD="$( callers tf_deep )";  UD="$( uses tf_deep )"
 CF="$( callers tf_free )";  UF="$( uses tf_free )"
-CG="$( callers Gen )"
+CG="$( callers Gen )"; UY="$( uses tf_decoy )"
 CWD="$( callers W::tf_dup )"; CVD="$( callers V::tf_dup )"
 CWM="$( callers W::tf_mk )";  CVM="$( callers V::tf_mk )"
 
@@ -148,6 +162,9 @@ has "$UD" '<u role="call" p="src/c_trans.rs:5" in_id="go"/>'         "[P6] --use
 has "$CWD" 'n="call_typed" p="src/c_typed.rs:2"'             "[P7] typed receiver w: &W, w.tf_dup::<u8>(12): --callers W::tf_dup lists c_typed.rs"
 has "$CWM" 'n="call_typed" p="src/c_typed.rs:2"'             "[P7] qualifier W in W::tf_mk::<u8>(13): --callers W::tf_mk lists c_typed.rs"
 
+has "$UA" '<u role="call" p="src/c_trans2.rs:3" in_id="arr"/>'  "[P8] transcriber turbofish with an array type W::tf_assoc::<[u8; 4]>(..): --uses tf_assoc has the arr call"
+has "$UF" '<u role="call" p="src/c_trans2.rs:8" in_id="cmt"/>'  "[P8] transcriber turbofish holding a comment tf_free::</* > */ u8>(1): --uses tf_free has the cmt call"
+
 echo "── [C] the same callees without a turbofish, and the bare turbofish H4 already read"
 has "$CF" 'n="call_free" p="src/c_free.rs:2"'                 "[C1] bare turbofish tf_free::<u32>(1): --callers tf_free lists c_free.rs"
 has "$CF" 'n="call_nested" p="src/c_nested.rs:2"'             "[C2] bare nested turbofish tf_free::<Vec<Option<u8>>>: --callers tf_free lists c_nested.rs"
@@ -160,6 +177,7 @@ echo "── [N] near misses: a turbofish that is no call"
 hasnt "$CF" 'n="go"'                                          "[N1] a fn-pointer value crate::tf_free::<u8> in a transcriber is no call of tf_free"
 hasnt "$CF" 'n="near"'                                        "[N1] ... nor a call of tf_free by the near macro"
 hasnt "$CG" 'n="near"'                                        "[N2] a turbofish on a TYPE segment crate::Gen::<u8>::make(..) is no call of Gen"
+hasnt "$UY" 'in_id="cmt"'                                          "[N4] a > and a call inside a comment in a turbofish is no call of tf_decoy"
 hasnt "$CVD" 'n="call_typed"'                                 "[N3] the receiver's type still decides: --callers V::tf_dup does not list call_typed"
 hasnt "$CVM" 'n="call_typed"'                                 "[N3] the qualifier still decides: --callers V::tf_mk does not list call_typed"
 

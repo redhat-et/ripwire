@@ -1426,19 +1426,40 @@ inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint
     return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
 }
 // RUST-TURBOFISH: the end of the generic-argument list whose `<` sits at `open` — one past its matching `>` — or `open` itself
-// when the list does not close inside [open, end) or meets a byte no type list holds (`;`, `{`, `}`). `->` (a `Fn(u8) -> u8`
-// argument) is not a closing `>`.
+// when the list does not close inside [open, end) or meets a byte no type list holds (`{`, `}`, or a `;` outside `[..]`: an array
+// type `[u8; 4]` holds one). `->` (a `Fn(u8) -> u8` argument) is not a closing `>`, and a block or line comment is skipped whole,
+// so a `>` or `;` inside one neither closes nor rejects the list.
 inline std::uint32_t pastGenericArgs( std::string_view src, std::uint32_t open, std::uint32_t end ) noexcept
 {
     std::uint32_t depth = 0;
+    std::uint32_t brack = 0;
     for( std::uint32_t k = open; k < end; ++k )
     {
         const char c = src[ k ];
-        if( c == ';' || c == '{' || c == '}' )
+        if( c == '/' && k + 1 < end && ( src[ k + 1 ] == '*' || src[ k + 1 ] == '/' ) )
+        {
+            const std::string_view stop = src[ k + 1 ] == '*' ? "*/" : "\n";
+            const std::size_t      at   = src.find( stop, k + 2 );
+            if( at == std::string_view::npos || at >= end )
+            {
+                return open;
+            }
+            k = static_cast< std::uint32_t >( at + stop.size() - 1 );
+            continue;
+        }
+        if( c == '{' || c == '}' || ( c == ';' && brack == 0 ) )
         {
             return open;
         }
-        if( c == '<' )
+        if( c == '[' )
+        {
+            ++brack;
+        }
+        else if( c == ']' && brack > 0 )
+        {
+            --brack;
+        }
+        else if( c == '<' )
         {
             ++depth;
         }
