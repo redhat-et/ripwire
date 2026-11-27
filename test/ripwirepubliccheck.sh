@@ -921,6 +921,32 @@ PAIR_ALLOW = frozenset( (
     ( 'test/docscommandscheck.sh', 'sym@file.ext' ),
     ( 'test/docscommandscheck.sh', 'symbol@file.ext' ),
     ( 'test/showcase_capture.py', 'symbol@file.ext' ),
+    # #777 HISTORY-HONESTY (train m5-1126-4): gitmine.h's kBotAuthorEmails / agent-trailer tables name the PUBLIC
+    # automation identities that commit without a `[bot]` suffix (GitHub Actions, Renovate, Dependabot) and the
+    # agents' published Co-Authored-By addresses. They are product data the history walks match against, not
+    # anyone's personal address; each is exempted by its exact (path, address) pair. The gates' fixtures commit
+    # as those identities, so each carries its own pairs.
+    ( 'src/gitmine.h', 'action@github.com' ),
+    ( 'src/gitmine.h', 'bot@renovateapp.com' ),
+    ( 'src/gitmine.h', 'github-actions@github.com' ),
+    ( 'src/gitmine.h', 'renovate@whitesourcesoftware.com' ),
+    ( 'src/gitmine.h', 'support@dependabot.com' ),
+    ( 'src/gitmine.h', 'noreply@anthropic.com' ),
+    ( 'src/gitmine.h', 'cursoragent@cursor.com' ),
+    ( 'src/gitmine.h', 'noreply@aider.chat' ),
+    ( 'src/gitmine.h', '+copilot@users.noreply.github.com' ),
+    ( 'src/gitmine.h', 'amp@ampcode.com' ),
+    ( 'src/gitmine.h', 'openhands@all-hands.dev' ),
+    ( 'test/historyhonestycheck.sh', 'noreply@anthropic.com' ),
+    ( 'test/historyhonestycheck.sh', 'action@github.com' ),
+    # the churn oracle's own copy of the automation-account list (re-derived independently of gitmine.h on purpose)
+    ( 'test/lib/history_oracle.py', 'action@github.com' ),
+    ( 'test/lib/history_oracle.py', 'bot@renovateapp.com' ),
+    ( 'test/lib/history_oracle.py', 'github-actions@github.com' ),
+    ( 'test/lib/history_oracle.py', 'renovate@whitesourcesoftware.com' ),
+    ( 'test/lib/history_oracle.py', 'support@dependabot.com' ),
+    # #786's fixture commits with one agent trailer, as historyhonestycheck's does
+    ( 'test/packpartnerscheck.sh', 'noreply@anthropic.com' ),
 ) )
 
 sys.path.insert(0, os.path.join(ROOT, 'docs'))
@@ -1304,6 +1330,9 @@ fi
 #       train 43b capture (train 42b's 669ff03d did this for 2026-10-30); nothing widens: each entry names its date and hash.
 #   docs/captures/COMMANDS_showcase_2026-11-02.md:616,631 — the same two prose lines, byte for byte (same content hashes), in the
 #       lane/rule3-member-guard re-capture; re-keyed under this date as above.
+#   test/lib/history_oracle.py:2,5 — the module docstring describing the oracle's walk (#777, train m5-1126-4). The walk
+#       itself is the argv list in main(), which runs on the gate's own fixture repository (historyhonestycheck,
+#       churnjoincheck) at whatever that fixture holds; it measures no published population.
 #   test/lib/sweeproot.sh:20 — counts refs/heads only to decide whether the checkout is past the 512-ref cap (then the gate
 #       sweeps a one-commit clone pinned at HEAD); it measures nothing and feeds no published number.
 ARM9_OK='bench/cppbench/run_cppbench.py:e5d3f485c59b0187
@@ -1331,6 +1360,8 @@ docs/captures/COMMANDS_showcase_2026-10-31.md:118fbfbb8f6823fe
 docs/captures/COMMANDS_showcase_2026-10-31.md:22be6025a57af773
 docs/captures/COMMANDS_showcase_2026-11-02.md:118fbfbb8f6823fe
 docs/captures/COMMANDS_showcase_2026-11-02.md:22be6025a57af773
+test/lib/history_oracle.py:766c3357cf44cf8d
+test/lib/history_oracle.py:ba81c25e66604d66
 test/lib/sweeproot.sh:67ee2c894bbf3cf5'
 python3 - "$TMP/tracked.z" "$ARM9_OK" > "$TMP/arm9" <<'PY'
 import hashlib, os, re, sys
