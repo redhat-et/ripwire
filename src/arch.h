@@ -36,6 +36,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/strkern.h"      // strkern::lowerFoldedEquals — the built-in layer names match a path component, A-Z folded
 #include "infra/fileSetStore.h" // rw::FileAdjacency: the file graph the metrics and the propagation walk read
 #include "memguard.h"           // guardedFileClosure: the propagation fold stops at the hard line
 #include "infra/stackthreads.h" // kCallerStackBytesFloor — path-rule matching runs on whatever thread --arch is on, never one it sized itself
@@ -43,7 +44,6 @@
 #include <algorithm>
 #include <numeric>
 #include <array>
-#include <cctype>
 #include <cerrno>      // ELOOP — the one errno openArchBaselineSidecar re-words into its own symlink alert
 #include <cmath>
 #include <cstdint>
@@ -75,22 +75,6 @@ inline constexpr std::array<BuiltinLayer, 18> kBuiltinLayers = {{
     { "test", "test" },   { "tests", "test" },           { "bench", "test" },
 }};
 
-inline bool ciEqualAscii( std::string_view a, std::string_view b ) noexcept
-{
-    if( a.size() != b.size() )
-    {
-        return false;
-    }
-    for( std::size_t i = 0; i < a.size(); ++i )
-    {
-        if( std::tolower( static_cast<unsigned char>( a[i] ) ) != static_cast<unsigned char>( b[i] ) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 // First built-in layer matching any DIRECTORY component of `path` (filename ignored), or "" if none.
 inline const char* builtinLayer( std::string_view path ) noexcept
 {
@@ -107,7 +91,7 @@ inline const char* builtinLayer( std::string_view path ) noexcept
         const std::string_view comp  = dirs.substr( start, ( slash == std::string_view::npos ? dirs.size() : slash ) - start );
         for( const BuiltinLayer& bl : kBuiltinLayers )
         {
-            if( ciEqualAscii( comp, bl.dir ) )
+            if( strkern::lowerFoldedEquals( comp, bl.dir ) )   // kBuiltinLayers dirs are lowercase
             {
                 return bl.layer;
             }
@@ -150,7 +134,8 @@ inline const char* builtinLayer( std::string_view path ) noexcept
 //   old note claimed here — "std::regex on a BOUNDED corpus terminates" — was false on both standard
 //   libraries: `deny path zz/.* -> (a+)+z` aborted the process on libc++ (an uncaught error_complexity, rc 134)
 //   and backtracks without end on libstdc++. A match the engine still abandons (RegexVerdict::Exhausted — e.g.
-//   the multi-quantifier residual a*a*a*a*a*b, which the screen admits by construction; the overlapping
+//   an admitted pattern whose cost in the subject is super-linear, such as `(a|aa){1,100}b$`; the multi-quantifier
+//   family `a*a*a*a*a*b` it used to name here is refused at admission since #484, and the overlapping
 //   alternation an earlier note named here is refused at admission since M2-c), and a TO pattern that only becomes
 //   invalid once an edge's captures are substituted into it (`a{2,\1}` → `a{2,1}`), are reported by pathRuleForbids
 //   and refused by the verb, never read as "no match".
@@ -681,12 +666,7 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
 
 inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 14695981039346656037ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s );
 }
 
 // The ONE `*`/`?` wildcard match over a whole string (`*` spans any run, '/' included; a failed suffix backtracks one
@@ -784,7 +764,7 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
                                    std::string_view ruleLabel ) noexcept
 {
     // Concatenate with NUL separators so "a/b" + "c" and "a" + "b/c" produce different hashes.
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto mix = [ &h ]( std::string_view sv ) noexcept
     {
         for( const char c : sv )

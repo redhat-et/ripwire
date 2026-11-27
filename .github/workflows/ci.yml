@@ -15,6 +15,8 @@ name: CI
 #                    at release. RHEL 9 userland (ubi9) via `container:` on a hosted Ubuntu runner, built with
 #                    Red Hat's own gcc-toolset (RHEL 9's default gcc 11 cannot do C++23). Build + fixture
 #                    self-run + the two headline guarantees, NOT the full suite — see the job comment for why.
+#   - qd-range job:  pull requests only — scripts/qd_range.sh runs --quality-delta=<merge-base>..HEAD on this repo and
+#                    fails on a gating row the ack ledger does not cover (#697: merged regressions become the baseline).
 #   - asan job:      configure -DRIPWIRE_ASAN=ON (G1: address,undefined,integer,float-divide-by-zero,
 #                    float-cast-overflow, fail-fast) + build + the fixture self-run + the 5 heaviest verbs
 #                    (--pack-task/--from-trace/--quality-delta/--merge-scout/--edit-check)
@@ -44,6 +46,13 @@ name: CI
 #   earlier green nightly — and a nightly `schedule` against main. See the report-failure/report-green jobs
 #   at the bottom for where a red scheduled run is reported: its OWN tracking issue (label
 #   nightly-full-matrix, alongside the shared nightly-failure), separate from nightly.yml's TSan issue.
+#
+# ci-gate (the LAST job) is the ONE check to mark required in branch protection on main (Settings -> Branches ->
+# main -> Require status checks -> `ci-gate`). It needs every gating job, runs `if: always()`, fails when any of them
+# FAILED or was CANCELLED, and passes on success or SKIPPED — a skip is the light plan's design, so one required
+# name works for light and full runs alike. Why: on 2026-11-18 #687 was merged by hand over red checks (zoomcheck,
+# anchorcheck, routecheck, loopconservationcheck, windows-package, xplat-diff) because main had no required status
+# checks. The advisory/report jobs (tidy-advisory-report, report-failure, report-green) are deliberately NOT needed.
 
 on:
   push:
@@ -59,7 +68,7 @@ on:
     - cron: "41 5 * * *"   # 05:41 UTC daily
 
 permissions:
-  contents: read   # least privilege at the top; only report-failure/report-green below widen, and only for themselves
+  contents: read   # least privilege at the top; only report-failure/report-green/tidy-advisory-report below widen, and only for themselves
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -162,6 +171,21 @@ jobs:
   # bugprone-easily-swappable-parameters and 30 bugprone-exception-escape. Every remaining class was read and
   # refused with evidence; the record is in the commit that wrote these numbers. Read it as a to-triage list,
   # not a queue of defects.
+  #
+  # WHERE THE ADVISORY clang-tidy RUNS: on `schedule` (the nightly full matrix against main) and
+  # `workflow_dispatch` only, NOT on push or pull_request. Measured on PR #537's CI: this job took 1 h 57 min,
+  # of which the two GATING clang-tidy/clang-format steps are about 3 min (tidycheck.sh: 17:32:49 to 17:35:38)
+  # and the advisory step is the other ~1 h 55 min (17:35:38 to ~19:30) — one single-threaded clang-tidy
+  # process over five TUs, main.cpp's including the whole header-only program (graph.h alone is 14,470 lines)
+  # under the broad catalogue with clang-analyzer-*'s path-sensitive analysis and a HeaderFilterRegex over
+  # every src/*.h. It is continue-on-error, so it could never fail the check, only delay it, and every PR's
+  # last required check waited on it. Both GATING steps still run on every event, and the job keeps its name
+  # (branch protection may require it). The advisory report now appears in the nightly run's `style` job log
+  # (ci.yml's 05:41 UTC schedule runs the whole job: it has no `if:` and no `needs:`), and a manual dispatch
+  # prints it on demand. The nightly report-failure / report-green jobs are unaffected: the advisory step
+  # still never fails, so it neither opens nor closes their tracking issue. The advisory output is acted on
+  # instead: scripts/tidyadvisory_diff.py diffs it against .clang-tidy-baseline.txt and the tidy-advisory-report
+  # job below keeps ONE issue (label clang-tidy-advisory) listing the NEW rows.
   style:
     name: style (clang-format gate + advisory clang-tidy)
     runs-on: ubuntu-24.04
@@ -225,11 +249,133 @@ jobs:
       - name: clang-tidy — gate (scripts/tidycheck.sh, the zero-row subset)
         run: CLANG_TIDY=clang-tidy-"$CLANG_VERSION" bash scripts/tidycheck.sh build-tidy
 
-      - name: clang-tidy — ADVISORY, never gates
+      # GATING, a second long: the parser behind the nightly advisory diff below (dedupe across TUs, ANSI, the anchor, a
+      # compile error is not a finding). It reads no repo state, so it runs on every event and keeps that parser honest
+      # between nightlies, when nothing else would exercise it.
+      - name: tidyadvisory_diff.py — selftest (the advisory diff's parser)
+        run: python3 scripts/tidyadvisory_diff.py --selftest
+
+      # Nightly (`schedule`) and manual (`workflow_dispatch`) runs only: ~1 h 55 min, advisory, never gates —
+      # see the job comment. The report goes to the job log AND to tidy-advisory.txt (with clang-tidy's exit status in
+      # tidy-advisory.rc, so a crashed run is not read as a clean one) for the diff step below.
+      - name: clang-tidy — ADVISORY, never gates (nightly and workflow_dispatch only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         run: |
+          rc=0
           clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
-            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp
+            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp \
+            >tidy-advisory.txt 2>&1 || rc=$?
+          echo "$rc" > tidy-advisory.rc
+          cat tidy-advisory.txt
+          exit "$rc"
+
+      # ADVISORY too, and also never gates: scripts/tidyadvisory_diff.py compares the report with .clang-tidy-baseline.txt
+      # (key = file + check + the trimmed source line, no line numbers), prints the NEW and GONE rows, and writes the
+      # tracking-issue body, the status line and a baseline candidate. It exits 0 whatever it finds. Runs even when the
+      # advisory step above failed, so status=tool-failed / noinput is on the record instead of a silent skip.
+      - name: clang-tidy — ADVISORY diff against .clang-tidy-baseline.txt (nightly and workflow_dispatch only)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        continue-on-error: true
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/tidyadvisory_diff.py --report tidy-advisory.txt --rc tidy-advisory.rc \
+            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" \
+            --normalized-out tidy-advisory-baseline-candidate.txt --issue-body tidy-advisory-issue.md \
+            --status-out tidy-advisory.status --run-url "$RUN_URL" --sha "$GITHUB_SHA" \
+            --note "run $GITHUB_RUN_ID at $GITHUB_SHA ($GITHUB_EVENT_NAME), clang-tidy $CLANG_VERSION, deduplicated across translation units" \
+            | tee tidy-advisory-diff.txt
+
+      # The report, the diff, the baseline candidate and the issue body: the tracking-issue job below reads status and
+      # body from here (it needs no checkout and no toolchain), and a maintainer regenerates .clang-tidy-baseline.txt
+      # from tidy-advisory-baseline-candidate.txt. A workflow_dispatch run on a branch yields the same artifact.
+      - name: clang-tidy — upload the advisory report and diff (nightly and workflow_dispatch only)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidy-advisory
+          path: |
+            tidy-advisory.txt
+            tidy-advisory.rc
+            tidy-advisory.status
+            tidy-advisory-diff.txt
+            tidy-advisory-baseline-candidate.txt
+            tidy-advisory-issue.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ─── tidy-advisory-report: ONE tracking issue for the advisory clang-tidy's NEW findings (nightly only) ─────
+  #
+  # Turns the advisory report into action: when the nightly `style` job's diff finds rows that are not in
+  # .clang-tidy-baseline.txt, this job opens (or updates the body of) ONE issue labelled clang-tidy-advisory listing
+  # them by check with file:line and how to regenerate the baseline; a run with no NEW rows comments on and closes it.
+  # It acts ONLY on status=ok: a crashed clang-tidy, a missing report, a missing baseline or an empty report against a
+  # non-empty baseline leaves the issue untouched and says why in a ::warning:: annotation (a GONE list from a crashed
+  # run is not evidence). Only `schedule` against main reports, as report-failure does: a workflow_dispatch run
+  # prints the diff and uploads the artifact for whoever dispatched it. The job is continue-on-error and is NOT in
+  # report-failure/report-green's `needs`: the advisory signal never reddens or greens the nightly tracking issue.
+  # Its issues: write is the same single widening report-failure holds (test/g1configcheck.sh [reportperms]).
+  tidy-advisory-report:
+    name: tidy-advisory-report (open or update the advisory clang-tidy tracking issue)
+    needs: [style]
+    if: ${{ !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: tidy-advisory
+          path: tidy
+
+      - name: Open or update the "clang-tidy-advisory" issue, or close it when no NEW rows remain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label=clang-tidy-advisory
+          title="Advisory clang-tidy: new findings not in .clang-tidy-baseline.txt"
+          st=tidy/tidy-advisory.status
+          if [ ! -f "$st" ]; then
+            echo "::warning::no tidy-advisory.status in the artifact (the style job did not reach the diff step); the tracking issue is left untouched"
+            exit 0
+          fi
+          status="$( sed -n 's/^status=//p' "$st" )"
+          new="$( sed -n 's/^new=//p' "$st" )"
+          if [ "$status" != ok ]; then
+            echo "::warning::advisory clang-tidy diff status=$status (not ok); the tracking issue is left untouched. See the style job's diff step"
+            exit 0
+          fi
+          case "$new" in ''|*[!0-9]*) echo "::warning::unreadable new= in $st; the tracking issue is left untouched"; exit 0 ;; esac
+          # #663: the old 121-character description drew HTTP 422 "description is too long (maximum is 100 characters)" on every
+          # nightly that reached this line (11-14 and 11-15), so the label never existed and no issue was ever opened. GitHub caps a
+          # label description at 100 characters; test/g1configcheck.sh pins every label create here and in nightly.yml
+          # under that cap, and --force makes the create idempotent (it updates a label that appeared since the check above).
+          if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
+            gh label create "$label" --repo "$REPO" --color FBCA04 --force \
+              --description "Advisory clang-tidy rows not in .clang-tidy-baseline.txt; opened and closed by ci.yml only"
+          fi
+          open="$( gh issue list --repo "$REPO" --label "$label" --state open --json number --jq '.[0].number // empty' )"
+          if [ "$new" -gt 0 ]; then
+            if [ ! -s tidy/tidy-advisory-issue.md ]; then
+              echo "::warning::new=$new but tidy-advisory-issue.md is missing or empty; the tracking issue is left untouched"
+              exit 0
+            fi
+            if [ -n "$open" ]; then
+              gh issue edit "$open" --repo "$REPO" --title "$title" --body-file tidy/tidy-advisory-issue.md
+            else
+              gh issue create --repo "$REPO" --title "$title" --label "$label" --body-file tidy/tidy-advisory-issue.md
+            fi
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$REPO" --body "No NEW advisory clang-tidy rows against .clang-tidy-baseline.txt in $RUN_URL; closing."
+            gh issue close "$open" --repo "$REPO"
+          else
+            echo "no NEW rows and no open $label issue; nothing to do"
+          fi
 
   release:
     needs: plan
@@ -418,7 +564,8 @@ jobs:
         # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
         # `skiplist` (macOS plain only): a committed list of platform-independent gates this leg does not run —
         # see .github/pargates-macos-plain-skip.txt for the measurement and the per-gate reason.
-        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
+        # --no-alone-retry: pargates' alone retry (default on for --shard) stays off on CI until the owner opts CI in.
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 --no-alone-retry ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
 
       - name: det-gate — 2-run byte-identical diff
         run: |
@@ -698,6 +845,14 @@ jobs:
       - name: TS/JS import resolution — --deps (test/depsprecisecheck.sh)
         run: RIPWIRE_BIN=asan/ripwire bash test/depsprecisecheck.sh
 
+      # The defect-shape readers (quality-delta's lexers and facet scanners) under the G1 sanitizers, on fixtures that drive
+      # each shape on purpose. count-drift's array look-back wrapped its unsigned cursor past token 0 when a brace list opened
+      # the file (-fsanitize=integer, #750); editcheckcheck arm (g) only caught it because this repo's own tree happens to hold
+      # such a file (test/falseedgefix/c/copy.c). The gate's src/first.h fixture holds that shape on purpose (about 1 min of
+      # CPU under ASan).
+      - name: Defect-shape readers — --quality-delta (test/defectshapecheck.sh)
+        run: RIPWIRE_BIN=asan/ripwire bash test/defectshapecheck.sh
+
       # cachefuzzcheck's two mutation tables ARE sanitizer sweeps: they drive corrupt/truncated/hostile cache
       # blobs and corrupt qsnap blobs through the readers and assert that no sanitizer report fires. That needs
       # an instrumented binary — RIPWIRE_ASAN_BIN is the whole point of the gate — and the `release` jobs, which
@@ -823,10 +978,15 @@ jobs:
 
       # One step, because vcvars64.bat exports the INCLUDE/LIB/PATH the compilers need into its own process
       # only. vswhere locates the install rather than a hard-coded "2022\Enterprise" path, so a runner-image
-      # edition bump does not silently red this leg. The standalone LLVM on the image is preferred over the
-      # one bundled with Visual Studio when it is present (it is the newer clang, and the one the contributor
-      # reported against); either way vcvars has already supplied the MSVC headers and import libraries it
-      # compiles against, which is what makes clang-cl an MSVC-ABI compiler and not a second toolchain.
+      # edition bump does not silently red this leg. The clang-cl bundled with Visual Studio is preferred over
+      # the image's standalone LLVM, which is only the fallback: the MSVC STL static_asserts a MINIMUM clang
+      # (STL1000), and only the bundled one ships in lockstep with that STL. Measured 2026-11-18, CI run
+      # 44390371541: image win25-vs2026/20261116.315 brought MSVC 14.52.37025, whose yvals_core.h requires
+      # Clang >= 22, while C:\Program Files\LLVM was still 20.1.8 — the windows-package leg went red on every
+      # TU (the 20261103 image's 14.51 still took 20.1.8). The standalone LLVM lags the STL on every such bump
+      # (actions/runner-images #8153, #10001, #12435). Either way vcvars has already supplied the MSVC headers
+      # and import libraries it compiles against, which is what makes clang-cl an MSVC-ABI compiler and not a
+      # second toolchain.
       - name: Configure and build (${{ matrix.toolchain }}, Ninja, plain flavour)
         shell: cmd
         run: |
@@ -835,11 +995,12 @@ jobs:
           if not defined VSINSTALL ( echo ci: no Visual Studio install with the x64 C++ tools & exit /b 1 )
           echo VSINSTALL=%VSINSTALL%
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "RW_TC=-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl"
           if "${{ matrix.toolchain }}"=="clang-cl" set "RW_TC=-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl"
           if "${{ matrix.toolchain }}"=="clang-cl" set "PATH=%RW_LLVM%;%PATH%"
+          if "${{ matrix.toolchain }}"=="clang-cl" ( clang-cl --version || exit /b 1 )
           cmake --version || exit /b 1
           cmake -S . -B build -G Ninja %RW_TC% -DCMAKE_BUILD_TYPE= -DRIPWIRE_TESTS=ON || exit /b 1
           cmake --build build -j || exit /b 1
@@ -866,7 +1027,7 @@ jobs:
       - name: The binary runs — --version and --help
         run: |
           ./build/ripwire.exe --version | tee version.txt
-          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+ \(' version.txt
+          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+(\+dirty|-dev(\.[0-9]+)?(\+g[0-9a-f]{7,40}(\.dirty)?)?)? \(' version.txt   # the label shapes cmake/version_stamp.cmake stamps (tag, +dirty, -dev.N+g<sha>, -dev+g<sha>, -dev)
           grep -q 'emit=' version.txt
           grep -q 'built_from=' version.txt
           test "$( ./build/ripwire.exe --help | wc -c )" -gt 1000
@@ -918,13 +1079,28 @@ jobs:
           [ -n "$blobs1" ] && [ "$blobs1" -ge 1 ] \
             || { echo "ci: #326 regressed — cache-dir row reports blobs=$blobs1 right after a crawl that just wrote there: $row" >&2; exit 1; }
 
-          # a second identical crawl must reuse the SAME blob (resolveCacheBlobPath), not write a new one.
-          ./build/ripwire.exe test/fixture > populate2.xml || { echo "ci: the warm crawl itself failed" >&2; exit 1; }
+          # a second identical crawl must reuse the SAME blob (resolveCacheBlobPath), not write a new one. What proves
+          # the reuse is the crawl's OWN cache-stats line: blobs= counts every artifact in the cache directory and
+          # cannot tell a re-written parse blob from a newly recorded warm snapshot (src/warmsnap.h), which the first
+          # warm run of a configuration also stores there. So the count is held to what it can say — at most that one
+          # extra artifact across BOTH warm runs, never one per run — and reparsed=0 says the lookup hit.
+          RIPWIRE_CACHE_STATS=1 ./build/ripwire.exe test/fixture > populate2.xml 2> warm.err || { echo "ci: the warm crawl itself failed" >&2; exit 1; }
+          cat warm.err
           cmp populate.xml populate2.xml || { echo "ci: cold and warm crawls of the same tree produced different bytes" >&2; exit 1; }
+          stats="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' warm.err || true )"
+          reparsed="$( printf '%s' "$stats" | sed -n 's/.*reparsed=\([0-9]*\).*/\1/p' )"
+          reused="$( printf '%s' "$stats" | sed -n 's/.*reused=\([0-9]*\).*/\1/p' )"
+          nfiles="$( printf '%s' "$stats" | sed -n 's/.*files=\([0-9]*\).*/\1/p' )"
+          { [ "$reparsed" = 0 ] && [ -n "$reused" ] && [ "$reused" -ge 1 ] && [ "$reused" = "$nfiles" ]; } \
+            || { echo "ci: #326 regressed — the warm crawl was not a cache hit: '$stats'" >&2; exit 1; }
           row2="$( bash scripts/ci-windows-doctor-row.sh ./build/ripwire.exe doctor2.xml )"
           blobs2="$( printf '%s' "$row2" | grep -o 'blobs="[0-9]*"' | grep -o '[0-9]*' || true )"
-          [ -n "$blobs2" ] && [ "$blobs2" -eq "$blobs1" ] \
-            || { echo "ci: #326 regressed — a warm, identical crawl changed blobs= from $blobs1 to $blobs2 (a cache miss/duplicate write, not a reuse)" >&2; exit 1; }
+          ./build/ripwire.exe test/fixture > populate3.xml || { echo "ci: the second warm crawl itself failed" >&2; exit 1; }
+          cmp populate.xml populate3.xml || { echo "ci: cold and second-warm crawls of the same tree produced different bytes" >&2; exit 1; }
+          row3="$( bash scripts/ci-windows-doctor-row.sh ./build/ripwire.exe doctor3.xml )"
+          blobs3="$( printf '%s' "$row3" | grep -o 'blobs="[0-9]*"' | grep -o '[0-9]*' || true )"
+          [ -n "$blobs2" ] && [ -n "$blobs3" ] && [ "$blobs3" -ge "$blobs2" ] && [ "$blobs2" -ge "$blobs1" ] && [ "$blobs3" -le "$((blobs1 + 1))" ] \
+            || { echo "ci: #326 regressed — the warm crawls kept adding cache-dir artifacts (blobs= $blobs1 -> $blobs2 -> $blobs3): a duplicate write per run, not a reuse plus one warm snapshot" >&2; exit 1; }
 
       # #326's sibling: the eviction sweep walked cacheDirLadder()'s un-rebased "/tmp/ripwire-<uid>" with
       # std::filesystem and so evicted nothing on Windows, ever. The script seeds the REAL cache directory (from
@@ -945,8 +1121,8 @@ jobs:
           @echo on
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "PATH=%RW_LLVM%;%PATH%"
           cmake -S . -B build-asan -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_BUILD_TYPE= -DRIPWIRE_ASAN=ON || exit /b 1
           cmake --build build-asan --target ripwire_probe || exit /b 1
@@ -997,6 +1173,44 @@ jobs:
         run: bash scripts/ci-xplat-diff.sh xplat/linux xplat/windows
 
 
+  # ─── qd-range: --quality-delta over the pull request's WHOLE range; a gating row fails unless acked ───────────
+  #
+  # --quality-delta compares a change with its parent, so a merged regression becomes the next comparison's baseline and
+  # never shows again (#697, prompts/quality-drift.md: chooseInWindow 12 -> 16 merged with #693; a two-step api-surface
+  # 2 -> 4 is minor on each commit and gating only over the range). This job runs scripts/qd_range.sh, the SAME command a
+  # developer or lane runs locally: --quality-delta=<merge-base>..HEAD on this repo, every row printed as a table, and a
+  # final FAIL line naming each gating row with the --quality-ack command that accepts it with a reason (the ledger,
+  # .ripwire_quality_acks, is read from the checked-out tree, so a committed ack is what clears it). HEAD is the pull
+  # request's merge ref, so the range is exactly what the PR would add to the base branch as it stands.
+  # Cost: one plain-flavour build of the ripwire target only (no Release LTO, no doctest binaries), then one range run.
+  # It runs beside the release shards rather than after them (no job uploads a binary early enough to reuse without
+  # waiting on the whole matrix), so it adds no time to ci-gate's critical path. Pull requests only: on a push to main
+  # or a scheduled run there is no PR range, and ci-gate reads the skip as a pass. test/qdrangecheck.sh covers the
+  # script's logic on a fixture repo and pins this job's wiring.
+  qd-range:
+    name: qd-range (--quality-delta over the PR range; a gating row fails unless acked)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the merge-base with the base branch must be reachable; on a depth-1 clone qd_range.sh exits 1
+          persist-credentials: false   # no step in this job pushes or fetches with the token
+
+      # gcc-14 is on the image (the std::print floor the gcc legs use), so no apt step; plain flavour, like a dev tree.
+      - name: Build ripwire (plain flavour, the ripwire target only)
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -S . -B build
+          cmake --build build -j --target ripwire
+
+      - name: --quality-delta=<merge-base>..HEAD (scripts/qd_range.sh)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/qd_range.sh --bin build/ripwire "origin/$BASE_REF" HEAD
+
   # ─── report-failure / report-green: this schedule's OWN tracking issue, separate from nightly.yml's ─────
   #
   # ci.yml's 05:41 UTC schedule and nightly.yml's 07:17 UTC schedule are two independent full runs against
@@ -1045,11 +1259,11 @@ jobs:
             echo "nightly.yml ThreadSanitizer run — read this run's own job logs for the failing gate."
           } > "$body"
           if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
-            gh label create "$label" --repo "$REPO" --color B60205 \
+            gh label create "$label" --repo "$REPO" --color B60205 --force \
               --description "A nightly-scale workflow run failed on main; see the workflow-specific label for which one"
           fi
           if ! gh api "repos/$REPO/labels/$ownLabel" --silent 2>/dev/null; then
-            gh label create "$ownLabel" --repo "$REPO" --color 1D76DB \
+            gh label create "$ownLabel" --repo "$REPO" --color 1D76DB --force \
               --description "The full-matrix nightly failed on main; opened and closed by .github/workflows/ci.yml only"
           fi
           open="$( gh issue list --repo "$REPO" --label "$label,$ownLabel" --state open --json number --jq '.[0].number // empty' )"
@@ -1083,3 +1297,26 @@ jobs:
             gh issue comment "$n" --repo "$REPO" --body "green again at $HEAD_SHA ($RUN_URL, ci.yml full matrix)"
             gh issue close "$n" --repo "$REPO"
           done
+
+  # ─── ci-gate: the single required check — see the header comment ─────────────────────────────────────────────
+  #
+  # failure/cancelled fail the gate; success/skipped pass it. `if: always()` so an upstream failure still yields a
+  # verdict here instead of a skipped (= unprotected-looking) gate. windows-package is a reusable-workflow call
+  # (uses: ./.github/workflows/windows-package.yml), so it is a job of THIS workflow and can be needed here.
+  ci-gate:
+    name: ci-gate
+    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff, qd-range]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries | map("\(.key)=\(.value.result)") | "ci-gate: " + join(" ")' <<<"$NEEDS_JSON"
+          bad="$( jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"' <<<"$NEEDS_JSON" )"
+          if [ -n "$bad" ]; then
+            echo "ci-gate FAILED: $bad"
+            exit 1
+          fi
+          echo "ci-gate passed (success or skipped everywhere)"

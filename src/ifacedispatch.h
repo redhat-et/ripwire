@@ -27,6 +27,7 @@
 // decision.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "filter.h"   // isTestSymbol — a declined list names the non-test implementors first
 #include "langfacts.h"
 #include "receiverevidence.h"
@@ -350,8 +351,7 @@ private:
     // testsuite's Spy). Order only: the set, its count and the one-candidate proof are unchanged.
     void settle( IfaceDispatchAnswer& out ) const
     {
-        std::sort( out.cand.begin(), out.cand.end() );
-        out.cand.erase( std::unique( out.cand.begin(), out.cand.end() ), out.cand.end() );
+        rw::sortutil::sortUnique( out.cand );
         std::stable_partition( out.cand.begin(), out.cand.end(), [ & ]( NodeId c ) { return !isTestSymbol( ing_, c ); } );
         out.fired = !out.cand.empty();
     }
@@ -521,8 +521,8 @@ private:
             return hit->second;
         }
         std::vector<Row>        rows;
-        HashMap<NodeId, char>   seen;
-        seen.emplace( type, char( 1 ) );
+        HashSet<NodeId>         seen;
+        seen.insert( type );
         const auto expand = [ & ]( NodeId parent, bool provenSoFar )
         {
             if( parent >= implementors_.size() )
@@ -537,7 +537,7 @@ private:
                     continue;
                 }
                 const NodeId child = implementors_[ parent ][ k ];
-                if( seen.emplace( child, char( 1 ) ).second )
+                if( seen.insert( child ).second )
                 {
                     rows.push_back( Row{ child, provenSoFar && b == BaseBound::Proven } );
                 }

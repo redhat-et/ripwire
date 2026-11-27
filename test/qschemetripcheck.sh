@@ -34,6 +34,228 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, lane cr-qd3 (#750) rebased onto main f7cfcec7a (#743 TANGLE-RULE took kQSnapCacheScheme 40): RE-PINNED ONCE with
+#   UPDATE_GOLDEN=1 from the rebased build. #750's scheme moves 39 -> 41 (one above main's 40; v39 never shipped). Watched text
+#   is main's tangle-cap snapshot fields plus #750's defectSitesOf scans. kCacheVersion and kParserVer unchanged. Hash
+#   e640115f3e…ccbd8342.
+# 2026-11-25, lane cr-qd3 (rebased onto main fec2ab27c): RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf (a manifest function) now also
+#   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
+#   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
+#   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
+# 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
+#   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
+#   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix
+#   that a cut shell tree yields no unhandled-arm site (only a tree the nesting budget cut). No kParserVer,
+#   kCacheVersion (54) or kQSnapCacheScheme (38) bump: the qsnap key carries the producer identity, so no blob from
+#   another build is read.
+# 2026-11-22, IN9 (the 0.7.0 train integration/070-cut-1121 merged with origin/main b576a95e3, which carries #715): RE-PINNED
+#   ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 340/337 -> 342 (rich 343): ONE
+#   number above BOTH sides' bumps (the train's 340, rich 341; main's 337, rich 338). kCacheVersion 54 and kQSnapCacheScheme 38
+#   unchanged. Both sides' entries are kept below, the train's first, then main's. Neither side's hash (448c91aa07…d311066,
+#   a57b75c512…5350ee08a9) can be right once kParserVer moves to 342. Hash a606e48d5b…2f4e02ec.
+# 2026-11-22, lane m1b-tracked-dirs (on the train 0e32486b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 338 -> 340 (PLACEHOLDER, rich 341): the crawl admits a build/ dist/ out/ target/ directory git tracks
+#   files under, and every materialized-tree ingest (computeHeadSnapshot among them) goes through ingest.h ingestTrackedTree so
+#   the HEAD side crawls the same directories. kCacheVersion 54 and kQSnapCacheScheme unchanged: the extraction key moves, the
+#   snapshot blob shape does not. Hash 448c91aa07…d311066.
+# 2026-11-21, lane fx1-two-reds (on integration/070-1120 64b85a6b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 336 -> 338 (rich 339, above the train's rich 337): a Rust macro invocation's re-read drops a bare call
+#   its own file's macro_rules! matcher spells as a literal word (ingest_rustmacroargs.h). kCacheVersion 54 and kQSnapCacheScheme
+#   38 unchanged: the extraction key moves, the snapshot blob shape does not. Hash abdd393688…5a5182b.
+# 2026-11-21, IN8 (owner ruling 135: train 1118a, #717 = the rebase of #716 onto main 5df5a26be, folded into the 0.7.0 train at
+#   4b1f4516e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 334/335 -> 336
+#   (rich 337): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 unchanged. Both sides' entries are
+#   kept below, the 0.7.0 train's first, then train 1118a's. Hash 8ac0bab2fe…a32b9bd.
+# 2026-11-21, IN8 (owner rulings 129/135: the 0.7.0 train integration/070-1121-local merged with main 8861b0d4d, which carries
+#   #709): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged build. kParserVer and kIngestParserVerMirror 332/333 -> 334 (rich
+#   335): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 are main's (the 0.7.0 line moved
+#   neither). Both sides' entries are kept below, the 0.7.0 line's first, then main's. Neither side's hash (0.7.0's
+#   0a4ba8ec92…6dc0274, main's 843630e84b…616ba25) can be right once kParserVer moves to 334. Hash 80e4bc57b7…8bd13d4.
+# 2026-11-20, IN3 (owner ruling 92: the 0.7.0 integration branch integration/070-1120 = integration/070-candidate
+#   + lane/r1b-priority + main ee8d1a50e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and
+#   kIngestParserVerMirror 317/331 -> 332 (rich 333): ONE number above BOTH sides' bumps, so a cache either side's
+#   binary wrote is refused. kCacheVersion and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot
+#   blob shape does not. Both merged sides' entries are kept below, newest first (INT1's 2026-11-19, then main's
+#   2026-11-18 train 1117d1 block). Hash 0a4ba8ec92…6dc0274, re-pinned from the merged build: neither side's
+#   value (main's c1fefa06b4…f246ff2, INT1's 52505b79f1…2dd4dcbf) can be right once kParserVer moves to 332.
+# 2026-11-19, INT1 (the 0.7.0 candidate, integration/070-candidate: lane/rt2-route + main d65f60c6d + lane BX2 minus FIX 2):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and kIngestParserVerMirror 313 -> 317 (rich 318): ONE
+#   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
+#   315, its own entries below), so a cache a lane binary wrote under a placeholder is refused. kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not (hash 52505b79f1…2dd4dcbf).
+# 2026-11-21, lane land-715 (#715 by @himanchalkaushale, #548 arm 1: Clojure calls whose list head carries metadata; stacked on
+#   train 1118a 4b1f4516e): RE-PINNED with UPDATE_GOLDEN=1 (hash a57b75c512…5350ee08a9). Watched text: kParserVer 335 -> 337
+#   (rich file tag 338; the PR's 311/312 renumbered above the train's 335/336): queries/clojure/tags.scm accepts a meta_lit before a
+#   list head and src/ingest_clojure.h clojureListHead skips it. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54
+#   and kQSnapCacheScheme 38 stay: no record changes shape and no watched quality.h function moved.
+# 2026-11-21, train 1118a (import-proved-splits, qual-ns-call-bind, cr705-edges, #711 ts paths alias; rebased onto main 5df5a26be,
+#   #714 = train ge2): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash ffa77d0632…ae8d5cc3). kParserVer 335
+#   (rich 336) is the train's number for qual-ns-call-bind, above main's 333/334; the other members change no extraction.
+#   kCacheVersion 54 and kQSnapCacheScheme 38 stay main's (train ge2).
+# 2026-11-19, lane qual-ns-call-bind (stacked on lane/import-proved-splits 4787d1ed0): RE-PINNED with UPDATE_GOLDEN=1. kParserVer
+#   335 PLACEHOLDER (C++ using-declarations + namespace aliases recorded, ingest_binds.h kCppCallScopeFacts; mirrored in quality.h);
+#   the train renumbers and re-pins. kCacheVersion and kQSnapCacheScheme unchanged.
+# 2026-11-21, lane QD-LESSONS-2a (on main 8861b0d4d): RE-PINNED with UPDATE_GOLDEN=1 (hash 269831ba67…15a52a). defectSitesOf moved:
+#   it takes an optional shell-cut counter (CR712-SHSTATUS-DEPTH) and each site record also carries its two-bit value
+#   (legacySite, CR712-ACK-KEY-MASK), which computeSnapshot does not store. The blob shape is unchanged; the Bash scanners
+#   now stop at the one nesting budget (64) instead of crashing (subshell/group/if) or cutting $( ) at 40, which changes
+#   the site set only for a script nested that deep, and the producer identity keeps this build's blobs apart, so
+#   kQSnapCacheScheme stays 38 (the cr-qd-kinds-068 fix-round-1 precedent below).
+# 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
+#   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the
+#   members' placeholders 315/317/319 (each lane's hash was that lane alone), above main's 331/332 (train 1117d1). kCacheVersion
+#   53 (rust-self-chain's RecvCall, its placeholder kept: no other member moves it; main 52). kQSnapCacheScheme stays 34.
+# 2026-11-20, train ge2 (rebase of qd-false-rows, qd-tangle, qd-lessons-1, qd-shrink-pair / qd-va-forms, qd-unchecked-status,
+#   qd-unhandled-arm / sort-unique onto main ee8d1a50e): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the composed build (hash
+#   77be420969…d95b8ba). kQSnapCacheScheme 38 (the members' 35/36/37/38, each that lane alone; the highest is the one value);
+#   kCacheVersion 54 (qd-tangle); kParserVer 331 stays (main's). The members' entries below are their lane-alone pins.
+# 2026-11-20, lane QD-UNHANDLED-ARM (over lane/qd-unchecked-status ebf7240f3): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
+#   37 -> 38: a sixth defect-shape facet (unhandled-arm) adds sites, defectSitesOf builds a tree-wide C/C++ enum table, scans
+#   C files holding a switch and every Bash file (not test scripts only). No blob shape change; kParserVer / kCacheVersion
+#   unchanged. The train may renumber the scheme.
+# 2026-11-19, lane QD-UNCHECKED-STATUS (E3b, over lane/qd-va-forms 7f98c7ab4): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
+#   35 -> 37 (36 is qd-tangle's reservation): a defect-shape site value carries its facet in three low bits, not two (a fifth facet,
+#   unchecked-status), so every stored site value moves; defectSitesOf now scans C files and every Python file. No blob shape
+#   change; kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
+# 2026-11-19, lane QD-VA-FORMS (E0, over main 33f7a1eac): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 35: defectSitesOf
+#   drops its `grep` prefilter for Bash (every test script is read) and the vacuous-assert facet it calls (defectshape.h, outside
+#   the manifest) now walks exit-status dataflow, so the stored site set moves; a v34 blob would read every new-form site as added.
+#   No blob shape change; kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
+# 2026-11-19, lane QD-TANGLE (stacked on lane/qd-false-rows): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 36 (35 is
+#   lane qd-va-forms'): the snapshot gains the tangle map (tangleBySym) and its known byte; computeSnapshot records it
+#   (recordTangleOf), serialize/deserializeSnapshot carry it, and kCacheVersion 54 carries RawDef::steer/deepDispatch/nestArmCut.
+# 2026-11-18, train 1117d1-r (the 1117d1 stack rebased onto main 7f461e33b, #687): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
+#   rebased build (hash c1fefa06b4…f246ff2). kParserVer 331 (rich 332) stays, above main's 313/314 (#688): the 331 note now sits
+#   above main's 313 note in ingest_cache.h and the quality.h mirror. kQSnapCacheScheme stays 34.
+# 2026-11-18, train 1117d1 (rebase-stack on main c565a3fad: cpp-base-by-name, go-cpp-edges, cpp-ptr-alias, overload-split,
+#   small-edges-1118, edge-strays-1118): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the composed build (hash c1fefa06b4…f246ff2).
+#   kParserVer 331 (rich 332) replaces the members' placeholders 317/321/323/327/329 (entries below; each lane's hash was that
+#   lane alone), above main's 311/312 and #688's 313/314. kQSnapCacheScheme stays 34.
+# 2026-11-18, lane edge-strays-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 327 (placeholder above
+#   the open lanes; the train renumbers) with quality.h's kIngestParserVerMirror: a Rust call written through a bracketed type
+#   (`<Where as Command>::run`) is qualified by the type it names (ingest_names.h rustBracketedQualifier). kQSnapCacheScheme stays
+#   34: no quality function on the manifest changed, and a cached Snapshot is keyed on the parser version already.
+# 2026-11-18, lane small-edges-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 323 (PLACEHOLDER, the train
+#   renumbers; mirrored in quality.h): a Go method expression `(*T).m` is a Value row (ingest_valuerefs.h methodValueAt). kQSnapCacheScheme
+#   stays: the parser key already keys the qsnap cache on extraction.
+# 2026-11-18, lane overload-split (base main 9087eb59c; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 309 -> 329 (mirrored in quality.h's kIngestParserVerMirror): ingest_binds.h goQualifiedWhole unwraps a Go
+#   generic_type, so a field `addrs.Set[addrs.Module]` records its qualified class. kQSnapCacheScheme stays: the parser key already
+#   keys the qsnap cache on extraction.
+# 2026-11-17, lane go-cpp-edges (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 317
+#   (placeholder, mirrored in quality.h): a Go result written as a generic instantiation records its ReturnType. kQSnapCacheScheme
+#   stays: the parser key already keys the qsnap cache on extraction, and no watched function moved.
+# 2026-11-17, TRAIN-1117b (lanes land-426 + land-606 stacked over main c565a3fad): RE-PINNED with UPDATE_GOLDEN=1 in the train's
+#   re-pin commit. kParserVer and kIngestParserVerMirror 311 -> 313 (rich 314): ONE number for both members, above main's 311/312
+#   (#420, landed by TRAIN-1117a-r #686). kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not.
+#   - land-606 (#446 round 2, @SeddonShen; its placeholder 316): Java base clauses are read as @reference.base captures.
+#   - land-426 (#355, PR #426 by @conka8; its placeholders 216, then 311): the tags pass evaluates tags.scm's string
+#     predicates, and Elixir's keyword tables move into queries/elixir/tags.scm.
+# 2026-11-18, lane BX2 FIX 8 (C-family parameter slot facts): parser tag 313 -> 315 (rich 316) and mirror move together
+#   (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1
+#   (hash ddac96863e…ed98cff).
+# 2026-11-18, lane BX2 FIX 5 (Rust transcriber calls, base integration/0.6.11-batch 259352fc0): parser tag 311 -> 313 (rich 314)
+#   and mirror move together (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived
+#   ONCE with UPDATE_GOLDEN=1 (hash 29a3c7f42e…5c4f976).
+# 2026-11-17, train 1117a-r (rebase-stack on main 9087eb59c: naming-wordy prefix, tidy-681, #420, #473, #540, ROW-MANIFEST): RE-PINNED ONCE
+#   with UPDATE_GOLDEN=1 from the composed build (hash d208bb4995…e892919). It carries the two entries below together: #420's parser tag
+#   311 (rich 312) and tidy-681's codeLocByNode text; each lane's own hash named below was that lane alone. No constant moves; #682 leaves it.
+# 2026-11-17, C# import captures (#358 1a, @LaimaWu; lands #420 rebased onto main 5139f7840): parser tag 309 -> 311 (rich 312)
+#   and mirror move together (the PR's 196 -> 198, renumbered above main). Import-free deep containers cease to be partial;
+#   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1 from the rebased build (hash
+#   1aec99a6d9…4083c76); extraction identity remains part of the quality snapshot key.
+# 2026-11-17, lane tidy-681 (clang-tidy #681, base main 5fb68b71a): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 34:
+#   codeLocByNode's move-cid store moved out of an if condition (bugprone-assignment-in-if-condition); the same slot is written
+#   and the same early return taken, so no cached Snapshot means anything new.
+# 2026-11-17, lane std-namesake (base main 9087eb59c; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 309 -> 317 (above rust-macro-args' 315/316), mirrored in quality.h: a Rust binding written as a
+#   standard type keeps its spine on the tombstone. kQSnapCacheScheme stays: no watched function moved, and the parser key
+#   already keys the qsnap cache on extraction.
+# 2026-11-18, lane rust-self-chain (base main 9087eb59c): RE-PINNED ONCE with UPDATE_GOLDEN=1 (ab701560… -> 7e577375…). Watched text:
+#   kParserVer 309 -> 319 (rich 320) and kCacheVersion 52 -> 53 (LocalBindKind RecvCall appended), both PLACEHOLDERS the train
+#   renumbers, with quality.h's two mirrors in the same commit. kQSnapCacheScheme stays: no watched quality.h function moved.
+# 2026-11-17, lane rust-macro-args (base main 5139f7840): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 315 (placeholder above the
+#   open lanes; the train renumbers) with quality.h's kIngestParserVerMirror: the calls written inside a Rust macro invocation's
+#   arguments are references (ingest_rustmacroargs.h). kQSnapCacheScheme stays 34: no quality function on the manifest changed, and
+#   a cached Snapshot is keyed on the parser version already.
+# 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
+#   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
+#   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
+#   takes a RegisterRule so inertRegisterMacroNames asks the macro-call half alone (a config warning, not a dead-set input).
+# 2026-11-15, lane land-499-500 (qd fix): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 33: isDeadCandidate is split
+#   into uncalledBody (the structural half, now on the manifest) and the invoked half, with the same answers and the same
+#   exemptedByRegisterMacro; forEachSymbolBody passes the whole file to a four-argument visitor (forEachSymbolFile folded in).
+# 2026-11-15, lane land-499-500 (review fix over both merges): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 33:
+#   isDeadCandidate also sets exemptedByRegisterMacro for a Rust test the test-runner rule exempts first when registersItself holds
+#   it (a delta-time COUNT, register-macro-excluded=; the dead set is the same).
+# 2026-11-15, lane land-499-500 (+ #500 merged over #499): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. #500's
+#   kQSnapCacheScheme bump lands as #499's 32 + 1 = 33 (quality.h's v33 note). Its 2026-11-02 entry is kept below.
+# 2026-11-15, lane land-499-500 (main 0217049f2 + #499 merged): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. #499's
+#   kQSnapCacheScheme bump lands as main's number + 1 = 32 (quality.h's v32 note). Its 2026-11-02 entry is kept below.
+# 2026-11-14, TRAIN-1111h, member 5 (lane failure-default): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. The lane bumped
+#   kQSnapCacheScheme 29 -> 30 against main; qd-rename-identity already took 30 in this train, so failure-default lands as 30 -> 31
+#   (main's number + 1 after the earlier member). kCacheVersion 51 -> 52 is kept as the lane made it (main is 51). Both lanes' log entries
+#   are kept below.
+# 2026-11-14, TRAIN-1111h (main 67b08d46b + lane qd-rename-identity): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. Main's
+#   kQSnapCacheScheme was 29 (#650 qd-constructs and #649 macro-p0 kept it), so the lane's bump lands as main's number + 1 = 30; both
+#   log entries below are kept (the lane's bodyCidBySym blob change and the 1111g kCacheVersion/kParserVer entries watch different text).
+# 2026-11-14, lane qd-rename-identity (base main 44f7d3326): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 29 -> 30. A BLOB SHAPE
+#   change: the Snapshot gained bodyCidBySym (computeSnapshot records moveCidOf of every callable; serialize/deserialize carry it), and
+#   codeLocByNode returns that identity for every callable beside the over-bar one. The manifest gains recordMoveIdentity (the per-key MAX
+#   both identity maps record).
+# 2026-11-18, lane cpp-ptr-alias (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 321 (PLACEHOLDER,
+#   mirrored in quality.h): a C++ Type / ParamType record carries kDirectDeclaratorBit (an EXTRACTION change); kQSnapCacheScheme stays:
+#   the parser key already keys the qsnap cache on extraction.
+# 2026-11-14, lane failure-default (merged with main be84a97de): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree, kQSnapCacheScheme 29 -> 30 (landed as 30 -> 31 in TRAIN-1111h). A BLOB SHAPE change: the Snapshot
+#   gained failureDefaultBySym (serialize/deserialize carry it after maskReportBySym), and maskBySym / maskReportBySym now count the
+#   error-masking failure-default facet (constructCountsBySym through tallyMaskHit).
+#   Also kCacheVersion 51 -> 52 (with quality.h's mirror): the ingest record's construct hits gain the failure-default shape tag
+#   (lintrules.h kConstructShapeTags), so a record an older build wrote, which lacks those hits, is a miss.
+# 2026-11-14, TRAIN-1111g (main d624cff5f + lane qd-constructs): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree; both log entries
+#   below are kept (main's entry-ceiling 27 -> 29 and the lane's kCacheVersion 50 -> 51 touch different watched text).
+#   Re-pinned again after lane macro-p0 (kParserVer 307 -> 309, mirrored in quality.h; kQSnapCacheScheme stays: the parser key already
+#   keys the qsnap cache on extraction).
+# 2026-11-13, lane qd-constructs (base main cd04d477e): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 50 -> 51: a file record carries the --quality-delta construct hits (u32 count + 9-byte rows, ingest_cache.h),
+#   found in the parse worker (ingest_astquery.h collectConstructHits); quality.h's kIngestCacheVersionMirror with it. kQSnapCacheScheme stays:
+#   no watched function moved and findQualityConstructs returns the same hits (test/qdconstructscheck.sh compares carried against re-parsed).
+# 2026-11-13, lane entry-ceiling MOVES (after the main merge e57136074): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 28 -> 29. A
+#   BLOB SHAPE change: the Snapshot gained moveSketchBySym (recordMoveSketches fills it beside moveCidBySym; serialize/deserialize carry
+#   it), and codeLocByNode now returns the sketch with the identity. The manifest gains moveSketchOf and recordMoveSketches.
+# 2026-11-12, lane entry-ceiling MOVED-BODY (same lane, next commit): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 27 -> 28. A BLOB
+#   SHAPE change: the Snapshot gained moveCidBySym (computeSnapshot fills it, serialize/deserializeSnapshot carry it); the manifest
+#   gains moveCidOf, the identity it stores.
+# 2026-11-12, lane entry-ceiling EXTENT-CTOR (base main 0b8f0bf8d; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1,
+#   kQSnapCacheScheme 26 -> 27. The manifest gains codeLocByNode and measureCallableNotItsContainer. Watched text: computeSnapshot
+#   zeroes the code lines of a container that shares its canonical id with a callable (C++ Foo and Foo::Foo), so the locBySym VALUES
+#   a v26 blob holds moved for every such class.
+# 2026-11-10, lane qd-fixes-1 (base main b8032471f): RE-PINNED ONCE with UPDATE_GOLDEN=1, kQSnapCacheScheme 25 -> 26.
+#   Watched text: isDeadCandidate exempts Go/Rust test-runner entry points (testRunnerInvokedSymbol, QD-TEST-DEAD), and the clone
+#   set computeSnapshot stores also holds every pair the baseline's clone relation implies (pushExactGroupPairs / pushTwinWidenedPairs,
+#   QD-CLONE-FALSE-GATE): both record SETS a v25 blob holds moved, so the scheme moved with them.
+#   Re-pinned again in the same lane after a qd-driven split of isDeadCandidate's two runner clauses into one (no behaviour change).
+# 2026-11-10, #538 (#446 round 1, C++ base clauses as @reference.base captures) merged with main 45caf6a00: RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 305 (above main's 303 and the PR head's 304); quality.h carries kIngestParserVerMirror 305. kQSnapCacheScheme stays: no watched function moved.
+# 2026-11-08, merge of main 45c2deb24 (#572 docs-units, #577 clones-persist) into lane proto-index: RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: both sides' bumps together, kParserVer 303 (this lane, .proto indexed) and kCacheVersion 50 (#577, def record clone key);
+#   quality.h carries kIngestParserVerMirror 303 and kIngestCacheVersionMirror 50. kQSnapCacheScheme stays: neither side moved a watched function.
+# 2026-11-07, lane clones-persist (base main e4432b48; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 49 -> 50: a def record ends with a clone-key presence u8 and, for a keyed Function/Method, its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
+#   findClones keys bodies with no file I/O; quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no
+#   extraction changes and findClones returns the same groups (it re-reads and compares the real strings of every shared key).
+# 2026-11-06, lane proto-index (merged over main bb1806df1 at 301/49; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 301 -> 303 (rich 304; above #538's 302): .proto files are indexed (Lang::Proto, queries/proto/tags.scm);
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 49 (no record changes shape) and kQSnapCacheScheme stays as main has
+#   it: no watched quality.h function moved.
+# 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
+#   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched
+#   quality.h function moved.
+# 2026-11-04, #478 gap 2 (rebased onto main 50bc05e8 at 299/300; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 299 -> 301 (rich 302): an aliased Python `import a.b as c` records the Include target `a.b`, not `a.b as c`;
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays as main has it: no record changes shape
+#   and no watched quality.h function moved. Supersedes the branch's 2026-11-01 entry (base b0f7e2fc, 283 -> 285).
 # 2026-11-03, lane index-alias-const (base main 824847bd, merged over main 6bae81c6 at 291/292; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
 #   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme
@@ -42,6 +264,16 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   (rich 292): both sides bumped (the lane's reST tier 287/288, main's namespace re-export 289/290), so the merged value goes above both and
 #   a cache built on main at 289 re-indexes the reST .txt docs. quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and
 #   kQSnapCacheScheme stay: no record changes shape and no watched quality.h function moved. Supersedes the 2026-11-03 NOT-re-pinned entry below.
+# 2026-11-02, PR fix/rust-test-harness-dead-code (#493, maintainer review of #499): RE-PINNED with UPDATE_GOLDEN=1 after merging main
+#   (main then held kQSnapCacheScheme 25). Watched text: registeredMacroSymbolIds now reads registersItself (a Rust #[test] / #[tokio::test]
+#   attribute above a definition exempts it); rustTestAttributed reads an attribute line only when it starts with `#[`; the manifest
+#   now lists registersItself, rustTestAttributed, isRustTestAttribute and rustCodeOfAttributeLine. kQSnapCacheScheme 25 -> 26 (v26)
+#   (landed as 31 -> 32 in lane land-499-500; quality.h's v32 note). kParserVer and kCacheVersion stay: no extraction change, no record shape change.
+# 2026-11-02, PR fix/rust-drop-dead-code (#494, maintainer review): RE-PINNED ONCE with UPDATE_GOLDEN=1 (ab16162e... -> 3bb8ea86...).
+#   Watched text: rustDropImplMethodIds joins the manifest (the Rust Drop impl block set isDeadCandidate reads) and isDeadCandidate takes
+#   that set. languageInvokedSymbol is NOT in the manifest here: its text is main's again (the name-only Rust drop rule is gone), and main
+#   does not list it either. kQSnapCacheScheme 25 -> 27 (landed as 32 -> 33 in lane land-499-500). kParserVer and kCacheVersion stay (289, 48):
+#   no extraction change, no record shape change.
 # 2026-11-02, lane rule3-member-guard fix 4 (base main 00a16550; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 283 -> 285 (rich 286; 284 is 283's rich tag): a Rust path call whose qualifier has more than one segment keeps
 #   it whole in Reference::fieldName; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:

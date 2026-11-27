@@ -7,13 +7,17 @@ full verification fits in one window. It does NOT modify regression.sh.
 
 usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
                    [--shard K/N] [--shard-plan] [--budget-scale F] [--exclude-list FILE]
+                   [--alone-retry | --no-alone-retry]
 """
+import atexit
 import concurrent.futures as cf
 import hashlib
 import json
 import os
 import re
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -29,6 +33,7 @@ shard = None          # (k, n): run only the k-th of n deterministic slices of t
 shard_plan = False    # print every slice's membership and predicted weight, run nothing
 budget_scale = 1.0    # scales the DEFAULT budget; a declared override acts as a FLOOR under it -- CI passes >1
 exclude_list = None   # a committed file naming gates this leg does not run (one per line, # comments)
+alone_retry = None    # None: on for --shard runs, off otherwise -- see ALONE RETRY below
 args = sys.argv[3:]
 for i, a in enumerate(args):
     if a == "-j":
@@ -46,6 +51,10 @@ for i, a in enumerate(args):
         shard_plan = True
     elif a == "--exclude-list":
         exclude_list = args[i + 1]
+    elif a == "--alone-retry":
+        alone_retry = True
+    elif a == "--no-alone-retry":
+        alone_retry = False
     elif a == "--budget-scale":
         budget_scale = float(args[i + 1])
         if budget_scale <= 0:
@@ -59,6 +68,7 @@ gates = sorted(f for f in os.listdir(testdir) if f.endswith(".sh") and not f.sta
 # regression.sh is the driver itself; det-gate is invoked inside it.
 skip = {"regression.sh"}
 gates = [g for g in gates if g not in skip]
+all_gates = list(gates)       # before --only / --exclude-list / --shard: what a committed gate-name list is checked against
 if only:
     gates = [g for g in gates if only in g]
 
@@ -81,6 +91,44 @@ if exclude_list:
     excluded = [g for g in gates if g in wanted]
     gates = [g for g in gates if g not in wanted]
     print(f"exclude-list {exclude_list}: {len(excluded)} gate(s) not run on this leg: {' '.join(excluded)}")
+
+# --- ALONE RETRY: a red under load is re-asked once with the machine to itself (2026-11-19) ------------------------
+# Under three parallel builders on one dev machine, most shard reds were not defects: of ~16 reds per train, 1-2 were
+# real and the rest were TIMEOUTs or a handful of gates whose timing arms are known to flake under load, each rerun
+# alone BY HAND (hours per train, and one ad-hoc loop clobbered its own loop variable). So the harness does it: after
+# the parallel pass (and the exclusive one), every gate that hit its TIMEOUT, and every red gate NAMED in the one
+# committed list below, is run once more, ALONE, serially, with the same budget. A gate that passes then is reported as
+# PASS(alone-retry), counted in its own alone_retry= field, listed under ALONE-RETRY, and never folded into pass= --
+# a reader can always tell "green" from "green only on a quiet machine". A red that is neither a TIMEOUT nor in the
+# list is a real red and is NOT retried. Default ON for --shard runs (the CI legs and the trains' shard loops), OFF for
+# whole-suite and --only runs; --alone-retry / --no-alone-retry override either way.
+#
+# ALONE_RETRY_MAX bounds the cost: when more gates qualify than that, the reds are not load -- a hung binary times out
+# EVERY gate -- and a serial rerun of each at its full budget would be hours of nothing, so none is retried and the
+# summary says so.
+#
+# THE LIST is .github/pargates-load-timing.txt, same shape as --exclude-list's files: one gate per line, `#` comments,
+# each line saying which arm flakes and where it was seen. A name that matches no gate is an error, for the same reason.
+ALONE_RETRY_MAX = 8
+LOAD_TIMING_LIST = os.path.join(".github", "pargates-load-timing.txt")
+if alone_retry is None:
+    alone_retry = shard is not None
+
+
+def _load_timing_gates():
+    path = os.path.join(root, LOAD_TIMING_LIST)
+    if not os.path.isfile(path):
+        return set()
+    with open(path) as fh:
+        named = [ln.split("#", 1)[0].strip() for ln in fh]
+    named = [n for n in named if n]
+    unknown = [n for n in named if n not in all_gates]
+    if unknown:
+        sys.exit(f"{LOAD_TIMING_LIST} names gates that do not exist: {' '.join(unknown)}")
+    return set(named)
+
+
+load_timing_gates = _load_timing_gates() if alone_retry else set()
 
 # --- longest-first (LPT) scheduling -----------------------------------------------------------
 # A greedy scheduler minimizes wall time by handing the slowest jobs to workers FIRST -- a long
@@ -234,6 +282,7 @@ exclusive = {"editcheckcheck.sh"}
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
+    "warmpeakcheck.sh":           600,   # five ~10 s indexes of a generated 1,200-file tree (two cold, two warm, --no-cache) under /usr/bin/time
     "nestedimportcheck.sh":       900,
     "preproccondcheck.sh":        900,
     "pyimportprecisecheck.sh":    900,
@@ -350,6 +399,13 @@ GATE_BUDGET_SEC = {
     # code). A budget here is a hang tripwire, never a perf bar.
     "cppbenchcheck.sh":          2400,
     "regexbombcheck.sh":         1200,
+    # 2026-11-14 (lane qd-rename-identity): qdrenameidentitycheck runs ~25 --quality-delta/--clones/--metrics calls over five
+    # languages' git repos (five per language). Each call on a two-file repo is ~0.3 s CPU but 2-6 s wall on a loaded host (git
+    # spawns, the HEAD-baseline archive); the first 9-call-per-language draft took 455 s solo and hit the 300 s cap under -j 3.
+    # A budget here is a hang tripwire, never a perf bar.
+    "qdrenameidentitycheck.sh":   900,
+    # 2026-11-14 (lane qd-git-rename-heal): the same shape, six calls per language (a --clones premise and five --quality-delta).
+    "qdgitrenamehealcheck.sh":    900,
 }
 parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]
@@ -718,6 +774,142 @@ def run_gate(argv, env, limit):
             pass
 
 
+# --- every gate gets its own TMPDIR, and loses it when it exits (2026-11-19) ------------------------------------------
+# Gates make scratch dirs with `mktemp -d` and remove them from a `trap ... EXIT`. A trap is not a guarantee: a gate
+# stopped at its budget whose children outlive TERM gets KILL (above), and KILL runs no trap; a gate with no trap at
+# all leaks on any early exit; and `rm -rf` cannot descend into a mode-000 subdir a gate left behind (an unreadable
+# fixture such as worka/blind), so even a trap that ran can leave its dir. Measured on the dev machine on 2026-11-19:
+# 890 `tmp.*` dirs, 8.7 GB, in $TMPDIR after ~3 days of train shard runs, which put the disk under the trains' floor
+# and stalled two of them. A rule for each gate to follow cannot fix that -- the gate is the thing that did not run.
+#
+# So the HARNESS owns the scratch space. pargates makes one per-run root, $TMPDIR/rwpg-<pid>-XXXXXX, and runs each
+# gate with TMPDIR=<root>/g.XXXXXX -- so a bare `mktemp -d`, Python's tempfile, and the binary's cacheDirLadder()
+# (which honours $TMPDIR first) all land inside it -- and removes that dir the moment the gate is over: pass, fail,
+# TIMEOUT or stop. Removal makes every directory in the tree u+rwx first (top-down, never through a symlink), so a
+# mode-000 subdir goes too. The root is removed at exit, Ctrl-C included (the stop path leaves through sys.exit);
+# a pargates that was itself SIGKILLed cannot clean up, so each run first removes any rwpg-<pid>-* root whose pid is
+# no longer alive. A gate that sets its own TMPDIR (e.g. `export TMPDIR="$TMP/cache"`) is unaffected: its $TMP is
+# made under the dir pargates handed it, so it goes with it. The harness's OWN files (the timings file, the failure
+# logs) stay where tempfile.gettempdir() puts them for pargates, never inside a per-run root.
+# macOS: /usr/bin/mktemp does NOT honour $TMPDIR for a name it makes up itself (bare `mktemp -d`, `mktemp -t p`) -- it
+# asks confstr(_CS_DARWIN_USER_TEMP_DIR) first (man mktemp, macOS 26), which is the per-user T/ dir the leak filled.
+# GNU mktemp on the Linux legs does honour it. So on macOS the run root also holds bin/mktemp, first on every gate's
+# PATH: a call that names no template of its own gets `-p "$TMPDIR"` (the Linux behaviour); a call that names one, or
+# its own -p/--tmpdir, is passed through untouched (-p would re-root an absolute template under it).
+# A side effect, stated: gates no longer share one warm ripwire cache through $TMPDIR/ripwire -- each gate's cache is
+# its own, which is the isolation the private-TMPDIR gates (compactlegendcheck, shapingflagcheck) already chose.
+_RUN_ROOT_RE = re.compile(r"^rwpg-(\d+)-")
+gate_tmp_leftover = []          # gate scratch dirs that could not be removed after the gate exited (reported, never fatal)
+
+
+def _rm_tree(path):
+    """Remove `path` whatever modes the gate left inside it -> True when it is gone. Two passes, because a descendant
+    that escaped the gate's group can still be writing while the first one runs."""
+    for _ in range(2):
+        if not os.path.lexists(path):
+            return True
+        try:
+            st = os.lstat(path)
+            if stat.S_ISDIR(st.st_mode):
+                os.chmod(path, st.st_mode | stat.S_IRWXU)
+        except OSError:
+            pass
+        for dp, dns, _fns in os.walk(path):
+            for dn in dns:          # top-down: open each subdir up BEFORE os.walk tries to list it
+                sub = os.path.join(dp, dn)
+                try:
+                    st = os.lstat(sub)
+                    if stat.S_ISDIR(st.st_mode):        # a symlink is never chmod'ed: that would follow it out of the tree
+                        os.chmod(sub, st.st_mode | stat.S_IRWXU)
+                except OSError:
+                    pass
+        shutil.rmtree(path, ignore_errors=True)
+    return not os.path.lexists(path)
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        pass                        # EPERM: alive, someone else's
+    return True
+
+
+def _sweep_dead_run_roots(base):
+    """Remove the per-run roots of pargates runs that died without cleaning up (SIGKILL, power loss)."""
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return
+    for name in names:
+        m = _RUN_ROOT_RE.match(name)
+        if m is None or int(m.group(1)) == os.getpid() or _pid_alive(int(m.group(1))):
+            continue
+        path = os.path.join(base, name)
+        try:
+            if os.lstat(path).st_uid != os.getuid() or not os.path.isdir(path) or os.path.islink(path):
+                continue
+        except OSError:
+            continue
+        _rm_tree(path)
+
+
+MKTEMP_SHIM = r'''#!/bin/sh
+# test/pargates.py (macOS): give a template-less mktemp the per-gate $TMPDIR, as GNU mktemp does; see pargates.py
+[ -n "${TMPDIR:-}" ] || exec @REAL@ "$@"
+skip=0
+for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$a" in
+        -p*|--tmpdir*) exec @REAL@ "$@" ;;
+        --) exec @REAL@ "$@" ;;
+        -*t) skip=1 ;;
+        -*) ;;
+        *) exec @REAL@ "$@" ;;
+    esac
+done
+exec @REAL@ -p "$TMPDIR" "$@"
+'''
+
+
+def _make_run_root():
+    base = tempfile.gettempdir()
+    _sweep_dead_run_roots(base)
+    rr = tempfile.mkdtemp(prefix=f"rwpg-{os.getpid()}-", dir=base)
+    real = shutil.which("mktemp")
+    if sys.platform == "darwin" and real:
+        os.mkdir(os.path.join(rr, "bin"))
+        shim = os.path.join(rr, "bin", "mktemp")
+        with open(shim, "w") as fh:
+            fh.write(MKTEMP_SHIM.replace("@REAL@", real))
+        os.chmod(shim, 0o755)
+    return rr
+
+
+# The per-gate dir is named g.XXXXXX, never after the gate: every path the binary prints under it lands in the gate's
+# stdout/stderr, and a gate that greps its output for a word in its own name (sidecarsymlinkcheck's h2 arm refuses any
+# stderr holding "symlink") then reads the harness's path as the binary's words (train 1119g shard 2).
+def _gate_tmpdir(g):
+    return tempfile.mkdtemp(prefix="g.", dir=run_tmp_root)
+
+
+def _drop_gate_tmpdir(path):
+    if not _rm_tree(path):
+        with running_lock:
+            gate_tmp_leftover.append(path)
+
+
+def _drop_run_root():
+    if run_tmp_root is not None:
+        _rm_tree(run_tmp_root)
+
+
+run_tmp_root = None             # made just before the first gate starts; see _make_run_root()
+timed_out = set()               # gates whose LATEST run ended at its budget; run() keeps it under running_lock
+
+
 def run(g):
     # PYTHONDONTWRITEBYTECODE: a gate that imports a module straight out of the checkout (agentlooplockcheck:
     # bench/agentloop/; aiderbytescheck: bench/headtohead/r4-2026-08-06/) would otherwise have Python drop a
@@ -745,11 +937,20 @@ def run(g):
         return g, 128 + stop_signal, 0.0, "", False     # pargates is stopping: no gate starts after the signal
     with running_lock:
         running.add(g)          # the tree tripwire names whoever is in flight when it sees new dirt
+        timed_out.discard(g)
+    gtmp = _gate_tmpdir(g)
+    env["TMPDIR"] = gtmp
+    if os.path.isdir(os.path.join(run_tmp_root, "bin")):
+        env["PATH"] = os.path.join(run_tmp_root, "bin") + os.pathsep + env.get("PATH", "")
     try:
         rc, raw, how = run_gate(["bash", os.path.join(testdir, g)], env, limit)
     finally:
         with running_lock:
             running.discard(g)
+        _drop_gate_tmpdir(gtmp)
+    if how == "timeout":
+        with running_lock:
+            timed_out.add(g)
     if how == "stopped":
         return g, rc, round(time.time() - t0, 1), "", False
     out = raw.decode("utf-8", "replace")
@@ -872,6 +1073,8 @@ bin_before = _bin_fingerprint()
 bin_build_type = build_type_of(binp)        # None: --version names no build type -- the NDEBUG-skip check is disarmed, and says so
 polices_ndebug_skips = bin_build_type is not None and bin_build_type not in NDEBUG_BUILD_TYPES
 
+run_tmp_root = _make_run_root()
+atexit.register(_drop_run_root)     # every exit: the summary's sys.exit, the stop path's, an uncaught exception
 t0 = time.time()
 dirt_thread = None
 if dirt_baseline is not None:
@@ -891,6 +1094,30 @@ for g in exclusive_gates:
         sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
         sys.stderr.flush()
 sys.stderr.write("\n")
+first_results = list(results)       # the parallel pass as it ran: what the timings file and the slowness tripwire measure
+alone = {}                          # gate -> (how its first run ended, the alone retry's result)
+alone_capped = 0                    # > 0: that many gates qualified, more than ALONE_RETRY_MAX, and none was retried
+if alone_retry and stop_signal is None:
+    cands = [i for i, r in enumerate(results)
+             if r[1] != 0 and not r[4] and (r[0] in timed_out or r[0] in load_timing_gates)]
+    if len(cands) > ALONE_RETRY_MAX:
+        alone_capped = len(cands)
+    elif cands:
+        sys.stderr.write("alone retry: ")
+        for i in cands:
+            g = results[i][0]
+            first = f"TIMEOUT at {results[i][2]}s" if g in timed_out else f"rc={results[i][1]} (named in {LOAD_TIMING_LIST})"
+            r = run(g)
+            if stop_signal is not None:
+                break
+            if r[1] != 0:
+                r = (r[0], r[1], r[2], f"first run (parallel): {first}; alone retry: rc={r[1]}\n" + r[3], r[4])
+            alone[g] = (first, r)
+            results[i] = r
+            sys.stderr.write("s" if r[4] else ("a" if r[1] == 0 else "X"))
+            sys.stderr.flush()
+        sys.stderr.write("\n")
+alone_passed = sorted(g for g, (_first, r) in alone.items() if r[1] == 0 and not r[4])
 if stop_signal is not None:
     # a stopped run proved nothing and measured nothing: no summary, no --json, no timings for the next LPT sort
     print(f"pargates: stopped by {signal.Signals(stop_signal).name} before the suite finished -- every gate still running had its "
@@ -906,7 +1133,7 @@ bin_moved = bin_before != bin_after
 
 fails = [r for r in results if r[1] != 0]
 skips = [r for r in results if r[4]]
-slow = sorted(results, key=lambda r: -r[2])[:8]
+slow = sorted(first_results, key=lambda r: -r[2])[:8]
 
 # Persist fresh durations for next run's LPT sort. Best-effort: a write failure (read-only temp
 # dir, a concurrent pargates run racing us) must not turn a passing gate run into a failing one --
@@ -917,7 +1144,7 @@ try:
     tpath = _timings_path()
     ttmp = f"{tpath}.tmp{os.getpid()}"
     with open(ttmp, "w") as fh:
-        json.dump({g: dt for g, rc, dt, _out, _sk in results}, fh)
+        json.dump({g: dt for g, rc, dt, _out, _sk in first_results}, fh)
     os.replace(ttmp, tpath)
 except OSError:
     pass
@@ -930,12 +1157,12 @@ except OSError:
 # quiet. Non-failing by design -- this is a heads-up, not a gate of its own, so it must never touch
 # the exit code below.
 tripwire = []
-for g, rc, dt, _out, _sk in results:
+for g, rc, dt, _out, _sk in first_results:
     prev = prior_timings.get(g)
     if prev and dt >= 2 * prev and dt > 5.0:
         tripwire.append((g, prev, dt))
 
-print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)} "
+print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)-len(alone_passed)} alone_retry={len(alone_passed)} "
       f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}"
       + (f" tree_writes={len(dirt_seen)}" if dirt_baseline is not None else " tree_writes=unwatched"))
 if bin_moved:
@@ -964,6 +1191,20 @@ if skips:
     for g, rc, dt, report, _ in skips:       # the 4th field is the stored REPORT, not the full transcript
         why = skip_reason(report)
         print(f"  {g}  {why}")
+if alone:
+    print(f"\nALONE-RETRY (rerun once, alone, after the parallel pass -- PASS(alone-retry) is not counted in pass=):")
+    for g in sorted(alone):
+        first, r = alone[g]
+        verdict = "SKIP(alone-retry)" if r[4] else ("PASS(alone-retry)" if r[1] == 0 else f"FAIL(alone-retry) rc={r[1]}")
+        print(f"  {verdict}  {g}  first run: {first}; alone: {r[2]}s")
+if alone_capped:
+    print(f"\nalone retry: NOT RUN -- {alone_capped} gates qualified, more than ALONE_RETRY_MAX={ALONE_RETRY_MAX}; that many reds "
+          f"is not load, so each stays red as the parallel pass saw it")
+if gate_tmp_leftover:
+    print(f"\ngate scratch: {len(gate_tmp_leftover)} gate TMPDIR(s) could not be removed after the gate exited (a descendant "
+          f"outside its process group still writing?); the run root's removal at exit tries again:")
+    for d in gate_tmp_leftover:
+        print(f"  {d}")
 print(f"bin={binp}")
 print("\nslowest:")
 for g, rc, dt, _, _sk in slow:
@@ -979,10 +1220,12 @@ if fails:
         print("\n".join("    " + ln for ln in report.splitlines()))
 elif dirt_seen:
     print("\nNO GATE FAILED, BUT THE SUITE IS NOT CLEAN -- a gate wrote into the shared checkout (see the tree tripwire above)")
+elif alone_passed:
+    print(f"\nNO GATE RED, BUT {len(alone_passed)} PASSED ONLY ON AN ALONE RETRY (see ALONE-RETRY above): {' '.join(alone_passed)}")
 else:
     print("\nALL PASS")
 
 if jsonout:
     with open(jsonout, "w") as fh:
-        json.dump({g: {"rc": rc, "sec": dt, "skipped": sk} for g, rc, dt, _, sk in results}, fh, indent=1)
+        json.dump({g: {"rc": rc, "sec": dt, "skipped": sk, "alone_retry": g in alone} for g, rc, dt, _, sk in results}, fh, indent=1)
 sys.exit(1 if fails or dirt_seen else 0)

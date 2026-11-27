@@ -96,5 +96,90 @@ rm -f "$TMP/cc"
 diff -q "$TMP/warm" "$TMP/cold" >/dev/null && ok "cache-transparent (arity/CHA facts round-trip: warm == cold)" \
     || { no "cache changes output (warm != cold)"; diff "$TMP/cold" "$TMP/warm" | head -6; }
 
+# ── 6) #446: C++ base-clause types read as @reference.base captures (the capture IS the language gate).
+# The fixture covers direct, qualified, template (CRTP family) and multiple-inheritance bases;
+# a nameless struct with a base stays edgeless (the capture only matches a named class/struct),
+# and a specialization's base is walked once (captureSpecializationHeader's own path).
+FIX446="$ROOT/test/chafix446"
+"$BIN" "$FIX446" --no-cache --lego=TBase 2>/dev/null >"$TMP/lego_tbase"
+# edge-specific: each impl names TBase (the global one) among its bases
+for impl in Tmpl QualTmpl Multi2 DepT In; do
+    if grep -q "n=\"$impl\"" "$TMP/lego_tbase"; then ok "C++ base capture: $impl -> TBase"; \
+    else no "C++ base capture: $impl lost its TBase edge"; fi
+done
+# Crtpd implements Crtp, not TBase — check against the right base
+"$BIN" "$FIX446" --no-cache --lego=Crtp 2>/dev/null >"$TMP/lego_crtp"
+if grep -q "n=\"Crtpd\"" "$TMP/lego_crtp"; then ok "C++ base capture: Crtpd -> Crtp (CRTP)"; \
+    else no "C++ base capture: Crtpd lost its Crtp edge"; fi
+# Base's direct implementors are exactly Dog, Cat and Multi2 (Multi arrives transitively via Dog).
+# anon_var's nameless struct also derives from Base: an edge from it would add a direct row here.
+"$BIN" "$FIX446" --no-cache --lego=Base 2>/dev/null >"$TMP/lego_base"
+DIRECT446=$( grep -o '<impl n="[^"]*" p="[^"]*"/>' "$TMP/lego_base" | sed 's/^<impl n="\([^"]*\)".*/\1/' | sort | tr '\n' ' ' )
+[ "$DIRECT446" = "Cat Dog Multi2 " ] && ok "C++ base capture: Base's direct implementors are exactly Cat Dog Multi2" \
+    || no "C++ base capture: Base's direct implementors are [$DIRECT446], want [Cat Dog Multi2 ]"
+# nameless struct (line 21): no extends site at all, and no anon_var row
+"$BIN" "$FIX446" --no-cache --uses=Base 2>/dev/null >"$TMP/uses_base"
+ANON446=$( grep -o 'role="extends" p="cppbase446.cpp:21"' "$TMP/uses_base" | wc -l | tr -d ' ' )
+if [ "$ANON446" = 0 ] && ! grep -q 'anon_var' "$TMP/lego_base"; then ok "C++ base capture: nameless struct has no edge"; \
+    else no "C++ base capture: nameless struct wrongly edged (extends sites at :21 = $ANON446)"; fi
+# specialization (line 23): exactly one extends site — captureSpecializationHeader's own walk, not doubled by the capture
+SPEC446=$( grep -o 'role="extends" p="cppbase446.cpp:23"' "$TMP/uses_base" | wc -l | tr -d ' ' )
+[ "$SPEC446" = 1 ] && ok "C++ base capture: specialization's base read exactly once" \
+    || no "C++ base capture: specialization produced $SPEC446 extends sites (want exactly 1)"
+# determinism
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map" 2>/dev/null
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map2" 2>/dev/null
+[ -s "$TMP/base446_map" ] && diff -q "$TMP/base446_map" "$TMP/base446_map2" >/dev/null && ok "C++ base capture: deterministic fixture map" \
+    || no "C++ base capture: empty or non-deterministic fixture map"
+
+# ── 7) #446 round 2: Java base clauses read as @reference.base captures (LangFacts::basesAsCaptures turns the
+# captureBases walk off for Java, so the query must cover every shape the walk took: a simple, generic, qualified
+# and qualified-generic base under `superclass` and `super_interfaces`, a nested class's base, and an enum's
+# `implements`). An anonymous class (`new JIface() { … }`) is no class_declaration and must not match. The rows
+# below are the ones main's walk gives on the same fixture (test/chafix446/java, names prefixed J so the C++
+# section's Base/TBase sets above stay untouched).
+FIXJ="$ROOT/test/chafix446/java"
+jrun(){ "$BIN" "$FIXJ" --no-cache "$1" 2>/dev/null >"$2" || no "Java base capture: ripwire $1 exited non-zero"; }
+directOf(){ grep -o '<impl n="[^"]*" p="[^"]*"/>' "$1" | sed 's/^<impl n="\([^"]*\)".*/\1/' | sort | tr '\n' ' '; }
+jrun --lego=JBase "$TMP/jlego_base"
+D=$( directOf "$TMP/jlego_base" )
+[ "$D" = "JGeneric JQualGen JSimple " ] && ok "Java base capture: JBase's direct implementors are simple, generic and qualified-generic (jb.JBase<String>)" \
+    || no "Java base capture: JBase's direct implementors are [$D], want [JGeneric JQualGen JSimple ]"
+grep -q '<impl n="JQual" [^>]*via="JGeneric"' "$TMP/jlego_base" && ok "Java base capture: qualified base JShapes.JGeneric reaches JBase transitively" \
+    || no "Java base capture: JQual (extends JShapes.JGeneric) lost its edge"
+jrun --lego=JIface "$TMP/jlego_iface"
+D=$( directOf "$TMP/jlego_iface" )
+[ "$D" = "JColor JSimple " ] && ok "Java base capture: JIface's direct implementors are JColor (enum implements) and JSimple, no anonymous class" \
+    || no "Java base capture: JIface's direct implementors are [$D], want [JColor JSimple ]"
+jrun --lego=Entry "$TMP/jlego_entry"
+D=$( directOf "$TMP/jlego_entry" )
+[ "$D" = "JColor JEntry " ] && ok "Java base capture: qualified generic JMap.Entry<K, V> edges JEntry and the enum JColor" \
+    || no "Java base capture: Entry's direct implementors are [$D], want [JColor JEntry ]"
+# a nested class's bases (JHolder.JOuterNode extends JShapes.JOuterNode; JKid extends JOuterNode): one extends site each
+jrun --uses=JOuterNode "$TMP/juses_node"
+D=$( grep -o 'role="extends" p="jb/JShapes.java:[0-9]*"' "$TMP/juses_node" | sed 's/.*://; s/"//' | tr '\n' ' ' )
+[ "$D" = "10 11 " ] && ok "Java base capture: nested classes' bases are read once each (lines 10 11)" \
+    || no "Java base capture: JOuterNode extends sites at lines [$D], want [10 11 ]"
+# every JBase site exactly once (the walk is off for Java, so the capture is the only reader), none from the anonymous class
+jrun --uses=JBase "$TMP/juses_base"
+jrun --uses=JIface "$TMP/juses_iface"
+NB=$( grep -o 'role="extends"' "$TMP/juses_base" | wc -l | tr -d ' ' ); NA=$( grep -o 'role="extends" p="jb/JShapes.java:13"' "$TMP/juses_iface" | wc -l | tr -d ' ' )
+[ "$NB" = 3 ] && [ "$NA" = 0 ] && ok "Java base capture: 3 JBase extends sites, none at the anonymous class (:13)" \
+    || no "Java base capture: $NB JBase extends sites (want 3), $NA at the anonymous class :13 (want 0)"
+
+# ── 8) #688 review (CodeRabbit 4614203119): a TYPE-ANNOTATED superclass. `extends @JMark JABase` wraps the type in
+# annotated_type; main's walk reached it one level down, so --lego=JABase listed JAKid and JAGen. Red on 7253fb78e
+# (only JAPlain: the capture took direct type children of `superclass` only). An annotated `implements @JMark JAIface`
+# was never read by the walk either (main lists no implementor), so it stays absent: a faithful port.
+FIXJA="$ROOT/test/chafix446/java-anno"
+"$BIN" "$FIXJA" --no-cache --lego=JABase 2>/dev/null >"$TMP/jalego_base" || no "Java annotated base: ripwire --lego=JABase exited non-zero"
+D=$( directOf "$TMP/jalego_base" )
+[ "$D" = "JAGen JAKid JAPlain " ] && ok "Java annotated base: JABase's direct implementors include the annotated JAKid and JAGen<String> beside JAPlain" \
+    || no "Java annotated base: JABase's direct implementors are [$D], want [JAGen JAKid JAPlain ]"
+"$BIN" "$FIXJA" --no-cache --uses=JABase 2>/dev/null >"$TMP/jauses_base" || no "Java annotated base: ripwire --uses=JABase exited non-zero"
+NB=$( grep -o 'role="extends"' "$TMP/jauses_base" | wc -l | tr -d ' ' )
+[ "$NB" = 3 ] && ok "Java annotated base: 3 JABase extends sites, one per class (the annotated pattern does not double the plain one)" \
+    || no "Java annotated base: $NB JABase extends sites, want 3"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

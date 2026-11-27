@@ -322,21 +322,24 @@ subAfter="$(   countRule atom-reversed-subscript "$TMP/mut" )"
 #     registered languages — cpp/c/objc — intersect none of a JS-only corpus), so the honest row now
 #     also carries applicable="0" — a stronger disclosure than the bare zero this arm used to check,
 #     not a different fact. See --lint-catalog.
+#     LT1 (verbs_lint.h ZeroRuleFold): a rule that found nothing no longer prints a count="0" row of its own;
+#     the ONE <zero_rules> row names it — under inert= when none of its languages are here (the fact
+#     applicable="0" carried). Same declaration, one row: so each atom rule must be named in inert= and
+#     have no <rule> row at all.
 JSONLY="$TMP/jsonly"; mkdir -p "$JSONLY"
 cp "$FIXTURE/guard.js" "$JSONLY/guard.js"
 "$BIN" "$JSONLY" --lint --no-cache >"$TMP/js" 2>/dev/null
+INERT="$( grep -o '<zero_rules [^>]*/>' "$TMP/js" | grep -o ' inert="[^"]*"' | sed 's/^ inert="//; s/"$//' )"
 zeroed=1
 for rule in atom-comma-operator atom-embedded-crement atom-assign-as-value atom-nested-ternary \
             atom-implicit-predicate atom-octal-literal atom-reversed-subscript
 do
-    # wave-4 item 12 added a per-rule shown_rows=/rows_capped= pair between count= and applicable= (--lint's
-    # row cap disclosure), so the exact literal now has two more attributes in between — matched, not
-    # restated as a new literal.
-    grep -q "<rule name=\"$rule\" count=\"0\" shown_rows=\"0\" rows_capped=\"0\" applicable=\"0\"/>" "$TMP/js" || { zeroed=0; echo "    (missing zero+inert row for $rule)"; }
+    case ",$INERT," in *",$rule,"*) ;; *) zeroed=0; echo "    (not named in zero_rules inert= for $rule)";; esac
+    grep -q "<rule name=\"$rule\"" "$TMP/js" && { zeroed=0; echo "    (a <rule> row still printed for $rule)"; }
 done
 [ "$zeroed" = 1 ] \
-    && ok "a JavaScript-only corpus declares all seven atom rules at count=\"0\" applicable=\"0\"" \
-    || no "a JavaScript-only corpus does not declare every atom rule at count=\"0\""
+    && ok "a JavaScript-only corpus declares all seven atom rules as inert zeros (zero_rules inert=)" \
+    || no "a JavaScript-only corpus does not declare every atom rule in zero_rules inert="
 
 # ── H) G5: --lint without any C-family atom is byte-identical to a flagless run's map ─────────────
 #     (the pack is additive — it may not perturb the default map).

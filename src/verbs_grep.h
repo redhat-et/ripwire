@@ -378,8 +378,12 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     }
     if( sug.offerFor )
     {
-        const auto fp = rw::escapeXml( pat, esc );
-        rw::emitTo( stdout, " next=\"--for=&quot;{}&quot;\"", std::string_view( fp.data(), fp.size() ) );
+        // NEXT-APOS-FINISH: the shell quoting is nextFlag's apostrophes, not `"`. Inside this "-delimited attribute a `"`
+        // can only be &quot;, which a reader pasting the raw answer hands the shell as a literal entity (and an `&` that
+        // backgrounds the command); a raw `'` is legal XML here, so `--for='total area'` is both well-formed and the call
+        // a shell runs, and a one-word pattern needs no quotes at all (`--for=perimeterr`). As before, the value is a shell
+        // line (it needs a shell or shlex to split), like every other next=. One next= escaper: nextverb.h.
+        rw::emitTo( stdout, "{}", rw::nextAttrXml( rw::nextFlag( "--for=", pat ) ) );
     }
     rw::emitTo( stdout, "/>" );
 }
@@ -487,7 +491,7 @@ std::string grepRootNext( const rw::Config& cfg, const std::string& pat, bool is
 // nothing on the root counted. `window` is a slice of THIS list (the caller computes it with the same
 // pageWindow()/rowCap the indexed half uses) — never derived inside the collector, so the §A1 rule holds
 // here too: what was COLLECTED does not move with the page, only what is PRINTED does, which is why
-// count= reads the same on every page of a walk. The shape is --impact's <f via="import"> with
+// count= reads the same on every page of a walk. The shape is --impact's <f p=> importer row with
 // shown_importers=/importers_capped=, restated on an element of this sub-list's own.
 void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageWindow& window, bool singleRoot,
                         const std::string& rootPrefix, std::vector<char>& esc )
@@ -564,7 +568,7 @@ std::string grepTierLegend( const rw::GrepTierReport& tier )
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
            "present only then, beside tier_files= the hit files it had to cover — and the root then also carries counts_floor=\"1\": "
            "the tier counts are floors while hits= stays exact and every row is served), tier_unclassified= hits in files nothing "
-           "classified — always EMITTED, never suppressed. " ) + liftClause;
+           "classified or parse_degraded — always EMITTED, never suppressed. " ) + liftClause;
 }
 
 // Present only when this answer actually held something back or stopped short — absent-means-nothing-was-
@@ -577,6 +581,28 @@ std::string grepTierLegend( const rw::GrepTierReport& tier )
 // NOT through pageDisclosure's collectionCapped path: every hit row was served, only the classification is partial, so
 // forcing capped="1" there would claim rows no page holds. The caller says whether the disclosure already spelled the
 // floor (hits_capped fired), so the attribute is never spelled twice.
+// BX2 step 2 (test/grepdegradedcheck.sh P3-P5): the files whose EVERY hit the tier held back — no <f> row names them, so the root
+// does: held_files= the count, held= the first rw::kGrepHeldFilesListed paths (collection order), held_next= the call that serves
+// them (every tier). "" when no file was wholly held back. The bytes ride only an answer that already discloses a suppression.
+template<class PathFor>
+std::string grepHeldAttrs( const rw::GrepTierReport& tier, const rw::Config& cfg, const std::string& pat, PathFor&& pathFor, std::vector<char>& esc )
+{
+    if( tier.heldFiles == 0 )
+    {
+        return {};
+    }
+    std::string held;
+    for( const std::uint32_t f : tier.heldFileIds )
+    {
+        held += ( held.empty() ? "" : "," ) + std::string( pathFor( f ) );
+    }
+    const std::string next = rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --grep-in=any";
+    return " held_files=\"" + std::to_string( tier.heldFiles ) + "\" held=\"" + std::string( rw::escapeXml( held, esc ) ) + "\" held_next=\""
+         + std::string( rw::escapeXml( next, esc ) ) + "\"";
+}
+inline constexpr std::string_view kGrepHeldLegend =
+    "held_files=N: N files whose EVERY hit was held back (no row names them); held= the first 5 paths; held_next= serves every tier. ";
+
 std::string grepTierAttrs( const rw::GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
@@ -799,7 +825,7 @@ GrepScanPhases collectGrepScanPhases( const rw::Config& cfg, const rw::IngestRes
         PROFILE_SCOPE_DESCRIBE( "grep/3: aux unindexed scan" );
         const std::size_t maxAuxFileBytes = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
         phases.aux = grepCollectAux( ing.crawlSkips, pat, cfg.grepRegex, maxAuxFileBytes,
-                                     phases.found.regexStackBytes != 0 ? phases.found.regexStackBytes : kGrepScanStackBytes );
+                                     phases.found.regexStackBytes != 0 ? phases.found.regexStackBytes : kGrepScanStackBytes, ing.skippedOversize );
     }
     phases.valid = true;
     return phases;
@@ -1024,7 +1050,8 @@ int emitGrepReport( const MainDispatch& d )
     // whose name holds the literal, then source), and the rest is where the literal is typed; next= pages on. servedString is
     // set only on that posture (search.h GrepStringLift::Ranked: fewer than kGrepLiftCodeFloor program-code hits, unclassified
     // ones included), so main's literal lift on a full count keeps the 100-row default (rv-lean-trio2 item 1).
-    const int                       histCap         = cfg.packTopN > 0 ? cfg.packTopN : tierReport.servedString > 0 ? kGrepLiftRowCap : 100;
+    // PG1: d.pageRowCap is the cap runGrepServed (main.cpp) chose to keep a default page under the output ceiling (0 = every row).
+    const int                       histCap         = d.pageRowCap >= 0 ? d.pageRowCap : cfg.packTopN > 0 ? cfg.packTopN : tierReport.servedString > 0 ? kGrepLiftRowCap : 100;
     const int                       rowCap          = effectiveRowCap( cfg.pageLimit, histCap );
     const GrepAuxCollection&        aux             = phases->aux;
     const std::vector<GrepTerm>&    grepTerms       = phases->terms;
@@ -1109,7 +1136,8 @@ int emitGrepReport( const MainDispatch& d )
     //            absent above is absent from every indexed file", and that is false the moment a comment or
     //            string row was held back. --grep-in=any (no filtering) keeps the claim, which is what makes
     //            the claim recoverable rather than lost.
-    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet();   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
+    // LARGE-PARTIAL-1: corpus_oversize= files are read by the unindexed scan now; one it could not read whole withholds the claim.
+    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet() && aux.oversizeUnread == 0;   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
     const char* const completeAttr = ( scanExhaustive && windowWhole && nothingHeldBack ) ? " complete=\"1\"" : "";
@@ -1171,7 +1199,7 @@ int emitGrepReport( const MainDispatch& d )
     // above set the precedent, and legendcoveragecheck's rule is "define what you EMIT"). An answer that
     // held nothing back emits no tier attribute and pays no tier prose — byte-identical to the pre-tier
     // verb, which is the "purely additive" contract. Helper above; empty string when there is nothing to say.
-    rw::emitTo( stdout, "{}", grepTierLegend( tierReport ) );
+    rw::emitTo( stdout, "{}{}", grepTierLegend( tierReport ), tierReport.heldFiles > 0 ? kGrepHeldLegend : std::string_view() );   // BX2 step 2
     // The long-line clause rides only on a regex answer — the only one that can carry the attributes it defines.
     if( cfg.grepRegex )
     {
@@ -1229,7 +1257,8 @@ int emitGrepReport( const MainDispatch& d )
                  // unsupported-ext/text-looking population and print its hits in a trailing block, never
                  // folded into the indexed count above and never claimed by complete=.
                  "unindexed_files_scanned= counts files outside the index (unsupported-ext, but text-looking — the skipped verb's "
-                 "own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a "
+                 "own unsupported-ext class — and the files corpus_oversize= counts, read whole however large) that THIS answer "
+                 "additionally scanned for the same pattern; their hits print inside a "
                  "trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as "
                  "above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file "
                  "scope. "
@@ -1242,7 +1271,7 @@ int emitGrepReport( const MainDispatch& d )
                  "carries that same number as its own count= beside shown=/capped= and obeys the SAME window limit/offset set here "
                  "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated. "
                  "unindexed_files_skipped= (present only when nonzero) counts "
-                 "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
+                 "candidates this scan saw but did not read: sniffed binary, or unreadable (no size ceiling applies to this text scan). "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
                  "500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb "
                  "for every row. "
@@ -1251,7 +1280,8 @@ int emitGrepReport( const MainDispatch& d )
                  // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
                  // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
                  "corpus_excluded= counts files a caller's own exclude filter kept OUT of the index entirely; "
-                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling; "
+                 "corpus_oversize= counts files the crawl SAW but did not index for exceeding the size ceiling (this answer still "
+                 "greps them, in the unindexed list); "
                  "corpus_pruned_dirs= counts the DIRECTORIES the BUILT-IN crawl denylist pruned whole — vendor, third_party, "
                  "build, dist, out, target, node_modules and the rest — a directory count and not a file count, because files "
                  "beneath a pruned subtree are never stat'd and so were never counted. All three answer what an "
@@ -1274,7 +1304,8 @@ int emitGrepReport( const MainDispatch& d )
     // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
     const std::string corpusAttr = grepCorpusAttrs( ing );
     // R-H: the tier disclosure (helper above) — empty when nothing was held back.
-    const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 );   // N2: tier_budget= floors the root too
+    const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 )   // N2: tier_budget= floors the root too
+                               + grepHeldAttrs( tierReport, cfg, pat, pathFor, esc );                      // BX2 step 2: the wholly held-back files
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux ) + renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp= walk (--metrics) could not be read
     const std::string regexSkipAttr = grepRegexSkipAttrs( cfg, found, aux, /*floorAlreadyEmitted=*/hitsCapped != 0 || tierReport.budgetHit != nullptr );
@@ -1296,14 +1327,24 @@ int emitGrepReport( const MainDispatch& d )
     scanShortAttr += pageCarriers.skippedAttrs;   // L4: the reads the memory guard stopped (reads_skipped=, reads_next=), or ""
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
     // P3 (L7) + honest-lex: the one follow-up (grepRootNext above states the order).
-    const std::string grepNext = grepRootNext( cfg, pat, grepPage.end < hitCount || hitsCapped != 0, grepPage.end,
+    // PG1: the unindexed list obeys the SAME window (H4 below), so a page is cut while EITHER list has rows past it — before, the
+    // chain stopped with the in-index list and the unindexed rows past it were reached by no next=. hits_capped= alone continues
+    // only from a page that printed rows: a page past the last row has nothing after it (it used to name itself forever).
+    const PageWindow  auxPage  = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
+    const std::size_t pageEnd  = std::max( grepPage.end, auxPage.end );
+    if( d.pageRowsOut != nullptr )
+    {
+        *d.pageRowsOut = std::max( grepPage.end - grepPage.begin, auxPage.end - auxPage.begin );
+    }
+    const std::string grepNext = grepRootNext( cfg, pat, grepPage.end < hitCount || auxPage.end < aux.hits.size() || ( hitsCapped != 0 && grepPage.end > grepPage.begin ), pageEnd,
                                                [ & ] { return rw::grepCarrierNext( ing, hits, encRows, encCarriers ); },
                                                [ & ] { return hits.empty() ? std::string() : std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ); } );
     rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}{}>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
-                 pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
-                                 cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
-                                 /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
+                 pageDisclosureChained( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
+                                        cfg.pageLimit, cfg.pageOffset,
+                                        /*collectionCapped=*/ hitsCapped != 0,   // H8: the cap hits_capped= names floors the root
+                                        auxPage.end < aux.hits.size(), pageEnd ),   // ruling 192: has_more= spans the unindexed list too
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(), regexSkipAttr.c_str(),
                  scanShortAttr.c_str(), rw::nextAttrXml( grepNext ).c_str() );
     rw::emitTo( stdout, "{}", renderHistoryUnread( DiscloseAs::LegendComment ) );   // K51: its own definition, behind the root it marks
@@ -1391,7 +1432,6 @@ int emitGrepReport( const MainDispatch& d )
     // H4: the SAME window the indexed list above obeys, applied to this list's own length. Computed here
     // rather than inside the collector for the §A1 reason: nothing derived from --limit/--offset may reach
     // what is COLLECTED, so count= stays a property of the search and only shown= moves with the page.
-    const PageWindow auxPage = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
     emitGrepUnindexed( aux.hits, auxPage, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────

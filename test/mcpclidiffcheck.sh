@@ -232,7 +232,10 @@ PY
 
 # grep: the CLI's XML root attributes vs the MCP JSON's header keys. The two spellings are deliberately
 # different in FORM (attributes vs keys) but must cover the same FACTS, so the comparison is over names.
-"$BIN" "$ROOT" --grep=pageDisclosure --legend=full >"$TMP/grep.cli" 2>/dev/null
+# --page-bytes=0: the CLI's WHOLE answer, which is what the MCP twin serves. A default CLI page is cut under the 24,000-character
+# output ceiling (PG1: this probe is 26,738 chars at --legend=full) and then carries paging attributes the uncut MCP answer has no
+# reason to — a difference of posture, not a missing fact.
+"$BIN" "$ROOT" --grep=pageDisclosure --legend=full --page-bytes=0 >"$TMP/grep.cli" 2>/dev/null
 mcp_text "$( call grep '{"path":"'"$ROOT"'","pattern":"pageDisclosure"}' )" >"$TMP/grep.mcp"
 python3 - "$TMP/grep.cli" "$TMP/grep.mcp" <<'PY' >"$TMP/grep.res" 2>&1
 import json, re, sys

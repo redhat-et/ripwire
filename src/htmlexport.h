@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -2167,6 +2168,7 @@ inline constexpr const char* kLangColors[] = {
                  // unused in this palette, so it stays separable on the #111 canvas — the same reasoning
                  // the Elixir and Kotlin rows above applied to the purples.
     "#63b132",   // Clojure — green, distinct from Bash's lighter yellow-green.
+    "#9a8c6a",   // Proto — a muted khaki: a schema, not code, kept apart from the saturated code hues.
 };
 inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
 // NB the bound names the LAST enumerator, so appending one to Lang leaves this assert TRUE and silently
@@ -2795,8 +2797,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
                 neigh.push_back( moduleRank[ms] );
             }
         }
-        std::sort( neigh.begin(), neigh.end() );
-        neigh.erase( std::unique( neigh.begin(), neigh.end() ), neigh.end() );
+        rw::sortutil::sortUnique( neigh );
 
         rw::emitTo( out, "  {{\"id\":{},\"name\":\"{}\",\"symCount\":{},\"fileCount\":{},\"files\":[",
                       disp, jsonEscape( m.name ).c_str(), m.members.size(), m.files.size() );

@@ -290,9 +290,9 @@ mkrepo "$HD"
 sub "$HD/app.py" "return x + 1" "return x + 11"; ( cd "$HD" && git commit -qam 'alpha (committed)' )
 sub "$HD/app.py" "return x * 2" "return x * 3"
 ( cd "$HD" && "$BIN" . --test-gate=app.py --no-cache >"$TMP/h.xml" 2>/dev/null ); RC_H=$?
-if grep -q 'test_alpha.py' "$TMP/h.xml" && grep -q 'test_beta.py' "$TMP/h.xml"; then
+if [ "$RC_H" = 4 ] && grep -q 'test_alpha.py' "$TMP/h.xml" && grep -q 'test_beta.py' "$TMP/h.xml"; then
   ok "(h) --test-gate=app.py keeps both obligations on a dirty tree (the file-level answer)"
-else no "(h) --test-gate=app.py was narrowed by the working-tree diff (alpha's obligation dropped)"; fi
+else no "(h) --test-gate=app.py exited $RC_H (expected 4: obligations remain), or was narrowed by the working-tree diff (alpha's obligation dropped)"; fi
 case "$( cat "$TMP/h.xml" )" in *change_granularity*) no "(h) an explicit list prints a hunk attribute — the diff did not shape this answer" ;;
   *) ok "(h) an explicit list carries no hunk attribute" ;; esac
 

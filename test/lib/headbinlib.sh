@@ -173,6 +173,46 @@ ripwire_private_checkout()
     git clone -q --shared --no-checkout "$_common" "$_dest" && git -C "$_dest" checkout -q --detach "$_sha"
 }
 
+# headbin_jobs  →  stdout: the job count for the HEAD-binary build, always a positive integer.
+# A bare `cmake --build -j` hands make an UNLIMITED -j: every translation unit of the ripwire target compiles at once.
+# At -O3 one clang holds 1.3-3.4 GB, and on 2026-11-18 three such builds ran at once on a 48 GB machine while ripwire
+# itself was growing — the machine ran out of memory. Precedence, first positive integer wins:
+#   1. CMAKE_BUILD_PARALLEL_LEVEL — CMake's own knob, honoured as CMake would.
+#   2. RIPWIRE_HEADBIN_JOBS       — this library's override.
+#   3. GITHUB_ACTIONS=true        — the logical CPU count: the staging step runs alone on an idle runner (CI's
+#                                   "Stage the HEAD comparison binary"), and ncpu jobs keep every core busy, which is
+#                                   what the unlimited -j delivered there, without queueing the rest in RAM.
+#   4. otherwise                  — max( 1, min( ncpu / 2, physical GiB / 8 ) ): half the cores, because a developer
+#                                   machine runs other lanes beside the gate, and one job per 8 GiB, so that even two
+#                                   or three concurrent head builds at the 3.4 GB worst case stay inside RAM.
+# A value that is set but is not a positive integer is ignored with one `headbinlib:` line on stderr.
+headbin_jobs()
+{
+    local _v _name _ncpu _mem _gib _j
+    for _name in CMAKE_BUILD_PARALLEL_LEVEL RIPWIRE_HEADBIN_JOBS; do
+        eval "_v=\"\${$_name-}\""
+        [ -z "$_v" ] && continue
+        case "$_v" in
+            *[!0-9]*|0*) echo "headbinlib: $_name='$_v' is not a positive integer; ignored" >&2 ;;
+            *) printf '%s\n' "$_v"; return 0 ;;
+        esac
+    done
+    _ncpu="$( getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2 )"
+    case "$_ncpu" in ""|*[!0-9]*) _ncpu=2 ;; esac
+    [ "$_ncpu" -ge 1 ] || _ncpu=1
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then printf '%s\n' "$_ncpu"; return 0; fi
+    _mem="$( sysctl -n hw.memsize 2>/dev/null )"
+    case "$_mem" in
+        # %.0f, never %d: mawk's %d goes through a C int and CLAMPS at 2147483647, so a 32 GiB host would read as
+        # 2 GiB, _gib=1 and the build would take -j 1 instead of -j 4. %.0f is exact for every byte count under 2^53.
+        ""|*[!0-9]*) _mem="$( awk '/^MemTotal:/ { printf "%.0f", $2 * 1024 }' /proc/meminfo 2>/dev/null )" ;;
+    esac
+    case "$_mem" in ""|*[!0-9]*) _gib=8 ;; *) _gib=$(( _mem / 1073741824 )) ;; esac
+    _j=$(( _ncpu / 2 )); [ $(( _gib / 8 )) -lt "$_j" ] && _j=$(( _gib / 8 ))
+    [ "$_j" -ge 1 ] || _j=1
+    printf '%s\n' "$_j"
+}
+
 # _headbin_build ROOT SHA WORKDIR OUT  →  builds SHA from a private checkout under WORKDIR, copies the binary to OUT
 _headbin_build()
 {
@@ -183,8 +223,9 @@ _headbin_build()
     if ripwire_private_checkout "$_root" "$_sha" "$_wt" >>"$_log" 2>&1; then
         # --target ripwire: the comparison needs that one binary. The default target also builds ripwire_probe and the
         # three doctest binaries, which took another 18 s after a 90 s ripwire-only build (dev machine, 2026-09-10).
+        # -j "$( headbin_jobs )", never a bare -j: see headbin_jobs above.
         if cmake -S "$_wt" -B "$_bld" -DRIPWIRE_NATIVE=ON >>"$_log" 2>&1 \
-           && cmake --build "$_bld" -j --target ripwire >>"$_log" 2>&1 \
+           && cmake --build "$_bld" -j "$( headbin_jobs )" --target ripwire >>"$_log" 2>&1 \
            && [ -x "$_bld/ripwire" ]; then
             cp "$_bld/ripwire" "$_out" && chmod +x "$_out" && _rc=0
         fi

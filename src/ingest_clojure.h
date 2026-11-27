@@ -21,20 +21,20 @@ std::string_view clojureListHead( TSNode list, std::string_view src ) noexcept
     {
         return {};
     }
+    // The head is the first named child that is not a comment, a `#_` discard or reader metadata (`^:tag`, `^{…}`):
+    // the same leading slot queries/clojure/tags.scm's call pattern skips.
     const std::uint32_t childCount = ts_node_named_child_count( list );
-    std::uint32_t       headIndex  = 0;
-    while( headIndex < childCount
-           && ( kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "comment" )
-                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "dis_expr" ) ) )
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
     {
-        ++headIndex;
+        const TSNode child = ts_node_named_child( list, childIndex );
+        const char*  kind  = ts_node_type( child );
+        if( kindIs( kind, "comment" ) || kindIs( kind, "dis_expr" ) || kindIs( kind, "meta_lit" ) )
+        {
+            continue;
+        }
+        return kindIs( kind, "sym_lit" ) ? nodeTextOf( child, src ) : std::string_view{};
     }
-    if( headIndex == childCount )
-    {
-        return {};
-    }
-    const TSNode head = ts_node_named_child( list, headIndex );
-    return kindIs( ts_node_type( head ), "sym_lit" ) ? nodeTextOf( head, src ) : std::string_view{};
+    return {};
 }
 
 // Temporary keyword-head table: CONTRIBUTING slice 5a moves these decisions into tags-pass predicates.
@@ -53,24 +53,9 @@ ClojureDefinitionShape clojureDefinitionShape( TSNode list, std::string_view src
     return {};
 }
 
-// Temporary inert-form filter: CONTRIBUTING slice 8a moves it onto the shared mechanism after #380 and #349 land.
-bool clojureInert( TSNode node, std::string_view src ) noexcept
-{
-    for( TSNode parent = ts_node_parent( node ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
-    {
-        const char* type = ts_node_type( parent );
-        if( kindIs( type, "quoting_lit" ) || kindIs( type, "syn_quoting_lit" ) || kindIs( type, "dis_expr" )
-            || ( kindIs( type, "list_lit" ) && clojureListHead( parent, src ) == "comment" ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool clojureDeclarationMethod( TSNode list, std::string_view src ) noexcept
 {
-    const TSNode parent = ts_node_parent( list );
+    const TSNode parent = parentOf( list );
     if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "list_lit" ) != 0 )
     {
         return false;
@@ -81,7 +66,16 @@ bool clojureDeclarationMethod( TSNode list, std::string_view src ) noexcept
 
 bool clojureKeepCapture( TSNode role, bool isDef, std::string_view src ) noexcept
 {
-    if( clojureInert( role, src ) )
+    if( inInertRegion( role, [ & ]( TSNode ancestor, TSNode )
+    {
+        const char* type = ts_node_type( ancestor );
+        if( kindIs( type, "quoting_lit" ) || kindIs( type, "syn_quoting_lit" ) || kindIs( type, "dis_expr" )
+            || ( kindIs( type, "list_lit" ) && clojureListHead( ancestor, src ) == "comment" ) )
+        {
+            return InertBoundary::Inert;
+        }
+        return InertBoundary::None;
+    } ) )
     {
         return false;
     }

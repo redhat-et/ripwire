@@ -14,18 +14,29 @@
 // answer is never replaced: the block rides after it, inside <graph_verb endpoints="subject">, whose legend says the
 // endpoints were read from prose (a name match, hedged), and the verb's default caps and next= paging bound it.
 // Nothing resolves → nothing is appended (byte-identical to the answer without this lane).
+#include "callhierarchy.h"   // callHierarchyRows — the callers / callees rows callHierarchyRowsNarrowed binds
+#include "compactlegend.h"   // spanHasAttr — the ONE attribute-at-a-tag-boundary test
 #include "filter.h"      // pathTierOf — name_test_hops=: the verb's own test/fixture path classifier
 #include "graph.h"       // resolveAllByNameQualified / resolveFocus — the callers / connect resolvers
+#include "handoffwindow.h"   // WINDOW-AWARE HAND-OFF: a windowing callers block is a stub naming the complete call
 #include "lexical.h"     // parseGraphSubject — the subject-only half
 #include "nextverb.h"    // nextFlag / nextAttrXml — verb= is a pasteable invocation
+#include "serialize.h"    // findSectionOpenTag — an element's open tag, comments skipped
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
+#include "pathpairs.h"   // pathDefInTests — the --defs class="test" rule (M1)
+#include "defattrib.h"   // endpointDefinitionCount — from= binds one definition (M3)
+#include "docparse.h"    // hasGeneratedMarker / readWholeFile — a generated or copied file's banner (CALLERS-TWO-COPY-BIND)
+#include "backhops.h"    // DeclinedCrossRule — a builtin-spelled declined call is no crossing (M3)
+#include "infra/emit.h"  // emitTo — the met_bridge disclosure's stderr line
 #include "serialize.h"   // escapeXml
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <deque>         // ConnectTerminalSpellings: bound spellings the terminal views point into
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,16 +54,399 @@ struct GraphSubjectArgs
     std::vector<std::string> spans;       // the words each slot was read from
     std::size_t              tried = 0;   // combinations tried before this one resolved (1 = the first)
     std::vector<std::string> unresolved;  // the spellings the resolver did NOT find on the way (tried > 1 only), first-tried first
+    std::vector<std::string> narrowed;    // GV-ASSEMBLY M1: the task spellings refused over several definitions that bound their ONE source definition
+};
+
+// The spelling that binds definition `pick` alone: its file:name, else its @file:line seed, each re-resolved to prove it (any other
+// match must be a bodyless declaration of it, never a second definition); nullopt when neither does. M1 and M3 name a definition by it.
+inline std::optional<std::string> soleDefinitionSpelling( const IngestResult& ing, NodeId pick )
+{
+    if( pick >= ing.symbols.size() )
+    {
+        return std::nullopt;
+    }
+    const Symbol&     s = ing.symbols[ pick ];
+    const std::string file( rootRelPath( ing, s.fileId ) );
+    const auto alone = [ & ]( const std::string& spell )
+    {
+        const std::vector<NodeId> got = resolveAllByNameQualified( ing, spell );
+        return std::ranges::find( got, pick ) != got.end()
+               && std::ranges::all_of( got, [ & ]( NodeId n ) { return n == pick || !isDefinitionNotDeclaration( ing.symbols[ n ] ); } );
+    };
+    for( std::string spell : { file + ":" + s.name, "@" + file + ":" + std::to_string( s.line ) } )
+    {
+        if( alone( spell ) )
+        {
+            return spell;
+        }
+    }
+    return std::nullopt;
+}
+
+// The M1 survivors of `spec`: its fitting definitions less the test/fixture-path, bodyless and doc-unit ones, in the resolver's order;
+// nullopt when the spelling was not refused over two or more fitting definitions all placed (an unplaced one is never listed).
+inline std::optional<std::vector<NodeId>> sourceOnlyKeptDefs( const IngestResult& ing, std::string_view spec )
+{
+    std::size_t         fitted = 0;
+    std::vector<NodeId> fits;
+    (void)resolveAllByWrittenSpelling( ing, spec, {}, &fitted, &fits );
+    if( fitted < 2 || fits.size() != fitted )
+    {
+        return std::nullopt;
+    }
+    std::erase_if( fits, [ & ]( NodeId id )
+                   { return id >= ing.symbols.size() || !isDefinitionNotDeclaration( ing.symbols[ id ] ) || pathDefInTests( ing, id ) || isDocUnit( ing.symbols[ id ] ); } );
+    return fits;
+}
+
+// GV-ASSEMBLY M1 ESRC (endpoint source-prefer; ORCH reports/s0-xh-1110.md, rule frozen there). A task spelling the resolver REFUSES
+// because several definitions fit it (`ApplicationRef.tick` on angular: the source method plus two bodyless mocks under a tests/
+// tree) leaves the graph question unasked, though only one of them is code the task can mean. On that refusal only, the fitting
+// definitions in a test or fixture path (pathDefInTests, the --defs class="test" rule) and the bodyless ones (no body: the --defs
+// decl_only="1" rule) are dropped; when exactly ONE remains, the answer is the spelling that binds it alone: its file:name, else
+// its @file:line seed (re-resolved here to prove it). No score and no row feature: the two labels are the parser's. Two or more
+// left, none left, or a fitting definition the resolver could not place (an unplaced candidate is never listed) → nullopt: refused
+// as before. The block discloses the narrowing (narrowed= on the open tag), so verb= is the one call that ran.
+inline std::optional<std::string> sourceOnlyPickSpelling( const IngestResult& ing, std::string_view spec )
+{
+    const std::optional<std::vector<NodeId>> kept = sourceOnlyKeptDefs( ing, spec );
+    if( !kept || kept->size() != 1 )
+    {
+        return std::nullopt;
+    }
+    return soleDefinitionSpelling( ing, kept->front() );
+}
+
+// CALLERS-TWO-COPY-BIND: is definition `id` a COPY of code that lives elsewhere: a file under a CI/tool dot directory, a vendoring
+// directory or the demo/generated tier (filter.h isToolOrVendoredPath, the --for subject anchor's rule), or a file whose head
+// declares it generated or copied (docparse.h hasGeneratedMarker: vscode's extensions/copilot/src/util/vs tree opens with
+// "DO NOT modify, this file was COPIED"). An unreadable file is not called a copy.
+inline bool definitionIsCopy( const IngestResult& ing, NodeId id )
+{
+    const std::uint32_t f = ing.symbols[ id ].fileId;
+    if( isToolOrVendoredPath( rootRelPath( ing, f ) ) )
+    {
+        return true;
+    }
+    const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, f ) );
+    return text && docparse::hasGeneratedMarker( *text );
+}
+
+// CALLERS-TWO-COPY-BIND (owner 11-17: "bind source, disclose"). A callers spelling M1 still refuses because two or more source-looking
+// definitions survive it (sourceOnlyKeptDefs), where all but ONE are copies (definitionIsCopy): the answer is that one's own
+// spelling, and `copies` names the copies the answer leaves out (resolver order), so the reader can ask for one. Two non-copies
+// left, or none, → nullopt: refused as before.
+struct SourceCopyPick
+{
+    std::string         spelling;
+    std::vector<NodeId> copies;
+};
+inline std::optional<SourceCopyPick> sourceCopyPick( const IngestResult& ing, std::string_view spec )
+{
+    std::optional<std::vector<NodeId>> kept = sourceOnlyKeptDefs( ing, spec );
+    if( !kept || kept->size() < 2 )
+    {
+        return std::nullopt;   // M1's own case (one left) or nothing left
+    }
+    SourceCopyPick pick;
+    NodeId         source = kNoNode;
+    for( const NodeId id : *kept )
+    {
+        if( definitionIsCopy( ing, id ) )
+        {
+            pick.copies.push_back( id );
+        }
+        else if( std::exchange( source, id ) != kNoNode )
+        {
+            return std::nullopt;   // two source definitions: no pick
+        }
+    }
+    std::optional<std::string> spelling = source == kNoNode ? std::nullopt : soleDefinitionSpelling( ing, source );
+    if( !spelling )
+    {
+        return std::nullopt;
+    }
+    pick.spelling = std::move( *spelling );
+    return pick;
+}
+
+// Does the graph verb of `form` bind `spec` as written: the --path resolver (a glob included), the --callers one, the --connect one.
+inline bool graphFormResolves( const IngestResult& ing, GraphSubjectForm form, std::string_view spec )
+{
+    std::size_t unproven = 0;
+    bool        glob     = false;
+    switch( form )
+    {
+        case GraphSubjectForm::Path: return !resolvePathEndpoint( ing, spec, &unproven, &glob ).empty();
+        case GraphSubjectForm::Callers: return !resolveAllByNameQualified( ing, spec, &unproven ).empty();
+        case GraphSubjectForm::Common: return resolveFocus( ing, spec, &unproven ) != kNoNode;
+    }
+    return false;
+}
+
+// GV-PATH-BIND: the ONE M1 step every surface takes for a spelling its verb refused: the --for graph block (GraphSubjectSpellings) and
+// the direct --path / --connect / --callers (src/verbs_navigate.h). The rule's pick (sourceOnlyPickSpelling, unchanged), kept only
+// when the verb of `form` binds it; nullopt = refused as before.
+inline std::optional<std::string> narrowRefusedSpelling( const IngestResult& ing, std::string_view spec, GraphSubjectForm form )
+{
+    std::optional<std::string> pick = sourceOnlyPickSpelling( ing, spec );
+    if( pick && graphFormResolves( ing, form, *pick ) )
+    {
+        return pick;
+    }
+    return std::nullopt;
+}
+
+// The spelling a refused CALLERS selector binds instead: the M1 pick (narrowRefusedSpelling), else (CALLERS-TWO-COPY-BIND) the one
+// source definition beside its copies (sourceCopyPick; `copies` receives them), each kept only when --callers binds it; nullopt =
+// refused as before.
+inline std::optional<std::string> callersRefusedPick( const IngestResult& ing, std::string_view sym, std::vector<NodeId>& copies )
+{
+    if( std::optional<std::string> pick = narrowRefusedSpelling( ing, sym, GraphSubjectForm::Callers ) )
+    {
+        return pick;
+    }
+    std::optional<SourceCopyPick> two = sourceCopyPick( ing, sym );
+    if( !two || !graphFormResolves( ing, GraphSubjectForm::Callers, two->spelling ) )
+    {
+        return std::nullopt;
+    }
+    copies = std::move( two->copies );
+    return std::move( two->spelling );
+}
+
+// GV-PATH-BIND + CALLERS-TWO-COPY: the ONE binder of the one-hop rows every surface serves — the CLI --callers/--callees and MCP
+// find_referencing_symbols / find_symbol / the callers verb. The rows of `sym`; for a CALLERS selector that binds nothing as typed and that
+// callersRefusedPick binds to one source definition, the rows of that definition's own spelling: `bound` holds it, `sym` is moved
+// onto it, the rows' `narrowed` names the selector as typed and `copies` the copies left out (CALLERS-TWO-COPY-BIND). Otherwise the
+// rows as typed (empty matches: the caller refuses as before). MCP used to call callHierarchyRows directly and refused the spelling
+// the CLI answered.
+inline CallHierarchyRows callHierarchyRowsNarrowed( const IngestResult& ing, const Graph& g, std::string_view& sym, bool wantCallers, std::string& bound,
+                                                    const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
+{
+    CallHierarchyRows          rows = callHierarchyRows( ing, g, sym, wantCallers, valueIndex );
+    std::vector<NodeId>        copies;
+    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? callersRefusedPick( ing, sym, copies ) : std::nullopt;
+    if( !pick )
+    {
+        return rows;
+    }
+    CallHierarchyRows narrowedRows = callHierarchyRows( ing, g, *pick, wantCallers, valueIndex );
+    if( narrowedRows.matches.empty() )
+    {
+        return rows;
+    }
+    narrowedRows.narrowed.emplace_back( sym );
+    narrowedRows.copies = std::move( copies );
+    bound = std::move( *pick );
+    sym   = bound;
+    return narrowedRows;
+}
+
+// CALLERS-TWO-COPY-BIND: the disclosure of the copies a two-copy bind left out, every dialect from one place. copy_p= lists each copy
+// as p:line (space-separated, resolver order); copy_next= is the callers call on the first, by the spelling that binds it alone
+// (soleDefinitionSpelling; absent when none does). Empty with no copies (0 bytes).
+struct SourceCopyDisclosure
+{
+    std::string p;      // "file:line file:line"
+    std::string next;   // "--callers=file:name", or ""
+};
+inline SourceCopyDisclosure sourceCopyDisclosure( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    SourceCopyDisclosure out;
+    for( const NodeId id : copies )
+    {
+        const Symbol& s = ing.symbols[ id ];
+        out.p += ( out.p.empty() ? "" : " " ) + std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line );
+    }
+    if( !copies.empty() )
+    {
+        const std::optional<std::string> sel = soleDefinitionSpelling( ing, copies.front() );
+        out.next                             = sel ? nextFlag( "--callers=", *sel ) : std::string();
+    }
+    return out;
+}
+inline std::string sourceCopyAttrXml( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    if( copies.empty() )
+    {
+        return {};
+    }
+    const SourceCopyDisclosure d = sourceCopyDisclosure( ing, copies );
+    std::vector<char>          esc;
+    std::string                out = " copy_p=\"" + std::string( escapeXml( d.p, esc ) ) + "\"";
+    return out + nextAttrXml( d.next, "copy_next" );   // nextFlag's shell quotes stay raw (the one next= escaper); empty next => nothing
+}
+inline std::string sourceCopyKeysJson( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    if( copies.empty() )
+    {
+        return {};
+    }
+    const SourceCopyDisclosure d   = sourceCopyDisclosure( ing, copies );
+    const std::string          out = ",\"copy_p\":\"" + jsonStr( d.p ) + "\"";
+    return d.next.empty() ? out : out + ",\"copy_next\":\"" + jsonStr( d.next ) + "\"";
+}
+
+// The legend clause for copy_p= / copy_next= (present only with them; no period inside, so it reads as one sentence).
+inline constexpr std::string_view kSourceCopyLegend =
+    "copy_p=: beside narrowed=, the other definitions the spelling fits are COPIES (under a CI/tool dot directory, a vendoring "
+    "directory or the demo/generated tier, or their file opens with a generated or copied banner), so the one source definition "
+    "answers and the copies (p:line each) are not counted; copy_next= is the callers call on the first copy. ";
+inline std::string_view sourceCopyLegend( bool on ) noexcept
+{
+    return on ? kSourceCopyLegend : std::string_view();
+}
+
+// ` narrowed="a b"`: the spellings as typed that M1 narrowed, space-separated; "" when none. The --for block's open tag and the direct
+// verbs' roots spell it alike.
+inline std::string narrowedAttrXml( std::span<const std::string> narrowed )
+{
+    if( narrowed.empty() )
+    {
+        return {};
+    }
+    std::string       names;
+    std::vector<char> esc;
+    for( const std::string& n : narrowed ) { names += ( names.empty() ? "" : " " ) + n; }
+    return " narrowed=\"" + std::string( escapeXml( names, esc ) ) + "\"";
+}
+
+// The direct verbs' legend clause for narrowed= (present only with the attribute; no period inside, so it reads as one sentence).
+inline constexpr std::string_view kNarrowedVerbLegend =
+    "narrowed=: the spellings as typed that several definitions fit (refused as written); the ones in a test or fixture path and the bodyless "
+    "ones were dropped, and the answer is the call on the ONE source definition left, named by its own spelling. ";
+inline std::string_view narrowedVerbLegend( bool on ) noexcept
+{
+    return on ? kNarrowedVerbLegend : std::string_view();
+}
+
+// GV-PATH-BIND: the --path endpoints, resolved, after the M1 rule (narrowRefusedSpelling above). PATH-AMBIG-VC: one binder for both
+// transports — the CLI --path (verbs_navigate.h runPathServed) and MCP path_between (mcpverbs.h pathText) — moved here from
+// verbs_navigate.h, so MCP gets the narrowing and the fitted Owner.method binding too. When an endpoint binds nothing as typed
+// and EVERY such endpoint narrows to its one source definition, src/dst/spec are the spellings the verb runs with (the
+// explicit call's) and `narrowed` names the spellings as typed, from= first; otherwise everything is as typed, defs as resolved (the
+// verb then refuses exactly as before). H1: each *Unproven is that endpoint's decl→def residue (graph.h declToDefFollowThrough).
+struct PathEndpointsBound
+{
+    std::string              src;
+    std::string              dst;
+    std::string              spec;   // "src,dst": the --path= value of the call that runs
+    std::vector<NodeId>      srcDefs;
+    std::vector<NodeId>      dstDefs;
+    std::size_t              srcUnproven = 0;
+    std::size_t              dstUnproven = 0;
+    bool                     srcGlob     = false;
+    bool                     dstGlob     = false;
+    std::vector<std::string> narrowed;
+};
+
+// The narrowed spellings of the endpoints that bound nothing, slot order; nullopt when one of them is still refused.
+inline std::optional<std::vector<std::string>> narrowedPathSpellings( const IngestResult& ing, PathEndpointsBound& ep )
+{
+    std::vector<std::string> narrowed;
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( !defs->empty() )
+        {
+            continue;
+        }
+        std::optional<std::string> pick = narrowRefusedSpelling( ing, *slot, GraphSubjectForm::Path );
+        if( !pick )
+        {
+            if( !ownerSpellingFittedDefs( ing, *slot ).empty() )
+            {
+                continue;   // PATH-AMBIG-VERDICT (b): this endpoint binds its fitting definitions below; the other may still narrow
+            }
+            return std::nullopt;
+        }
+        narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
+    }
+    return narrowed;
+}
+
+inline PathEndpointsBound bindPathEndpoints( const IngestResult& ing, std::string_view srcN, std::string_view dstN )
+{
+    PathEndpointsBound ep;
+    ep.src = srcN;
+    ep.dst = dstN;
+    const auto resolve = [ & ]
+    {
+        ep.srcDefs = resolvePathEndpoint( ing, ep.src, &ep.srcUnproven, &ep.srcGlob );
+        ep.dstDefs = resolvePathEndpoint( ing, ep.dst, &ep.dstUnproven, &ep.dstGlob );
+    };
+    resolve();
+    if( ep.srcDefs.empty() || ep.dstDefs.empty() )
+    {
+        PathEndpointsBound typed = ep;
+        if( std::optional<std::vector<std::string>> narrowed = narrowedPathSpellings( ing, ep ) )
+        {
+            ep.narrowed = std::move( *narrowed );
+            resolve();
+        }
+        else
+        {
+            ep = std::move( typed );   // still refused: the spellings as typed
+        }
+    }
+    // PATH-AMBIG-VERDICT (b): an endpoint still refused because several placed definitions fit its scope-qualified spelling binds
+    // them all (graph.h ownerSpellingFittedDefs): --path lists the reaching pairs, so qualifying narrows and never refuses
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( defs->empty() )
+        {
+            *defs = ownerSpellingFittedDefs( ing, *slot );
+        }
+    }
+    ep.spec = ep.src + "," + ep.dst;
+    return ep;
+}
+
+// The --connect terminals as resolved, for the CLI --connect (verbs_navigate.h runConnect) and MCP connect (mcpverbs.h connectText) alike
+// (PATH-AMBIG-VC moved it here). resolve() is a terminal's node as --around/--lego resolve it (resolveFocus), its decl→def residue
+// summed into `unprovenDefs` (H1). GV-PATH-BIND: a spelling that binds nothing and that the M1 rule narrows to one source definition
+// (narrowRefusedSpelling above) resolves as that definition's own spelling: `bound` holds it (a deque, so `spec` may view it), `spec`
+// is moved onto it and `narrowed` gains the spelling as typed. PATH-AMBIG-VC: else a spelling refused over K >= 2 fitting definitions
+// named after its last segment (graph.h ownerSpellingFittedDefs) resolves to resolveFocus's pick among those K, and joinTerminalPicks
+// then moves it onto the one that joins (ambiguous_terminal= on a tie), as for any many-definition name. kNoNode = refused as before,
+// `spec` as typed (a wrong owner fits nothing).
+struct ConnectTerminalSpellings
+{
+    std::size_t              unprovenDefs = 0;
+    std::deque<std::string>  bound;
+    std::vector<std::string> narrowed;
+
+    NodeId resolve( const IngestResult& ing, std::string_view& spec )
+    {
+        std::size_t                termUnprovenDefs = 0;
+        NodeId                     id   = resolveFocus( ing, spec, &termUnprovenDefs );
+        std::optional<std::string> pick = id == kNoNode ? narrowRefusedSpelling( ing, spec, GraphSubjectForm::Common ) : std::nullopt;
+        if( pick )
+        {
+            narrowed.emplace_back( spec );
+            spec = bound.emplace_back( std::move( *pick ) );
+            id   = resolveFocus( ing, spec, &termUnprovenDefs );
+        }
+        else if( id == kNoNode )
+        {
+            id = focusOfOrderedMatches( ing, ownerSpellingFittedDefs( ing, spec ) );
+        }
+        unprovenDefs += termUnprovenDefs;
+        return id;
+    }
 };
 
 // How a block is opened (FOR-ROUTE fix1): `jsonDialect` = the body is the MCP callers twin's JSON in a CDATA section (S1);
 // `held` = a token budget is set, so the verb did NOT run here and the tag is self-closed with the verb= handle only (S2);
-// `nameTestHops` = path rows matched by name alone whose p= is a test or fixture path (S5), 0 = attribute absent.
+// `nameTestHops` = path rows matched by name alone whose p= is a test or fixture path (S5), 0 = attribute absent;
+// `windowTotal` = the callers verb ran and its default answer windows over this many rows (handoffwindow.h), so the tag is
+// self-closed with windows="1", next_total= and the complete call as next=; 0 = the verb's answer follows as before.
 struct GraphSubjectOpen
 {
     bool        jsonDialect  = false;
     bool        held         = false;
     std::size_t nameTestHops = 0;
+    std::size_t windowTotal  = 0;
 };
 
 // The candidate combinations, in the order they are tried (at most kGraphSubjectAttempts). A two-endpoint form ranks (a,b) by
@@ -83,6 +477,44 @@ inline std::vector<std::vector<std::string>> graphSubjectCombinations( const Gra
     return combos;
 }
 
+// Each task spelling resolved ONCE, however many combinations hold it: the spelling the verb runs with is the task's own when the
+// form's resolver finds it, else (M1) the one source definition's own spelling (sourceOnlyPickSpelling); "" = neither.
+class GraphSubjectSpellings
+{
+public:
+    struct Resolved
+    {
+        std::string spelling;   // the task's
+        std::string bound;      // what the verb runs with ("" = not resolved)
+    };
+    GraphSubjectSpellings( const IngestResult& ing, GraphSubjectForm form ) : m_ing( ing ), m_form( form ) {}
+
+    const std::string& boundOf( const std::string& spec )
+    {
+        if( const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling ); seen != m_memo.end() )
+        {
+            return seen->bound;   // resolved once already
+        }
+        std::string bound = bind( spec );
+        m_memo.push_back( Resolved{ spec, std::move( bound ) } );
+        return m_memo.back().bound;
+    }
+    const std::vector<Resolved>& tried() const noexcept { return m_memo; }
+
+private:
+    std::string bind( const std::string& spec ) const
+    {
+        if( graphFormResolves( m_ing, m_form, spec ) )
+        {
+            return spec;
+        }
+        return narrowRefusedSpelling( m_ing, spec, m_form ).value_or( std::string() );
+    }
+    const IngestResult&   m_ing;
+    GraphSubjectForm      m_form;
+    std::vector<Resolved> m_memo;
+};
+
 // The first candidate combination whose every endpoint the verb's own resolver finds; nullopt when the task is not
 // a graph question or no combination resolves.
 inline std::optional<GraphSubjectArgs> chooseGraphSubjectArgs( const IngestResult& ing, std::string_view task )
@@ -92,42 +524,22 @@ inline std::optional<GraphSubjectArgs> chooseGraphSubjectArgs( const IngestResul
     {
         return std::nullopt;
     }
-    const auto resolves = [ & ]( const std::string& spec ) -> bool
-    {
-        std::size_t unproven = 0;
-        bool        glob     = false;
-        switch( gs->form )
-        {
-            case GraphSubjectForm::Path: return !resolvePathEndpoint( ing, spec, &unproven, &glob ).empty();
-            case GraphSubjectForm::Callers: return !resolveAllByNameQualified( ing, spec, &unproven ).empty();
-            case GraphSubjectForm::Common: return resolveFocus( ing, spec, &unproven ) != kNoNode;
-        }
-        return false;
-    };
+    GraphSubjectSpellings                       names( ing, gs->form );
     const std::vector<std::vector<std::string>> combos = graphSubjectCombinations( *gs );
-    std::vector<std::pair<std::string, bool>> memo;   // a spelling is resolved once however many combinations hold it
-    const auto found = [ & ]( const std::string& spec ) -> bool
-    {
-        for( const auto& [ s, ok ] : memo )
-        {
-            if( s == spec ) { return ok; }
-        }
-        memo.emplace_back( spec, resolves( spec ) );
-        return memo.back().second;
-    };
     for( std::size_t k = 0; k < combos.size(); ++k )
     {
-        bool all = true;
-        for( const std::string& e : combos[k] )
-        {
-            all = all && found( e );
-        }
+        const bool all = std::ranges::all_of( combos[k], [ & ]( const std::string& e ) { return !names.boundOf( e ).empty(); } );
         if( all )
         {
-            GraphSubjectArgs a{ gs->form, combos[k], gs->spans, k + 1, {} };
-            for( const auto& [ spelling, ok ] : memo )
+            GraphSubjectArgs a{ gs->form, {}, gs->spans, k + 1, {}, {} };
+            for( const std::string& e : combos[k] )
             {
-                if( !ok ) { a.unresolved.push_back( spelling ); }
+                a.endpoints.push_back( names.boundOf( e ) );
+                if( a.endpoints.back() != e ) { a.narrowed.push_back( e ); }
+            }
+            for( const GraphSubjectSpellings::Resolved& r : names.tried() )
+            {
+                if( r.bound.empty() ) { a.unresolved.push_back( r.spelling ); }
             }
             return a;
         }
@@ -208,22 +620,31 @@ inline std::string graphSubjectTriedAttrs( const GraphSubjectArgs& a )
 inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSubjectOpen& o = {} )
 {
     std::string out = "<!-- ripwire for graph_verb: the task is spelled as a graph question, so the verb it names ran too, on the built "
-                      "index with its default caps; endpoints=\"subject\": its endpoints were READ FROM THE TASK WORDS (the *_span= "
-                      "attributes, cut at the first for/with/via/in/on/when/using/during/at/near, sentence end, comma or clause word "
+                      "index with its default caps; endpoints=\"subject\": its endpoints were READ FROM THE TASK WORDS (from_span=/to_span= "
+                      "or of_span=/and_span=, cut at the first for/with/via/in/on/when/using/during/at/near, sentence end, comma or clause word "
                       "such as and/then/how/which), matched by name, not chosen "
                       "from the graph: check they are the symbols meant; verb= is the same call to paste";
     out += a.tried > 1 ? "; tried= combinations of the words were tried, the first that resolves ran; unresolved= names the spellings that did not resolve" : "";
     out += o.jsonDialect ? "; dialect=\"json\": this surface answers the verb as JSON, carried as CDATA text, not as XML rows" : "";
     out += o.nameTestHops > 0 ? "; name_test_hops=N: N path hops were matched by name alone to a definition in a test or fixture path, so they may not be the call the source makes" : "";
+    out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (refused as written): the ones in a test or fixture path "
+                                     "and the bodyless ones were dropped, and verb= names the ONE source definition left by its own spelling";
+    out += o.windowTotal > 0 ? kWindowHandoffBlockLegend : std::string_view();
     out += o.held ? "; held=\"budget\": a token budget is set, so the verb did NOT run here: verb= is the one call to run; the answer above is unchanged --><graph_verb endpoints=\"subject\""
-                  : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
+           : o.windowTotal > 0 ? "; verb= is the default call (that first page); the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\""
+                               : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
     const auto [ flag, value ] = graphSubjectVerbFlag( a );
     out += nextAttrXml( nextFlag( flag, value ), "verb" );
     out += graphSubjectSpanAttrs( a ) + graphSubjectTriedAttrs( a );
     out += o.jsonDialect ? " dialect=\"json\"" : "";
     out += o.held ? " held=\"budget\"" : "";
     out += o.nameTestHops > 0 ? " name_test_hops=\"" + std::to_string( o.nameTestHops ) + "\"" : "";
-    out += o.held ? "/>" : ">";
+    out += narrowedAttrXml( a.narrowed );
+    if( o.windowTotal > 0 )
+    {
+        out += " counts_floor=\"1\"" + handoffNextAttrsXml( flag, value, HandoffWindow{ o.windowTotal, true } );
+    }
+    out += o.held || o.windowTotal > 0 ? "/>" : ">";
     return out;
 }
 
@@ -360,4 +781,227 @@ inline std::string pathFromUpstreamNote( std::uint32_t moved )
 }
 
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";
+
+// GRAPH-FORM-ENDPOINTS: did the path verb's printed answer find NO directed path? Read off its open tag (`<path … reachable="0"`), the
+// one attribute every no-path answer carries in every legend (the legend comment before it is skipped); a doc with no <path> tag (a
+// refusal) is not a gap.
+inline bool graphSubjectPathReachableIs( std::string_view doc, std::string_view quoted )
+{
+    const SectionOpenTag tag = findSectionOpenTag( doc, "<path " );
+    return tag.start != std::string::npos && spanHasAttr( doc.substr( tag.start, tag.end - tag.start ), "reachable", quoted );
+}
+inline bool graphSubjectPathUnreachable( std::string_view doc )
+{
+    return graphSubjectPathReachableIs( doc, "\"0\"" );
+}
+
+// The rows each side of a <path_gap> shows: the plain --callees / --callers answer at --limit=10, its count= the total and its next= the
+// page after. Set from the 7 in-sample fires (reports/graph-form-endpoints.md FIN): the two rows that gained an item held 7 and 3 callees,
+// the five that did not held 3 to 51 callees and 5 to 43 callers, so the uncapped sides (up to 40 rows, a 16 KB callers band) were mostly filler.
+inline constexpr int kPathGapSideRows = 10;   // rows per side of a <path_gap>; the rest is count= and next=
+
+// <path_gap from= to= reachable="0" [missing=]>: reachable="0" restates on the block itself that no path from= to to= was printed (none was
+// found, or a route_hedged="not-proven" refusal withheld the one found; why the rows follow); then its own legend, from='s --callees and to='s --callers answers. missing=from|to|from,to names a side whose answer could
+// not be captured (not printed, never "none").
+inline std::string pathGapOpenXml( const GraphSubjectArgs& a, bool fromMissing, bool toMissing )
+{
+    std::vector<char> esc;
+    std::string out = "<!-- ripwire for path_gap: the path verb above printed NO directed call path (reachable=\"0\": none was found, or route_hedged=\"not-proven\" "
+                      "refused the one it found; its searched= and gaps= say whether that search was complete), so the two sides a missing hop would "
+                      "join follow (reachable=\"0\" on path_gap restates it): "
+                      "from='s callees (what it calls, one hop) and to='s callers (who calls it, one hop), each the bare callees / callers verb "
+                      "answer cut at ";
+    out += std::to_string( kPathGapSideRows );
+    out += " rows (its count= is the total, its next= the page after) with its own legend. A name in both lists, or a callee of from= that "
+           "calls a caller of to=, is a CANDIDATE link to read, not a proven path";
+    out += fromMissing || toMissing ? "; missing= names a side whose answer could not be captured: it is not shown, which is not the same as empty" : "";
+    out += " --><path_gap from=\"" + std::string( escapeXml( a.endpoints[0], esc ) ) + "\"";
+    out += " to=\"" + std::string( escapeXml( a.endpoints[1], esc ) ) + "\" reachable=\"0\"";
+    if( fromMissing || toMissing )
+    {
+        out += std::string( " missing=\"" ) + ( fromMissing ? "from" : "" ) + ( fromMissing && toMissing ? "," : "" ) + ( toMissing ? "to" : "" ) + "\"";
+    }
+    return out + ">";
+}
+inline constexpr std::string_view kPathGapCloseXml = "</path_gap>";
+
+// GV-ASSEMBLY M3 MET-BRIDGE (ORCH reports/s0-xh-1110.md, rule frozen there). A reachable="0" path answer whose <near_sink> row for a
+// to= definition (d="0") carries met="1" says the forward search REACHED in=, whose call at site= could have meant to= and was not
+// followed: envoy's ConnectionImpl::onFileEvent reaches FilterManagerImpl::onContinueReading in 4 proven hops, and its virtual
+// `filter->onData( … )` is the hop the graph holds no edge for. The answer printed only the gap rows, never that proven prefix.
+// The plan below names the bridge, every fact checked BY ID in the index, never by a printed name: from= binds ONE definition (a
+// 79-definition `main` reaches in= from whichever `main` it was, so a bridge from it names a start the task may not mean: envoy-03);
+// the row's p= is a definition to= resolves to; the site is a DECLINED call record (the graph's own: several in-tree candidates,
+// none chosen, not a builtin-spelled one) made by a definition named in=, and that record's candidate list holds that very to=
+// definition. The caller then prints the path verb's own answer from= -> in= (proven, reachable="1", or nothing) and that one call
+// as a hedged crossing row. Anything else, a name-key site included → nullopt: nothing printed, byte-identical.
+struct MetBridgePlan
+{
+    NodeId        in    = kNoNode;   // the reached caller (the declined record's caller)
+    NodeId        to    = kNoNode;   // the to= definition its candidate list holds
+    std::string   inSel;             // the spelling that binds `in` alone (the path verb's to= for the proven prefix)
+    std::string   toP;               // the row's p= and site= as the path verb printed them (attribute bytes, already escaped)
+    std::string   site;
+    std::uint32_t cands = 0;         // the declined call's candidate count
+};
+
+namespace metbridge_detail
+{
+// the value of attribute `name` in one printed row (handoffwindow.h printedAttrOf: one reader for both lanes)
+inline std::string_view attrOf( std::string_view row, std::string_view name ) { return printedAttrOf( row, name ); }
+// A place: file id and 1-based line, two uint32_t that a positional call could swap unseen.
+struct FileLinePlace
+{
+    std::uint32_t fileId = 0;
+    std::uint32_t line   = 0;
+};
+// a printed `file:line` names file `place.fileId` at `place.line`: the path is the root-relative one, or the tail of the stored one
+inline bool namesPlace( const IngestResult& ing, std::string_view printed, FileLinePlace place )
+{
+    const std::uint32_t fileId = place.fileId;
+    const std::uint32_t line   = place.line;
+    const std::size_t colon = printed.rfind( ':' );
+    if( colon == std::string_view::npos || printed.substr( colon + 1 ) != std::to_string( line ) )
+    {
+        return false;
+    }
+    const std::string_view path = printed.substr( 0, colon );
+    const std::string_view full = ing.files[ fileId ];
+    return !path.empty() && ( rootRelPath( ing, fileId ) == path || ( full.size() > path.size() && full.ends_with( path ) && full[ full.size() - path.size() - 1 ] == '/' ) );
+}
+}   // namespace metbridge_detail
+
+namespace metbridge_detail
+{
+// the first <near_sink> row for a to= definition (d="0") the forward search met (met="1"; the served order puts met first) that names
+// a reached in=; a name-key site (via=) has no declined record, so it is not one. "" when none.
+inline std::string_view metRowOf( std::string_view doc )
+{
+    const std::size_t nsAt  = doc.find( "<near_sink " );
+    const std::size_t nsEnd = nsAt == std::string_view::npos ? nsAt : doc.find( "</near_sink>", nsAt );
+    if( nsEnd == std::string_view::npos )
+    {
+        return {};
+    }
+    const std::string_view block = doc.substr( nsAt, nsEnd - nsAt );
+    for( std::size_t at = block.find( "<ns " ); at != std::string_view::npos; at = block.find( "<ns ", at + 4 ) )
+    {
+        const std::size_t      end = block.find( "/>", at );
+        const std::string_view r   = block.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at );
+        if( attrOf( r, "d" ) == "0" && attrOf( r, "met" ) == "1" && attrOf( r, "via" ).empty() && !attrOf( r, "in" ).empty() )
+        {
+            return r;
+        }
+    }
+    return {};
+}
+// the declined call record at the printed site= made by a definition named `inName` (escaped bytes) whose candidate list holds `to`
+// and that is not builtin-spelled: sets plan.in and plan.cands, or leaves plan.in kNoNode
+inline void bindDeclinedSite( const IngestResult& ing, const Graph& g, std::string_view inName, MetBridgePlan& plan )
+{
+    const DeclinedCrossRule rule( ing, g );
+    std::vector<char>       esc;
+    for( std::uint32_t k = 0; k < g.declinedSiteList.size() && plan.in == kNoNode; ++k )
+    {
+        const Reference&    ref  = ing.references[ g.declinedSiteRef[k] ];
+        const NodeId        by   = g.declinedSiteCaller[k];
+        if( by >= ing.symbols.size() || !namesPlace( ing, plan.site, { .fileId = ref.fileId, .line = ref.line } ) || escapeXml( ing.symbols[ by ].name, esc ) != inName )
+        {
+            continue;
+        }
+        if( const std::uint32_t cands = declinedCrossingCands( g, rule, k, plan.to ); cands > 0 )   // backhops.h: the one by-id crossing test
+        {
+            plan.in    = by;
+            plan.cands = cands;
+        }
+    }
+}
+}   // namespace metbridge_detail
+
+inline std::optional<MetBridgePlan> metBridgePlan( const IngestResult& ing, const Graph& g, const GraphSubjectArgs& a, std::string_view doc )
+{
+    using metbridge_detail::attrOf;
+    if( a.form != GraphSubjectForm::Path || a.endpoints.size() != 2 || !graphSubjectPathUnreachable( doc ) )
+    {
+        return std::nullopt;
+    }
+    const std::string_view row = metbridge_detail::metRowOf( doc );
+    if( row.empty() )
+    {
+        return std::nullopt;
+    }
+    std::size_t unproven = 0;
+    bool        glob     = false;
+    const std::vector<NodeId> src = resolvePathEndpoint( ing, a.endpoints[0], &unproven, &glob );
+    const std::vector<NodeId> dst = resolvePathEndpoint( ing, a.endpoints[1], &unproven, &glob );
+    if( glob || endpointDefinitionCount( ing, src ) != 1 )
+    {
+        return std::nullopt;   // from= names several definitions: a reached in= says nothing about the one the task means
+    }
+    MetBridgePlan plan;
+    plan.toP  = std::string( attrOf( row, "p" ) );
+    plan.site = std::string( attrOf( row, "site" ) );
+    const auto at = std::ranges::find_if( dst, [ & ]( NodeId t ) { return metbridge_detail::namesPlace( ing, plan.toP, { .fileId = ing.symbols[ t ].fileId, .line = ing.symbols[ t ].line } ); } );
+    plan.to = at != dst.end() ? *at : kNoNode;
+    if( plan.to != kNoNode )
+    {
+        metbridge_detail::bindDeclinedSite( ing, g, attrOf( row, "in" ), plan );
+    }
+    std::optional<std::string> sel = plan.in != kNoNode ? soleDefinitionSpelling( ing, plan.in ) : std::nullopt;
+    if( !sel )
+    {
+        return std::nullopt;
+    }
+    plan.inSel = std::move( *sel );
+    return plan;
+}
+
+// The proven prefix is the path verb's own answer; it counts only when that answer found its path (reachable="1").
+inline bool graphSubjectPathReached( std::string_view doc )
+{
+    return graphSubjectPathReachableIs( doc, "\"1\"" );
+}
+
+// A bridge whose prefix answer could not be captured is still the crossing the index proves, printed with missing="prefix"
+// (never shown as an empty prefix) and said on stderr.
+struct MetBridgeShown
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        PrefixUncaptured,   // no capture buffer for the from= -> in= path answer: it is not shown, which is not the same as empty
+    };
+    bool prefixMissing = false;
+    void disclose( DisclosureWhy ) noexcept
+    {
+        prefixMissing = true;
+        rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the met_bridge proven prefix — it is not shown (missing=\"prefix\"), which is not empty\n" );
+    }
+};
+
+inline std::string metBridgeOpenXml( const IngestResult& ing, const MetBridgePlan& p, bool prefixMissing = false )
+{
+    std::vector<char> esc;
+    std::string out = "<!-- ripwire for met_bridge: the path verb above printed NO directed path, but its forward search REACHED in= (its near_sink "
+                      "met=\"1\" row), whose call at site= is a declined call (several in-tree candidates, none chosen; cands= counts them) whose "
+                      "candidate list holds to='s definition, all checked by id in the index, from= binding one definition. So the proven path "
+                      "from= to in= follows (the path verb's own answer, with its own legend), then that one call as a crossing row <s via=\"declined\" "
+                      "t= n= p= site= in= cands=>. A BRIDGE, not a path: the crossing is a hedge, not a proven call; reachable=\"0\" stands and no "
+                      "count includes it";
+    out += prefixMissing ? "; missing=\"prefix\": the proven path answer could not be captured, so it is not shown, which is not the same as empty" : "";
+    out += " --><met_bridge reachable=\"0\" in=\"";
+    out += std::string( escapeXml( ing.symbols[ p.in ].name, esc ) ) + "\" site=\"";
+    out += p.site + "\" via=\"declined\" cands=\"" + std::to_string( p.cands ) + "\"" + ( prefixMissing ? " missing=\"prefix\">" : ">" );
+    return out;
+}
+// the crossing: in='s declined call at site= into the to= definition
+inline std::string metBridgeCrossingXml( const IngestResult& ing, const MetBridgePlan& p )
+{
+    std::vector<char> esc;
+    const Symbol&     t = ing.symbols[ p.to ];
+    std::string out = "<s via=\"declined\" t=\"" + std::string( symTag( t.kind ) ) + "\" n=\"" + std::string( escapeXml( t.name, esc ) ) + "\" p=\"";
+    out += p.toP + "\" site=\"" + p.site + "\" in=\"";
+    out += std::string( escapeXml( ing.symbols[ p.in ].name, esc ) ) + "\" cands=\"" + std::to_string( p.cands ) + "\"/>";
+    return out;
+}
+inline constexpr std::string_view kMetBridgeCloseXml = "</met_bridge>";
 }   // namespace rw

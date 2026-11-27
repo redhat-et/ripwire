@@ -405,10 +405,11 @@ for text, which in ( ( d, "bare" ), ( a, "--limit=1000000" ) ):
     hdr = [ l for l in text.splitlines() if l.startswith( "  [2] tests to run" ) ]
     line = hdr[ 0 ] if hdr else ""
     total = int( re.search( r'\((\d+)\)', line ).group( 1 ) ) if re.search( r'\((\d+)\)', line ) else 0
-    # E1 (2026-09-12): a `[hops=N] (n): a, b, …` line serves n files on one line — count FILES, not lines
+    # E1 (2026-09-12): a `[hops=N] (n): a, b, …` line serves n files on one line — count FILES, not lines.
+    # PATH-FOLD (2026-11-18): the same line with its paths folded says `(n folded):`; n is still the file count.
     served = 0
     for r in rows( text, "  [2] tests to run", r'^        \S' ):
-        gm = re.match( r'^        (?:\[[^\]]*\] )*\((\d+)\): ', r )
+        gm = re.match( r'^        (?:\[[^\]]*\] )*\((\d+)(?: folded)?\): ', r )
         served += int( gm.group( 1 ) ) if gm else 1
     served -= 1   # minus the script-gates disclosure line
     if total <= 25:
@@ -696,16 +697,31 @@ if os.path.exists(bp) and os.path.getsize(bp) > 0:
     raw = open(bp, encoding="utf-8", errors="replace").read()
     raw = re.sub( r'<!--.*?-->', '', raw, flags=re.S )   # the legend's prose <d r=N> is not a row
     bundle = []
-    for m in re.finditer( r'<d\s[^>]*>', raw ):
+    # B26 DEMOTE-ALL: the budgeted bundle is demoted (a SIBLING-DEMOTE / DECL-TWIN row prints in place as <t p= sym= r=/>, its
+    # rank held) while a --limit/--offset page is the candidate listing, never demoted; a pointer carries no l=, so it matches
+    # its walk row on (file, name) — the XML n= is the pointer's sym=
+    for m in re.finditer( r'<d\s[^>]*>|<t\s[^>]*\br="\d+"[^>]*>', raw ):
         t = m.group( 0 )
-        n = re.search( r'\sn="([^"]*)"', t )
+        n = re.search( r'\s(?:n|sym)="([^"]*)"', t )
         pp = re.search( r'\sp="([^"]*)"', t )
         ll = re.search( r'\sl="([^"]*)"', t )
-        bundle.append( ( pp.group(1) if pp else "?" ) + "\x1f" + ( ll.group(1) if ll else "?" ) + "\x1f" + ( n.group(1) if n else "?" ) )
-    if rows[:len(bundle)] != bundle:
-        problems.append("the un-paged bundle's served rows are NOT a prefix of the walk — the page and the bundle answer different orders")
+        bundle.append( ( pp.group(1) if pp else "?" ) + "\x1f" + ( ll.group(1) if ll else "*" ) + "\x1f" + ( n.group(1) if n else "?" ) )
+    def same( w, b ):
+        wp, wl, wn = w.split( "\x1f" ); bp_, bl, bn = b.split( "\x1f" )
+        return wp == bp_ and wn == bn and ( bl == "*" or wl == bl )
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): a --for budget no longer re-decides the posture, so --token-budget=100000 (above the
+    # answer's price) serves the unbudgeted bundle byte for byte — its head round-robin and code-above-docs reorder included —
+    # while the --limit page walks score order. The bundle's rows are therefore the walk's first rows as a SET (each matched once).
+    left = list( rows[ :len( bundle ) ] )
+    def take( b ):
+        for i, w in enumerate( left ):
+            if same( w, b ):
+                del left[ i ]; return True
+        return False
+    if len( rows ) < len( bundle ) or not all( take( b ) for b in bundle ):
+        problems.append("the un-paged bundle's served rows are NOT the walk's first rows (as a set) — the page and the bundle answer different lists")
     else:
-        print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are a prefix of the walk (same order)")
+        print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are the walk's first {len(bundle)} rows (as a set: the bundle reorders its head)")
 for p_ in problems: print("  FAIL  " + p_)
 print(f"  ..    (G3) walked {pages} pages, {len(rows)} rows, total={total}, tiers: {' -> '.join(tiers)}")
 sys.exit(1 if problems else 0)

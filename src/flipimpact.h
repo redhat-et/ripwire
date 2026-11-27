@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 
 
 // flipimpact.h — `--flags --flip=NAME`, the ONE-GATE BLAST RADIUS (the sequel `--flags` demands).
@@ -1093,8 +1094,7 @@ inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const st
     }
 
     // (4) the radius — one dedupe of the hosts the three collectors accumulated, then the two traversals
-    std::sort( res.hosts.begin(), res.hosts.end() );
-    res.hosts.erase( std::unique( res.hosts.begin(), res.hosts.end() ), res.hosts.end() );
+    rw::sortutil::sortUnique( res.hosts );
     computeRadius( ing, g, res );
 
     // (5) one total order over every emitted list, once, after every list exists
@@ -1125,8 +1125,7 @@ inline std::string qualifiedName( const Symbol& s )
 // pageWindow spells as limit <= 0.
 inline PageWindow flipRowWindow( std::size_t total, std::size_t maxRows, int pageOffset ) noexcept
 {
-    const int limit = maxRows >= std::size_t( INT_MAX ) ? 0 : int( maxRows );
-    return pageWindow( total, limit, pageOffset );
+    return darkflags::siteCapWindow( total, maxRows, pageOffset );   // the --flags site lists' window, one rule
 }
 
 template<class Seq, class Row>

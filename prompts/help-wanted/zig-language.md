@@ -7,6 +7,16 @@ says what changed and why.
 
 Work in a git worktree. Run gates in the foreground.
 
+> **Status (2026-11-26): STEP 0 is measured, and #166 is claimed.** @csy20 posted it on #166 and in
+> draft PR #495 (2026-11-01), harness `scripts/zig-step0/run.sh`. Both pins tie on every file, so the
+> recommended pin is **`v1.1.2`** (`b670c8df85a1568f498aa5c8cae42f51a90473c0`, ABI 14). Pooled over
+> Zig std 0.14.1 and 0.15.1 and Ghostty 1.2.3 and 1.3.1: 2,175 of 2,293 files clean (94.85%), 0.041%
+> of bytes under ERROR. The holes: an empty `struct {}`/`enum {}`/`opaque {}` reads as a zero-width
+> error, `error{foo}` inside a struct literal is `MISSING`, and inline-asm syscall wrappers carry most
+> ERROR bytes. `@import`, `.zon` and Zig-to-C are agreed deferred. **The next round is extraction.**
+> Read #166 and #495 first, and ask on #166 before you start, so two people do not build the same
+> round. Re-run STEP 0 only if you pin something else.
+
 ---
 
 ## Why this matters
@@ -32,10 +42,10 @@ agent reading TigerBeetle's state machine is missing.
 
 ---
 
-## STEP 0 for Zig — measure before you vendor
+## STEP 0 for Zig — measured in #495; kept here for the record
 
-Run add-a-language.md's STEP 0 on the candidate below, at **both** pins, over a corpus you did not
-write.
+The table and rules below are what #495 measured against. Skip to the design notes unless you pin
+something other than `v1.1.2`.
 
 **The candidate** (checked 2026-09-11):
 [tree-sitter-grammars/tree-sitter-zig](https://github.com/tree-sitter-grammars/tree-sitter-zig), MIT.
@@ -54,33 +64,11 @@ write.
   was last pushed in July 2024. Measure it only if the first candidate fails.
 
 **Which pin.** The house convention is a tagged commit, with the tag as a trailing comment in
-CMakeLists.txt. Here the tag predates Zig 0.15's syntax changes, and `master` tracks them.
-
-- Measure both pins on the same corpus, and pin the one that parses more.
-- If the winner is the untagged commit, give the reason in the CMakeLists.txt comment, the way the
-  Swift grammar's comment does.
-
-**The corpus, and the dialect axis.** For Zig, the "dialect" is the language version. Zig 0.15.1
-removed `usingnamespace` and the async/await keywords, so:
-
-- code written for 0.14 still carries them;
-- code written for 0.15 uses constructs an older grammar may reject.
-
-Measure on at least two trees that target different Zig versions, and record the version each one
-targets. Candidates: the standard library at a pinned Codeberg commit, TigerBeetle, Ghostty and ZLS.
-
-**How to measure without ripwire support.** Write a throwaway C program outside the repository. It
-links the candidate's `parser.c` against the vendored core and parses every `.zig` file. For each
-file it records two numbers:
-
-- whether `ts_node_has_error( root )` is true;
-- the share of bytes inside ERROR subtrees.
-
-The second number is the one the Metal entry in `src/ingest_crawl.h` reports: 0.81% of bytes under
-the C++ grammar, against 12.3% under C. A file with one recoverable error still yields most of its
-definitions.
-
-Write both numbers into the plan, per corpus and per pin.
+CMakeLists.txt. #495 found the tag and `6479aa13` parse identically, so the tag wins. If you pin
+something else, re-measure both on the same corpora with #495's harness (`scripts/zig-step0/run.sh`:
+clean-root rate plus the share of bytes under ERROR, the second number the Metal entry in
+`src/ingest_crawl.h` reports) over at least two trees that target different Zig versions — 0.15.1
+removed `usingnamespace` and async/await, so the version is the dialect axis.
 
 ---
 
@@ -94,11 +82,24 @@ plan, before you write anything** — three things below hang on the answer: the
 the case-collision import fixture, and acceptance criterion 4. Deferring is fine. Leaving it unstated
 is not, because a reader cannot tell a deferred edge from a missing one.
 
-**Registration.**
+**Orient first.** Before you open a file, run
+`./build/ripwire . --for="register a new tree-sitter language: Lang enum, kLangTable row, kLangFacts row, tags.scm captures"`
+and read what it ranks. Before you write a helper or a gate, run `--exemplar="<what you are writing>"`
+(for the gate: `--exemplar="a language gate with decoy fixtures"`) and imitate what it returns.
 
-- Append `Lang::Zig` at the **end** of `enum class Lang` in `src/model.h`.
-- Add `.zig` to `kLangTable` in `src/ingest_crawl.h`. That table is a `std::array` sized by its row
-  count, so a missing size bump fails to compile. That is on purpose.
+**Registration — the data-first layout on main today.** add-a-language.md's steps hold, but the
+files have moved since its Elixir reconstruction. The most recent languages (Lua and PHP `a8b99318f`,
+GDScript `1ca964b89`, Clojure `3205e4c85`) show the set:
+
+- `queries/zig/tags.scm` holds most of the language. The tags pass evaluates `#eq?`/`#any-of?` string
+  predicates now (`cfc455fea`), so a keyword list belongs here, not in C++.
+- `src/langfacts.h`: one `kLangFacts` row per `Lang`, in enum order; a missing row does not compile.
+  Decide each column for its reason, and leave the rest at the conservative default.
+- Append `Lang::Zig` at the **end** of `enum class Lang` in `src/model.h`, with its `langTag` case.
+- `.zig` in `kLangTable` (`src/ingest_crawl.h`), and its mirror rows in `kLintExtRows` and
+  `kLangTokenRows` (`src/lintrules.h`). The compile-time checks in `src/ingest_crawl.h` and
+  `src/main.cpp` (`7ece90b40`) name each registration table you missed; `test/langidentitycheck.sh`
+  refuses a new `== Lang::Zig` compare in a shared file.
 - ZON data files (`.zon`, e.g. `build.zig.zon`) use Zig expression syntax. Claim them only if STEP 0
   measured them.
 
@@ -109,9 +110,9 @@ is not, because a reader cannot tell a deferred edge from a missing one.
   `enum`, `union`, `opaque` and `error{ … }`. Name the symbol after the `const` binding, and give it
   the kind of the container it binds.
 - **Methods are `fn` declarations inside a container body.** Scope-qualify them: `Point.distance`, not
-  a bare `distance`. Read `src/ingest_elixir.h` first anyway — add-a-language.md calls it the most
-  conventional extraction module — and follow how the existing extractors build scoped symbol ids
-  rather than inventing a new scheme.
+  a bare `distance`. Use the shared `enclosingScopeOf` (`src/ingest_names.h`) rather than a Zig copy.
+  add-a-language.md says `src/ingest_elixir.h` is **not** a template; do not start a `src/ingest_zig.h`
+  unless a semantic truly cannot be a capture or a facts column.
 - **Files are values too.** `const fs = @import("fs.zig");` binds that file's top-level declarations
   to `fs`, so `fs.openFile()` is a call into `fs.zig`. This is the resolver's most valuable edge —
   and it *is* `@import` resolution, so it is STEP 5 and it follows **Scope** above. In this PR: make
@@ -134,7 +135,7 @@ is not, because a reader cannot tell a deferred edge from a missing one.
 - an anonymous `test { … }`.
 
 Mint test symbols for them, so that `--test-gate` and `--affected` can name them. The closest
-precedent is the Elixir extractor's handling of literal ExUnit tests, and `childwalkscalecheck.sh`
+precedent is ExUnit's literal test titles in `queries/elixir/tags.scm`, and `childwalkscalecheck.sh`
 arm (A13) shows a string title becoming a symbol.
 
 **Error sets.** `const FileError = error{ NotFound, AccessDenied };` is a named type. `!T` error
@@ -190,7 +191,7 @@ These do not change for this kit:
 
 **Grammars are vendored and pinned by full SHA.** Fix grammar bugs upstream. The only local edits are
 crash or memory-safety fixes, carried as `third_party/patches/<dep>/NNN-name.patch` under
-`test/vendorpatchcheck.sh`'s convention; yaml, markdown and swift already carry such patches.
+`test/vendorpatchcheck.sh`'s convention (`third_party/patches/` holds them for nine trees today).
 
 **What add-a-language.md does not mention yet.** A gate enforces each of these today:
 
@@ -225,8 +226,8 @@ crash or memory-safety fixes, carried as `third_party/patches/<dep>/NNN-name.pat
   decoy either way: with STEP 5 it proves the specifier resolved through the corpus index and not by
   a case-folded name; without STEP 5 it proves that nothing bound at all.
 - **Parser versions collide across PRs.** `kParserVer` and `kIngestParserVerMirror` move in the same
-  commit, and in-flight language PRs claim versions too; #126 records two collisions. Take the next
-  free value on the tree you merge onto, not the one you branched from.
+  commit, and in-flight language PRs claim versions too; #126 records two collisions. The maintainers
+  assign your number in the PR (add-a-language STEP 4); re-check it on the tree you merge onto.
 - **The standard-library corpus lives on Codeberg, not GitHub.** The GitHub mirror stopped at the
   move.
 - **`main` collides by name.** `pub fn main` appears in many tool and example files. Two `main`s in
@@ -236,7 +237,7 @@ crash or memory-safety fixes, carried as `third_party/patches/<dep>/NNN-name.pat
 
 ## Acceptance criteria
 
-1. **STEP 0.** Parse rate and ERROR-byte share per corpus and per pin; the chosen pin and the reason.
+1. **STEP 0.** #495's table, cited; re-measured only if you pin something other than `v1.1.2`.
 2. **Vendoring.** The grammar lives under `third_party/deps/zig/`, is pinned by full SHA in
    CMakeLists.txt, and has a `THIRD_PARTY.md` row. Configure succeeds with the network off.
 3. **Definitions with spans.** Functions, container bindings (struct, enum, union, opaque, error set),
@@ -264,6 +265,10 @@ crash or memory-safety fixes, carried as `third_party/patches/<dep>/NNN-name.pat
    and no `@import` produces an edge or a guess in the meantime.
 9. **STEP 8's suite** green in the foreground.
 
+**Done means** `bash test/zigcheck.sh` red on the base binary and green on yours, then
+`./build/ripwire . --quality-delta --legend=compact` clean, `./build/ripwire . --test-gate` run and
+its named tests green, and `python3 test/pargates.py . ./build/ripwire -j 6` green.
+
 ---
 
 ## What the PR description should contain
@@ -278,5 +283,6 @@ crash or memory-safety fixes, carried as `third_party/patches/<dep>/NNN-name.pat
 
 ---
 
-**Write the plan — the STEP 0 corpora and harness, the rule that picks the pin, the symbol kinds, the
-fixtures, and what is deferred — then STOP for my go-ahead.**
+**Write the plan — the pin and the #495 numbers you rely on, the symbol kinds and the `tags.scm`
+captures, the `kLangFacts` columns you set, the fixtures in red-first order, and what is deferred —
+then STOP for my go-ahead.**

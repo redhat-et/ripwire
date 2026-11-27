@@ -27,6 +27,12 @@
 # canonical-id arm, pinned that wrong answer and PASSED; issue #164's fix flipped each to its FIXED line, which is that
 # prompt's acceptance test. It runs on two fixtures other gates own and pin:
 # test/declinefix (C++, Python — declinecheck.sh) and test/rustqualfix (Rust — rustqualcheck.sh).
+#
+# (g), added 2026-11-14, is the same contract for the DOT-qualified member spelling — the one --impact rows and
+# --callers' own next= hand the reader (langfacts.h memberSeparator defaults to "."). It fell to the plain-key arm, so
+# --uses=Widget.arrange answered count="0" where --uses=Widget::arrange answered count="9". Its negatives pin why the
+# guard is NOT "holds a dot": test/jsonfix's flat key `lodash.merge` and test/elixirnamearityfix's module `Outer.Inner`
+# are plain NAMES that hold a dot and resolve, and must keep the plain-key arm's bytes.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -427,6 +433,119 @@ fx declinefix --uses=cpp/pair/one.cpp::One::ctwin >"$TMP/q2"
 if command -v xmllint >/dev/null 2>&1; then
     xmllint --noout "$TMP/q1" 2>/dev/null && ok "(f) --uses on a canonical id is well-formed XML" \
         || no "(f) --uses=cpp/pair/one.cpp::One::ctwin is malformed XML"
+fi
+
+# ── (g) a DOT-qualified member spelling narrows like "::" — the spelling ripwire itself hands back ───────
+# THE BUG. resolveUsesSelector's arms ran: @FILE:LINE, then file:name (a ':' with no "::"), then the "::"
+# scope arm, then a plain-key else. A DOTTED member spelling fell to the else, so the WHOLE string became the
+# site-match key and no reference could carry it — reference names are always bare. defs= resolved, count="0"
+# followed, and nothing said the zero was a spelling artifact: --uses=Widget.arrange on textual answered
+# defs="1" count="0" while --uses=Widget::arrange answered count="9", and --safe-delete=Region.intersection
+# printed callers="13" uses="0" in one element. It is the defect arm 1's own comment records for the raw
+# @-spec — "pre-fix the raw @-spec was the match key and every site vanished into a silent count=0
+# (atcheck (13b))" — in the arm next door. It matters because the dotted form is what --impact rows and
+# --callers' own next= hand the reader (langfacts.h memberSeparator defaults to ".").
+#
+# THE GUARD, and why "holds a dot" is NOT it. A dot also lives inside plain NAMES, measured on committed
+# fixtures: test/jsonfix indexes the flat key `lodash.merge` as a symbol whose own name is `lodash.merge`,
+# and test/elixirnamearityfix indexes the module `Outer.Inner`. Both RESOLVE, so a bare-dot guard would have
+# flipped them to scopeNarrowed and added the file:name disclosure plus the call-role narrowing to two
+# answers that are already right — Outer.Inner's count="1" among them. So the dot narrows only when it ACTED
+# as the separator in THIS resolution: the defs' shared name is the spelling's last dot-separated segment. A
+# name that IS the whole spelling keeps the plain-key arm, bytes included. The Elixir exclusion
+# (allDefsElixir) is untouched and still runs first, so an arity-suffixed population (`run/1` vs `run/2`) is
+# never keyed on a bare trailing name.
+echo "=== (g) the dot-qualified member selector (the same contract as (f)) ==="
+
+# fixture | dotted selector | the "::" twin | the call site a fixed --uses lists | shape
+# Every row: the dotted answer lists the site with the narrowing disclosure, AND is byte-identical to its
+# "::" twin once of= (the echoed selector) is removed — the two spellings are one answer, not two.
+while IFS='|' read -r fix dotted colons site shape; do
+    [ -z "$fix" ] && continue
+    DOT="$( fx "$fix" --uses="$dotted" --limit=100000 )"; DRC=$?
+    COL="$( fx "$fix" --uses="$colons" --limit=100000 )"
+    DU="$( tag_of "$DOT" uses )"; CU="$( tag_of "$COL" uses )"
+    # premise: both spellings bind the SAME definition count, so the byte-equality claim below is about the
+    # ANSWER and not about two different symbols that happen to agree.
+    if [ -n "$DU" ] && [ -n "$CU" ] && [ "$( val_of "$DU" defs )" = "$( val_of "$CU" defs )" ] && [ -n "$( val_of "$CU" count )" ]; then
+        ok "(g) premise, $shape: $dotted and $colons both resolve defs=$( val_of "$DU" defs )"
+    else
+        no "(g) premise, $shape: $dotted / $colons did not both resolve — the arms below prove nothing: [${DU:-no root}] [${CU:-no root}]"
+    fi
+    C="$( val_of "$DU" count )"
+    if [ "$DRC" = 0 ] && [ -n "$DU" ] && lists_site "$DOT" "$site" && [ -n "$C" ] && [ "$C" -ge 1 ] \
+        && printf '%s' "$DU" | grep -q 'narrowed_roles="call"' && [ -n "$( val_of "$DU" call_sites_of_name )" ] \
+        && [ -n "$( val_of "$DU" defs_of_name )" ]; then
+        ok "(g) FIXED, $shape: --uses=$dotted lists $site at count=$C with the narrowing disclosure"
+    else
+        no "(g) FIXED, $shape: --uses=$dotted should list $site with count>=1 plus narrowed_roles=/call_sites_of_name=: rc=$DRC ${DU:-no <uses> root}"
+    fi
+    # byte-identical modulo of=: strip the one attribute that echoes the selector from each document
+    printf '%s' "$DOT" | sed 's/ of="[^"]*"//g' >"$TMP/g_dot"
+    printf '%s' "$COL" | sed 's/ of="[^"]*"//g' >"$TMP/g_col"
+    if [ -s "$TMP/g_dot" ] && cmp -s "$TMP/g_dot" "$TMP/g_col"; then
+        ok "(g) FIXED, $shape: the dotted and \"::\" answers are byte-identical modulo of="
+    else
+        no "(g) FIXED, $shape: $dotted and $colons differ beyond of=: $( diff "$TMP/g_col" "$TMP/g_dot" 2>&1 | head -4 | tr '\n' ' ' )"
+    fi
+done <<'EOF'
+declinefix|One.pytwin|One::pytwin|py/pair/user.py:2|Python Class.method
+declinefix|One.ctwin|One::ctwin|cpp/pair/user.cpp:3|C++ Class.method
+declinefix|Solo.conly|Solo::conly|cpp/caller/caller.cpp:8|C++ Class.method on a unique global
+rustqualfix|Widget.new|Widget::new|src/gadget/mod.rs:47|Rust Type.assoc
+EOF
+
+# NEGATIVE 1 — a plain NAME that holds a dot is not a member spelling. test/jsonfix's flat key `lodash.merge`
+# resolves (defs="1") and its own name IS the whole spelling, so the answer keeps the plain-key arm: no
+# narrowing disclosure at all. This is the arm a "holds a dot" guard fails.
+U="$( tag_of "$( fx jsonfix --uses=lodash.merge )" uses )"
+if [ "$( val_of "$U" defs )" = 1 ] && [ "$( val_of "$U" count )" = 0 ] \
+   && ! printf '%s' "$U" | grep -qE 'narrowed_roles=|call_sites_of_name=|defs_of_name='; then
+    ok "(g) negative: the dotted JSON key lodash.merge keeps the plain-key arm (defs=\"1\" count=\"0\", no narrowing disclosure)"
+else
+    no "(g) negative: --uses=lodash.merge must not narrow — its own name is the whole spelling: ${U:-no <uses> root}"
+fi
+
+# NEGATIVE 2 — an all-Elixir resolution still does NOT narrow (the allDefsElixir guard). `Outer.Inner` is a
+# MODULE whose own name holds the dot and whose count="1" a narrowing would have put at risk; `run/1` is the
+# arity-suffixed population elixirsemanticcheck exists to protect, and its count must not move.
+EO="$( tag_of "$( fx elixirnamearityfix --uses=Outer.Inner )" uses )"
+ER="$( tag_of "$( fx elixirnamearityfix --uses=run/1 )" uses )"
+if [ "$( val_of "$EO" count )" = 1 ] && ! printf '%s' "$EO" | grep -qE 'narrowed_roles=|defs_of_name=' \
+   && [ "$( val_of "$ER" count )" = 3 ] && ! printf '%s' "$ER" | grep -qE 'narrowed_roles=|defs_of_name='; then
+    ok "(g) negative: Elixir Outer.Inner keeps count=\"1\" and run/1 keeps count=\"3\", neither narrowed"
+else
+    no "(g) negative: an Elixir resolution must not narrow (arity-suffixed refs): Outer.Inner [${EO:-none}] run/1 [${ER:-none}]"
+fi
+
+# NEGATIVE 3 — a WRONG scope spelled with a dot refuses exactly as the "::" twin does: the dot arm reads its
+# key off the RESOLVED defs, so an empty resolution never sets the flag and the generic refusal keeps its bytes.
+DN="$( fx declinefix --uses=Nope.ctwin )"; DNRC=$?
+CN="$( fx declinefix --uses=Nope::ctwin )"; CNRC=$?
+if [ "$DNRC" = 1 ] && [ "$DNRC" = "$CNRC" ] && ! printf '%s' "$DN" | sed 's/<!--.*-->//' | grep -q '<u ' \
+   && printf '%s' "$DN" | grep -q 'found="0"'; then
+    ok "(g) negative: --uses=Nope.ctwin refuses (exit 1, found=\"0\", no use-site row) exactly as Nope::ctwin does"
+else
+    no "(g) negative: a wrong dotted scope must refuse like its \"::\" twin: dotted rc=$DNRC, \"::\" rc=$CNRC, rows [$( printf '%s' "$CN" | grep -c '<u ' )]"
+fi
+
+# NEGATIVE 4 — a dotted spelling backed by NO symbol is served upstream (fielduses.h memberUsesArm) exactly as
+# today: the flag is never set on an empty resolution.
+NB="$( fx declinefix --uses=Widget.missingfield )"; NBRC=$?
+if [ "$NBRC" != 0 ] && ! printf '%s' "$NB" | sed 's/<!--.*-->//' | grep -q '<u '; then
+    ok "(g) negative: a dotted spelling backed by no symbol still refuses with no use-site row (rc=$NBRC)"
+else
+    no "(g) negative: --uses=Widget.missingfield should refuse with no row: rc=$NBRC"
+fi
+
+# determinism and well-formedness on a dotted selector
+fx declinefix --uses=One.pytwin >"$TMP/g1"
+fx declinefix --uses=One.pytwin >"$TMP/g2"
+[ -s "$TMP/g1" ] && cmp -s "$TMP/g1" "$TMP/g2" && ok "(g) determinism: --uses on a dotted member spelling is byte-identical run to run" \
+    || no "(g) determinism: --uses=One.pytwin differs between two runs, or printed nothing"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$TMP/g1" 2>/dev/null && ok "(g) --uses on a dotted member spelling is well-formed XML" \
+        || no "(g) --uses=One.pytwin is malformed XML"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

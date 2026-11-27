@@ -12,8 +12,8 @@ namespace
 {
 
 // Included by ingest.cpp after the shared AST helpers.
-// Elixir keywords are identifiers, so tags.scm alone cannot distinguish def f(x) from
-// ordinary(f(x)). Keep the text gates local to this grammar instead of changing every tags pass.
+// Elixir keywords are identifiers: tags.scm tells def f(x) from ordinary(f(x)) only through its
+// string predicates (#355). The text gates that predicates cannot express stay local to this grammar.
 /// Return an identifier call target as a view into src, or an empty view for null or remote targets.
 std::string_view elixirTarget( TSNode node, std::string_view src ) noexcept
 {
@@ -24,12 +24,24 @@ std::string_view elixirTarget( TSNode node, std::string_view src ) noexcept
     return fieldIdentifierText( node, NodeField::Target, src );
 }
 
-/// Return whether target introduces a function, macro, guard, or delegate definition.
-bool elixirFunctionKeyword( std::string_view target ) noexcept
+/// The definition keywords (def, defp, defmacro, ...) are DATA: the #any-of? list on the @_keyword capture of
+/// queries/elixir/tags.scm's keyword-headed @definition.function patterns, which the tags pass applies itself (#355).
+/// A tags match is a keyword-headed definition when it carries @_keyword. The tree walks below that must recognise a
+/// definition head OUTSIDE a match (an enclosing `def` while scoping a binding, a `def` call that is not a reference)
+/// read the same list here, filled by ElixirContext::prepare from the file's compiled query, instead of a C++ copy.
+/// The metadata attributes (@doc, @spec, ...) are the same kind of data: the #not-any-of? list on @_attribute of the
+/// @definition.attribute pattern, read back for the references INSIDE such an attribute, which are not call sites.
+struct ElixirKeywords
 {
-    constexpr std::string_view keywords[] = { "def", "defp", "defmacro", "defmacrop", "defguard", "defguardp", "defdelegate" };
-    return std::find( std::begin( keywords ), std::end( keywords ), target ) != std::end( keywords );
-}
+    std::vector<std::string_view> function;   // views into the TSQuery's string table, which outlives every file
+    std::vector<std::string_view> metadata;   // the same, for the metadata attribute names
+
+    /// Return whether target introduces a function, macro, guard, or delegate definition.
+    bool isFunction( std::string_view target ) const noexcept
+    {
+        return std::find( function.begin(), function.end(), target ) != function.end();
+    }
+};
 
 /// Return whether target introduces a statically named module or protocol, excluding defimpl.
 bool elixirModuleKeyword( std::string_view target ) noexcept
@@ -144,29 +156,42 @@ bool elixirTypedAttribute( std::string_view name ) noexcept
     return name == "type" || name == "typep" || name == "opaque" || name == "callback" || name == "macrocallback";
 }
 
-bool elixirMetadataAttribute( std::string_view name ) noexcept
+/// Return whether @name is compile-time metadata, never a runtime value: a typed attribute, or one of tags.scm's
+/// metadata names (ElixirKeywords::metadata, #355).
+bool elixirMetadataAttribute( std::string_view name, const ElixirKeywords& keywords ) noexcept
 {
-    constexpr std::string_view metadata[] = { "doc", "moduledoc", "typedoc", "spec", "impl", "behaviour", "behavior", "derive", "enforce_keys",
-        "dialyzer", "on_load", "before_compile", "after_compile", "after_verify", "optional_callbacks", "compile", "external_resource", "vsn", "file" };
-    return elixirTypedAttribute( name ) || std::find( std::begin( metadata ), std::end( metadata ), name ) != std::end( metadata );
+    return elixirTypedAttribute( name ) || std::find( keywords.metadata.begin(), keywords.metadata.end(), name ) != keywords.metadata.end();
 }
 
 bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept;
 
+/// What one tags match says about its role node, as elixirKeepCapture reads it.
+struct ElixirCaptureRole
+{
+    bool    isDef       = false;            // the role is an @definition.* capture
+    SymKind kind        = SymKind::Other;   // the role's symbol kind
+    bool    keywordHead = false;            // the match carried @_keyword: tags.scm's predicates already decided it is a
+                                            // keyword-headed definition (#any-of? on the keyword, #not-any-of? "unquote"
+                                            // "when" on the name, #355)
+};
+
 /// Decide whether a candidate definition or call capture represents supported executable Elixir syntax.
 /// role and name are non-null query captures into src. Reject quoted and dynamic syntax and metadata
 /// references; retain executable defaults and attributes while excluding declaration heads and patterns.
-bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std::string_view src ) noexcept
+/// capture: what the tags match says about the role node (see ElixirCaptureRole).
+bool elixirKeepCapture( TSNode role, TSNode name, ElixirCaptureRole capture, std::string_view src, const ElixirKeywords& keywords ) noexcept
 {
+    const bool    isDef = capture.isDef;
+    const SymKind kind  = capture.kind;
     // Module attributes (notably @spec/@type) are not runtime call sites.
     // The shared inert-region decision runs after this capture's other syntax filters,
     // so quoted definition heads and special forms never inflate declined=.
-    for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( role ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src  ) == "@" )
         {
-            if( elixirMetadataAttribute( elixirAttribute( parent, src ) )
+            if( elixirMetadataAttribute( elixirAttribute( parent, src ), keywords )
                 || ts_node_eq( fieldChild( parent, NodeField::Operand ), role ) ) { return false; }
         }
     }
@@ -175,7 +200,9 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     {
         if( const auto attribute = elixirAttribute( role, src ); !attribute.empty() )
         {
-            return kind == SymKind::Struct ? elixirTypedAttribute( attribute ) : !elixirMetadataAttribute( attribute );
+            // A metadata attribute (@doc, @spec, ...) never reaches here: tags.scm's #not-any-of? on @_attribute
+            // rejected its @definition.attribute match (#355). A typed one is the @definition.type pattern's.
+            return kind == SymKind::Struct ? elixirTypedAttribute( attribute ) : !elixirTypedAttribute( attribute );
         }
         if( target == "test" && std::strcmp( ts_node_type( name ), "string" ) == 0 )
         {
@@ -197,7 +224,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         }
         // `defimpl` defines a real module (`Protocol.For`); ElixirContext supplies its full name.
         if( kind == SymKind::Other ) { return elixirModuleKeyword( target ) || target == "defimpl"; }
-        return elixirFunctionKeyword( target ) && nodeTextOf( name, src ) != "unquote" && nodeTextOf( name, src ) != "when";
+        return capture.keywordHead;   // the keyword list and the unquote/when exclusion live in queries/elixir/tags.scm (#355)
     }
     const TSNode firstArg = elixirFirstArgument( role );
     if( target == "test" && !ts_node_is_null( firstArg ) && std::strcmp( ts_node_type( firstArg ), "string" ) == 0 && !ts_node_is_null( elixirBody( role, src ) ) )
@@ -217,14 +244,14 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     }
     constexpr std::string_view special[] = { "defimpl", "defstruct", "defexception", "defoverridable", "alias", "import", "require", "use",
                                             "unquote", "unquote_splicing", "case", "cond", "for", "if", "unless", "with", "receive", "try" };
-    if( elixirFunctionKeyword( target ) || elixirModuleKeyword( target )
+    if( keywords.isFunction( target ) || elixirModuleKeyword( target )
         || ( target == "quote" && !ts_node_is_null( elixirBody( role, src ) ) )
         || std::find( std::begin( special ), std::end( special ), target ) != std::end( special ) )
     {
         return false;
     }
     bool inDefault = false;
-    for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( role ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src ) == "\\\\" )
@@ -233,7 +260,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
             inDefault = inDefault || ( !ts_node_is_null( value ) && ts_node_start_byte( role ) >= ts_node_start_byte( value )
                                       && ts_node_end_byte( role ) <= ts_node_end_byte( value ) );
         }
-        if( !elixirFunctionKeyword( elixirTarget( parent, src ) ) )
+        if( !keywords.isFunction( elixirTarget( parent, src ) ) )
         {
             continue;
         }
@@ -265,7 +292,7 @@ bool elixirContains( TSNode outer, TSNode inner ) noexcept
 
 TSNode elixirLexicalScope( TSNode node ) noexcept
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( elixirNodeIs( p, "source" ) || elixirNodeIs( p, "do_block" ) || elixirNodeIs( p, "stab_clause" )
             || elixirNodeIs( p, "block" ) || elixirNodeIs( p, "pair" ) || elixirNodeIs( p, "else_block" )
@@ -311,7 +338,7 @@ bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept
 {
     const auto target = elixirTarget( hole, src );
     if( ( target != "unquote" && target != "unquote_splicing" ) || !elixirContains( elixirFirstArgument( hole ), site ) ) { return false; }
-    for( TSNode parent = ts_node_parent( hole ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( hole ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirTarget( parent, src ) != "quote" || !elixirContains( elixirBody( parent, src ), hole ) )
         {
@@ -367,6 +394,7 @@ struct ElixirContext
     HashMap<std::string, std::vector<ElixirLexicalName>> variables;
     HashMap<std::uint32_t, std::string> modules;
     ExtractShortfall*                   shortfall = nullptr;   // the file's sink, set by captureTagsFacts before any lookup
+    ElixirKeywords                      keywords;              // tags.scm's definition keywords, read by prepare (#355)
 
     std::string scopeOf( TSNode node, unsigned depth = 0 ) const
     {
@@ -376,7 +404,7 @@ struct ElixirContext
             DISCLOSE( *shortfall, ExtractShortfall::DisclosureWhy::ElixirScopeTooDeep, "Elixir module nesting exceeds 128" );
             return {};
         }
-        for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
         {
             if( ( elixirModuleKeyword( elixirTarget( p, src ) ) || elixirTarget( p, src ) == "defimpl" )
                 && !elixirInert( p, src ) )
@@ -495,8 +523,7 @@ struct ElixirContext
         {
             if( auto target = moduleOf( ts_node_named_child( targets, i ), node ); !target.empty() ) { out.push_back( protocol + "." + target ); }
         }
-        std::sort( out.begin(), out.end() );
-        out.erase( std::unique( out.begin(), out.end() ), out.end() );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 
@@ -527,11 +554,11 @@ struct ElixirContext
     // visibility: function parameters, clause patterns, matches and comprehension generators.
     TSNode bindingScope( TSNode node ) const
     {
-        for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
         {
             if( elixirLiveHole( p, node, src ) ) { return {}; } // patterns outside the live hole are inert syntax
             if( elixirNodeIs( p, "unary_operator" ) && nodeFieldText( p, NodeField::Operator, src  ) == "^" ) { return {}; }
-            if( elixirFunctionKeyword( elixirTarget( p, src ) ) )
+            if( keywords.isFunction( elixirTarget( p, src ) ) )
             {
                 TSNode head = elixirFirstArgument( p );
                 if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
@@ -569,7 +596,7 @@ struct ElixirContext
                     }
                     if( op == "<-" )
                     {
-                        for( TSNode c = ts_node_parent( p ); !ts_node_is_null( c ); c = ts_node_parent( c ) )
+                        for( TSNode c = parentOf( p ); !ts_node_is_null( c ); c = parentOf( c ) )
                         {
                             if( elixirTarget( c, src ) == "for" || elixirTarget( c, src ) == "with" ) { return c; }
                         }
@@ -584,16 +611,16 @@ struct ElixirContext
     // `&name/N`: name is the operand of a named capture — a function, whatever variable shares its spelling
     bool namedCapture( TSNode name ) const
     {
-        const TSNode slash = ts_node_parent( name );
+        const TSNode slash = parentOf( name );
         return elixirNodeIs( slash, "binary_operator" ) && nodeFieldText( slash, NodeField::Operator, src  ) == "/"
-            && elixirNodeIs( ts_node_parent( slash ), "unary_operator" ) && nodeFieldText( ts_node_parent( slash ), NodeField::Operator, src  ) == "&";
+            && elixirNodeIs( parentOf( slash ), "unary_operator" ) && nodeFieldText( parentOf( slash ), NodeField::Operator, src  ) == "&";
     }
 
     bool bareCall( TSNode name ) const
     {
         const auto text = nodeTextOf( name, src );
         if( text.empty() || text == "true" || text == "false" || text == "nil" ) { return false; }
-        const TSNode parent = ts_node_parent( name );
+        const TSNode parent = parentOf( name );
         if( elixirNodeIs( parent, "dot" ) || ( elixirNodeIs( parent, "call" )
             && ts_node_eq( fieldChild( parent, NodeField::Target ), name ) ) ) { return false; }
         // A capture names a function even if a variable with the same spelling is bound — and even when the spelling
@@ -617,10 +644,16 @@ struct ElixirContext
                   std::uint32_t fileId, std::vector<RawBind>& binds, std::vector<Include>& includes, std::vector<RawRef>& refs )
     {
         src = bytes;
+        keywords.function = predicateStrings( query, "any-of?", "_keyword" );
+        keywords.metadata = predicateStrings( query, "not-any-of?", "_attribute" );
         ts_query_cursor_exec( cursor, query, root );
         TSQueryMatch match;
         while( ts_query_cursor_next_match( cursor, &match ) )
         {
+            if( !passesStringPredicates( query, match, src ) )
+            {
+                continue;   // the same query, the same predicates: one meaning for a pattern in both passes (#355)
+            }
             for( std::uint16_t i = 0; i < match.capture_count; ++i )
             {
                 const auto& capture = match.captures[ i ];
@@ -679,7 +712,7 @@ struct ElixirContext
                 continue;
             }
             const bool behaviour = ( keyword == "behaviour" || keyword == "behavior" )
-                                && elixirAttribute( ts_node_parent( call ), src ) == keyword;
+                                && elixirAttribute( parentOf( call ), src ) == keyword;
             if( keyword != "alias" && keyword != "import" && keyword != "require" && keyword != "use" && !behaviour ) { continue; }
             const auto targets = directiveModules( call );
             for( const std::string& target : targets )
@@ -720,6 +753,7 @@ struct ElixirContext
                 }
                 else if( elixirNodeIs( filter, "list" ) )
                 {
+                    std::string pairs;   // built here, interned once (MEM-B1: a pool name's += would intern every prefix)
                     for( std::uint32_t i = 0; i < ts_node_named_child_count( filter ); ++i )
                     {
                         const TSNode entries = ts_node_named_child( filter, i );
@@ -730,11 +764,12 @@ struct ElixirContext
                             auto key = nodeTextOf( fieldChild( pair, NodeField::Key ), src );
                             while( !key.empty() && ( key.back() == ':' || std::isspace( static_cast<unsigned char>( key.back() ) ) ) ) { key.remove_suffix( 1 ); }
                             const auto count = nodeTextOf( fieldChild( pair, NodeField::Value ), src );
-                            bind.importedName += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
+                            pairs += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
                         }
                     }
+                    bind.importedName = pairs;
                 }
-                binds.push_back( std::move( bind ) );
+                binds.push_back( bind );
             }
         }
         for( TSNode identifier : identifiers )
@@ -742,7 +777,7 @@ struct ElixirContext
             const TSNode scope = bindingScope( identifier );
             if( ts_node_is_null( scope ) ) { continue; }
             auto visibleFrom = ts_node_start_byte( identifier );
-            for( TSNode p = ts_node_parent( identifier ); !ts_node_is_null( p ) && !ts_node_eq( p, scope ); p = ts_node_parent( p ) )
+            for( TSNode p = parentOf( identifier ); !ts_node_is_null( p ) && !ts_node_eq( p, scope ); p = parentOf( p ) )
             {
                 const auto op = nodeFieldText( p, NodeField::Operator, src  );
                 if( ( op == "=" || op == "<-" ) && elixirContains( fieldChild( p, NodeField::Left ), identifier ) )
@@ -761,11 +796,13 @@ struct ElixirContext
 void elixirExpandImplementations( const ElixirContext& context, std::vector<RawDef>& defs, std::size_t firstDef,
                                  std::vector<RawBind>& binds, std::size_t firstBind )
 {
-    const auto replacePrefix = []( std::string& text, const std::string& from, const std::string& to )
+    // `text` is a std::string (a def's scope / name) or a pool name (a bind's typeName, MEM-B1): build the new text, assign once
+    const auto replacePrefix = []( auto& text, const std::string& from, const std::string& to )
     {
-        if( text == from || ( text.starts_with( from ) && text.size() > from.size() && text[ from.size() ] == '.' ) )
+        const std::string_view was = text;
+        if( was == from || ( was.starts_with( from ) && was.size() > from.size() && was[ from.size() ] == '.' ) )
         {
-            text.replace( 0, from.size(), to );
+            text = to + std::string( was.substr( from.size() ) );
         }
     };
     for( TSNode call : context.calls )
@@ -789,7 +826,7 @@ void elixirExpandImplementations( const ElixirContext& context, std::vector<RawD
                 if( binds[j].startByte < begin || binds[j].startByte >= end || binds[j].kind == LocalBindKind::ElixirImport ) { continue; }
                 RawBind clone = binds[j];
                 replacePrefix( clone.typeName, names.front(), names[i] );
-                binds.push_back( std::move( clone ) );
+                binds.push_back( clone );
             }
         }
     }
@@ -803,9 +840,9 @@ std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::s
     {
         expression = name;
     }
-    const TSNode parent = ts_node_parent( expression );
+    const TSNode parent = parentOf( expression );
     if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
-        && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" )
+        && nodeFieldText( parentOf( parent ), NodeField::Operator, src  ) == "&" )
     {
         const auto arity = nodeFieldText( parent, NodeField::Right, src  );
         std::uint16_t count = 0;
@@ -848,10 +885,10 @@ std::uint32_t elixirHeadDefaultCount( TSNode node, std::string_view src ) noexce
     return defaults;
 }
 
-void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src, std::vector<RawBind>& binds )
+void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src, std::vector<RawBind>& binds, const ElixirKeywords& keywords )
 {
     const auto keyword = elixirTarget( node, src );
-    if( !elixirFunctionKeyword( keyword ) ) { return; }
+    if( !keywords.isFunction( keyword ) ) { return; }
     RawBind bind;
     bind.fileId = def.fileId; bind.startByte = def.startByte; bind.lang = Lang::Elixir;
     bind.kind = LocalBindKind::ElixirCallable; bind.var = def.name; bind.typeName = def.scope; bind.importedName = keyword;

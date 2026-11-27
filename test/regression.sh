@@ -268,6 +268,15 @@ else
     RIPWIRE_BIN="$BIN" bash "$ROOT/test/lspcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
+# task D (language-first name answers): its CLI-lane gate is a dedicated standalone gate beside the
+# LSP-lane arms (27)-(36) that ride lspcheck above; the fixtures are read in place, no build needed.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" >/dev/null 2>&1; then
+    ok "language-first name-answer gate (test/langordercheck.sh)"
+else
+    no "language-first name-answer gate (test/langordercheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" 2>&1 | grep -E 'FAIL|ABOVE' | head -8
+fi
+
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
 #     dedicated standalone gate; run with the binary under test (a listed gate with no file FAILS).
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexdoctorcheck.sh" >/dev/null 2>&1; then
@@ -278,6 +287,7 @@ else
 fi
 # retired: forspinecheck — the --for caller spine (Change A) was dropped by its own offline kill rule: a spine of up to 2 caller hops from the top 3 seeds named a missed rubric item on 1 of 7 in-sample rows, so the gate that pinned it went with it
 # retired: cacheexclkeycheck — the per-configuration auto-cache key it pinned is a registered NEGATIVE (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03: a 158K-file root with >= 12 gate configurations thrashed the 2 GiB sweep); the retry design keeps ONE superset blob per root and will bring its own gate
+# retired: phantomdefcheck — the attribute-macro phantom gate (train item S) left the train with its code at 82ed4c8bf ("train: move item S (attribute-macro phantoms) to its own lane"); 994f0021f-based lanes still listed it, so the batch merges declare the retirement here
 # THE ABSORB LIST: one gate per line, in byte (LC_ALL=C) order, ending with the `    ; do` line. Two branches
 # that each add a gate then touch different lines and merge without a conflict; the old single line conflicted
 # on every gate added anywhere. A new gate goes on its own line at its sorted place. test/manifestcheck.sh holds
@@ -286,17 +296,24 @@ fi
 _absorb_listed=0; _absorb_ran=0
 for _g in \
     a9disclosurecheck \
+    abiarchretirecheck \
     abicheck \
     accessshapecheck \
     ackonlycheck \
+    actlinecheck \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedfoldcheck \
+    affectedgroupcheck \
+    affectedpathcheck \
+    agentloopaccountingcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
     agentloopfollowupcheck \
     agentloopgradercheck \
+    agentloophistorycheck \
     agentlooplockcheck \
     agentloopopencodecheck \
     agentsurfacecheck \
@@ -305,6 +322,7 @@ for _g in \
     aliasdefcheck \
     anchorbodycheck \
     anchorcheck \
+    anchorhonestycheck \
     archcheck \
     archhonestcheck \
     archmetricscheck \
@@ -324,18 +342,26 @@ for _g in \
     baselinecheck \
     baselinedirtycheck \
     baselineportcheck \
+    bashenvcheck \
     bashsourcecheck \
     batchcheck \
+    benchxmlpathcheck \
     binoverridecheck \
     blindspotcheck \
     bm25boundcheck \
     bm25check \
     bodiesshowncheck \
+    bodilessseedcheck \
+    bodycalleefilecheck \
     bodydialectcheck \
+    bodyeditcheck \
+    bodypointercheck \
+    budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
     bundleidcheck \
+    c1stampcheck \
     cachefuzzcheck \
     cachehashcheck \
     cacheidentitycheck \
@@ -344,14 +370,18 @@ for _g in \
     cacheoffsetcheck \
     cachereservecheck \
     cachesplitcheck \
+    calleerowfilecheck \
     callerscheck \
     callformcheck \
     callsrankordercheck \
     candheadcheck \
     candidatescheck \
     canoncheck \
+    capdisclosemapcheck \
     capdisclosurecheck \
+    cappedbodycheck \
     capsweepcheck \
+    carriedpageboundcheck \
     ccheck \
     ccjsoncheck \
     ceilingverdictcheck \
@@ -372,6 +402,8 @@ for _g in \
     clonededupcheck \
     cloneidiomcheck \
     clonelexcheck \
+    cloneoperandcheck \
+    clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
@@ -394,12 +426,16 @@ for _g in \
     composelangcheck \
     connectcheck \
     connectcorecheck \
+    connectdeclinedjointcheck \
     connectjoincheck \
+    connectsourcejointcheck \
     constcheck \
     contextratiocheck \
     coplintcheck \
+    corelegendcheck \
     countfloorcheck \
     cppbenchcheck \
+    cppextqualcheck \
     cppoperatorcheck \
     cppqualcheck \
     cpptmplscopecheck \
@@ -415,7 +451,10 @@ for _g in \
     cyclecutcheck \
     danglingwarncheck \
     dartcheck \
+    dccolumnarcheck \
+    dctiercutcheck \
     deadcheck \
+    deadcodescopecheck \
     deadfiltercheck \
     deadprecisioncheck \
     deckcheck \
@@ -426,13 +465,17 @@ for _g in \
     decltodefcheck \
     deeptailcheck \
     defaultceilingcheck \
+    defectackschemecheck \
     defectshapecheck \
     defoverdeclcheck \
     defslookupcheck \
     degradedhintcheck \
+    demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
+    depsrereadcheck \
     det-gate \
     detailcheck \
     diagnoticecheck \
@@ -447,12 +490,15 @@ for _g in \
     docmdcachecheck \
     docmentioncheck \
     docscommandscheck \
+    docsunitscheck \
     doctorcheck \
     donelegendcheck \
     dottedstringcheck \
     droppedpositivecheck \
     duprowcheck \
+    dupshortcheck \
     dynmapsimdcheck \
+    edgemarkcheck \
     editcheckanswercheck \
     editcheckcheck \
     editcheckdeclcheck \
@@ -494,6 +540,7 @@ for _g in \
     expandtopk0check \
     extentcheck \
     externalvetocheck \
+    failuredefaultcheck \
     falseedgecheck \
     fcallforwardcheck \
     fficheck \
@@ -515,37 +562,64 @@ for _g in \
     fnliteralcheck \
     fnptrcheck \
     fnslotcheck \
+    fnvbasischeck \
+    foranchornscheck \
+    foranswerfirstcheck \
     forautobodycheck \
+    forbasenamedefaultcheck \
     forblowupcheck \
     forbodyfoldcheck \
     forbodyslotcheck \
+    forbudgetcountscheck \
     forbudgetmonotoncheck \
     forcalibfactscheck \
     forcallerhopcheck \
     forcompresscheck \
     forctorhopcheck \
     fordeclrowcheck \
+    fordecltwincheck \
+    fordemoteallcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
+    fordocbodycheck \
+    fordocsaftercodecheck \
+    forendlinecheck \
+    forexemplarcheck \
     forfileanchorcheck \
+    forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
+    forkeybodycheck \
     forlenscheck \
     forliteralcheck \
+    formanifestcheck \
     formatgatecheck \
     formaxtokenscheck \
     formembernamescheck \
     fornotesbudgetcheck \
     fornotesjsoncheck \
+    foronesidecheck \
+    forpagescheck \
+    forqsitescheck \
     forrankordercheck \
+    forreadercallerscheck \
+    forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forroutepagecheck \
+    forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
+    forsiblingdemotecheck \
     forsigspancheck \
+    forsigxcheck \
+    forsizetrimcheck \
     forsoftbudgetcheck \
+    fortailfoldcheck \
+    fortailwidecheck \
     forunusedcheck \
+    forverbroutecheck \
     forwidencheck \
     freshclonecheck \
     freshnesscheck \
@@ -567,6 +641,7 @@ for _g in \
     gointerfacecheck \
     gokindcheck \
     goscopecheck \
+    graphformendpointscheck \
     graphlegendbudgetcheck \
     graphqueryrefusecheck \
     grepanchorcheck \
@@ -575,19 +650,27 @@ for _g in \
     grepcheck \
     grepcontextcheck \
     grepcorpuscheck \
+    grepdegradedcheck \
     grepfastcheck \
     grepfollowupcheck \
     grepignorecheck \
     grepscancheck \
     grepseamcheck \
     greptiercheck \
+    guardedwalkcheck \
     guardmsgcheck \
+    gvassemblycheck \
     handlerrulecheck \
+    handoffwindowcheck \
     hasacheck \
+    hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headerstaticadjcheck \
+    headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
+    helptaskdeadlinecheck \
     hermesinstallcheck \
     historyoraclecheck \
     historywalkcheck \
@@ -595,6 +678,8 @@ for _g in \
     hookcheck \
     hop1check \
     hopbodycheck \
+    hopcontextcheck \
+    hopvaluerefscheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
@@ -604,11 +689,17 @@ for _g in \
     ifacedispatchcheck \
     ifacepeelcheck \
     impactdepthcheck \
+    impactfirstwindowcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impactsoledefcheck \
+    impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
+    importprovedsplitscheck \
+    importrowshortcheck \
+    importspellingcheck \
     includeanglecheck \
     includeprecisecheck \
     indexoutcheck \
@@ -639,19 +730,30 @@ for _g in \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
+    lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
+    legenddefaultcheck \
     legenddriftcheck \
+    legendhavecheck \
     legendrefcheck \
+    legendseenblockcheck \
+    legendseencheck \
+    legendseenhookcheck \
+    legendseenportcheck \
+    legendtiercheck \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    legounreadlangcheck \
+    lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
     lintbudgetcheck \
     lintcatalogcheck \
     lintcheck \
     lintdedupcheck \
+    lintordercheck \
     lintpayloadcapcheck \
     lintprecisioncheck \
     lintrulescheck \
@@ -662,8 +764,10 @@ for _g in \
     localdeclcheck \
     localitycheck \
     localscountcheck \
+    locatoragentcheck \
     loopconservationcheck \
     lpincheck \
+    lstiercapcheck \
     luacheck \
     luarequirecheck \
     macroedgecheck \
@@ -689,11 +793,16 @@ for _g in \
     mcpeditracecheck \
     mcpflagshipcheck \
     mcpforparitycheck \
+    mcpforroutecheck \
+    mcpforroutepagecheck \
+    mcpforrowscheck \
     mcpframehonestycheck \
     mcpgrepdegradedcheck \
     mcphandlecheck \
     mcpincrementalcheck \
+    mcplisttrimcheck \
     mcpmanifestcheck \
+    mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
     mcpredactcheck \
@@ -715,7 +824,9 @@ for _g in \
     mcpwatchercheck \
     mdembedcheck \
     mdsectioncheck \
+    memceilingcheck \
     memguardcheck \
+    memstatscheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \
@@ -735,6 +846,7 @@ for _g in \
     namedfileinputcheck \
     nameinfocheck \
     namekeyhopcheck \
+    namewalkcheck \
     namingcalibrationcheck \
     namingconsistencycheck \
     naminglenscheck \
@@ -745,14 +857,17 @@ for _g in \
     nestedimportcheck \
     nestedqualcheck \
     nestprofilecheck \
+    nextaposcheck \
     nextverbcheck \
     noaliascheck \
+    nocacheevictcheck \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
+    notfoundtextcheck \
     nsfiltercheck \
     nulbytecheck \
     numericrefusecheck \
@@ -765,20 +880,29 @@ for _g in \
     osswitchcheck \
     oswin32logiccheck \
     outlinecheck \
+    outputceilingcheck \
     overbudgetcommentcheck \
     ownerhopcheck \
     ownerscheck \
     packcallersharecheck \
+    packkeybodycheck \
+    packlocatecheck \
+    packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
     packtaskquotacheck \
     padscalecheck \
+    pagelegendcheck \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    paramslotcheck \
+    parentcachecheck \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
+    pathambigcheck \
+    pathfewestcheck \
     pathgapcheck \
     pathownercheck \
     pathpaircheck \
@@ -808,6 +932,7 @@ for _g in \
     prnestedcapcheck \
     probecheck \
     propcostcheck \
+    protoindexcheck \
     prrefsafecheck \
     prrenamecheck \
     pyaliascallcheck \
@@ -818,13 +943,25 @@ for _g in \
     pyshapecheck \
     qackconcurrencycheck \
     qackorigincheck \
+    qbasecachecheck \
+    qbasechildcheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
+    qdclonepaircheck \
+    qdconstructscheck \
     qddegradecheck \
     qddialscheck \
+    qdentryceilingcheck \
+    qdgitrenamehealcheck \
+    qdmonstercheck \
+    qdrangecheck \
     qdrefpaircheck \
+    qdrenameidentitycheck \
+    qdtestdeadcheck \
+    qdtype3oncecheck \
     qextractionkeycheck \
+    qmetricscheck \
     qoriginoraclecheck \
     qrevtokencheck \
     qrowlocatorcheck \
@@ -832,6 +969,7 @@ for _g in \
     qsnapcachecheck \
     qsnapprefetchcheck \
     qsnapproducercheck \
+    qualendpointcheck \
     qualifiedresolvecheck \
     qualitycheck \
     qualitycrosslangcheck \
@@ -846,6 +984,7 @@ for _g in \
     qualitysymcheck \
     qualnamecheck \
     qualnewcheck \
+    qualnscallcheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \
@@ -869,6 +1008,7 @@ for _g in \
     recallshapecheck \
     recalltablecheck \
     recalltotalcheck \
+    recallwindowcheck \
     receiptpostcheck \
     receiverevidencecheck \
     receiverfixescheck \
@@ -876,15 +1016,19 @@ for _g in \
     redactcheck \
     redactfixcheck \
     reexportcheck \
+    refdisclosurecheck \
     refusaltailcheck \
+    refwindowcheck \
     regexbombcheck \
     regexcheck \
     regexguardcheck \
+    regexmultiquantcheck \
     regexrefusecheck \
     registermacrocheck \
     regsitecheck \
     relevancefloorcheck \
     relinkcheck \
+    repeateddecisioncheck \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
@@ -895,11 +1039,14 @@ for _g in \
     rootrelcheck \
     rootrelemitcheck \
     rootspellingcheck \
+    roundcderivecheck \
     routecheck \
     routeedgecheck \
     routehookcheck \
     routeoncecheck \
+    routingcheck \
     routingreportcheck \
+    rowlinescheck \
     rubyargcheck \
     rubyattrscheck \
     rubybarecallcheck \
@@ -923,11 +1070,16 @@ for _g in \
     runhintcheck \
     runtracecheck \
     rustanccheck \
+    rustglobscalecheck \
     rustimportprecisecheck \
+    rustmacrocallcheck \
+    rustmacropathcheck \
     rustqualcheck \
+    rustrootscheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    scanoncecheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \
@@ -941,11 +1093,14 @@ for _g in \
     selectorscopecheck \
     selfcheckcheck \
     selfcontainedcheck \
+    sentencesubjectcheck \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \
     shellgateindexcheck \
+    shellnestcheck \
     showcasecapturecheck \
+    shrinkpaircheck \
     sibliftcheck \
     sidecarsymlinkcheck \
     sigredactcheck \
@@ -953,6 +1108,7 @@ for _g in \
     sincecochangecheck \
     sincewindowcheck \
     singledefcheck \
+    sitesatshortcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \
@@ -963,6 +1119,7 @@ for _g in \
     skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
+    skillshapecheck \
     skilltruthcheck \
     skipclassifycheck \
     skippedcheck \
@@ -971,7 +1128,10 @@ for _g in \
     slicediffcheck \
     sliceflowcheck \
     sliceflowsenscheck \
+    slotbasecheck \
     slotjoincheck \
+    slotregcheck \
+    snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \
     statgatecheck \
@@ -979,6 +1139,8 @@ for _g in \
     stdqualcheck \
     strkerncheck \
     structlayoutcheck \
+    subagentprimercheck \
+    subagentroutecheck \
     subjectanchorcheck \
     sublistcountcheck \
     subscriptopcheck \
@@ -988,6 +1150,10 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tagspredicatecheck \
+    tailsymtermscheck \
+    tanglecapcheck \
+    tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \
@@ -1003,7 +1169,11 @@ for _g in \
     testrowruncheck \
     testscopecheck \
     textdocscheck \
+    textpoolcheck \
+    tiebreakcontentcheck \
+    tiercallerscheck \
     timsortcheck \
+    tinyshapecheck \
     tokenbudgetcheck \
     tomllangcheck \
     toolcallroutecheck \
@@ -1013,6 +1183,7 @@ for _g in \
     tracehandoffcapcheck \
     tracehopcheck \
     traceminecheck \
+    trackedbuilddircheck \
     treecheck \
     truncvocabcheck \
     tsimportprecisecheck \
@@ -1025,23 +1196,33 @@ for _g in \
     usescheck \
     usesliteralcheck \
     usesselectorcheck \
+    usesunarmedcheck \
     usingdeclcheck \
     utf8scrubcheck \
     vendoredassetcheck \
     vendoredbundlecheck \
     vendorpatchcheck \
+    verbdefrowscheck \
+    verbfixcheck \
+    verbfscheck \
     verifycheck \
     versioncheck \
+    versionlabelcheck \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \
+    warmpeakcheck \
+    warmsnapcheck \
     weaksignalcheck \
+    whereisnographcheck \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
+    wrapperprefixcheck \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \
+    xfaliashopcheck \
     xmlwellformed \
     yamllangcheck \
     zonecheck \

@@ -15,7 +15,7 @@
 #   (n1) "path from X to serialising a dict" does NOT fire, though `dict` is a symbol here
 #   (n2) "path from X to spawning ripgrep" does NOT fire, though `spawning` and `ripgrep` are symbols here
 #   (n3) an endpoint no resolver finds: no block, and nothing on stdout says not found
-#   (n4) a task that is not a graph question: no block
+#   (n4) a task that is not a graph question: no block ("how does A reach B" IS one since SENTENCE-SUBJECT: test/sentencesubjectcheck.sh G)
 #   (j1) --json carries no block (one document per dialect)
 #   (x1) MCP `for`: the same <graph_verb …> opening tag and the same path answer element
 # FIX ROUND 1 (review B1/S1-S5, mutants):
@@ -26,6 +26,13 @@
 #   (n8) `e.g.` is prose, never a candidate; (h3) MCP name_test_hops
 #   (h1)(h2) a path hop matched by name alone into a test file says so (name_test_hops=); the same hop into a source file does not
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# MR1 (src/mcpverbs.h forTaskText): MCP `for` serves its <sigs>/<tail> rows as text lines in one CDATA too (the CLI's ROWLINES +
+# RANKSEQ, lossless; test/mcpforrowscheck.sh pins it). This gate reads those rows as elements for another rule, so the line form is
+# off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -58,7 +65,13 @@ n = s.count( '<graph_verb ' )
 m = re.search( r'<graph_verb ([^>]*)>', s )
 a = m.group( 1 ) if m else ''
 g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [None, '-'] )[1]
-tail = s.endswith( '</graph_verb></ctx>' )
+# AF1 (2026-11-18): "tail" now reads PLACED. The legend-first answer (MCP; --legend=first) still ends </graph_verb></ctx>; the
+# answer-first CLI default ends the block before the trailing DOCUMENT legend (comments only), and a RESOLVED block
+# (reachable="1" or <met_bridge>) is moved AHEAD of <sigs> by design (foranswerfirst.h move 2, pinned by foranswerfirstcheck R3).
+blk = re.search( r'<graph_verb .*?(?:</graph_verb>|/>)(?=(?:<!--(?:(?!-->).)*-->)*</ctx>$)', s, re.S )
+gv = re.search( r'<graph_verb [^>]*>.*?</graph_verb>', s, re.S )
+resolvedAhead = gv is not None and ( 'reachable="1"' in gv.group( 0 ) or '<met_bridge' in gv.group( 0 ) ) and 0 <= gv.start() < s.find( '<sigs' )
+tail = s.endswith( '</graph_verb></ctx>' ) or blk is not None or resolvedAhead
 leg = re.search( r'<!-- ripwire for graph_verb:(.*?)-->', s, re.S )
 legdash = '--' in leg.group( 1 ) if leg else False
 print( f"n={n} endpoints={g('endpoints')} verb={g('verb')} from={g('from_span')} to={g('to_span')} of={g('of_span')} and={g('and_span')} tried={g('tried')} tail={int(tail)} legdash={int(legdash)}" )
@@ -78,7 +91,7 @@ run --for="path from startEntry to leaf_sink" >"$TMP/p1.xml"
 f="$( facts "$TMP/p1.xml" )"
 if [ "$f" = "n=1 endpoints=subject verb=--path=startEntry,leaf_sink from=startEntry to=leaf_sink of=- and=- tried=- tail=1 legdash=0" ] \
    && grep -q '<path [^>]*from="startEntry" to="leaf_sink"[^>]* reachable="1" hops="2"' "$TMP/p1.xml" && xmlok "$TMP/p1.xml"
-then ok "(p1) path form: one <graph_verb endpoints=\"subject\"> with the --path answer (reachable=1 hops=2) right before </ctx>, well-formed"
+then ok "(p1) path form: one <graph_verb endpoints=\"subject\"> with the --path answer (reachable=1 hops=2), placed (resolved: ahead of <sigs>), well-formed"
 else no "(p1) path form: $f"; fi
 
 run --for="path from main to leaf_sink for a script file" >"$TMP/p2.xml"
@@ -96,11 +109,21 @@ run --for="callers of leaf_sink with the local backend" >"$TMP/c2.xml"
 f="$( facts "$TMP/c2.xml" )"
 case "$f" in *" of=leaf_sink and=- "*) ok "(c2) the \"with ...\" tail is cut: of_span=leaf_sink";; *) no "(c2) $f";; esac
 
+# AF1 (2026-11-18): the answer-first default may move a resolved block ahead of <sigs> and AF2's A lifts a comment that is a direct
+# child of <graph_verb> (the verb's own legend) into the trailing document legend, once. So the block is read wherever it sits, and
+# (v1)/(v2) compare it with the bare call COMMENTS OUT on both sides; (v1l)/(v2l) then prove every comment of the bare call is in the
+# --for answer verbatim (lifted, not lost) — the same reading gvassemblycheck (e1) took.
 inner(){ python3 -c '
 import re, sys
 s = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
-m = re.search( r"<graph_verb [^>]*>(.*)</graph_verb></ctx>$", s, re.S )
+m = re.search( r"<graph_verb [^>]*>(.*)</graph_verb>", s, re.S )
 sys.stdout.write( m.group( 1 ) if m else "NO-BLOCK" )' "$1"; }
+nocomment(){ python3 -c 'import re,sys; sys.stdout.write(re.sub(r"<!--.*?-->", "", open(sys.argv[1],encoding="utf8",errors="replace").read(), flags=re.S))' "$1"; }
+lifted(){ python3 -c '
+import re, sys
+bare = open( sys.argv[1], encoding="utf8", errors="replace" ).read(); full = open( sys.argv[2], encoding="utf8", errors="replace" ).read()
+cs = re.findall( r"<!--.*?-->", bare, re.S )
+sys.exit( 0 if cs and all( full.count( c ) == 1 for c in cs ) else 1 )' "$1" "$2"; }
 # (v1) under the PATH-HOP-BODY A/B handle (src/hopbody.h), so its premise is the pre-lane one: the block's bytes ARE the bare call's.
 # With hop bodies on, (v1b) below states the one by-design difference.
 RIPWIRE_NO_HOP_BODY=1 run --for="path from startEntry to leaf_sink" >"$TMP/p1off.xml"
@@ -109,9 +132,11 @@ do
     id="${arm%%|*}"; rest="${arm#*|}"; src="${rest%%|*}"; flag="${rest#*|}"
     if [ "$id" = v1 ]; then RIPWIRE_NO_HOP_BODY=1 run "$flag" >"$TMP/$id.bare"; else run "$flag" >"$TMP/$id.bare"; fi
     inner "$TMP/$src.xml" >"$TMP/$id.inner"
-    if [ -s "$TMP/$id.bare" ] && cmp -s "$TMP/$id.bare" "$TMP/$id.inner"
-    then ok "($id) the block's verb answer is byte-identical to the bare $flag call (same default caps, same compact legend)"
+    if [ -s "$TMP/$id.bare" ] && [ "$( nocomment "$TMP/$id.bare" )" = "$( nocomment "$TMP/$id.inner" )" ]
+    then ok "($id) the block's verb answer is byte-identical to the bare $flag call, comments out (same default caps)"
     else no "($id) the block's verb answer differs from the bare $flag call ($( wc -c <"$TMP/$id.inner" ) vs $( wc -c <"$TMP/$id.bare" ) B)"; fi
+    if lifted "$TMP/$id.bare" "$TMP/$src.xml"; then ok "(${id}l) every comment of the bare $flag call (its compact legend) is in the --for answer, once"
+    else no "(${id}l) a comment of the bare $flag call is missing from the --for answer, or repeated"; fi
 done
 
 # (v1b) PATH-HOP-BODY, hop bodies on: the block is the bare call, except that a middle hop body whose text the --for answer
@@ -121,10 +146,11 @@ run --path=startEntry,leaf_sink >"$TMP/v1b.bare"; inner "$TMP/p1.xml" >"$TMP/v1b
 if python3 - "$TMP/v1b.bare" "$TMP/v1b.inner" "$TMP/p1.xml" <<'PY'
 import re, sys
 bare, inner, full = (open(f, encoding="utf8", errors="replace").read() for f in sys.argv[1:4])
-if bare == inner: sys.exit(0)
+nolegend = lambda t: re.sub(r'<!--.*?-->', '', t, flags=re.S)   # AF1: the verb's own legend is lifted to the document legend ((v1l) pins it)
+if nolegend(bare) == nolegend(inner): sys.exit(0)
 el = re.search(r'<bodies of="hops".*?</bodies>', bare, re.S)
 if not el or '<bodies of="hops"' in inner: sys.exit(1)
-outside = full.split("<graph_verb ", 1)[0]
+outside = re.sub(r'<graph_verb .*?</graph_verb>', '', full, count=1, flags=re.S)   # AF1: the block may lead the answer (resolved, item R)
 held = all(re.search(r'<b [^>]*p="%s"' % re.escape(m.group(1)), outside) for m in re.finditer(r'<b [^>]*p="([^"]*)"', el.group(0)))
 nolegend = lambda t: re.sub(r'<!--.*?-->', '', t, flags=re.S)   # its present-only readings (bodies of=, the window) go with it; (v1) pins the legend
 sys.exit(0 if held and nolegend(bare.replace(el.group(0), "")) == nolegend(inner) else 1)
@@ -145,7 +171,7 @@ u="$( attr "$TMP/t1.xml" unresolved )"
 if [ "$u" = "notReal_xq" ] && xmlok "$TMP/t1.xml"; then ok "(t1b) unresolved= names the spelling that failed (legend clause rides; well-formed)"; else no "(t1b) unresolved=[$u]"; fi
 
 for arm in "n1|path from startEntry to serialising a dict" "n2|path from startEntry to spawning ripgrep" \
-           "n3|path from startEntry to notReal_xq" "n4|how does startEntry reach leaf_sink"
+           "n3|path from startEntry to notReal_xq" "n4|how does startEntry handle leaf_sink"
 do
     id="${arm%%|*}"; q="${arm#*|}"
     run --for="$q" >"$TMP/$id.xml"
@@ -163,7 +189,9 @@ for arm in "n5|path from startEntry to leaf_sink. Afterwards summarise other_cal
            "s4c|callers of leaf_sink？ nothing else|--callers=leaf_sink|of_span=leaf_sink|-"
 do
     IFS='|' read -r id q want sp1 sp2 <<<"$arm"
-    run --for="$q" >"$TMP/$id.xml"
+    # --no-verb-route: s4a's backticked `dict()` is a symbol rule E2 routes to --callers=dict (verbs_forroute.h, RT2); this
+    # arm reads the --for answer's <graph_verb> block, which a routed answer replaces
+    run --for="$q" --no-verb-route >"$TMP/$id.xml"
     v="$( attr "$TMP/$id.xml" verb )"; a1="$( attr "$TMP/$id.xml" "${sp1%%=*}" )"; a2="-"
     [ "$sp2" != "-" ] && a2="$( attr "$TMP/$id.xml" "${sp2%%=*}" )"
     if [ "$v" = "$want" ] && [ "$a1" = "${sp1#*=}" ] && { [ "$sp2" = "-" ] || [ "$a2" = "${sp2#*=}" ]; } && [ "$( grep -c '<graph_verb ' "$TMP/$id.xml" )" = 1 ]
@@ -186,12 +214,15 @@ then ok "(n8) \"e.g.\" is prose: --callers=leaf_sink with no tried="
 else no "(n8) verb=[$( attr "$TMP/n8.xml" verb )] tried=[$( attr "$TMP/n8.xml" tried )] unresolved=[$( attr "$TMP/n8.xml" unresolved )]"; fi
 
 # S2: a token budget holds the verb back: the self-closed tag names it, verb= is the call, no verb body
-for arm in "b1a|--token-budget=4100"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (4100 held it
+# at any size; that answer now fits 4100 whole and comes back byte for byte, block and all): 100 forces the hold.
+for arm in "b1a|--token-budget=100"
 do
     id="${arm%%|*}"; fl="${arm#*|}"
     run --for="path from startEntry to leaf_sink" "$fl" >"$TMP/$id.xml"
     if [ "$( attr "$TMP/$id.xml" held )" = "budget" ] && [ "$( attr "$TMP/$id.xml" verb )" = "--path=startEntry,leaf_sink" ] \
-       && grep -q '<graph_verb [^>]*/></ctx>$' "$TMP/$id.xml" && ! grep -q '<path ' "$TMP/$id.xml" && xmlok "$TMP/$id.xml"
+       && python3 -c 'import re,sys; sys.exit(0 if re.search(r"<graph_verb [^>]*/>(?:<!--(?:(?!-->).)*-->)*</ctx>$", open(sys.argv[1]).read(), re.S) else 1)' "$TMP/$id.xml" \
+       && ! grep -q '<path ' "$TMP/$id.xml" && xmlok "$TMP/$id.xml"   # AF1 (2026-11-18): only the trailing document legend may follow the held block
     then ok "($id) $fl: held=\"budget\", verb= names the call, no verb body, well-formed"
     else no "($id) $fl: held=[$( attr "$TMP/$id.xml" held )] $( facts "$TMP/$id.xml" )"; fi
 done
@@ -202,7 +233,7 @@ for line in sys.stdin:
     try: d = json.loads( line )
     except Exception: continue
     c = d.get( "result", {} ).get( "content" )
-    if c: print( c[0].get( "text", "" ), end="" )'; }
+    if c: print( __import__( "re" ).sub( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)", "", c[0].get( "text", "" ), flags = 16 ), end="" )'; }   # K-WRONGSYM: the <syms> block is last before </ctx>, after the verb block this gate reads
 mcp_call "path from startEntry to leaf_sink" ',"budget_tokens":4100' >"$TMP/b2.xml"
 if [ "$( attr "$TMP/b2.xml" held )" = "budget" ] && grep -q '<graph_verb [^>]*/></ctx>$' "$TMP/b2.xml" && ! grep -q '<path ' "$TMP/b2.xml"
 then ok "(b2) MCP budget_tokens: the same held=\"budget\" tag, no verb body"
@@ -262,7 +293,7 @@ for line in sys.stdin:
     try: d = json.loads( line )
     except Exception: continue
     c = d.get( "result", {} ).get( "content" )
-    if c: print( c[0].get( "text", "" ), end="" )'; }
+    if c: print( __import__( "re" ).sub( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)", "", c[0].get( "text", "" ), flags = 16 ), end="" )'; }   # K-WRONGSYM: the <syms> block is last before </ctx>, after the verb block this gate reads
 mcp_for "path from startEntry to leaf_sink" >"$TMP/x1.xml"
 cli_tag="$( grep -o '<graph_verb [^>]*>' "$TMP/p1.xml" )"; mcp_tag="$( grep -o '<graph_verb [^>]*>' "$TMP/x1.xml" )"
 if [ -n "$cli_tag" ] && [ "$cli_tag" = "$mcp_tag" ] && grep -q '<path [^>]*from="startEntry" to="leaf_sink"[^>]* reachable="1" hops="2"' "$TMP/x1.xml" \

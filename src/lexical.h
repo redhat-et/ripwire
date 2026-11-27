@@ -20,7 +20,9 @@
 #include "infra/strkern.h"      // Byteset256 — the head set below is that type, not a second bitmap
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 #include "infra/namesplit.h"     // hasIdentifierShape — the ONE camel/snake predicate chooseForRanker shares with mention.h
+#include "forrouteswitch.h"       // routing::routingOn — the file-gap ground of confidence= (RIPWIRE_ROUTING=0 off)
 #include "infra/charconvcompat.h" // rw::parseFloating — envKnob's full-token finite parse of a RIPWIRE_* knob
+#include "infra/pctenc.h"        // appendPercentEncoded — a refused RIPWIRE_TERMMARGIN value echoed on one line
 
 #include <algorithm>
 #include <atomic>
@@ -81,6 +83,52 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
     } );
 }
 
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes );
+
+// How many DISTINCT subtokens of `name` — each suffix-stemmed first by `stemSuffixes` when given (suffixStem) — are among `words`.
+// `words` is a handful, read by linear find. The member-name slice's (formembers.h wordOverlap); the tail's tsym= reads WHICH words
+// match instead (fortailterms.h tailTermMask, the same split and stem).
+inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::span<const std::string_view> stemSuffixes = {} )
+{
+    std::vector<std::string> toks;
+    subtokens( name, toks );
+    for( std::string& t : toks )
+    {
+        t = suffixStem( std::move( t ), stemSuffixes );
+    }
+    sortutil::sortUnique( toks );
+    return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
+// A light suffix stem: the FIRST of `suffixes` (in order) that `w` ends with and that leaves 3+ bytes is cut; "ies" becomes "y".
+// The suffix list is the caller's measured rule (forfilesyms.h kLightStemSuffixes for <syms>, fortailterms.h kTailTermSuffixes
+// for tsym=); an empty list leaves `w` as is.
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes )
+{
+    for( const std::string_view suf : suffixes )
+    {
+        if( w.size() > suf.size() + 2 && std::string_view( w ).ends_with( suf ) )
+        {
+            w.resize( w.size() - suf.size() );
+            if( suf == "ies" )
+            {
+                w += 'y';
+            }
+            return w;
+        }
+    }
+    return w;
+}
+
+// Does `text` carry one of `words` (lowercased subtokens) as a subtoken? `words` is a handful, read by linear find. Shared by the
+// --for fold's member slice (forfold.h) and the path owner-word key (pathroute.h).
+inline bool holdsSubtokenWord( std::string_view text, const std::vector<std::string>& words )
+{
+    std::vector<std::string> toks;
+    subtokens( text, toks );
+    return std::ranges::any_of( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
 // ── L-W (routing-loop round 2026-09-12): what the BM25 pass saw, read back out ──────────────────────────
 // Per symbol, which of the query's unique terms it matched, and per term, how many symbols matched it — the
 // integers lexicalScoresTiered accumulates anyway, exposed rather than re-derived by a second tokenizer that
@@ -93,6 +141,15 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 //   anyMask     per symbol, bit u set iff it carried terms[u] in any field (the final row, after the fold)
 // Masks are maskWords 64-bit words per symbol (maskWords = ceil(terms/64)): a pasted stack trace with a
 // hundred unique terms is tracked in full, nothing silently dropped from the share.
+//
+// BM25's idf for a term carried by n of the N units the corpus statistics count — the ONE spelling of the expression:
+// the scorer's per-term table (LexBm25Stats), its MaxScore bound and the evidence below all read it. An absent term
+// (n = 0) weighs as the rarest possible term, ln( (N+0.5)/0.5 + 1 ), never as nothing.
+inline double bm25Idf( double N, double n ) noexcept
+{
+    return std::log( ( N - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+}
+
 struct LexTermEvidence
 {
     std::vector<std::string>   terms;
@@ -110,16 +167,12 @@ struct LexTermEvidence
     std::size_t                termsSeenTotal = 0;
     bool                       termsCapped    = false;
 
-    const std::uint64_t* anyMaskOf( std::size_t sym ) const noexcept { return anyMask.data() + sym * maskWords; }
-    static bool          hasBit( const std::uint64_t* mask, std::size_t u ) noexcept { return ( mask[ u / 64 ] >> ( u % 64 ) ) & 1u; }
+    static constexpr std::size_t maskWordsFor( std::size_t termCount ) noexcept { return ( termCount + 63 ) / 64; }
+    const std::uint64_t*         anyMaskOf( std::size_t sym ) const noexcept { return anyMask.data() + sym * maskWords; }
+    static bool                  hasBit( const std::uint64_t* mask, std::size_t u ) noexcept { return ( mask[ u / 64 ] >> ( u % 64 ) ) & 1u; }
 
-    // BM25's own idf for term u over the `statsCount` symbols the statistics count — the exact expression both scoring branches use,
-    // so an absent term (df 0) weighs as the rarest possible term and never as nothing.
-    double idf( std::size_t u ) const noexcept
-    {
-        const double n = double( df[u] );
-        return std::log( ( double( statsCount ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-    }
+    // BM25's own idf for term u over the `statsCount` symbols the statistics count (bm25Idf, the scorer's expression)
+    double idf( std::size_t u ) const noexcept { return bm25Idf( double( statsCount ), double( df[u] ) ); }
 };
 
 // docCommentStart moved to lexindex.h (B0.2): the index-time stats builder must scan the EXACT spans this
@@ -220,7 +273,7 @@ inline Bm25Params resolveBm25Params() noexcept
 
 // The provably-safe per-term impact bound (MaxScore "max contribution"), derived from the SAME (k1,b) the
 // exact scoring loop uses. idf: this term's IDF. T: the largest weighted tf of this term anywhere in the
-// corpus (tfMaxOf[u] at the call site). See lexicalScoresTiered's pruned branch for the full monotonicity
+// corpus (tfMaxOf[u] at the call site). See LexTopKPruner for the full monotonicity
 // proof this bound relies on — it holds for ANY k1 > 0 and ANY b in [0,1], not just the shipped defaults.
 inline double bm25ImpactBound( double idf, double T, const Bm25Params& p ) noexcept
 {
@@ -470,6 +523,1138 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
+// LP1 (2026-11-21): the CODE lens's default weight for pass 1.6's basename-only field — what the --for ranking
+// (verbs_for.h computeLensRanking, which --pack-task and the change lanes share) and its MCP twins (mcpverbs.h forTaskText,
+// packTaskText) pass as basenameFieldDefaultW on every subtoken call of the route, so CLI and MCP rank alike. A question
+// names a FILE or a package more often than a function ("lib/theme.githelpers: remove dead code", "restorer: reject …"),
+// and a symbol's own text rarely repeats its file's name. Two peers win GA1 DEV cells on exactly this signal:
+// codebase-memory-mcp indexes each node's file path and qualified name at the SAME BM25 weight as its name, graphify seeds
+// from the file node a query word names. LP1 shipped 2 (under the name field ×3, over the body ×1). MEASURED on GA1 DEV n=89
+// (in-sample; LP1): w=2 completes 1 more task and takes 0 tasks down at any rung; the FULL-path field (RIPWIRE_PATHTOK_W=1)
+// took 2 tasks down — r3_pathtok's held-out finding again, the reason this is the basename and not the path.
+// OWNER RULING (2026-11-23): the default is 1, not LP1's 2. At 2 a file-name match lifts every function of a same-named
+// file by the same amount, so a long function in a large file sinks behind its short siblings under BM25 length
+// normalization (test/ownerhopcheck.sh G/guard: `broadcast` among 105 short handlers of pkg/broadcast.py, rank 2 -> 107;
+// at 1 it stays at 2). Weight 1 keeps the held-out completeness unchanged (126 / 83 / 4 of 213) and fixes that case.
+// RIPWIRE_BASENAME_W still overrides it (0 = the historical ranking). test/forbasenamedefaultcheck.sh pins it.
+inline constexpr int kForBasenameFieldW = 1;
+
+// The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
+// without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
+inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+{
+    std::vector<char> mask;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( notLexRanked( ing.symbols[i] ) )
+        {
+            if( mask.empty() )
+            {
+                mask.assign( ing.symbols.size(), 0 );
+            }
+            mask[i] = 1;
+        }
+    }
+    return mask;
+}
+
+// ─── lexicalScoresTiered's steps, in the order it runs them ─────────────────────────────────────────────
+// lexicalScoresTiered (below) reads as the list of these steps. Each one makes ONE decision and names it:
+// which units the corpus statistics count, which tokens a corpus subtoken can match, what each field adds,
+// which stem variants are rare enough to keep, which query terms separate, and which units are scored.
+
+// TIER STEP — which units the BM25 corpus statistics count. Decided ONCE per call, per unit, as one of three roles:
+//   kCounted   scored, and counted in the statistics: the symbol count, every document frequency, the average length
+//   kStatsOut  scored like any other unit but kept OUT of the statistics (the caller's statsOut — filter.h
+//              sphinxTxtStatsExclusion). It scores against the whole ranked corpus instead: rankedCount units, its
+//              term's counted df plus the statsOut df, and the ranked average length.
+//   kUnranked  a kRankFlagNotLexRanked unit (model.h): never scored (0), and no document in either corpus — so a
+//              Sphinx .txt section scores as it did before HTML units existed.
+// An unranked unit that the caller also lists in statsOut is kUnranked: unranked wins. roleOf is EMPTY when every unit
+// is kCounted, so a corpus with neither kind pays no per-unit lookup and runs the historical pass byte-for-byte.
+struct LexCorpusRoles
+{
+    enum Role : std::uint8_t
+    {
+        kCounted  = 0,
+        kStatsOut = 1,
+        kUnranked = 2,
+    };
+
+    std::vector<std::uint8_t> roleOf;              // per unit; empty = every unit kCounted
+    std::size_t               countedCount = 0;    // the units the statistics count (the BM25 N of a counted unit)
+    std::size_t               rankedCount  = 0;    // counted + statsOut: the corpus a statsOut unit scores against
+
+    Role role( std::size_t i ) const noexcept { return roleOf.empty() ? kCounted : Role( roleOf[i] ); }
+    bool isUnranked( std::size_t i ) const noexcept { return role( i ) == kUnranked; }
+    bool isStatsOut( std::size_t i ) const noexcept { return role( i ) == kStatsOut; }
+    // a unit's weight in every corpus statistic: 1 counted, 0 otherwise (statsOut and unranked alike)
+    int  statsWeight( std::size_t i ) const noexcept { return role( i ) == kCounted ? 1 : 0; }
+};
+
+inline LexCorpusRoles assignLexCorpusRoles( const IngestResult& ing, const std::vector<char>* statsOut )
+{
+    const std::size_t S = ing.symbols.size();
+    LexCorpusRoles    roles;
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        const bool listedOut = statsOut != nullptr && i < statsOut->size() && ( *statsOut )[i] != 0;
+        const auto role      = notLexRanked( ing.symbols[i] ) ? LexCorpusRoles::kUnranked
+                             : listedOut                      ? LexCorpusRoles::kStatsOut
+                                                              : LexCorpusRoles::kCounted;
+        if( role != LexCorpusRoles::kCounted && roles.roleOf.empty() )
+        {
+            roles.roleOf.assign( S, LexCorpusRoles::kCounted );
+        }
+        if( role != LexCorpusRoles::kCounted )
+        {
+            roles.roleOf[i] = role;
+        }
+        roles.countedCount += role == LexCorpusRoles::kCounted ? 1 : 0;
+        roles.rankedCount += role != LexCorpusRoles::kUnranked ? 1 : 0;
+    }
+    return roles;
+}
+
+// One row of a query's match table: a token a corpus subtoken is compared against, and the unique query term whose
+// tf/idf row it scores into — itself for an exact term (row m == u), the original term for an LB-3 stem variant.
+struct LexMatchTok
+{
+    std::string   tok;
+    std::uint32_t u;
+};
+
+// The LB-3 arm S suffix rules for ONE query term, in the order the match table admits them (first-wins): a
+// plural/participle query token ("splits", "resolved", "hoisting") cannot exact-match the singular subtoken a
+// compound name carries (SplitChunksPlugin → split; resolve.h → resolve) — the measured LB-3 anatomy (bench/r7 + r8,
+// three independent confirmations). Candidates only: the 3-byte floor and the first-wins dedupe are the table's.
+inline std::vector<std::string> lightStemVariantsOf( const std::string& t )
+{
+    const auto isConsonant = []( char c )
+    {
+        return c >= 'a' && c <= 'z' && c != 'a' && c != 'e' && c != 'i' && c != 'o' && c != 'u';
+    };
+    const std::size_t L    = t.size();
+    const auto        ends = [ & ]( std::string_view suf ) { return L >= suf.size() && t.compare( L - suf.size(), suf.size(), suf ) == 0; };
+    // a doubled final consonant before the suffix ("flagged", "running"): the undoubled stem is a variant too
+    const auto        doubledBefore = [ & ]( std::size_t suffixLen ) { return t[L - suffixLen - 1] == t[L - suffixLen - 2] && isConsonant( t[L - suffixLen - 1] ); };
+    std::vector<std::string> variants;
+    if( ends( "s" ) && !ends( "ss" ) && L >= 4 )
+    {
+        variants.push_back( t.substr( 0, L - 1 ) );                  // splits → split
+    }
+    if( ends( "es" ) && L >= 5 )
+    {
+        variants.push_back( t.substr( 0, L - 2 ) );                  // classes → class
+    }
+    if( ends( "ed" ) && L >= 5 )
+    {
+        variants.push_back( t.substr( 0, L - 1 ) );                  // resolved → resolve
+        variants.push_back( t.substr( 0, L - 2 ) );                  // parsed → pars (rarely useful, harmless)
+    }
+    if( ends( "ed" ) && L >= 6 && doubledBefore( 2 ) )
+    {
+        variants.push_back( t.substr( 0, L - 3 ) );                  // flagged → flag
+    }
+    if( ends( "ing" ) && L >= 6 )
+    {
+        variants.push_back( t.substr( 0, L - 3 ) );                  // hoisting → hoist
+        variants.push_back( t.substr( 0, L - 3 ) + "e" );            // caching → cache
+    }
+    if( ends( "ing" ) && L >= 7 && doubledBefore( 3 ) )
+    {
+        variants.push_back( t.substr( 0, L - 4 ) );                  // running → run
+    }
+    return variants;
+}
+
+// THE query's match table: one row per unique exact term (rows 0..uniqueCount, m == u), then — only when RIPWIRE_QSTEM=1
+// arms LB-3 arm S — the terms' light-stem variants as PROVISIONAL rows (m ≥ uniqueCount), each owning its own tf column.
+// Variants are QUERY-side only and score into the ORIGINAL token's tf/idf row, so corpus stats and the cache format are
+// untouched. ONE shared table drives the scan branch, the persisted-stats branch, and every field pass — parity by
+// construction (test/postingscheck.sh; armed arm in test/lb3namecheck.sh). A variant string already claimed by an
+// earlier token (or equal to any exact token) is dropped, first-wins, so a doc token maps to exactly one row in either
+// branch. The shipped default stays OFF until the LB-3 acceptance verdict (scratchpad lb3/preregistration.md) lands.
+//
+// IDF guard, rung R3 (LB-3 retry, scratchpad lb3retry/preregistration.md): the un-guarded round measured the failure:
+// a corpus-common variant ("split" on webpack) hands its term-frequency mass to every competitor whose doc/body rides
+// the same subtoken, displacing currently-hit truths (EVALS §7) — and the mass is BODY frequency (`.split()` call
+// sites), which is why the name-carrier bound (rungs R1/R2) measured too low to catch it. So a variant enters the table
+// PROVISIONALLY; admission is decided after pass 2 (admitRareStemVariants), when both pass-2 sources have measured
+// its doc/body document frequency as the SAME integers. The guard never sees a user's EXACT query token — only derived
+// variants — so it structurally cannot drop a truth's own carrier (the LB-1 IDF-floor failure).
+inline std::vector<LexMatchTok> buildLexMatchTable( const std::vector<std::string>& uniqueToks )
+{
+    const std::size_t        uniqueCount = uniqueToks.size();
+    std::vector<LexMatchTok> rows;
+    rows.reserve( uniqueCount * 2 );
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        rows.push_back( { uniqueToks[u], std::uint32_t( u ) } );
+    }
+    const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
+    if( qstemEnv == nullptr || *qstemEnv != '1' )
+    {
+        return rows;
+    }
+    const auto alreadyClaimed = [ &rows ]( const std::string& v )
+    { return std::ranges::any_of( rows, [ & ]( const LexMatchTok& row ) { return row.tok == v; } ); };
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        for( std::string& v : lightStemVariantsOf( uniqueToks[u] ) )
+        {
+            if( v.size() >= 3 && !alreadyClaimed( v ) )            // sub-3-byte stems are noise, frozen rule; first-wins
+            {
+                rows.push_back( { std::move( v ), std::uint32_t( u ) } );
+            }
+        }
+    }
+    return rows;
+}
+
+// ── SIRA term margin (docs/EVALS.md "Corpus-statistics term margin", PRE-REGISTERED 2026-09-05) — the arming ──
+// The decision itself needs corpus statistics that do not exist until after pass 2 (judgeTermMargins); all that is
+// read here is whether it is armed and at which rung, ONCE per query: the tf tables carry it, pass 1 counts nameDf
+// only when it is armed, the fold folds nameDf only then, and judgeTermMargins decides only then — one predicate.
+// bits is the k of "a term separates iff idf_u >= k * ln 2", k = 1 being the shipped rule and the only rung this round
+// may ship (the ladder is frozen in the registration). 0 = disarmed: the scorer is the historical one byte-for-byte.
+struct LexTermMargin
+{
+    int  bits = 0;
+    bool armed() const noexcept { return bits > 0; }
+};
+
+// RIPWIRE_TERMMARGIN is a switch: unset, empty or "0" leaves the margin disarmed, "1" arms it. Any other value is refused to
+// the disarmed default with one stderr line (CR721: "off" used to ARM it, since every value not starting with '0' did).
+inline LexTermMargin termMarginFromEnv()
+{
+    const char* const env = std::getenv( "RIPWIRE_TERMMARGIN" );
+    if( env == nullptr || std::string_view( env ).empty() || std::string_view( env ) == "0" )
+    {
+        return {};
+    }
+    if( !VALIDATE( std::string_view( env ) == "1", "RIPWIRE_TERMMARGIN is 0 or 1" ) )
+    {
+        // CR721 r4: the refused value is percent-encoded (control bytes, DEL and '%' as %XX), so the refusal stays ONE line.
+        std::string shown;
+        appendPercentEncoded( shown, env, []( unsigned char ) { return false; } );
+        rw::emitTo( stderr, "ripwire: ignoring RIPWIRE_TERMMARGIN=\"{}\" (want 0 or 1) — the margin stays disarmed\n", shown );
+        return {};
+    }
+    const std::optional<int> bits = envKnob<int>( "RIPWIRE_TERMMARGIN_BITS" );
+    return { bits ? std::clamp( *bits, 1, 8 ) : 1 };
+}
+
+// The per-query BM25 term table AFTER the stem-variant fold — the historical layout, one row per unique query term:
+// dl[i] = doc i's weighted subtoken count (the BM25 document length), tf[i * uniqueCount + u] = the weighted term
+// frequency of unique term u in doc i, and nameDf[u] = the term margin's name-field document frequency (empty when the
+// margin is disarmed). Every step from the term evidence on reads THIS type, and the only way to make one is the fold
+// (LexMatchTfTable::foldAdmittedVariants below), so no later step can see a provisional variant column or a match-row
+// stride. Integer counts are exact, so the float scoring later runs in strict doc order with the historical expressions.
+struct LexTermTfTable
+{
+    std::size_t      uniqueCount = 0;
+    std::vector<int> dl;
+    std::vector<int> tf;
+    std::vector<int> nameDf;
+    LexTermMargin    margin;
+
+    std::size_t docCount() const noexcept { return dl.size(); }
+    const int*  row( std::size_t doc ) const noexcept { return tf.data() + doc * uniqueCount; }
+};
+
+// The same table BEFORE the fold, while the field passes add into it: one row per MATCH-table row (tf[i * matchCount() + m]),
+// so the LB-3 stem variants sit in provisional columns m ≥ uniqueCount (none when RIPWIRE_QSTEM is off, and then the fold
+// is a move). Beside tf it keeps the two per-row facts only the field passes can see: nameDf (pass 1, the name field
+// alone; sized only when the margin is armed) and variantDocDf (pass 2, the units whose doc/body fields carry each
+// variant — the R3 admission signal). The fold consumes the table and turns all of it into a LexTermTfTable at once.
+//
+// Every write goes through the add members below, and every field's evidence through ONE tokenizer:
+// scanTextInto streams a field through lexindex.h forEachLexSubtoken (the same state machine subtokens() mirrors and the
+// B0.2 index-time builder uses): a token is a maximal alphanumeric run between separators, cut at a lower/digit → Upper
+// transition and at the ACRONYMWord seam. Tokens shorter than 2 bytes are dropped, exactly like subtokens(). No strings,
+// no maps — just in-place span-vs-query compares through the P2-3 head index (LexHeadIndex above). Since 2026-08-19 an
+// all-caps run survives as ONE token, so a span's INTERIOR bytes can be uppercase and memcmp alone would miss it; the
+// memcmp stays as the fast path and only a span already agreeing on length AND head falls through to
+// lexTokenEqualsLowered — the rare acronym case, arm D's seam.
+struct LexMatchTfTable
+{
+    const std::vector<LexMatchTok>& matchToks;
+    std::size_t                     uniqueCount;   // rows 0..uniqueCount are the exact query terms, the rest stem variants
+    LexTermMargin                   margin;
+    LexHeadIndex                    headIndex;
+    std::vector<int>                dl;
+    std::vector<int>                tf;
+    std::vector<int>                nameDf;         // per match row: ranked units whose NAME field alone carries it
+    std::vector<std::uint32_t>      variantDocDf;   // per stem variant: units whose doc/body fields carry it
+
+    LexMatchTfTable( std::size_t docCount, const std::vector<LexMatchTok>& rows, std::size_t exactCount, LexTermMargin termMargin )
+        : matchToks( rows ), uniqueCount( exactCount ), margin( termMargin ),
+          headIndex( buildLexHeadIndex( rows.size(), [ &rows ]( std::size_t m ) -> const std::string& { return rows[m].tok; } ) ),
+          dl( docCount, 0 ), tf( docCount * rows.size(), 0 ), nameDf( termMargin.armed() ? rows.size() : 0, 0 ),
+          variantDocDf( rows.size() - exactCount, 0u )
+    {
+        DASSERT( exactCount <= rows.size(), "the match table lists the exact query terms first, then their stem variants" );
+    }
+
+    std::size_t matchCount() const noexcept { return matchToks.size(); }
+    std::size_t variantCount() const noexcept { return matchToks.size() - uniqueCount; }
+    int*        row( std::size_t doc ) noexcept { return tf.data() + doc * matchCount(); }
+    const int*  row( std::size_t doc ) const noexcept { return tf.data() + doc * matchCount(); }
+
+    // Streams `text` at weight w into a caller-owned tf row and length accumulator (the per-file basename rows use it
+    // directly; addField is the per-doc form). Exact tokens own rows 0..uniqueCount (m == u there).
+    void scanTextInto( int* tfRow, int& wtAccum, std::string_view text, int w ) const
+    {
+        const auto tokOf        = [ this ]( std::size_t m ) -> const std::string& { return matchToks[m].tok; };
+        int        fieldTokenWt = 0;
+        forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
+        {
+            const std::size_t tokLen = tokEndByte - tokStartByte;
+            if( tokLen < 2 )
+            {
+                return;
+            }
+            fieldTokenWt += w;
+            if( const std::size_t m = headIndex.matchRow( text.data() + tokStartByte, tokLen, tokOf ); m != LexHeadIndex::kNoRow )
+            {
+                tfRow[m] += w;
+            }
+        } );
+        wtAccum += fieldTokenWt;
+    }
+
+    void addField( std::size_t doc, std::string_view text, int w ) { scanTextInto( row( doc ), dl[doc], text, w ); }
+
+    // a field scanned once per FILE and shared by every doc in it (pass 1.6): its tf row and its length, added
+    void addFileField( std::size_t doc, const int* fileRow, int fileWt )
+    {
+        int* const tfRow = row( doc );
+        for( std::size_t m = 0; m < matchCount(); ++m )
+        {
+            tfRow[m] += fileRow[m];
+        }
+        dl[doc] += fileWt;
+    }
+
+    // the persisted-stats branch's exact stored integers (B0.2): a doc's doc/body length, and one term's tf
+    void addStoredLength( std::size_t doc, int length ) { dl[doc] += length; }
+    void addStoredTf( std::size_t doc, std::size_t m, int count ) { row( doc )[m] += count; }
+
+    // pass 1, right after a ranked doc's NAME field and before any other field lands in its row: count its name hits
+    // into nameDf — only while the term margin is armed (nameDf is unsized otherwise)
+    void countNameFieldDf( std::size_t doc )
+    {
+        if( !margin.armed() )
+        {
+            return;
+        }
+        const int* const nameRow = row( doc );
+        for( std::size_t m = 0; m < matchCount(); ++m )
+        {
+            nameDf[m] += nameRow[m] > 0 ? 1 : 0;
+        }
+    }
+
+    // The R3 fold, one flag per variant (admitRareStemVariants): an admitted variant's column adds into its original
+    // term's row, a rejected one's is dropped (its evidence — name, callee, path, basename, doc, body — vanishes without
+    // touching dl: document length counts all subtokens scanned, never matches). nameDf folds the SAME way, so the margin
+    // test sees one row per unique term on either arm. A doc carrying both the exact token and an admitted variant in its
+    // name is counted twice, so a folded nameDf is a CEILING, not a count — stated rather than hidden. It matters only
+    // when RIPWIRE_QSTEM and the margin are both armed, and both ship off.
+    LexTermTfTable foldAdmittedVariants( const std::vector<char>& admitted ) &&
+    {
+        DASSERT( admitted.size() == variantCount(), "one admission flag per stem variant" );
+        const std::size_t docCount = dl.size();
+        LexTermTfTable    terms;
+        terms.uniqueCount = uniqueCount;
+        terms.margin      = margin;
+        terms.dl          = std::move( dl );
+        if( variantCount() == 0 )
+        {
+            terms.tf     = std::move( tf );       // disarmed: already the historical layout
+            terms.nameDf = std::move( nameDf );
+            return terms;
+        }
+        terms.tf.assign( docCount * uniqueCount, 0 );
+        for( std::size_t i = 0; i < docCount; ++i )
+        {
+            foldRowInto( terms.tf.data() + i * uniqueCount, row( i ), admitted );
+        }
+        if( margin.armed() )
+        {
+            terms.nameDf.assign( uniqueCount, 0 );
+            foldRowInto( terms.nameDf.data(), nameDf.data(), admitted );
+        }
+        // the match-width rows are spent: free them here, or `std::move( fields )` at the caller (which only selects this
+        // overload) keeps a second S x matches matrix alive through evidence, margins and scoring (CodeRabbit #721)
+        std::vector<int>().swap( tf );
+        std::vector<int>().swap( nameDf );
+        return terms;
+    }
+
+private:
+    // one match-width row (tf, or nameDf) into a unique-width one: the exact columns copied, each admitted variant's
+    // column added into its term's
+    void foldRowInto( int* dst, const int* src, const std::vector<char>& admitted ) const
+    {
+        std::copy( src, src + uniqueCount, dst );
+        for( std::size_t v = 0; v < admitted.size(); ++v )
+        {
+            dst[ matchToks[ uniqueCount + v ].u ] += admitted[v] != 0 ? src[ uniqueCount + v ] : 0;
+        }
+    }
+};
+
+// A field's weight: the caller's lens default, or the RIPWIRE_* calibration knob (clamped 0..8) when set. 0 = the
+// field is not scanned at all.
+inline int fieldWeightOrEnv( int lensDefaultW, const char* envName )
+{
+    if( const std::optional<int> knob = envKnob<int>( envName ) )
+    {
+        return std::clamp( *knob, 0, 8 );
+    }
+    return lensDefaultW;
+}
+
+// Field weights: a query term in a symbol's NAME outranks one in its DOC-COMMENT, which outranks one buried in its
+// BODY — so an exactly-named function beats a struct that merely mentions the word, and an algorithm beats a
+// comment-dense enum (the "keyword magnet" the review flagged). BM25 tf accumulates these weighted contributions; dl is
+// weighted to match, so length normalization stays consistent. Doc/body weights are the SHARED constants (lexindex.h) —
+// the index-time stats builder must weigh those two fields identically or the postings path would diverge from the scan.
+inline constexpr int kLexWeightName = 3, kLexWeightCallee = 1;
+
+// pass 1 — name (×kLexWeightName) + callee-name (×kLexWeightCallee) fields, which need no file text. Two per-unit facts
+// are separable ONLY here, after a unit's name field and before its callee, path, doc and body fields land in the same
+// tf row, so this pass also captures which terms each unit's NAME carries ("name hits"), two ways:
+//   L-W   evidenceOut->nameMask, bit u set iff the NAME field alone carried terms[u] (skipped when evidenceOut is null)
+//   SIRA  table.nameDf[m] = ranked units whose NAME FIELD ALONE carries match-table row m (only when the margin is
+//         armed). This is the statistic the LB-1 negative is the reason for: that round's IDF floor read document
+//         frequency only, and so deleted `module` — the truth's OWN name carrier — on a corpus where `module` is
+//         everywhere in bodies. A term that names between 1 and S/2 symbols separates on the field ripwire weights highest
+//         (×3) whatever its body mass says, and is kept. Pass 1 runs before the pass-2 branch split, so the scan and
+//         persisted-stats paths read the identical integers.
+inline void addNameAndCalleeFieldsCapturingNameHits( LexMatchTfTable& table, const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                                     const std::vector<NodeId>& outTargets, const LexCorpusRoles& roles,
+                                                     LexTermEvidence* evidenceOut )
+{
+    const std::size_t S             = ing.symbols.size();
+    const std::size_t uniqueCount   = table.uniqueCount;
+    const std::size_t evidenceWords = LexTermEvidence::maskWordsFor( uniqueCount );
+    if( evidenceOut )
+    {
+        evidenceOut->maskWords = evidenceWords;
+        evidenceOut->nameMask.assign( S * evidenceWords, 0u );
+    }
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        table.addField( i, ing.symbols[i].name, kLexWeightName );
+        const int* const nameRow = table.row( i );   // name field only: nothing else has run for this unit yet
+        if( evidenceOut && !roles.isUnranked( i ) )
+        {
+            std::uint64_t* words = evidenceOut->nameMask.data() + i * evidenceWords;
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                words[ u / 64 ] |= nameRow[u] > 0 ? std::uint64_t( 1 ) << ( u % 64 ) : 0u;
+            }
+        }
+        if( !roles.isUnranked( i ) )
+        {
+            table.countNameFieldDf( i );   // SIRA nameDf, armed only
+        }
+        for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
+        {
+            table.addField( i, ing.symbols[ outTargets[e] ].name, kLexWeightCallee );
+        }
+    }
+}
+
+// pass 1.5 — path field (×kwPath): the symbol's file path scanned through the SAME state machine.
+// pathFieldDefaultW is the CALLER's lens decision: the RECALL lens (docs) passes 1 — a query naming a
+// "readme" / "report" / "paired table" should be able to hit the doc whose PATH says exactly that, and
+// bench/recalleval/ is the instrument that measured the +0.03 lenient-MRR / doc-sibling recovery this
+// buys (2026-08-03, gate: test/recallevalcheck.sh). The CODE lenses (--for and friends) still pass 0:
+// a nonzero default THERE requires the pre-registered locbench acceptance gate
+// (bench/locbench/results/r3_pathtok/PREREG.md), unchanged. RIPWIRE_PATHTOK_W overrides either default
+// for calibration sweeps only. Paths need no file text, so the pass sits before the pass-2 branch split and
+// runs identically over the scan and persisted-stats paths — postings parity holds by construction and
+// the cache format is untouched.
+//
+// R-R RANKING (2026-08-25): the scanned string is the ROOT-RELATIVE VIEW, never ing.files[f] itself,
+// which stays absolute because the emission lane proved it must (g.canonId, Regression::key, every
+// pathQualifiedKey and the ingest cache's relForHash compare all key off it). Scanning it verbatim indexed
+// every directory ABOVE the corpus as corpus vocabulary — and a directory that spelled a query word
+// then matched EVERY document and collapsed that word's idf — so two clones of ONE commit at different
+// checkout depths ranked --recall differently: 11 of 42 frozen queries reordered, 5 of them returning a
+// different SET of documents (registered + measured in docs/EVALS.md; test/recallrankdepthcheck.sh).
+//
+// A VIEW, not a move — and the same helper recall.h PRINTS the separator path with, so the scored and
+// the printed spelling of a file cannot disagree. rootRelativeUri(p, "") returns p bar a leading "./",
+// exactly what a relative-root run already scanned, which is why this is a CONVERGENCE onto the
+// already-invariant `ripwire .` rather than a new ranking opinion. Multi-root passes no prefix:
+// ing.files already hold "<label>/<root-relative>".
+inline void addPathField( LexMatchTfTable& table, const IngestResult& ing, int kwPath, std::string_view pathRootPrefix )
+{
+    if( kwPath <= 0 )
+    {
+        return;
+    }
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( const std::uint32_t f = ing.symbols[i].fileId; f < ing.files.size() )
+        {
+            table.addField( i, rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix ), kwPath );
+        }
+    }
+}
+
+// pass 1.6 — LB-3 arm B: basename-only field (×kwBase). The r3_pathtok retry, narrowed per that
+// round's own rejection note (bench/locbench/results/r3_pathtok/PREREG.md): FULL paths lost
+// held-out to generic-directory noise, so only the basename is scanned, and the scan is amortized
+// per FILE (each basename tokenized once, its row added per symbol) honoring r3's "amortize
+// first". Needs no file text → runs before the pass-2 branch split; parity and the cache format
+// untouched. RIPWIRE_BASENAME_W (0..8) overrides basenameFieldDefaultW; a nonzero shipped default
+// requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh). The code lens now passes
+// kForBasenameFieldW (above) on GA1 DEV evidence only — the acceptance verdict is still owed.
+//
+// R-R: takes the same root-relative view as pass 1.5. PROVABLY a no-op here — the basename is whatever
+// follows the last '/', which the root prefix cannot change — and applied anyway so the two path passes
+// cannot drift apart. One reading of ing.files[f], one rule; a future reader who changes one pass finds
+// the other already agreeing rather than discovering half the path tokenization was still absolute.
+inline void addBasenameField( LexMatchTfTable& table, const IngestResult& ing, int kwBase, std::string_view pathRootPrefix )
+{
+    if( kwBase <= 0 )
+    {
+        return;
+    }
+    const std::size_t fileCount = ing.files.size();
+    std::vector<int>  fileTf( fileCount * table.matchCount(), 0 );
+    std::vector<int>  fileWt( fileCount, 0 );
+    for( std::size_t f = 0; f < fileCount; ++f )
+    {
+        const std::string_view path = rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix );
+        const std::size_t      cut  = path.find_last_of( '/' );
+        const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
+        table.scanTextInto( fileTf.data() + f * table.matchCount(), fileWt[f], base, kwBase );
+    }
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( const std::uint32_t f = ing.symbols[i].fileId; f < fileCount && fileWt[f] != 0 )
+        {
+            table.addFileField( i, fileTf.data() + std::size_t( f ) * table.matchCount(), fileWt[f] );
+        }
+    }
+}
+
+// Which pass-2 source an ingest offers: B0.2 (R1 hypothesis #1) — a RICH ingest carries per-symbol weighted subtoken
+// statistics built ONCE at parse/cache time, from the SAME byte spans through the SAME state machine, so the per-query
+// work is pure lookups: no file re-read, no corpus re-tokenize. The stored dl/tf values are the exact integers the scan
+// would accumulate, and the float scoring is shared, so the two sources are byte-identical (test/postingscheck.sh).
+inline bool hasPersistedLexStats( const IngestResult& ing ) noexcept
+{
+    const std::size_t S = ing.symbols.size();
+    return ing.hasLexStats && ing.lexTokenRowOffsets.size() == S + 1 && ing.lexDocBodyDl.size() == S;
+}
+
+// pass 2 from persisted stats — doc-comment + body evidence as stored integers, and table.variantDocDf: per stem variant,
+// the units whose stored doc/body rows carry it (the R3 guard's admission signal; stored rows hold each hash once → one
+// bump per unit). The match rows are reached by the same normalized-lowercase hash index time used, over the FULL match table
+// (exact tokens + LB-3 stem variants), each hash mapped to its own tf ROW — the same row targeting the scan applies.
+// try_emplace keeps the FIRST entry on the astronomically-unlikely 64-bit collision between two DISTINCT table strings,
+// so both transfer strategies agree deterministically.
+inline void addDocBodyFieldsFromPersistedStats( LexMatchTfTable& table, const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "lexical: pass 2 via persisted subtoken stats (cached tf/dl, no corpus re-tokenize)" );
+    const std::size_t S           = ing.symbols.size();
+    const std::size_t matchCount  = table.matchCount();
+    const std::size_t uniqueCount = table.uniqueCount;
+
+    // dl first: BM25 length normalization needs EVERY doc's weighted length whether or not it matches
+    // the query (avgdl sums them all), so this runs unconditionally — exact stored integers.
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        table.addStoredLength( i, int( ing.lexDocBodyDl[i] ) );
+    }
+
+    std::vector<std::uint64_t>            matchHash( matchCount );
+    HashMap<std::uint64_t, std::uint32_t> rowIndexOfHash;
+    rowIndexOfHash.reserve( matchCount );
+    for( std::size_t m = 0; m < matchCount; ++m )
+    {
+        matchHash[m] = lexSubtokenHash( table.matchToks[m].tok.data(), table.matchToks[m].tok.size() );
+        rowIndexOfHash.try_emplace( matchHash[m], std::uint32_t( m ) );
+    }
+    const auto addStoredTerm = [ & ]( std::size_t i, std::uint32_t m, std::uint32_t storedTf )
+    {
+        table.addStoredTf( i, m, int( storedTf ) );
+        if( m >= uniqueCount )
+        {
+            ++table.variantDocDf[ m - uniqueCount ];   // stored rows hold each hash once → one df bump per symbol
+        }
+    };
+
+    // B0.1 per-file pre-filter: skip a whole file's tf walks when its 512-bit signature excludes every
+    // query subtoken — no false negatives (dl above is already complete; tf for such a file is provably
+    // zero), and a false positive just walks the cheap stats rows. Symbol ids are file-contiguous
+    // (assigned in fileId,line,name order), so the test amortizes to one signature check per file.
+    const bool useFileSig      = ing.lexFileSig.size() == ing.files.size() * kLexFileSigWords;
+    const auto fileMayHoldTerm = [ & ]( std::uint32_t f )
+    {
+        const std::uint64_t* sig = ing.lexFileSig.data() + std::size_t( f ) * kLexFileSigWords;
+        return std::ranges::any_of( matchHash, [ sig ]( std::uint64_t h ) { return ( sig[ lexSigWord( h ) ] & lexSigBit( h ) ) != 0; } );
+    };
+    std::uint32_t lastFileId       = kNoNode;
+    bool          lastFileMayMatch = true;
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        const std::uint32_t rowBegin = ing.lexTokenRowOffsets[i];
+        const std::uint32_t rowEnd   = ing.lexTokenRowOffsets[ i + 1 ];
+        const std::uint32_t f        = ing.symbols[i].fileId;
+        const bool          sigTests = useFileSig && f < ing.files.size();
+        if( rowBegin == rowEnd )
+        {
+            continue; // no doc/body tokens → nothing to transfer
+        }
+        if( sigTests && f != lastFileId )
+        {
+            lastFileId       = f;                       // one membership probe per FILE (B0.1)
+            lastFileMayMatch = fileMayHoldTerm( f );
+        }
+        if( sigTests && !lastFileMayMatch )
+        {
+            continue;
+        }
+
+        // exact tf transfer — walk whichever side is smaller: probe the query map per stored token, or
+        // binary-search each DISTINCT query hash in the symbol's sorted row. Identical sums either way
+        // (the map dedupes hash-colliding query tokens for both strategies).
+        const std::uint64_t* rowHash = ing.lexTokenHashes.data();
+        if( std::size_t( rowEnd - rowBegin ) <= matchCount * 8 )       // ~log2(row) probes vs one map probe per entry
+        {
+            for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
+            {
+                if( const auto it = rowIndexOfHash.find( rowHash[e] ); it != rowIndexOfHash.end() )
+                {
+                    addStoredTerm( i, it->second, ing.lexTokenTfs[e] );
+                }
+            }
+            continue;
+        }
+        for( const auto& [ hash, m ] : rowIndexOfHash )            // iteration order is score-irrelevant: rows are disjoint per HASH (+= commutes)
+        {
+            const std::uint64_t* lo = rowHash + rowBegin;
+            const std::uint64_t* hi = rowHash + rowEnd;
+            if( const std::uint64_t* it = std::lower_bound( lo, hi, hash ); it != hi && *it == hash )
+            {
+                addStoredTerm( i, m, ing.lexTokenTfs[ std::size_t( it - rowHash ) ] );
+            }
+        }
+    }
+}
+
+// pass 2 by scanning (lean ingests, --no-cache lean verbs, multi-root merges, stubs) — doc-comment (×kLexWeightDoc) +
+// body (×kLexWeightBody) evidence, streamed ONE file at a time touching only that file's symbols: peak memory is a single
+// file's text, not the whole corpus held at once (symbol order within a file is irrelevant: integer counts commute
+// exactly). Fills the same table.variantDocDf the persisted branch fills, from the scan's own counts.
+//
+// Files stream across a small worker pool: each worker holds ONE file's text at a time, and a file's symbols are touched
+// only by the worker that claimed the file — every dl[i] / tf row has exactly ONE writer (no locks needed). Determinism:
+// all pooled writes are exact integer counts and the float scoring stays single-threaded in doc order, so worker
+// scheduling cannot change a byte of output (no cross-doc float reductions — the det-gate rule). The per-(file, variant)
+// df tallies likewise have ONE writer each and merge single-threaded in file order.
+inline void addDocBodyFieldsByFileScan( LexMatchTfTable& table, const IngestResult& ing )
+{
+    const std::size_t fileCount    = ing.files.size();
+    const std::size_t variantCount = table.variantCount();
+
+    const SymbolsByFile symbolsOfFile = symbolsByFileInIdOrder( ing, []( const Symbol& ) { return true; } );
+
+    std::vector<std::uint32_t> dfPerFile( variantCount > 0 ? fileCount * variantCount : 0, 0u );   // sized only when armed
+    const auto scanFileSymbols = [ & ]( std::size_t f, const std::string& src )
+    {
+        const std::string_view sv = src;
+        std::vector<int>       variantTfBefore( variantCount );
+        for( const NodeId i : symbolsOfFile[f] )
+        {
+            const Symbol&     s         = ing.symbols[i];
+            const std::size_t bodyStart = std::min<std::size_t>( s.sigStartByte, src.size() );
+            const std::size_t end       = std::min<std::size_t>( s.endByte, src.size() );
+            const std::size_t docStart  = docCommentStart( src, bodyStart );
+            const int* const  variantTf = table.row( i ) + table.uniqueCount;
+            // snapshot the variant columns: df must count ONLY pass-2 (doc/body) growth, never pass-1 name/callee tf
+            std::copy( variantTf, variantTf + variantCount, variantTfBefore.begin() );
+            if( bodyStart > docStart )
+            {
+                table.addField( i, sv.substr( docStart, bodyStart - docStart ), kLexWeightDoc );
+            }
+            if( end > bodyStart )
+            {
+                table.addField( i, sv.substr( bodyStart, end - bodyStart ), kLexWeightBody );
+            }
+            for( std::size_t v = 0; v < variantCount; ++v )
+            {
+                dfPerFile[ f * variantCount + v ] += variantTf[v] > variantTfBefore[v] ? 1u : 0u;
+            }
+        }
+    };
+    std::atomic<std::size_t> nextFileIndex { 0 };
+    const auto               fileWorker = [ & ]() noexcept
+    {
+        try
+        {
+            std::string loadedText;
+            for( std::size_t f = nextFileIndex.fetch_add( 1 ); f < fileCount; f = nextFileIndex.fetch_add( 1 ) )
+            {
+                if( symbolsOfFile[f].empty() )
+                {
+                    continue; // no symbols in this file → skip
+                }
+                const std::string* src = lexicalScanText( ing, f, loadedText );
+                if( src != nullptr && !src->empty() )
+                {
+                    scanFileSymbols( f, *src );   // unreadable/empty → degrade (skip), as before
+                }
+            }
+        }
+        catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial counts instead
+        {
+            rw::emitRaw( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
+        }
+    };
+    const std::size_t hwThreadCount = std::thread::hardware_concurrency();
+    const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, fileCount ? fileCount : 1, std::size_t( 16 ) } );
+    if( workerCount <= 1 )
+    {
+        fileWorker();
+    }
+    else
+    {
+        // symmetric bare scope: workers live exactly as long as the pooled scan
+        std::vector<std::thread> workers;
+        workers.reserve( workerCount );
+        for( std::size_t w = 0; w < workerCount; ++w )
+        {
+            workers.emplace_back( fileWorker );
+        }
+        for( std::thread& worker : workers )
+        {
+            worker.join();
+        }
+    }
+
+    for( std::size_t f = 0; f < fileCount && variantCount > 0; ++f )   // deterministic df merge, file order
+    {
+        for( std::size_t v = 0; v < variantCount; ++v )
+        {
+            table.variantDocDf[v] += dfPerFile[ f * variantCount + v ];
+        }
+    }
+}
+
+// pass 2 — doc-comment (×kLexWeightDoc) + body (×kLexWeightBody), from whichever source the ingest has (hasPersistedLexStats)
+inline void addDocBodyFields( LexMatchTfTable& table, const IngestResult& ing )
+{
+    if( hasPersistedLexStats( ing ) )
+    {
+        addDocBodyFieldsFromPersistedStats( table, ing );
+        return;
+    }
+    addDocBodyFieldsByFileScan( table, ing );
+}
+
+// ── IDF-guard admission (rung R3) — the same decision after EITHER pass-2 source ─────────────────────────
+// A variant whose doc/body document frequency is corpus-common (df > max(8, rankedCount/64)) is rejected; a corpus-rare
+// one is admitted and folds into its original token's row — the exact integers the un-guarded arm would have
+// accumulated there. The cap reads the ranked corpus: an unranked unit does not widen it. Returns one flag per variant
+// (empty when disarmed); RIPWIRE_QSTEM_DEBUG prints each verdict on stderr.
+inline std::vector<char> admitRareStemVariants( const LexMatchTfTable& table, std::size_t rankedCount )
+{
+    const std::vector<std::uint32_t>& dfVariant = table.variantDocDf;
+    const std::uint32_t sOver64    = std::uint32_t( rankedCount / 64 );
+    const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
+    std::vector<char>   admitted( dfVariant.size(), 0 );
+    for( std::size_t v = 0; v < dfVariant.size(); ++v )
+    {
+        admitted[v] = dfVariant[v] <= variantCap ? 1 : 0;
+    }
+    const bool debug = !dfVariant.empty() && std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr;
+    for( std::size_t v = 0; v < dfVariant.size() && debug; ++v )
+    {
+        rw::emitTo( stderr, "qstem-guard: \"{}\" df={} cap={} {}\n", table.matchToks[ table.uniqueCount + v ].tok.c_str(), dfVariant[v],
+                    variantCap, admitted[v] != 0 ? "admitted" : "rejected" );
+    }
+    return admitted;
+}
+
+// ── L-W: the term evidence, read off the FINAL tf rows (LexTermTfTable: every field, the fold applied) — one S×U
+// integer scan, the same "tf > 0" fact the document frequency counts when scoring. nameMask is pass 1's
+// (addNameAndCalleeFieldsCapturingNameHits), sized for the same term count — asserted, not assumed.
+inline void recordTermEvidence( LexTermEvidence& evidence, const LexTermTfTable& table, const LexCorpusRoles& roles, const DedupedQueryTerms& dedup )
+{
+    const std::size_t S             = table.docCount();
+    const std::size_t uniqueCount   = table.uniqueCount;
+    const std::size_t evidenceWords = LexTermEvidence::maskWordsFor( uniqueCount );
+    DASSERT( evidence.maskWords == evidenceWords && evidence.nameMask.size() == S * evidenceWords,
+             "pass 1 captures the name mask for the same symbols and terms before the evidence is recorded" );
+    evidence.termsSeenTotal = dedup.uniqueSeenTotal;
+    evidence.termsCapped    = dedup.capped;
+    evidence.terms.assign( dedup.uniqueToks.begin(), dedup.uniqueToks.end() );
+    evidence.df.assign( uniqueCount, 0u );
+    evidence.anyMask.assign( S * evidenceWords, 0u );
+    evidence.symbolCount = S;
+    evidence.statsCount  = roles.countedCount;
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        const int* const row   = table.row( i );
+        std::uint64_t*   words = evidence.anyMask.data() + i * evidenceWords;
+        const int        w     = roles.statsWeight( i );
+        for( std::size_t u = 0; u < uniqueCount && !roles.isUnranked( i ); ++u )
+        {
+            evidence.df[u] += row[u] > 0 ? std::uint32_t( w ) : 0u;
+            words[ u / 64 ] |= row[u] > 0 ? std::uint64_t( 1 ) << ( u % 64 ) : 0u;
+        }
+    }
+}
+
+// ── SIRA term margin — the decision (docs/EVALS.md, PRE-REGISTERED 2026-09-05) ────────────────────
+// A query term earns its contribution by SEPARATING the target from corpus-level confusers, not by
+// looking relevant. BM25's own idf says when that stops being true: at df = S/2,
+// idf = ln( (S-n+0.5)/(n+0.5) + 1 ) is exactly ln 2 — one bit, the point at which observing the term
+// halves the candidate space. Above it the term carries less than a bit and hands its tf mass to
+// whichever document recites it most, which on a natural-language query ("how does the csrf token
+// get validated") is the prose, not the answer. This ranker has no query-side stopword list, and a
+// corpus-statistics margin test is that idea derived from the tree in front of it rather than
+// written down in English — a Rust corpus's `mut` and a Python corpus's `self` are caught by the
+// same arithmetic that catches `the`, with nothing language-specific anywhere.
+//
+// TWO FIELDS, because ONE field is how the LB-1 negative happened. That round's IDF floor read
+// document frequency alone and deleted `module` — the truth's own name carrier — flipping a hit to
+// a miss (docs/EVALS.md §7). A term that names between 1 and S/2 symbols separates on the field
+// this scorer weights highest, whatever its body mass says, so the name margin keeps it. A term
+// naming NOTHING has no name margin to appeal to; a term naming MORE than half the corpus has no
+// margin there either.
+//
+// THE SOLE-ANCHOR GUARD, and the trap inside it. Suppression is skipped entirely unless a PRESENT,
+// non-suppressed term survives it — otherwise a query whose every term is corpus-saturating scores
+// zero everywhere, which is the catastrophic shape, not a ranking. "Present" is load-bearing and is
+// the subtle half: an ABSENT term (df = 0) has the LARGEST idf in the whole scheme,
+// ln( (S+0.5)/0.5 + 1 ), so an implementation that asks "did a higher-idf term survive?" without
+// excluding absent terms reads a typo beside the anchor as excellent evidence and drops the anchor.
+// Gated: test/termmargincheck.sh arms (b), (c) and (d), each red before this code existed.
+//
+// KEPT OR DROPPED, never fractionally weighted. A kept term's contribution is the historical
+// expression evaluated in the historical order — bit-identical, not merely close — and a dropped
+// term's impact cap is 0, so the MaxScore bound stays a valid bound and the pruned and exhaustive
+// modes stay byte-identical to each other. `dl` is untouched: a suppressed term's EVIDENCE
+// vanishes, the document's length does not, exactly the posture the R3 variant guard already takes.
+//
+// Each present term gets ONE verdict, decided here; termKept and the RIPWIRE_TERMMARGIN_DEBUG lines both read it.
+enum class TermMarginVerdict : std::uint8_t
+{
+    kAbsent,              // df 0: contributes nothing, survives nothing
+    kDocSeparates,        // kept: its document frequency alone is under the cut
+    kNameSeparates,       // kept: it names between 1 and cut units (the LB-1 protection)
+    kSoleAnchor,          // would be suppressed, but no present term survives — suppression withheld for the whole query
+    kSuppressed,
+};
+
+// Returns termKept per unique term: all 1 when the margin is disarmed.
+inline std::vector<char> judgeTermMargins( const LexTermTfTable& table, const LexCorpusRoles& roles, const std::vector<std::string>& uniqueToks )
+{
+    const std::size_t uniqueCount = table.uniqueCount;
+    std::vector<char> termKept( uniqueCount, 1 );
+    if( !table.margin.armed() )
+    {
+        return termKept;
+    }
+    // df in fixed doc order over the folded rows — the same integers both pass-2 sources produced
+    std::vector<int> dfMargin( uniqueCount, 0 );
+    for( std::size_t i = 0; i < table.docCount(); ++i )
+    {
+        const int* const tfRow = table.row( i );
+        const int        w     = roles.statsWeight( i );
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            dfMargin[u] += tfRow[u] > 0 ? w : 0;
+        }
+    }
+    // "separates" at k bits: idf_u >= k*ln2  ⇔  (S-n+0.5)/(n+0.5) + 1 >= 2^k  ⇔  n <= (S+0.5)/2^k - 0.5,
+    // which at k = 1 is exactly n <= S/2. Evaluated in doubles from integer inputs, so it is a pure
+    // function of (S, n, k) and cannot vary run to run.
+    const double                   separationCut = ( double( roles.countedCount ) + 0.5 ) / std::exp2( double( table.margin.bits ) ) - 0.5;
+    std::vector<TermMarginVerdict> verdict( uniqueCount, TermMarginVerdict::kAbsent );
+    std::size_t                    presentCount = 0, survivorCount = 0;
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        const bool separatesDoc  = double( dfMargin[u] ) <= separationCut;
+        const bool separatesName = table.nameDf[u] > 0 && double( table.nameDf[u] ) <= separationCut;
+        verdict[u] = dfMargin[u] == 0 ? TermMarginVerdict::kAbsent
+                   : separatesDoc     ? TermMarginVerdict::kDocSeparates
+                   : separatesName    ? TermMarginVerdict::kNameSeparates
+                                      : TermMarginVerdict::kSuppressed;
+        presentCount += dfMargin[u] > 0 ? 1 : 0;
+        survivorCount += verdict[u] == TermMarginVerdict::kDocSeparates || verdict[u] == TermMarginVerdict::kNameSeparates ? 1 : 0;
+    }
+    const bool applySuppression = survivorCount > 0;            // the sole-anchor guard
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        if( verdict[u] == TermMarginVerdict::kSuppressed && !applySuppression )
+        {
+            verdict[u] = TermMarginVerdict::kSoleAnchor;
+        }
+        termKept[u] = verdict[u] == TermMarginVerdict::kSuppressed ? 0 : 1;
+    }
+    if( std::getenv( "RIPWIRE_TERMMARGIN_DEBUG" ) != nullptr )
+    {
+        static constexpr const char* kVerdictText[] = { "absent", "kept (doc-separates)", "kept (name-separates)", "kept (sole-anchor)",
+                                                        "SUPPRESSED" };
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            rw::emitTo( stderr, "term-margin: \"{}\" df={}/{} nameDf={} bits={} {}\n", uniqueToks[u].c_str(), dfMargin[u], roles.countedCount,
+                        table.nameDf[u], table.margin.bits, kVerdictText[ std::size_t( verdict[u] ) ] );
+        }
+        rw::emitTo( stderr, "term-margin: {} present, {} survive, suppression {}\n", presentCount, survivorCount,
+                    applySuppression ? "applied" : "withheld (sole-anchor)" );
+    }
+    return termKept;
+}
+
+// The corpus statistics BM25 scores against, tallied in ONE pass over the final tf rows in ascending doc id, and the
+// (k1, b) it scores with (A4: resolveBm25Params, the ONE definition the impact bound reads too).
+// avgdl accumulates in the historical doc order (integer sums: exact in any order anyway). dfreq[u] = COUNTED units
+// containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it); dfOut[u] = statsOut units carrying
+// it (all 0 with no statsOut). A counted unit scores with (countedCount, dfreq, avgdlCounted); a statsOut unit against
+// the whole ranked corpus (rankedCount, dfreq + dfOut, avgdlRanked), as with no statsOut. That choice is made HERE,
+// once per term and role: idfCounted / idfRanked (bm25Idf over each role's N and df) and avgdlOf(role) are what the
+// scorer and the MaxScore bound read, so neither re-derives which corpus a unit scores against.
+struct LexBm25Stats
+{
+    std::vector<int>           dfreq;
+    std::vector<int>           dfOut;
+    std::vector<int>           tfMaxOf;        // per term, its largest weighted tf anywhere — the MaxScore bound's T
+    std::vector<std::uint32_t> candidateIds;   // ascending: every unit with any tf > 0
+    std::vector<double>        idfCounted;     // per term, a counted unit's idf: bm25Idf( countedCount, dfreq )
+    std::vector<double>        idfRanked;      // per term, a statsOut unit's idf: bm25Idf( rankedCount, dfreq + dfOut )
+    double                     avgdlCounted = 0;
+    double                     avgdlRanked  = 0;
+    Bm25Params                 params       = kBm25Default;
+
+    double idfOf( std::size_t u, bool statsOut ) const noexcept { return statsOut ? idfRanked[u] : idfCounted[u]; }
+    double avgdlOf( bool statsOut ) const noexcept { return statsOut ? avgdlRanked : avgdlCounted; }
+};
+
+inline LexBm25Stats tallyBm25Stats( const LexTermTfTable& table, const LexCorpusRoles& roles )
+{
+    const std::size_t S           = table.docCount();
+    const std::size_t uniqueCount = table.uniqueCount;
+    LexBm25Stats      st;
+    st.dfreq.assign( uniqueCount, 0 );
+    st.dfOut.assign( uniqueCount, 0 );
+    st.tfMaxOf.assign( uniqueCount, 0 );
+    st.candidateIds.reserve( 1024 );
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        st.avgdlCounted += roles.statsWeight( i ) != 0 ? table.dl[i] : 0;
+        st.avgdlRanked += roles.isUnranked( i ) ? 0 : table.dl[i];
+        const int* const tfRow = table.row( i );
+        const int        w     = roles.statsWeight( i );
+        const int        out   = roles.isStatsOut( i ) ? 1 : 0;
+        bool             any   = false;
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            const bool carries = tfRow[u] > 0;
+            st.dfreq[u] += carries ? w : 0;
+            st.dfOut[u] += carries ? out : 0;
+            st.tfMaxOf[u] = std::max( st.tfMaxOf[u], tfRow[u] );
+            any           = any || carries;
+        }
+        if( any )
+        {
+            st.candidateIds.push_back( std::uint32_t( i ) );
+        }
+    }
+    st.avgdlCounted /= double( roles.countedCount ? roles.countedCount : 1 );
+    st.avgdlRanked /= double( roles.rankedCount ? roles.rankedCount : 1 );
+    st.idfCounted.resize( uniqueCount );
+    st.idfRanked.resize( uniqueCount );
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        st.idfCounted[u] = bm25Idf( double( roles.countedCount ), double( st.dfreq[u] ) );
+        st.idfRanked[u]  = bm25Idf( double( roles.rankedCount ), double( st.dfreq[u] + st.dfOut[u] ) );
+    }
+    st.params = resolveBm25Params();
+    return st;
+}
+
+// ── H2 (B0 round 2): MaxScore-style SAFE early termination, decided once ────────────────────────────────
+// Armed only when the caller opted in (pruneTopK > 0: it consumes only the top-pruneTopK ranked units, plus
+// `alwaysExact` — e.g. every interface packLego may surface) AND the RIPWIRE_NO_PRUNE escape hatch is off (the
+// postingscheck equivalence gate flips it). Disarmed, skips() is always false and the scorer is exhaustive.
+//
+// The PROVABLY-SAFE per-term impact bound (the MaxScore "max contribution"): a term u's contribution to any doc is
+// idf_u × tf(k1+1)/(tf + k1(1−b+b·dl/avgdl)). Two exact monotonicities bound it: it INCREASES in tf (so tf ≤ T :=
+// tfMaxOf[u], the largest weighted tf of u anywhere in the corpus) and DECREASES in dl (dl ≥ 0 ⇒ the mixed factor
+// ≥ 1−b), giving
+//   contribution ≤ idf_u × T(k1+1)/(T + k1(1−b))   in REAL arithmetic.
+// In IEEE doubles each side is computed with ≤ 7 rounded ops (relative error ≤ 7·2⁻⁵³ ≈ 8e-16), so the ×(1+1e-9)
+// slack — six orders of magnitude above the worst accumulated rounding, and likewise above the U·2⁻⁵³ summation
+// error of the per-doc bound sum — makes the COMPUTED cap strictly ≥ the COMPUTED contribution. The Section ×0.30
+// down-weight and the §P4 tier multiplier (both (0,1], shrink-only) only shrink a real score, never the bound.
+// Hence: bound < θ ⇒ computed score < θ, unconditionally. capOcc folds in the query-occurrence multiplicity (BM25
+// adds one contribution PER occurrence).
+//
+// θ = K-th best exact score seen so far (min-heap; grows monotonically). θ at skip time ≤ final θ ≤ the true K-th
+// best overall, and skipping needs bound < θ STRICTLY, so a skipped doc's true score is strictly below the final
+// K-th score — it cannot enter the top-K even via the (score desc, id asc) tie-break. Docs are visited in ascending id
+// (determinism). Safety is absolute, not approximate: the emitted top-K set, their EXACT scores, and their
+// (score desc, id asc) order are byte-identical to exhaustive scoring.
+class LexTopKPruner
+{
+public:
+    LexTopKPruner( std::size_t pruneTopK, const std::vector<char>* alwaysExact, const LexBm25Stats& st, const DedupedQueryTerms& dedup,
+                   const std::vector<char>& termKept )
+        : topK_( std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr ? pruneTopK : 0 ), alwaysExact_( alwaysExact )
+    {
+        if( topK_ == 0 )
+        {
+            return;
+        }
+        heap_.reserve( topK_ );
+        const std::size_t uniqueCount = st.dfreq.size();
+        std::vector<int>  occCount( uniqueCount, 0 );
+        for( const std::size_t u : dedup.uniqueIndexOfQtok )
+        {
+            if( u != DedupedQueryTerms::kDroppedTerm )   // capped past kMaxUniqueQueryTerms — owns no row, no contribution
+            {
+                ++occCount[u];
+            }
+        }
+        capOcc_.assign( uniqueCount, 0.0 );
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            if( st.dfreq[u] + st.dfOut[u] == 0 || termKept[u] == 0 )
+            {
+                continue; // never contributes anywhere — a suppressed term's cap stays 0, and a cap of
+                          // 0 bounds a contribution of 0, so the MaxScore proof above is unchanged
+            }
+            // the larger of the two roles' idf bounds the contribution; a role no unit carrying u plays contributes 0
+            const double idfIn  = st.dfreq[u] > 0 ? st.idfCounted[u] : 0.0;
+            const double idfAll = st.dfOut[u] > 0 ? st.idfRanked[u] : 0.0;
+            const double idf    = std::max( idfIn, idfAll );
+            const double cap1   = bm25ImpactBound( idf, double( st.tfMaxOf[u] ), st.params );   // A4: shared bound, same (k1,b)
+            capOcc_[u]          = cap1 * double( occCount[u] );
+        }
+    }
+
+    // true iff unit i provably cannot enter the top-K: its bound (adds only, fixed u-ascending order) is below θ
+    bool skips( std::uint32_t i, const int* tfRow ) const
+    {
+        if( topK_ == 0 || ( alwaysExact_ && i < alwaysExact_->size() && ( *alwaysExact_ )[i] != 0 ) )
+        {
+            return false;
+        }
+        double ub = 0.0;
+        for( std::size_t u = 0; u < capOcc_.size(); ++u )
+        {
+            if( tfRow[u] > 0 )
+            {
+                ub += capOcc_[u];
+            }
+        }
+        return ub < theta_;
+    }
+
+    void record( double sc )
+    {
+        if( topK_ == 0 )
+        {
+            return;
+        }
+        if( heap_.size() < topK_ )
+        {
+            heap_.push_back( sc );
+            std::push_heap( heap_.begin(), heap_.end(), std::greater<double>{} );
+            theta_ = heap_.size() == topK_ ? heap_.front() : theta_;
+            return;
+        }
+        if( sc > heap_.front() )
+        {
+            std::pop_heap( heap_.begin(), heap_.end(), std::greater<double>{} );
+            heap_.back() = sc;
+            std::push_heap( heap_.begin(), heap_.end(), std::greater<double>{} );
+            theta_ = heap_.front();
+        }
+    }
+
+private:
+    std::size_t              topK_;
+    const std::vector<char>* alwaysExact_;
+    std::vector<double>      capOcc_;
+    std::vector<double>      heap_;              // min-heap over exact final scores
+    double                   theta_ = -1.0;      // scores are ≥ 0 ⇒ no skips until K units scored
+};
+
+// The exact BM25 score of every candidate the pruner does not rule out — the historical expressions in the historical
+// order (one contribution PER query occurrence, ascending qi; a kept term only, and termKept is all-1 disarmed). Every
+// other unit keeps the +0.0f the vector starts with, which is exactly what exhaustive scoring computes for it:
+//   - a non-candidate has no tf > 0 for any term, so its sum is +0.0, and the Section ×0.30 and the §P4 tier multiplier
+//     keep it +0.0 because every multiplier is in (0,1] (filter.h rankTierSymbolMultipliersShaped; the DASSERT below);
+//   - a kRankFlagNotLexRanked unit (model.h) scores 0;
+//   - a pruned unit provably cannot enter the top-K the caller consumes (LexTopKPruner).
+// So the exhaustive mode needs no loop of its own: it is this loop with a pruner that never skips.
+inline std::vector<float> scoreLexCandidates( const IngestResult& ing, const LexTermTfTable& table, const LexBm25Stats& st, const LexCorpusRoles& roles,
+                                              const DedupedQueryTerms& dedup, const std::vector<char>& termKept, LexTopKPruner& pruner,
+                                              const std::vector<float>* symbolScoreMul )
+{
+    DASSERT( symbolScoreMul == nullptr || std::ranges::all_of( *symbolScoreMul, []( float mul ) { return mul > 0.f && mul <= 1.f; } ),
+             "a tier multiplier outside (0,1] would score a non-candidate unit other than +0.0f and break the MaxScore bound" );
+    const std::vector<std::size_t>& uniqueIndexOfQtok = dedup.uniqueIndexOfQtok;
+    const std::vector<int>&         dl                = table.dl;
+    const double                    k1 = st.params.k1, b = st.params.b;
+    std::vector<float>              score( dl.size(), 0.f );
+    for( const std::uint32_t i : st.candidateIds )
+    {
+        const int* tfRow = table.row( i );
+        if( roles.isUnranked( i ) || pruner.skips( i, tfRow ) )
+        {
+            continue;
+        }
+        const bool   outI = roles.isStatsOut( i );
+        const double avgI = st.avgdlOf( outI );
+        double sc = 0;
+        for( std::size_t qi = 0; qi < uniqueIndexOfQtok.size(); ++qi )
+        {
+            const std::size_t u  = uniqueIndexOfQtok[qi];
+            if( u == DedupedQueryTerms::kDroppedTerm )
+            {
+                continue;               // capped past kMaxUniqueQueryTerms — owns no row, no contribution
+            }
+            const int         tf = tfRow[u];
+            if( tf == 0 || termKept[u] == 0 )
+            {
+                continue; // old: docs[i].find( qt ) == end — termKept is all-1 disarmed, so this is that
+            }
+            const double idf = st.idfOf( u, outI );
+            sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
+        }
+        // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
+        // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
+        if( ing.symbols[i].kind == SymKind::Section )
+        {
+            sc *= 0.30;
+        }
+        if( symbolScoreMul && i < symbolScoreMul->size() )
+        {
+            sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight — shrink-only, bound-safe
+        }
+        score[i] = float( sc );
+        pruner.record( sc );
+    }
+    return score;
+}
+
+// BM25 score of `query` against each symbol's doc (name subtokens + callees' names + DOC-COMMENT & BODY
+// text). Returns a per-symbol score vector (size = symbols.size()). Cold path: one query. The steps above, in order.
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
@@ -479,20 +1664,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                                                const std::vector<char>* statsOut = nullptr )   // units scored but kept OUT of the corpus statistics
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
-    const std::size_t S = ing.symbols.size();
-    // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
-    // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
-    const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
-    { return ( statsOut != nullptr && i < statsOut->size() && ( *statsOut )[i] != 0 ) ? 0 : 1; };
-    std::size_t statsS = S;
-    if( statsOut != nullptr )
-    {
-        statsS = 0;
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            statsS += std::size_t( statsWeight( i ) );
-        }
-    }
+    const std::size_t    S     = ing.symbols.size();
+    const LexCorpusRoles roles = assignLexCorpusRoles( ing, statsOut );
 
     // query subtokens — occurrence order preserved (BM25 adds one contribution PER occurrence, as before);
     // an empty query scores exactly 0 everywhere (0.0 survives the Section down-weight unchanged)
@@ -504,996 +1677,44 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             *evidenceOut             = LexTermEvidence{};
             evidenceOut->symbolCount = S;
-            evidenceOut->statsCount  = S;
+            evidenceOut->statsCount  = S;   // no term, so no idf ever reads it
         }
         return std::vector<float>( S, 0.f );
     }
 
     // dedupe to the unique terms whose statistics we need — a duplicated query word must not double-count
     // tf, but still contributes once PER OCCURRENCE in the scoring loop (uniqueIndexOfQtok maps back) —
-    // capped (see dedupeQueryTerms above) so a pathologically term-rich query cannot blow up tfFlat's S×terms
-    // allocation below.
-    DedupedQueryTerms         dedup = dedupeQueryTerms( qToks, kMaxUniqueQueryTerms );
-    std::vector<std::string>& uniqueToks         = dedup.uniqueToks;
-    std::vector<std::size_t>& uniqueIndexOfQtok  = dedup.uniqueIndexOfQtok;
-    const std::size_t         uniqueCount        = uniqueToks.size();
+    // capped (see dedupeQueryTerms above) so a pathologically term-rich query cannot blow up the tf table's
+    // S×terms allocation below.
+    const DedupedQueryTerms        dedup     = dedupeQueryTerms( qToks, kMaxUniqueQueryTerms );
+    const std::vector<LexMatchTok> matchToks = buildLexMatchTable( dedup.uniqueToks );
+    LexMatchTfTable                fields( S, matchToks, dedup.uniqueToks.size(), termMarginFromEnv() );
 
-    // ── LB-3 arm S: conservative query-side stem variants ─────────────────────────────────────────────
-    // A plural/participle query token ("splits", "resolved", "hoisting") cannot exact-match the singular
-    // subtoken a compound name carries (SplitChunksPlugin → split; resolve.h → resolve) — the measured
-    // LB-3 anatomy (bench/r7 + r8, three independent confirmations). Variants are QUERY-side only and
-    // score into the ORIGINAL token's tf/idf row, so corpus stats and the cache format are untouched.
-    // ONE shared table drives the scan branch, the persisted-stats branch, and every field pass —
-    // parity by construction (test/postingscheck.sh; armed arm in test/lb3namecheck.sh). A variant
-    // string already claimed by an earlier token (or equal to any exact token) is dropped, first-wins,
-    // so a doc token maps to exactly one row in either branch. RIPWIRE_QSTEM=1 arms it; the shipped
-    // default stays OFF until the LB-3 acceptance verdict (scratchpad lb3/preregistration.md) lands.
-    struct LexMatchTok
-    {
-        std::string   tok;
-        std::uint32_t u;
-    };
-    std::vector<LexMatchTok> matchToks;
-    matchToks.reserve( uniqueCount * 2 );
-    for( std::size_t u = 0; u < uniqueCount; ++u )
-    {
-        matchToks.push_back( { uniqueToks[u], std::uint32_t( u ) } );
-    }
-    {
-        const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
-        const bool  qstemOn  = qstemEnv != nullptr && *qstemEnv == '1';
-        // derived variants are CANDIDATES first: admission into the match table happens only after the
-        // IDF guard below — the guard sees the deduped candidate set, never the user's exact tokens
-        std::vector<LexMatchTok> stemCandidates;
-        const auto  pushVariant = [ & ]( std::string v, std::uint32_t u )
-        {
-            if( v.size() < 3 )
-            {
-                return;                                        // sub-3-byte stems are noise, frozen rule
-            }
-            for( const LexMatchTok& mt : matchToks )
-            {
-                if( mt.tok == v )
-                {
-                    return;                                    // first-wins: string already claimed
-                }
-            }
-            for( const LexMatchTok& cand : stemCandidates )
-            {
-                if( cand.tok == v )
-                {
-                    return;                                    // first-wins among candidates too
-                }
-            }
-            stemCandidates.push_back( { std::move( v ), u } );
-        };
-        const auto isConsonant = []( char c )
-        {
-            return c >= 'a' && c <= 'z' && c != 'a' && c != 'e' && c != 'i' && c != 'o' && c != 'u';
-        };
-        if( qstemOn )
-        {
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                const std::string& t    = uniqueToks[u];
-                const std::size_t  L    = t.size();
-                const auto         ends = [ & ]( std::string_view suf )
-                { return L >= suf.size() && t.compare( L - suf.size(), suf.size(), suf ) == 0; };
-                if( ends( "s" ) && !ends( "ss" ) && L >= 4 )
-                {
-                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // splits → split
-                    if( ends( "es" ) && L >= 5 )
-                    {
-                        pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );      // classes → class
-                    }
-                }
-                if( ends( "ed" ) && L >= 5 )
-                {
-                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // resolved → resolve
-                    pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );          // parsed → pars (rarely useful, harmless)
-                    if( L >= 6 && t[L - 3] == t[L - 4] && isConsonant( t[L - 3] ) )
-                    {
-                        pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );      // flagged → flag
-                    }
-                }
-                if( ends( "ing" ) && L >= 6 )
-                {
-                    pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );                // hoisting → hoist
-                    pushVariant( t.substr( 0, L - 3 ) + "e", std::uint32_t( u ) );          // caching → cache
-                    if( L >= 7 && t[L - 4] == t[L - 5] && isConsonant( t[L - 4] ) )
-                    {
-                        pushVariant( t.substr( 0, L - 4 ), std::uint32_t( u ) );            // running → run
-                    }
-                }
-            }
-        }
-        // ── IDF guard, rung R3 (LB-3 retry, scratchpad lb3retry/preregistration.md) ──────────────────
-        // The un-guarded round measured the failure: a corpus-common variant ("split" on webpack) hands
-        // its term-frequency mass to every competitor whose doc/body rides the same subtoken, displacing
-        // currently-hit truths (EVALS §7) — and the mass is BODY frequency (`.split()` call sites), which
-        // is why the name-carrier bound (rungs R1/R2) measured too low to catch it. So every candidate
-        // enters the match table PROVISIONALLY, owning its own tf column (m ≥ uniqueCount); admission is
-        // decided AFTER pass 2, when both scoring branches have measured the variant's doc/body document
-        // frequency as the SAME integers (postings rows on the rich path, the scan's own counts on the
-        // lean path — parity by construction), and only a corpus-rare variant (df ≤ max(8, S/64)) is
-        // folded into its original token's row; a common one is discarded untouched. The guard never
-        // sees a user's EXACT query token — only derived variants — so it structurally cannot drop a
-        // truth's own carrier (the LB-1 IDF-floor failure).
-        for( LexMatchTok& cand : stemCandidates )
-        {
-            matchToks.push_back( std::move( cand ) );
-        }
-    }
-    const std::size_t matchCount = matchToks.size();
+    // the fields, weakest dependence first: name + callee (pass 1), path (1.5) and basename (1.6) need no file text,
+    // so they run before the pass-2 source split; then doc-comment + body (pass 2) from whichever source the ingest has
+    addNameAndCalleeFieldsCapturingNameHits( fields, ing, outOff, outTargets, roles, evidenceOut );
+    addPathField( fields, ing, fieldWeightOrEnv( pathFieldDefaultW, "RIPWIRE_PATHTOK_W" ), pathRootPrefix );
+    addBasenameField( fields, ing, fieldWeightOrEnv( basenameFieldDefaultW, "RIPWIRE_BASENAME_W" ), pathRootPrefix );
+    addDocBodyFields( fields, ing );
 
-    // P2-3: build the head mask + length buckets for THIS query's match table (see LexHeadIndex above).
-    const auto         matchTokOf = [ & ]( std::size_t m ) -> const std::string& { return matchToks[m].tok; };
-    const LexHeadIndex headIndex  = buildLexHeadIndex( matchCount, matchTokOf );
-
-    // per-doc integer stats (SoA): dl[i] = weighted subtoken count, tfFlat[i*matchCount+m] = weighted term
-    // frequency of match-table row m in doc i. Disarmed, matchCount == uniqueCount and the layout is the
-    // historical one byte-for-byte; armed, provisional variant columns sit at m ≥ uniqueCount until the
-    // post-pass-2 guard folds the admitted ones and the array shrinks back to uniqueCount stride.
-    std::vector<int> dl( S, 0 );
-    std::vector<int> tfFlat( S * matchCount, 0 );
-
-    // Field weights: a query term in a symbol's NAME outranks one in its DOC-COMMENT, which outranks one
-    // buried in its BODY — so an exactly-named function beats a struct that merely mentions the word, and an
-    // algorithm beats a comment-dense enum (the "keyword magnet" the review flagged). BM25 tf accumulates
-    // these weighted contributions; dl is weighted to match, so length normalization stays consistent.
-    // Doc/body weights are the SHARED constants (lexindex.h) — the index-time stats builder must weigh
-    // those two fields identically or the postings path would diverge from this scan.
-    constexpr int kwName = 3, kwCallee = 1, kwDoc = kLexWeightDoc, kwBody = kLexWeightBody;
-
-    // stream one field through the ONE shared state machine (lexindex.h forEachLexSubtoken — the same
-    // tokenizer subtokens() mirrors and the B0.2 index-time builder uses): a token is a maximal
-    // alphanumeric run between separators, cut at a lower/digit → Upper transition and at the ACRONYMWord
-    // seam. Tokens shorter than 2 bytes are dropped, exactly like subtokens().
-    // No strings, no maps — just in-place span-vs-query compares. Since 2026-08-19 an all-caps run survives
-    // as ONE token, so a span's INTERIOR bytes can be uppercase and memcmp alone would miss it; the memcmp
-    // stays as the fast path (it resolves every ordinary identifier token) and only a span already agreeing
-    // on length AND head falls through to lexTokenEqualsLowered — the rare acronym case, arm D's seam.
-    const auto scanTextInto = [ & ]( int* tfRow, int& wtAccum, std::string_view text, int w )
-    {
-        int fieldTokenWt = 0;
-        forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
-        {
-            const std::size_t tokLen = tokEndByte - tokStartByte;
-            if( tokLen < 2 )
-            {
-                return;
-            }
-            fieldTokenWt += w;
-            const std::size_t m = headIndex.matchRow( text.data() + tokStartByte, tokLen, matchTokOf );
-            if( m != LexHeadIndex::kNoRow )
-            {
-                tfRow[m] += w;                        // exact tokens own rows 0..uniqueCount (m == u there)
-            }
-        } );
-        wtAccum += fieldTokenWt;
-    };
-    const auto scanField = [ & ]( std::size_t docIndex, std::string_view text, int w )
-    {
-        scanTextInto( tfFlat.data() + docIndex * matchCount, dl[ docIndex ], text, w );
-    };
-
-    // ── SIRA term margin (docs/EVALS.md "Corpus-statistics term margin", PRE-REGISTERED 2026-09-05) ──
-    // Arming only. The decision itself needs corpus statistics that do not exist until after pass 2, so
-    // it lives below the fold; all that happens here is the extra field statistic the decision reads.
-    // marginBits is the k of "a term separates iff idf_u >= k * ln 2", k = 1 being the shipped rule and
-    // the only rung this round may ship (the ladder is frozen in the registration). Disarmed, every
-    // branch this flag guards is skipped and the scorer is the historical one byte-for-byte.
-    const int  marginBits  = []
-    {
-        const char* env = std::getenv( "RIPWIRE_TERMMARGIN" );
-        if( env == nullptr || *env == '0' )
-        {
-            return 0;
-        }
-        const std::optional<int> bits = envKnob<int>( "RIPWIRE_TERMMARGIN_BITS" );
-        return bits ? std::clamp( *bits, 1, 8 ) : 1;
-    }();
-    const bool marginArmed = marginBits > 0;
-
-    // nameDf[m] = symbols whose NAME FIELD ALONE carries match-table row m. This is the statistic the
-    // LB-1 negative is the reason for: that round's IDF floor read document frequency only, and so
-    // deleted `module` — the truth's OWN name carrier — on a corpus where `module` is everywhere in
-    // bodies. A term that names between 1 and S/2 symbols separates on the field ripwire weights
-    // highest (×3) whatever its body mass says, and is kept. Measured HERE, inside pass 1, because
-    // this is the only point at which the name field's contribution is separable from the callee, doc,
-    // body, path and basename fields that follow — and because pass 1 runs before the pass-2 branch
-    // split, so the scan and persisted-stats paths read the identical integers.
-    std::vector<int> nameDf( marginArmed ? matchCount : 0, 0 );
-    // L-W: the name-field mask is separable ONLY here — the callee, path, doc and body fields land in the
-    // same tf row from the next statement on (the nameDf comment below says the same thing for its count).
-    const std::size_t evidenceWords = ( uniqueCount + 63 ) / 64;
+    // what the corpus statistics decide: which stem variants stay (the fold leaves one row per query term), then
+    // which query terms separate
+    const std::vector<char> admitted = admitRareStemVariants( fields, roles.rankedCount );
+    const LexTermTfTable    terms    = std::move( fields ).foldAdmittedVariants( admitted );
     if( evidenceOut )
     {
-        evidenceOut->maskWords = evidenceWords;
-        evidenceOut->nameMask.assign( S * evidenceWords, 0u );
+        recordTermEvidence( *evidenceOut, terms, roles, dedup );
     }
+    const std::vector<char> termKept = judgeTermMargins( terms, roles, dedup.uniqueToks );
 
-    // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        scanField( i, ing.symbols[i].name, kwName );
-        if( evidenceOut )
-        {
-            const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
-            std::uint64_t*   words   = evidenceOut->nameMask.data() + i * evidenceWords;
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                if( nameRow[u] > 0 )
-                {
-                    words[ u / 64 ] |= std::uint64_t( 1 ) << ( u % 64 );
-                }
-            }
-        }
-        if( marginArmed )
-        {
-            const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
-            for( std::size_t m = 0; m < matchCount; ++m )
-            {
-                nameDf[m] += nameRow[m] > 0 ? 1 : 0;
-            }
-        }
-        for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
-        {
-            scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee );
-        }
-    }
-
-    // pass 1.5 — path field (×kwPath): the symbol's file path scanned through the SAME state machine.
-    // pathFieldDefaultW is the CALLER's lens decision: the RECALL lens (docs) passes 1 — a query naming a
-    // "readme" / "report" / "paired table" should be able to hit the doc whose PATH says exactly that, and
-    // bench/recalleval/ is the instrument that measured the +0.03 lenient-MRR / doc-sibling recovery this
-    // buys (2026-08-03, gate: test/recallevalcheck.sh). The CODE lenses (--for and friends) still pass 0:
-    // a nonzero default THERE requires the pre-registered locbench acceptance gate
-    // (bench/locbench/results/r3_pathtok/PREREG.md), unchanged. RIPWIRE_PATHTOK_W overrides either default
-    // for calibration sweeps only. Paths need no file text, so the pass sits before the branch below and
-    // runs identically over the scan and persisted-stats paths — postings parity holds by construction and
-    // the cache format is untouched.
-    //
-    // R-R RANKING (2026-08-25): the scanned string is the ROOT-RELATIVE VIEW, never ing.files[f] itself,
-    // which stays absolute because the emission lane proved it must (g.canonId, Regression::key, every
-    // pathQualifiedKey and the ingest cache's reAbsolutize all key off it). Scanning it verbatim indexed
-    // every directory ABOVE the corpus as corpus vocabulary — and a directory that spelled a query word
-    // then matched EVERY document and collapsed that word's idf — so two clones of ONE commit at different
-    // checkout depths ranked --recall differently: 11 of 42 frozen queries reordered, 5 of them returning a
-    // different SET of documents (registered + measured in docs/EVALS.md; test/recallrankdepthcheck.sh).
-    //
-    // A VIEW, not a move — and the same helper recall.h PRINTS the separator path with, so the scored and
-    // the printed spelling of a file cannot disagree. rootRelativeUri(p, "") returns p bar a leading "./",
-    // exactly what a relative-root run already scanned, which is why this is a CONVERGENCE onto the
-    // already-invariant `ripwire .` rather than a new ranking opinion. Multi-root passes no prefix:
-    // ing.files already hold "<label>/<root-relative>".
-    {
-        int kwPath = pathFieldDefaultW;
-        if( const std::optional<int> pathTokW = envKnob<int>( "RIPWIRE_PATHTOK_W" ) )
-        {
-            kwPath = std::clamp( *pathTokW, 0, 8 );
-        }
-        if( kwPath > 0 )
-        {
-            for( std::size_t i = 0; i < S; ++i )
-            {
-                if( const std::uint32_t f = ing.symbols[i].fileId; f < ing.files.size() )
-                {
-                    scanField( i, rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix ), kwPath );
-                }
-            }
-        }
-    }
-
-    // pass 1.6 — LB-3 arm B: basename-only field (×kwBase). The r3_pathtok retry, narrowed per that
-    // round's own rejection note (bench/locbench/results/r3_pathtok/PREREG.md): FULL paths lost
-    // held-out to generic-directory noise, so only the basename is scanned, and the scan is amortized
-    // per FILE (each basename tokenized once, its row added per symbol) honoring r3's "amortize
-    // first". Needs no file text → runs before the pass-2 branch split; parity and the cache format
-    // untouched. RIPWIRE_BASENAME_W (0..8) overrides basenameFieldDefaultW; a nonzero shipped default
-    // requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh).
-    //
-    // R-R: takes the same root-relative view as pass 1.5. PROVABLY a no-op here — the basename is whatever
-    // follows the last '/', which the root prefix cannot change — and applied anyway so the two path passes
-    // cannot drift apart. One reading of ing.files[f], one rule; a future reader who changes one pass finds
-    // the other already agreeing rather than discovering half the path tokenization was still absolute.
-    {
-        int kwBase = basenameFieldDefaultW;
-        if( const std::optional<int> baseW = envKnob<int>( "RIPWIRE_BASENAME_W" ) )
-        {
-            kwBase = std::clamp( *baseW, 0, 8 );
-        }
-        if( kwBase > 0 )
-        {
-            const std::size_t fileCount = ing.files.size();
-            std::vector<int>  fileTf( fileCount * matchCount, 0 );
-            std::vector<int>  fileWt( fileCount, 0 );
-            for( std::size_t f = 0; f < fileCount; ++f )
-            {
-                const std::string_view path = rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix );
-                const std::size_t      cut  = path.find_last_of( '/' );
-                const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
-                scanTextInto( fileTf.data() + f * matchCount, fileWt[f], base, kwBase );
-            }
-            for( std::size_t i = 0; i < S; ++i )
-            {
-                const std::uint32_t f = ing.symbols[i].fileId;
-                if( f >= fileCount || fileWt[f] == 0 )
-                {
-                    continue;
-                }
-                int* const       tfRow = tfFlat.data() + i * matchCount;
-                const int* const fRow  = fileTf.data() + std::size_t( f ) * matchCount;
-                for( std::size_t m = 0; m < matchCount; ++m )
-                {
-                    tfRow[m] += fRow[m];
-                }
-                dl[i] += fileWt[f];
-            }
-        }
-    }
-
-    // per-variant doc/body document frequency, measured by whichever pass-2 branch runs — the guard's
-    // admission signal (rung R3). Both branches accumulate the same integers, so admission is identical.
-    const std::size_t          variantCount = matchCount - uniqueCount;
-    std::vector<std::uint32_t> dfVariant( variantCount, 0u );
-
-    // pass 2 — doc-comment (×kwDoc) + body (×kwBody) evidence.
-    //
-    // B0.2 (R1 hypothesis #1): a RICH ingest carries per-symbol weighted subtoken statistics built ONCE at
-    // parse/cache time — from the SAME byte spans through the SAME state machine — so the per-query work
-    // here is pure lookups: no file re-read, no corpus re-tokenize (the O(corpus-bytes) per-query term is
-    // gone). The stored dl/tf values are the exact integers the scan branch would accumulate, and the float
-    // scoring loop below is shared, so the two branches are byte-identical (test/postingscheck.sh).
-    if( ing.hasLexStats && ing.lexTokenRowOffsets.size() == S + 1 && ing.lexDocBodyDl.size() == S )
-    {
-        PROFILE_SCOPE_DESCRIBE( "lexical: pass 2 via persisted subtoken stats (cached tf/dl, no corpus re-tokenize)" );
-
-        // dl first: BM25 length normalization needs EVERY doc's weighted length whether or not it matches
-        // the query (avgdl sums them all), so this runs unconditionally — exact stored integers.
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            dl[i] += int( ing.lexDocBodyDl[i] );
-        }
-
-        // query-token hashes — the same normalized-lowercase hash index time used, over the FULL match
-        // table (exact tokens + LB-3 stem variants), each hash mapped to its own tf ROW (a variant's tf
-        // lands in its provisional column; the post-pass-2 guard decides whether it folds into the
-        // original token's row) — the same row targeting the scan branch's table walk applies.
-        // try_emplace keeps the FIRST entry on the astronomically-unlikely 64-bit collision between two
-        // DISTINCT table strings, so both transfer strategies below agree deterministically.
-        std::vector<std::uint64_t>            matchHash( matchCount );
-        HashMap<std::uint64_t, std::uint32_t> rowIndexOfHash;
-        rowIndexOfHash.reserve( matchCount );
-        for( std::size_t m = 0; m < matchCount; ++m )
-        {
-            matchHash[m] = lexSubtokenHash( matchToks[m].tok.data(), matchToks[m].tok.size() );
-            rowIndexOfHash.try_emplace( matchHash[m], std::uint32_t( m ) );
-        }
-
-        // B0.1 per-file pre-filter: skip a whole file's tf walks when its 512-bit signature excludes every
-        // query subtoken — no false negatives (dl above is already complete; tf for such a file is provably
-        // zero), and a false positive just walks the cheap stats rows. Symbol ids are file-contiguous
-        // (assigned in fileId,line,name order), so the test amortizes to one signature check per file.
-        const bool    useFileSig       = ing.lexFileSig.size() == ing.files.size() * kLexFileSigWords;
-        std::uint32_t lastFileId       = kNoNode;
-        bool          lastFileMayMatch = true;
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            const std::uint32_t rowBegin = ing.lexTokenRowOffsets[i];
-            const std::uint32_t rowEnd   = ing.lexTokenRowOffsets[ i + 1 ];
-            if( rowBegin == rowEnd )
-            {
-                continue; // no doc/body tokens → nothing to transfer
-            }
-
-            // one membership probe per FILE against the query's subtoken bits (B0.1)
-            if( const std::uint32_t f = ing.symbols[i].fileId; useFileSig && f < ing.files.size() )
-            {
-                if( f != lastFileId )
-                {
-                    lastFileId       = f;
-                    lastFileMayMatch = false;
-                    const std::uint64_t* sig = ing.lexFileSig.data() + std::size_t( f ) * kLexFileSigWords;
-                    for( std::size_t m = 0; m < matchCount && !lastFileMayMatch; ++m )
-                    {
-                        if( sig[lexSigWord( matchHash[m] )] & lexSigBit( matchHash[m] ) )
-                        {
-                            lastFileMayMatch = true;
-                        }
-                    }
-                }
-                if( !lastFileMayMatch )
-                {
-                    continue;
-                }
-            }
-
-            // exact tf transfer — walk whichever side is smaller: probe the query map per stored token, or
-            // binary-search each DISTINCT query hash in the symbol's sorted row. Identical sums either way
-            // (the map dedupes hash-colliding query tokens for both strategies).
-            int* const           tfRow   = tfFlat.data() + i * matchCount;
-            const std::uint64_t* rowHash = ing.lexTokenHashes.data();
-            if( std::size_t( rowEnd - rowBegin ) <= matchCount * 8 )       // ~log2(row) probes vs one map probe per entry
-            {
-                for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
-                {
-                    if( const auto it = rowIndexOfHash.find( rowHash[e] ); it != rowIndexOfHash.end() )
-                    {
-                        tfRow[ it->second ] += int( ing.lexTokenTfs[e] );
-                        if( it->second >= uniqueCount )
-                        {
-                            ++dfVariant[ it->second - uniqueCount ];       // stored rows hold each hash once → one df bump per symbol
-                        }
-                    }
-                }
-            }
-            else
-            {
-                for( const auto& [ hash, m ] : rowIndexOfHash )            // iteration order is score-irrelevant: rows are disjoint per HASH (+= commutes)
-                {
-                    const std::uint64_t* lo = rowHash + rowBegin;
-                    const std::uint64_t* hi = rowHash + rowEnd;
-                    if( const std::uint64_t* it = std::lower_bound( lo, hi, hash ); it != hi && *it == hash )
-                    {
-                        tfRow[m] += int( ing.lexTokenTfs[ std::size_t( it - rowHash ) ] );
-                        if( m >= uniqueCount )
-                        {
-                            ++dfVariant[ m - uniqueCount ];
-                        }
-                    }
-                }
-            }
-        }
-    }
-    else
-    {
-        // scan branch (lean ingests, --no-cache lean verbs, multi-root merges, stubs): CSR file→symbol
-        // index, then stream ONE file at a time touching only that file's symbols — peak memory is a single
-        // file's text, not the whole corpus held at once (symbol order within a file is irrelevant: integer
-        // counts commute exactly).
-        const std::size_t          fileCount = ing.files.size();
-        std::vector<std::uint32_t> fileRowOffsets( fileCount + 1, 0 );
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            if( ing.symbols[i].fileId < fileCount )
-            {
-                ++fileRowOffsets[ing.symbols[i].fileId + 1];
-            }
-        }
-        for( std::size_t f = 0; f < fileCount; ++f )
-        {
-            fileRowOffsets[f + 1] += fileRowOffsets[f];
-        }
-        std::vector<std::uint32_t> fileSymbolIds( fileRowOffsets[ fileCount ] );
-        {
-            std::vector<std::uint32_t> writeCursor( fileRowOffsets.begin(), fileRowOffsets.end() - 1 );
-            for( std::size_t i = 0; i < S; ++i )
-            {
-                if( ing.symbols[i].fileId < fileCount )
-                {
-                    fileSymbolIds[writeCursor[ing.symbols[i].fileId]++] = std::uint32_t( i );
-                }
-            }
-        }
-        // Files stream across a small worker pool: each worker holds ONE file's text at a time, and a file's
-        // symbols are touched only by the worker that claimed the file — every dl[i] / tfFlat row has exactly
-        // ONE writer (no locks needed). Determinism: all pooled writes are exact integer counts and the float
-        // scoring below stays single-threaded in doc order, so worker scheduling cannot change a byte of
-        // output (no cross-doc float reductions — the det-gate rule).
-        // per-(file, variant) doc/body df tallies — a file's tally has exactly ONE writer (the worker
-        // that claimed the file), merged single-threaded below in file order; integer sums commute, so
-        // worker scheduling cannot change the totals (the det-gate rule). Sized only when armed.
-        std::vector<std::uint32_t> dfPerFile( variantCount > 0 ? fileCount * variantCount : 0, 0u );
-        const auto scanFileSymbols = [ & ]( std::size_t f, const std::string& src )
-        {
-            const std::string_view sv = src;
-            std::vector<int>       variantTfBefore( variantCount );
-            for( std::uint32_t r = fileRowOffsets[f]; r < fileRowOffsets[ f + 1 ]; ++r )
-            {
-                const std::size_t i         = fileSymbolIds[r];
-                const Symbol&     s         = ing.symbols[i];
-                const std::size_t bodyStart = std::min<std::size_t>( s.sigStartByte, src.size() );
-                const std::size_t end       = std::min<std::size_t>( s.endByte, src.size() );
-                const std::size_t docStart  = docCommentStart( src, bodyStart );
-                if( variantCount > 0 )                 // snapshot the variant columns: df must count ONLY
-                {                                      // pass-2 (doc/body) growth, never pass-1 name/callee tf
-                    const int* tfRow = tfFlat.data() + i * matchCount + uniqueCount;
-                    std::copy( tfRow, tfRow + variantCount, variantTfBefore.begin() );
-                }
-                if( bodyStart > docStart )
-                {
-                    scanField( i, sv.substr( docStart, bodyStart - docStart ), kwDoc );
-                }
-                if( end > bodyStart )
-                {
-                    scanField( i, sv.substr( bodyStart, end - bodyStart ), kwBody );
-                }
-                if( variantCount > 0 )
-                {
-                    const int* tfRow = tfFlat.data() + i * matchCount + uniqueCount;
-                    for( std::size_t v = 0; v < variantCount; ++v )
-                    {
-                        if( tfRow[v] > variantTfBefore[v] )
-                        {
-                            ++dfPerFile[ f * variantCount + v ];
-                        }
-                    }
-                }
-            }
-        };
-        std::atomic<std::size_t> nextFileIndex { 0 };
-        const auto               fileWorker = [ & ]() noexcept
-        {
-            try
-            {
-                std::string loadedText;
-                for( std::size_t f = nextFileIndex.fetch_add( 1 ); f < fileCount; f = nextFileIndex.fetch_add( 1 ) )
-                {
-                    if( fileRowOffsets[f] == fileRowOffsets[f + 1] )
-                    {
-                        continue; // no symbols in this file → skip
-                    }
-                    const std::string* src = lexicalScanText( ing, f, loadedText );
-                    if( src != nullptr && !src->empty() )
-                    {
-                        scanFileSymbols( f, *src );   // unreadable/empty → degrade (skip), as before
-                    }
-                }
-            }
-            catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial counts instead
-            {
-                rw::emitRaw( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
-            }
-        };
-        const std::size_t hwThreadCount = std::thread::hardware_concurrency();
-        const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, fileCount ? fileCount : 1, std::size_t( 16 ) } );
-        if( workerCount <= 1 )
-        {
-            fileWorker();
-        }
-        else
-        {
-            // symmetric bare scope: workers live exactly as long as the pooled scan
-            std::vector<std::thread> workers;
-            workers.reserve( workerCount );
-            for( std::size_t w = 0; w < workerCount; ++w )
-            {
-                workers.emplace_back( fileWorker );
-            }
-            for( std::thread& worker : workers )
-            {
-                worker.join();
-            }
-        }
-        for( std::size_t f = 0; f < fileCount && variantCount > 0; ++f )   // deterministic df merge, file order
-        {
-            for( std::size_t v = 0; v < variantCount; ++v )
-            {
-                dfVariant[v] += dfPerFile[ f * variantCount + v ];
-            }
-        }
-    }
-
-    // ── IDF-guard admission + fold (rung R3) — runs identically after EITHER pass-2 branch ──────────
-    // A variant whose doc/body document frequency is corpus-common (df > max(8, S/64)) is discarded:
-    // its provisional column is simply never folded, so its evidence — name, callee, path, basename,
-    // doc, body — vanishes without touching dl (document length counts all subtokens scanned, never
-    // matches). An admitted (corpus-rare) variant folds its column into the original token's row, the
-    // exact integers the un-guarded arm would have accumulated there. The array then shrinks back to
-    // uniqueCount stride, and everything below — corpus stats, both scoring branches — is untouched
-    // code operating on the historical layout.
-    if( variantCount > 0 )
-    {
-        const std::uint32_t sOver64    = std::uint32_t( S / 64 );
-        const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
-        if( std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr )
-        {
-            for( std::size_t v = 0; v < variantCount; ++v )
-            {
-                rw::emitTo( stderr, "qstem-guard: \"{}\" df={} cap={} {}\n",
-                              matchToks[ uniqueCount + v ].tok.c_str(), dfVariant[v], variantCap,
-                              dfVariant[v] <= variantCap ? "admitted" : "rejected" );
-            }
-        }
-        std::vector<int> tfFolded( S * uniqueCount, 0 );
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            const int* const src = tfFlat.data() + i * matchCount;
-            int* const       dst = tfFolded.data() + i * uniqueCount;
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                dst[u] = src[u];
-            }
-            for( std::size_t v = 0; v < variantCount; ++v )
-            {
-                if( dfVariant[v] <= variantCap )
-                {
-                    dst[ matchToks[ uniqueCount + v ].u ] += src[ uniqueCount + v ];
-                }
-            }
-        }
-        tfFlat = std::move( tfFolded );
-        if( marginArmed )
-        {
-            // fold nameDf the SAME way tf just folded, so the margin test below sees one row per unique
-            // token on either arm. A doc carrying both the exact token and an admitted variant in its
-            // name is counted twice, so a folded nameDf is a CEILING, not a count — stated rather than
-            // hidden. It matters only when RIPWIRE_QSTEM is also armed, which ships off.
-            for( std::size_t v = 0; v < variantCount; ++v )
-            {
-                if( dfVariant[v] <= variantCap )
-                {
-                    nameDf[ matchToks[ uniqueCount + v ].u ] += nameDf[ uniqueCount + v ];
-                }
-            }
-        }
-    }
-
-    // ── L-W: the term evidence, read off the FINAL tf rows (uniqueCount stride, every field, the fold applied)
-    // — one S×U integer scan, the same "tf > 0" fact dfreq counts in both scoring branches below.
-    if( evidenceOut )
-    {
-        evidenceOut->termsSeenTotal = dedup.uniqueSeenTotal;
-        evidenceOut->termsCapped    = dedup.capped;
-        evidenceOut->terms.assign( uniqueToks.begin(), uniqueToks.end() );
-        evidenceOut->df.assign( uniqueCount, 0u );
-        evidenceOut->anyMask.assign( S * evidenceWords, 0u );
-        evidenceOut->symbolCount = S;
-        evidenceOut->statsCount  = statsS;
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            const int* const row   = tfFlat.data() + i * uniqueCount;
-            std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
-            const int        w     = statsWeight( i );
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                if( row[u] > 0 )
-                {
-                    evidenceOut->df[u] += std::uint32_t( w );
-                    words[ u / 64 ] |= std::uint64_t( 1 ) << ( u % 64 );
-                }
-            }
-        }
-    }
-
-    // ── SIRA term margin — the decision (docs/EVALS.md, PRE-REGISTERED 2026-09-05) ────────────────────
-    // A query term earns its contribution by SEPARATING the target from corpus-level confusers, not by
-    // looking relevant. BM25's own idf says when that stops being true: at df = S/2,
-    // idf = ln( (S-n+0.5)/(n+0.5) + 1 ) is exactly ln 2 — one bit, the point at which observing the term
-    // halves the candidate space. Above it the term carries less than a bit and hands its tf mass to
-    // whichever document recites it most, which on a natural-language query ("how does the csrf token
-    // get validated") is the prose, not the answer. This ranker has no query-side stopword list, and a
-    // corpus-statistics margin test is that idea derived from the tree in front of it rather than
-    // written down in English — a Rust corpus's `mut` and a Python corpus's `self` are caught by the
-    // same arithmetic that catches `the`, with nothing language-specific anywhere.
-    //
-    // TWO FIELDS, because ONE field is how the LB-1 negative happened. That round's IDF floor read
-    // document frequency alone and deleted `module` — the truth's own name carrier — flipping a hit to
-    // a miss (docs/EVALS.md §7). A term that names between 1 and S/2 symbols separates on the field
-    // this scorer weights highest, whatever its body mass says, so `separatesName` keeps it. A term
-    // naming NOTHING has no name margin to appeal to; a term naming MORE than half the corpus has no
-    // margin there either.
-    //
-    // THE SOLE-ANCHOR GUARD, and the trap inside it. Suppression is skipped entirely unless a PRESENT,
-    // non-suppressed term survives it — otherwise a query whose every term is corpus-saturating scores
-    // zero everywhere, which is the catastrophic shape, not a ranking. "Present" is load-bearing and is
-    // the subtle half: an ABSENT term (df = 0) has the LARGEST idf in the whole scheme,
-    // ln( (S+0.5)/0.5 + 1 ), so an implementation that asks "did a higher-idf term survive?" without
-    // excluding absent terms reads a typo beside the anchor as excellent evidence and drops the anchor.
-    // Gated: test/termmargincheck.sh arms (b), (c) and (d), each red before this code existed.
-    //
-    // KEPT OR DROPPED, never fractionally weighted. A kept term's contribution is the historical
-    // expression evaluated in the historical order — bit-identical, not merely close — and a dropped
-    // term's impact cap is 0, so the MaxScore bound stays a valid bound and the pruned and exhaustive
-    // branches stay byte-identical to each other. `dl` is untouched: a suppressed term's EVIDENCE
-    // vanishes, the document's length does not, exactly the posture the R3 variant guard already takes.
-    std::vector<char> termKept( uniqueCount, 1 );
-    if( marginArmed )
-    {
-        // df in fixed doc order over the folded rows — the same integers both pass-2 branches produced
-        std::vector<int> dfMargin( uniqueCount, 0 );
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            const int* const tfRow = tfFlat.data() + i * uniqueCount;
-            const int        w     = statsWeight( i );
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                dfMargin[u] += tfRow[u] > 0 ? w : 0;
-            }
-        }
-        // "separates" at k bits: idf_u >= k*ln2  ⇔  (S-n+0.5)/(n+0.5) + 1 >= 2^k  ⇔  n <= (S+0.5)/2^k - 0.5,
-        // which at k = 1 is exactly n <= S/2. Evaluated in doubles from integer inputs, so it is a pure
-        // function of (S, n, k) and cannot vary run to run.
-        const double separationCut = ( double( statsS ) + 0.5 ) / std::exp2( double( marginBits ) ) - 0.5;
-        std::vector<char> suppressible( uniqueCount, 0 );
-        std::size_t       presentCount = 0, survivorCount = 0;
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            if( dfMargin[u] == 0 )
-            {
-                continue;                                          // absent: contributes nothing, survives nothing
-            }
-            ++presentCount;
-            const bool separatesDoc  = double( dfMargin[u] ) <= separationCut;
-            const bool separatesName = nameDf[u] > 0 && double( nameDf[u] ) <= separationCut;
-            suppressible[u]          = ( !separatesDoc && !separatesName ) ? 1 : 0;
-            survivorCount += suppressible[u] == 0 ? 1 : 0;
-        }
-        const bool applySuppression = survivorCount > 0;            // the sole-anchor guard
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            termKept[u] = ( applySuppression && suppressible[u] != 0 ) ? 0 : 1;
-        }
-        if( std::getenv( "RIPWIRE_TERMMARGIN_DEBUG" ) != nullptr )
-        {
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                const char* verdict = "absent";
-                if( dfMargin[u] > 0 )
-                {
-                    if( termKept[u] == 0 )
-                    {
-                        verdict = "SUPPRESSED";
-                    }
-                    else if( !applySuppression && suppressible[u] != 0 )
-                    {
-                        verdict = "kept (sole-anchor)";
-                    }
-                    else if( double( dfMargin[u] ) <= separationCut )
-                    {
-                        verdict = "kept (doc-separates)";
-                    }
-                    else
-                    {
-                        verdict = "kept (name-separates)";
-                    }
-                }
-                rw::emitTo( stderr, "term-margin: \"{}\" df={}/{} nameDf={} bits={} {}\n",
-                              uniqueToks[u].c_str(), dfMargin[u], statsS, nameDf[u], marginBits, verdict );
-            }
-            rw::emitTo( stderr, "term-margin: {} present, {} survive, suppression {}\n",
-                          presentCount, survivorCount, applySuppression ? "applied" : "withheld (sole-anchor)" );
-        }
-    }
-
-    // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
-    // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
-    // statsOut: the counted units' average (the same doc order: identical doubles when every unit counts) scores the
-    // counted units; an OUT unit scores against the whole corpus (avgdlAll, S, its df plus dfOut), as with no statsOut.
-    double avgdl = 0, avgdlAll = 0;
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
-        avgdlAll += dl[i];
-    }
-    avgdl /= double( statsS ? statsS : 1 );
-    avgdlAll /= double( S ? S : 1 );
-    std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
-    const auto       countOut = [ & ]( const int* tfRow )
-    {
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            dfOut[u] += tfRow[u] > 0 ? 1 : 0;
-        }
-    };
-
-    const Bm25Params    bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
-    const double        k1 = bm25Params.k1, b = bm25Params.b;
-    std::vector<float> score( S, 0.f );
-
-    // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
-    //    escape hatch is off. The exhaustive branch below is the pre-H2 code, byte-for-byte.
-    const bool pruneActive = pruneTopK > 0 && std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr;
-    if( pruneActive )
-    {
-        // one pass: candidates (any tf > 0 — every other doc scores EXACTLY the same +0.0f either way),
-        // exact dfreq, and the per-term max weighted tf the impact bound needs. Ascending doc id.
-        std::vector<int>           dfreq( uniqueCount, 0 );
-        std::vector<int>           tfMaxOf( uniqueCount, 0 );
-        std::vector<std::uint32_t> candidateIds;
-        candidateIds.reserve( 1024 );
-        for( std::size_t i = 0; i < S; ++i )
-        {
-            const int* tfRow = tfFlat.data() + i * uniqueCount;
-            bool       any   = false;
-            const int  w     = statsWeight( i );
-            if( w == 0 )
-            {
-                countOut( tfRow );
-            }
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                if( tfRow[u] > 0 )
-                {
-                    dfreq[u] += w;
-                    if( tfRow[u] > tfMaxOf[u] )
-                    {
-                        tfMaxOf[u] = tfRow[u];
-                    }
-                    any = true;
-                }
-            }
-            if( any )
-            {
-                candidateIds.push_back( std::uint32_t( i ) );
-            }
-        }
-
-        // ── the PROVABLY-SAFE per-term impact bound (the MaxScore "max contribution") ────────────────
-        // A term u's contribution to any doc is idf_u × tf(k1+1)/(tf + k1(1−b+b·dl/avgdl)). Two exact
-        // monotonicities bound it: it INCREASES in tf (so tf ≤ T := tfMaxOf[u], the largest weighted tf
-        // of u anywhere in the corpus) and DECREASES in dl (dl ≥ 0 ⇒ the mixed factor ≥ 1−b), giving
-        //   contribution ≤ idf_u × T(k1+1)/(T + k1(1−b))   in REAL arithmetic.
-        // In IEEE doubles each side is computed with ≤ 7 rounded ops (relative error ≤ 7·2⁻⁵³ ≈ 8e-16),
-        // so the ×(1+1e-9) slack — six orders of magnitude above the worst accumulated rounding, and
-        // likewise above the U·2⁻⁵³ summation error of the per-doc bound sum below — makes the COMPUTED
-        // cap strictly ≥ the COMPUTED contribution. The Section ×0.30 down-weight and the §P4 tier
-        // multiplier (both (0,1], shrink-only) only shrink a real score, never the bound.
-        // Hence: bound < θ ⇒ computed score < θ, unconditionally.
-        // capOcc folds in the query-occurrence multiplicity (BM25 adds one contribution PER occurrence).
-        std::vector<double> capOcc( uniqueCount, 0.0 );
-        {
-            std::vector<int> occCount( uniqueCount, 0 );
-            for( std::size_t qi = 0; qi < qToks.size(); ++qi )
-            {
-                if( uniqueIndexOfQtok[qi] == DedupedQueryTerms::kDroppedTerm )
-                {
-                    continue;               // capped past kMaxUniqueQueryTerms — owns no row, no contribution
-                }
-                ++occCount[uniqueIndexOfQtok[qi]];
-            }
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                if( dfreq[u] + dfOut[u] == 0 || termKept[u] == 0 )
-                {
-                    continue; // never contributes anywhere — a suppressed term's cap stays 0, and a cap of
-                              // 0 bounds a contribution of 0, so the MaxScore proof below is unchanged
-                }
-                const int    n    = dfreq[u];
-                const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
-                const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
-                const double idfAll = dfOut[u] > 0 ? std::log( ( double( S ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
-                const double idf  = std::max( idfIn, idfAll );
-                const double T    = double( tfMaxOf[u] );
-                const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
-                capOcc[u]         = cap1 * double( occCount[u] );
-            }
-        }
-
-        // top-K threshold θ = K-th best exact score seen so far (min-heap; grows monotonically). θ at
-        // skip time ≤ final θ ≤ the true K-th best overall, and skipping needs bound < θ STRICTLY, so a
-        // skipped doc's true score is strictly below the final K-th score — it cannot enter the top-K
-        // even via the (score desc, id asc) tie-break. Docs are processed in ascending id (determinism).
-        std::vector<double> heap;                                // min-heap over exact final scores
-        heap.reserve( pruneTopK );
-        double theta = -1.0;                                     // scores are ≥ 0 ⇒ no skips until K docs scored
-        for( const std::uint32_t i : candidateIds )
-        {
-            const int* tfRow = tfFlat.data() + std::size_t( i ) * uniqueCount;
-
-            // cheap upper bound: adds only, fixed u-ascending order (deterministic)
-            double ub = 0.0;
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                if( tfRow[u] > 0 )
-                {
-                    ub += capOcc[u];
-                }
-            }
-            const bool mustScore = alwaysExact && i < alwaysExact->size() && (*alwaysExact)[i] != 0;
-            if( !mustScore && ub < theta )
-            {
-                continue; // provably cannot enter the top-K → skip
-            }
-
-            // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
-            const bool   outI = statsWeight( i ) == 0;
-            const double Si   = outI ? double( S ) : double( statsS );
-            const double avgI = outI ? avgdlAll : avgdl;
-            double sc = 0;
-            for( std::size_t qi = 0; qi < qToks.size(); ++qi )
-            {
-                const std::size_t u  = uniqueIndexOfQtok[qi];
-                if( u == DedupedQueryTerms::kDroppedTerm )
-                {
-                    continue;               // capped past kMaxUniqueQueryTerms — owns no row, no contribution
-                }
-                const int         tf = tfRow[u];
-                if( tf == 0 || termKept[u] == 0 )
-                {
-                    continue; // termKept is all-1 disarmed, so this reads as the historical `tf == 0`
-                }
-                const int    n   = dfreq[u] + ( outI ? dfOut[u] : 0 );
-                const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-                sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
-            }
-            if( ing.symbols[i].kind == SymKind::Section )
-            {
-                sc *= 0.30;
-            }
-            if( symbolScoreMul && i < symbolScoreMul->size() )
-            {
-                sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight — shrink-only, bound-safe
-            }
-            score[i] = float( sc );
-
-            if( heap.size() < pruneTopK )
-            {
-                heap.push_back( sc );
-                std::push_heap( heap.begin(), heap.end(), std::greater<double>{} );
-                if( heap.size() == pruneTopK )
-                {
-                    theta = heap.front();
-                }
-            }
-            else if( sc > heap.front() )
-            {
-                std::pop_heap( heap.begin(), heap.end(), std::greater<double>{} );
-                heap.back() = sc;
-                std::push_heap( heap.begin(), heap.end(), std::greater<double>{} );
-                theta = heap.front();
-            }
-        }
-        return score;
-    }
-
-    std::vector<int> dfreq( uniqueCount, 0 );
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        const int w = statsWeight( i );
-        if( w == 0 )
-        {
-            countOut( tfFlat.data() + i * uniqueCount );
-        }
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            if( tfFlat[i * uniqueCount + u] > 0 )
-            {
-                dfreq[u] += w;
-            }
-        }
-    }
-
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        const bool   outI = statsWeight( i ) == 0;
-        const double Si   = outI ? double( S ) : double( statsS );
-        const double avgI = outI ? avgdlAll : avgdl;
-        double sc = 0;
-        for( std::size_t qi = 0; qi < qToks.size(); ++qi )
-        {
-            const std::size_t u  = uniqueIndexOfQtok[qi];
-            if( u == DedupedQueryTerms::kDroppedTerm )
-            {
-                continue;                   // capped past kMaxUniqueQueryTerms — owns no row, no contribution
-            }
-            const int         tf = tfFlat[ i * uniqueCount + u ];
-            if( tf == 0 || termKept[u] == 0 )
-            {
-                continue; // old: docs[i].find( qt ) == end — termKept is all-1 disarmed, so this is that
-            }
-            const int    n   = dfreq[u] + ( outI ? dfOut[u] : 0 );
-            const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-            sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
-        }
-        // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
-        // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
-        if( ing.symbols[i].kind == SymKind::Section )
-        {
-            sc *= 0.30;
-        }
-        if( symbolScoreMul && i < symbolScoreMul->size() )
-        {
-            sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight (same factor as the pruned branch)
-        }
-        score[i] = float( sc );
-    }
-    return score;
+    // score: corpus statistics, then every candidate the MaxScore pruner (armed only on request) does not rule out
+    const LexBm25Stats stats = tallyBm25Stats( terms, roles );
+    LexTopKPruner      pruner( pruneTopK, alwaysExact, stats, dedup, termKept );
+    return scoreLexCandidates( ing, terms, stats, roles, dedup, termKept, pruner, symbolScoreMul );
 }
 
 // the un-tiered contract every pre-§P4 caller keeps (evals, exemplar, --recall): same arity as always,
-// byte-identical scores (a null multiplier is the identity in both scoring branches above).
+// byte-identical scores (a null multiplier is the identity in scoreLexCandidates above, pruned or exhaustive).
 inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                          const std::vector<NodeId>& outTargets, std::string_view query,
                                          std::size_t pruneTopK = 0, const std::vector<char>* alwaysExact = nullptr,
@@ -1599,9 +1820,16 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
     };
 
+    // kRankFlagNotLexRanked units (model.h) are no document: no tf, no length, not in the corpus size; they score 0
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    const std::size_t       rankedS  = S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( !unranked.empty() && unranked[i] != 0 )
+        {
+            continue;
+        }
         const Symbol&          s    = ing.symbols[i];
         const std::string_view base = ( s.lang == Lang::Elixir ) ? elixirBaseName( s.name ) : std::string_view( s.name );
         const std::string_view alt  = ( base.size() != s.name.size() ) ? base : std::string_view{};
@@ -1628,7 +1856,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         avgdl += d;
     }
-    avgdl /= double( S ? S : 1 );
+    avgdl /= double( rankedS ? rankedS : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -1660,7 +1888,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
                 continue;
             }
             const int    n   = dfreq[u];
-            const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+            const double idf = std::log( ( double( rankedS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
         if( ing.symbols[i].kind == SymKind::Section )
@@ -1748,8 +1976,7 @@ inline std::size_t applyDefOverDeclTiebreak( const IngestResult& ing, std::vecto
     {
         return 0;
     }
-    std::sort( distinct.begin(), distinct.end() );
-    distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
+    sortutil::sortUnique( distinct );
 
     // which distinct values hold a body-carrying member, and which hold a bodyless one
     std::vector<std::uint8_t> sawBody( distinct.size(), 0 );
@@ -1874,6 +2101,13 @@ struct RouteAnchorDef
                                       // definition in NodeId order; see noteWholeNameDef), i.e. the same one
                                       // routeAnchorEvidence prints the path of
     std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
+};
+
+// FRAME-HIGH-CONFIDENCE: the anchor of a name-exact route, in the two forms a ranked head row can match. Empty on every other route.
+struct RouteAnchorKeys
+{
+    std::vector<std::string> lowerNames; // each subject word's leaf, lowercased (`a.b.C::d` gives d), and each resolved anchor name
+    std::vector<std::uint32_t> fileIds; // the files the anchors are defined in, and a FILE subject's own file
 };
 
 struct RouteChoice
@@ -2171,6 +2405,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
     std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
+        if( notLexRanked( s ) )
+        {
+            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
+        }
         noteWholeNameDef( names, s );
         parts.clear();
         subtokens( s.name, parts );
@@ -2202,7 +2440,9 @@ inline constexpr std::uint32_t kMaxAnchorDefs = 3;
 // "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    const std::uint32_t sOver128 = std::uint32_t( ing.symbols.size() / 128 );
+    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap
+    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
+    const std::uint32_t sOver128 = std::uint32_t( ranked / 128 );
     return sOver128 > 8u ? sOver128 : 8u;
 }
 
@@ -2432,71 +2672,143 @@ inline std::vector<std::string> graphSubjectCandidates( std::span<const std::str
     }
     return out;
 }
+
+using GraphSubjectWords = std::vector<std::string_view>;
+
+// the slots read from w[b, e) per range, in order; nullopt when a slot holds no candidate
+inline std::optional<GraphSubject> graphSubjectFill( const GraphSubjectWords& w, GraphSubjectForm form,
+                                                     std::initializer_list<std::pair<std::size_t, std::size_t>> ranges )
+{
+    GraphSubject gs;
+    gs.form = form;
+    for( const auto& [ b, e ] : ranges )
+    {
+        std::string              span;
+        std::vector<std::string> c = graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
+        if( c.empty() )
+        {
+            return std::nullopt;
+        }
+        gs.spans.push_back( std::move( span ) );
+        gs.slots.push_back( std::move( c ) );
+    }
+    return gs;
+}
+
+// the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it); w.size() when none
+inline std::size_t graphSubjectSep( const GraphSubjectWords& w, std::size_t from, std::string_view word )
+{
+    for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
+    {
+        if( routeLower( w[k] ) == word )
+        {
+            return k;
+        }
+    }
+    return w.size();
+}
+
+// one form's scan: `decided` stops the parse with `gs` (a form that matched decides even when a slot is empty)
+struct GraphFormScan
+{
+    bool                        decided = false;
+    std::optional<GraphSubject> gs;
+};
+
+// common callers of A and B (the key form: once matched, its slots decide) | calls both A and B (a sentence's phrase: read only when its
+// slots hold code)
+inline GraphFormScan scanCommonForm( const GraphSubjectWords& w, bool sentencePhrase )
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const bool matched = sentencePhrase ? graphSubjectWordIs( w[i], { "call", "calls" } ) && routeLower( w[i + 1] ) == "both"
+                                            : graphSubjectWordIs( w[i], { "common" } ) && graphSubjectWordIs( w[i + 1], { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of";
+        const std::size_t from = i + ( sentencePhrase ? 2 : 3 );
+        const std::size_t a    = matched ? graphSubjectSep( w, from, "and" ) : w.size();
+        if( a < w.size() )
+        {
+            std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Common, { { from, a }, { a + 1, w.size() } } );
+            if( gs || !sentencePhrase )
+            {
+                return { true, std::move( gs ) };
+            }
+        }
+    }
+    return {};
+}
+
+// [call] path from A to B (the key form) | [call] chain from A to B (a sentence's)
+inline GraphFormScan scanPathForm( const GraphSubjectWords& w, std::string_view noun )
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const std::size_t t = graphSubjectWordIs( w[i], { noun } ) && routeLower( w[i + 1] ) == "from" ? graphSubjectSep( w, i + 2, "to" ) : w.size();
+        if( t < w.size() )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanReachForm( const GraphSubjectWords& w )   // A reach(es) B: A's span runs back to the previous clause word or stop
+{
+    for( std::size_t i = 1; i + 1 < w.size(); ++i )
+    {
+        if( !graphSubjectWordIs( w[i], { "reach", "reaches" } ) )
+        {
+            continue;
+        }
+        std::size_t b = i;
+        while( b > 0 && !graphSubjectQualifier( w[b - 1] ) && !graphSubjectTrimWord( w[b - 1] ).stop )
+        {
+            --b;
+        }
+        if( std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Path, { { b, i }, { i + 1, w.size() } } ) )
+        {
+            return { true, std::move( gs ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanCallersForm( const GraphSubjectWords& w )   // callers of X
+{
+    for( std::size_t i = 0; i + 2 < w.size(); ++i )
+    {
+        if( graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Callers, { { i + 2, w.size() } } ) };
+        }
+    }
+    return {};
+}
 }   // namespace detail
 
 // nullopt unless the task holds one of the three forms AND every slot has a candidate. Forms are tried common,
 // path, callers (parse.py PATS order); the first keyword occurrence of a form anchors it; the first span ends at
 // the form's first separator word (`to` / `and`), the last span runs to the end of the task.
+// SENTENCE-SUBJECT: the same forms as a sentence spells them, read only when no key form matched (so nothing a key form printed is replaced). `[call] chain from A to B` is `path from A to B`; `calls both A
+// and B` asks for their common callers; `A reach(es) B` is a path whose FROM span runs back from `reach` to the previous clause
+// word or sentence stop ("How does `ApplicationRef.tick()` reach `refreshView`"). Every slot still needs a code-like candidate, so a
+// sentence that only uses the words ("which tests reach the cache", "a chain from start to finish") reads nothing.
 inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
 {
-    const std::vector<std::string_view> w = splitRouteWords( task );
-    const auto fill = [ & ]( GraphSubjectForm form, std::initializer_list<std::pair<std::size_t, std::size_t>> ranges ) -> std::optional<GraphSubject>
+    using namespace detail;
+    using Scan = GraphFormScan ( * )( const GraphSubjectWords& );
+    // the key forms first, in their own order, so a task one of them reads keeps the block it always had; the sentence forms only after
+    static constexpr Scan kScans[] = { []( const GraphSubjectWords& x ) { return scanCommonForm( x, /*sentencePhrase=*/false ); },
+                                       []( const GraphSubjectWords& x ) { return scanPathForm( x, "path" ); },
+                                       &scanCallersForm,
+                                       []( const GraphSubjectWords& x ) { return scanCommonForm( x, /*sentencePhrase=*/true ); },
+                                       []( const GraphSubjectWords& x ) { return scanPathForm( x, "chain" ); },
+                                       &scanReachForm };
+    const GraphSubjectWords w = splitRouteWords( task );
+    for( const Scan scan : kScans )
     {
-        GraphSubject gs;
-        gs.form = form;
-        for( const auto& [ b, e ] : ranges )
+        if( GraphFormScan r = scan( w ); r.decided )
         {
-            std::string span;
-            std::vector<std::string> c = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
-            if( c.empty() )
-            {
-                return std::nullopt;
-            }
-            gs.spans.push_back( std::move( span ) );
-            gs.slots.push_back( std::move( c ) );
-        }
-        return gs;
-    };
-    // the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it)
-    const auto sep = [ & ]( std::size_t from, std::string_view word ) -> std::size_t
-    {
-        for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
-        {
-            if( routeLower( w[k] ) == word )
-            {
-                return k;
-            }
-        }
-        return w.size();
-    };
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B
-    {
-        if( detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
-            && routeLower( w[i + 2] ) == "of" )
-        {
-            const std::size_t a = sep( i + 3, "and" );
-            if( a < w.size() )
-            {
-                return fill( GraphSubjectForm::Common, { { i + 3, a }, { a + 1, w.size() } } );   // the form matched: its slots decide
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B
-    {
-        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
-        {
-            const std::size_t t = sep( i + 2, "to" );
-            if( t < w.size() )
-            {
-                return fill( GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } );
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 2 < w.size(); ++i )   // callers of X
-    {
-        if( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
-        {
-            return fill( GraphSubjectForm::Callers, { { i + 2, w.size() } } );
+            return std::move( r.gs );
         }
     }
     return std::nullopt;
@@ -2836,20 +3148,62 @@ struct ForConfidence
     std::string note;       // the legend clause defining both (legend-coverage contract)
     const char* level = ""; // "high" | "low" — the JSON dialect's key value
     int         marginPct = 0;
+    int         fileGapPct = -1;   // the file_gap_pct= shown, whole percent, when the file-gap ground made the level high; else -1
 };
+
+// ── THE FILE-GAP GROUND (lane ROUTING, 11-25; switch forrouteswitch.h, RIPWIRE_ROUTING=0 off) ──────────────────────────────────
+// WHY. A many-term question (a commit message, a pasted paragraph) sums BM25 over many terms, so its head is smooth rank to rank:
+// on GA1 + GA3 DEV (181 --for rows) 122 heads had no 20 % ADJACENT step at all and read low, while 51 of them had the right file at
+// r=1. What does separate right from wrong there is how far the best row of ANOTHER file trails the top row: measured as a ranking
+// statistic over the head (AUC 0.71 for "the r=1 file is a gold file", against 0.64 for today's level), and as a ground beside the
+// cliff, "high" goes from 59 rows (73 % right) to 71 rows (73 % right), recall 0.46 -> 0.55 at the same precision. The threshold is
+// the cliff's own 20 % (kMinCliffDrop), not a tuned number: 0.15-0.25 move it by a few rows either way.
+// WHAT. The relative gap between the top score and the best score of a row in a different file, over the served head in rank order,
+// in percent and UNROUNDED (the threshold compares it as measured; only the shown value is rounded); -1 when the head holds no
+// second file (nothing to compare: no ground).
+inline constexpr double kForFileGapMinPct = 20.0;
+
+[[nodiscard]] inline double headFileGapPct( const std::vector<float>& rank, std::span<const NodeId> head, const std::vector<Symbol>& symbols ) noexcept
+{
+    if( head.empty() || head[0] >= rank.size() || head[0] >= symbols.size() || !( rank[ head[0] ] > 0.f ) )
+    {
+        return -1.0;
+    }
+    const double      top     = double( rank[ head[0] ] );
+    const std::uint32_t topFile = symbols[ head[0] ].fileId;
+    for( const NodeId id : head.subspan( 1 ) )
+    {
+        if( id < symbols.size() && id < rank.size() && symbols[id].fileId != topFile )
+        {
+            return 100.0 * ( top - double( std::max( rank[id], 0.f ) ) ) / top;
+        }
+    }
+    return -1.0;
+}
+
+// The legend clause of file_gap_pct= (present-only: the attribute rides only on a root the ground made high). No "--" (XML comment).
+inline constexpr std::string_view kForFileGapNote =
+    " [file_gap_pct= how far the best row of any other file trails r=1, %; at 20 or more it grounds confidence=high on its own]";
+inline constexpr std::string_view kForCompactFileGapClause = " [file_gap_pct=: other files trail r=1 by this %; >=20 grounds high]";
 
 // homonymDecline: true when isAdaptiveHomonymDecline fired on this same cut — confidence must not claim
 // "high" on a cliff driven by tie-break order rather than relevance (a decline plus a high-confidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
 // when declined — 0 means "no cliff found" (non-negotiable #3: a zero must mean none found, never none
 // exists), and a real 25% tie-break drop is not that; the note's extra clause is what says not to trust it.
-// anchorNoSource (CONFIDENCE-ANCHOR, subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file. The
-// drop may be real, but it says the name matched, not that the answer is here: low, and route= says why.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorNoSource = false )
+// anchorUnproven (subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file (CONFIDENCE-ANCHOR), or
+// whose ranked head is not the anchor (FRAME-HIGH-CONFIDENCE). The drop may be real, but it says the name matched, not that the answer
+// is here: low, and route= says why.
+// fileGapPct (headFileGapPct; -1 = not measured): the FILE-GAP ground above — a head with no cliff is still high when the best row of
+// another file trails r=1 by kForFileGapMinPct or more. Never over a decline or an unproven anchor. Only when routing::routingOn().
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false,
+                                          double fileGapPct = -1.0 )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( homonymDecline || anchorNoSource ) ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    const bool sharpHead = !cut.hitCeiling || servedComplete;
+    const bool fileGround = !sharpHead && fileGapPct >= kForFileGapMinPct && routing::routingOn();
+    out.level = ( homonymDecline || anchorUnproven || !( sharpHead || fileGround ) ) ? "low" : "high";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );
@@ -2858,6 +3212,14 @@ inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int served
     // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
     // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
     out.note = kForConfidenceNote;
+    if( fileGround && !homonymDecline && !anchorUnproven )
+    {
+        // present-only: a root the cliff made high (or that stayed low) is byte-identical to the pre-ground one
+        out.fileGapPct = int( fileGapPct + 0.5 );   // shown rounded; the ground above compared the unrounded gap (CodeRabbit #753)
+        rw::formatTo( attrBuf, sizeof( attrBuf ), " file_gap_pct=\"{}\"", out.fileGapPct );
+        out.attrs += attrBuf;
+        out.note += kForFileGapNote;
+    }
     if( homonymDecline )
     {
         // present-only (fires only on the decline itself — byte-identical elsewhere): margin_pct above is

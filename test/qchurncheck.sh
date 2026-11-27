@@ -23,6 +23,10 @@
 # land in a directory we own and can inspect/clear. Needs git + perl(for nothing here, plain grep/wc).
 # Usage:  test/qchurncheck.sh   |   RIPWIRE_BIN=build_w2e/ripwire test/qchurncheck.sh
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -117,6 +121,7 @@ NEW2_N="$( name_only_count "$TMP/trace_new2.log" )"
 [ "$rcNew2" -eq 0 ] && [ "$NEW2_N" -eq 0 ] \
     && ok "second run on the NEW head is warm again (count=$NEW2_N)" \
     || no "second run on new head did not memoize (rc=$rcNew2, count=$NEW2_N)"
+[ -s "$TMP/new.out" ] || no "zero-evidence premise (qchurncheck.sh:124): the file the next arm judges is empty, so its verdict proves nothing"
 diff -q "$TMP/new.out" "$TMP/new2.out" >/dev/null \
     && ok "new-head cold vs warm output byte-identical" \
     || no "new-head cold vs warm output differs"
@@ -222,7 +227,7 @@ if [ -f "$kgpobj" ] && [ -n "$khealthy" ]; then
     if grep -q 'history_unread=1: the git history walk.*(the walk stopped part-way), so churn= and amp= count only the commits that were read: both are floors' "$TMP/k_pre.out"; then
         ok "K51: the prefix comment names the cause and says churn=/amp= are floors"
     else
-        no "K51: the prefix comment does not call churn=/amp= floors: $( grep -o '<!--history_unread[^>]*' "$TMP/k_pre.out" | head -c 300 )"
+        no "K51: the prefix comment does not call churn=/amp= floors: $( grep -o '<!-- history_unread[^>]*' "$TMP/k_pre.out" | head -c 300 )"
     fi
     if [ -n "$kpre" ] && grep -q 'churn= is absent' "$TMP/k_pre.out"; then
         no "K51: the document prints churn=$kpre beside a comment that says churn= is absent"
@@ -246,7 +251,7 @@ fi
 if grep -q 'history_unread=1: the git history walk.*(the walk did not run), so churn= is absent and amp= counts callers only' "$TMP/k_nogit.out"; then
     ok "K51: the no-git comment names the cause (the walk did not run)"
 else
-    no "K51: the no-git comment does not name the cause: $( grep -o '<!--history_unread[^>]*' "$TMP/k_nogit.out" | head -c 300 )"
+    no "K51: the no-git comment does not name the cause: $( grep -o '<!-- history_unread[^>]*' "$TMP/k_nogit.out" | head -c 300 )"
 fi
 if grep -q ' churn="' "$TMP/k_nogit.out"; then
     no "K51: git missing from PATH still printed a churn= value"

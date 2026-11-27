@@ -81,6 +81,13 @@ ASAN_BIN="${RIPWIRE_ASAN_BIN:-}"
 [ -n "$ASAN_BIN" ] && [ "${ASAN_BIN#/}" = "$ASAN_BIN" ] && ASAN_BIN="$ROOT/$ASAN_BIN"
 SRC="${RIPWIRE_CRASHSWEEP_SRC:-$ROOT/src}"   # the tree the static rules read; a red-first run points it at a base checkout
 TMP="$( mktemp -d )"; trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE. This gate compares stderr, and the warm snapshot in a SHARED $TMPDIR carries the
+# writing build's source identity: a binary whose identity differs refuses it, says so on stderr
+# ("warmsnap: written by another build", warmsnap.h:760/762), runs cold and overwrites it, then is silent on
+# its next run. So a foreign build touching this corpus first turns a stderr comparison red for reasons that
+# have nothing to do with the code, and it self-heals on re-run — which is what makes it read as a flake.
+# Diagnosed on budgetmonotonecheck 2026-11-17; these are its siblings by the same shared-root exposure.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 fail=0
 
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
@@ -292,11 +299,12 @@ SCANPY
 
 cat > "$TMP/registry.tsv" <<'REGISTRY'
 ccjson.h	ccCountLoc	fopen	1	closes	the only early exit is the failed open; nothing between open and fclose allocates
-clones.h	findClones	fopen	1	closes	skips only a failed open; fclose right after the sized read
-clones.h	findClonesType3	fopen	1	closes	same shape as findClones
+clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share: false on a failed open; fclose right after the sized read
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
+crossref.h	diffTreeSlice	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
+crossref.h	mergeBasesByOneWalk	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	popen	1	closes	the read loop leaves by break/continue only; pclose then unlink
 darkflags.h	readWhole	fopen	1	closes	fclose before the size-cap return and before the final return
@@ -318,7 +326,7 @@ infra/os.h	spawn_sh	open	1	closes	in the forked child: dup2 onto stdin, close, t
 infra/os.h	read_small	open	1	closes	one read, then ::close before the only return past the failed-open one (Linux /proc and /sys files)
 ingest_cache.h	openOnce	open	1	owned	ReadFd's destructor closes it
 ingest_cache.h	saveCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
-ingest_crawl.h	runGitIgnoreProbe	popen	1	closes	the overflow break still reaches pclose
+ingest_crawl.h	runGitLsFiles	popen	1	closes	the overflow break still reaches pclose (the popen moved here from runGitIgnoreProbe, which now calls it, when the tracked build/ probe began sharing it)
 ingest_docpass.h	publishDocBridgeBlob	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
 lintrules.h	loadLintRules	fopen	1	closes	skips only a failed open; fclose after the sized read
 main.cpp	dispatchMainBody	fopen	1	closes	returns only on a failed open; fclose after the read loop
@@ -328,7 +336,6 @@ main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before
 mcpedit.h	EditLock	open	1	owned	EditLock's destructor unlocks and closes
 mcpindex.h	arm	open	1	owned	held in FsWatcher::dirFds, closed by reset and the destructor
 mcpindex.h	readFileBytes	fopen	1	closes	fclose before both returns
-mcpverbs.h	packConnect	fopen	1	closes	if-scoped; fclose after the read
 mcpverbs.h	sliceText	fopen	1	closes	if-scoped; fclose after the read loop
 naminglens.h	namingLensChecks	fopen	1	closes	if-scoped; fclose after the sized read
 packtask.h	d1ReadSrcCached	fopen	1	closes	if-scoped; fclose after the read loop
@@ -367,6 +374,7 @@ verbs_lint.h	parseProfTsv	fopen	1	closes	returns only on a failed open; fclose a
 verbs_navigate.h	runSafeDelete	fopen	1	closes	if-scoped; fclose after the sized read
 verbs_navigate.h	runSlice	fopen	1	closes	if-scoped; fclose after the read loop
 verbs_quality.h	runQualityViews	fopen	1	closes	returns on a failed open; fclose before the other return
+warmsnap.h	collectGitInputs	popen	1	closes	no return between the popen and the pclose: the read loop leaves by its own condition, and a non-null pipe is always closed on the next line
 REGISTRY
 
 # The allocations S1 reports inside a reader function whose size is NOT a decoded count, with why.

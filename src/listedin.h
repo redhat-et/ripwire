@@ -39,6 +39,7 @@
 #include "lintrules.h"    // lintdetail::indentOf — the leading-blank count of a raw line
 #include "taskroute.h"    // taskroute::wordByte — the word byte (alnum or _)
 #include "model.h"        // IngestResult, rootRelPath, diskPath
+#include "redact.h"       // redactInPlace — a printed <ln> is a manifest line (a script or config value can hold a token)
 #include "serialize.h"    // escapeXml, truncateUtf8WithEllipsis
 
 #include <algorithm>
@@ -723,7 +724,7 @@ inline std::vector<std::size_t> printedLines( const Hit& h )
 }
 
 inline void appendListed( std::string& x, const IngestResult& ing, const std::vector<std::uint32_t>& files, const Manifest& man, const Hit& h,
-                          std::string_view manifestsCap, std::vector<char>& esc )
+                          std::string_view manifestsCap, std::vector<char>& esc, RedactCounts* redact )
 {
     const std::vector<std::size_t> print = printedLines( h );
     x += std::format( "<listed p=\"{}\"", escapeXml( man.rel, esc ) );
@@ -745,6 +746,7 @@ inline void appendListed( std::string& x, const IngestResult& ing, const std::ve
     for( std::size_t pi = 0; pi < print.size() && pi < kListedLines; ++pi )
     {
         std::string text( h.lines[ print[pi] ].text );
+        redactInPlace( text, redact );   // REDACT-TOUCH: BEFORE the cut, so a token crossing kListedLineBytes reaches the redactor whole
         truncateUtf8WithEllipsis( text, kListedLineBytes );
         x += std::format( "<ln l=\"{}\">{}</ln>", h.lines[ print[pi] ].line, escapeXml( text, esc ) );
     }
@@ -754,7 +756,8 @@ inline void appendListed( std::string& x, const IngestResult& ing, const std::ve
 }   // namespace listeddetail
 
 // The <listed> elements for the shown rows (rank order). Empty unless the task is a creation task and a manifest names a shown file.
-inline ListedRender renderForListedIn( const IngestResult& ing, std::span<const NodeId> shown, std::string_view task )
+// `redact`: the run's redaction tally, every printed <ln> passes it (nullptr: --no-redact).
+inline ListedRender renderForListedIn( const IngestResult& ing, std::span<const NodeId> shown, std::string_view task, RedactCounts* redact )
 {
     using namespace listeddetail;
     ListedRender out;
@@ -798,7 +801,7 @@ inline ListedRender renderForListedIn( const IngestResult& ing, std::span<const 
         std::string cap = ( hi == 0 && hits.size() > kListedManifests )
                                   ? std::format( " manifests_capped=\"1\" manifests_total=\"{}\"", hits.size() ) : std::string();
         cap += hi == 0 && filesCapped ? " files_capped=\"1\"" : "";
-        appendListed( out.xml, ing, files, manifests[ hits[hi].m ], hits[hi], cap, esc );
+        appendListed( out.xml, ing, files, manifests[ hits[hi].m ], hits[hi], cap, esc, redact );
     }
     return out;
 }

@@ -16,7 +16,7 @@
 # RULE. This gate states the rule over the family rather than over the instance that was caught:
 #
 #   R1  a secondary row class (a container of rows that is NOT the answer's primary <f>/hit list) carries
-#       its OWN count= shown= capped= — the shape --impact's <f via="import"> already uses with
+#       its OWN count= shown= capped= — the shape --impact's <f p=> importer row already uses with
 #       shown_importers=/importers_capped= (arm 7 is that shape's liveness anchor);
 #   R2  it obeys the SAME window the primary list obeys (--limit/--offset on the CLI, `limit`/`offset` over
 #       MCP) — or declares itself unwindowed and says so with a count;
@@ -45,7 +45,7 @@
 #   (7) PROPERTY    — derived, not enumerated: for EVERY container element in a grep-family answer that
 #                     holds row children and is not the primary <f> class, assert R1+R2. A new secondary
 #                     row class added later must comply or this arm reds without being edited.
-#   (8) REFERENCE   — --impact's <f via="import"> still carries shown_importers=/importers_capped=, so the
+#   (8) REFERENCE   — --impact's <f p=> importer row still carries shown_importers=/importers_capped=, so the
 #                     shape arm (1) copies is proven to exist rather than assumed.
 #   (9) DETERMINISM + WELL-FORMEDNESS on every surface this gate touched.
 #

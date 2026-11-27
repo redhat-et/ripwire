@@ -32,7 +32,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
-echo "savecachecheck: BIN=$BIN  TMP=$TMP"
+echo "savecachecheck: BIN=$BIN ($( "$BIN" --version 2>/dev/null | head -1 ))  TMP=$TMP"
 
 WORK="$TMP/proj"
 mkdir -p "$WORK"
@@ -148,6 +148,112 @@ command -v xmllint >/dev/null 2>&1 \
     && { xmllint --noout "$TMP/warm.xml" 2>/dev/null \
          && ok "post-restore run: xml well-formed" || no "post-restore run: xml malformed"; } \
     || ok "post-restore run: xml well-formed (xmllint absent — skipped)"
+
+# ── WARM-REWRITE: a refused file must not make every warm run rewrite the blob ─────────────────────
+# A nest-refused file yields no facts and is written UNKNOWN (forgetNestRefusalsForCache), so every warm run
+# re-reads and re-refuses it. Before the fix that re-read also set the pool's dirty flag, and the WHOLE blob was
+# re-serialized on every warm run (envoy: a 146 MB write per warm run, for one deep_recursion.json).
+# A rewrite is visible in the blob bytes: the header carries the write's wall-clock stamp, so any saveCache
+# changes the checksum. Arms: (w1) a warm run over an unchanged tree with a refused file leaves the blob
+# byte-identical, and still notes and rows the refusal; (w2) the positive twin, an edited source rewrites it;
+# (w3) accepted -> refused rewrites it and rows the file; (w4) refused -> accepted rewrites it and indexes the key;
+# (w5) after (w4) the next warm run writes nothing again.
+WR="$TMP/wr"; mkdir -p "$WR"
+WRC="$TMP/wr.cache"
+blobsum(){ { shasum -a 256 "$WRC" 2>/dev/null || sha256sum "$WRC" 2>/dev/null; } | awk '{print $1}'; }
+deepjson(){ python3 -c "import sys; open(sys.argv[1],'w').write('['*600 + ']'*600)" "$1"; }
+wrrun(){ "$BIN" "$WR" --cache="$WRC" --no-stable "$@" >"$TMP/wr.out" 2>"$TMP/wr.err"; }
+printf 'int wrKeep( void )\n{\n    return 1;\n}\n' > "$WR/k.cpp"
+printf '{"wrshallowkey": [1]}\n' > "$WR/flip.json"
+deepjson "$WR/deep.json"
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '  SKIP  (w1-w5) python3 absent: no deep JSON fixture\n'
+elif ! { wrrun; rc_w00=$?; [ "$rc_w00" -eq 0 ] && [ -s "$WRC" ]; }; then
+    no "(w0) cold run over the refused-file fixture: expected rc=0 and a cache, got rc=$rc_w00 size=$( wc -c < "$WRC" 2>/dev/null || echo missing )"
+else
+    wrrun; rc_w0=$?                                    # first warm run: settles any one-time convergence
+    s0=$( blobsum )
+    wrrun; rc_w1=$?
+    s1=$( blobsum )
+    if [ "$rc_w0" -eq 0 ] && [ "$rc_w1" -eq 0 ] && [ -n "$s0" ] && [ "$s0" = "$s1" ] && grep -q 'deep.json: json nesting' "$TMP/wr.err"; then
+        ok "(w1) warm run over an unchanged tree with a refused file writes nothing (blob byte-identical) and still notes the refusal"
+    else
+        no "(w1) WARM-REWRITE: warm run rc=$rc_w0/$rc_w1, blob $s0 -> $s1, refusal note: $( grep -c 'deep.json: json nesting' "$TMP/wr.err" )"
+    fi
+    wrrun --skipped; rc_sk=$?
+    if [ "$rc_sk" -eq 0 ] && grep -qE '<f p="[^"]*deep\.json" why="nest-refused"' "$TMP/wr.out" && [ "$( blobsum )" = "$s1" ]; then
+        ok "(w1) the warm --skipped run still rows deep.json as nest-refused, and writes nothing"
+    else
+        no "(w1) warm --skipped: rc=$rc_sk, row: $( grep -c 'deep\.json" why="nest-refused"' "$TMP/wr.out" ), blob moved: $( [ "$( blobsum )" = "$s1" ] && echo no || echo yes )"
+    fi
+    printf 'int wrKeep( void )\n{\n    return 2;\n}\nint wrAdded( void )\n{\n    return 3;\n}\n' > "$WR/k.cpp"
+    wrrun; rc_w2=$?
+    s2=$( blobsum )
+    if [ "$rc_w2" -eq 0 ] && [ "$s2" != "$s1" ] && grep -q 'n="wrAdded"' "$TMP/wr.out"; then
+        ok "(w2) positive twin: an edited source still rewrites the blob"
+    else
+        no "(w2) an edited source did not rewrite the blob (rc=$rc_w2, $s1 -> $s2) — the (w1) arm cannot see a rewrite"
+    fi
+    deepjson "$WR/flip.json"
+    wrrun --skipped; rc_w3=$?
+    s3=$( blobsum )
+    if [ "$rc_w3" -eq 0 ] && [ "$s3" != "$s2" ] && grep -qE '<f p="[^"]*flip\.json" why="nest-refused"' "$TMP/wr.out"; then
+        ok "(w3) accepted -> refused rewrites the blob and rows flip.json as nest-refused"
+    else
+        no "(w3) accepted -> refused: rc=$rc_w3, blob $s2 -> $s3, row: $( grep -c 'flip\.json" why="nest-refused"' "$TMP/wr.out" )"
+    fi
+    wrrun --skipped; rc_w3b=$?
+    if [ "$rc_w3b" -eq 0 ] && [ "$( blobsum )" = "$s3" ] && grep -qE '<f p="[^"]*flip\.json" why="nest-refused"' "$TMP/wr.out"; then
+        ok "(w3) the warm run after it writes nothing and still rows flip.json"
+    else
+        no "(w3) warm after accepted -> refused: rc=$rc_w3b, blob moved: $( [ "$( blobsum )" = "$s3" ] && echo no || echo yes ), row: $( grep -c 'flip\.json" why="nest-refused"' "$TMP/wr.out" )"
+    fi
+    printf '{"wrbackkey": [1]}\n' > "$WR/flip.json"
+    wrrun; rc_w4=$?
+    s4=$( blobsum )
+    if [ "$rc_w4" -eq 0 ] && [ "$s4" != "$s3" ] && grep -q 'wrbackkey' "$TMP/wr.out"; then
+        ok "(w4) refused -> accepted rewrites the blob and indexes the file's key"
+    else
+        no "(w4) refused -> accepted: rc=$rc_w4, blob $s3 -> $s4, key indexed: $( grep -c 'wrbackkey' "$TMP/wr.out" )"
+    fi
+    wrrun; rc_w5=$?
+    if [ "$rc_w5" -eq 0 ] && [ "$( blobsum )" = "$s4" ] && grep -q 'wrbackkey' "$TMP/wr.out"; then
+        ok "(w5) the warm run after (w4) writes nothing and serves the key from the cache"
+    else
+        no "(w5) warm after refused -> accepted: rc=$rc_w5, blob moved: $( [ "$( blobsum )" = "$s4" ] && echo no || echo yes )"
+    fi
+fi
+
+# ── (w6) a binary-sniffed SOURCE file must not make the first warm run a re-parse ──────────────────
+# The cold path skipped a file looksBinary() sniffed (a NUL byte: llvm's clang/test/Lexer/newline-nul.c and four
+# more) BEFORE hashing it, so its record was stored as hash 0. The next run's prewarm hash never matched that, the file
+# counted as a re-parse (llvm: reparsed=5 on call 2) and the whole blob was rewritten (840 MB). The hash is now taken
+# before the sniff. Under RIPWIRE_NO_WARMSNAP so run 2 really runs the parse pool (a served run prints reparsed=0 by
+# construction). The tree is aged past the racy slack first, so no record is legitimately re-stamped on run 2.
+NB="$TMP/nb"; mkdir -p "$NB"
+NBC="$TMP/nb.cache"
+printf 'int nbKeep( void )\n{\n    return 1;\n}\n' > "$NB/k.c"
+printf 'int nbNul( void ) { return 0; }\n/* \000 */\n' > "$NB/nul.c"
+nbrun(){ RIPWIRE_NO_WARMSNAP=1 RIPWIRE_CACHE_STATS=1 "$BIN" "$NB" --cache="$NBC" --no-stable >"$TMP/nb.out" 2>"$TMP/nb.err"; }
+nbsum(){ { shasum -a 256 "$NBC" 2>/dev/null || sha256sum "$NBC" 2>/dev/null; } | awk '{print $1}'; }
+if [ "$( tr -d '\000' < "$NB/nul.c" | wc -c )" -ge "$( wc -c < "$NB/nul.c" )" ]; then
+    no "(w6) premise: the fixture holds no NUL byte"
+else
+    sleep 3
+    nbrun; rc_n1=$?; n1=$( nbsum ); cp "$TMP/nb.out" "$TMP/nb.out1"; cp "$TMP/nb.err" "$TMP/nb.err1"
+    nbrun; rc_n2=$?; n2=$( nbsum )
+    if [ "$rc_n1" -eq 0 ] && grep -q 'cache-stats reparsed=[1-9]' "$TMP/nb.err1"; then ok "(w6) premise: run 1 is cold ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err1" ))"
+    else no "(w6) premise: run 1 is not a cold parse: rc=$rc_n1 $( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err1" )"; fi
+    if [ "$rc_n2" -eq 0 ] && grep -q 'cache-stats reparsed=0 ' "$TMP/nb.err"; then
+        ok "(w6) the run after a cold run over a NUL-byte source file re-parses nothing ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/nb.err" ))"
+    else
+        no "(w6) the first warm run re-parsed the binary-sniffed file: rc=$rc_n2, $( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]*' "$TMP/nb.err" )"
+    fi
+    if [ -n "$n1" ] && [ "$n1" = "$n2" ]; then ok "(w6) ...and leaves the blob byte-identical"
+    else no "(w6) the first warm run rewrote the blob ($n1 -> $n2) for a file that did not change"; fi
+    if cmp -s "$TMP/nb.out1" "$TMP/nb.out" && grep -q 'n="nbKeep"' "$TMP/nb.out"; then ok "(w6) ...and both runs print the same map"
+    else no "(w6) the cold and warm maps differ, or the fixture did not index: $( cmp "$TMP/nb.out1" "$TMP/nb.out" 2>&1 | head -1 )"; fi
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

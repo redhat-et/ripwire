@@ -9,8 +9,9 @@
 //   * root set hygiene   — realpath dedupe (stderr note), NESTED roots = hard error (§2.1);
 //   * root identity      — label = shortest unique whole-segment suffix of the root's REAL path
 //                          (basename when unique; leftward whole-segment extension on collision) (§2);
-//   * canonical order    — roots sorted by LABEL (byte order), NEVER argv order: `ripwire a b` and
-//                          `ripwire b a` are byte-identical (§2.1);
+//   * canonical order    — roots sorted by LABEL as a path prefix (`<label>/`, byte order), NEVER argv order:
+//                          `ripwire a b` and `ripwire b a` are byte-identical (§2.1), and the merged files keep
+//                          the byte order one root over their parent gives (`a-b/` before `a/`);
 //   * merge              — per-root IngestResults concatenated with fileId/NodeId offsets into one
 //                          IngestResult whose ing.files carry the LABELED spelling `<label>/<rel>`;
 //                          the on-disk path per file survives in ing.realPaths (§4).
@@ -84,11 +85,22 @@ namespace wsdetail
         }
         return out;
     }
+
+    // WORKSPACE-LABEL-SORT: the canonical root order. Every merged path is `<label>/<rel>` and each root's files arrive
+    // byte-sorted, so the concatenation is byte-sorted only when the roots sort by `<label>/`, not by the bare label:
+    // '-' and '.' sort below '/', so `a` < `a-b` as labels while `a-b/y.c` < `a/x.c` as paths. Sorting by the bare
+    // label put `a/x.c` (fileId 0) before `a-b/y.c`, so every fileId/NodeId tie-break in a workspace read in crawl
+    // order rather than the path order one root over the parent gives. Labels are distinct, so this is a strict
+    // total order. (A label that is another's whole-segment prefix, `a` and `a/b`, interleaves under any root order.)
+    inline bool labelPathOrderLess( const std::string& a, const std::string& b )
+    {
+        return a + '/' < b + '/';
+    }
 }   // namespace wsdetail
 
 // Build the canonical workspace root set from the raw (post-URL-resolution) root args.
 // Returns false ⇒ hard error (nested roots), message already printed to stderr.
-// On success `out` holds ≥1 root in canonical (label byte-order) order, deduped.
+// On success `out` holds ≥1 root in canonical (`<label>/` byte-order) order, deduped.
 inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vector<WorkspaceRoot>& out )
 {
     out.clear();
@@ -162,9 +174,11 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
         }
     }
 
-    // 4) canonical order: sort by label (byte order) — argv order can never leak into output (§2.1).
+    // 4) canonical order: sort by `<label>/` (byte order) — argv order can never leak into output (§2.1), and the
+    //    merged files stay byte-sorted unless one label is another's whole-segment prefix (`a` and `a/b`: their files
+    //    interleave under any root order — wsdetail::labelPathOrderLess states that exception).
     std::sort( out.begin(), out.end(),
-               []( const WorkspaceRoot& a, const WorkspaceRoot& b ) noexcept { return a.label < b.label; } );
+               []( const WorkspaceRoot& a, const WorkspaceRoot& b ) { return wsdetail::labelPathOrderLess( a.label, b.label ); } );
     return true;
 }
 
@@ -231,8 +245,12 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     // by the workspace's union), so its rows relabel and its count sums exactly like every sibling above. A
     // link in root A pointing into root B is an escape from A; B's own copy is indexed under B, where it lives.
     relabel( part.crawlSkips.escaped,        m.crawlSkips.escaped );
+    relabel( part.crawlSkips.untrackedBuild, m.crawlSkips.untrackedBuild );   // M1, per root like its siblings
+    relabel( part.crawlSkips.extensionless,  m.crawlSkips.extensionless );    // θ11, per root like its siblings
+    m.crawlSkips.extensionlessFiles += part.crawlSkips.extensionlessFiles;
 
     m.crawlSkips.escapedFiles     += part.crawlSkips.escapedFiles;
+    m.crawlSkips.untrackedBuildFiles += part.crawlSkips.untrackedBuildFiles;
     m.crawlSkips.nestRefusedFiles += part.crawlSkips.nestRefusedFiles;
     m.crawlSkips.extractPartialFiles += part.crawlSkips.extractPartialFiles;
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
@@ -304,6 +322,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                                            std::vector<IngestResult>&        parts )
 {
     IngestResult m;
+    m.constructHitsForFiles = 0;   // QD-CONSTRUCTS-AT-INGEST: zero files covered so far; each covering part extends it below
     ASSUME( roots.size() == parts.size() );
     // §N6-C: seed the merged ignore mode from the FIRST part, not from IngestResult's own default. The
     // merge below keeps the WEAKEST mode across roots (mergeCrawlDisclosures), and a reduction seeded with
@@ -406,6 +425,28 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
 
         mergeCrawlDisclosures( m, p, roots[r] );   // §L1 — see its own header
 
+        // CLONES-PERSIST: the clone-key side array concatenates with the symbols it is aligned to; a part without it
+        // (size mismatch) leaves the merged array short, and findClones then keys every body from its file.
+        if( p.cloneKeys.size() == p.symbols.size() && m.cloneKeys.size() == m.symbols.size() )
+        {
+            m.cloneKeys.insert( m.cloneKeys.end(), p.cloneKeys.begin(), p.cloneKeys.end() );
+        }
+        else
+        {
+            m.cloneKeys.clear();
+            m.cloneKeys.shrink_to_fit();
+        }
+        // QD-CONSTRUCTS-AT-INGEST: the construct hits ride their file's id; a part that does not cover all its files makes
+        // the merged claim false (constructHitsForFiles stays short of m.files), and the reader re-parses the merged tree.
+        if( p.constructHitsForFiles == p.files.size() && m.constructHitsForFiles == fileOff )
+        {
+            for( ConstructHit ch : p.constructHits )
+            {
+                ch.fileId += fileOff;
+                m.constructHits.push_back( ch );
+            }
+            m.constructHitsForFiles = fileOff + p.files.size();
+        }
         for( Symbol& s : p.symbols )
         {
             s.id     += symOff;
@@ -421,6 +462,11 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         {
             f.id += symOff;
             m.fnLocalScopes.push_back( f );
+        }
+        for( TangleBlockFacts f : p.tangleBlocks )   // QD-TANGLE BLOCK FACTS: the same id offset
+        {
+            f.id += symOff;
+            m.tangleBlocks.push_back( f );
         }
         const std::uint32_t fieldOff = std::uint32_t( m.fields.size() );   // member-variable round: the field side table merges alike
         for( Symbol& f : p.fields )
@@ -450,7 +496,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                 b.fromSymbol += symOff;
             }
             b.fileId += fileOff;
-            m.bindings.push_back( std::move( b ) );
+            m.bindings.push_back( b );
         }
         for( BindingAlias& a : p.bindingAliases )
         {

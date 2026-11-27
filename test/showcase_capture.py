@@ -10,6 +10,7 @@ SCRATCH = os.environ.get("RIPWIRE_SHOWCASE_SCRATCH") or tempfile.mkdtemp(prefix=
 BIN = "./build/ripwire"
 ABIN = os.path.join(REPO, "build", "ripwire")
 DIRTY = os.path.join(SCRATCH, "dirty")          # throwaway --local clone with ONE deliberate regression
+CLEAN = os.path.join(SCRATCH, "clean")          # throwaway clean clone: seeds the --show-stale contrast pair
 AUX = os.path.join(SCRATCH, "aux")
 
 # The capture is a SHIPPED document, so it goes through the SAME public-export scrub docs/COMMANDS.md
@@ -31,21 +32,68 @@ os.makedirs(AUX, exist_ok=True)
 # --since window from what the PUBLISHED block shows — see chooseInWindow below — and cannot do that
 # with the formatters defined after the table that needs them) ------------------------------------
 def explode(text):
-    """Re-wrap minified single-line XML/JSON at tag seams for display (real output is one line)."""
+    """Re-wrap minified single-line XML/JSON at tag seams for display (real output is one line).
+
+    A long line is XML to re-wrap when it CONTAINS a tag seam, not only when it STARTS with one
+    (SHOWCASE-TAIL-SEAM, 2026-11-20, IN5). The seam test used to be `startswith("<")`, which cannot see the
+    line that CLOSES an answer whose last payload is a CDATA body: the raw line reads
+    `}]]></b></fold><tail total=…><t …></tail><!-- legend --></ctx>` and begins with the body's own `}`. It
+    was therefore left whole — one 300-byte-truncated display line — so the entire tail of an answer-first
+    `--for` document, its trailing LEGEND included, never became display lines at all and
+    trailing_legend_start had nothing it could keep. MEASURED on this repo's own
+    `--for="tree-sitter parse of a source file" --adaptive`: 91 display lines with the tail glued into the
+    last one, against 164 once the seam test looks inside, where the final six ARE the trailing legend —
+    which is how the `[adaptive: kept N of N]` clause that case's caption names reaches the page. The JSON
+    branch is tested FIRST so an object line keeps its own seams, and a line under the 300-byte cut is
+    untouched either way."""
     lines = []
     exploded = False
     for ln in text.split("\n"):
-        if len(ln) > 300 and ln.lstrip().startswith("<"):
-            lines.extend(ln.replace("><", ">\n<").split("\n"))
-            exploded = True
-        elif len(ln) > 300 and ln.lstrip().startswith("{"):
+        stripped = ln.lstrip()
+        if len(ln) > 300 and stripped.startswith("{"):
             lines.extend(ln.replace("},{", "},\n{").replace('],"', '],\n"').split("\n"))
+            exploded = True
+        elif len(ln) > 300 and ( stripped.startswith("<") or "><" in ln ):
+            lines.extend(ln.replace("><", ">\n<").split("\n"))
             exploded = True
         else:
             lines.append(ln)
     return lines, exploded
 
-def fmt_block(data):
+def trailing_legend_start(lines):
+    """Index where a cut block's kept TRAILING legend starts (len(lines) when it keeps none).
+
+    INT1 (2026-11-19): an answer-first --for document ENDS in its legend (the trailing comments before the root closes),
+    so the 30-line window cut every legend clause a caption may name ([adaptive: …], [doc mentions: …]) and
+    showcasecapturecheck (G) went red. The trailing run of comment lines (and the closing tags among them) is kept after
+    the marker, like the head comments the preamble already promises in full; the marker counts only the lines between.
+    A block whose trailing run holds no comment (every legend-first answer) is cut exactly as before."""
+    k = len(lines)
+    while k > 30 and (lines[k - 1].lstrip().startswith("<!--") or re.match(r'^\s*</[\w-]+>\s*$', lines[k - 1])):
+        k -= 1
+    return k if any(ln.lstrip().startswith("<!--") for ln in lines[k:]) else len(lines)
+
+def keep_from_start( lines, keepFrom ):
+    """Index where a cut block's kept TRAILING ELEMENT starts (len(lines) when there is none to keep).
+
+    SHOWCASE-KEEP-FROM (2026-11-20, IN5). trailing_legend_start keeps a trailing LEGEND after the marker; a block
+    whose caption promises an ELEMENT needs the same for that element. The case that needs it is `--in=DIR`: its
+    promise (a second `<recent scope="DIR">` page that CUTS, and the `<symbols stubbed=>` stub) lives in the LAST
+    display lines, behind a global `<recent>` block whose rows are capped at 40 by the tool. On a MERGE-HEAVY tip
+    every window wide enough for the scoped page to cut also widens the global block past 22 rows, which pushed
+    the scoped page past the 30-line cut; chooseInWindow then found no window and the generator refused to write
+    the whole capture over one case (measured on integration/070-1120: windows of 1 src file at HEAD~2..4 and 53
+    at HEAD~5 and beyond — the merge of main contributes 53 by itself, so no window lands in the 4..22 band).
+    The tool's answer in the wide window is COMPLETE (capped="1" has_more="1" next= and the stub are all there);
+    only the capture's own display cut hid it. So the cut keeps the promised element rather than the window moving.
+    Nothing is hidden: the marker still counts exactly the lines between, and it is the elided MIDDLE of the global
+    block — the preamble says so. Only lines PAST the ordinary 30-line window qualify, so a block that already
+    shows its element is cut exactly as before and no train tip's capture moves."""
+    if keepFrom is None:
+        return len( lines )
+    return next( ( i for i, ln in enumerate( lines ) if i > 30 and ln.lstrip().startswith( keepFrom ) ), len( lines ) )
+
+def fmt_block(data, keepFrom=None):
     text = data.decode("utf-8", "replace").rstrip("\n")
     if not text:
         return "(empty)"
@@ -54,12 +102,15 @@ def fmt_block(data):
     lines, exploded = explode(text)
     shown = lines
     marker = None
+    tail = []
     if len(lines) > 40:
+        k = min( trailing_legend_start(lines), keep_from_start( lines, keepFrom ) )
+        tail = lines[k:]
         shown = lines[:30]
         if exploded:
-            marker = f"… [{len(lines)-30} more display lines; full output is {total_bytes} bytes on {raw_line_count} raw line(s)]"
+            marker = f"… [{k-30} more display lines; full output is {total_bytes} bytes on {raw_line_count} raw line(s)]"
         else:
-            marker = f"… [{len(lines)-30} more lines, {total_bytes} bytes total]"
+            marker = f"… [{k-30} more lines, {total_bytes} bytes total]"
     out = []
     for ln in shown:
         # §B11.2: header COMMENTS are exempt from the 300-byte display cut — the preamble promises they
@@ -87,16 +138,18 @@ def fmt_block(data):
             out.append(ln)
     if marker:
         out.append(marker)
+        out.extend(tail)   # the trailing legend comments of an answer-first document (never cut: they are comment lines),
+                           # or the element a caption promises (keep_from_start)
     return "\n".join(out)
 
-def publish_block(data):
+def publish_block(data, keepFrom=None):
     """fmt_block, then the project's own rebrand rows withheld (exportscrub.withhold_rebrand_rows).
 
     AFTER the display cut, deliberately: the window and its `… [N more display lines]` marker still describe
     the real output, and the disclosure's count is exactly the rows taken out of what this block shows. So
     rows shown + withheld + past the cut still equals the pairs= the tool reported — the sum
     test/docscommandscheck.sh arm (E) checks on every capture."""
-    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data).split("\n"))
+    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data, keepFrom).split("\n"))
     return "\n".join(lines)
 
 # --- helper input files -------------------------------------------------
@@ -220,6 +273,14 @@ BRIEF = ("add a --since filter to the doc-drift verb\n"
          "write regression tests for the new filter\n")
 brief_path = os.path.join(AUX, "lanes_brief.txt")
 open(brief_path, "w").write(BRIEF)
+
+# --legend-seen=FILE (lane LS1): the file a caller keeps of the legend definitions it already RECEIVED. Made here the way a caller
+# makes it — the S1 `--for="rankGraphTeleport"` answer piped into `--legend-dict=seen` — so the captured block shows that same
+# answer with those definitions left out. (Built at setup because a block's pre= runs after its command.)
+seen_path = os.path.join(AUX, "legend_seen.txt")
+with open(seen_path, "w") as _seen:
+    subprocess.run(f'{BIN} . --for="rankGraphTeleport" | {BIN} --legend-dict=seen', shell=True, cwd=REPO, stdout=_seen,
+                   stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=300)
 
 # A minimal two-file corpus for the --lint --with-profile heat-join demo: one function with a
 # pointer-chase loop (trips cache-pointer-chase-loop) and a PROFILE_SCOPE site above it, plus a
@@ -364,6 +425,12 @@ add(S1, f'{BIN} . --for="{_batchWord1} {_batchWord2} {_batchWord3} when a file c
 add(S1, f'{BIN} . --for="rankGraphTeleport"', "Name-shaped query: the router picks name-exact BM25 (header says which/why).")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --no-route', "Same query with routing forced OFF (plain subtoken+body BM25) — contrast with the routed run.")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --signatures-only', "T3 opt-out: the signatures-only lens (no auto bodies, no bundle=\"auto\" attribute) — contrast with the terminal default above.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --legend-seen={seen_path}', "The same --for answer for a caller that already RECEIVED the first one: the file (that answer piped into `--legend-dict=seen`, shown above) names the legend definitions it holds, and they are left out — each place says so ([legend-seen: N held]) and the trailer names the dictv= that holds them all. Rows unchanged.", pre=f"cat {seen_path}")
+add(S1, f"{BIN} . --for='who calls `rankGraphTeleport`'", "A --for question that names its symbol in backticks and asks a call-graph question is ROUTED: the verb it asks for answers (here --callers), under a <route> row: kind=, the verb it ran, complete=not-proven, next= the unrouted --for call; a reason the row names (why=) also brings page 1 of the --for answer (page1=1).")
+add(S1, f"{BIN} . --for='who calls `rankGraphTeleport`' --no-verb-route", "Same question, never routed: the --for answer itself, answer-first and paged — contrast with the routed run above.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --page-bytes=4000:2', "Page 2 of the answer-first --for answer cut at 4,000-byte pages: page=/pages= on the root, and what page 1 deferred (here its bodies and syms blocks) arrives here.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --rows=elements', "The same --for answer with its <sigs> and <tail> rows as XML elements, one per row, instead of the default text lines in one CDATA: the element form the line form decodes to byte for byte.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --bodies=pointer', "The same --for answer with every body its first page would carry served as the skip row that names it (l..e its source lines, next= the --expand that serves it), the page ending at the row it ended at: off by default, the pointer form a live check is pre-registered to judge.")
 add(S1, f'{BIN} . --for="tree-sitter parse of a source file" --adaptive', "Cut the result at the relevance cliff (Adaptive-k) — on a flat ranking nothing is cut and the header says so ([adaptive: kept N of N]).")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25"', "Mention anchoring (default-on): a path and a Symbol literally named in the task get lifted; the header says what anchored.")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost', "Same task with the anchor disabled — the contrast the flag exists for.")
@@ -409,12 +476,12 @@ add(S2, f'{BIN} . --query="teleport pagerank" --top-k=5', "Raw BM25 ranking (deb
 
 S3 = "zoom the detail ladder"
 add(S3, f'{BIN} . --for="pagerank power iteration" --detail=2', "Importance-weighted detail: FULL bodies for top-2, signatures for the rest.")
-add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 88.8% fewer bytes at top-10, 86.2% at top-50, 87.4% at top-100 (re-derived 2026-10-10 when the C++ standard-member gate stopped std::vector/std::string calls such as out.push_back() and s.empty() from binding to in-tree namesakes by name: the ranked top-10/50 lost one-line container accessors (svector::push_back, WidePath::c_str, every empty) and gained one-line forwarding helpers and macros (kindIs, ASSUME, formatTo, emitTo) whose signature is nearly the whole body, so less of the set is elidable, from 92.7/88.7/87.6; before that, re-derived 2026-09-20 when the native Windows port landed: src/infra/os_win32.cpp and os_win32_logic.h are ~3,900 lines of new, heavily commented infra that the ranked top-10/50/100 now reach, and their bodies are this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new, from top-50 87.1. Measured by test/showcasecapturecheck.sh's own recount arm on the combined tree, which is the gate that would otherwise report the drift; before that, re-derived 2026-09-17 at the self-check macro vocabulary rename: VERIFY/VERIFY_TEXT/VERIFY_DEBUG_ONLY/VERIFY_NOT_REACHED/VERIFY_SAME_THREAD/VERIFY_NO_ALIAS*/DYNMAP_VERIFY/DEGRADED_PATH_ALERT renamed to ASSUME/EXPECTS/ENSURES/DASSERT/UNREACHABLE/ASSUME_SAME_THREAD*/ASSUME_NO_ALIAS*/DYNMAP_ASSUME/DISCLOSE (plus new VALIDATE sites) across 839 identifier renames in 179 files, and a hand-written Diagnostics.h/diagnostics.cpp replacing the old ones outright: this moves both WHICH symbols the ranked top-10/50/100 hold and how large their bodies are, from top-50 85.2. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-12 when the <d> rows dropped the path-repeating id= for the short sc= scope: the signature side shrank, the bodies did not; before that, 89.5% / 81.8% / 84.3% re-derived 2026-09-10 at the sibs= cap raise: kMaxExpandSibs went 8 -> 100, so --expand's <b> bodies now carry the file context the old cap hid — 89.3% of all sibling names — and the body side is this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new. Measured on a fixed tree with the top-50 membership and the signature side unchanged: top-50 from 71.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-09 at the printf-family -> std::print conversion: converting ~1,500 emitter call sites to rw::emitTo/emitRaw/formatTo across 93 files changes how large the ranked symbols' BODIES are, and the body side is this ratio's denominator — top-50 from 72.3. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
+add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 88.3% fewer bytes at top-10, 87.4% at top-50, 88.6% at top-100 (re-derived 2026-11-21 when train 1118a's qualified C++ calls began binding the namespace their qualifier names (qual-ns-call-bind; with the train's other lanes this repo's graph went from 44,435 to 44,883 edges on main 5df5a26be): the ranked top-10 lost the RW_CHECK_ macro and gained enumcount.h's enumTableAt, whose signature is most of its short body, from 89.7/88.0/87.8 (main 5df5a26be recounts 90.0/88.5/88.8); before that, re-derived 2026-10-10 when the C++ standard-member gate stopped std::vector/std::string calls such as out.push_back() and s.empty() from binding to in-tree namesakes by name: the ranked top-10/50 lost one-line container accessors (svector::push_back, WidePath::c_str, every empty) and gained one-line forwarding helpers and macros (kindIs, ASSUME, formatTo, emitTo) whose signature is nearly the whole body, so less of the set is elidable, from 92.7/88.7/87.6; before that, re-derived 2026-09-20 when the native Windows port landed: src/infra/os_win32.cpp and os_win32_logic.h are ~3,900 lines of new, heavily commented infra that the ranked top-10/50/100 now reach, and their bodies are this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new, from top-50 87.1. Measured by test/showcasecapturecheck.sh's own recount arm on the combined tree, which is the gate that would otherwise report the drift; before that, re-derived 2026-09-17 at the self-check macro vocabulary rename: VERIFY/VERIFY_TEXT/VERIFY_DEBUG_ONLY/VERIFY_NOT_REACHED/VERIFY_SAME_THREAD/VERIFY_NO_ALIAS*/DYNMAP_VERIFY/DEGRADED_PATH_ALERT renamed to ASSUME/EXPECTS/ENSURES/DASSERT/UNREACHABLE/ASSUME_SAME_THREAD*/ASSUME_NO_ALIAS*/DYNMAP_ASSUME/DISCLOSE (plus new VALIDATE sites) across 839 identifier renames in 179 files, and a hand-written Diagnostics.h/diagnostics.cpp replacing the old ones outright: this moves both WHICH symbols the ranked top-10/50/100 hold and how large their bodies are, from top-50 85.2. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-12 when the <d> rows dropped the path-repeating id= for the short sc= scope: the signature side shrank, the bodies did not; before that, 89.5% / 81.8% / 84.3% re-derived 2026-09-10 at the sibs= cap raise: kMaxExpandSibs went 8 -> 100, so --expand's <b> bodies now carry the file context the old cap hid — 89.3% of all sibling names — and the body side is this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new. Measured on a fixed tree with the top-50 membership and the signature side unchanged: top-50 from 71.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-09 at the printf-family -> std::print conversion: converting ~1,500 emitter call sites to rw::emitTo/emitRaw/formatTo across 93 files changes how large the ranked symbols' BODIES are, and the body side is this ratio's denominator — top-50 from 72.3. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport --top-k=0", "Control-flow skeleton of one symbol, payload-only via the new --top-k=0.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport:1-10 --top-k=0", "CHANGED: a line range on --outline is now STRIPPED with a stderr note (it used to refuse).")
 add(S3, f"{BIN} . --expand=rankGraphTeleport --top-k=0", "Full body + inline callee signatures.")
 add(S3, f"{BIN} . --expand=rankGraphTeleport:1-12 --top-k=0", "Body SLICE: lines 1..12 of the symbol's own body, with lines=\"lo-hi/total\" marking it partial.")
-add(S3, f"{BIN} . --expand=compressBody --top-k=0 --compress", "Comments stripped + blank runs collapsed — compressBody is the function that implements --compress itself, chosen because it is comment-heavy enough to show a real reduction (the previously captioned symbol had no comments or blank runs, so before/after were byte-identical under a caption promising a difference).")
+add(S3, f"{BIN} . --expand=collapseBlankLineRuns --top-k=0 --compress", "Comments stripped + blank runs collapsed — collapseBlankLineRuns is --compress's own second step (compressBody is now the one-line stripCommentsKeepLiterals-then-collapse pipeline, with nothing left to strip), chosen because it is comment-heavy enough to show a real reduction (a symbol with no comments or blank runs reads byte-identical, or a few bytes larger for the compress attribute, under a caption promising a difference).")
 add(S3, f"{BIN} . --expand=readAckRecords --top-k=0 --no-redact", "--no-redact: emit bodies verbatim (credential redaction is on by default).")
 add(S3, f"{BIN} . --pack-top-n=3 --top-k=0", "Pack the top-3 ranked symbols' full bodies (deprecated verb; see stderr).")
 
@@ -432,7 +499,7 @@ add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto -
     post=f"{ABIN} . --lint --with-profile=report.txt 2>/dev/null | grep -o '<f rule=[^<]*</f>'",
     post_label="The joined finding — past the display cut above, extracted so the join is visible:")
 add(S4, f"{BIN} . --communities", "Cluster the call graph into cohesive modules.")
-add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges — levels_shown=\"2\" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=.")
+add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges — shown_levels=\"2\" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=.")
 add(S4, f"{BIN} . --zoom --zoom-levels=3", "The restoring knob: --zoom-levels=N prints N levels (0 = the whole tree); here three, ~11 KB.")
 add(S4, f"{BIN} . --report", "Architecture summary (modules, god-files, cycles) as markdown.")
 add(S4, f"{BIN} . --seams", "Cross-module call seams no test reaches. NOW carries seam_pairs/shown/capped.")
@@ -441,12 +508,12 @@ add(S4, f"{BIN} . --owners", "Bus-factor: recency-weighted author ownership per 
 add(S4, f"{BIN} . --dead-code=src", "Internal functions with no caller found in the index — a name-based graph reading, not a confidence score. NOTE the filter is a path-COMPONENT match: 'src' matches any .../src/... segment; use ./src to pin the root directory.")
 add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE exercises — the reverse direction of --affected.")
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
-add(S4, f"{BIN} . --quality-delta", onTree(
-    "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
-    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy — the recorded exit code says whether anything gated. The sandbox section below shows the same gating shape on a known, deliberate edit."))
-add(S4, f"{BIN} . --quality-delta --show-stale", onTree(
-    "The same clean verdict with what it folded printed back: every stale acknowledgement as an <sa kind= key= why=> row and the full header. The regression-free answer above keeps only stale= and stale_by_kind= (and stale_next= names this call), and folds only when that saves a quarter of the bytes. Refused without --quality-delta.",
-    "The same verdict with every stale acknowledgement printed as an <sa kind= key= why=> row and the full header — recorded against a DIRTY tree, so the rows above it are the working copy's. Refused without --quality-delta."))
+add(S4, f"{ABIN} . --quality-delta",
+    "The regression-free answer on a clone whose ledger holds stale acknowledgements (its HEAD's own history plus one demo row keyed to a finding that no longer measures as worse): the verdict-only document, every stale row collapsed to stale= and stale_by_kind=, with stale_next= naming the call below. Recorded in a throwaway clean clone so the contrast is structural — not a race with the release checkout's drift — and every regeneration on every machine sees the same pair.",
+    cwd=CLEAN)
+add(S4, f"{ABIN} . --quality-delta --show-stale",
+    "The same run, the same clone, the folded rows printed back: each stale acknowledgement as an <sa kind= key= why=> row under the full header — the demo row included, and no quarter of the bytes saved by silence. Refused without --quality-delta.",
+    cwd=CLEAN)
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
     "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
     "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone, and the recorded exit code is the working copy's."))
@@ -496,10 +563,10 @@ add(S4, f"{BIN} . --stray-content={shlex.quote( _famA )}", f"A second selection,
 add(S4, f"{BIN} . --stray-content={shlex.quote( _famB )} --plan", f"Select the genuinely-unmerged refs of {_strayScope( _famB, _famBKind )} and feed them to merge-scout for a landing order (a fully merged selection yields an empty landing set — still a measurement, disclosed on the root).", timeout=900)
 add(S4, f"{BIN} . --stray-content=zzzz-no-such-ref --plan", "A --plan filter that selects NO ref REFUSES (exit 1) naming the substring — before the wave-3 close this fell through to the '>512 refs match' sentence, and --abi under the same filter answered an empty measurement at exit 0.")
 add(S4, f"{BIN} . --stray-content={shlex.quote( _famB )} --abi", f"Cross-branch ABI-break gate over {_strayScope( _famB, _famBKind )}: struct byte-contract drift on each ref's AUTHORED paths — exit 2 when any drift row is found (the only kind that gates), 0 when the compared refs are clean, and exit 1 if the --stray-content filter matches no ref at all.", timeout=600)
-add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default lists the kind=\"def\" rows (here the first 60, most on branches, each carrying tip= and date=) and counts the references in <refs count= next=>: on this symbol HEAD's references would fill the 60-row cap before the branch definitions arrive, so the whole list (below) shows fewer definitions, and the default serves the page that shows more of them, whatever its bytes.", timeout=600)
-add(S4, f"{BIN} . --whereis=rankGraphTeleport --whereis-listing=all", "The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list, so it shows far fewer definitions (here HEAD's one) than the default above (here 60). The default serves the all page only when it shows the same definitions as the defs page in strictly fewer bytes (a tie serves it too).", timeout=600)
-add(S4, f"{BIN} . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dead-code", "A ref range run for two of the twelve kinds only: the named kinds' rows are exactly their rows in the full answer, the header names the others (kinds_skipped=, skipped_why=\"selector\"), and a pass no named kind needs does not run. The replay a memory-stopped range answer hands back (kinds_next=) is this flag. Refused without --quality-delta=A..B.")
-add(S4, f"{BIN} . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text", "The same page with every t= line whole: the page above previews each line over 300 B (200 B and t_bytes=, the <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.")
+add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default renders two pages under the same 60-row cap, the definitions page (kind=\"def\" rows and the kind=\"text\" lines no parse read, the references counted in <refs count= next=>) and the whole list, and serves the definitions page when it shows more definitions, whatever its bytes, else only when it is strictly shorter. Here it serves the definitions page (listing=\"defs\"): HEAD's one definition, then the branches' lines in blobs past the parse guard (<unparsed>) as kind=\"text\" rows, a line several refs hold printed once with refs=N (folded= counts the copies it stands for), and HEAD's references counted in <refs count= next=>.", timeout=600)
+add(S4, f"{BIN} . --whereis=rankGraphTeleport --whereis-listing=all", "The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list before any branch row arrives, so it can show fewer definitions than the definitions page. The default serves this page only when both show the same definitions and the definitions page is not strictly shorter (a tie serves this page); here the default served the definitions page above, so this page is asked for by name: HEAD's one definition, then its references.", timeout=600)
+add(S4, f"{BIN} . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dead-code", "A ref range run for two of the thirteen kinds only: the named kinds' rows are exactly their rows in the full answer, the header names the others (kinds_skipped=, skipped_why=\"selector\"), and a pass no named kind needs does not run. The replay a memory-stopped range answer hands back (kinds_next=) is this flag. Refused without --quality-delta=A..B.")
+add(S4, f"{BIN} . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text", "The --whereis-listing=all page with every t= line whole: that page previews each line over 300 B (200 B and t_bytes=, its <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true.")
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
 add(S4, f"{BIN} . --flags --flip=RIPWIRE_ASAN", "Blast radius of turning ONE gate on: live code, symbols, transitive reach, covering tests.")
@@ -552,6 +619,11 @@ add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prio
 # nothing, and the message says which half broke so the next person re-measures rather than re-guesses.
 _IN_DIR      = "src"
 _IN_LIMIT    = 3
+# The element this case's caption promises, and therefore the one the display cut keeps when it falls past the
+# ordinary 30-line window (keep_from_start). It is the SCOPED page's own opening tag: everything the caption
+# names — its counts, capped=/has_more=/next_offset=/next=, its rows, and the <symbols stubbed=> stub behind it —
+# follows this line, so keeping from here keeps the whole demonstration and elides only the global block's middle.
+_IN_KEEP_FROM = '<recent scope='
 # The corpus flags are not decoration: they narrow the mined window so the GLOBAL block fits the display cut,
 # and they make next= replay real corpus/window flags, which is the fact a hand-spelled next= used to lose.
 # --exclude=skills joined them on 2026-09-14 (18 skills/ files in the window, and 17 of the ~24 bytes of
@@ -562,9 +634,19 @@ _IN_LIMIT    = 3
 _IN_EXCLUDES = "--exclude=test --exclude=docs --exclude=skills --exclude=changelog.d"
 
 _IN_LIMIT_NARROW = 2   # the page size the last-resort pass tries (see chooseInWindow)
+# SHOWCASE-LIMIT-1 (2026-11-19): the page size of the LAST passes, tried only after every --limit=3 and --limit=2 pass and the
+# lane-merge pass have refused. A lane whose change window holds only two src/ files (M1, #693: graph.h and resolve.h) cannot
+# cut a page of 2, and every wider HEAD~N spans the previous train; the same refusal hit main right after #687 merged. The
+# published command spells --limit=1 and the caption says it was the last resort, so a reader sees which page size was used.
+_IN_LIMIT_LAST = 1
+
+def inSince( n ):
+    """The --since= revision of window n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit id)."""
+    return f"HEAD~{n}" if isinstance( n, int ) else n
 
 def inCaseCmd( n, limit=_IN_LIMIT ):
-    return f"{BIN} . --rank-by=churn-decay --since=HEAD~{n} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
+    """n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit, see laneMergeSince)."""
+    return f"{BIN} . --rank-by=churn-decay --since={inSince( n )} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
 
 # The probe runs at MODULE INITIALISATION, before the capture loop below and therefore before the per-case
 # timeout that loop applies. A non-terminating run here would hang the generator with nothing on stderr and no
@@ -573,8 +655,12 @@ def inCaseCmd( n, limit=_IN_LIMIT ):
 # this repo, ~2 s cold) and well under the capture loop's own 600 s cases.
 _IN_PROBE_TIMEOUT_S = 120
 
-def inCaseUnshown( n, limit=_IN_LIMIT ):
-    """Which of the caption's promises the PUBLISHED block for HEAD~n does not keep ([] = keeps them all)."""
+def inCaseUnshown( n, limit=_IN_LIMIT, keepFrom=_IN_KEEP_FROM ):
+    """Which of the caption's promises the PUBLISHED block for HEAD~n does not keep ([] = keeps them all).
+
+    keepFrom is the SAME argument the published block is formatted with, so what this measures is what a reader
+    sees — the invariant the comment above insists on. keepFrom=None measures the block as the plain display cut
+    would render it, which is how the caption learns whether the kept tail was needed (_inKeptNote below)."""
     try:
         p = subprocess.run( inCaseCmd( n, limit ), shell=True, cwd=REPO, capture_output=True,
                             timeout=_IN_PROBE_TIMEOUT_S, stdin=subprocess.DEVNULL )
@@ -585,7 +671,7 @@ def inCaseUnshown( n, limit=_IN_LIMIT ):
                   f"no other diagnostic" )
     if p.returncode != 0:
         return [f"the run exited {p.returncode}"]
-    shown = publish_block( p.stdout )
+    shown = publish_block( p.stdout, keepFrom )
     scoped = re.search( r'<recent scope="[^"]*"[^>]*>', shown )
     gone = []
     if scoped is None:
@@ -625,34 +711,97 @@ def marginHeldByMerge( n, repo, inDir ):
     viaMerge = git( "diff", "--name-only", f"HEAD~{n}^1", f"HEAD~{n}", "--", f"{inDir}/" )
     return behind is not None and viaMerge is not None and behind.strip() == "" and viaMerge.strip() != ""
 
+# LANE MERGES (SHOWCASE-LANE-MERGE, 2026-11-14). A lane that merged main has that merge on its first-parent line (#637:
+# HEAD~2). Every HEAD~N past the merge also takes in main's whole second-parent side (#637: 84 commits, a 35-row global
+# block past the display cut), and every N short of it holds no source (the lane's own work sits behind the merge), so no
+# HEAD~N shows and the generator refused: a lane could not regenerate its capture. The last resort walks the first-parent
+# line to the newest merge and anchors the window at that merge's SECOND parent (the main tip it took in): the window is
+# then the lane's own commits plus the merge, and the probe measures it like any other. It is spelled as a commit id, not
+# HEAD~k^2, because the commit that lands the capture moves HEAD~k^2 off the merge (the margin the scan above keeps), while
+# a fixed commit only gains that source-free commit. Train tips never reach it: their scan finds an N first.
+def laneMergeSince( repo, hi ):
+    """The second parent of the newest merge within hi first-parent steps of HEAD, as a 12-hex commit id; else None."""
+    p = subprocess.run( [ "git", "rev-list", "--first-parent", "--parents", "-n", str( hi ), "HEAD" ], cwd=repo,
+                        capture_output=True, text=True, stdin=subprocess.DEVNULL )
+    merge = next( ( row.split() for row in p.stdout.splitlines() if len( row.split() ) >= 3 ), None ) if p.returncode == 0 else None
+    return merge[ 2 ][ :12 ] if merge else None
+
 def firstWindow( lo, hi, ok ):
     """The smallest N in (lo, hi] with ok( N ), else None."""
     return next( ( n for n in range( lo + 1, hi + 1 ) if ok( n ) ), None )
 
-def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None ):
-    """Return ( N, page limit )."""
-    unshown = unshown or inCaseUnshown
-    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
-    both = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
-    passes = [
-        ( _IN_LIMIT, lambda n: both( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
-        ( _IN_LIMIT, lambda n: not unshown( n, _IN_LIMIT ) and mergeHolds( n - 1 ),
-          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
-        ( _IN_LIMIT_NARROW, lambda n: both( n, _IN_LIMIT_NARROW ),
-          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
-    ]
+def scanPasses( passes, lo, hi ):
+    """The first pass, in order, that accepts some N in (lo, hi]: ( N, page limit, why ), else None."""
     for lim, ok, why in passes:
         n = firstWindow( lo, hi, ok )
         if n is not None:
-            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
-            return n, lim
+            return n, lim, why( n )
+    return None
+
+def windowPasses( unshown, mergeHolds ):
+    """The HEAD~N passes as ( tried before the lane-merge pass, the last resorts after it ); a pass is ( limit, ok( N ), why( N ) ).
+    A window is accepted when it shows and its margin HEAD~(N-1) either shows too or is held by the merge HEAD~(N-1)."""
+    marginShows = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
+    marginHeld  = lambda n, lim: not unshown( n, lim ) and mergeHolds( n - 1 )
+    before = [
+        ( _IN_LIMIT, lambda n: marginShows( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
+        ( _IN_LIMIT, lambda n: marginHeld( n, _IN_LIMIT ),
+          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
+        ( _IN_LIMIT_NARROW, lambda n: marginShows( n, _IN_LIMIT_NARROW ),
+          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
+    ]
+    lastResort = [
+        ( _IN_LIMIT_LAST, lambda n: marginShows( n, _IN_LIMIT_LAST ),
+          lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds; no larger page cuts in any window" ),
+        ( _IN_LIMIT_LAST, lambda n: marginHeld( n, _IN_LIMIT_LAST ),
+          lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds as the merge HEAD~{n-1}; no larger page cuts in any window" ),
+    ]
+    return before, lastResort
+
+def laneMergeWindow( laneSince, unshown ):
+    """The lane-merge pass (see laneMergeSince): ( commit id, page limit, why ) when that window shows, else None."""
+    rev = laneSince()
+    if rev is None or unshown( rev, _IN_LIMIT ):
+        return None
+    return rev, _IN_LIMIT, ( "no HEAD~N shows: the newest first-parent merge took in "
+                             "main; the window is this branch's own commits since that main tip" )
+
+def refuseNoWindow( lo, hi, unshown ):
+    """Exit naming, for every N tried, which promise HEAD~N and its margin HEAD~(N-1) broke at the usual page size."""
     tried = [ f"HEAD~{n}: {'; '.join( unshown( n, _IN_LIMIT ) ) or 'shows everything'} (margin HEAD~{n-1}: {'; '.join( unshown( n - 1, _IN_LIMIT ) ) or 'shows everything'})"
               for n in range( lo + 1, hi + 1 ) ]
     sys.exit( "showcase_capture: refusing to write — no --since=HEAD~N in [%d,%d] shows what the --in=%s case promises:\n  %s"
               % ( lo + 1, hi, _IN_DIR, "\n  ".join( tried ) ) )
 
+def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
+    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str). The passes run in order — the
+    HEAD~N scans, the lane-merge window, the --limit=1 last resorts — and the first that finds a window wins; none refuses."""
+    unshown = unshown or inCaseUnshown
+    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
+    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
+    before, lastResort = windowPasses( unshown, mergeHolds )
+    found = scanPasses( before, lo, hi ) or laneMergeWindow( laneSince, unshown ) or scanPasses( lastResort, lo, hi )
+    if found is None:
+        refuseNoWindow( lo, hi, unshown )
+    n, lim, why = found
+    print( f"showcase_capture: --in= case window derived as {inSince( n )} ({why})", file=sys.stderr )
+    return n, lim
+
 _inN, _inLimit = chooseInWindow()
-add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's.")
+# Whether the chosen window needed the kept tail (keep_from_start): measured by re-rendering the SAME window with the
+# plain display cut. A train tip answers False and the caption says nothing; a merge-heavy tip answers True and the
+# caption says which half of the block the reader is looking at, because a marker alone would not say WHY the middle
+# of the global block is the part that went.
+_inKept = bool( inCaseUnshown( _inN, _inLimit, keepFrom=None ) )
+_inKeptNote = ( "" if not _inKept else
+    f" The global block's rows are elided in the MIDDLE here, not at the end: every change window on this branch that is wide "
+    f"enough for the scoped page to cut also fills the global block past the display cut (the tool caps it at 40 rows), so the "
+    f"cut keeps the scoped page and the stub the caption promises and the `… [N more display lines]` marker counts exactly the "
+    f"global rows taken out. The tool's answer is complete either way; only this document's own 30-line window moved." )
+_inLimitNote = ( "" if _inLimit == _IN_LIMIT else
+    f" This page holds {_inLimit} row(s), not the usual {_IN_LIMIT}: no change window on this branch held enough src/ files "
+    f"for a larger page to cut, so the generator fell back to a smaller one (see chooseInWindow)." )
+add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's." + _inLimitNote + _inKeptNote, keep_from=_IN_KEEP_FROM)
 add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "An unknown value REFUSES (exit 1), NAMED, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --format=columnar", "Columnar output: paths table + parallel arrays, ~15-60% fewer tokens on MANY-row lists — small results can be LARGER (the columnar legend is a fixed cost).")
 add(S7, f'{BIN} . --for="cache invalidation" --format=candidates --top-k=5', "Flat top-K export for an external reranker.")
@@ -840,6 +989,23 @@ def mustReplace( text, old, new, what ):
 if os.path.isdir( DIRTY ):
     shutil.rmtree( DIRTY )
 subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, DIRTY ], check=True )
+# the clean sandbox for the --show-stale contrast pair: HEAD's own ledger + ONE demo ack row whose key
+# no current measurement produces — stale by construction, so the collapsed/restored contrast regenerates
+# identically on every machine instead of depending on whatever drift the release checkout happens to have
+if os.path.isdir( CLEAN ):
+    shutil.rmtree( CLEAN )
+subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, CLEAN ], check=True )
+# the clone carries REPO's own origin/main ref, so --quality-delta measures the SAME range there as here
+# (objects already exist via --local; this is ref metadata, no network, no new objects) — without it the
+# range mis-resolves and every historical ack reads stale, which would demo the flag honestly badly
+_originMain = subprocess.run( [ "git", "-C", REPO, "rev-parse", "--verify", "--quiet", "origin/main^{commit}" ],
+                              capture_output=True, text=True ).stdout.strip()
+if not _originMain:
+    sys.exit( "showcase_capture: " + REPO + " has no origin/main ref (a --single-branch clone of another branch?): "
+              "`git fetch origin main:refs/remotes/origin/main` first, the --quality-delta captures measure that range" )
+subprocess.run( [ "git", "-C", CLEAN, "update-ref", "refs/remotes/origin/main", _originMain ], check=True )
+with open( os.path.join( CLEAN, ".ripwire_quality_acks" ), "a" ) as _ackf:
+    _ackf.write( "ack api-surface 0123456789abcdef 1 showcase demo row: no current finding carries this key, so it folds silently until --show-stale prints it back\n" )
 subprocess.run( "git branch zz-orphan-lane $(git commit-tree 'HEAD^{tree}' -m 'zz-orphan-lane: parentless probe branch for the no-merge-base bucket')",
                 shell=True, cwd=DIRTY, check=True )
 
@@ -1010,9 +1176,9 @@ doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. The di
 doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
 doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.")
 doc.append("")
-doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
+doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size; an answer that ENDS in its legend (the answer-first `--for` document) keeps those trailing comment lines after the marker, and N counts only the lines between. One block (`--in=DIR`) keeps a trailing ELEMENT the same way — its caption's whole subject, the scoped `<recent scope=>` page, is the last thing the tool prints — so there the elided lines are the MIDDLE of the preceding global block and the marker counts exactly those; its caption says so when it happens. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
-doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
+doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` / `--lsp-langmap` (the editor transport and its language-map config — their one-shot dialogues, including every map and hint arm, are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
 
 cur_section = None
@@ -1038,12 +1204,12 @@ for r in results:
         doc.append(r["pre"].rstrip())
         doc.append(FENCE + "\n")
     doc.append(FENCE)
-    doc.append(publish_block(r["out"]))
+    doc.append(publish_block(r["out"], c.get("keep_from")))
     doc.append(FENCE + "\n")
     if r["err"].strip():
         doc.append("stderr:\n")
         doc.append(FENCE)
-        doc.append(publish_block(r["err"]))
+        doc.append(publish_block(r["err"], c.get("keep_from")))
         doc.append(FENCE + "\n")
     if r["post"]:
         doc.append(c.get("post_label", "Artifact written:") + "\n")

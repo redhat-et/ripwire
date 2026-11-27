@@ -103,7 +103,9 @@ if has c_only_tested; then ok "A7 a C static called only by a test is a <to> row
 if printf '%s' "$OUT" | grep -q '<d n="zero_callers"'; then no "A8 a zero-caller Python private def became a count= row"; else ok "A8 zero-caller Python private def is not a <d> row"; fi
 if printf '%s' "$OUT" | grep -q '<dead-code [^>]*count="0"'; then ok "A8 count=0 (test-only rows are not in count=)"; else no "A8 count= is not 0"; fi
 chk "A9 filtered run" "$F" --dead-code=pkg/public.py && NONE="$CHK" || NONE="<run failed>"
-if [ "$NONE" = "<run failed>" ] || printf '%s' "$NONE" | grep -q 'test-only'; then no "A9 test-only text on an answer with no <to> row"; else ok "A9 no test-only=/clause when none (present-only)"; fi
+# DEAD-CODE-SCOPE: a filtered run may now carry the exported group, whose rows read v="test-only" (a verdict word, not this
+# root attribute or its clause), so the arm reads the attribute and the clause by their own spelling.
+if [ "$NONE" = "<run failed>" ] || printf '%s' "$NONE" | grep -q 'test-only="\|test-only=N'; then no "A9 test-only text on an answer with no <to> row"; else ok "A9 no test-only=/clause when none (present-only)"; fi
 if printf '%s' "$OUT" | grep -q 'test-only=N'; then ok "A9 the clause rides the answer that carries test-only="; else no "A9 clause missing"; fi
 chk "A10 second-page run" "$F" --dead-code --limit=1 --offset=1 && P2="$CHK" || P2="<to n=\"run-failed\""
 if printf '%s' "$P2" | grep -q '<to n="'; then no "A10 <to> rows repeated past the first page"; else ok "A10 <to> rows ride the first page only"; fi

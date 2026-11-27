@@ -1,156 +1,57 @@
 ---
 name: ripwire-router
 description: >
-  Start HERE when unsure which ripwire skill fits, or asked 'how do I use ripwire / where do I start'.
-  A moment→skill map, cold start to handoff, plus the two reflexes that leak most: --exemplar before
-  you write, --quality-delta before you call it done. One hop to the right skill.
+  Start HERE when unsure which ripwire skill fits, or asked 'how do I use ripwire / where do I start':
+  maps the moment to one skill, plus the two reflexes that leak most — --exemplar before you write,
+  --quality-delta before done.
 allowed-tools: Bash, Read
 ---
 
 # ripwire router — the moment → skill map
 
-Agents route by **moment**, not by feature. Find the row that matches what you're about to do; it names the
-ONE skill to enter. If you routed wrong, each skill's own routing header sends you one hop to the right one.
+Find your moment and enter that ONE skill; each skill's routing line corrects a wrong pick in one hop. Unsure of
+the verb? `ripwire <dir> --help-task="<the task in words>"` recommends ONE command with its evidence, or abstains
+(advice only; backtick a word that names code, `` `F` ``, so it routes by name).
 
-## Not sure which verb fits? Ask the tool itself
-
-`ripwire <dir> --help-task="<the task in words>" --legend=compact` returns ONE recommended command with the evidence
-behind the pick (intent, score/margin, repository facts) — or honestly abstains when the evidence is
-too thin to name a winner. One hop cheaper than reading this whole map: paste the task, run what it
-recommends. Advice only — it never executes the recommendation.
-
-A short bare word abstains even when it names a real symbol — a lone letter, a SCREAMING name, or an
-ordinary word that happens to match an indexed name (`F` in `--help-task="understand F"`, django's ORM
-class, is a real example) does not resolve on its own; only genuine identifier SHAPE does
-(camelCase/snake_case/`::`/`.`). Mark it as code in the task text instead — backtick it (`` `F` ``) or
-write it in call form (`F()`) — to route on it by name.
-
-| The moment you're in | The ONE skill | Its opening move |
+| The moment you're in | Enter | Opening move |
 |---|---|---|
-| **Cold-start** — landed in an unfamiliar repo, "what is this / what matters here" | **ripwire-orient** | `--recall` then `--report` |
-| **Resuming after a context compaction / a new session on work already in flight** — you have a task but no longer the reasoning that got you here | **ripwire-orient** | rebuild state instead of re-reading files: `--recall="<the task>"` (what past sessions WROTE down) → `--situ` (what the working tree currently has changed + tests to run) → `--notes` (gotchas already paid for). Cheaper and more accurate than re-deriving from source. |
-| **A pile of DUMPED output, not code** — a `git log`, fetched docs, `<tool> --help`, one oversized reference file, and you need ONE answer out of it | **ripwire-orient** | point `--recall` at the dump directory itself: `ripwire <dumpdir> --recall="<the question>"` — a zero-setup knowledge base, nothing to install and no daemon (one cold parse, warm after). Two rules decide whether it works at all: **dump to `.md`** — `.txt`/`.log`/`.json` are not documents to `--recall` and it answers `0 relevant of 0 document files` — and keep `##` headings in the dump, because a headed document is served as whole ranked SECTIONS (the served `[sections: …; lines="…"; dropped_by_budget=D]` note discloses the cut) while a headless one is still cut front-first. |
-| **Understand X** — "how does X work / where is Y / architecture overview" | **ripwire-orient** | `--for="X"` |
-| **Trace one symbol** — who calls it, what it calls, is it safe to change, locate a literal | **ripwire-navigate** | `--callers`/`--callees`/`--impact`/`--grep` |
-| **Find an exact literal** — error text, config key, or emitted string | **ripwire-navigate** | `--grep='literal' --grep-context=2`; add `--and`/`--not`, `--grep-scope=file`, or `--grep-in=any` only when the first answer requires it |
-| **Verify one closed code claim** — does A call B, is X unused, does a file define/contain Y? | **ripwire-navigate** | `--verify='calls(A,B)'` (also `uses`/`unused`/`contains`/`defines`/`reaches`) |
-| **My task touches A, B and C — how do they relate?** — N (>2) task symbols, or a pair `--path` can't reach | **ripwire-navigate** | `--connect=A,B,C` (the shared-caller join a directed `--path` can't see) |
-| **Planning a FEATURE** — multi-symbol work needing a plan / interface / size estimate | **ripwire-before-you-build** | `--recall` + `--for` + `--seams` |
-| **Implementing against an interface** — writing a class/type that must satisfy interface `I` | **ripwire-before-you-build** | `--lego=I` (I's method contract + every existing implementor to copy) |
-| **About to write ONE symbol** — a fn/class/helper, even a "quick" one | **ripwire-reuse-first** | `--exemplar` + `--for` + `--clones` |
-| **Mid-implementation** — about to open several files just to learn something | **ripwire-orient** (`map-before-you-read.md`) | cheapest verb, then read 2-3 files |
-| **Reviewing MY diff** — "am I ready to push / is this safe to merge" | **ripwire-change-check** | `--quality-delta` (that's the quality-bar reflex) → `--pr-context` |
-| **Which tests should I run for this change? Did I run the right ones?** | **ripwire-change-check** | `--affected=F1,F2` / `--situ` → `--test-gate` |
-| **A test failed and I have its name and nothing else** — what does this harness actually cover? | **ripwire-change-check** | `--exercises=TESTFILE` — the INVERSE of `--affected`: the non-test symbols this test transitively calls into |
-| **My symbol is missing from the map** — expected a def to show up and it didn't | **ripwire-orient** | `--skipped` first (was its FILE dropped — a size ceiling, one row per oversize file); if the file isn't oversize-skipped, `--doctor` next (stale binary, grammar/parse failure, cache-dir health — a setup check, not a bug report) |
-| **Writing tests for existing (untested) code** | **ripwire-write-tests** | `--seams` + `tested=1` coverage lens + `--callers=SYM` |
-| **Reviewing code I did NOT write** — unfamiliar subsystem, "what's gnarly here" | **ripwire-fresh-eyes** | `--quality-panel` (THE SINGLE COMMAND — six evidence families in one ranked report; a lens, not a gate) — or `--hotspots` + `--clones` + `--owners` one lens at a time (scope to the subsystem) |
-| **Debugging** — a symptom, a suspect subsystem, or "I changed X and it broke" | **ripwire-find-bug** | `--for=symptom` / `--situ` |
-| **I HAVE a stack trace / sanitizer report / compiler error** — paste it, don't hand-translate it | **ripwire-find-bug** | `--from-trace=FILE` (or `-` from stdin) — frames → ranked in-corpus suspects, innermost first |
-| **Just edited a symbol** — "did I change a contract someone depends on?" (pre-commit, per-symbol) | **ripwire-change-check** | `--edit-check=SYM` — unchanged / new-symbol / contract-change + flagged incompatible callers, ~26 ms warm |
-| **Apply a whole-symbol edit** — replace a definition or insert beside one without a whole-file Read (agents without a read-before-edit rule; **Claude Code**: Read only the symbol's `l=` range, then use the native Edit) | **ripwire-orient** (`map-before-you-read.md`) | CLI first: `--replace-symbol-body=SYM --edit-payload=FILE|-` (or `--insert-before-symbol` / `--insert-after-symbol`); add `--edit-target-file=PATH` only for ambiguity. MCP has same-named warm-server counterparts. |
-| **Landing several branches / parallel agent worktrees** — who conflicts, what order? | **ripwire-change-check** | `--merge-scout=REF1,REF2,…` — pairwise conflict sites + a suggested landing order |
-| **Branch/content archaeology** — "I have 30 branches and don't know what's stranded on them" (not a diff review) | **ripwire-change-check** | `--stray-content[=SUBSTR]` (unmerged/superseded/merged verdict per ref) + `--whereis=SYM` (which ref defines/mentions it) |
-| **Worth remembering for the next session** — a gotcha tied to a symbol/file (trap, flake, invariant) | **ripwire-orient** | `--note-add="SYM: text"` — surfaces automatically whenever `--for`/`--expand` later emit that symbol |
-| **One-call orientation under a budget** — the whole --for → bodies → callers → tests dance at once | **ripwire-orient** | `--pack-task="task"` (+ `--token-budget=N`) — ranking, top bodies, caller sigs, notes, tests_to_run in ONE bundle |
-| **About to FAN OUT** — spawning N subagents / worktrees / lanes, about to hand-write N per-agent briefs | **ripwire-orient** (`map-before-you-read.md`) | `--pack-task="task" --partition=N` (N=2..16) — ONE shared core plus N minimally-overlapping slices carved along the call graph's own communities, so N agents stop re-deriving the same orientation. `--token-budget` here means ONE agent's budget; each inner `<ctx>` is byte-identical to that agent's standalone call, so hand it over verbatim. Check `overlap_max` before trusting the split, and `split="K"` (>0 = a module was cut at its rank median because there were fewer modules than agents). Then `--plan-lanes=N --task="…"` (or `--plan-lanes --brief=FILE`) for the conflict-aware version: which lanes would COLLIDE, in what order they should land, and what each must test — JSON, pre-hoc, before a line is written. |
-| **Refactoring** — planning a restructure, or a suspected god object | **ripwire-fresh-eyes** | `--communities`/`--metrics` (lcom4) + `--impact` + `--cochange`; read the nesting PROFILE (`humps=`/`deep=`), never `nest=` alone |
-| **I have the measurement — now WHICH refactor, and is it safe?** — a shape (many shallow humps / one deep tangle / small-and-dense / untested hub / a clone) needs a named fix and its precondition | **ripwire-quality-bar** | the shape → refactor playbook, then the closed fix loop: `--quality-delta` → `--edit-check=SYM` → `--affected` |
-| **Perf** — a benchmark/profile (including a flame graph) identifies a slow operation or symbol | **ripwire-perf-target** | measure → navigate measured surface → re-measure; if the counters say MEMORY not compute, `--field-affinity[=STRUCT]` (a hypothesis generator, never a measurement) |
-| **A clang optimization remark while editing ripwire's OWN C++** — `-Rpass`/`-Rpass-missed` says "loop not vectorized" / "will not inline" / etc, and you need to decide if it's worth a diff | **ripwire-opt-remarks** | `scripts/optremarks.sh` then `scripts/optremarks.py --hot` — contributor-facing, not a general perf-investigation entry: a generic "this is slow" / "where's the bottleneck" prompt with no remark in hand is **ripwire-perf-target**, not this |
-| **Security** — untrusted input, reviewing security-sensitive code, or auditing a skill/MCP config | **ripwire-security-scan** | `--lint` unsafe fns + `--scan-skills` |
-| **Handoff** — writing a summary of a repo/change for the next agent or teammate | **ripwire-handoff** | the handoff bundle |
-| **What's built but DARK here** — "why don't I see feature X" (code compiled/flagged OFF, not a bug) | **ripwire-fresh-eyes** | `--flags[=SUBSTR]` (dark-gate dashboard) + `--flip=NAME` (blast radius of turning one ON) — **ripwire-find-bug** points here too when a symptom turns out to be a dark flag |
-| **Task spans multiple checkouts** — service+client, a split monorepo — one question over BOTH | any moment skill above | pass every root: `ripwire dir1 dir2 --for=…` (one merged graph; `--impact` across roots needs the workspace call). Refusal boundary: `--quality-delta`/`--test-gate`/`--eval*`/`--arch --baseline` stay single-root (HEAD-keyed baselines and corpora are per-repo) — run those per root. |
-| **Is my ripwire setup healthy / am I running a stale binary?** | (no skill — run directly) | `ripwire <dir> --doctor --legend=compact` — binary-vs-PATH staleness, grammar compile, cache-dir health, git reachability (single-root, diagnostic not deterministic) |
+| cold start; "how does X work / where is Y"; resuming after a compaction; a symbol missing from the map | **ripwire-orient** | `ripwire <dir>` once, `--recall`, `--for="X"` · resume: `--recall` → `--situ` → `--notes` |
+| a NAMED symbol: callers, callees, path A→B, "safe to rename X", an exact literal, a closed claim, 3+ symbols | **ripwire-navigate** | `--for` (routes itself) · `--grep` · `--verify` · `--connect` |
+| a symptom: crash, stack trace, wrong output, "it broke after my edit" | **ripwire-find-bug** | `--from-trace=FILE` · `--situ` · `--for="symptom"` |
+| about to write ONE symbol, or add a dependency | **ripwire-reuse-first** | `--for`, then optionally `--exemplar` |
+| planning a FEATURE; implementing an interface | **ripwire-before-you-build** | `--pack-task` · `--lego=I` |
+| "did the code I wrote get worse?" before done | **ripwire-quality-bar** | `--quality-delta` |
+| "is my diff safe to merge / which tests / did I break a contract / landing order" | **ripwire-change-check** | `--edit-check=SYM` · `--test-gate` · `--merge-scout` |
+| code I did NOT write: rot, refactor planning, dark flags, owners | **ripwire-fresh-eyes** | `--quality-panel` |
+| tests for existing untested code | **ripwire-write-tests** | `--seams` |
+| a measured profile names a hot symbol | **ripwire-perf-target** | `--for` on the measured symbol |
+| untrusted SKILL.md / `.mcp.json`, or code on an untrusted-input path | **ripwire-security-scan** | `--scan-skills` · `--lint` |
+| briefing someone else on a subsystem | **ripwire-handoff** | `--for --signatures-only` → `--expand` → `--recall` |
+| architecture health with rules to enforce in CI | **ripwire-layers** | `--arch=rules.txt` · `--deps` |
+| a graph question the fixed verbs can't phrase | **ripwire-graph-query** | `--graph-query='EXPR'` |
+| wiring ripwire into an agent as an MCP server; tool health | **ripwire-mcp** | `ripwire wrap AGENT` · `--doctor` |
+| a clang optimization remark on ripwire's OWN C++ (contributors) | **ripwire-opt-remarks** | `scripts/optremarks.sh` |
+| is my setup healthy? | (no skill) | `ripwire <dir> --doctor --legend=compact` |
 
-## You are not in a "moment" — you are about to reach for a default
+## The two reflexes that leak most
 
-The table above assumes you recognized a moment. The most expensive case is the one where you did not:
-you simply went for `Read`, `Grep`, or `Glob` because they are always there. That reflex needs no
-recognition and no skill load, which is exactly why it wins by default and why it costs the most.
+- **Before you write a fn/class, even a quick one:** `--for="<task>"` to reuse first, then `--exemplar` for the shape
+  to imitate (**ripwire-reuse-first**).
+- **Before you call it DONE:** `ripwire <dir> --quality-delta --legend=compact` — only what your change made worse, across 13 kinds, vs
+  `git HEAD` (**ripwire-quality-bar**).
 
-Match the **default you were about to use**, not a moment:
+About to `Read` a whole file for one function, or `Grep` a symbol name? `--expand=SYM` and `--for="theExactName"`
+answer it for a fraction of the bytes (`defaults.md`).
 
-| About to… | Reach for instead |
-|---|---|
-| `Read` a whole file to understand one function | `--expand=SYM` — that symbol's body + its callees' signatures, no ride-along map (orient ONCE per session with `ripwire <dir>`, then look up lean). The file is not the unit of an answer. |
-| `Read` several files to learn how something works | `--pack-task="<task>"` — ranking + bodies + callers + tests in ONE budgeted call |
-| `Grep`/`rg` a symbol name across the tree | `--for="theExactName"` (name-exact routing, recall@1 ~99%) · `--uses=SYM` for every read/write/import site |
-| `Grep` a concept ("where do we retry") | `--for="<the concept in words>"` — matches doc-comments and bodies, not just identifiers |
-| `Glob` for candidate files by name | `--for=` ranks by what the code DOES; a glob only knows paths |
-| paste a stack trace and hand-pick frames | `--from-trace=FILE` (`-` = stdin) — verbatim, ranked innermost-first |
-| `git diff` / `git log` to judge a change | `--situ` (blast radius + tests) · `--rank-by=churn` |
+## The legend
 
-The discipline behind this row set is **ripwire-orient**'s companion `map-before-you-read.md`; it is worth entering even mid-task, because
-less context is measurably MORE accurate, not merely cheaper (29% → 3% code-repair accuracy as context
-grew 32K → 256K, LongCodeBench). If a `ripwire wrap` primer or the opt-in `skills/install.sh --hook`
-nudge is installed, these same substitutions arrive without anyone loading this file — that is the point:
-a rule an agent must remember to look up is a rule that loses to a habit.
+Answers carry the compact legend by default; add `--legend=full` when a definition's reasoning is needed. On a long
+session (about 10+ ripwire calls), read `ripwire --legend-dict=core` in full — 13 definitions, about 1.5 KB — and pass
+its `have=` as `--legend-have=<value>`; on a shorter one pass nothing. Never pass a value whose lines you did not read
+(`legend.md`).
 
-## The legend: compact by default, full when a definition needs its reasoning
+## Reference files — read only when a row above is not enough
 
-Every command these skills spell asks for the compact legend (`--legend=compact`: terse definitions of only the attributes the answer carries). Compact is also the CLI's DEFAULT now, so on a current binary the flag is redundant — it stays so a command reads the same on an older one. Add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, or a map a human will read. `--for` spells no flag: its compact legend is its own dialect, and the default.
-
-The other exceptions are not a choice — **the binary refuses `--legend=compact` on any command that does not answer with an XML legend**, and a command it refuses runs not at all. Two families: the **state-changing** commands, which write something rather than answer (`--quality-ack`, `--quality-baseline`, `--arch --baseline`, `--note-add`, `--replace-symbol-body` / `--insert-before-symbol` / `--insert-after-symbol`, `--edit-plan`, `--index-out=`), which refuse either posture, and the **non-XML renderings** (`--mermaid`, `--html`, `--report`, `--sarif`, `--situ`, `--recall=`, `--export`), where `--legend=full` is accepted as a no-op because the full form is the only one they have. Those carry no `--legend=compact`. `--pin-census=` is not among them: it writes its census beside a map, and the map takes a posture like any other. This matters when you compose rather than copy: a flag that turns an XML verb into one of these — `--zoom --mermaid`, `--quality-delta --quality-ack` — takes the whole command with it, so the verb is not what decides, the command is. Nothing here is a rule you have to apply by hand: `ripwire --help-task` spells no posture at all (the binary's default decides), and `test/skilltruthcheck.sh` runs every `--legend=compact` command these skills spell against the binary and fails on a refusal.
-
-## Cross-cutting disciplines (fire ALONGSIDE a moment skill, not instead)
-
-- **ripwire-orient / `map-before-you-read.md`** — the map-before-you-read token+accuracy discipline for *any* read, at *any* moment (a companion file since 2026-09-07; it was the standalone `efficient` skill).
-- **ripwire-quality-bar** — the measure-what-you-made-worse convergence loop, at *every* "I think I'm done".
-- **ripwire-reuse-first** — reuse-before-reinvent, at *every* new symbol.
-
-These aren't a "moment" you land in; they're reflexes you carry into every moment.
-
-## Wrong tool for the job
-
-`ripwire --help` (its **Languages** line) is the source of truth for what gets parsed; it grows, so trust it over any copy.
-Today: C-family (C, C++, ObjC/ObjC++, Metal, CUDA), Python, TypeScript, JavaScript, Java, Kotlin, C#, Go, Rust, Swift,
-Ruby, PHP, Lua, Elixir, Dart, Clojure, GDScript, Bash; JSON/TOML/YAML (config keys); Markdown (headings are sections).
-A repo in a language not on that line (Haskell, OCaml, Scala, Zig, ...) gets an empty map whose header names the skipped
-extensions (`unindexed=`) — don't mistake that for "nothing here"; reach for plain `rg` + reads instead. Supported
-languages are not "thin": try the map first. And ripwire maps *structure*, not build/link state — a
-build failure or a linker error is the compiler's/linker's question, not ripwire's; it can still tell you
-*where* the broken symbol lives (`--grep`/`--callers`), just not why the toolchain rejected it.
-
-## Reference skills (consulted, never "entered")
-
-**ripwire-layers** (architecture-health / `--arch` CI gate), **ripwire-graph-query** (custom graph queries),
-**ripwire-mcp** (run ripwire as an MCP server). `--doctor` (setup-health row above) is diagnostic, not a
-moment skill. `--eval` / `--eval-retrieval` / `--eval-mined` are
-maintainer self-eval harnesses (not an agent moment) — `--eval-mined=FILE` scores ranker recall against
-real session-mined (query, gold-files) pairs from `bench/mine_traces.py`. The
-detail-ladder / token-squeeze (`--compress`) material
-lives inside **ripwire-orient**'s companion file (`skills/ripwire-orient/compress-ladder.md`) now — it's not a standalone
-moment. You don't recognize "the graph-query moment" — reach for these when a moment skill points you at
-them.
-
-## The two-reflex primer — the moments the habit forgets
-
-The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--callers`/`--expand`/
-`--hotspots`) but not the two WRITE-time reflexes, which is exactly where the most value leaks:
-
-- **Before you write a fn/class — even a "quick" one:** `ripwire <dir> --exemplar="<the sub-task in words>" --legend=compact`
-  → the repo's best-in-class instance of that shape to imitate (by ROLE, not text similarity), plus
-  `--for="<task>"` to reuse before reinventing. Duplicates are born on tasks that felt too small to tool up
-  for. (→ **ripwire-reuse-first**.)
-- **Before you call it DONE:** `ripwire <dir> --quality-delta --legend=compact` → ONLY what your change made worse across 10
-  kinds (complexity, verbosity, nesting, params, duplication, dead-code, api-surface, error-masking,
-  short-horizon-churn, new-clone-of-reused-helper); exit 2 = new debt.
-  In a git repo it **auto-compares vs `git HEAD`** (no start-of-task ritual — just run it before you push).
-  **A finding is only half the job** — the fix is not done until it is proven: `--quality-delta` (targeted
-  kind gone, nothing else regressed) → `--edit-check=SYM` (contract intact) → `--affected` (the tests that
-  prove it). That chain, and the shape → refactor playbook that picks the fix in the first place, are in
-  **ripwire-quality-bar**.
-  For a mid-task convergence loop, run `ripwire <dir> --quality-baseline` at the start to pin an explicit
-  floor (it takes precedence over HEAD), then re-run `--quality-delta` after each edit. (→ **ripwire-quality-bar**.)
-  Want the wider "does this still look rotten" picture alongside the delta, not just what you changed? —
-  `ripwire <dir> --quality-panel[=strict|default|lenient] --legend=compact`, the six-family panel (→ **ripwire-fresh-eyes**).
-  **It is a lens, not a gate** — always exits 0; `--quality-delta` above is the only pass here that gates.
-
-`ripwire --help` lists every flag on one line; `--help=--FLAG` prints one flag in full and `--help=all` the whole catalog. Every skill re-verifies its commands against the shipped binary.
-
-**Installing these skills:** `bash skills/install.sh` symlinks every `ripwire-*` skill into the Claude
-skill home (its codex mode targets `${AGENTS_HOME:-~/.agents}/skills`; `--codex-legacy` retains
-`${CODEX_HOME:-~/.codex}/skills`) and prunes dangling links from removed skills. Add `--hook` explicitly
-for the advisory nudge (`--codex --hook` for Codex).
+`moments.md` every moment with its full opening move · `defaults.md` Read/Grep/Glob → the ripwire substitute ·
+`legend.md` legend postures, refusals, `--legend-have` measurements · `scope.md` cross-cutting disciplines, languages,
+wrong tool for the job · `primer.md` the two reflexes in full, `--help`, installing these skills (`skills/install.sh`).

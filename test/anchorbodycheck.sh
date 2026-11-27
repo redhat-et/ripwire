@@ -46,7 +46,8 @@
 #       fixed six-candidate pool. (7)/(7b) prove the mid-sized anchor is now served, alone, from its own
 #       file; (7b2) proves the RAISE did not reopen substitution, which matters because a larger
 #       allowance is exactly the condition under which the original defect fired; (7c) proves an explicit
-#       --token-budget is still a hard ceiling; (7d) proves the raise is BOUNDED (the 36 KB anchor still
+#       --token-budget sheds the answer AFTER its posture (TOKEN-BUDGET-MONOTONE, 2026-11-14: it used to re-decide the posture
+#       and refuse the body — bodies="0" reason="budget"); the anchor's body IS the answer and no shed unit removes it; (7d) proves the raise is BOUNDED (the 36 KB anchor still
 #       refuses, so whole-body-or-nothing survives); (7e) proves a MULTI-candidate anchored bundle gets
 #       no raise at all — the guard that stops this becoming a general per-item budget increase.
 #
@@ -77,6 +78,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): the anchor-body rules shape the full page's <bodies>; a named location's tiny answer serves no bodies (its <more next=> returns this page)
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -182,7 +184,12 @@ rootbodies(){ printf '%s' "$1" | grep -o 'bundle="auto" bodies="[0-9]*"' | head 
 BIG="$( rw --for=widgetAnchorProbe )"
 FIT="$( rw --for=widgetFitProbe )"
 SOLO="$( rw --for=widgetSoloProbe )"
-MID="$( rw --for=widgetMidProbe )"                        # the anchor-resolved allowance's own shape
+# AF1-fix (2026-11-18): the default --for answer is served in 12 KB PAGES (src/forpages.h); the anchor body this arm funds is
+# ~11 KB, so it starts past page 1's cut. (7)..(7b2) are about the ANSWER the allowance funds, so MID reads --page-bytes=0 —
+# the whole answer in one call, row-identical to the joined pages (forpagescheck P2) — and (7p) holds the default PAGE to
+# present-or-disclosed-deferred. (7c): a budget is never paged, so the whole answer a fitting budget returns is MID.
+MID="$( rw --for=widgetMidProbe --page-bytes=0 )"         # the anchor-resolved allowance's own shape
+MIDPAGE="$( rw --for=widgetMidProbe )"                    # the default page
 MIDCAP="$( rw --for=widgetMidProbe --token-budget=6000 )" # …with an explicit ceiling: stays hard
 TWIN="$( rw --for=widgetTwinProbe )"                      # multi-candidate anchor: no raise
 # COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) moved the rank-first BODY
@@ -280,9 +287,16 @@ printf '%s' "$MID" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe
 printf '%s' "$MID" | grep -q 'ZZBYSTANDERPROSE' \
     && no "(7b2) the bystander's prose rode in on the RAISED allowance — substitution reopened at the new ceiling" \
     || ok "(7b2) no bystander prose in the newly-funded bundle"
-printf '%s' "$MIDCAP" | grep -q 'bundle="auto" bodies="0" reason="budget"' \
-    && ok "(7c) an explicit --token-budget stays a HARD ceiling — the raise does not apply to it" \
-    || no "(7c) the raise leaked into the explicit --token-budget regime (root: $( rootbodies "$MIDCAP" ) bodies)"
+# TOKEN-BUDGET-MONOTONE (rule 4): 6000 tokens holds this answer whole, so it IS the unbudgeted answer byte for byte (no
+# budget_tokens= named: nothing was shed) — the anchor's body rides because the posture is the no-budget one
+if printf '%s' "$MIDPAGE" | grep -q '<b t="fn" [^>]*n="widgetMidProbe"><!\[CDATA\['; then ok "(7p) the default page carries the anchor's body"
+elif printf '%s' "$MIDPAGE" | python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",sys.stdin.read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "bodies" in n and " next=" in r else 1)'; then
+    ok "(7p) the default page does not hold the anchor's body and says so: deferred= names <bodies>, next= reaches it"
+else no "(7p) the default page neither carries the anchor's body nor names <bodies> in deferred=/continued= (a silent drop)"; fi
+{ printf '%s' "$MIDCAP" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe"><!\[CDATA\[' \
+  && [ "$MIDCAP" = "$MID" ]; } \
+    && ok "(7c) an explicit --token-budget the answer fits returns it byte for byte: the anchor's body (the answer) still rides" \
+    || no "(7c) --token-budget=6000 lost the anchor's own body or is not the unbudgeted answer (root: $( rootbodies "$MIDCAP" ) bodies)"
 { [ "$( bodycount "$BIG" )" = "0" ] && printf '%s' "$BIG" | grep -q '<!-- body omitted (over budget): widgetAnchorProbe -->'; } \
     && ok "(7d) the oversized anchor STILL refuses at the raised ceiling — whole-body-or-nothing survives, bounded" \
     || no "(7d) the raise is unbounded: the 36 KB anchor now fits, so the allowance is no longer a ceiling"

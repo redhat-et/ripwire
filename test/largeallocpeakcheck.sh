@@ -7,6 +7,15 @@
 #   U  the route and its table on their own (test/largeallocfix/largealloc_test.cpp): probe limit, full table, no size
 #      wrap, whole request writable, blocks freed on another thread; on macOS also every replaced form, failure paths
 #      and the new-handler. The binary's route is what the P arms exercise.
+#   L  the replaced operators under link-time optimization (test/largeallocfix/lto_free_test.cpp + src/largealloc.cpp,
+#      -O2 -flto; macOS): a block freed in the function that allocated it leaves the footprint, and the fixture's only
+#      munmap call sites are inside the replaced operators. Inlined into a caller that also holds the matching
+#      `operator new`, the read of the size kept before the block is a load the optimizer may fold to any value, and
+#      munmap then gets whatever its length register held: the 0.7.0 candidate's Release build did exactly that and a
+#      warm --for on llvm-project unmapped its own graph. Red on that source (48 freed blocks stay mapped, 385 MiB).
+#   S  the binary under test has the same shape: at most kUnmapSites munmap call sites (the route's two). An LTO build
+#      that inlines the frees has thousands (46,669 in the candidate, 4,135 with a profile), so this is the arm that reads the
+#      artifact a release ships; on a build without LTO it holds trivially.
 #   P  a generated tree whose workers' arrays walk the doubling ladder: peak with the route <= kRatio x peak with
 #      RIPWIRE_TEST_LARGEALLOC=off. Same binary, same run load, so the ratio is the machine-free number. It goes red if
 #      someone raises the threshold, unlinks the file, or swaps the allocator back.
@@ -48,10 +57,39 @@ case "$( uname -s )" in
 esac
 if ! "$CXX" -std=c++20 -O1 -I "$ROOT/src" "$ROOT/test/largeallocfix/largealloc_test.cpp" "${EXTRA[@]}" -o "$TMP/ut" 2>"$TMP/ut.err"; then
     no "U: the unit test did not build"; sed 's/^/        /' "$TMP/ut.err" | head -20
-elif [ "$( "$TMP/ut" | tail -1 )" = "UNIT_OK" ]; then
-    ok "U: table, route, operators"
 else
-    no "U: unit arms"; "$TMP/ut" | head -20
+    "$TMP/ut" >"$TMP/ut.out" 2>&1; urc=$?   # its exit status carries its own arms (gateexitcheck H1), not only the last line
+    if [ "$urc" = 0 ] && [ "$( tail -1 "$TMP/ut.out" )" = "UNIT_OK" ]; then
+        ok "U: table, route, operators"
+    else
+        no "U: unit arms (exit $urc)"; head -20 "$TMP/ut.out"
+    fi
+fi
+
+# ---- L: only macOS routes, and only an LTO link can inline a replaced operator into its caller ----
+# munmap call sites in a Mach-O binary, by the stub's name (symbols may be stripped, the stub's name is not)
+unmapsites(){ otool -tV "$1" 2>/dev/null | grep -c 'symbol stub for: _munmap'; }
+kUnmapSites=4   # release() in operator delete, allocate()'s table-full path in operator new; 4 leaves room for a second copy of each
+if [ "$( uname -s )" = Darwin ]; then
+    if ! command -v otool >/dev/null 2>&1; then
+        no "L: otool is not on PATH, so no munmap call site can be counted"
+    elif ! "$CXX" -std=c++20 -O2 -flto -I "$ROOT/src" "$ROOT/test/largeallocfix/lto_free_test.cpp" "$ROOT/src/largealloc.cpp" -o "$TMP/lto" 2>"$TMP/lto.err"; then
+        no "L: the LTO fixture did not build"; sed 's/^/        /' "$TMP/lto.err" | head -20
+    else
+        "$TMP/lto" >"$TMP/lto.out" 2>&1; lrc=$?
+        if [ "$lrc" = 0 ] && [ "$( tail -1 "$TMP/lto.out" )" = "LTO_FREE_OK" ]; then
+            ok "L: under -O2 -flto a block freed where it was allocated leaves the footprint ($( head -1 "$TMP/lto.out" | sed 's/^ *//' ))"
+        else
+            no "L: under -O2 -flto freed blocks did not go back whole (exit $lrc)"; head -5 "$TMP/lto.out"
+        fi
+        lsites="$( unmapsites "$TMP/lto" )"
+        where="$( otool -tV "$TMP/lto" | awk '/^[_A-Za-z].*:$/ { fn = $0 } /symbol stub for: _munmap/ { print fn }' | sort -u | tr '\n' ' ' )"
+        if [ "${lsites:-0}" -ge 1 ] && [ "$lsites" -le "$kUnmapSites" ] && ! printf '%s\n' "$where" | tr ' ' '\n' | grep -v '^$' | grep -Evq '^__Z(dl|da|nw|na)'; then
+            ok "L: the fixture calls munmap from the replaced operators only ($lsites sites: $where)"
+        else
+            no "L: munmap is called outside the replaced operators ($lsites sites: $where): a free was inlined into its caller"
+        fi
+    fi
 fi
 
 # ---- does this binary carry a route? src/largealloc.cpp is the only source that spells RIPWIRE_TEST_LARGEALLOC, so the
@@ -84,6 +122,14 @@ if [ "$ROUTED" != 1 ]; then
     echo "FAIL largeallocpeakcheck"; exit 1
 fi
 
+# ---- S: the binary under test frees through the operators, not through copies of them inlined into callers ----
+bsites="$( unmapsites "$BIN" )"
+if [ "${bsites:-0}" -ge 1 ] && [ "$bsites" -le "$kUnmapSites" ]; then
+    ok "S: the binary has $bsites munmap call sites (limit $kUnmapSites)"
+else
+    no "S: the binary has ${bsites:-0} munmap call sites (1..$kUnmapSites expected): the replaced operator delete was inlined into its callers, where the optimizer may drop the read of a block's size"
+fi
+
 # ---- fixture: dense calls, so each worker's reference array passes 256 KiB many times over ----
 genfx(){ # dir files calls
 python3 - "$1" "$2" "$3" <<'P'
@@ -100,8 +146,12 @@ for f in range(files):
 P
 git -C "$1" init -q . 2>/dev/null
 }
+# Sized so the M arm's limit (half the routed peak) sits above its 256 MB floor. 2000 files x 400 calls peaked at 458 MB
+# routed on main 74456897f, so half of it was under the floor and the floor was the limit; MEM-REF-SHRINK step 2 (#608) cut
+# the reference rows to 80 B and the same tree peaked at 278 MB, where a 256 MB limit sits above every between-phase
+# reading and M could not stop it. 880 calls per file peaks at 569 MB routed with that lane (macOS M2, 9 s).
 FX="$TMP/fx"
-genfx "$FX" 2000 400
+genfx "$FX" 2000 880
 
 # peak MB of one run: macOS phys_footprint, else max RSS
 peak(){ # outfile errfile env...
@@ -149,10 +199,13 @@ else
     no "M: --max-memory=${lim}M against a ${on} MB run did not stop (exit $rc): the guard does not see routed pages"
 fi
 
-# ---- D: the band between the at-line reading and the peak. A 400-file tree peaks near 180 MB in ~2 s (under the guard's
-#      5 s cadence, so no soft line); a limit at 70 % of the unlimited peak sits above every reading and below the peak. ----
+# ---- D: the band between the at-line reading and the peak. The tree must peak well over the 80 MB floor below in under
+#      the guard's 5 s cadence (so no soft line); a limit at 70 % of the unlimited peak sits above every reading and below
+#      the peak. 400 files peaked near 180 MB when this arm was written and 108 MB on main 74456897f; with #608's 80 B
+#      reference rows they peak at 71 MB on an M2 and 60 MB on CI's macOS runner, under the floor. 800 files peak at
+#      ~123 MB on the M2 in ~1 s. ----
 DX="$TMP/dx"
-genfx "$DX" 400 400
+genfx "$DX" 800 400
 dpeak(){ # outfile errfile [extra args]
     local o="$1" e="$2"; shift 2
     ( cd "$DX" && HOME="$TMP" /usr/bin/time -l "$BIN" "$DX" --no-cache "$@" >"$o" 2>"$e" ); local r=$?

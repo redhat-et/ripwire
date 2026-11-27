@@ -208,12 +208,15 @@ same_answer "fixture target" "$TMP/a_def.xml" "$TMP/a_all.xml"
 
 # and on REAL symbols of this repo's own src/, spanning the measured caller distribution: a leaf, a
 # typical mid-fan-in symbol, and the widest name in the tree. Named rather than discovered so a rename
-# fails LOUDLY here instead of quietly reducing the arm to a leaf-only test.
-for sym in editCheckSiteList escapeXml push_back; do
-    "$BIN" "$ROOT/src" --edit-check="$sym"         > "$TMP/r_$sym.def.xml" 2>/dev/null
-    "$BIN" "$ROOT/src" --edit-check="$sym" $UNCAP  > "$TMP/r_$sym.all.xml" 2>/dev/null
-    if [ -s "$TMP/r_$sym.def.xml" ] && [ -s "$TMP/r_$sym.all.xml" ]; then
-        same_answer "src/ $sym" "$TMP/r_$sym.def.xml" "$TMP/r_$sym.all.xml"
+# fails LOUDLY here instead of quietly reducing the arm to a leaf-only test. push_back is qualified to
+# svector's: since #608 rw::InternedText has one too, and --edit-check refuses a bare name with two
+# contracts (correctly — a contract is per definition site).
+for sym in editCheckSiteList escapeXml infra/svector.h:push_back; do
+    f="$TMP/r_${sym//[\/:]/_}"
+    "$BIN" "$ROOT/src" --edit-check="$sym"         > "$f.def.xml" 2>/dev/null
+    "$BIN" "$ROOT/src" --edit-check="$sym" $UNCAP  > "$f.all.xml" 2>/dev/null
+    if [ -s "$f.def.xml" ] && [ -s "$f.all.xml" ]; then
+        same_answer "src/ $sym" "$f.def.xml" "$f.all.xml"
     else
         no "(B) src/ $sym: --edit-check produced nothing — the symbol was renamed or the run failed"
     fi

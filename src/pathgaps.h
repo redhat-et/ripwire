@@ -134,8 +134,7 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
     {
         return;
     }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     std::vector<char> searched( ing.symbols.size(), 0 );   // the cone, by symbol id
     for( const NodeId u : cone )
     {
@@ -651,7 +650,7 @@ private:
         }
         std::vector<NodeId>   out;
         std::vector<NodeId>   stack = ownersOf( bs );
-        HashMap<NodeId, char> seen;
+        HashSet<NodeId>       seen;
         while( !stack.empty() )
         {
             const NodeId b = stack.back();
@@ -660,7 +659,7 @@ private:
             const std::vector<std::uint8_t>& bound = g_.implementorBound[b];
             for( std::size_t k = 0; k < kids.size(); ++k )
             {
-                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.try_emplace( kids[k], char( 1 ) ).second )
+                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.insert( kids[k] ).second )
                 {
                     out.push_back( kids[k] );
                     stack.push_back( kids[k] );
@@ -903,7 +902,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
             // a reference inside the row itself is no way in; nor is a WRAPPER decorator (`@property`, `@classmethod`,
             // `@overload` — valuerefindex.h vrIsWrapperDecorator, the dead-set's own rule): it hands the function back under its
             // own name, which is then read or called by name, not handed off
-            if( vr.fromSymbol == u || vrIsWrapperDecorator( vr.fieldName ) )
+            if( vr.fromSymbol == u || vrIsWrapperDecorator( vr.fieldName() ) )
             {
                 continue;
             }
@@ -986,8 +985,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( nameHits );
-        nameHits.erase( std::ranges::unique( nameHits ).begin(), nameHits.end() );
+        sortutil::sortUnique( nameHits );
         if( !nameHits.empty() )
         {
             // the call site: the caller's first call reference of the row's name that is not builtin-spelled (K5 rule 1)
@@ -1011,8 +1009,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( withheld );
-        withheld.erase( std::ranges::unique( withheld ).begin(), withheld.end() );
+        sortutil::sortUnique( withheld );
         for( const auto& hit : withheld )
         {
             ++out.rows[ hit.second ].nameWithheld;
@@ -1427,7 +1424,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
             }
             for( auto it = std::ranges::lower_bound( valueBy, lo ); it != valueBy.end() && *it <= hi; ++it )
             {
-                if( vrIsWrapperDecorator( ing.references[ it->second ].fieldName ) )
+                if( vrIsWrapperDecorator( ing.references[ it->second ].fieldName() ) )
                 {
                     continue;   // a wrapper decorator hands the function back under its own name: no hand-off
                 }
@@ -1603,8 +1600,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         toNames.push_back( ing.symbols[d].name );
     }
-    std::ranges::sort( toNames, sortutil::svLess );
-    toNames.erase( std::ranges::unique( toNames ).begin(), toNames.end() );
+    sortutil::sortUnique( toNames, sortutil::svLess );
     std::vector<std::string> hit;   // the handler names a counted post site carries that to= names
     for( const HandlerPostSite& site : hr.sites() )
     {
@@ -1638,8 +1634,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         return out;
     }
-    std::ranges::sort( hit, sortutil::svLess );
-    hit.erase( std::ranges::unique( hit ).begin(), hit.end() );
+    sortutil::sortUnique( hit, sortutil::svLess );
     for( const NodeId d : dstDefs )
     {
         if( std::ranges::binary_search( hit, std::string_view( ing.symbols[d].name ), sortutil::svLess ) && hr.classes().ownerOf( d ) != kNoNode )
@@ -1825,7 +1820,8 @@ inline constexpr std::size_t kRouteBodyMaxHops = 2;   // bridge rows 0..2 (from=
 inline constexpr std::size_t kRouteBodyMax     = 4;   // spew guard: bodies per answer; past it capped="1" next= the first unshown
 
 // The route's <bodies of="route" proven="0"> element (routeBodiesXml, the one printer); "" when the answer names no route body.
-inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, const PathBridge& br, const PathHandlerRule& hrule, std::string_view rootArg )
+inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, const PathBridge& br, const PathHandlerRule& hrule, std::string_view rootArg,
+                                       RedactCounts* redact )
 {
     std::vector<RouteBody> out;
     std::vector<NodeId>    seen;
@@ -1873,7 +1869,7 @@ inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, 
             add( reader.fn, " via=\"name-key\"" );
         }
     }
-    return routeBodiesXml( ing, out, "route", " proven=\"0\"", kRouteBodyMax, rootArg );
+    return routeBodiesXml( ing, out, "route", " proven=\"0\"", kRouteBodyMax, rootArg, redact );
 }
 static_assert( kRouteBodyMaxHops == 2 && kRouteBodyMax == 4 && kHopBodyCapBytes == 4000, "the route clause spells the bounds: re-word it with the knobs" );
 inline std::string_view pathRouteBodiesLegend( bool on ) noexcept

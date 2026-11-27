@@ -36,12 +36,18 @@
 
 import argparse
 import glob
+import html
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mcp_session_timing import read_reply_bounded  # noqa: E402 -- the one bounded MCP reply reader
+
+REQUEST_TIMEOUT_S = 900   # one MCP request, incl. a cold index of a large corpus; generous on purpose
 
 THIS_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CANYON = os.environ.get("RIPWIRE_BENCH_ROOT", "/path/to/your/large/private/cpp/corpus")
@@ -73,7 +79,8 @@ class Server:
             req["params"] = params
         self.proc.stdin.write(json.dumps(req) + "\n")
         self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
+        # bounded (mcp_session_timing.read_reply_bounded): a timeout or a signal-kill raises as its own state, never None
+        line = read_reply_bounded(self.proc, REQUEST_TIMEOUT_S, method)
         if not line:
             return None
         return json.loads(line)
@@ -159,7 +166,7 @@ def run_session(binpath, repo, writable):
         ex = _text(srv.tool("exemplar", {"path": repo, "kind": "fn"}, 3))
         plan.append(("orient", "exemplar"))
         m = re.search(r'\bn="([^"]+)"', ex)
-        seed = m.group(1) if m else "main"
+        seed = html.unescape(m.group(1)) if m else "main"   # XML-decoded: the seed is sent back as a symbol (#719)
 
         fs = srv.tool("find_symbol", {"path": repo, "symbol": seed}, 4)
         plan.append(("read", "find_symbol"))

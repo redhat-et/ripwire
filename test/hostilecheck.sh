@@ -278,7 +278,9 @@ DASH3="--"
 for hostile in "$DASH1" "$DASH2" "$DASH3"; do
     out="$( "$BIN" "$hostile" 2>&1 1>/dev/null )"
     rc=$?
-    if printf '%s' "$out" | grep -qi 'cloning\|git clone'; then
+    if [ "$rc" != 1 ]; then
+        no "hostile positional '$hostile': exit $rc (want 1, a refusal; a crash must not read as 'not routed'): $out"
+    elif printf '%s' "$out" | grep -qi 'cloning\|git clone'; then
         no "hostile positional '$hostile': WAS routed into the clone path (git-clone/cloning mentioned): $out"
     else
         ok "hostile positional '$hostile': not routed into the clone path (exit $rc)"

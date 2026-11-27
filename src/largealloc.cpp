@@ -20,9 +20,26 @@
 // NOT ROUTED: over-aligned new (the library's aligned forms use posix_memalign and free, never these functions; the one
 // direct caller, infra/sparseCsr.h, pairs it with the aligned delete, and those frees stay retained); malloc itself (tree-sitter's own, about 2 % of the large bytes).
 // RIPWIRE_TEST_LARGEALLOC=off turns the route off for one run, so the gate can compare the same binary with and without.
+//
+// NEVER INLINED (RW_ALLOC_FN below, on every form). The compiler knows these functions by name: a caller's `operator new`
+// is, to the optimizer, a fresh block of exactly n bytes whose contents are indeterminate. The route keeps the region's
+// size 16 bytes BEFORE that block, and release() reads it back. Under LTO the body of operator delete was inlined into
+// functions that also held the matching new, where that read is a load from outside (before) a block the optimizer
+// believes it knows whole: it folded the load to "any value" and passed munmap whatever the length register last held.
+// At least 15 of the 46,669 inlined frees in the 0.7.0 candidate (no profile) were built that way (pageRankDouble's score array among them), and
+// the length a preceding memcpy left behind was a pointer: a multi-gigabyte unmap. Low in the address space that range
+// reaches a region the kernel will not remove, the call fails with EINVAL and the block only leaks; above it the call
+// succeeds and takes every later mapping with it, which on llvm-project was the loaded graph (a warm --for then read
+// unmapped memory: 6 of 9 fully warm runs). Kept out of line, the read happens where the pointer is only a pointer, as
+// it does in every allocator that lives behind a library boundary and in every non-LTO build of this file.
+// test/largeallocpeakcheck.sh arm L builds this file under -O2 -flto and holds both halves: freed blocks leave the
+// footprint, and munmap is called from these functions and nowhere else (arm S asks the same of the binary under test).
 #include "largealloc.h"
+#include "memceiling.h"   // the memory guard's allocator line: onAllocate before every block
 #include <cstdlib>
 #include <new>
+
+#define RW_ALLOC_FN [[gnu::noinline]]
 
 namespace
 {
@@ -31,6 +48,7 @@ constinit rw::largealloc::BlockTable<std::size_t( 1 ) << 16, 4096> g_blocks;
 
 void* allocOrNull( std::size_t n ) noexcept
 {
+    rw::memceiling::onAllocate( n );   // disarmed: one relaxed load; armed: may refuse the run before the block is taken
     if( n >= rw::largealloc::kMinBytes )
     {
         // the variable's name is also the route's mark: test/largeallocpeakcheck.sh finds it in the binary to tell a build
@@ -49,7 +67,7 @@ void* allocOrNull( std::size_t n ) noexcept
 }
 } // namespace
 
-void* operator new( std::size_t n )
+RW_ALLOC_FN void* operator new( std::size_t n )
 {
     for( ;; )
     {
@@ -65,8 +83,8 @@ void* operator new( std::size_t n )
         h();
     }
 }
-void* operator new[]( std::size_t n ) { return ::operator new( n ); }
-void* operator new( std::size_t n, const std::nothrow_t& ) noexcept
+RW_ALLOC_FN void* operator new[]( std::size_t n ) { return ::operator new( n ); }
+RW_ALLOC_FN void* operator new( std::size_t n, const std::nothrow_t& ) noexcept
 {
     try
     {
@@ -77,17 +95,17 @@ void* operator new( std::size_t n, const std::nothrow_t& ) noexcept
         return nullptr;
     }
 }
-void* operator new[]( std::size_t n, const std::nothrow_t& t ) noexcept { return ::operator new( n, t ); }
+RW_ALLOC_FN void* operator new[]( std::size_t n, const std::nothrow_t& t ) noexcept { return ::operator new( n, t ); }
 
-void operator delete( void* p ) noexcept
+RW_ALLOC_FN void operator delete( void* p ) noexcept
 {
     if( p != nullptr && !rw::largealloc::release( g_blocks, p ) )
     {
         std::free( p );
     }
 }
-void operator delete[]( void* p ) noexcept { ::operator delete( p ); }
-void operator delete( void* p, std::size_t ) noexcept { ::operator delete( p ); }
-void operator delete[]( void* p, std::size_t ) noexcept { ::operator delete( p ); }
-void operator delete( void* p, const std::nothrow_t& ) noexcept { ::operator delete( p ); }
-void operator delete[]( void* p, const std::nothrow_t& ) noexcept { ::operator delete( p ); }
+RW_ALLOC_FN void operator delete[]( void* p ) noexcept { ::operator delete( p ); }
+RW_ALLOC_FN void operator delete( void* p, std::size_t ) noexcept { ::operator delete( p ); }
+RW_ALLOC_FN void operator delete[]( void* p, std::size_t ) noexcept { ::operator delete( p ); }
+RW_ALLOC_FN void operator delete( void* p, const std::nothrow_t& ) noexcept { ::operator delete( p ); }
+RW_ALLOC_FN void operator delete[]( void* p, const std::nothrow_t& ) noexcept { ::operator delete( p ); }

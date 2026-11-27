@@ -114,6 +114,7 @@
 #include "mention.h"            // isIdentChar
 #include "accessshape.h"        // Phase A — access-shape classification, consumed report-only (see addendum above)
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
+#include "infra/hashutil.h"     // packPair — the (a, b) pair key
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
@@ -521,10 +522,7 @@ struct AggAccum
 // The pair key for a (small) dense triangular accumulation. Field counts per struct are small (the model
 // caps at what a source aggregate actually declares), so a flat vector<AffPair> plus a btree index by
 // packed (a,b) is both deterministic and cheaper than a hash of pairs.
-inline std::uint64_t pairKey( std::uint32_t a, std::uint32_t b ) noexcept
-{
-    return ( std::uint64_t( a ) << 32 ) | std::uint64_t( b );
-}
+// (infra/hashutil.h packPair: ( a << 32 ) | b)
 
 // ONE function body = ONE co-access observation, in Chilimbi's <function, struct type> sense. Everything
 // this touches is an accumulator; the affinity graph itself is built later, per aggregate.
@@ -841,7 +839,7 @@ inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, c
                 {
                     continue;
                 }
-                const std::uint64_t key = pairKey( da, db );
+                const std::uint64_t key = rw::hashutil::packPair( da, db );
                 auto                it  = pairAt.find( key );
                 if( it == pairAt.end() )
                 {

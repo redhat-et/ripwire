@@ -53,8 +53,11 @@
 #include "nextverb.h"         // nextAttrXml / nextFlag — the capped row's shell-safe follow-up
 #include "resolve.h"           // resolvePreciseInclude, resolvePythonModuleSuffix, lexicalNormalize — an import's module file
 #include "serialize.h"         // escapeXml
+#include "infra/sortutil.h"   // svLess: the cut names are sorted and binary-searched
+#include "verbfs_slotreg_seam.h" // SLOTREG: a served index answers RegIndex::build from its record (src/verbfs_slotreg.h)
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -111,6 +114,8 @@ struct RegSite
     std::string   as;                       // TS: the provider field (useClass…); "" otherwise
     NodeId        key          = kNoNode;   // the key's one definition
     bool          test         = false;
+
+    bool operator==( const RegSite& ) const = default;   // SLOTREG's plain-build check: a served index equals a fresh build
 };
 
 struct RegKey
@@ -120,6 +125,8 @@ struct RegKey
     std::vector<RegSite>       sites;                 // source order (reference order)
     std::vector<NodeId>        consumers;             // enclosing symbols of a send / inject site, first-seen order
     std::vector<bool>          consumerTest;
+
+    bool operator==( const RegKey& ) const = default;
 };
 
 class RegIndex
@@ -158,8 +165,18 @@ public:
         return keys;
     }
 
-    // Names whose re-export chain ran past kRegReexportDepth (a registration or definition through it is uncounted).
-    bool reexportCut( std::string_view name ) const { return m_cut.contains( std::string( name ) ); }
+    // Names whose re-export chain ran past kRegReexportDepth (a registration or definition through it is uncounted), sorted.
+    std::vector<std::string> cutNames() const
+    {
+        std::vector<std::string> names;
+        names.reserve( m_cut.size() );
+        for( const auto& [ name, flag ] : m_cut )
+        {
+            names.push_back( name );
+        }
+        std::ranges::sort( names, rw::sortutil::svLess );
+        return names;
+    }
 
 private:
     const IngestResult&                         m_ing;
@@ -220,7 +237,7 @@ private:
             }
             else if( b.kind == LocalBindKind::VarDecl && !b.var.empty() )
             {
-                const bool             local = b.var.starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
+                const bool             local = b.var.str().starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
                 const std::string_view name  = local ? std::string_view( b.var ).substr( kPythonLocalScopePrefix.size() ) : std::string_view( b.var );
                 const NodeId           sc    = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope
                 if( local && b.spanEnd > b.spanStart )
@@ -231,7 +248,7 @@ private:
                 {
                     addShadow( b, sc, name );
                 }
-                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
+                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.str().starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
                 {
                     ++m_modWrites[ fk( b.fileId, name ) ];   // `global K` (byte 0) is not a write here
                 }
@@ -352,7 +369,7 @@ private:
             const std::uint32_t mf   = moduleFile( f, b->typeName, !js );
             // the name the imported module defines: JS `import { a as b }` → a; Python `from m import a as b` → a (never the alias)
             const std::string_view there = js ? ( b->importedName.empty() ? name : std::string_view( b->importedName ) )
-                                       : b->importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
+                                       : b->importedName.str().starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
             const bool          pyModule = !js && b->importedName == "module";   // `import m as K` binds a module, not a name of it
             NodeId              def  = mf == kNoFile || mf == f || pyModule ? kNoNode
                                      : depth < kRegReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
@@ -385,11 +402,11 @@ private:
             {
                 return false;
             }
-            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.starts_with( kPythonFromMemberMark ) || sub == kNoFile )
+            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.str().starts_with( kPythonFromMemberMark ) || sub == kNoFile )
             {
                 return true;
             }
-            const std::string here = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+            const std::string here = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
             return moduleFile( pkg, here, true ) != sub;
         } );
     }
@@ -436,15 +453,15 @@ private:
             std::uint32_t mf = kNoFile;
             if( b->importedName == "module" )
             {
-                const bool plain = b->typeName.size() > mod.size() && b->typeName.starts_with( mod ) && b->typeName[ mod.size() ] == '.';
+                const bool plain = b->typeName.size() > mod.size() && b->typeName.str().starts_with( mod ) && b->typeName[ mod.size() ] == '.';
                 mf               = moduleFile( f, plain ? mod : std::string_view( b->typeName ), true );
             }
             else
             {
-                const std::string_view member = b->importedName.starts_with( kPythonFromMemberMark )
+                const std::string_view member = b->importedName.str().starts_with( kPythonFromMemberMark )
                                                     ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : mod;
                 const std::uint32_t    pkg    = moduleFile( f, b->typeName, true );
-                const std::string      sub    = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+                const std::string      sub    = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
                 mf                            = moduleFile( f, sub, true );
                 if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || bindsOtherThanSubmodule( pkg, member, b, mf ) ) )
                 {
@@ -522,7 +539,7 @@ private:
             {
                 continue;
             }
-            const std::string_view into = r.fieldName;
+            const std::string_view into = r.fieldName();
             const std::size_t      hash = into.rfind( "#arg" );
             const std::size_t      dot  = hash == std::string_view::npos ? std::string_view::npos : into.rfind( '.', hash );
             if( dot == std::string_view::npos || into.substr( hash + 4 ) != std::to_string( r.argCount ) )
@@ -554,33 +571,34 @@ private:
     }
 
     // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal. A pair
-    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is an
+    // counts only when the extractor marked it (Reference::litAt, 1 + the start byte of its object literal): the literal is an
     // ELEMENT of an array (a call argument, a `const` initialiser or a `providers` / `viewProviders` property) and the value is written bare. Key and value
     // pair only through the SAME literal, so a ternary / `||` / return / reassignment / second call can never join two objects.
     void collectProviderSites( std::vector<RegSite>& out ) const
     {
-        struct Pair { std::uint32_t ref; std::string_view lit; std::string_view field; };
-        HashMap<std::string, std::vector<Pair>> keysByLit;   // "<file>@<literal start>" → its `provide` pairs
-        std::vector<Pair>                       values;
+        struct Pair { std::uint32_t ref; std::string_view field; };
+        HashMap<std::uint64_t, std::vector<Pair>> keysByLit;   // ( file, literal start ) → its `provide` pairs
+        std::vector<Pair>                         values;
         const auto litKey = [ & ]( const Pair& p )
         {
-            return std::to_string( m_ing.references[ p.ref ].fileId ) + "@" + std::string( p.lit );
+            const Reference& r = m_ing.references[ p.ref ];
+            return ( std::uint64_t( r.fileId ) << 32 ) | r.litAt;
         };
         for( std::uint32_t i = 0; i < m_ing.references.size(); ++i )
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
-            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel.size() < 2
-                || r.composeRel[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
+            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel().size() < 2
+                || r.composeRel()[0] != '.' || r.litAt == 0 )
             {
                 continue;
             }
-            const std::string_view field = std::string_view( r.composeRel ).substr( 1 );
-            if( !std::string_view( r.fieldName ).ends_with( r.composeRel ) )
+            const std::string_view field = std::string_view( r.composeRel() ).substr( 1 );
+            if( !std::string_view( r.fieldName() ).ends_with( r.composeRel() ) )
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
-            const Pair p{ i, std::string_view( r.qualifier ).substr( 3 ), field };
+            const Pair p{ i, field };
             if( field == row->keyField )
             {
                 keysByLit[ litKey( p ) ].push_back( p );
@@ -590,7 +608,7 @@ private:
                 values.push_back( p );
             }
         }
-        HashMap<std::string, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
+        HashMap<std::uint64_t, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
         for( const Pair& v : values )
         {
             ++valuesIn[ litKey( v ) ];
@@ -648,9 +666,9 @@ private:
             if( row->form == RegForm::ProviderRecord && r.role == RefRole::Value )
             {
                 const auto it = byName.find( r.calleeName );
-                const std::size_t hash = std::string_view( r.fieldName ).rfind( "#arg" );
+                const std::size_t hash = std::string_view( r.fieldName() ).rfind( "#arg" );
                 if( it == byName.end() || hash == std::string::npos
-                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName ).substr( 0, hash ) ) == row->consumerCalls.end() )
+                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName() ).substr( 0, hash ) ) == row->consumerCalls.end() )
                 {
                     continue;
                 }
@@ -665,14 +683,14 @@ private:
             }
             else if( row->form == RegForm::ReceiverMethod && r.role == RefRole::Call && !r.recvVar.empty() )
             {
-                const std::string_view leaf = r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+                const std::string_view leaf = r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
                 const auto             it   = byName.find( std::string( leaf ) );
                 if( it == byName.end() || std::ranges::find( row->consumerSkip, std::string_view( r.calleeName ) ) != row->consumerSkip.end() )
                 {
                     continue;
                 }
-                const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.find( '.' ) ), r.startByte, r.fromSymbol )
-                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName.empty() ? r.recvVar : r.recvVar + "." + r.fieldName );
+                const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.str().find( '.' ) ), r.startByte, r.fromSymbol )
+                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName().empty() ? r.recvVar : r.recvVar + "." + r.fieldName() );
                 for( const std::size_t k : it->second )
                 {
                     const RegKey& key = keys[k];
@@ -773,14 +791,112 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
         return sub.size() >= 3 && std::ranges::any_of( words, [ & ]( const std::string& w ) { return normWord( w ) == sub; } );
     } );
 }
+// REGISTRAR-2 (forliteral.h shape=table): a callee that SAYS it registers, the registrar family's one name vocabulary. The last segment of a
+// callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and on lower-to-upper
+// case changes into words. An allowlist of three shapes, never a substring and never a noun alone (REG2-FIX1, rv-reg2 F2):
+//   (A) a registration verb word (`register`, `registers`, or `reg` as the last word or right before a noun word) and no access word (`read`, `write`,
+//       `get`, `set`, `peek`, `poke`, `load`, `store`, `dump`): `async_register_entity_service`, `registerCommand`, `async_reg`, `reg_handler`; not
+//       `write_reg`, `reg_read`, `get_registry`, `is_registered`, `reg_value`, `reg_field` (a hardware register, rv-reg2-delta D1);
+//   (B) an adding verb word (`add`, `on`, `install`, `bind`, `map`, `connect`, `subscribe`, `mount`, `attach`; not `use`, the hook prefix of `useRouter`)
+//       and, after it, a noun word (`route(s)`, `router`, `command(s)`, `handler(s)`) that is the name's LAST word: `add_route`, `addEventHandler`,
+//       `on_command`; not `get_handler`, `run_command`, `logging.FileHandler`, `ParseCommandLine`, `handler`, `addCommandLineOption`;
+//   (C) a decorator (`@x.websocket_command(`, `@app.route(`, `@click.command(`) whose name holds a noun word.
+// A name is no proof the call registers; the shape=table row that reads it says what it is.
+inline bool isRegistrationCallee( std::string_view callee, bool decorator = false ) noexcept
+{
+    static constexpr std::array<std::string_view, 3>  kRegVerbs{ "register", "registers", "reg" };
+    static constexpr std::array<std::string_view, 9>  kAddVerbs{ "add", "on", "install", "bind", "map", "connect", "subscribe", "mount", "attach" };
+    static constexpr std::array<std::string_view, 7>  kNouns{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
+    static constexpr std::array<std::string_view, 9>  kAccess{ "read", "write", "get", "set", "peek", "poke", "load", "store", "dump" };
+    const auto in = []( const auto& list, std::string_view w ) { return std::find( list.begin(), list.end(), w ) != list.end(); };
+    const std::size_t sep = callee.find_last_of( ".:" );
+    const std::string_view name = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    bool        regVerb = false, access = false, noun = false, addThenNoun = false, adding = false;
+    bool        pendingReg = false;   // the word before was `reg`: a verb only if the name ends there or a noun word follows (`async_reg`, `reg_handler`)
+    std::array<char, 32> word{};
+    std::size_t          n = 0;
+    const auto           take = [ & ]()
+    {
+        const std::string_view w( word.data(), n );
+        const bool isNoun = in( kNouns, w );
+        regVerb     = regVerb || ( pendingReg && isNoun ) || ( in( kRegVerbs, w ) && w != "reg" );
+        pendingReg  = w == "reg";
+        access      = access || in( kAccess, w );
+        noun        = noun || isNoun;
+        addThenNoun = adding && isNoun;   // the noun after an adding verb is the name's last word: a later word resets it (`addCommandLineOption`)
+        adding      = adding || in( kAddVerbs, w );
+    };
+    for( std::size_t i = 0; i <= name.size(); ++i )
+    {
+        const char c     = i < name.size() ? name[i] : '_';
+        const bool upper = c >= 'A' && c <= 'Z';
+        const bool split = c == '_' || ( upper && i > 0 && name[i - 1] >= 'a' && name[i - 1] <= 'z' );
+        if( split && n > 0 )
+        {
+            take();
+            n = 0;
+        }
+        if( c != '_' && n < word.size() )
+        {
+            word[n++] = upper ? static_cast<char>( c - 'A' + 'a' ) : c;
+        }
+    }
+    regVerb = regVerb || pendingReg;   // `reg` as the last word (`async_reg`)
+    return ( regVerb && !access ) || addThenNoun || ( decorator && noun );
+}
 }   // namespace reg_detail
+
+// The whole-index half of the render: every key and the cut names. Neither reads the question, so a served index answers it
+// from the SLOTREG record when `ing` is the model the warm snapshot identifies (src/verbfs_slotreg.h); anything else builds it.
+struct RegIndexRows
+{
+    std::vector<RegKey>      keys;
+    std::vector<std::string> cut;   // sorted
+};
+
+inline RegIndexRows regIndexBuilt( const IngestResult& ing )
+{
+    RegIndex     idx( ing );
+    RegIndexRows rows;
+    rows.keys = idx.build();      // build() before cutNames(): the cut names are found while resolving
+    rows.cut  = idx.cutNames();
+    return rows;
+}
+
+// The served rows are the ones this index would build: the plain build's check behind a served regIndexOf.
+inline bool regIndexMatchesFresh( const IngestResult& ing, const RegIndexRows& served )
+{
+    const RegIndexRows fresh = regIndexBuilt( ing );
+    return fresh.keys == served.keys && fresh.cut == served.cut;
+}
+
+inline RegIndexRows regIndexOf( const IngestResult& ing )
+{
+    RegIndexRows                            rows;
+    const verbfs::slotreg::Seams&           seam  = verbfs::slotreg::seams();
+    const verbfs::slotreg::Serve            tried = seam.regServe != nullptr ? seam.regServe( ing, rows.keys, rows.cut ) : verbfs::slotreg::Serve{};
+    if( tried.served )
+    {
+        // The plain build proves every served index against a fresh one (release: not evaluated). The served entry is keyed on
+        // the model ingest() returned; a pass that later edited that model IN PLACE would serve a stale index, and this fires.
+        DASSERT( verbfs::slotreg::servesStaleOnPurpose() || regIndexMatchesFresh( ing, rows ), "SLOTREG: the served registrar index differs from a fresh build of this IngestResult (was the model edited after ingest()?)" );
+        return rows;
+    }
+    verbfs::slotreg::BuildWatch watch( seam.regKeep != nullptr );
+    rows = regIndexBuilt( ing );
+    if( seam.regKeep != nullptr )
+    {
+        seam.regKeep( ing, tried, rows.keys, rows.cut, watch.readsPinned( ing.files ) );
+    }
+    return rows;
+}
 
 // THE RENDER: the <reg> rows a compact --for answer gains for the shown ranked rows `shownIds` and question `task` (the gate
 // above). "" when no key passes it.
 inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeId> shownIds, std::string_view task )
 {
-    RegIndex                  idx( ing );
-    const std::vector<RegKey> keys = idx.build();   // build() before reexportCut(): the cut names are found while resolving
+    const RegIndexRows         idx  = regIndexOf( ing );
+    const std::vector<RegKey>& keys = idx.keys;
     if( keys.empty() )
     {
         return {};
@@ -894,7 +1010,7 @@ inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeI
         {
             out += " capped=\"1\"" + nextAttrXml( nextFlag( "--grep=", ks.name ) );
         }
-        if( idx.reexportCut( ks.name ) )
+        if( std::ranges::binary_search( idx.cut, std::string_view( ks.name ), rw::sortutil::svLess ) )
         {
             out += " cut=\"1\"";
         }

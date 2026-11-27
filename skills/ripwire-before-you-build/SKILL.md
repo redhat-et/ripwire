@@ -1,105 +1,47 @@
 ---
 name: ripwire-before-you-build
 description: >
-  Starting a FEATURE (multi-symbol work): the plan, the API boundary, the scope — how big does
-  this change get — from the codebase's real structure. Implementing an EXISTING interface?
-  --lego=Iface lists its contract and current implementors. ONE standalone symbol → reuse-first.
-  A small feature with an obvious home needs none of this.
+  Starting a FEATURE (multi-symbol work): the plan, the API boundary, the scope — how big does this
+  change get — from the codebase's real structure. Implementing an EXISTING interface? --lego=Iface
+  lists its contract and implementors. ONE standalone symbol → reuse-first. A small feature with an
+  obvious home needs none of this.
 allowed-tools: Bash, Read
 ---
 
 # Before you build — with ripwire
 
-> Routing:
-> • Writing ONE symbol (fn/class/helper) and want to reuse rather than reinvent → **ripwire-reuse-first**.
-> • You've already written the change and want the pre-submit check → **ripwire-change-check**.
-> • You want to judge whether the code you wrote got better/worse → **ripwire-quality-bar**.
-> • Restructuring EXISTING code (not new work) → **ripwire-fresh-eyes**.
-> • Not sure which skill? → **ripwire-router**.
+> Routing: ONE symbol (fn/class/helper) → **ripwire-reuse-first** · already written → **ripwire-change-check** ·
+> judging what you wrote → **ripwire-quality-bar** · restructuring EXISTING code → **ripwire-fresh-eyes**.
 
-`<dir>` = repo root. `FEATURE`/`APPROACH` = your task in 2–4 plain words; `SYM` = a representative symbol.
-Run only the sections your question needs — they share the same building blocks.
+`FEATURE` = your task in 2–4 plain words; `SYM` = a representative symbol.
 
-## Common first move — recall + reusable blocks
+## The one call
 
-Almost every section starts here; do it once. **One-call shortcut:** `ripwire <dir> --pack-task="FEATURE" --legend=compact`
-assembles the recall + `--for` ranking + top bodies + caller signatures + notes + `tests_to_run` into ONE
-bundle under one token budget — reach for it first instead of firing the calls below one at a time; drop to
-the individual calls only when you need a specific section's full output.
+`ripwire <dir> --pack-task="FEATURE" --legend=compact` — prior decisions + the `--for` ranking with its quality lens + top bodies +
+caller signatures + notes + `tests_to_run`, in ONE budgeted bundle. If a design doc in it covers the feature, read it
+fully: the decision may be made (look for "rejected" / "future work").
 
-- **Recall prior decisions** — `ripwire <dir> --recall="FEATURE"` → full bodies of the most relevant
-  markdown docs (planning/design notes, READMEs) ranked by relevance. **If a doc already covers this, read
-  it fully — the decision may be made.** Look for explicit "rejected" / "future work" language.
-- **Reusable building blocks — the one-call write-mode bundle** — `ripwire <dir> --for="FEATURE"` → `<sigs>`
-  ranked by task-relevance, each carrying the **quality lens** in the same call: `cx`/`ccx` (complexity),
-  `in`/`amp` (reuse count / change-amplification), `churn` (recent-commits), `clone="1"` (duplicated),
-  `tested="1"`, plus the inline `<doc>` block. That's read-context-and-quality-signal in ONE call — you learn
-  what to reuse AND what's fragile (high-churn, high-amp, cloned, or untested) before you write a line, not
-  after. High-`in` symbols are already widely composed — prefer extending them over reimplementing; treat a
-  high-`churn`/high-`amp` one as something to touch carefully and test around.
-- **The shape to imitate for each new symbol** — `ripwire <dir> --exemplar=fn|method|class|struct|iface|var --legend=compact`
-  or `--exemplar="<the sub-task in words>"` (top match's kind inferred) → the repo's single best-in-class
-  instance of that shape — cognitive complexity must clear an eligibility ceiling first (a blob can never
-  win no matter how reused/tested), then among eligible candidates it's ranked `tested=1` first, highest
-  fan-in second, lowest cognitive-cx as the final tie-break — full body under
-  `<bodies>`. Run it per new symbol the feature adds so each one **copies a proven shape** (structure, error
-  handling, naming) instead of being invented from memory. (Deep-dive on exemplar-by-ROLE → **ripwire-reuse-first**.)
-- **Implementing against an interface?** — `ripwire <dir> --lego=I --legend=compact` (or `--lego=file:I` to disambiguate a
-  same-named type) → the interface's method contract (the exact signatures you must satisfy) **plus every
-  existing implementor**, own-language only. Read one existing impl as the template so your new one matches
-  the house pattern (method order, error handling, registration) instead of guessing the shape from the
-  interface alone. The single highest-value call when the thing you're building has to satisfy an `I`.
+**Implementing an interface?** `ripwire <dir> --lego=I` (`--lego=file:I` to disambiguate) — its method contract plus
+every existing implementor. Read one implementor as the template.
 
-## Feasibility spike — "is this approach even viable?"
+## Then only the section your question needs
 
-After the recall + `--for` above:
-1. If highly-relevant symbols already exist with `in > 0`, the approach is **partially implemented** — build
-   on it. If `--recall` shows it was decided against, stop.
-2. **Integration seams** — `ripwire <dir> --seams --legend=compact` → `<seams>` (untested cross-module edges). If your
-   approach must connect two modules with no test-covered seam between them, that's an integration cost.
-3. **Coupling cost** — `ripwire <dir> --deps --legend=compact` (skim `<godfiles>` + `shape=`). Adding a dependency on a
-   god-file adds coupling cost for every future change — flag it.
-   → **Verdict:** "build on existing" / "greenfield but seams exist" / "needs new seam, flag risk".
+| Question | Calls | Answer shape |
+|---|---|---|
+| is this approach viable? | `ripwire <dir> --seams --legend=compact` · `ripwire <dir> --deps --legend=compact` | build on existing / greenfield but seams exist / needs a new seam |
+| the ordered steps | `--seams`, then `ripwire <dir> --impact=SYM --legend=compact` for anything you modify | steps naming file + symbol, each with blast radius and test gate (`--affected`) |
+| the boundary / API | `ripwire <dir> --around=SYM --metrics` · `--seams` · `--callers=SYM` | 3–5 high-fan-in, called-from-outside symbols, their seam, what to hide |
+| how big is this change? | `--impact=SYM` (`reaches=`) · `--affected=F1,F2` · `ripwire <dir> --cochange=fileA.cpp` | local (≤5, tests exist) / moderate (5–20) / wide (>20 or no tests) |
 
-## Plan — "give me the ordered implementation steps"
+For each new symbol, `ripwire <dir> --exemplar="<the sub-task in words>"` gives the house shape to copy.
 
-1. Recall + `--for` (above) — check whether any existing symbol already solves part of the problem. Low `in=`
-   = an underused candidate to extend or replace; high `in=` = load-bearing, extend cautiously.
-2. **Integration seams** — `ripwire <dir> --seams --legend=compact`. Each seam is a wiring point; your plan should name which
-   seam(s) the new code wires through, and add a test at each new seam it creates.
-3. **Impact of anything you'll modify** — `ripwire <dir> --impact=SYM --legend=compact`. Large `reaches=` → plan a staged
-   rollout or a compatibility shim.
-   → **Plan:** ordered steps (recall → design → wire seams → write tests → implement), each naming the
-   specific file+symbol to touch, the blast radius of any modification, and its test gate (from
-   `--affected`). Flag any step that creates a new seam without a test.
+## Stop rule and honesty
 
-## Interface — "what should the boundary / API look like?"
+A small feature with an obvious home needs none of this — **ripwire-reuse-first** for its one new symbol. Otherwise the
+one call, then one section. Seams and impact are name-based (dynamic dispatch, callbacks, macros can be missing); say
+what is genuinely missing rather than reinventing it.
 
-1. **Neighborhood of the subsystem** — `ripwire <dir> --around=SYM --legend=compact --metrics [--around-depth=2]` → the ego
-   graph with ranks + call edges. `--metrics` is what adds the `in=` fan-in annotation (bare `--around`
-   emits none); **high-`in=` symbols are already acting as the de-facto API surface.**
-2. **The seam it lives on** — `ripwire <dir> --seams --legend=compact`. If your subsystem straddles a `<seam from="X"
-   to="Y">`, that's where the interface belongs.
-3. **Who currently crosses the boundary** — `ripwire <dir> --callers=SYM --legend=compact` for the top 2–3 in the ego graph.
-   Callers from *outside* the subsystem's directory are the external clients the interface must serve.
-4. **What to hide** — `ripwire <dir> --deps --legend=compact`, skim `instab=`. High-instability internal files (leaves) stay
-   behind the interface; stable (low-instability) files may be safe to expose.
-   → **Proposal:** the 3–5 high-fan-in, called-from-outside symbols that form the natural API surface, the
-   seam they live on, and the internal symbols to hide. Write it in terms of callers' needs, not internals.
+## Reference file
 
-## Sizing rubric — "how big is this change?"
-
-1. **Blast radius** — `ripwire <dir> --impact=SYM --legend=compact` → `reaches="N"` is the blast-radius **symbol** count
-   (count distinct `p=` files for the file count); `defs="D">1` means overloads, each a separate blast root.
-2. **Affected tests** — `ripwire <dir> --affected=fileA.cpp,fileB.h --legend=compact` (the files defining SYM, from
-   `--impact`). `tests="0"` = no test cover — flag it.
-3. **Caller-stack depth** — `ripwire <dir> --callers=SYM --legend=compact`, then spot-check `--callers=<top-caller>` one level
-   up. A 2-hop caller graph is a tactical change; 5+ hops is architectural.
-4. **Hidden coupling** — `ripwire <dir> --cochange=fileA.cpp --legend=compact`; `surprising="1"` partners must be verified
-   manually even if not in the blast radius.
-   → **Classify:** local (≤5 blast, tests exist) / moderate (5–20) / wide (>20 or no tests).
-
-## Honesty
-
-ripwire maps *structure*, not data flow; seams/impact are name-based (dynamic dispatch/callbacks/macros can
-be missing). Compose from what exists; note what's genuinely missing rather than reinventing it.
+`build-reference.md` — every section step by step (recall, the bundle's quality lens, exemplar eligibility,
+feasibility spike, plan, interface, sizing rubric).

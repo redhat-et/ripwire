@@ -29,6 +29,8 @@
 // consulted, so the two surfaces cannot disagree about a floor.
 
 #include "graph.h"           // Graph, declinedCallsNaming — the declined evidence and the in-edge CSR
+#include "infra/sortutil.h"   // sortUnique
+#include "langfacts.h"       // LangFacts::transitiveIncludes — usesRolesUnindexed's includer-language test
 #include "model.h"
 #include "nextverb.h"        // nextFlag — the follow-up's shell-safe spelling
 #include "valuerefindex.h"   // ValueRefIndex, valueRefCallerRows — the value evidence
@@ -111,6 +113,63 @@ inline std::string countFloorNext( const IngestResult& ing, const Symbol& s )
     return nextFlag( literal ? "--grep=" : "--uses=", s.name );
 }
 
+// USES-UNARMED-DISCLOSE (B31). The uses verb's count= lists call, value, import and extends sites always, and read, write
+// and type-mention sites only where the index captures them (kValueUsesArmed above). A definition READ or NAMED more than
+// called (UseForm::NotCalls) in an unarmed language — a Go or Rust struct, a C global table — therefore answered a bare
+// count="0" beside hundreds of real uses (fzf Options, terraform FmtCommand, mdbook CmdRenderer, tmux cmd_table, htop
+// Process_class). A C-family HEADER definition is unarmed the same way when the corpus holds C files: the grammar reads
+// the header as C++, but the .c files that use it get no read capture (countFloorNext's `.h` rule, said on the count).
+// True exactly when one of `defs` is such a definition; the root then carries unindexed_roles= and its legend clause.
+inline bool usesRolesUnindexed( const IngestResult& ing, std::span<const NodeId> defs )
+{
+    std::optional<bool> corpusHasC;   // asked once, and only for a header definition of an armed language
+    for( const NodeId def : defs )
+    {
+        if( def >= ing.symbols.size() || useFormOf( ing.symbols[ def ] ) != UseForm::NotCalls )
+        {
+            continue;
+        }
+        const Symbol& ds = ing.symbols[ def ];
+        if( !valueUsesArmedFor( ds.lang ) )
+        {
+            return true;
+        }
+        if( ds.fileId < ing.files.size() && std::string_view( ing.files[ ds.fileId ] ).ends_with( ".h" ) )
+        {
+            if( !corpusHasC )
+            {
+                // an INCLUDER language with no read capture (C): its files use the header and none of their reads is indexed. Read
+                // from the file list, not the symbols: a .c file holding only `extern struct cell g;` mints no symbol at all.
+                corpusHasC = std::any_of( ing.files.begin(), ing.files.end(), []( const std::string& path )
+                {
+                    const Lang lang = langOfPath( path );
+                    return langFacts( lang ).transitiveIncludes && !valueUsesArmedFor( lang );
+                } );
+            }
+            if( *corpusHasC )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline const char* unindexedRolesAttrXml( bool on ) noexcept
+{
+    return on ? " unindexed_roles=\"read,write,type\"" : "";
+}
+
+// The clause defining unindexed_roles=, emitted exactly when the root carries it (G4). No flag dashes: it rides an XML comment.
+inline const char* unindexedRolesLegend( bool on ) noexcept
+{
+    return on ? "unindexed_roles=\"read,write,type\": the index captures no read, write or type-mention site for some or all users of SYM "
+                "(its language has no such capture, or it is a C-family header whose C users go uncaptured), so count= is a floor: every call, "
+                "value, import and extends site, but only the captured read, write and type sites; a zero is NOT a count of its uses; the grep "
+                "verb lists the text uses. "
+              : "";
+}
+
 // One row's verdict. `next` is a CLI flag spelling (MCP prints the same text), empty exactly when !isFloor.
 struct CallerFloor
 {
@@ -159,8 +218,7 @@ inline IdsOfName relatedByName( const IngestResult& ing, const RowsOfName& rowsO
     }
     for( auto& [ name, ids ] : out )
     {
-        std::sort( ids.begin(), ids.end() );
-        ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+        rw::sortutil::sortUnique( ids );
     }
     return out;
 }
@@ -234,7 +292,7 @@ inline bool hasValueUse( const IngestResult& ing, const ValueRefIndex& vri, std:
 {
     for( const ValueRefRow& vr : valueRefCallerRows( ing, vri, ids ).rows )
     {
-        if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName.starts_with( '@' ) )
+        if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName().starts_with( '@' ) )
         {
             return true;
         }
@@ -364,7 +422,7 @@ inline constexpr const char* kLegoClosureLegendComment =
     "through extends clauses the index PROVES name the type above (a same-file declaration in scope; a Python or JS/TS named "
     "import or require; a resolved include; the Java, Kotlin or Go package; a Java package qualifier. A Java or Kotlin import "
     "or a C# using is not a proof). The deeper rows are one page: "
-    "transitive_shown= rows printed when it is cut, transitive_offset= the first one shown, has_more=\"1\" and "
+    "shown_transitive= rows printed when it is cut (transitive_capped=1), transitive_offset= the first one shown, has_more=\"1\" and "
     "next= the call for the next page. -->";
 
 // lane lego-transitive fix 1: the hedge's own clause, present-only beside the one above (no double hyphen: an XML comment).

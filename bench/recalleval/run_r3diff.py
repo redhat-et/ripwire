@@ -312,7 +312,7 @@ def run_r3diff_cli():
     ap.add_argument("--root", required=True, help="corpus directory both binaries are run against")
     ap.add_argument("--format", choices=("ranking", "recall", "skills"), help="override query-set format auto-detection")
     ap.add_argument("--top-k", type=int, default=20, help="candidate depth for --for-driven lanes (ranking/skills)")
-    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4, help="build parallelism for --a-ref/--b-ref")
+    ap.add_argument("--jobs", type=int, default=max(1, min(6, (os.cpu_count() or 2) // 2)), help="build parallelism for --a-ref/--b-ref (default: half the cores, at most 6 -- an -O3 clang holds up to 3.4 GB)")
     ap.add_argument("--keep-worktrees", action="store_true", help="do not remove scratch worktrees built for --a-ref/--b-ref")
     args = ap.parse_args()
 

@@ -11,7 +11,8 @@
 # Required (fixed) behavior:
 #   - the prose numerator and total= report the TRUE relevant count (score > 0), independent of --top-k
 #   - shown= is what THIS run actually emitted; capped= is the honest total-vs-shown gap
-#   - --top-k=N is HONORED: it shapes how many docs get emitted; the DEFAULT (no --top-k) stays 8
+#   - --top-k=N is HONORED: it shapes how many docs get emitted; the DEFAULT (no --top-k) is 6
+#     (DOCS-TOPK6, 2026-11-05: was 8; rw::kDefaultRecallTopK, one constant for --recall and MCP memory_recall)
 #
 # Independent derivation of the true count: a run with --top-k=9999 (far above anything this repo's docs
 # corpus can match) cannot possibly be cut by --top-k, so its shown= IS the true relevant count by
@@ -166,21 +167,37 @@ fi
     || no "--top-k=2: printed $( sep_count "$K2" ) doc blocks, header said shown=$K2_SHOWN (expected both = 2)"
 
 if [ -n "$K20_SHOWN" ]; then
-    [ "$K20_SHOWN" -gt 8 ] \
-        && ok "--top-k=20: shown=$K20_SHOWN > 8 (more than the default cap got through)" \
-        || no "--top-k=20: shown=$K20_SHOWN not > 8 — --top-k=20 did not raise the emitted count above the default"
+    [ "$K20_SHOWN" -gt 6 ] \
+        && ok "--top-k=20: shown=$K20_SHOWN > 6 (more than the default cap got through)" \
+        || no "--top-k=20: shown=$K20_SHOWN not > 6 — --top-k=20 did not raise the emitted count above the default"
 fi
 [ "$( sep_count "$K20" )" = "$K20_SHOWN" ] \
     && ok "--top-k=20: doc separator blocks printed ($( sep_count "$K20" )) match header shown=$K20_SHOWN" \
     || no "--top-k=20: printed $( sep_count "$K20" ) doc blocks, header said shown=$K20_SHOWN — disclosure inconsistent with the real payload"
 
-# ── 4) no explicit --top-k still emits exactly 8 (under the explicit high body budget above) ─────────
-[ "$DEFAULT_SHOWN" = "8" ] \
-    && ok "default (no --top-k): shown=8 (default cap unchanged)" \
-    || no "default (no --top-k): shown=$DEFAULT_SHOWN (expected 8 — the default must stay 8)"
-[ "$( sep_count "$DEFAULT" )" = "8" ] \
-    && ok "default (no --top-k): exactly 8 doc separator blocks printed" \
-    || no "default (no --top-k): printed $( sep_count "$DEFAULT" ) doc blocks (expected 8)"
+# ── 4) no explicit --top-k emits exactly 6 (under the explicit high body budget above) ────────────────
+#    DOCS-TOPK6 (2026-11-05): the default moved 8 -> 6 (reports/docs-quick-s0.md: fewer docs, bigger water-fill
+#    share each). MCP memory_recall's default is the same constant; recallparitycheck.sh pins the two doors
+#    byte-identical on an unflagged call, so this CLI arm pins both.
+[ "$DEFAULT_SHOWN" = "6" ] \
+    && ok "default (no --top-k): shown=6 (the DOCS-TOPK6 default)" \
+    || no "default (no --top-k): shown=$DEFAULT_SHOWN (expected 6 — rw::kDefaultRecallTopK)"
+[ "$( sep_count "$DEFAULT" )" = "6" ] \
+    && ok "default (no --top-k): exactly 6 doc separator blocks printed" \
+    || no "default (no --top-k): printed $( sep_count "$DEFAULT" ) doc blocks (expected 6)"
+
+# ── 4b) every place that NAMES the default agrees with the count the binary actually served ───────────
+#    The default used to live as a literal in two source files and three texts; a text that says one number
+#    while the run serves another is the drift this pins. Both numbers come from the binary under test.
+NOTE_K="$( printf '%s\n' "$DEFAULT" | grep -oE 'raise --top-k/top_k \(default [0-9]+\)' | grep -oE '[0-9]+' | head -1 )"
+[ -n "$NOTE_K" ] && [ "$NOTE_K" = "$DEFAULT_SHOWN" ] \
+    && ok "capped note names the served default: (default $NOTE_K) = shown=$DEFAULT_SHOWN" \
+    || no "capped note says (default ${NOTE_K:-<missing>}) but the unflagged run served shown=$DEFAULT_SHOWN"
+HELP_OUT="$( "$BIN" --help=--recall 2>&1 )"; HELP_RC=$?
+HELP_K="$( printf '%s\n' "$HELP_OUT" | grep -oE 'docs are emitted \(default [0-9]+' | grep -oE '[0-9]+$' | head -1 )"
+[ "$HELP_RC" = 0 ] && [ -n "$HELP_K" ] && [ "$HELP_K" = "$DEFAULT_SHOWN" ] \
+    && ok "--help=--recall names the served default: (default $HELP_K) = shown=$DEFAULT_SHOWN" \
+    || no "--help=--recall (exit $HELP_RC) says (default ${HELP_K:-<missing>}) for --recall --top-k but the unflagged run served shown=$DEFAULT_SHOWN"
 
 # ── 5) determinism ──────────────────────────────────────────────────────────────────────────────────
 [ "$( run )" = "$DEFAULT" ] \

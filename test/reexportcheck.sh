@@ -45,6 +45,9 @@
 #
 # Usage: bash test/reexportcheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -116,8 +119,25 @@ if grep -q '<reexports>' "$TMP/n1.xml"; then no "N1 no code-shaped name: no bloc
 ask --json "--for=where Boom used in main.rs is defined" >"$TMP/n2.json"
 if grep -q 'reexports' "$TMP/n2.json"; then no "N1 --json carries no block"; else ok "N1 --json carries no block"; fi
 ( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache "--for=where Boom used in main.rs is defined" </dev/null 2>/dev/null ) >"$TMP/off.xml"
-sed 's|<reexports>.*</reexports>||' "$TMP/r1.xml" >"$TMP/r1.stripped"
-if cmp -s "$TMP/off.xml" "$TMP/r1.stripped"; then ok "N1 the off switch removes exactly the block"; else no "N1 the off switch changed more than the block"; fi
+# AF2 A (built by AF1, 2026-11-18): the answer-first default lifts the comments that are DIRECT CHILDREN of <reexports> into the
+# trailing document legend, so "exactly the block" is the block plus those notes wherever they now sit. They are read off the
+# legend-first twin (inside its <reexports>), each removed once; nothing else may differ.
+ask --legend=first "--for=where Boom used in main.rs is defined" >"$TMP/r1.first.xml"
+python3 - "$TMP/r1.xml" "$TMP/r1.first.xml" >"$TMP/r1.stripped" <<'PY_N1'
+import re, sys
+s, first = ( open( p, encoding="utf-8" ).read() for p in sys.argv[ 1:3 ] )
+b = re.search( r"<reexports>(.*)</reexports>", first, re.S )
+kids, depth = [], 0
+for t in re.finditer( r"<!--.*?-->|<(/?)[A-Za-z_][\w-]*[^>]*?(/?)>", b.group( 1 ) if b else "", re.S ):
+    if t.group( 0 ).startswith( "<!--" ):
+        if depth == 0: kids.append( t.group( 0 ) )
+    elif t.group( 1 ): depth -= 1
+    elif not t.group( 2 ): depth += 1
+s = re.sub( r"<reexports>.*</reexports>", "", s, flags=re.S )
+for c in kids: s = s.replace( c, "", 1 )
+sys.stdout.write( s )
+PY_N1
+if cmp -s "$TMP/off.xml" "$TMP/r1.stripped"; then ok "N1 the off switch removes exactly the block (and the block's own notes A lifted into the legend)"; else no "N1 the off switch changed more than the block"; fi
 # ── fix round 1: the Rust module-identity guards (fixture test/reexportfix2) ────────────────────────────────────────────
 FIX2="$ROOT/test/reexportfix2"
 ask2(){ ( cd "$FIX2" || exit 1; HOME="$TMP" "$BIN" "$FIX2" --no-cache "$@" </dev/null 2>/dev/null ); }
@@ -173,15 +193,29 @@ has   "$TMP/t2c.xml" "X1c twin: a same-module import is still read through: c's 
 # A token budget is a request the block must obey: the rows sit outside est_tokens, so under one they are NOT printed and a held marker
 # names the count. RED on train head b50d9518 (rows printed, no marker); H3/H4 are twins that hold on both.
 HB="--for=where sayHello used in use.ts is defined"
-ask --token-budget=3000 "$HB" >"$TMP/h1.xml"
-( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache --token-budget=3000 "$HB" </dev/null 2>/dev/null ) >"$TMP/h1off.xml"
-if grep -qE '<(def|rx|u) ' "$TMP/h1.xml"; then no "H1 --token-budget=3000 prints no re-export row"; else ok "H1 --token-budget=3000 prints no re-export row"; fi
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget at or above the whole price (est_tokens 975 + the blocks outside it) serves the
+# unbudgeted answer byte for byte, rows included, so 3000 no longer holds anything; the arms move to 100, under the price,
+# where the blocks are held (shed="held,…"). H3 compares through the hold's own disclosure (held in shed=, its legend unit,
+# est_tokens): the off switch holds nothing, so it names no held step.
+ask --token-budget=100 "$HB" >"$TMP/h1.xml" || no "H1: the budgeted run exited $?"
+( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache --token-budget=100 "$HB" </dev/null 2>/dev/null ) >"$TMP/h1off.xml" || no "H3: the off-switch run exited $?"
+if grep -qE '<(def|rx|u) ' "$TMP/h1.xml"; then no "H1 --token-budget=100 prints no re-export row"; else ok "H1 --token-budget=100 prints no re-export row"; fi
 if grep -qF '<reexports held="budget" defs="1"/>' "$TMP/h1.xml"; then ok "H2 the held marker names the definitions (defs=1)"; else no "H2 the held marker names the definitions (defs=1)"; fi
 sed 's|<!-- reexports held=[^>]*-->||; s|<reexports held="budget"[^>]*/>||' "$TMP/h1.xml" >"$TMP/h1.stripped"
-if cmp -s "$TMP/h1off.xml" "$TMP/h1.stripped"; then ok "H3 the answer minus the marker is the off-switch answer, est_tokens included"; else no "H3 the held marker changed more than itself"; fi
+if python3 - "$TMP/h1.stripped" "$TMP/h1off.xml" <<'PY'
+import re, sys
+def norm( t ):
+    t = t.replace( 'shed="held,', 'shed="' )
+    t = re.sub( r' held \(the blocks outside est_tokens:[^)]*\),', '', t )
+    return re.sub( r'est_tokens="\d+"', 'est_tokens=""', t )
+a, b = ( norm( open( p, encoding = "utf-8" ).read() ) for p in sys.argv[ 1: ] )
+sys.exit( 0 if a == b and 'shed="held,' in open( sys.argv[ 1 ], encoding = "utf-8" ).read() else 1 )
+PY
+then ok "H3 the answer minus the marker (and the hold's own disclosure) is the off-switch answer"; else no "H3 the held marker changed more than itself"; fi
 ask "$HB" >"$TMP/h4.xml"
 if grep -qF '<rx p="ts/m/index.ts"' "$TMP/h4.xml" && ! grep -qF 'held="budget"' "$TMP/h4.xml"; then ok "H4 twin: no budget, the rows print and no marker"; else no "H4 twin: no budget, the rows print and no marker"; fi
-ask --token-budget=3000 "--for=add a new built-in filter command" >"$TMP/h5.xml"
+ask --token-budget=100 "--for=add a new built-in filter command" >"$TMP/h5.xml" || no "H5: the budgeted run exited $?"
+[ -s "$TMP/h5.xml" ] || no "zero-evidence premise (reexportcheck.sh:218): the file the next arm judges is empty, so its verdict proves nothing"
 if grep -qF 'reexports' "$TMP/h5.xml"; then no "H5 twin: a task with no chain carries no marker under a budget"; else ok "H5 twin: a task with no chain carries no marker under a budget"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for f in f1 f3 f4 g1 n3deep t2a t2b t2c h1; do if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "xml well-formed $f"; else no "xml malformed $f"; fi; done

@@ -114,7 +114,7 @@ inline InitSlotPairs initSlotPairs( const IngestResult& ing, const ValueRefIndex
     for( const std::uint32_t v : refs )
     {
         const Reference&       r   = ing.references[v];
-        const std::string_view key = slot_detail::slotKey( r.fieldName, ing.symbols[id].name );
+        const std::string_view key = slot_detail::slotKey( r.fieldName(), ing.symbols[id].name );
         std::vector<NodeId>    tgt = vri.targetsOf( v );
         std::ranges::sort( tgt, [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].name != ing.symbols[b].name ? ing.symbols[a].name < ing.symbols[b].name : a < b; } );
         for( const NodeId t : tgt )
@@ -261,7 +261,7 @@ inline constexpr std::string_view kForSlotNameLegend =
     "type is not read (the callers rows say via=\"slot-name\"), a candidate, never a fact";
 inline constexpr std::string_view kForCompactSlotJoinLegend =
     "; d slot_by= functions that MAY call this one through a slot it is stored in, slot_fields= F=K@C a struct field F holding K "
-    "stored functions that C calls through (both by the value index, not calls), _more= the rest";
+    "stored functions that C calls through (both by the value index, not calls), slot_by_more=/slot_fields_more= the rest";
 inline constexpr std::string_view kForSlotJoinLegend =
     "; slot_by= on a function d row: up to 4 functions that MAY call it through a slot it is stored in (a struct field, by type or "
     "by field name, a variable, a parameter of a registrar it is passed to), by the value index, never a proven call, "
@@ -356,7 +356,7 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
     {
         return r.role == RefRole::Value
             && ( std::ranges::binary_search( fnNames, std::string_view( r.calleeName ), rw::sortutil::svLess )
-                 || ( structRow && ( !r.memberPath.empty() || ( !r.qualifier.empty() && r.qualifier[0] == kValueRefSlotParamScope ) ) ) );
+                 || ( structRow && ( !r.memberPath().empty() || ( !r.qualifier.empty() && r.qualifier[0] == kValueRefSlotParamScope ) ) ) );
     } );
     if( !joinable )
     {
@@ -465,8 +465,7 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
                         }
                     }
                 }
-                std::ranges::sort( fns );
-                fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+                rw::sortutil::sortUnique( fns );
                 if( fns.empty() || caller.find_first_of( ",=@" ) != std::string::npos )
                 {
                     ++more;

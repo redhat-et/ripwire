@@ -15,6 +15,7 @@
 // that group alone; the sel= it prints then names the group's file and owner and may bind more than it.
 
 #include "defattrib.h"     // DefGroups, defGroupsOf — the ONE definition-group rule
+#include "infra/sortutil.h"   // sortUnique
 #include "filter.h"        // isTestSymbol, pathTierOf (via pathDefInTests)
 #include "graph.h"         // resolveAllByNameQualified — the shared resolver
 #include "lexical.h"       // lexicalScanText — an alias row's written target (to=) is read from its file
@@ -23,6 +24,7 @@
 #include "model.h"
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "pathpairs.h"     // pathDefInTests — the one test-path rule --path's twins use
+#include "redact.h"        // redactInPlace — to= is source text
 #include "serialize.h"     // escapeXml / jsonStr / symTag
 #include "infra/tablelookup.h"  // findSortedByField — the alias-target side table is ascending by id
 
@@ -124,8 +126,7 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
         {
             defslookup_detail::collectCallers( ing, g, m, callers );
         }
-        std::sort( callers.begin(), callers.end() );
-        callers.erase( std::unique( callers.begin(), callers.end() ), callers.end() );
+        rw::sortutil::sortUnique( callers );
         // a member calling itself (recursion) is no outside caller
         r.callers = std::size_t( std::count_if( callers.begin(), callers.end(), [ & ]( NodeId c )
                                                 { return std::find( members[k].begin(), members[k].end(), c ) == members[k].end(); } ) );
@@ -211,7 +212,60 @@ inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {
     return aliasTargetStart( ing, s ) != 0;
 }
-inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
+// An alias target's written text, folded the way to= prints it: whitespace runs to one space, a comment as whitespace, a string
+// literal copied whole, a trailing `;` dropped. The one fold: aliasTargetText and the alias walk (aliashop.h) both read it.
+inline std::string foldAliasTarget( std::string_view raw )
+{
+    std::string text;
+    bool        space = false;
+    for( std::size_t i = 0; i < raw.size(); ++i )
+    {
+        const char c = raw[i];
+        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
+        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
+        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
+        {
+            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
+            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
+            space                 = !text.empty();
+            continue;
+        }
+        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        if( ws )
+        {
+            space = !text.empty();
+            continue;
+        }
+        if( space )
+        {
+            text += ' ';
+            space = false;
+        }
+        text += c;
+        if( c == '"' )
+        {
+            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
+            {
+                text += raw[i];
+                if( raw[i] == '\\' && i + 1 < raw.size() )
+                {
+                    text += raw[ ++i ];
+                }
+            }
+            if( i < raw.size() )
+            {
+                text += '"';
+            }
+        }
+    }
+    while( !text.empty() && ( text.back() == ';' || text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
+    {
+        text.pop_back();
+    }
+    return text;
+}
+// `redact`: the run's tally when the text is printed (CR 4476868695: to= is source text; nullptr under --no-redact or to parse)
+inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s, RedactCounts* redact = nullptr )
 {
     AliasTargetText out;
     const std::uint32_t tStart = aliasTargetStart( ing, s );
@@ -228,51 +282,7 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         return out;
     }
     const std::string_view raw = std::string_view( *file ).substr( tStart, s.endByte - tStart );
-    bool                   space = false;
-    for( std::size_t i = 0; i < raw.size(); ++i )
-    {
-        const char c = raw[i];
-        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
-        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
-        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
-        {
-            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
-            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
-            space                 = !out.text.empty();
-            continue;
-        }
-        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-        if( ws )
-        {
-            space = !out.text.empty();
-            continue;
-        }
-        if( space )
-        {
-            out.text += ' ';
-            space = false;
-        }
-        out.text += c;
-        if( c == '"' )
-        {
-            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
-            {
-                out.text += raw[i];
-                if( raw[i] == '\\' && i + 1 < raw.size() )
-                {
-                    out.text += raw[ ++i ];
-                }
-            }
-            if( i < raw.size() )
-            {
-                out.text += '"';
-            }
-        }
-    }
-    while( !out.text.empty() && ( out.text.back() == ';' || out.text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
-    {
-        out.text.pop_back();
-    }
+    out.text                   = foldAliasTarget( raw );
     out.fullBytes = out.text.size();
     // the target's own definition: a plain identifier chain once template arguments are dropped (`COW<IColumn>::Ptr` -> COW::Ptr)
     std::string name;
@@ -329,6 +339,8 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         }
         out.next = nextFlag( "--defs=", spell );
     }
+    redactInPlace( out.text, redact );
+    out.fullBytes = out.text.size();
     truncateUtf8WithEllipsis( out.text, kAliasTargetCap );
     return out;
 }
@@ -349,10 +361,7 @@ inline void aliasTargetAttrsXml( std::string& out, const AliasTargetText& a )
     {
         out += " to_capped=\"1\" to_bytes=\"" + std::to_string( a.fullBytes ) + "\"";
     }
-    if( !a.next.empty() )
-    {
-        out += " to_next=\"" + std::string( escapeXml( a.next, esc ) ) + "\"";
-    }
+    out += nextAttrXml( a.next, "to_next" );   // nothing when a.next is empty; the one next= escaper (nextverb.h)
 }
 inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
 {
@@ -376,7 +385,8 @@ inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
     }
 }
 
-inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false )
+inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false,
+                       RedactCounts* redact = nullptr )
 {
     std::vector<char> esc;
     const Symbol&     s = ing.symbols[ r.rep ];
@@ -406,12 +416,12 @@ inline void defRowXml( std::string& out, const IngestResult& ing, const DefLooku
     }
     if( aliasTarget )
     {
-        aliasTargetAttrsXml( out, aliasTargetText( ing, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
+        aliasTargetAttrsXml( out, aliasTargetText( ing, s, redact ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
     }
     out += "/>";
 }
 
-inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
+inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, RedactCounts* redact = nullptr )
 {
     const Symbol& s = ing.symbols[ r.rep ];
     out += "{\"n\":\"" + jsonStr( qualifiedMemberName( owners, s ) ) + "\",\"t\":\"" + symTag( s.kind ) + "\",\"p\":\""
@@ -426,7 +436,7 @@ inline void defRowJson( std::string& out, const IngestResult& ing, const DefLook
     {
         out += ",\"decl_only\":1";
     }
-    aliasTargetAttrsJson( out, aliasTargetText( ing, s ) );
+    aliasTargetAttrsJson( out, aliasTargetText( ing, s, redact ) );
     out += "}";
 }
 
@@ -466,7 +476,7 @@ struct PathAlts
 };
 
 // --path's inline alternatives for one endpoint (part 5): every definition the answer does NOT already show, up to the cap,
-// compact rows, then alts_shown=K defs=N next=--defs=NAME --offset=M when more exist (M: the first row not yet shown). Empty when the pick is provably unique or
+// compact rows, then shown_alts=K defs=N next=--defs=NAME --offset=M when more exist (M: the first row not yet shown). Empty when the pick is provably unique or
 // nothing is left to tell (0 bytes added). Not alternatives: the bound definition, a definition the answer prints as a pair
 // endpoint (`printed`), an untied C-family prototype (not a second candidate, as endpointDefinitionCount counts it).
 // `bound`: the definition the answer bound (kNoNode when it bound none: every candidate group is then an alternative).
@@ -514,7 +524,7 @@ inline void defAltsXml( PathAlts& acc, const IngestResult& ing, const DefLookup&
     std::string out = "<alts side=\"" + std::string( side ) + "\" of=\"" + std::string( escapeXml( L.spec, esc ) ) + "\"";
     if( shown < total )
     {
-        out += " alts_shown=\"" + std::to_string( shown ) + "\" defs=\"" + std::to_string( L.defs() ) + "\""
+        out += " shown_alts=\"" + std::to_string( shown ) + "\" alts_capped=\"1\" defs=\"" + std::to_string( L.defs() ) + "\""
              + nextAttrXml( nextFlag( "--defs=", L.spec ) + " --offset=" + std::to_string( nextOffset ) );   // past page 1, never a replay of it
     }
     acc.xml += out + ">" + rows + "</alts>";
@@ -550,7 +560,7 @@ inline std::string defAltsLegend( const PathAlts& alts )
     return std::string( "<alts side= of=> lists further definitions the endpoint's name binds, not printed above (the pick is "
                         "not provably unique): sel= pastes as that endpoint to bind one alone" )
          + ( alts.unproven ? ", except on a sel_proven=0 row: no spelling tried binds that one alone, its sel= names the file and owner and may bind more" : "" )
-         + ", p= where it is, class=source|test; alts_shown=K defs=N: K of the other rows shown, next= pages the rest. "
+         + ", p= where it is, class=source|test; shown_alts=K defs=N: K of the other rows shown, alts_capped=1 they are cut, next= pages the rest. "
          + ( alts.declOnly ? "decl_only=1: no body (a header declaration or interface contract), not a second definition. " : "" );
 }
 

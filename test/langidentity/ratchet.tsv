@@ -1,7 +1,20 @@
 # test/langidentity/ratchet.tsv -- the ratchet printed last by test/langidentitycheck.sh.
-# ceiling: the most "== Lang::X" / "!= Lang::X" predicate lines (a `case` label is not a predicate) src/ may hold outside the
-#          per-language files below; counted from `ripwire src --regex='Lang::[A-Z][A-Za-z]+'`, one count per distinct line.
+# ceiling: the most "== Lang::X" / "!= Lang::X" predicate lines (a `case` label is not a predicate, and from 2026-11-20 a
+#          COMMENT is not either -- ruling 107) src/ may hold outside the per-language files below; counted from
+#          `ripwire src --regex='Lang::[A-Z][A-Za-z]+'`, one count per distinct line.
 #          It may fall (lower the number in the same commit that removes the predicate) and may never rise.
+# THE COUNT IS A FLOOR, NOT A TOTAL (2026-11-20, ruling 108, found by lane IN5; disclosed now, counted later). The counter's
+#          hit regex REQUIRES the `in=` attribute, and the tool omits it for a hit with no enclosing symbol, so such a row is
+#          dropped silently. MEASURED on integration/070-1120 at 2d03f0b3b: 12 real `l == Lang::X` lines in
+#          src/langfacts.h:544-555 (langFacts()'s own self-check) are not counted -- the figure printed is 325 where the
+#          served rows hold 337 -- and IN5's source-level count of 339 says at least one further line is not served as a hit
+#          row at all, so 12 is itself a floor. CONSEQUENCE, stated rather than hidden: the ceiling below was recorded by
+#          this same instrument, so its quantity is KNOWN TO BE WRONG IN THE SAFE DIRECTION -- too low, hence the bar is
+#          stricter than it reads, never looser. A lane that adds a shared-file predicate in a span with no enclosing symbol
+#          is not counted at all, which is the gap to close when the count is fixed. DO NOT RE-BASE THE CEILING ON A FIXED
+#          COUNT HERE: making `in=` optional lifts the figure to 337 at once, and "may never rise" above forbids that in this
+#          file. Fixing the count is one change (counter + ceiling together, with the quantity re-derived and this note
+#          retired) and it needs the owner, exactly as the one-time 352 -> 362 waiver below did.
 # perlang: a file that exists for ONE language, whose predicates are the point of the file and do not count.
 # CLOSED (train 29, langfacts-fold): the one-time named exception (owner waiver 2026-10-16) raised the ceiling 352 -> 362 for
 #   train 28, for 10 shared-file Lang:: predicates added by lanes signed before #399's ratchet (grep-carrier +1, ruby-pair +4,
@@ -18,9 +31,22 @@
 # 335 -> 333 (train 36, recount on the composed tree #431 + #438 + #437 over train 35): train 35's head counted 335; the
 #   composed tree counts 333 (net two fewer shared-file predicates from the merged branches).
 # 333 -> 326 (slice 6c, #447): implicitReceiver, memberNeverReachesFreeFunction, classNameReceiver and hashComment moved to LangFacts.
-ceiling	326
+# 325 -> 324 (qd-shrink-pair): quality.h definitionQualityKey holds the Elixir key fold; pathQualifiedKey(relPath, Symbol) and
+#   qdbestsince.h's best-since fold call it instead of spelling the compare (the base-body reader added none).
+# 324 -> 321 (train ge2, the composed tree): qd-unchecked-status + qd-unhandled-arm added two C-family predicates (the enum table's
+#   Cpp/C filter, the C scanner branch) and the composed tree counted 326; quality.h defectSitesOf and cFamilyEnumTable now read
+#   langfacts.h's DefectScan column, so all six defect-shape language tests (four of them main's) left the count.
+# 321 -> 317 (GE-CAPTURETAGS): captureTagsFacts' three Elixir capture filters and its three Elixir definition-name arms each ask
+#   the language once, in a named step (ingest_sidecap.h languageFilterFate, indexedNameOf).
+# 317 -> 316 (GE-CAPTURETAGS round 2): a definition's language rules are decided once (definitionIdentityOf), the language filters
+#   and the per-language binds dispatch by one switch each (languageFilterFate, emitLanguageDefinitionFacts), the Elixir def-head
+#   steps read @_keyword (queries/elixir/tags.scm's only) as their gate, and C++'s std-rooted scope comes with its scope (DefScope).
+ceiling	316
 perlang	ingest_elixir.h
 perlang	elixir_resolve.h
 perlang	ingest_clojure.h
 perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
+# argtypepick.h (lane overload-split): the C++ argument-type overload pick (graph.h B2.3), C++ overload resolution only.
+perlang	argtypepick.h
+perlang	pyscopepin.h

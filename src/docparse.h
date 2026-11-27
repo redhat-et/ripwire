@@ -21,8 +21,11 @@
 #include "infra/jsonesc.h"   // A4-F27 residual: rw::shSingleQuote — canonical shell single-quote, forwarded
                         // to below instead of carrying a local copy; STL-only, no coupling cost here.
 
+#include "infra/strkern.h"   // strkern::lowerFoldedStartsWith — the A-Z-folded tag and needle scans
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
+#include "infra/depwatch.h"  // readWholeFile reports each read to the warm snapshot's dependency log when one is armed
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
+#include "htmldoc.h"          // DOCS-UNITS D5: the HTML section tree (line-preserving body text + units)
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
 
 #include <algorithm>   // std::binary_search — the membership test, instead of a hand-rolled scan loop
@@ -292,14 +295,26 @@ inline std::optional<std::string> readWholeFile( const std::string& path )
     OwnedFile fp = openOwnedFile( path.c_str(), "rb" );
     if( !fp )
     {
+        depwatch::note( depwatch::Seam::WholeFile, path, nullptr );
+        return std::nullopt;
+    }
+    // Only a REGULAR file has a whole to read. A directory opens on Linux and its seek can report LLONG_MAX (ext4 htree,
+    // overlayfs), so readAllOfStream sized a string to that and threw std::bad_alloc: a `go.mod` that is a directory took
+    // down a plain --no-cache run (graph.h GoModReads). Asked of the descriptor, so the name cannot be swapped in between;
+    // anything else reads as unreadable, exactly as a failed open does, in the answer and in the dependency log.
+    os::stat_t st{};
+    if( os::fstat( os::fileno( fp.file ), &st ) != 0 || !S_ISREG( st.st_mode ) )
+    {
+        depwatch::note( depwatch::Seam::WholeFile, path, nullptr );
         return std::nullopt;
     }
     std::optional<std::string> out      = readAllOfStream( fp.file );
     const bool                 closedOk = fp.close();
     if( !closedOk )
     {
-        return std::nullopt;
+        out.reset();
     }
+    depwatch::note( depwatch::Seam::WholeFile, path, out ? &*out : nullptr );   // the warm snapshot's dependency log (infra/depwatch.h)
     return out;
 }
 
@@ -464,29 +479,18 @@ inline std::string extractIpynb( std::string_view json )
 
 // ── .html — strip script/style + tags, decode a few entities ────────────────────────────────────────
 
-namespace detail
+// The page's line-preserving body text (htmldoc.h: content region, chrome stripped, line k = raw line k). The
+// units ride beside it in HtmlDoc::headings; the doc post-pass reads those through extractHtmlDoc directly.
+inline std::string extractHtml( std::string_view html )
 {
-
-// Case-insensitive: does s, at offset p, begin with the lowercase `lit` (e.g. "<script")?
-inline bool ciStartsWith( std::string_view s, std::size_t p, std::string_view lit ) noexcept
-{
-    if( p + lit.size() > s.size() )
-    {
-        return false;
-    }
-    for( std::size_t k = 0; k < lit.size(); ++k )
-    {
-        if( char( std::tolower( static_cast<unsigned char>( s[p + k] ) ) ) != lit[k] )
-        {
-            return false;
-        }
-    }
-    return true;
+    return extractHtmlDoc( html ).text;
 }
 
-}   // namespace detail
-
-inline std::string extractHtml( std::string_view html )
+// The page's WHOLE-TEXT reading as every lexical ranking lens has always seen it (DOCS-UNITS-FIX): every tag a space, script and style
+// dropped, entities decoded, whitespace collapsed. --recall reads the page through extractHtml above (chrome stripped, line-preserving);
+// the page's file node keeps THIS text's corpus statistics (ingest_docpass.h docTextOfDoc), so --for, --query and pack-task rank an HTML
+// page exactly as before the section tree existed (gate test/docsunitscheck.sh arm H).
+inline std::string extractHtmlFlat( std::string_view html )
 {
     std::string out;
     out.reserve( html.size() );
@@ -496,11 +500,13 @@ inline std::string extractHtml( std::string_view html )
         if( html[i] == '<' )
         {
             // drop <script>…</script> and <style>…</style> wholesale (content is not prose)
-            if( detail::ciStartsWith( html, i, "<script" ) || detail::ciStartsWith( html, i, "<style" ) )
+            const std::string_view tag    = html.substr( i );
+            const bool             script = strkern::lowerFoldedStartsWith( tag, "<script" );
+            if( script || strkern::lowerFoldedStartsWith( tag, "<style" ) )
             {
-                const std::string_view close = detail::ciStartsWith( html, i, "<script" ) ? "</script" : "</style";
+                const std::string_view close = script ? "</script" : "</style";
                 std::size_t            e     = i + 1;
-                while( e < html.size() && !detail::ciStartsWith( html, e, close ) )
+                while( e < html.size() && !strkern::lowerFoldedStartsWith( html.substr( e ), close ) )
                 {
                     ++e;
                 }
@@ -528,8 +534,11 @@ inline std::string extractHtml( std::string_view html )
         // text node — decode the handful of entities that matter for tokens
         if( html[i] == '&' )
         {
-            const std::size_t semi = html.find( ';', i );
-            if( semi != std::string_view::npos && semi - i <= 8 )
+            // the ';' within the longest entity read here (8 bytes past the '&'), never in the rest of the page (a run of bare
+            // '&' rescanned the document once per '&')
+            const std::size_t rel  = html.substr( i, 9 ).find( ';' );
+            const std::size_t semi = rel == std::string_view::npos ? rel : i + rel;
+            if( semi != std::string_view::npos )
             {
                 const std::string_view ent = html.substr( i, semi - i + 1 );
                 if( ent == "&amp;" )
@@ -600,6 +609,7 @@ inline std::string extractHtml( std::string_view html )
     }
     return collapsed;
 }
+
 
 // ── .csv — header names + a few sample rows (the column names are the searchable tokens) ─────────────
 
@@ -1015,7 +1025,7 @@ inline bool ciContains( std::string_view haystack, std::string_view needle ) noe
     }
     for( std::size_t at = 0; at + needle.size() <= haystack.size(); ++at )
     {
-        if( ciStartsWith( haystack, at, needle ) )
+        if( strkern::lowerFoldedStartsWith( haystack.substr( at ), needle ) )
         {
             return true;
         }

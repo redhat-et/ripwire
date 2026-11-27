@@ -11,6 +11,7 @@
 // mcpedit.h, and mcp.h. Also carries the index-side mcpdetail helpers (mtime/stat/watcher/
 // byte-hash/handle codec) — the JSON-side mcpdetail helpers live in mcpjson.h (same namespace).
 
+#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf; the MCP-CALL-MEMO slots (McpIndex::impure, ::qmetrics)
 #include "mcpjson.h"
 
 #include "model.h"
@@ -67,6 +68,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <optional>     // MCP-CALL-MEMO: the per-index fact slots on McpIndex
 #include <string>
 #include <string_view>
 #include <thread>       // Phase-M: the DETACHED qsnap-prefetch worker
@@ -128,7 +130,27 @@ namespace mcpdetail
     // the first source file to a previously file-less directory is detected — creating the file bumps its
     // own dir's mtime, and creating a brand-new subdir bumps its (already-tracked) parent's mtime, so every
     // add/delete bubbles into a watched dir. Errors degrade: an unreadable subtree is simply not watched.
-    inline void collectDirMtimes( const std::string& root, HashMap<std::string, long long>& dirMtime )
+    //
+    // M1: the crawl now CRAWLS a build-output-named dir (build/dist/out/target) that git tracks files under, so the name
+    // alone no longer means "nothing indexed lives here". `indexed` (the index this watch-list belongs to) keeps such a dir
+    // watched when an indexed file sits under it — the crawl's own decision, read back from its answer rather than
+    // re-asking git on every rebuild. A linear scan, paid only for a dir that carries one of the four names. The residual,
+    // stated: a tracked build-output dir holding NO indexed file stays unwatched, so its first source file is seen only at
+    // the next rebuild something else forces.
+    inline bool holdsIndexedFile( const IngestResult* indexed, const std::string& dir )
+    {
+        const std::string prefix = dir + "/";
+        for( std::uint32_t i = 0; indexed != nullptr && i < indexed->files.size(); ++i )
+        {
+            if( diskPath( *indexed, i ).starts_with( prefix ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    inline void collectDirMtimes( const std::string& root, HashMap<std::string, long long>& dirMtime, const IngestResult* indexed = nullptr )
     {
         namespace fs = std::filesystem;
         dirMtime.try_emplace( root, mtimeOf( root ) );
@@ -164,6 +186,10 @@ namespace mcpdetail
             if( !skip && dn.size() > 12 && dn.compare( 0, 12, "cmake-build-" ) == 0 )
             {
                 skip = true;
+            }
+            if( skip && isTrackedBuildOutputName( dn ) && holdsIndexedFile( indexed, it->path().string() ) )
+            {
+                skip = false;   // M1: the crawl indexed files under this tracked build-output dir — watch it (header)
             }
             if( !skip )
             {
@@ -354,9 +380,7 @@ namespace mcpdetail
     // FNV-1a 64 over a byte range — the per-file content fingerprint the EDIT verbs verify against.
     inline std::uint64_t byteHash( const char* data, std::size_t n ) noexcept
     {
-        std::uint64_t h = 14695981039346656037ull;
-        for( std::size_t i = 0; i < n; ++i ) { h ^= static_cast<unsigned char>( data[i] ); h = hashutil::fnv1aMultiply( h ); }
-        return h;
+        return hashutil::fnv1a64( std::string_view( data, n ) );
     }
 
     // FNV-1a 64 over a std::string — the same hash the handle system uses for the STABLE identity part.
@@ -465,7 +489,7 @@ namespace mcpdetail
                                            const std::vector<long long>&      fileMtime,
                                            const std::vector<std::uint64_t>&  fileByteHash )
     {
-        std::uint64_t h = 14695981039346656037ull;
+        std::uint64_t h = hashutil::kFnv1aOffset64;
         const auto mix = [ &h ]( const void* data, std::size_t n ) noexcept
         {
             const unsigned char* b = static_cast<const unsigned char*>( data );
@@ -542,6 +566,13 @@ struct McpIndex
     mutable std::shared_ptr<const ValueRefIndex> valueRefs;
     mutable std::uint64_t                        valueRefBuilds = 0;   // monotone: McpRequestTiming's vri= reads it
 
+    // MCP-CALL-MEMO: the per-index facts the `for`, `pack`, `from_trace`, `lego` and `exemplar` verbs read on every call — the
+    // purity fixpoint (computeImpure) and QMetrics (computeQMetrics) — are pure functions of (`ing`, `g`), so they are built on
+    // first use and reused until the index is replaced, under the same rule as valueRefs: every writer of `ing` resets them
+    // (releaseMcpIndexMemory), and the verb fills them with sharedOnce. Before, each call recomputed them (computeImpure 21 ms envoy, 84 ms vscode per `for` call).
+    mutable std::optional<std::vector<char>> impure;     // filled by sharedOnce at the verb
+    mutable std::optional<QMetrics>          qmetrics;
+
     // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
     //
     // incrementalPasses counts ONLY rebuilds that refreshed an index this process ALREADY held for this
@@ -579,13 +610,17 @@ struct McpIndex
 // diverged from the CLI's twice over: a different offset basis, and a key that followed the SPELLING of the
 // root (a trailing slash or a symlinked checkout minted a second blob).
 //
-// The name carries the build tag too (`ripwire-mcp-<rootKey>-c<format>p<parser>.cache`, quality.h rootBlobTail): two MCP
-// servers of different formats on one root — an agent wired to an older install beside one wired to a newer —
-// each keep their own warm index instead of refusing and rewriting one file on every start.
+// ONE-PARSE (MCP half): the server reads and writes the CLI's RICH blob (`ripwire-<rootKey>-rich-<tag>.bin`, main.cpp
+// defaultCachePath with captureValueUses), not a third file of its own. Its ingest is the CLI rich verbs' ingest with the
+// CLI defaults — no excludes, kDefaultMaxFileBytes, captureValueUses, .gitignore respected, the workspace label passed the
+// same way — so the records are the same records, and a server started after a CLI `--for` (or the reverse) loads the
+// tree warm instead of parsing it a second time (envoy: 350 G of a cold parse per server start). Two writers on one blob
+// are the case saveCache already handles (an exclusive temp file, then rename). The build tag still separates formats.
+// RootBlobFamily::Mcp stays in the table only so the eviction sweep keeps reading the root key of blobs older servers wrote.
 inline std::string mcpCachePath( const std::string& root )
 {
-    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Mcp );
-    ENSURES( path.ends_with( ".cache" ), "the MCP index family's row names a .cache blob, flat or sharded" );
+    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Rich );
+    ENSURES( path.ends_with( ".bin" ), "the MCP index is the CLI rich family's .bin blob, flat or sharded" );
     return path;
 }
 
@@ -596,7 +631,7 @@ inline std::string mcpCachePath( const std::string& root )
 // requires: a clean tree's stamp/rank must equal a non-git root's.
 inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 {
-    std::uint64_t          h = 14695981039346656037ull;
+    std::uint64_t          h = hashutil::kFnv1aOffset64;
     std::vector<std::uint32_t> ids;
     for( std::uint32_t f = 0; f < changed.size(); ++f )
     {
@@ -818,11 +853,14 @@ inline void invalidateMcpIndex()
 
 // #350: over the memory guard's hard limit, drop the resident index's bulk (the ingest, the graph, the ranks and the
 // per-file arrays) and mark it stale, so the footprint can fall back under the line; the next getIndex() rebuilds.
+// getIndex() also calls it first on every rebuild (S1), so a rebuild never holds the old index beside the new one.
 inline void releaseMcpIndexMemory()
 {
     McpIndex& ix = mcpIndexSlot();
     ix.valid = false;
     ix.valueRefs.reset();   // it points into `ing` (see McpIndex::valueRefs) — and it is resident bulk too
+    ix.impure.reset();      // MCP-CALL-MEMO: derived from the `ing` and `g` released below
+    ix.qmetrics.reset();
     ix.ing   = IngestResult{};
     ix.g     = Graph{};
     std::vector<float>().swap( ix.rank );
@@ -1070,7 +1108,7 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
         gitDir = gd;
     }
 
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto fold = [ &h ]( const std::string& path )
     {
         // (mtime, size) only, and ctime DELIBERATELY not folded: this is a "did git move HEAD" stamp, not a
@@ -1173,12 +1211,11 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
 // resets it — see McpIndex::valueRefs).
 inline const ValueRefIndex& valueRefIndexOf( const McpIndex& ix )
 {
-    if( !ix.valueRefs )
-    {
-        ix.valueRefs = std::make_shared<const ValueRefIndex>( ix.ing );
-        ++ix.valueRefBuilds;
-    }
-    return *ix.valueRefs;
+    return sharedOnce( ix.valueRefs, [ & ]
+                       {
+                           ++ix.valueRefBuilds;
+                           return std::make_shared<const ValueRefIndex>( ix.ing );
+                       } );
 }
 
 // notfound-on-cut: the memory-guard sentence an ERROR from `root` carries when the resident index for that root is the one the
@@ -1240,9 +1277,13 @@ inline const McpIndex& getIndex( const std::string& root )
     // touches the warm reuse that returned above.
     const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
 
-    // `ing` is about to be replaced: the value-reference index points into it (McpIndex::valueRefs), so it goes first —
-    // whether or not the file content moved.
-    ix.valueRefs.reset();
+    // S1 (mem-audit-fable-1111): the old index goes BEFORE the new ingest, not when the new one is assigned over it. Everything
+    // the rebuild still needs from it was taken just above (a3Before) or lives outside the bulk (root, cacheFile, dirMtime, the
+    // watcher, the counters); the ingest reads the cache blob on disk, never the old model. Holding both meant a rebuild peaked
+    // at the old model + graph on top of a fresh build (envoy: about 565 MiB extra). The value-reference index and the
+    // MCP-CALL-MEMO facts point into or derive from `ing`, and releaseMcpIndexMemory drops them first. A failed ingest or graph
+    // build now leaves an invalid slot, the state the FileGraphStopped path below already leaves; the next request rebuilds.
+    releaseMcpIndexMemory();
 
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.
@@ -1351,12 +1392,12 @@ inline const McpIndex& getIndex( const std::string& root )
     {
         for( const WorkspaceRoot& r : wsIt->second )
         {
-            mcpdetail::collectDirMtimes( r.arg, ix.dirMtime );
+            mcpdetail::collectDirMtimes( r.arg, ix.dirMtime, &ix.ing );   // M1: see collectDirMtimes
         }
     }
     else
     {
-        mcpdetail::collectDirMtimes( root, ix.dirMtime );
+        mcpdetail::collectDirMtimes( root, ix.dirMtime, &ix.ing );
     }
 
     // Feature 1: (re-)arm the FS-event watcher over the freshly-collected dir set. The rebuild we just did IS

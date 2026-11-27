@@ -19,7 +19,7 @@
 #   T1 [P] a site in a test path is counted (tests=), never a row; test-only keeps s= next=
 #   C1 [P] the cap: 4 sites show 3, rows_capped="1" next="--grep=…" (a target's non-test sites first)
 #   F1 [P] a %-template filled by three sibling shown directories: tmpl= cand= cands=3 sink=      F2 [G] filled by one, or by three directories under different parents: no row   F3/F4 [G] second argument, test path: no row
-#   R1 [G] --json, --token-budget, RIPWIRE_NO_DOTTED_STRINGS=1: no element   R2 [G] the answer minus the element == the OFF answer byte for byte
+#   R1 [G] --json, RIPWIRE_NO_DOTTED_STRINGS=1: no element; --token-budget: the unbudgeted answer's element (TOKEN-BUDGET-MONOTONE)   R2 [G] the answer minus the element == the OFF answer byte for byte
 #   R3 [G] other languages: a JS file with the same shapes records no fact: no element
 #   V1 [P] --callers carries it, the caller rows byte-identical to OFF   V2 [G] callees carries none
 #   G1 [P] on the first cut of this lane, [G] since: a fact's fields are no name evidence (graph.h file evidence)
@@ -33,6 +33,9 @@
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_DOTTED_STRINGS
@@ -470,8 +473,12 @@ hasnt "$TMP/f4o" 'tmpl=' "F4 a template in a test path: no row"
 # ── R: regimes, byte identity, other languages ────────────────────────────────────────────────────────────────────────────────
 run "$K" "$TMP/rj" '--for=csrfproc' --json
 hasnt "$TMP/rj" 'dotted_strings' "R1 --json carries none"
+# TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, never re-decides it — the element is not a shed unit, so it rides
 run "$K" "$TMP/rb" '--for=csrfproc' --token-budget=3000
-hasnt "$TMP/rb" 'dotted_strings' "R1 --token-budget carries none"
+run "$K" "$TMP/ru" '--for=csrfproc'
+if [ "$( grep -o '<dotted_strings.*</dotted_strings>' "$TMP/rb" )" = "$( grep -o '<dotted_strings.*</dotted_strings>' "$TMP/ru" )" ] && grep -q '<dotted_strings' "$TMP/ru"; then
+    ok "R1 --token-budget carries the unbudgeted answer's element"
+else no "R1 --token-budget does not carry the unbudgeted answer's element"; fi
 RIPWIRE_NO_DOTTED_STRINGS=1 run "$K" "$TMP/roff" '--for=csrfproc'
 hasnt "$TMP/roff" 'dotted_strings' "R1 RIPWIRE_NO_DOTTED_STRINGS=1 carries none"
 if python3 - "$TMP/k1" "$TMP/roff" <<'PY'

@@ -39,6 +39,7 @@
 # file has never seen, and the derived symbol is recorded in the results so a rerun is auditable.
 
 import argparse
+import html
 import json
 import os
 import re
@@ -66,14 +67,14 @@ def derive_targets(binpath, root):
     out, _, _ = run(binpath, root, ["--top-k=40"])
     syms = SYM_RE.findall(out)
     files = FILE_RE.findall(out)
-    sym = syms[0].decode() if syms else "main"
-    fil = files[0].decode() if files else ""
+    sym = html.unescape(syms[0].decode()) if syms else "main"   # XML-decoded: both ride back in as CLI args (#719)
+    fil = html.unescape(files[0].decode()) if files else ""
     # Prefer a symbol that actually has callers AND is unambiguous, else --callers/--impact answer
     # nothing and --edit-check refuses — the legend share would then be measured on an empty or
     # refused document (true, but not the case anyone runs). The FIRST candidate that satisfies both
     # wins, so the choice stays deterministic and is recorded in the results.
     for cand in syms[:20]:
-        c = cand.decode()
+        c = html.unescape(cand.decode())
         co, _, rc = run(binpath, root, ["--callers=" + c, "--legend=compact"])
         if rc != 0 or co.count(b"<caller") == 0:
             continue

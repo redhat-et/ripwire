@@ -1490,6 +1490,15 @@ struct SliceRdWalker
 
     void push( SliceRdStep step ) { work.push_back( std::move( step ) ); }
 
+    // Descend into child `n` in statement position, then continue with `then` — the one shape nearly every
+    // continuation in this walker takes. The descent is pushed, not called, for the same reason as `push`:
+    // nesting depth must grow `work`, never the calling thread's stack. `state` is a reference into `arena`
+    // or a caller's frame that outlives the step. `then` is moved, never copied (see `stmt` on the O(depth²) copy trap).
+    void pushStmt( TSNode n, SliceRdState& state, SliceRdStep then )
+    {
+        push( [ this, n, &state, then = std::move( then ) ]() mutable { stmt( n, state, std::move( then ) ); } );
+    }
+
     // drains `work` until empty — this call IS what "the recursive walk completing" now looks like
     void run()
     {
@@ -1569,6 +1578,7 @@ struct SliceRdWalker
         seqFrom( kids, 0, state, skip, std::move( done ) );
     }
 
+    // The *From child iterators share one skeleton (bounds check, fetch child i, continue at i + 1) and differ in what each child does.
     void seqFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& state, TSNode skip, SliceRdStep done )
     {
         if( state.dead || i >= kids->size() )
@@ -1582,12 +1592,9 @@ struct SliceRdWalker
             seqFrom( kids, i + 1, state, skip, std::move( done ) );   // `skip` matches at most ONE node total — not a nesting-depth recursion
             return;
         }
-        push( [ this, kids, i, c, &state, skip, done = std::move( done ) ]() mutable
+        pushStmt( c, state, [ this, kids, i, &state, skip, done = std::move( done ) ]() mutable
         {
-            stmt( c, state, [ this, kids, i, &state, skip, done = std::move( done ) ]() mutable
-            {
-                seqFrom( kids, i + 1, state, skip, std::move( done ) );
-            } );
+            seqFrom( kids, i + 1, state, skip, std::move( done ) );
         } );
     }
 
@@ -1865,7 +1872,7 @@ struct SliceRdWalker
             {
                 branchBody( alternative, elseS, std::move( finish ) );
             };
-            push( [ this, consequence, &thenS, visitAlt = std::move( visitAlt ) ]() mutable { stmt( consequence, thenS, std::move( visitAlt ) ); } );
+            pushStmt( consequence, thenS, std::move( visitAlt ) );
             return true;
         }
         if( sliceKindIs( n, "while_statement" ) )
@@ -1988,12 +1995,9 @@ struct SliceRdWalker
         const TSNode c = ( *kids )[ i ];
         if( !sliceKindIs( c, "case_statement" ) )
         {
-            push( [ this, kids, i, c, &in, &fall, hasDefault, done = std::move( done ) ]() mutable
+            pushStmt( c, fall, [ this, kids, i, &in, &fall, hasDefault, done = std::move( done ) ]() mutable   // a statement between cases — reachable only by fall-through
             {
-                stmt( c, fall, [ this, kids, i, &in, &fall, hasDefault, done = std::move( done ) ]() mutable   // a statement between cases — reachable only by fall-through
-                {
-                    switchCaseFrom( kids, i + 1, in, fall, hasDefault, std::move( done ) );
-                } );
+                switchCaseFrom( kids, i + 1, in, fall, hasDefault, std::move( done ) );
             } );
             return;
         }
@@ -2029,17 +2033,14 @@ struct SliceRdWalker
         auto kids = std::make_shared<std::vector<TSNode>>();
         ChildCursor cursor( n );
         collectNamedChildren( n, cursor.cur, *kids );
-        push( [ this, tryBody, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
+        pushStmt( tryBody, tryOut, [ this, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
         {
-            stmt( tryBody, tryOut, [ this, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
+            tryAcc.pop_back();
+            SliceRdState& out = newState( tryOut );
+            tryCatchFrom( kids, 0, handlerIn, out, [ this, &state, &out, done = std::move( done ) ]() mutable
             {
-                tryAcc.pop_back();
-                SliceRdState& out = newState( tryOut );
-                tryCatchFrom( kids, 0, handlerIn, out, [ this, &state, &out, done = std::move( done ) ]() mutable
-                {
-                    state = out;
-                    push( std::move( done ) );
-                } );
+                state = out;
+                push( std::move( done ) );
             } );
         } );
     }
@@ -2060,13 +2061,10 @@ struct SliceRdWalker
         SliceRdState& h = newState( handlerIn );
         const TSNode catchBody = sliceField( c, NodeField::Body );
         unit( sliceField( c, NodeField::Parameters ), h );
-        push( [ this, kids, i, catchBody, &h, &handlerIn, &out, done = std::move( done ) ]() mutable
+        pushStmt( catchBody, h, [ this, kids, i, &h, &handlerIn, &out, done = std::move( done ) ]() mutable
         {
-            stmt( catchBody, h, [ this, kids, i, &h, &handlerIn, &out, done = std::move( done ) ]() mutable
-            {
-                sliceRdJoin( out, h );
-                tryCatchFrom( kids, i + 1, handlerIn, out, std::move( done ) );
-            } );
+            sliceRdJoin( out, h );
+            tryCatchFrom( kids, i + 1, handlerIn, out, std::move( done ) );
         } );
     }
 
@@ -2095,14 +2093,11 @@ struct SliceRdWalker
             if( !ts_node_is_null( alternative ) && altState != SlicePp::Dead )
             {
                 SliceRdState& altOut = newState( state );
-                push( [ this, alternative, &altOut, &bodyOut, &state, done = std::move( done ) ]() mutable
+                pushStmt( alternative, altOut, [ this, &altOut, &bodyOut, &state, done = std::move( done ) ]() mutable
                 {
-                    stmt( alternative, altOut, [ this, &altOut, &bodyOut, &state, done = std::move( done ) ]() mutable
-                    {
-                        sliceRdJoin( bodyOut, altOut );
-                        state = bodyOut;
-                        push( std::move( done ) );
-                    } );
+                    sliceRdJoin( bodyOut, altOut );
+                    state = bodyOut;
+                    push( std::move( done ) );
                 } );
                 return;
             }
@@ -2132,12 +2127,9 @@ struct SliceRdWalker
             return;
         }
         const TSNode c = ( *kids )[ i ];
-        push( [ this, kids, skip, i, c, &bodyOut, done = std::move( done ) ]() mutable
+        pushStmt( c, bodyOut, [ this, kids, skip, i, &bodyOut, done = std::move( done ) ]() mutable
         {
-            stmt( c, bodyOut, [ this, kids, skip, i, &bodyOut, done = std::move( done ) ]() mutable
-            {
-                preprocChildFrom( kids, skip, i + 1, bodyOut, std::move( done ) );
-            } );
+            preprocChildFrom( kids, skip, i + 1, bodyOut, std::move( done ) );
         } );
     }
 
@@ -2224,12 +2216,9 @@ struct SliceRdWalker
             withPartFrom( kids, i + 1, body, state, std::move( done ) );
             return;
         }
-        push( [ this, kids, i, c, body, &state, done = std::move( done ) ]() mutable
+        pushStmt( c, state, [ this, kids, i, body, &state, done = std::move( done ) ]() mutable
         {
-            stmt( c, state, [ this, kids, i, body, &state, done = std::move( done ) ]() mutable
-            {
-                withPartFrom( kids, i + 1, body, state, std::move( done ) );
-            } );
+            withPartFrom( kids, i + 1, body, state, std::move( done ) );
         } );
     }
 
@@ -2245,20 +2234,17 @@ struct SliceRdWalker
         ChildCursor cursor( n );
         collectNamedChildren( n, cursor.cur, *kids );
         auto hasElse = std::make_shared<bool>( false );
-        push( [ this, consequence, &t0, &out, &falseS, &state, kids, hasElse, done = std::move( done ) ]() mutable
+        pushStmt( consequence, t0, [ this, &t0, &out, &falseS, &state, kids, hasElse, done = std::move( done ) ]() mutable
         {
-            stmt( consequence, t0, [ this, &t0, &out, &falseS, &state, kids, hasElse, done = std::move( done ) ]() mutable
+            sliceRdJoin( out, t0 );
+            ifPyBranchFrom( kids, 0, falseS, out, hasElse, [ this, &out, &falseS, &state, hasElse, done = std::move( done ) ]() mutable
             {
-                sliceRdJoin( out, t0 );
-                ifPyBranchFrom( kids, 0, falseS, out, hasElse, [ this, &out, &falseS, &state, hasElse, done = std::move( done ) ]() mutable
+                if( !*hasElse )
                 {
-                    if( !*hasElse )
-                    {
-                        sliceRdJoin( out, falseS );
-                    }
-                    state = out;
-                    push( std::move( done ) );
-                } );
+                    sliceRdJoin( out, falseS );
+                }
+                state = out;
+                push( std::move( done ) );
             } );
         } );
     }
@@ -2277,13 +2263,10 @@ struct SliceRdWalker
             unit( sliceField( c, NodeField::Condition ), falseS );
             SliceRdState& t = newState( falseS );
             const TSNode consequence = sliceField( c, NodeField::Consequence );
-            push( [ this, kids, i, consequence, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
+            pushStmt( consequence, t, [ this, kids, i, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
             {
-                stmt( consequence, t, [ this, kids, i, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
-                {
-                    sliceRdJoin( out, t );
-                    ifPyBranchFrom( kids, i + 1, falseS, out, hasElse, std::move( done ) );
-                } );
+                sliceRdJoin( out, t );
+                ifPyBranchFrom( kids, i + 1, falseS, out, hasElse, std::move( done ) );
             } );
             return;
         }
@@ -2292,13 +2275,10 @@ struct SliceRdWalker
             SliceRdState& t = newState( falseS );
             const TSNode body = sliceField( c, NodeField::Body );
             *hasElse = true;
-            push( [ this, kids, i, body, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
+            pushStmt( body, t, [ this, kids, i, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
             {
-                stmt( body, t, [ this, kids, i, &t, &out, &falseS, hasElse, done = std::move( done ) ]() mutable
-                {
-                    sliceRdJoin( out, t );
-                    ifPyBranchFrom( kids, i + 1, falseS, out, hasElse, std::move( done ) );
-                } );
+                sliceRdJoin( out, t );
+                ifPyBranchFrom( kids, i + 1, falseS, out, hasElse, std::move( done ) );
             } );
             return;
         }
@@ -2317,44 +2297,41 @@ struct SliceRdWalker
         auto kids = std::make_shared<std::vector<TSNode>>();
         ChildCursor cursor( n );
         collectNamedChildren( n, cursor.cur, *kids );
-        push( [ this, tryBody, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
+        pushStmt( tryBody, tryOut, [ this, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
         {
-            stmt( tryBody, tryOut, [ this, &tryOut, &state, &handlerIn, kids, done = std::move( done ) ]() mutable
-            {
-                tryAcc.pop_back();
-                SliceRdState& handlersOut = newState( dead() );
-                SliceRdState& normalOut   = newState( tryOut );
-                auto finallyClause = std::make_shared<TSNode>( TSNode{} );
-                tryPyPartFrom( kids, 0, handlerIn, handlersOut, normalOut, finallyClause,
-                    [ this, &state, &handlerIn, &handlersOut, &normalOut, finallyClause, done = std::move( done ) ]() mutable
+            tryAcc.pop_back();
+            SliceRdState& handlersOut = newState( dead() );
+            SliceRdState& normalOut   = newState( tryOut );
+            auto finallyClause = std::make_shared<TSNode>( TSNode{} );
+            tryPyPartFrom( kids, 0, handlerIn, handlersOut, normalOut, finallyClause,
+                [ this, &state, &handlerIn, &handlersOut, &normalOut, finallyClause, done = std::move( done ) ]() mutable
+                {
+                    if( ts_node_is_null( *finallyClause ) )
                     {
-                        if( ts_node_is_null( *finallyClause ) )
+                        sliceRdJoin( normalOut, handlersOut );
+                        state = normalOut;
+                        push( std::move( done ) );
+                        return;
+                    }
+                    SliceRdState& fin = newState( normalOut );
+                    sliceRdJoin( fin, handlersOut );
+                    const TSNode fc = *finallyClause;
+                    push( [ this, fc, &fin, &handlerIn, &state, done = std::move( done ) ]() mutable
+                    {
+                        seq( fc, fin, [ this, fc, &fin, &handlerIn, &state, done = std::move( done ) ]() mutable   // the normal path — the statement's exit
                         {
-                            sliceRdJoin( normalOut, handlersOut );
-                            state = normalOut;
-                            push( std::move( done ) );
-                            return;
-                        }
-                        SliceRdState& fin = newState( normalOut );
-                        sliceRdJoin( fin, handlersOut );
-                        const TSNode fc = *finallyClause;
-                        push( [ this, fc, &fin, &handlerIn, &state, done = std::move( done ) ]() mutable
-                        {
-                            seq( fc, fin, [ this, fc, &fin, &handlerIn, &state, done = std::move( done ) ]() mutable   // the normal path — the statement's exit
+                            SliceRdState& exceptional = newState( handlerIn );
+                            push( [ this, fc, &exceptional, &fin, &state, done = std::move( done ) ]() mutable
                             {
-                                SliceRdState& exceptional = newState( handlerIn );
-                                push( [ this, fc, &exceptional, &fin, &state, done = std::move( done ) ]() mutable
+                                seq( fc, exceptional, [ this, &fin, &state, done = std::move( done ) ]() mutable   // the uncaught path — walked for its uses' reach, then dropped
                                 {
-                                    seq( fc, exceptional, [ this, &fin, &state, done = std::move( done ) ]() mutable   // the uncaught path — walked for its uses' reach, then dropped
-                                    {
-                                        state = fin;
-                                        push( std::move( done ) );
-                                    } );
+                                    state = fin;
+                                    push( std::move( done ) );
                                 } );
                             } );
                         } );
                     } );
-            } );
+                } );
         } );
     }
 
@@ -2383,12 +2360,9 @@ struct SliceRdWalker
         if( sliceKindIs( c, "else_clause" ) )
         {
             const TSNode body = sliceField( c, NodeField::Body );
-            push( [ this, kids, i, body, &normalOut, &handlerIn, &handlersOut, finallyClause, done = std::move( done ) ]() mutable
+            pushStmt( body, normalOut, [ this, kids, i, &handlerIn, &handlersOut, &normalOut, finallyClause, done = std::move( done ) ]() mutable
             {
-                stmt( body, normalOut, [ this, kids, i, &handlerIn, &handlersOut, &normalOut, finallyClause, done = std::move( done ) ]() mutable
-                {
-                    tryPyPartFrom( kids, i + 1, handlerIn, handlersOut, normalOut, finallyClause, std::move( done ) );
-                } );
+                tryPyPartFrom( kids, i + 1, handlerIn, handlersOut, normalOut, finallyClause, std::move( done ) );
             } );
             return;
         }
@@ -2415,12 +2389,9 @@ struct SliceRdWalker
             tryPyExceptPartFrom( parts, i + 1, h, std::move( done ) );
             return;
         }
-        push( [ this, parts, i, part, &h, done = std::move( done ) ]() mutable
+        pushStmt( part, h, [ this, parts, i, &h, done = std::move( done ) ]() mutable
         {
-            stmt( part, h, [ this, parts, i, &h, done = std::move( done ) ]() mutable
-            {
-                tryPyExceptPartFrom( parts, i + 1, h, std::move( done ) );
-            } );
+            tryPyExceptPartFrom( parts, i + 1, h, std::move( done ) );
         } );
     }
 
@@ -2472,13 +2443,10 @@ struct SliceRdWalker
                 unit( part, s );   // patterns (capture defs) and the guard
             }
         }
-        push( [ this, kids, i, consequence, &s, &out, &state, done = std::move( done ) ]() mutable
+        pushStmt( consequence, s, [ this, kids, i, &s, &out, &state, done = std::move( done ) ]() mutable
         {
-            stmt( consequence, s, [ this, kids, i, &s, &out, &state, done = std::move( done ) ]() mutable
-            {
-                sliceRdJoin( out, s );
-                matchCaseFrom( kids, i + 1, state, out, std::move( done ) );
-            } );
+            sliceRdJoin( out, s );
+            matchCaseFrom( kids, i + 1, state, out, std::move( done ) );
         } );
     }
 };
@@ -2516,8 +2484,7 @@ inline void sliceComputeReach( SliceScan& scan, TSNode root, const SliceWalkCtx&
     }
     // svLess, not operator<: see infra/sortutil.h. The sort and the lower_bound below MUST name the same
     // comparator, or the slot numbering silently stops being a pure function of the scan.
-    std::sort( unboundNames.begin(), unboundNames.end(), rw::sortutil::svLess );
-    unboundNames.erase( std::unique( unboundNames.begin(), unboundNames.end() ), unboundNames.end() );
+    rw::sortutil::sortUnique( unboundNames, rw::sortutil::svLess );
     w.slotOf.resize( scan.all.size() );
     for( std::uint32_t occIndex = 0; occIndex < scan.all.size(); ++occIndex )
     {
@@ -3231,10 +3198,9 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
             lineNames.emplace_back( no.occ.line, no.name );
         }
     }
-    std::sort( lineNames.begin(), lineNames.end(),
+    rw::sortutil::sortUnique( lineNames,
                []( const std::pair<std::uint32_t, std::string_view>& x, const std::pair<std::uint32_t, std::string_view>& y )
                { return x.first != y.first ? x.first < y.first : rw::sortutil::svLess( x.second, y.second ); } );
-    lineNames.erase( std::unique( lineNames.begin(), lineNames.end() ), lineNames.end() );
 
     std::vector<std::uint32_t> coverage( rows.size(), 0 );
     std::vector<std::uint32_t> order( rows.size() );

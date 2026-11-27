@@ -93,13 +93,15 @@ silent(){ # arm, argv...
     local arm="$1"; shift
     if run "$@" >"$TMP/o" && ! grep -q 'decl_rows' "$TMP/o" && grep -q '</ctx>$' "$TMP/o"; then ok "($arm) silent: $*"; else no "($arm) must be silent: $*"; fi
 }
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 two_rows(){ # file, subject: rows="2", the definition row, the header row decl_only, closes before </ctx>
     python3 - "$1" "$2" <<'PY'
 import re, sys
 s = open( sys.argv[1], encoding="utf8" ).read()
 # a trailing <shortkey> (the out-of-band fallback ladder, gate barrelshortkeycheck: `app::run_it` is unproven under namespace app)
-# whose legend declares it outside est_tokens may follow; nothing else may
-m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?</ctx>$', s, re.S )
+# whose legend declares it outside est_tokens may follow; nothing else may — except, since AF1 (2026-11-18), the answer-first
+# DOCUMENT legend: the trailing run of comments the default --for answer ends with, inside the same answer. No row may.
+m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$', s, re.S )
 if not m or m.group( 1 ) != sys.argv[2] or m.group( 2 ) != "2": sys.exit( 1 )
 rows = re.findall( r'<d [^>]*/>', m.group( 3 ) )
 if len( rows ) != 2: sys.exit( 1 )
@@ -129,7 +131,9 @@ silent n5 "--for=add a new argument to fold_tested"
 silent n6 "--for=change the signature of data_var"
 silent n6 '--for=change the signature of `Fwd`'
 silent n4 '--for=add a new argument to `jfn`'
-silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers'
+# n8 names `solo_fn` in backticks and asks about callers, so a BARE call is answered by --callers=solo_fn since lane/rt1-route
+# (verbs_forroute.h, test/forverbroutecheck.sh). This arm measures the --for answer's <decl_rows>, so it asks for that answer.
+silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers' --no-verb-route
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys
@@ -184,7 +188,9 @@ callee r1 'add a new argument to `API_FUNC(int) api_proto(int a)`' api_proto
 callee r1 'add a new argument to `static inline int run_it(int a)`' run_it
 silent v1 '--for=change the signature of `sh_fn` used by `oth_fn`'
 callee v1 'change the signature of `oth_fn`' oth_fn
-run "--for=run_it" --token-budget=4000 >"$TMP/s2n.xml"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
+# 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
+run "--for=run_it" --token-budget=100 >"$TMP/s2n.xml" || no "(s2) the held run exited $?"
 nxt="$( grep -o 'held="budget" next="[^"]*"' "$TMP/s2n.xml" | sed 's/^held="budget" next="//; s/"$//; s/&apos;/'"'"'/g' )"
 if [ -n "$nxt" ] && python3 -c '
 import shlex, subprocess, sys, os
@@ -194,8 +200,9 @@ sys.exit( 0 if "p=\"api.h:1\"" in r.stdout and "decl_only=\"1\"" in r.stdout els
 ' "$nxt" "$BIN" "$FX"; then ok "(s2) the held next= ($nxt) prints the tied prototype row api.h:1"; else no "(s2) the held next= ($nxt) does not reach api.h:1"; fi
 run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
-run "--for=run_it" --token-budget=4000 >"$TMP/s2.xml"
-if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
+run "--for=run_it" --token-budget=100 >"$TMP/s2.xml" || no "(s2) the budgeted run exited $?"
+# AF1-fix (2026-11-18): a budget keeps the default posture, answer-first, so only the trailing document legend may follow the held block
+if [ -s "$TMP/s2.xml" ] && python3 -c 'import re,sys; sys.exit(0 if re.search(r"<decl_rows of=\"run_it\" held=\"budget\" next=\"--for=run_it\"/>(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z",open(sys.argv[1]).read(),re.S) else 1)' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
 if python3 -c '
 import sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()
@@ -217,6 +224,7 @@ if [ -n "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/w1.xml" )" ] && [ "$( grep 
 then ok "(x1) MCP for: the same element bytes"; else no "(x1) MCP: $( grep -o '<decl_rows.*' "$TMP/x1.xml" | head -c 300 )"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it","budget_tokens":4000}}}\n' "$FX" \
   | ( cd "$FX" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x2.json"
-if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--for=&apos;add a new argument to run_it&apos;\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= reads --for='…' (was &apos;…&apos;): nextverb.h leaves ' raw in a "-delimited attribute
+if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--for='\''add a new argument to run_it'\''\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
 [ "$fail" = 0 ] && echo "fordeclrowcheck: PASS" || echo "fordeclrowcheck: FAIL"
 exit "$fail"

@@ -9,7 +9,8 @@
 #   1. short-horizon-churn — churn="self" is informational; GATING needs >= 2 COMMITTED in-window commits on
 #      the edited lines (the working edit never counted).
 #   2. dead-code — the blanket .h/.hpp/.hh/.hxx exclusion is gone; what is exempt is what the LANGUAGE invokes
-#      (constructors, destructors, operators, bare type declarations, main).
+#      (constructors, destructors, operators, bare type declarations, main) and a Rust method named drop inside an
+#      impl Drop block (issue #494).
 #   3. verbosity/complexity — verbosity counts CODE lines (blank and comment lines are not debt); both kinds
 #      gate on a bar CROSSING or >= 25% growth, and a sub-bar doubling is a minor row rather than silence.
 #   4. api-surface — new-symbol rows are a header COUNT, a surface that SHRANK is not a regression, and a
@@ -17,6 +18,8 @@
 #   5. duplication / new-clone-of-reused-helper — an overload set and a vendored path are not this change's
 #      duplication; a same-file copy IS, which is why the audit's one-file drop was withdrawn.
 #   6. error-masking — a block whose only content is a COMMENT is a swallow.
+#   7. params similar= — on by default, report-only: a new or grown list of three or more adjacent same-typed parameters is
+#      marked (a run of two is not, owner 2026-11-18), and the mark never changes a row's severity or the exit status.
 #
 # Fixtures are built in temp dirs (git-init where a section needs history); the repo is never touched.
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/qddialscheck.sh
@@ -132,6 +135,139 @@ rows "$ODC" | grep 'kind="dead-code"' | grep -q 'Extra' \
 [ "$ODC" = "$( cd "$DC" && "$BIN" . --quality-delta --no-cache 2>/dev/null )" ] \
     && ok "dead-code: byte-identical run to run (deterministic)" || no "dead-code: non-deterministic delta"
 
+
+# ── 2b) the Rust Drop::drop exemption (issue #494, maintainer review: the ImplBlock of the Drop trait) ───────────
+# `impl Drop for T { fn drop(&mut self) }` is run by the compiler when a T leaves scope, and nothing in the source
+# names it, so its zero in-edges say nothing. What is exempt is a method of a Drop impl BLOCK, judged by the trait's
+# final path segment: `impl std::ops::Drop` and `impl<T> Drop for G<T>` count. A free fn named drop, a method of any
+# other impl or trait, and the C++ method named drop stay reported. Each case is judged on ITS OWN LINE: a row's sym
+# cannot tell two `drop` symbols apart (a nested free fn prints as Nest::drop too), and the p= attribute can.
+# Each fixture line carries a marker comment, so the line is looked up, never guessed.
+RD="$WORK/rustdrop"; mkdir -p "$RD/src"
+( cd "$RD" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'pub fn api() -> u32 { 2 }\n' > "$RD/src/lib.rs"
+( cd "$RD" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+cat > "$RD/src/lib.rs" <<'RS'
+pub fn api() -> u32 { use_guard() }
+
+struct Guard(u32);
+
+impl Drop for Guard {
+    fn drop(&mut self) { self.0 = 0; } // P-guard
+}
+
+struct Gen<T>(T);
+
+impl<T> Drop for Gen<T> {
+    fn drop(&mut self) { } // P-gen
+}
+
+struct Q;
+
+impl std::ops::Drop for Q {
+    fn drop(&mut self) { } // P-path
+}
+
+fn use_guard() -> u32 { let guard = Guard(3); guard.0 }
+fn drop() { } // N-free
+fn orphan_helper() -> u32 { 7 } // N-orphan
+RS
+cat > "$RD/src/holder.cpp" <<'CPP'
+struct Holder { void drop() { } }; // N-cpp
+CPP
+# A dead-code row on file:line. The p= attribute is exact ("src/lib.rs:4"), so line 4 never matches line 40.
+deadAt(){ printf '%s' "$1" | tr '>' '\n' | grep -F 'kind="dead-code"' | grep -q -F "p=\"$2\""; }
+# The one line that carries a marker. A marker that is not on exactly one line fails its case; nothing is guessed.
+markerLine(){ [ "$( grep -c -F -- "$2" "$1" )" = 1 ] && grep -n -F -- "$2" "$1" | cut -d: -f1; }
+# judgeLine <project dir> <quality-delta output> <file> <marker> <reported|exempt> <claim>
+judgeLine(){
+    local l
+    l="$( markerLine "$1/$3" "$4" )" || { no "$6: marker '$4' is not on exactly one line of $3"; return 0; }
+    if deadAt "$2" "$3:$l"; then
+        if [ "$5" = reported ]; then ok "$6 (line $l)"; else no "$6: reported as dead-code at $3:$l"; fi
+    else
+        if [ "$5" = exempt ]; then ok "$6 (line $l)"; else no "$6: not reported at $3:$l"; fi
+    fi
+    return 0
+}
+RDQ="$( cd "$RD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_rdq=$?
+if [ "$rc_rdq" = 0 ]; then ok "rust-drop: --quality-delta exits 0 (no row on this fixture gates)"; else no "rust-drop: --quality-delta exited $rc_rdq, not 0"; fi
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-guard' exempt "rust-drop: Drop::drop of 'impl Drop for Guard' is not reported (the compiler runs it at scope exit)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-gen' exempt "rust-drop: Drop::drop of 'impl<T> Drop for Gen<T>' is not reported (generic implementor)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-path' exempt "rust-drop: Drop::drop of 'impl std::ops::Drop for Q' is not reported (path-qualified trait)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// N-free' reported "rust-drop: a free fn named drop is still reported (the language does not invoke it)"
+judgeLine "$RD" "$RDQ" src/holder.cpp '// N-cpp' reported "rust-drop: a C++ method named drop is still reported (the exemption is Rust-only)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// N-orphan' reported "rust-drop: an ordinary orphan helper is still reported (negative control)"
+
+# ── 2c) raw identifier r#drop, and the shapes that must stay reported (issue #494, maintainer review) ───────────
+# `fn r#drop` is the same Drop::drop: the extractor keeps the `r#` in the name, and the trait is still Drop. The
+# reported side is the review's list: a module-level fn, an inherent method, a method of another trait (its declaration
+# and its impl), and everything nested in a Drop::drop body (a free fn, an inherent impl, another trait's impl).
+RR="$WORK/rawdrop"; mkdir -p "$RR/src"
+( cd "$RR" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'pub fn api() -> u32 { 2 }\n' > "$RR/src/lib.rs"
+( cd "$RR" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+cat > "$RR/src/lib.rs" <<'RS'
+pub fn api() -> u32 { 2 }
+
+struct Raw(u32);
+
+impl Drop for Raw {
+    fn r#drop(&mut self) { self.0 = 0; } // P-raw
+}
+
+mod m {
+    pub fn drop() { } // N-mod
+}
+
+struct Plain;
+
+impl Plain {
+    fn drop(&mut self) { } // N-inherent
+}
+
+trait Closer {
+    fn drop(&mut self) { } // N-trait-decl
+}
+
+struct C1;
+
+impl Closer for C1 {
+    fn drop(&mut self) { } // N-other-trait
+}
+
+struct Nest;
+
+impl Drop for Nest {
+    fn drop(&mut self) { // P-nest
+        fn drop() { } // N-nested-fn
+        struct Inner;
+        impl Inner {
+            fn drop(&mut self) { } // N-nested-inherent
+        }
+        struct Inner2;
+        impl Closer for Inner2 {
+            fn drop(&mut self) { } // N-nested-trait
+        }
+    }
+}
+
+fn orphan_raw_helper() -> u32 { 7 } // N-orphan-raw
+RS
+RRQ="$( cd "$RR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_rrq=$?
+if [ "$rc_rrq" = 0 ]; then ok "rust-raw-drop: --quality-delta exits 0 (no row on this fixture gates)"; else no "rust-raw-drop: --quality-delta exited $rc_rrq, not 0"; fi
+judgeLine "$RR" "$RRQ" src/lib.rs '// P-raw' exempt "rust-raw-drop: r#drop of 'impl Drop for Raw' is not reported (same Drop::drop, raw spelling)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// P-nest' exempt "rust-raw-drop: Drop::drop of 'impl Drop for Nest' is not reported (a Drop body holding nested items)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-mod' reported "rust-raw-drop: a free fn named drop inside mod m is still reported (not a method of any impl)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-inherent' reported "rust-raw-drop: an inherent method named drop is still reported (no Drop impl block)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-trait-decl' reported "rust-raw-drop: trait Closer's own default drop is still reported (another trait)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-other-trait' reported "rust-raw-drop: impl Closer for C1's drop is still reported (another trait's impl)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-fn' reported "rust-raw-drop: a free fn named drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-inherent' reported "rust-raw-drop: an inherent drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-trait' reported "rust-raw-drop: an other-trait drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-orphan-raw' reported "rust-raw-drop: an ordinary orphan helper is still reported (negative control)"
 
 # ── 3) verbosity counts CODE lines; verbosity + complexity gate on a CROSSING or >= 25% growth ───────────
 # Q1 measured the median growth of a GATING verbosity row at 6% and of a gating complexity row at 6%, while
@@ -415,6 +551,127 @@ row "$OEM" error-masking lineCommentJs >/dev/null \
     || ok "error-masking: a // comment followed by code on the next line is a HANDLER, not a swallow"
 [ "$OEM" = "$( cd "$EM" && "$BIN" . --quality-delta --no-cache 2>/dev/null )" ] \
     && ok "error-masking: byte-identical run to run (deterministic)" || no "error-masking: non-deterministic delta"
+
+
+# ── 7) params: similar= on a list of adjacent same-typed parameters (QD-SWAP-1117; ON BY DEFAULT since QD-SIMILAR-DEFAULT) ──
+# On by default and report-only (src/similarargs.h; owner 2026-11-17). A function that is new, or whose list grew,
+# and now holds a run of adjacent parameters with one written type and different names gets a params row with
+# similar="N" (sev="minor" unless the params kind already reported it). There is no variable: the only way to drop
+# the rows is the range form's --quality-kinds= without params, the selector every kind has.
+# Red before QD-SIMILAR-DEFAULT (lane/qd-swap-1117's binary, the prototype, run WITHOUT its variable): 9 FAIL — every
+# (s*) arm, the full- and compact-legend arms, the session-dictionary arm and the (kinds) and (g0) premises.
+#   (s1) new, three uint32_t                      -> similar="3", minor, origin="new-symbol"
+#   (s2) grew 1 -> 3 const std::string&            -> similar="3", minor, no origin (it existed)
+#   (s3) the params kind's own major row (5 -> 7)  -> the same row gains similar="7", still major, still ONE row
+#   (n1) new ( from, to ), (n2) three new bools, (n3) new int, long, int (no two adjacent share a type), (n4) an unchanged
+#        ( p, q ): no row. (n2) and (n3) have three parameters, so the bool exclusion and the type comparison are what
+#        keep them quiet, not the run minimum ((s1)'s three uint32_t are the positive control; CR 706, review 5994579130)
+#   (n5) new ( index, count ) of one uint32_t, (n6) grew 1 -> 2 const std::string&: no row. A run of two is not reported
+#        (similarargs.h kSimilarRunMin 3, owner 2026-11-18: runs of two were 160 of the 184 rows on the tidy-681 ref pair).
+#        Red before the threshold (lane/qd-similar-default 9f662d600's binary, runs of two reported): 2 FAIL, the rest
+#        PASS — (n1-n6) (pair2 and grew2 carry similar="2": 4 of 6 without a row) and the (g0) premise (the pair `skip`
+#        beside pick( index, count, limit ) is a second row, similar="2").
+#   (kinds) the range form with --quality-kinds= without params: no similar= and no params row (the range alone has them)
+#   (g0) NEGATIVE: a change whose ONLY row is a similar= params row exits 0 (similar= never gates)
+#   PREMISE: (n*) count the functions they judged in the fixture and FAIL on a miscount (a vacuous arm is a FAIL);
+#   (g0) asserts its one row IS a similar= row before it reads the exit status.
+SA="$WORK/similar"; mkdir -p "$SA/src"
+( cd "$SA" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+simgen(){ python3 - "$SA/src" "$1" <<'PY'
+import sys, os
+d, after = sys.argv[1], sys.argv[2] == "after"
+h = ["#include <cstdint>\n#include <cstddef>\n#include <string>\n"]
+h.append("inline int untouched( int p, int q ){ return p - q; }\n")
+h.append("inline std::size_t grew( const std::string& task%s ){ return task.size()%s; }\n"
+         % (", const std::string& answer, const std::string& hint" if after else "", " + answer.size() + hint.size()" if after else ""))
+h.append("inline std::size_t grew2( const std::string& path%s ){ return path.size()%s; }\n"
+         % (", const std::string& name" if after else "", " + name.size()" if after else ""))
+h.append("inline int wide( int a1, int b1, int c1, int d1, int e1%s ){ return a1+b1+c1+d1+e1%s; }\n"
+         % (", int f1, int g1" if after else "", "+f1+g1" if after else ""))
+if after:
+    h.append("inline std::uint32_t fresh3( std::uint32_t at, std::uint32_t nameAt, std::uint32_t line ){ return at + nameAt + line; }\n")
+    h.append("inline std::size_t ranged( std::size_t from, std::size_t to ){ return to - from; }\n")
+    h.append("inline bool flags( bool keep, bool fold, bool trim ){ return keep && fold && trim; }\n")
+    h.append("inline long mixed( int count, long total, int limit ){ return count + total + limit; }\n")
+    h.append("inline std::uint32_t pair2( std::uint32_t index, std::uint32_t count ){ return index < count ? index : 0; }\n")
+open(os.path.join(d, "sim.hpp"), "w").write("".join(h))
+call = "untouched( 2, 1 ) + int( grew( \"t\"%s ) ) + int( grew2( \"p\"%s ) ) + wide( 1,2,3,4,5%s )" % (", \"a\", \"h\"" if after else "", ", \"n\"" if after else "", ",6,7" if after else "")
+if after:
+    call += " + int( fresh3( 1, 2, 3 ) ) + int( ranged( 1, 2 ) ) + int( flags( true, false, true ) ) + int( mixed( 1, 2, 3 ) ) + int( pair2( 1, 2 ) )"
+open(os.path.join(d, "m.cpp"), "w").write('#include "sim.hpp"\nint driver(){\n    return %s;\n}\nint main(){ return driver(); }\n' % call)
+PY
+}
+simgen before
+( cd "$SA" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+simgen after
+OSA="$( cd "$SA" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SARC=$?
+OSF="$( cd "$SA" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; SFRC=$?
+OSC="$( cd "$SA" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; SCRC=$?
+srow(){ row "$OSA" params "$1"; }
+R1="$( srow fresh3 )"
+{ printf '%s' "$R1" | grep -q ' similar="3"' && printf '%s' "$R1" | grep -q 'sev="minor"' && printf '%s' "$R1" | grep -q 'origin="new-symbol"'; } \
+    && ok "similar (s1): by default a new function with three uint32_t is a minor new-symbol params row, similar=3" \
+    || { no "similar (s1): expected a minor new-symbol params row with similar=3 on fresh3 (no variable set)"; rows "$OSA"; }
+R2="$( srow grew )"
+{ printf '%s' "$R2" | grep -q ' similar="3"' && printf '%s' "$R2" | grep -q 'was="1" now="3"' && printf '%s' "$R2" | grep -q 'sev="minor"' && ! printf '%s' "$R2" | grep -q 'origin='; } \
+    && ok "similar (s2): a list that grew 1 -> 3 strings is a minor preexisting row, similar=3" \
+    || { no "similar (s2): expected was=1 now=3 sev=minor similar=3 and no origin on grew"; rows "$OSA"; }
+R3="$( srow wide )"
+{ [ "$( rows "$OSA" | grep -c 'sym="wide"' )" = 1 ] && printf '%s' "$R3" | grep -q ' similar="7"' && ! printf '%s' "$R3" | grep -q 'sev="minor"'; } \
+    && ok "similar (s3): the params kind's own 5 -> 7 row gains similar=7, stays major, stays one row" \
+    || { no "similar (s3): expected ONE major params row with similar=7 on wide"; rows "$OSA"; }
+SJUDGED="$( grep -cE '^inline [a-z:_0-9 ]+ (ranged|flags|mixed|untouched|pair2|grew2)\(' "$SA/src/sim.hpp" )"
+SQUIET=0
+for f in ranged flags mixed untouched pair2 grew2; do srow "$f" >/dev/null || SQUIET=$(( SQUIET + 1 )); done
+[ "$SJUDGED" = 6 ] && [ "$SQUIET" = 6 ] \
+    && ok "similar (n1-n6): a range pair, three bools, int-long-int, an unchanged list, a new pair and a list grown to two get no row (6 judged)" \
+    || { no "similar (n1-n6): judged=$SJUDGED (want 6), without a row=$SQUIET (want 6)"; rows "$OSA"; }
+{ [ "$SFRC" = "$SARC" ] && printf '%s' "$OSF" | grep -q 'on a params row: the function is new or its parameter list grew'; } \
+    && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"
+{ [ "$SCRC" = "$SARC" ] && printf '%s' "$OSC" | grep -q ' similar="3"' && printf '%s' "$OSC" | grep -q 'r similar=N: '; } \
+    && ok "similar: the compact legend defines similar= when a row carries it" || no "similar: the compact answer carries similar= without its 'r similar=N:' reading"
+CLEAN="$WORK/similar-clean"; mkdir -p "$CLEAN/src"
+( cd "$CLEAN" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'int base( int p ){ return p; }\n' > "$CLEAN/src/c.cpp"
+( cd "$CLEAN" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+printf 'int base( int p ){ return p; }\nint grow2( long n ){ return int( n ); }\n' > "$CLEAN/src/c.cpp"
+OCL="$( cd "$CLEAN" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; CLRC=$?
+{ [ "$CLRC" = 0 ] && [ -n "$OCL" ] && ! printf '%s' "$OCL" | grep -q 'similar='; } \
+    && ok "similar: an answer with no similar= row carries no similar= reading (present-only)" || no "similar: the similar= reading rode an answer with no similar= row (rc $CLRC)"
+SDICT="$( "$BIN" --legend-dict 2>/dev/null )"; SDRC=$?
+{ [ "$SDRC" = 0 ] && printf '%s' "$SDICT" | grep -q 'r similar=N: '; } \
+    && ok "similar: the session dictionary holds the similar= reading (dictv= moved once)" || no "similar: --legend-dict has no similar= reading (rc $SDRC)"
+# (kinds) --quality-kinds= selects kinds of the range form only: commit the after state in a copy and read HEAD~1..HEAD.
+SAK="$WORK/similar-kinds"; cp -R "$SA" "$SAK"
+( cd "$SAK" && git add -A >/dev/null 2>&1 && git commit -qm after >/dev/null 2>&1 )
+OSR="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache 2>/dev/null )"; SRRC=$?
+OSK="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache --quality-kinds=complexity,verbosity,nesting 2>/dev/null )"; SKRC=$?
+if [ "$SRRC" = "$SARC" ] && printf '%s' "$OSR" | grep -q ' similar="3"'; then
+    { [ "$SKRC" = 0 ] && [ -n "$OSK" ] && ! printf '%s' "$OSK" | grep -q 'similar=' && [ "$( rows "$OSK" | grep -c 'kind="params"' )" = 0 ]; } \
+        && ok "similar (kinds): the range carries similar= (rc $SRRC); --quality-kinds= without params prints no similar= and no params row (rc $SKRC)" \
+        || { no "similar (kinds): similar= or a params row under --quality-kinds= without params, or rc $SKRC (want 0: no other kind gates)"; rows "$OSK"; }
+else
+    no "similar (kinds) PREMISE: the range HEAD~1..HEAD carries no similar=3 row, or rc $SRRC differs from the working tree's $SARC"; rows "$OSR"
+fi
+OSA2="$( cd "$SA" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SA2RC=$?
+{ [ "$OSA" = "$OSA2" ] && [ "$SA2RC" = "$SARC" ]; } \
+    && ok "similar: byte-identical run to run (deterministic)" || no "similar: non-deterministic delta"
+# (g0) NEGATIVE: similar= never gates. The change adds ONE small function with three same-typed parameters (and a pair,
+# `skip`, that is no row: a run of two) and nothing else a kind reports, so its document holds exactly one row, a minor
+# similar= params row, and the exit status is 0.
+GZ="$WORK/similar-gate"; mkdir -p "$GZ/src"
+( cd "$GZ" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'int keep( int p ){ return p; }\nint main(){ return keep( 0 ); }\n' > "$GZ/src/g.cpp"
+( cd "$GZ" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+printf 'int keep( int p ){ return p; }\nint pick( int index, int count, int limit ){ return index < count ? index : limit; }\nint skip( int step, int span ){ return step + span; }\nint main(){ return keep( 0 ) + pick( 1, 2, 3 ) + skip( 1, 2 ); }\n' > "$GZ/src/g.cpp"
+OGZ="$( cd "$GZ" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; GZRC=$?
+GZROWS="$( rows "$OGZ" | grep -c '<r kind="[a-z-]*" sym=' )"; GZSIM="$( rows "$OGZ" | grep -c 'kind="params" sym="pick".* similar="3"' )"
+if [ "$GZROWS" = 1 ] && [ "$GZSIM" = 1 ]; then
+    [ "$GZRC" = 0 ] && ok "similar (g0): a change whose only row is a similar= params row exits 0 (never gates)" \
+                    || { no "similar (g0): the only row is a similar= params row and the exit status is $GZRC (want 0)"; rows "$OGZ"; }
+else
+    no "similar (g0) PREMISE: want exactly one row, a similar=3 params row on pick; rows=$GZROWS similar=$GZSIM"; rows "$OGZ"
+fi
 
 
 [ "$fail" = 0 ] && echo "qddialscheck: ALL PASS" || echo "qddialscheck: FAILURES"

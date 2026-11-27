@@ -40,6 +40,10 @@
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -318,9 +322,11 @@ run "$TINY" --for="add one to a number" > "$TMP/tiny_for.xml"
 grep -q '<sigs>' "$TMP/tiny_for.xml" \
     && ok "(C) --for <sigs> untrimmed: bare <sigs>, no marker (rule 5: absent = untrimmed)" \
     || no "(C) --for <sigs> on a two-symbol corpus is not the bare untrimmed <sigs>"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget sheds the unbudgeted answer, whose <sigs> keeps its files_first= (now counting the
+# rows left), so that attribute joins the optional run.
 # knob-honesty-068: a trimmed tag also carries its continuation, next= (the call that serves it uncut) — the pair is
 # still asserted immediately after the tag name; only the closing `>` admits the trailing attributes the tag may carry.
-grep -qE '<sigs shown="[0-9]+" total="[0-9]+" capped="1"( past_target="[0-9]+")?( docs_dropped="[0-9]+")?( docs_after_code="[0-9]+")?( next_offset="[0-9]+")?( next="[^"]*")?( next_budget_tokens="[0-9]+")?>' "$TMP/sweep_forbudget.xml" \
+grep -qE '<sigs shown="[0-9]+" total="[0-9]+" capped="1"( past_target="[0-9]+")?( docs_dropped="[0-9]+")?( docs_after_code="[0-9]+")?( files_first="[0-9]+")?( next_offset="[0-9]+")?( next="[^"]*")?( next_budget_tokens="[0-9]+")?>' "$TMP/sweep_forbudget.xml" \
     && ok "(C) --for <sigs> trimmed by --token-budget: <sigs shown=N total=M capped=\"1\"> (rule 5, amended: the pair rides on a byte trim too)" \
     || no "(C) --for --token-budget=800 did not mark its trimmed payload <sigs shown= total= capped=\"1\">: $( grep -oE '<sigs[^>]*>' "$TMP/sweep_forbudget.xml" | head -1 )"
 
@@ -385,7 +391,14 @@ fi
 python3 - "$TMP" <<'PY'
 import glob, os, sys, xml.etree.ElementTree as ET
 
-ROSTER = {"bodies": "b", "callers": "s", "far": "s", "notes": "target", "tests": "test"}
+# "far" is GONE from the roster (PB1, 2026-11-19): --pack-task's name-only <far> tier went with the distance mask
+# that fed it when the bundle took --for's own 40-row head, and a roster entry that can no longer appear is an
+# entry that checks nothing — which is what the never-appeared arm below says in as many words.
+# <tail> is deliberately NOT added in its place. Its shown= counts FILES and its <t> rows are FOLDED (a same-dir
+# group is one row, tl1-tail-samedir), so the one-row-per-shown rule this roster applies is simply not the
+# contract that section keeps: MEASURED on this sweep, --for's own forbundle tail reads shown="157" over 96 <t>
+# rows. Pinning it here would turn a correct answer red. Its cut is gated by its own arms and by packlocatecheck.
+ROSTER = {"bodies": "b", "callers": "s", "notes": "target", "tests": "test"}
 seen, problems = {k: 0 for k in ROSTER}, []
 
 for path in sorted(glob.glob(os.path.join(sys.argv[1], "sweep_*.xml"))):
@@ -619,6 +632,185 @@ if [ $? = 0 ]; then
     ok '(H) paged budgeted-bundle roots carry the full pageview quintet; offset=0 is byte-identical to the un-paged budgeted answer'
 else
     no '(H) the budgeted-bundle continuation contract (upstream issue #294, corrected scope) does not hold — see FAIL lines above'
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# (I) NOUN-FIRST `<noun>_shown=` IS RETIRED, AND EVERY CUT LISTING'S COMPANIONS ARE REGISTERED.
+#     Rule 1 spells a secondary listing's printed count shown_<noun>= and rule 3 gives it <noun>_capped=. Seven
+#     emitters spelled it noun-first instead (dc_shown, levels_shown, transitive_shown, implementors_shown,
+#     alts_shown, cells_shown, d2_shown), so a reader scanning for shown_ prefixes (arm (A) did) found no cut on them.
+#     Arm (A)'s regex is shown_-prefix-only, so it could not see them. This arm closes that, and the third
+#     check is the load-bearing one: the compact legend carries a GENERIC row ("X_capped= (any attribute ending
+#     _capped): 1 = cut"), so a *_capped attribute's NAME is glossed whether or not its own row was registered.
+#     Testing for the name proves nothing. The registration check therefore reads `--legend-dict` (rows only, the
+#     generic row keyed X_capped so it can never register a noun's own) and requires the shown_<noun> row to
+#     spell its COMPANIONS — the total and the next — which only a real row spells.
+#       I1  no `<noun>_shown` KEY anywhere: not in the dictionary, not on a cut answer's elements, not in src/'s
+#           emitters (the static sweep covers dc_, d2_ and implementors_, whose cuts need a heavy fixture owned by
+#           dctiercutcheck / countfloorcheck).
+#       I2  on seven real cut answers, one per noun (--zoom, --lego --limit, --nonlocal-state, --path, --impact
+#           --limit=1, --for with its caller hop, --for --sections=lego,compose), every shown_<noun>= is beside
+#           <noun>_capped="1" (levels and d2 print theirs 0|1 always: those shown_ attributes are not cut-only),
+#           its total and, where it has one, its next. All seven nouns have a live fixture; none rides on the
+#           static sweep alone. The cheap dc fixture is `--impact=find --limit=1` on src (2,440 declined sites).
+#
+#     DELIBERATELY OUT OF SCOPE: the JSON keys sigs_shown / sigs_total / sigs_next (--for --json, MCP). That is a
+#     different surface with external consumers and a self-consistent noun-first family; it is the owner's call,
+#     not this arm's. Do not "finish the job" by extending the sweep to it. (dc's JSON twin, which the CLI --json
+#     and MCP print under the SAME name as the XML attribute, was renamed with it: attribute parity.)
+#
+#     ENUMERATION TRAP, kept on purpose: the first sweep for these attributes used the character class
+#     [a-z_]+ before _shown= and found SIX. d2_shown has a digit in it; the seventh was invisible to the sweep
+#     for exactly that reason and was found only by widening to [A-Za-z0-9_]+ and recounting. A sweep over
+#     attribute NAMES must allow digits; NOUN_FIRST below does ([a-z][a-z0-9]*(_[a-z0-9]+)*).
+#       I3  every such noun has a dictionary row that spells the companions.
+#     The arm can fail: the in-process mutations below run the same checker on a dictionary with a row deleted, a
+#     row's companions deleted, the generic gloss standing in, and the old spelling defined; each must be flagged.
+# ---------------------------------------------------------------------------------------------------
+NF_WORK="$TMP/nf"; mkdir -p "$NF_WORK/j" "$NF_WORK/c" "$NF_WORK/py" "$NF_WORK/r"
+# implementors_ cut: --for's <lego> block lists 16 of a 40-implementor interface, but ONLY on the task phrase and the
+# --sections=lego,compose opt-in below (a bare --for stubs the block to <lego shown="0">; an interface-by-name task
+# did not render it at all — an empty capture here is fixture drift, and the arm says so rather than passing)
+printf 'interface Router { void run(); }\n' > "$NF_WORK/r/Router.java"
+printf 'interface I { void run(); }\n' > "$NF_WORK/j/I.java"
+i=0
+while [ $i -lt 40 ]; do
+    printf 'class C%d implements I { public void run() { } }\n' "$i" > "$NF_WORK/j/C$i.java"
+    printf 'class Impl%d implements Router { public void run() { } }\n' "$i" > "$NF_WORK/r/Impl$i.java"
+    printf 'class D%d extends C0 { }\n' "$i" > "$NF_WORK/j/D$i.java"       # a level BELOW the direct implementors: --lego's transitive= rows
+    printf 'int dup( int x ) { return x + %d; }\n' "$i" > "$NF_WORK/c/f$i.c"
+    i=$(( i + 1 ))
+done
+printf 'int a1( void ) { return dup( 1 ); }\n' > "$NF_WORK/c/a.c"
+python3 - "$NF_WORK/py/m.py" <<'PYGEN'
+import sys
+n = 30
+open( sys.argv[1], "w" ).write( "".join( f"g{i} = 0\n" for i in range( n ) ) + "def touch():\n    global " + ", ".join( f"g{i}" for i in range( n ) ) + "\n" + "".join( f"    g{i} = {i}\n" for i in range( n ) ) )
+PYGEN
+run "$BIG"            --zoom                           --legend=compact > "$TMP/nf_zoom.xml"
+run "$NF_WORK/j"      --lego=I --limit=10              --legend=compact > "$TMP/nf_lego.xml"
+run "$NF_WORK/py"     --nonlocal-state                 --legend=compact > "$TMP/nf_cells.xml"
+run "$NF_WORK/c"      --path=a1,dup                    --legend=compact > "$TMP/nf_alts.xml"
+run "$BIG"            --impact=find --limit=1          --legend=compact > "$TMP/nf_dc.xml"
+run "$BIG"            --for=escapeXml                  --legend=compact > "$TMP/nf_d2.xml"
+run "$NF_WORK/r"      '--for=which router classes implement the Router interface' --sections=lego,compose --legend=compact > "$TMP/nf_impl.xml"
+run --legend-dict                                                       > "$TMP/nf_dict.txt"
+python3 - "$TMP" "$ROOT/src" <<'PY'
+import os, re, sys
+import xml.etree.ElementTree as ET
+tmp, srcdir = sys.argv[1], sys.argv[2]
+# noun -> ( total attribute, next attribute or None ): the companions a reader needs beside shown_<noun>=
+COMPANIONS = {
+    "dc":           ( "declined_calls", "dc_next" ),
+    "levels":       ( "levels",         None ),
+    "transitive":   ( "transitive",     "next" ),
+    "implementors": ( "implementors",   "implementors_next" ),
+    "alts":         ( "defs",           "next" ),
+    "cells":        ( "cells_total",    None ),
+    "d2":           ( "d2",             "next" ),
+}
+NOUN_FIRST = re.compile( r"(?<![A-Za-z0-9_])(?!shown_)([a-z][a-z0-9]*(?:_[a-z0-9]+)*)_shown(?![A-Za-z0-9_])" )
+problems = []
+
+def dict_rows( text ):
+    """{ key: [ row, ... ] }: a row is a dictionary line that DEFINES `key=` at its start."""
+    rows = {}
+    for line in text.splitlines():
+        m = re.match( r"(?:[a-z]+ )?([a-z][a-z0-9_]*)=", line )   # a row is key=... or tag-led: tag key=... (alts shown_alts=K)
+        if m:
+            rows.setdefault( m.group( 1 ), [] ).append( line )
+    return rows
+
+def check_dict( text, label ):
+    out = []
+    rows = dict_rows( text )
+    if len( rows ) < 400:
+        out.append( f"{label}: the dictionary parsed to only {len( rows )} keyed rows — the legend-dict read failed, nothing below is evidence" )
+        return out
+    for key in rows:
+        if NOUN_FIRST.fullmatch( key ):
+            out.append( f"{label}: the dictionary DEFINES the noun-first spelling {key}= (rule 1 spells it shown_<noun>=)" )
+    for line in text.splitlines():
+        m = re.match( r"[a-z]+ ([a-z][a-z0-9_]*_shown)=", line )   # the `alts alts_shown=K` shape: a row led by its tag
+        if m and NOUN_FIRST.fullmatch( m.group( 1 ) ):
+            out.append( f"{label}: the dictionary DEFINES the noun-first spelling {m.group( 1 )}= inside a tag-led row" )
+    for noun, ( total, nxt ) in COMPANIONS.items():
+        key = "shown_" + noun
+        rs = rows.get( key )
+        if not rs:
+            out.append( f"{label}: no dictionary row DEFINES {key}= (a row that starts `{key}=`)" )
+            continue
+        row = " ".join( rs )
+        for need in ( noun + "_capped=", total + "=" ) + ( ( nxt + "=", ) if nxt else () ):
+            if need not in row:
+                out.append( f"{label}: the {key}= row does not spell its companion {need} — only a registered row can; the generic X_capped= gloss does not count" )
+    return out
+
+dict_text = open( os.path.join( tmp, "nf_dict.txt" ), encoding = "utf-8", errors = "replace" ).read()
+problems += check_dict( dict_text, "I1/I3 dictionary" )
+
+seen = set()
+for name, noun in ( ( "nf_zoom", "levels" ), ( "nf_lego", "transitive" ), ( "nf_cells", "cells" ), ( "nf_alts", "alts" ),
+                    ( "nf_dc", "dc" ), ( "nf_d2", "d2" ), ( "nf_impl", "implementors" ) ):
+    path = os.path.join( tmp, name + ".xml" )
+    text = open( path, encoding = "utf-8", errors = "replace" ).read() if os.path.exists( path ) else ""
+    if not text.strip():
+        problems.append( f"{name}: produced no output — an empty capture is not evidence" ); continue
+    try:
+        root = ET.fromstring( re.sub( r"<!--.*?-->", "", text, flags = re.S ) )
+    except ET.ParseError as e:
+        problems.append( f"{name}: not well-formed XML: {e}" ); continue
+    found = False
+    for el in root.iter():
+        for key in el.attrib:
+            if NOUN_FIRST.fullmatch( key ):
+                problems.append( f"{name}: <{el.tag}> carries the noun-first {key}= (rule 1: shown_<noun>=)" )
+            if key.startswith( "shown_" ) and key[ 6: ] in COMPANIONS:
+                n = key[ 6: ]; found = found or n == noun; seen.add( n )
+                total, nxt = COMPANIONS[ n ]
+                if el.attrib.get( n + "_capped" ) != "1":
+                    problems.append( f"{name}: <{el.tag}> has {key}= but {n}_capped is {el.attrib.get( n + '_capped' )!r}, want \"1\" (rule 3)" )
+                if total not in el.attrib:
+                    problems.append( f"{name}: <{el.tag}> has {key}= but no {total}= (rule 2: the total)" )
+                if nxt and nxt not in el.attrib:
+                    problems.append( f"{name}: <{el.tag}> has {key}= but no {nxt}= (the call that lists the rest)" )
+    if not found:
+        problems.append( f"{name}: no shown_{noun}= on a CUT answer — the cut did not engage (fixture drift) or the listing is still noun-first" )
+
+# static sweep of src/: no emitter spells a noun-first _shown= (dc_, d2_ and implementors_ ride here; their cuts need a heavy fixture)
+for dirpath, _, files in os.walk( srcdir ):
+    for f in files:
+        if not f.endswith( ( ".h", ".cpp" ) ):
+            continue
+        rel = os.path.relpath( os.path.join( dirpath, f ), srcdir )
+        for ln, line in enumerate( open( os.path.join( dirpath, f ), encoding = "utf-8", errors = "replace" ), 1 ):
+            for m in NOUN_FIRST.finditer( line ):
+                if line[ m.end(): m.end() + 1 ] == "=":
+                    problems.append( f"src/{rel}:{ln}: spells {m.group( 0 )}= (rule 1: shown_<noun>=)" ); break
+
+# the checker can FAIL: mutate a good dictionary in-process and require it to notice
+good = "\n".join( [ f"k{i}=filler row" for i in range( 450 ) ] + [
+    f"shown_{n}=N: rows printed; {n}_capped=1 when cut; {t}= the total" + ( f"; {x}= lists the rest" if x else "" ) for n, ( t, x ) in COMPANIONS.items() ] )
+if check_dict( good, "mutation-base" ):
+    problems.append( "mutation: the checker flags a fully registered dictionary — it cannot be trusted green" )
+if not check_dict( "\n".join( l for l in good.splitlines() if not l.startswith( "shown_dc=" ) ), "m" ):
+    problems.append( "mutation: a dictionary with the shown_dc row DELETED was NOT flagged — the registration arm cannot fail" )
+if not check_dict( good.replace( "dc_next=", "dc_nxt" ), "m" ):
+    problems.append( "mutation: a shown_dc row with its next companion removed was NOT flagged — the arm tests names, not companions" )
+if not check_dict( good.replace( "dc_capped=1 when cut", "" ) + "\nX_capped= (any attribute ending _capped): 1 = cut", "m" ):
+    problems.append( "mutation: the generic X_capped= gloss satisfied dc_capped — the fallback trap is open" )
+if not check_dict( good + "\ndc_shown=N: old spelling", "m" ):
+    problems.append( "mutation: a dictionary defining the noun-first dc_shown= was NOT flagged" )
+
+for p in problems:
+    print( "  FAIL  " + p )
+print( "  ..    (I) nouns seen on real cut answers: " + ( ",".join( sorted( seen ) ) or "none" ) )
+sys.exit( 1 if problems else 0 )
+PY
+if [ $? = 0 ]; then
+    ok '(I) no noun-first <noun>_shown=; every shown_<noun>= on a cut answer carries its capped bit, total and next; each noun has a dictionary row spelling them; the checker flags 4 mutations'
+else
+    no '(I) noun-first cut spelling and/or unregistered cut companions — see FAIL lines above'
 fi
 
 [ $fail = 0 ] && echo "ALL PASS" || echo "FAILURES"

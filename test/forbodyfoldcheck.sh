@@ -37,7 +37,8 @@
 #          <fold>, <slice> and <skip> elements the answer carries
 #   F1 [P] the router question: a <fold> holds SmartRouter's whole body (router.match.bind(router), UnsupportedPathError)
 #   F2 [P] the respond question: respond's body served, the 7.5 KB renderResponseBodyPage SKIPPED with bytes= > 4000 and
-#          next=--expand=lib/render.js:6:renderResponseBodyPage, and Application (r3) still served after the skip;
+#          next=--expand=lib/render.js:6:renderResponseBodyPage, and a body ranked below it still served after the skip (LP1: read off
+#          the answer; it was Application by rank order before the basename field);
 #          the skip's next= pasted (shlex) serves that body whole
 #   F3 [P] C3: on the respond answer <sigs next=> equals the first skip's next=; on a src/ answer whose fold-off <sigs> carried
 #          next=, the fold answer carries it as sigs_next= byte for byte and the legend reads [sigs sigs_next=: …]
@@ -66,6 +67,13 @@
 # Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP RIPWIRE_NO_MEMBER_NAMES
@@ -157,7 +165,16 @@ elif cmd == "skip_then_serve":  # FILE SKIPNAME LATERNAME
     s = sk[0]
     if int(s.get("bytes", "0")) <= 4000: fail(f"skip bytes={s.get('bytes')} not over the budget")
     if s.get("next") != f"--expand={s['p']}:{s['l']}:{s['n']}": fail(f"skip next= {s.get('next')!r}")
-    if args[2] not in [b[0].get("n") for b in bodies(x)]: fail(f"{args[2]} not served after the skip")
+    if args[2] == "@later":   # LP1 re-pin: ANY body whose <d> row ranks below the skipped row's (read off the answer)
+        rk = {}
+        for m in re.finditer(r'<d ([^>]*)>', t):
+            a2 = attrs(m.group(1))
+            if "r" in a2: rk.setdefault((a2.get("p"), a2.get("l")), int(a2["r"]))
+        sr = rk.get((s.get("p"), s.get("l")))
+        later = [b[0] for b in bodies(x) if sr is not None and rk.get((b[0].get("p"), b[0].get("l")), 0) > sr]
+        if sr is None: fail(f"the skipped row {s.get('n')} has no ranked <d> row to order against")
+        if not later: fail(f"no body ranked below the skipped {s.get('n')} (r{sr}) is served: {[b[0].get('n') for b in bodies(x)]}")
+    elif args[2] not in [b[0].get("n") for b in bodies(x)]: fail(f"{args[2]} not served after the skip")
     print(s["next"])
 elif cmd == "c3_skip":           # FILE : sigs next= == the first skip's next=
     t = load(args[0]); a, x, _ = fold(t); sk = skips(x)
@@ -301,8 +318,10 @@ else:
     fail("unknown check " + cmd)
 PY
 chk(){ python3 "$TMP/chk.py" "$@"; }
-run(){ local out="$1"; shift; "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
-off(){ local out="$1"; shift; RIPWIRE_NO_BODY_FOLD=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
+# K-WRONGSYM: the <syms> block names what the answer does not, and a fold body names more, so the fold-on and fold-off answers carry different blocks;
+# this gate is about the fold, so both sides run without the block (forfilesymscheck owns it)
+run(){ local out="$1"; shift; RIPWIRE_NO_FILE_SYMS=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
+off(){ local out="$1"; shift; RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
 
 run "$TMP/router" --for="$T_ROUTER";            off "$TMP/router.off" --for="$T_ROUTER"
 run "$TMP/resp"   --for="$T_RESP";              off "$TMP/resp.off"   --for="$T_RESP"
@@ -325,6 +344,10 @@ if r=$( chk slice "$TMP/slice" JobScheduler __init__ drain counter_00 ); then ok
 if r=$( chk whole "$TMP/slice" "$BIN" "$FIXPY" ); then ok "(S2) slice members whole, the fold <= 4000 B, no body twice"; else no "(S2) $r"; fi
 if grep -q '<slice p="scheduler.py" n="JobScheduler" l="1" members="[0-9]*" of="49">' "$TMP/slice"; then ok "(S3) of= counts the class's 49 direct members: hand_off, nested in drain, is not one"; else no "(S3) of= is not 49 (a nested function counted as a member?)"; fi
 # S4 (N4): the constructor by name, not by rank
+# FIXTURE MOVE 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW): ledger.ts -> book.ts. The question's
+# "ledger" was also the class file's basename, which lifts every symbol of the file by the same amount; at weight 1 that put
+# lineOfDay (2.69) a hair over LedgerBook (2.64), so lineOfDay was served as its own body and no slice was cut — the premise moved,
+# not the slice rule. Under book.ts the fold, slice and skip are the pre-basename answer at weights 0, 1 and 2 alike (paths aside).
 if r=$( chk unranked "$TMP/ctor" constructor ) && r=$( chk slice "$TMP/ctor" LedgerBook constructor lineOfDay member00 ); then
     ok "(S4) an unranked constructor with no question word still leads LedgerBook's slice (by name), then lineOfDay; never member00"
 else no "(S4) $r"; fi
@@ -343,8 +366,13 @@ for q in router resp respf slice ctor; do
     if r=$( chk cover "$TMP/$q" ); then ok "(L1) $q: the legend defines b t= n= p= l= and every fold/slice/skip attribute"; else no "(L1) $q: $r"; fi
 done
 # F2
-if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage Application ); then
-    ok "(F2) renderResponseBodyPage skipped with bytes>4000 and its --expand next=; Application still served after it"
+# F2 re-pinned (LP1, rule 4): the property is "the fold keeps walking past a skip" — a body ranked BELOW the skipped one is still
+# served. It named Application, which held only while Application was the next body in rank order; once --for scores the file
+# basename (lexical.h kForBasenameFieldW) App.constructor (src/app.ts) is r3 and the fold serves it after the skip instead. The
+# later body is now read off the answer (@later: any served body whose <d> rank is past the skipped row's), so the arm still
+# fails when the walk stops at the skip.
+if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage @later ); then
+    ok "(F2) renderResponseBodyPage skipped with bytes>4000 and its --expand next=; a body ranked below it still served"
     if r2=$( chk has_body "$TMP/resp" respond "res.end(body)" "body.pipe(res)" ); then ok "(F2b) respond's whole body served"; else no "(F2b) $r2"; fi
     eval "set -- $r"
     "$BIN" "$FIX" --no-cache "$@" >"$TMP/skipnext" 2>/dev/null
@@ -352,8 +380,16 @@ if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage Application ); th
 else no "(F2) $r"; fi
 # F3
 if r=$( chk c3_skip "$TMP/resp" ); then ok "(F3a) <sigs next=> is the first skip's --expand"; else no "(F3a) $r"; fi
-"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/src" 2>/dev/null
-RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/src.off" 2>/dev/null
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h), and on src the fold starts past page
+# 1's cut. (F3b)/(F5)/(F5n) on src are about the WHOLE answer, so they read --page-bytes=0 — the whole answer in one call,
+# row-identical to the joined pages (forpagescheck P2); (F3p) holds the default PAGE to present-or-disclosed-deferred.
+"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" --page-bytes=0 >"$TMP/src" 2>/dev/null
+RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$ROOT/src" --no-cache --for="$T_SRC" --page-bytes=0 >"$TMP/src.off" 2>/dev/null
+"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/srcpage" 2>/dev/null
+if grep -q '<fold ' "$TMP/srcpage"; then ok "(F3p) the default src page carries the fold"
+elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "fold" in n and " next=" in r else 1)' "$TMP/srcpage"; then
+    ok "(F3p) the default src page does not hold the fold and says so: deferred= names it, next= reaches it"
+else no "(F3p) the default src page neither carries <fold> nor names it in deferred=/continued= (a silent drop)"; fi
 if r=$( chk c3_pair "$TMP/src" "$TMP/src.off" ); then ok "(F3b) the signatures-only re-call moved to sigs_next= with its reading ${r:+($r)}"; else no "(F3b) $r"; fi
 # F4
 for q in router resp; do
@@ -367,8 +403,8 @@ if r=$( chk prefix "$TMP/src" "$TMP/src.off" ); then ok "(F5) src: the answer be
 # F5n (member-names twin): with the names off on both sides the pre-names premise holds byte for byte (est_tokens masked)
 # (train 32a, N1: all six of F5's questions, each with F5's own root and legend)
 namesoff(){ local q="$1" rd="$2" qq="$3"; shift 3
-    RIPWIRE_NO_MEMBER_NAMES=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n" 2>/dev/null
-    RIPWIRE_NO_MEMBER_NAMES=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n.off" 2>/dev/null; }
+    RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_MEMBER_NAMES=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n" 2>/dev/null
+    RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_MEMBER_NAMES=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n.off" 2>/dev/null; }
 for q in router resp respf slot slice src; do
     case "$q" in
         router) namesoff "$q" "$FIX" "$T_ROUTER";;
@@ -376,7 +412,7 @@ for q in router resp respf slot slice src; do
         respf)  namesoff "$q" "$FIX" "$T_RESP" --legend=full;;
         slot)   namesoff "$q" "$FIX" "$T_SLOT";;
         slice)  namesoff "$q" "$FIXPY" "$T_SLICE";;
-        src)    namesoff "$q" "$ROOT/src" "$T_SRC";;
+        src)    namesoff "$q" "$ROOT/src" "$T_SRC" --page-bytes=0;;
     esac
     if r=$( chk prefix_raw "$TMP/$q.n" "$TMP/$q.n.off" ); then ok "(F5n) $q: names off, the answer before the fold == RIPWIRE_NO_BODY_FOLD=1 unmasked"; else no "(F5n) $q: $r"; fi
 done
@@ -402,9 +438,12 @@ done <<ARGV
 --for=$T_RESP|--json
 --for=$T_RESP|--auto-bodies
 --for=$T_RESP|--detail=1
---for=$T_RESP|--token-budget=3000
 --for=SmartRouter
 ARGV
+# F8t — TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the posture (it used to drop the fold); a budget
+# the answer fits returns the flagless answer byte for byte, fold included
+run "$TMP/tb" --for="$T_RESP" --token-budget=3000 || no "(F8t) the budgeted run exited $?"
+if [ -s "$TMP/tb" ] && cmp -s "$TMP/tb" "$TMP/resp"; then ok "(F8t) --token-budget=3000 (the answer fits): the flagless answer byte for byte, fold included"; else no "(F8t) --token-budget=3000 is not the flagless answer"; fi
 # F8m (B1): --max-tokens is not read by this answer, so it changes no byte of it
 run "$TMP/mt" --for="$T_RESP" --max-tokens=3000
 if [ -s "$TMP/mt" ] && cmp -s "$TMP/mt" "$TMP/resp"; then ok "(F8m) --max-tokens=3000 is inert, as its notice says: the flagless answer, fold included"; else no "(F8m) --max-tokens=3000 changed the answer its notice says it does not read"; fi

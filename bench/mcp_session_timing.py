@@ -8,13 +8,50 @@ import sys
 import tempfile
 import time
 import os
+import threading
+
+# One analyze request over a whole corpus; generous on purpose. A watchdog kills the server if a reply does
+# not arrive in time, so a runaway request ends as a named TIMEOUT instead of a readline that never returns.
+REQUEST_TIMEOUT_S = 900
+
+
+def read_reply_bounded(process: subprocess.Popen[str], timeout_s: float, label: str) -> str:
+    """One reply line from an MCP server, bounded: a watchdog kills the server when no reply arrives within timeout_s.
+    A timeout or a signal-kill (rc < 0) raises as its own state; plain EOF from a server that exited returns "".
+    A kill mid-line leaves readline() returning the buffered text at EOF with NO trailing newline: that is a partial
+    reply, not a reply, and it raises the TIMEOUT state rather than reaching json.loads as a JSONDecodeError."""
+    assert process.stdout is not None
+    fired = threading.Event()
+    def expire() -> None:
+        fired.set()
+        process.kill()
+    watchdog = threading.Timer(timeout_s, expire)
+    watchdog.start()
+    try:
+        line = process.stdout.readline()
+    finally:
+        watchdog.cancel()
+    if line:
+        if fired.is_set() and not line.endswith("\n"):
+            raise RuntimeError(f"ripwire MCP TIMEOUT: only a partial reply to {label} ({len(line)} B, unterminated) "
+                               f"within {timeout_s}s (server killed)")
+        return line
+    if fired.is_set():
+        raise RuntimeError(f"ripwire MCP TIMEOUT: no reply to {label} within {timeout_s}s (server killed)")
+    try:
+        rc = process.wait(timeout=10)   # EOF can beat the reap; give the exit status a moment to land
+    except subprocess.TimeoutExpired:
+        rc = None
+    if rc is not None and rc < 0:
+        raise RuntimeError(f"ripwire MCP KILLED (signal={-rc}) before replying to {label}")
+    return ""
 
 
 def exchange(process: subprocess.Popen[str], request: dict) -> dict:
     assert process.stdin is not None and process.stdout is not None
     process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
     process.stdin.flush()
-    line = process.stdout.readline()
+    line = read_reply_bounded(process, REQUEST_TIMEOUT_S, str(request.get("method")))
     if not line:
         raise RuntimeError("ripwire MCP closed before responding")
     return json.loads(line)

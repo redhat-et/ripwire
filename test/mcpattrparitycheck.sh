@@ -31,6 +31,8 @@
 #   3. A deliberate omission is DECLARED: the twin's root carries lens="a,b,c" naming exactly the attributes
 #      it drops on purpose, and the gate subtracts that set. An undeclared drop fails; a declaration naming
 #      an attribute that is NOT dropped also fails (a stale exemption is a lie in the other direction).
+#   4. A QUALIFIER (QUALIFIES below: an attribute about other attributes, like history_unread about churn/amp) is dropped with
+#      them: exempt only while the twin's lens= declares EVERY attribute it qualifies.
 #
 # Usage:
 #   bash test/mcpattrparitycheck.sh                                 # uses build/ripwire
@@ -104,10 +106,15 @@ int client() { Box b; b.fill( 1 ); return b.size() + helper_add( 1, 2 ); }
 EOF
 echo "mcpattrparitycheck: BIN=$BIN  CORPUS=$ROOT  REFFIX=$SFIX  MARKERFIX=$MFIX  ANFIX=$AFX"
 
-python3 - "$BIN" "$ROOT" "$SFIX" "$MFIX" "$AFX" <<'PY'
+# The SELECTOR arms ask whereis on this checkout; past its 512-branch refusal (a long-lived dev clone or its linked worktree)
+# they ask test/lib/sweeproot.sh's stand-in with CI's ref shape instead.
+. "$ROOT/test/lib/sweeproot.sh"
+SWEEPTMP="$( mktemp -d )"; MFIX_CLEANUP="$MFIX_CLEANUP $SWEEPTMP"   # cleaned by the trap above
+SWEEP="$( sweepRoot "$ROOT" "$SWEEPTMP/sweep" )"
+python3 - "$BIN" "$ROOT" "$SFIX" "$MFIX" "$AFX" "$SWEEP" <<'PY'
 import json, os, re, subprocess, sys
 
-BIN, ROOT, SFIX, MFIX, AFX = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+BIN, ROOT, SFIX, MFIX, AFX, SWEEP = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 
 fails = 0
 def check( cond, msg ):
@@ -214,10 +221,17 @@ RENAME = {
     # asserts the fold lost nothing (stale on both surfaces, stale_by_kind summing to it, show_stale=true listing the rows).
 }
 
+# Qualifiers: a CLI attribute that says something ONLY about other attributes, and so is omitted with them. history_unread="1"
+# says the git walk behind churn= and amp= was cut or failed (historyread.h); the MCP `for` twin runs no git walk at all and
+# declares churn and amp in lens=, so there is no walk for it to call unread, and carrying the attribute would claim one. The
+# qualifier is exempt ONLY while the twin's lens= declares EVERY attribute it qualifies, and the lens= stale check above keeps
+# that declaration true: a twin that starts serving churn= or amp= must drop them from lens=, and history_unread is owed again.
+QUALIFIES = { "history_unread": { "churn", "amp" } }
+
 def report( label, cliNames, twinNames, lens ):
     missing = set()
     for a in sorted( cliNames ):
-        if a in twinNames or ( RENAME.get( a, set() ) & twinNames ) or a in lens:
+        if a in twinNames or ( RENAME.get( a, set() ) & twinNames ) or a in lens or ( a in QUALIFIES and QUALIFIES[ a ] <= lens ):
             continue
         missing.add( a )
     stale = { a for a in lens if a in twinNames }
@@ -329,6 +343,14 @@ else:
     report( "for root", xmlRootAttrs( forXml, "ctx" ) or set(), xmlRootAttrs( forMcp, "ctx" ) or set(),
             declaredLens( forMcp ) )
     report( "for rows", xmlRowAttrs( forXml, "d" ), xmlRowAttrs( forMcp, "d" ), declaredLens( forMcp ) )
+    # HISTORY-UNREAD-LEGEND: the same pair with the CLI's git walk CUT, forced (RIPWIRE_GIT_WALK_COMMITS=1; the budget is in the
+    # walk cache's key, so no other run is served this prefix). Unforced, history_unread rides the CLI root only on a runner slow
+    # enough to hit the 20 s clock, and this arm flaked red there (#688). Premise first: the cut root must carry it (else vacuous).
+    forCutXml = subprocess.run( [ BIN, ROOT, "--for=pagerank power iteration", "--signatures-only", "--legend=full" ], capture_output = True,
+                                text = True, env = dict( os.environ, RIPWIRE_GIT_WALK_COMMITS = "1" ) ).stdout
+    forCutRoot = xmlRootAttrs( forCutXml, "ctx" ) or set()
+    check( "history_unread" in forCutRoot, "for root, walk cut at 1 commit: premise: the CLI root carries history_unread (got %s)" % ",".join( sorted( forCutRoot ) ) )
+    report( "for root, walk cut at 1 commit", forCutRoot, xmlRootAttrs( forMcp, "ctx" ) or set(), declaredLens( forMcp ) )
 
 # analyze — the default CLI map's <s> rows vs MCP analyze's. This is the pair whose drop is DELIBERATE:
 # --stable omits the globally volatile k= so an unedited prefix stays byte-identical, and MCP serves the
@@ -522,8 +544,8 @@ nearMissSel = "escape" + "Xm"
 for label, sel in ( ( "@FILE:LINE seed", seedSpec ), ( "near-miss", nearMissSel ) ):
     if not sel:
         continue
-    cx = cli( [ "--whereis=" + sel ] )
-    mx = mcp( "whereis", { "path": ROOT, "symbol": sel } )
+    cx = cliAt( SWEEP, [ "--whereis=" + sel ] )
+    mx = mcp( "whereis", { "path": SWEEP, "symbol": sel } )
     if mx.startswith( "__ERROR__" ):
         check( False, "whereis %s: MCP refused (%s)" % ( label, mx[ :100 ] ) )
         continue

@@ -39,7 +39,10 @@
 #           A DIFF with no --intended row, any
 #           EMPTY (a vacuous comparison) and any ERROR (non-zero exit, timeout) fails the gate. Then the self-test (HEAD
 #           run with --top-k=199, or one less than the corpus has, must read as DIFF) and last the ratchet line
-#           (test/langidentity/ratchet.tsv: the "== Lang::" predicates outside per-language files may not rise).
+#           (test/langidentity/ratchet.tsv: the "== Lang::" predicates outside per-language files may not rise). That
+#           count is a FLOOR, not a total, and the line says so: the counter's hit regex requires `in=`, so a predicate
+#           in a span with no enclosing symbol is dropped silently (2026-11-20, ruling 108 -- the figures and the
+#           consequence for the ceiling are in ratchet.tsv's own header).
 #
 # With no BASE (empty, not given) this SKIPS and exits 0: CI has no "previous" binary. regression.sh passes one argument
 # (the binary under test); RIPWIRE_BASE names the reference binary. A BASE that is given but is not an executable file
@@ -104,7 +107,7 @@ manifest_check(){
     local tags tag
     tags="$( grep -oE 'lang="[a-z|]+"' "$ROOT/src/model.h" | head -1 | sed 's/lang="//;s/"//' | tr '|' ' ' )"
     for tag in $tags; do
-        case "$tag" in md|json|toml|yaml) continue ;; esac
+        case "$tag" in md|json|toml|yaml|proto) continue ;; esac   # data and schema tags: no call graph to compare
         case " ${CODE_LANGS[*]} " in *" $tag "*) ;; *) no "manifest: src/model.h labels a language '$tag' this gate does not know (add it to CODE_LANGS and the manifest)"; bad=1 ;; esac
     done
     [ "$bad" = 0 ] && ok "manifest: $n row(s), all ${#CODE_LANGS[@]} code languages covered, every directory exists"

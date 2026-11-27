@@ -115,13 +115,14 @@ inline bool isAdornmentChar( char c ) noexcept
 // A whole line of one punctuation character, with trailing blanks allowed.
 inline bool isAdornmentLine( std::string_view s ) noexcept
 {
-    const std::string_view t = s.substr( 0, s.find_last_not_of( " \t" ) + 1 );
+    const std::string_view t = namesplit::trimTrailing( s, " \t" );
     return !t.empty() && isAdornmentChar( t[ 0 ] ) && t.find_first_not_of( t[ 0 ] ) == std::string_view::npos;
 }
 
+
 inline std::size_t adornmentLength( std::string_view s ) noexcept
 {
-    return s.find_last_not_of( " \t" ) + 1;
+    return namesplit::trimTrailing( s, " \t" ).size();
 }
 
 // Width in code points, not bytes: an accented title must not read as longer than its underline.
@@ -529,8 +530,7 @@ inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::strin
     RawRef r;
     r.fileId = fileId; r.startByte = at; r.lang = Lang::Markdown; r.isInherit = false;
     r.name = ":ref:" + label;
-    r.memberPath.assign( kRestLabelMark );
-    r.memberPath.append( label );
+    r.setMemberPath( std::string( kRestLabelMark ).append( label ) );
     refs.push_back( std::move( r ) );
 }
 
@@ -549,13 +549,14 @@ inline void emitRestDocRef( std::uint32_t fileId, std::uint32_t at, std::string_
     RawRef r;
     r.fileId = fileId; r.startByte = at; r.lang = Lang::Markdown; r.isInherit = false;
     r.name.assign( stem );
+    std::string path;
     if( target.front() == '/' )
     {
-        r.memberPath.assign( kRestDocRootMark );
+        path.assign( kRestDocRootMark );
         target.remove_prefix( 1 );
     }
-    r.memberPath.append( target );
-    r.memberPath.append( ownExt );
+    path.append( target ).append( ownExt );
+    r.setMemberPath( path );
     refs.push_back( std::move( r ) );
 }
 

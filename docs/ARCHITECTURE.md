@@ -585,6 +585,24 @@ The three write verbs — `replace_symbol_body`, `insert_before_symbol` and `ins
 staleness hash, symlink refusal, mode preservation and atomic-write transaction. CLI is the preferred
 zero-standing-schema path; MCP is the warm-index alternative.
 
+### hops — one hop record for every edge an answer prints
+
+`src/hoprecord.h` is THE hop record: the rule every verb that prints a call edge reads, so a fix to it
+shows up on every such verb at once. `--path` hop rows and `--connect` `<e>` rows (CLI and MCP) print
+it today. For the edges an answer will print, `hopFacts()` makes one pass over the reference table
+(never one scan per hop), reads each file once through the shared reader `src/filetext.h`
+(`FileTextCache`, which also says when a file could not be read or its length changed since indexing), and keeps
+per edge the call site in the caller (`site=`, a name match like `sites_at=`, a call whose argument count
+the callee accepts first, then the owner-qualified call, with `sites=N` when the caller has more and `site_by=` when the
+pick is a tie or a misfit), the call's text (`call=`, redacted before any cut) and the callee's
+signature (`sig=`, `cleanSig`, printed on a hop with no site too). One
+renderer, `hopAttrsXml()`, prints them at a shed level: under a budget `sig=` goes first, then
+`call=`, then `site=`, before anything the answer printed without them. Text that cannot be read, whose
+file's length changed since indexing (`site=` withheld too), or that no longer spells the callee, or whose callee name sits in a redaction, is withheld and counted on the root
+(`hop_unread=`, `hop_notext=`, `hop_redacted=`), never
+guessed; an edge no call names prints no site (`hop_nosite=`). A new edge-printing verb, or a stored
+per-edge site, goes through this file, not a second copy beside it.
+
 ---
 
 ## 2. Data model
@@ -629,7 +647,9 @@ A second, much smaller cache sits beside it: the **span-tier memo** (`ingest_ast
 path + parser version, gated on the same `(sizeBytes, mtimeNs, ctimeNs)` stat triple and racy-mtime rule
 the parse cache's warm path uses, and it carries a measured size floor so it writes blobs only for files
 whose parse actually costs something. It obeys the same rules as everything else here: `--no-cache`
-turns it off, a blob that cannot be trusted is ignored rather than repaired, and `test/grepfastcheck.sh`
+turns it off, as it does the working-tree parse cache (the HEAD-side families a commit-tree verb writes
+stay on, but a `--no-cache` run never sweeps another root's blobs — `test/nocacheevictcheck.sh`),
+a blob that cannot be trusted is ignored rather than repaired, and `test/grepfastcheck.sh`
 pins cold output byte-identical to warm across the whole `--grep` option matrix.
 
 ---

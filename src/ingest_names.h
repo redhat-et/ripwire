@@ -86,8 +86,8 @@ inline std::string immediateScope( std::string_view full )
 // explicit-template-argument call — so the template_function reference pattern matches every cast in the
 // tree (171 sites in this repo's src/ alone). A cast is not a call and must not mint a reference: it is
 // VALID INPUT, not a corrupt invariant, so the capture loop simply skips it (never ASSUME, never
-// DISCLOSE — nothing degraded). Query predicates cannot do this: passesPredicates is wired into
-// --match/--lint only, not the tags pass (measured — a `#not-eq?` left --uses=static_cast at 165).
+// DISCLOSE — nothing degraded). Query predicates could not do this before #355: the tags pass ran
+// none (measured — a `#not-eq?` left --uses=static_cast at 165). It runs the string ones now, so this can move into the query.
 inline bool isCppCastKeyword( std::string_view name ) noexcept
 {
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
@@ -99,8 +99,8 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
 // grammar carries no case distinction, so an intrinsic tag would otherwise mint a phantom call edge
 // to a symbol that is never defined. react.dev's own rule is the filter: a user component's tag name
 // MUST start with an uppercase letter for JSX to treat it as one rather than an HTML tag, so a
-// lower-case-first-letter name at this shape is never a component. Query predicates cannot do this:
-// passesPredicates is wired into --match/--lint only, not the tags pass (same measured fact
+// lower-case-first-letter name at this shape is never a component. Query predicates could not do this before
+// #355, when the tags pass ran none (the same measured fact
 // isCppCastKeyword's note above relies on) — so, exactly like that cast filter, this is VALID INPUT,
 // skipped at capture time, never ASSUME/DISCLOSE.
 //
@@ -136,7 +136,7 @@ inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::
 // `using enum E;` (C++20; re-exports the ENUMERATORS, not the named type, so an import row for the type
 // would over-claim). Both are VALID INPUT, skipped at capture time exactly like the cast keywords above:
 // the grammar puts the keyword in an anonymous child with no field name, which a tags-query pattern
-// cannot negate (passesPredicates is wired into --match/--lint only, never the tags pass).
+// cannot negate (and before #355 the tags pass ran no predicate that could test its text).
 inline bool usingDeclarationIsDirective( TSNode n ) noexcept
 {
     return !ts_node_is_null( firstChildOfType( n, "namespace" ) ) || !ts_node_is_null( firstChildOfType( n, "enum" ) );
@@ -210,39 +210,7 @@ inline std::size_t operatorNameStart( std::string_view text ) noexcept
     return punctEnd == text.size() ? op : std::string_view::npos;
 }
 
-// Index of the last `::` in `text` that sits at TEMPLATE-ARGUMENT DEPTH ZERO, or npos when there is none.
-// Scanned in reverse (the LAST top-level separator is the one that splits name from scope), tracking `<`/`>`
-// nesting so a `::` inside template arguments never splits: `tmplFn<a::B>` has NO top-level separator, while
-// `numeric_limits<std::size_t>::max` has exactly one — at the `::` before `max`.
-// PRECONDITION: `text` carries no trailing operator name. Depth is clamped at zero, which makes an
-// operator spelling merely IGNORED rather than balanced — that is enough for `operator<<` and NOT enough for
-// the `>` family, whose unmatched `>` would leave the depth pinned above zero and hide every separator. The
-// caller checks operatorNameStart() first; do not weaken that ordering.
-// The loop counts a 1-based CURSOR down to zero rather than the classic `for( i = n; i-- > 0; )`: that idiom
-// wraps `i` to SIZE_MAX on its final test, which `-fsanitize=integer` reports as an unsigned-integer
-// overflow (observed on this very function before this shape — the G1 build caught it on the fixture).
-inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
-{
-    std::size_t angleDepth = 0;
-    for( std::size_t cursor = text.size(); cursor > 0; --cursor )
-    {
-        const std::size_t charIndex = cursor - 1;
-        const char        c         = text[ charIndex ];
-        if( c == '>' )
-        {
-            ++angleDepth;
-        }
-        else if( c == '<' && angleDepth > 0 )
-        {
-            --angleDepth;
-        }
-        else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[ charIndex - 1 ] == ':' )
-        {
-            return charIndex - 1;                                 // index of the FIRST ':' of the pair
-        }
-    }
-    return std::string_view::npos;
-}
+// lastTopLevelScopeSep: infra/namesplit.h (moved there so graph-side readers split a scope by the same rule).
 
 // True when a qualified_identifier's `::` separator is a MISSING node — a zero-width token tree-sitter
 // INSERTED during error recovery, not one that is written in the source. Recovery reaches for this shape
@@ -525,7 +493,7 @@ struct TemplateParameterLists
 inline TemplateParameterLists templateParameterListsAbove( TSNode node ) noexcept
 {
     TemplateParameterLists lists;
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         if( kindIs( t, "qualified_identifier" ) )
@@ -669,7 +637,7 @@ inline bool captureSpecializationHeader( bool isDef, Lang lang, std::string_view
 // "Traits<long>"). An out-of-range span reads "", as before.
 inline std::string cppQualifierText( TSNode nameNode, std::string_view src, bool isDefinition )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "qualified_identifier" ) || hasPhantomScopeSeparator( parent ) )
     {
         return {};
@@ -734,12 +702,12 @@ struct CppWrittenChainRoot
 };
 inline std::optional<CppWrittenChainRoot> cppWrittenChainRoot( TSNode nameNode, std::string_view src )
 {
-    TSNode outer = ts_node_parent( nameNode );
+    TSNode outer = parentOf( nameNode );
     if( ts_node_is_null( outer ) || !kindIs( ts_node_type( outer ), "qualified_identifier" ) || hasPhantomScopeSeparator( outer ) )
     {
         return std::nullopt;
     }
-    for( TSNode up = ts_node_parent( outer ); !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "qualified_identifier" ); up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( outer ); !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "qualified_identifier" ); up = parentOf( up ) )
     {
         outer = up;
     }
@@ -779,7 +747,7 @@ inline std::optional<std::string_view> cppOutermostNamedNamespaceRoot( TSNode no
 {
     std::string_view outermostNsRoot;
     bool              sawNamespace = false;
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( !kindIs( ts_node_type( p ), "namespace_definition" ) )
         {
@@ -838,7 +806,7 @@ inline bool cppDefinitionRootsStd( TSNode nameNode, std::string_view src )
 // part BEFORE the name's separator, and an operator never names a scope.
 inline std::string cppRefQualifierText( std::string_view scopeText )
 {
-    const std::size_t      sep  = lastTopLevelScopeSep( scopeText );
+    const std::size_t      sep  = namesplit::lastTopLevelScopeSep( scopeText );
     const std::string_view last = skipTemplateDisambiguator( sep == std::string_view::npos ? scopeText : scopeText.substr( sep + 2 ) );
     return last.ends_with( '>' ) ? canonicalTemplateIdText( last ) : immediateScope( last );
 }
@@ -875,7 +843,7 @@ inline void cppResplitRefName( RawRef& r, std::string_view nameTxt )
     {
         return;
     }
-    const std::size_t      sep    = lastTopLevelScopeSep( nameTxt );
+    const std::size_t      sep    = namesplit::lastTopLevelScopeSep( nameTxt );
     const bool             hasSep = sep != std::string_view::npos;
     const std::string_view tail   = hasSep ? nameTxt.substr( sep + 2 ) : nameTxt;
     const std::string_view bare   = skipTemplateDisambiguator( tail );
@@ -935,7 +903,7 @@ inline std::string rustPathSegment( std::string_view pathText ) noexcept
     { // the turbofish `::<` separator
         text.remove_suffix( 2 );
     }
-    const std::size_t sep = lastTopLevelScopeSep( text );
+    const std::size_t sep = namesplit::lastTopLevelScopeSep( text );
     const std::string_view seg = ( sep == std::string_view::npos ) ? text : text.substr( sep + 2 );
     return isRustIdentifier( seg ) ? std::string( seg ) : std::string{};
 }
@@ -950,7 +918,7 @@ inline std::string rustPathSegment( std::string_view pathText ) noexcept
 // function from enclosingScopeOf rather than three more arms in its shared list.
 inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool includeModules )
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         const bool  isImpl  = kindIs( t, "impl_item" );
@@ -977,19 +945,107 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
     return {};
 }
 
+// RUST-UFCS-QUALIFIED: is `name` a type parameter of an item enclosing `node` — `fn f<T>`, `impl<T> … for T`, `trait Tr<T>`? Each
+// parameter's own name is its first identifier (`T` in `T: Bound`), never a bound. A path written through one names no type.
+inline bool rustEnclosingTypeParam( TSNode node, std::string_view name, std::string_view src )
+{
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* t = ts_node_type( p );
+        if( !kindIs( t, "function_item" ) && !kindIs( t, "impl_item" ) && !kindIs( t, "trait_item" ) )
+        {
+            continue;
+        }
+        const TSNode params = fieldChild( p, NodeField::TypeParameters );
+        for( std::uint32_t i = 0, k = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params ); i < k; ++i )
+        {
+            TSNode id = ts_node_named_child( params, i );
+            if( !kindIs( ts_node_type( id ), "type_identifier" ) )
+            {
+                const TSNode named = fieldChild( id, NodeField::Name );
+                id = !ts_node_is_null( named ) ? named : ts_node_named_child_count( id ) > 0 ? ts_node_named_child( id, 0 ) : TSNode{};
+            }
+            if( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "type_identifier" ) && nodeTextOf( id, src ) == name )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// RUST-UFCS-QUALIFIED: the ONE type a bracketed path's written type names — `Where`, `a::Where` and `Where<T>` → "Where", a
+// primitive `u8` → "u8", `Self` → the enclosing impl's type. "" when it names no one type: a type parameter, `Self` of an impl
+// for one, an associated type reached through either (`B::Owned`, `Self::Item`), and every shape that is not a path (`&T`,
+// `dyn Tr`, `[T]`, a tuple).
+inline std::string rustBracketedTypeName( TSNode type, TSNode at, std::string_view src )
+{
+    const TSNode base = kindIs( ts_node_type( type ), "generic_type" ) ? fieldChild( type, NodeField::Type ) : type;
+    if( ts_node_is_null( base ) )
+    {
+        return {};
+    }
+    const char*            kind = ts_node_type( base );
+    const std::string_view text = nodeTextOf( base, src );
+    if( kindIs( kind, "primitive_type" ) )
+    {
+        return std::string( text );
+    }
+    if( !kindIs( kind, "type_identifier" ) && !kindIs( kind, "scoped_type_identifier" ) )
+    {
+        return {};
+    }
+    const std::size_t      sep  = text.find( "::" );
+    const std::string_view root = sep == std::string_view::npos ? text : text.substr( 0, sep );
+    if( root == "Self" )
+    {
+        const std::string self = rustEnclosingScopeOf( at, src, /*includeModules=*/false );
+        return sep != std::string_view::npos || self.empty() || rustEnclosingTypeParam( at, self, src ) ? std::string{} : self;
+    }
+    return rustEnclosingTypeParam( at, root, src ) ? std::string{} : rustPathSegment( text );
+}
+
+// RUST-UFCS-QUALIFIED: the qualifier of a call whose path is a bracketed type. `<Where as Command>::run( .. )` names Where's impl of
+// Command::run and `<Where>::helper( .. )` Where's own helper, so the qualifier is the type's name, which keepRustQualifiedCandidates
+// (graph.h) holds the call to — a type the tree does not define declines it, never every same-named method. A written type that
+// names no one type (rustBracketedTypeName "") qualifies by the trait it is cast to or is (`<T as Tr>::m`, `<dyn Tr>::m`): the
+// call dispatches to Tr's implementors. "" for any other shape (`<&T>::m`), which keeps the bare-name resolution.
+inline std::string rustBracketedQualifier( TSNode bracketed, TSNode at, std::string_view src )
+{
+    const TSNode inner = ts_node_named_child_count( bracketed ) == 1 ? ts_node_named_child( bracketed, 0 ) : TSNode{};
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const bool   cast  = kindIs( ts_node_type( inner ), "qualified_type" );
+    const TSNode type  = cast ? fieldChild( inner, NodeField::Type ) : inner;
+    std::string  named = ts_node_is_null( type ) ? std::string{} : rustBracketedTypeName( type, at, src );
+    if( !named.empty() )
+    {
+        return named;
+    }
+    const TSNode trait = cast ? fieldChild( inner, NodeField::Alias )
+                       : kindIs( ts_node_type( inner ), "dynamic_type" ) ? fieldChild( inner, NodeField::Trait ) : TSNode{};
+    return ts_node_is_null( trait ) ? std::string{} : rustPathSegment( nodeTextOf( trait, src ) );
+}
+
 // Qualifier of a Rust CALL reference whose @name is the final segment of a `scoped_identifier`:
-// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec".
-// Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
+// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec", `<Where as Command>::run()` → "Where"
+// (rustBracketedQualifier). Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
 // spelling, which has no `path:` child) → those keep the pre-existing bare-name resolution untouched.
 // This is a CALL ref (isInherit=false). graph.h's Rust `impl Trait for T` CHA path reads `qualifier` too, but
 // only behind `if( !ir.isInherit ) continue;`, so the two uses of the field cannot collide — gated by
 // test/rustqualcheck.sh §8.
 inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
+    }
+    if( const TSNode path = fieldChild( parent, NodeField::Path ); !ts_node_is_null( path ) && kindIs( ts_node_type( path ), "bracketed_type" ) )
+    {
+        return rustBracketedQualifier( path, nameNode, src );
     }
 
     std::string qualifier = rustPathSegment( nodeTextOf( fieldChild( parent, NodeField::Path ), src ) );
@@ -1010,7 +1066,7 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 // rustRule3Proves) reads this one; stored in Reference::fieldName (model.h), which a Rust call reference does not otherwise use.
 inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     const TSNode path   = ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) ? TSNode{} : fieldChild( parent, NodeField::Path );
     if( ts_node_is_null( path ) || !kindIs( ts_node_type( path ), "scoped_identifier" ) )
     {
@@ -1025,6 +1081,435 @@ inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
         }
     }
     return out.find_first_of( "<>" ) != std::string::npos || out.starts_with( "::" ) ? std::string{} : out;
+}
+
+// RUST-MACRO-PATH: a path macro invocation's qualifier from its written path (`crate`, `axum_core`, `$crate::a`), `$crate` (the crate
+// of the macro whose transcriber spells it) read as `crate`: the last segment into `qualifier`, and the whole path, blanks dropped, into
+// `written` when it has more than one segment — the pair rustQualifierOf / rustWrittenQualifier give a path call. A generic or
+// `<T as Trait>` segment, a leading `::` or a non-identifier segment leaves both empty (the site reads as a bare name).
+inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, std::string& written )
+{
+    qualifier.clear();
+    written.clear();
+    std::string out;
+    for( const char c : pathText )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            out.push_back( c );
+        }
+    }
+    if( out.starts_with( "$crate" ) && ( out.size() == 6 || out[ 6 ] == ':' ) )
+    {
+        out.erase( 0, 1 );
+    }
+    if( out.empty() || out.starts_with( "::" ) || out.find_first_of( "<>$" ) != std::string::npos )
+    {
+        return;
+    }
+    const std::size_t      sep  = out.rfind( "::" );
+    const std::string_view last = sep == std::string::npos ? std::string_view( out ) : std::string_view( out ).substr( sep + 2 );
+    if( !isRustIdentifier( last ) )
+    {
+        return;
+    }
+    qualifier.assign( last );
+    if( sep != std::string::npos )
+    {
+        written = std::move( out );
+    }
+}
+
+// RUST-MACRO-PATH: the `$crate::…::name!` invocations a `macro_rules!` transcriber spells, as Macro references at their own byte, so
+// the macro definition's span owns them and the graph connects THROUGH the macro (`wrap_thing` → `other_thing`, axum's
+// `__define_rejection` → `__log_rejection`). A token tree is not parsed, so this is a lexical scan over the definition, kept to the
+// `$crate`-rooted path: the one spelling that names the defining crate's macro by construction (a bare `name!` in a transcriber may
+// name a macro of the expansion site: not read, a floor). String, raw-string and char literals and (nested) comments are skipped;
+// `$crate::x != y` is no call.
+namespace rust_transcriber_scan
+{
+// blanks: space, tab, CR, LF (rw::isJsonWs is exactly that set); identifier bytes: namesplit::isIdentChar (ASCII)
+inline std::uint32_t skipBlanks( std::string_view src, std::uint32_t k, std::uint32_t end ) noexcept
+{
+    while( k < end && rw::isJsonWs( src[ k ] ) )
+    {
+        ++k;
+    }
+    return k;
+}
+// A string literal at `i` (`"` to its unescaped close): moves `i` past it, adding the newlines it holds to `line`, the one an escape
+// skips included (a string continuation, `"a \<newline> b"`: CodeRabbit #633).
+inline void skipStringLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
+    {
+        const bool escaped = src[ i ] == '\\' && i + 1 < end;
+        line += src[ escaped ? i + 1 : i ] == '\n' ? 1u : 0u;
+    }
+    ++i;
+}
+// A comment at `i` (`//` or `/*`): moves `i` past it (a line comment stops at its newline, which the caller counts), adding the
+// newlines a block comment holds to `line`. Rust block comments nest (`/* a /* b */ still a comment */`), so the outer `*/` closes
+// it (CodeRabbit #627). False, `i` unmoved, when `i` starts none.
+inline bool skipComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const char next = i + 1 < end ? src[ i + 1 ] : '\0';
+    if( src[ i ] != '/' || ( next != '/' && next != '*' ) )
+    {
+        return false;
+    }
+    if( next == '/' )
+    {
+        i = static_cast<std::uint32_t>( std::min<std::size_t>( src.find( '\n', i ), end ) );
+        return true;
+    }
+    std::uint32_t depth = 1;
+    for( i += 2; i < end && depth > 0; )
+    {
+        const std::string_view two = src.substr( i, 2 );
+        line += src[ i ] == '\n' ? 1u : 0u;
+        depth += two == "/*" ? 1u : 0u;
+        depth -= two == "*/" ? 1u : 0u;
+        i += two == "/*" || two == "*/" ? 2u : 1u;
+    }
+    return true;
+}
+// A raw string at `i` (`r"…"`, `r#"…"#`, `br##"…"##`: no escapes, closed only by `"` and as many `#` as opened it): moves `i` past
+// it, adding the newlines it holds to `line` (CodeRabbit #627: an embedded `"` does not close it). False, `i` unmoved, when the `r`
+// is part of an identifier or no raw string starts there.
+inline bool skipRawString( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const bool tokenStart = i == 0 || !namesplit::isIdentChar( src[ i - 1 ] ) || ( src[ i - 1 ] == 'b' && ( i == 1 || !namesplit::isIdentChar( src[ i - 2 ] ) ) );
+    if( src[ i ] != 'r' || !tokenStart )
+    {
+        return false;
+    }
+    std::uint32_t q = i + 1;
+    while( q < end && src[ q ] == '#' )
+    {
+        ++q;
+    }
+    if( q >= end || src[ q ] != '"' )
+    {
+        return false;
+    }
+    const std::string closer = "\"" + std::string( q - i - 1, '#' );
+    const std::size_t close  = src.substr( 0, end ).find( closer, q + 1 );
+    const std::uint32_t stop = close == std::string_view::npos ? end : static_cast<std::uint32_t>( close + closer.size() );
+    line += static_cast<std::uint32_t>( std::count( src.begin() + i, src.begin() + stop, '\n' ) );
+    i = stop;
+    return true;
+}
+// A char literal at `i` (`'"'`, `'\''`, `'\u{22}'`): moves `i` past it, so its quote opens no string. False for a lifetime or label
+// (`'a`), which has no closing `'` right after one character or an escape.
+inline bool skipCharLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end ) noexcept
+{
+    if( src[ i ] != '\'' || i + 2 >= end )
+    {
+        return false;
+    }
+    if( src[ i + 1 ] != '\\' )
+    {
+        if( src[ i + 2 ] != '\'' )
+        {
+            return false;   // a lifetime or a label
+        }
+        i += 3;
+        return true;
+    }
+    const std::size_t close = src.substr( 0, end ).find( '\'', i + 3 );
+    if( close == std::string_view::npos || close > i + 12 )
+    {
+        return false;
+    }
+    i = static_cast<std::uint32_t>( close + 1 );
+    return true;
+}
+// Any literal or comment at `i` that the scan must not read calls in: moves `i` past it. False, `i` unmoved, when none starts.
+inline bool skipLiteralOrComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    if( src[ i ] == '"' )
+    {
+        skipStringLiteral( src, i, end, line );
+        return true;
+    }
+    return skipRawString( src, i, end, line ) || skipCharLiteral( src, i, end ) || skipComment( src, i, end, line );
+}
+// `$crate` at `at` followed by ( `::` ident )+ `!` (not `!=`): the last segment's [nameAt, nameEnd). Only peeks.
+inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    nameAt = nameEnd = 0;
+    std::uint32_t j  = at + 6;
+    for( ;; )
+    {
+        std::uint32_t k = skipBlanks( src, j, end );
+        if( k + 1 >= end || src[ k ] != ':' || src[ k + 1 ] != ':' )
+        {
+            break;
+        }
+        const std::uint32_t segAt = skipBlanks( src, k + 2, end );
+        for( k = segAt; k < end && namesplit::isIdentChar( src[ k ] ); ++k )
+        {
+        }
+        if( k == segAt )
+        {
+            break;
+        }
+        nameAt  = segAt;
+        nameEnd = k;
+        j       = k;
+    }
+    j = skipBlanks( src, j, end );
+    return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
+}
+// Where one `$crate::a::name!` sits: `$crate` at byte `at`, the macro name at [nameAt, nameEnd), in file `fileId` on 1-based `line`
+// (five uint32_t, named at the call).
+struct CrateMacroSite
+{
+    std::uint32_t at      = 0;
+    std::uint32_t nameAt  = 0;
+    std::uint32_t nameEnd = 0;
+    std::uint32_t fileId  = 0;
+    std::uint32_t line    = 0;
+};
+// The Macro reference for `$crate::a::name!` at `site.at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, CrateMacroSite site )
+{
+    const std::uint32_t at      = site.at;
+    const std::uint32_t nameAt  = site.nameAt;
+    const std::uint32_t nameEnd = site.nameEnd;
+    const std::uint32_t fileId  = site.fileId;
+    const std::uint32_t line    = site.line;
+    std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
+    while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
+    {
+        path.remove_suffix( 1 );
+    }
+    RawRef r;
+    r.fileId    = fileId;
+    r.startByte = at;
+    r.line      = line;
+    r.lang      = Lang::Rust;
+    r.role      = RefRole::Macro;
+    r.name      = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    std::string qualifier;
+    std::string written;
+    rustMacroPathOf( path, qualifier, written );
+    r.qualifier = qualifier;
+    if( !written.empty() )
+    {
+        r.setFieldName( std::move( written ) );
+    }
+    return r;
+}
+
+// BX2 FIX 5 — CALLS IN A TRANSCRIBER (test/rustmacrocallcheck.sh). axum calls Route::oneshot_inner_owned twice only inside the
+// fn-local `call!` macro_rules of MethodRouter::call_with_state (`return route.oneshot_inner_owned($req);`): a token tree is not
+// parsed, so no tags pattern saw the call and --callers missed the file. The same lexical floor the C macro-body scan keeps
+// (ingest_relations.h captureMacroBodyCalls), over each rule's TRANSCRIBER only (the right of `=>`; a matcher holds fragment
+// specifiers, never calls): a call-shaped `name(`, `.name(` (a member call) or `a::b::name(` / `$crate::a::name(` (a path call,
+// its qualifier and written path read as a macro path's are, `$crate` as `crate`), one Call reference at the name's byte, so the
+// macro's span owns it and the graph connects THROUGH the macro, as it does for C. Not read: a metavariable (`$f(`), a keyword
+// (`if (`, `match (`), a definition (`fn name(`), a macro (`name!(`), a turbofish or generic path segment (`Vec::<T>::new(`,
+// a floor), anything in a literal or comment. `Self::` names the impl of the EXPANSION site: read as a bare name.
+inline constexpr std::array<std::string_view, 32> kTranscriberKeywords = {
+    "if", "while", "match", "for", "return", "loop", "in", "as", "let", "mut", "ref", "move", "unsafe", "async", "await", "fn",
+    "impl", "where", "dyn", "else", "break", "continue", "struct", "enum", "union", "type", "use", "mod", "pub", "const", "static", "trait" };
+// The previous non-blank byte before `at` within [begin, at), or '\0'; `before` receives its index.
+inline char prevNonBlank( std::string_view src, std::uint32_t begin, std::uint32_t at, std::uint32_t& before ) noexcept
+{
+    for( std::uint32_t k = at; k > begin; --k )
+    {
+        if( !rw::isJsonWs( src[ k - 1 ] ) )
+        {
+            before = k - 1;
+            return src[ k - 1 ];
+        }
+    }
+    before = begin;
+    return '\0';
+}
+// True when the word right before `at` (blanks skipped) is `fn`: `fn name(` defines, it does not call.
+inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint32_t at ) noexcept
+{
+    std::uint32_t before = 0;
+    if( prevNonBlank( src, begin, at, before ) != 'n' || before < begin + 1 || src[ before - 1 ] != 'f' )
+    {
+        return false;
+    }
+    return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
+}
+// One path `seg ( :: seg )*` starting at `at` (an identifier or `$crate`): moves `at` past it, the last segment's bytes into
+// [nameAt, nameEnd). False when a segment is not an identifier (a metavariable, a turbofish `::<`): `at` then sits past what was read.
+inline bool readCallPath( std::string_view src, std::uint32_t& at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    for( bool first = true;; first = false )
+    {
+        std::uint32_t k = at;
+        if( first && src[ k ] == '$' )
+        {
+            k += 6;   // `$crate`, checked by the caller
+        }
+        else
+        {
+            while( k < end && namesplit::isIdentChar( src[ k ] ) )
+            {
+                ++k;
+            }
+        }
+        if( k == at )
+        {
+            return false;
+        }
+        nameAt  = at;
+        nameEnd = k;
+        at      = k;
+        const std::uint32_t sep = skipBlanks( src, k, end );
+        if( sep + 1 >= end || src[ sep ] != ':' || src[ sep + 1 ] != ':' )
+        {
+            return true;
+        }
+        at = skipBlanks( src, sep + 2, end );
+        if( at >= end || !namesplit::isIdentChar( src[ at ] ) )
+        {
+            return false;   // `Vec::<T>`, `x::$m`: not a plain path
+        }
+    }
+}
+// The Call reference for the call whose path starts at `pathAt` and whose last segment is [nameAt, nameEnd).
+inline RawRef transcriberCallRef( std::string_view src, std::uint32_t pathAt, std::uint32_t nameAt, std::uint32_t nameEnd, bool member,
+                                  std::uint32_t fileId, std::uint32_t line )
+{
+    RawRef r;
+    r.fileId     = fileId;
+    r.startByte  = nameAt;
+    r.line       = line;
+    r.lang       = Lang::Rust;
+    r.role       = RefRole::Call;
+    r.memberCall = member;
+    r.name       = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    if( nameAt > pathAt )
+    {
+        std::string_view path = src.substr( pathAt, nameAt - pathAt );   // `a::b::` — its trailing `::` dropped
+        while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
+        {
+            path.remove_suffix( 1 );
+        }
+        std::string qualifier;
+        std::string written;
+        rustMacroPathOf( path, qualifier, written );
+        if( qualifier != "Self" )
+        {
+            r.qualifier = qualifier;
+            if( !written.empty() )
+            {
+                r.setFieldName( std::move( written ) );   // the whole written qualifier, as a path call's (model.h Reference::fieldName)
+            }
+        }
+    }
+    return r;
+}
+// The calls one transcriber token tree [begin, end) spells, starting on 1-based line `line`.
+inline void scanTranscriberCalls( std::string_view src, std::uint32_t begin, std::uint32_t end, std::uint32_t line, std::uint32_t fileId,
+                                  std::vector<RawRef>& refs )
+{
+    std::uint32_t i = begin;
+    while( i < end )
+    {
+        if( src[ i ] == '\n' )
+        {
+            ++line;
+            ++i;
+            continue;
+        }
+        if( skipLiteralOrComment( src, i, end, line ) )
+        {
+            continue;
+        }
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
+        const bool atWord  = namesplit::isIdentChar( src[ i ] ) && !( src[ i ] >= '0' && src[ i ] <= '9' ) && ( i == begin || !namesplit::isIdentChar( src[ i - 1 ] ) );
+        if( !atCrate && !atWord )
+        {
+            ++i;
+            continue;
+        }
+        if( atWord && i > begin && src[ i - 1 ] == '$' )
+        {
+            while( i < end && namesplit::isIdentChar( src[ i ] ) )   // a metavariable `$name`: never a callee here
+            {
+                ++i;
+            }
+            continue;
+        }
+        std::uint32_t       before  = 0;
+        const char          prev    = prevNonBlank( src, begin, i, before );
+        const bool          member  = prev == '.' && !( before > begin && src[ before - 1 ] == '.' );   // `x.f(`, never a range `..f(`
+        const bool          pathed  = prev == ':' && before > begin && src[ before - 1 ] == ':';       // mid-path: a start this scan does not read
+        const std::uint32_t pathAt  = i;
+        std::uint32_t       nameAt  = 0;
+        std::uint32_t       nameEnd = 0;
+        const bool          plain   = readCallPath( src, i, end, nameAt, nameEnd );
+        const std::uint32_t toName  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + nameAt, '\n' ) );
+        const std::uint32_t inPath  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + i, '\n' ) );
+        const std::uint32_t next    = skipBlanks( src, i, end );
+        const bool          call    = plain && !pathed && next < end && src[ next ] == '(' && !( atCrate && nameAt == pathAt )
+                                   && !std::ranges::contains( kTranscriberKeywords, src.substr( nameAt, nameEnd - nameAt ) ) && !( nameAt == pathAt && afterFnKeyword( src, begin, pathAt ) );
+        if( call )
+        {
+            refs.push_back( transcriberCallRef( src, pathAt, nameAt, nameEnd, member && nameAt == pathAt, fileId, line + toName ) );
+        }
+        line += inPath;   // the scan resumes past the path; a newline inside it is counted here
+    }
+}
+// Each rule's transcriber (`macro_rule`'s right:) of `macroDef`, in source order.
+inline void scanMacroTranscribers( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    const std::uint32_t rules = ts_node_named_child_count( macroDef );
+    for( std::uint32_t c = 0; c < rules; ++c )
+    {
+        const TSNode rule  = ts_node_named_child( macroDef, c );
+        const TSNode right = kindIs( ts_node_type( rule ), "macro_rule" ) ? fieldChild( rule, NodeField::Right ) : TSNode{};
+        if( !ts_node_is_null( right ) && ts_node_end_byte( right ) <= src.size() )
+        {
+            scanTranscriberCalls( src, ts_node_start_byte( right ), ts_node_end_byte( right ), ts_node_start_point( right ).row + 1, fileId, refs );
+        }
+    }
+}
+}   // namespace rust_transcriber_scan
+
+inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    using namespace rust_transcriber_scan;
+    scanMacroTranscribers( macroDef, fileId, src, refs );   // BX2 FIX 5: the calls each transcriber spells
+    const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
+    std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
+    std::uint32_t       i    = ts_node_start_byte( macroDef );
+    while( i < end )
+    {
+        if( src[ i ] == '\n' )
+        {
+            ++line;
+            ++i;
+            continue;
+        }
+        if( skipLiteralOrComment( src, i, end, line ) )
+        {
+            continue;
+        }
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
+        if( !atCrate )
+        {
+            ++i;
+            continue;
+        }
+        std::uint32_t nameAt  = 0;
+        std::uint32_t nameEnd = 0;
+        if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
+        {
+            refs.push_back( cratePathMacroRef( src, { .at = i, .nameAt = nameAt, .nameEnd = nameEnd, .fileId = fileId, .line = line } ) );
+        }
+        i += 6;   // resume past `$crate` so a newline inside the path is still counted
+    }
 }
 
 // The name a written type ends in: `Deb`, `*Deb` → "Deb"; `Stack[T]`, `*Stack[T]`, `Foo<T>` → the name, never the
@@ -1048,7 +1533,7 @@ inline std::string_view finalTypeSegment( TSNode typeNode, std::string_view src 
             typeNode = ts_node_named_child_count( typeNode ) > 0 ? ts_node_named_child( typeNode, ts_node_named_child_count( typeNode ) - 1 ) : TSNode{};
             if( !ts_node_is_null( typeNode ) && kindIs( t, "generic_type" ) )
             {
-                typeNode = ts_node_named_child( ts_node_parent( typeNode ), 0 );   // `Foo<T>`: the name, never the argument list
+                typeNode = ts_node_named_child( parentOf( typeNode ), 0 );   // `Foo<T>`: the name, never the argument list
             }
         }
         else if( kindIs( t, "member_expression" ) || kindIs( t, "scoped_type_identifier" ) || kindIs( t, "nested_identifier" ) )
@@ -1126,7 +1611,7 @@ inline std::string_view receiverTypeName( TSNode method, std::string_view src )
 // `self.m()`/`this->m()`/bare member call resolves to scope::m) and what a `Type::m` selector matches.
 inline std::string enclosingScopeOf( TSNode node, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view kind( ts_node_type( p ) );   // one strlen per ancestor, then a compare per row
         for( const ScopeOwnerRow& row : kScopeOwners )
@@ -1163,7 +1648,7 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
 // so a member of one scopes to the class that owns it.
 inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         const bool scopeOwner =    kindIs( t, "class_declaration" )
@@ -1184,10 +1669,41 @@ inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src
     return {};
 }
 
+// Proto (PROTO-INDEX): the enclosing message, enum or service of a definition: a nested message's or enum's owner, an
+// enum value's enum, an rpc's service. The grammar names none of these by field, so the name is the one named child of the
+// owner's *_name kind. The definition's own node is walked through (its name node lies inside it). "" at file level.
+inline std::string protoEnclosingScopeOf( TSNode nameNode, std::string_view src )
+{
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* t        = ts_node_type( p );
+        const char* nameKind = ( kindIs( t, "message" ) || kindIs( t, "group" ) ) ? "message_name"
+                             : kindIs( t, "enum" )                               ? "enum_name"
+                             : kindIs( t, "service" )                            ? "service_name"
+                                                                                 : nullptr;
+        if( nameKind == nullptr )
+        {
+            continue;
+        }
+        const TSNode nm = firstChildOfKind( p, /*namedOnly=*/true, { nameKind } );
+        if( ts_node_is_null( nm ) )
+        {
+            return {};
+        }
+        const std::uint32_t a = ts_node_start_byte( nm ), b = ts_node_end_byte( nm );
+        if( a <= ts_node_start_byte( nameNode ) && ts_node_end_byte( nameNode ) <= b )
+        {
+            continue;   // this IS the definition being scoped
+        }
+        return ( a <= b && b <= src.size() ) ? std::string( src.substr( a, b - a ) ) : std::string{};
+    }
+    return {};
+}
+
 // Which walker gives a definition its scope at capture (ingest_sidecap.h captureTagsFacts), one row per language. None =
 // the language has no row here: C++ (an out-of-line qualifier comes first, then this walker), Ruby, Elixir and the JS/TS
 // built-in prototype methods keep their own arms there; every other language records no scope.
-enum class DefScopeWalker : std::uint8_t { None, Shared, Rust, Kotlin };
+enum class DefScopeWalker : std::uint8_t { None, Shared, Rust, Kotlin, Proto };
 inline constexpr std::array<DefScopeWalker, kLangCount> kDefScopeWalkerOfLang = []
 {
     std::array<DefScopeWalker, kLangCount> table {};   // value-initialised: every language None unless routed below
@@ -1198,6 +1714,7 @@ inline constexpr std::array<DefScopeWalker, kLangCount> kDefScopeWalkerOfLang = 
     // same-named methods from colliding under the Kotlin<->Java langCompatible bridge (graph.h) — an unqualified
     // name-only match is exactly the false-candidate risk that bridge's own comment names.
     table[ static_cast<std::size_t>( Lang::Kotlin ) ] = DefScopeWalker::Kotlin;
+    table[ static_cast<std::size_t>( Lang::Proto ) ]  = DefScopeWalker::Proto;    // a nested message's, enum value's or rpc's owner
     return table;
 }();
 
@@ -1209,6 +1726,7 @@ inline std::string defScopeOf( Lang lang, TSNode nameNode, std::string_view src 
     case DefScopeWalker::Shared: return enclosingScopeOf( nameNode, src );
     case DefScopeWalker::Rust:   return rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
     case DefScopeWalker::Kotlin: return kotlinEnclosingScopeOf( nameNode, src );
+    case DefScopeWalker::Proto:  return protoEnclosingScopeOf( nameNode, src );
     case DefScopeWalker::None:   break;
     }
     return {};
@@ -1229,7 +1747,7 @@ inline std::string defScopeOf( Lang lang, TSNode nameNode, std::string_view src 
 // Returns "" at file level, so a top-level `def` keeps no scope and no id= (the file is not a scope).
 inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         if( !kindIs( t, "class" ) && !kindIs( t, "module" ) )
@@ -1271,12 +1789,12 @@ inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
 // the same (assignment) node to this grammar, so it needs no separate arm. Both are gated.
 inline bool rubyCallIsAssignmentTarget( TSNode nameNode ) noexcept
 {
-    const TSNode call = ts_node_parent( nameNode );
+    const TSNode call = parentOf( nameNode );
     if( ts_node_is_null( call ) || !kindIs( ts_node_type( call ), "call" ) )
     {
         return false;
     }
-    const TSNode assign = ts_node_parent( call );
+    const TSNode assign = parentOf( call );
     if( ts_node_is_null( assign ) || !kindIs( ts_node_type( assign ), "assignment" ) )
     {
         return false;
@@ -1416,7 +1934,7 @@ inline void captureRubyDefs( TSNode root, std::uint32_t fileId, std::string_view
 // asks it — Swift's local binding below and C++'s block-scope direct-initialized local (cppBlockScopeDirectInit).
 inline bool nearestScopeOwnerIs( TSNode node, std::initializer_list<std::string_view> inside, std::initializer_list<std::string_view> outside ) noexcept
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view kind( ts_node_type( p ) );
         if( std::find( inside.begin(), inside.end(), kind ) != inside.end() )
@@ -1616,7 +2134,7 @@ inline bool csharpNodeCarriesTestAttr( TSNode n, std::string_view src ) noexcept
 inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexcept
 {
     bool enclosedByClass = false;
-    for( TSNode n = defNode; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = defNode; !ts_node_is_null( n ); n = parentOf( n ) )
     {
         if( !kindIs( ts_node_type( n ), "class_definition" ) )
         {
@@ -1643,7 +2161,7 @@ inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexce
 template<class NodePred>
 inline bool anySelfOrAncestor( TSNode node, NodePred pred ) noexcept
 {
-    for( TSNode n = node; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = node; !ts_node_is_null( n ); n = parentOf( n ) )
     {
         if( pred( n ) )
         {
@@ -1667,7 +2185,7 @@ inline std::uint8_t parseRecoveredBits( TSNode defNode, SymKind kind, Lang lang,
     {
         return 0;
     }
-    const bool hasErrorAncestor = anySelfOrAncestor( ts_node_parent( defNode ), []( TSNode n ) noexcept { return ts_node_is_error( n ); } );
+    const bool hasErrorAncestor = anySelfOrAncestor( parentOf( defNode ), []( TSNode n ) noexcept { return ts_node_is_error( n ); } );
     if( !hasErrorAncestor )
     {
         return 0;
@@ -1787,7 +2305,7 @@ inline bool bindsOutsideItsFunction( TSNode roleNode, Lang lang ) noexcept
         }
         const bool localToken  = !e.localChildToken.empty() && ts_node_child_count( roleNode ) > 0
                                  && std::string_view( ts_node_type( ts_node_child( roleNode, 0 ) ) ) == e.localChildToken;
-        const TSNode parent      = ts_node_parent( roleNode );   // null above the root: no parent kind, never ts_node_type( null )
+        const TSNode parent      = parentOf( roleNode );   // null above the root: no parent kind, never ts_node_type( null )
         const bool   localParent = !e.localParentKind.empty() && !ts_node_is_null( parent ) && std::string_view( ts_node_type( parent ) ) == e.localParentKind;
         return !localToken && !localParent;
     }
@@ -1813,7 +2331,7 @@ inline FnScope enclosingFunctionScope( TSNode root, TSNode defNode ) noexcept
     for( TSNode n = root; !ts_node_is_null( n ) && !ts_node_is_null( defNode ) && !ts_node_eq( n, defNode ); n = ts_node_child_with_descendant( n, defNode ) )
     {
         const char* t = ts_node_type( n );
-        if( namesNode( kMemberContainerKinds, t ) )
+        if( isOneOf( t, kMemberContainerKinds ) )
         {
             scope = {};   // a member of a class/impl body below here, unless a function nests deeper still
         }
@@ -1958,7 +2476,7 @@ inline bool isScreamingSnakeName( std::string_view name ) noexcept
 // Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
 // constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the
 // right shape — the name gate is what scopes extraction to settings modules / feature-flag tables
-// instead of every literal. Enforced HERE because tags-pass predicates never run (#match? is wired into
+// instead of every literal. Enforced HERE because tags-pass predicates did not run before #355 (#match? is wired into
 // --match/--lint only — measured; see the note in queries/cpp/tags.scm). Deliberately NOT gated:
 // Python (vendored upstream pattern, case-blind since import — existing behavior pinned by constcheck),
 // Go (const/var patterns predate this and Go constants are conventionally CamelCase), Rust (const_item/
@@ -1991,7 +2509,7 @@ inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
 // up to the captured declaration is the robust discriminator.
 inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexcept
 {
-    for( TSNode walk = ts_node_parent( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = ts_node_parent( walk ) )
+    for( TSNode walk = parentOf( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = parentOf( walk ) )
     {
         if( kindIs( ts_node_type( walk ), "init_declarator" ) )
         {
@@ -2042,7 +2560,7 @@ inline std::string_view childTokenAmong( TSNode node, std::string_view src, cons
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
 // patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
 // compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
-// there would make ts_query_new reject the whole query; tags-pass predicates never run (measured; see
+// there would make ts_query_new reject the whole query; tags-pass predicates did not run before #355 (measured; see
 // the cast-keyword note in tags.scm); and a `(type_qualifier)` child constraint cannot see `__device__`
 // anyway — tree-sitter-cuda parses `__constant__`/`__managed__` as NAMED type_qualifier nodes but
 // `__device__` as an ANONYMOUS token child of the declaration. The qualifier test therefore lives here,
@@ -2079,7 +2597,7 @@ inline bool declarationCarriesConstQualifier( TSNode declNode, std::string_view 
 
 // The keep decision for the class-static-constant field_declaration captures (queries/cpp/tags.scm,
 // module-constant round). The pattern is deliberately loose — it matches EVERY default-member-
-// initializer, because tags-pass predicates never run and static/constexpr child order is free — so
+// initializer, because tags-pass predicates did not run before #355 and static/constexpr child order is free — so
 // this is where the real contract lives: keep iff the field carries BOTH a `static`
 // storage_class_specifier AND a const/constexpr/constinit type_qualifier. That keeps
 // `static constexpr int kMaxDepth = 3;` case-blind (one per-class constant, the census target) and
@@ -2093,7 +2611,7 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
 }
 
 // The keep decision for the @definition.field captures (member-variable round, card A3; queries/cpp,
-// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates never run
+// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates did not run before #355
 // — so the contract lives here, per language:
 //   C/C++ : keep iff the field_declaration carries NO `static` storage_class_specifier. A class-static
 //           CONSTANT keeps its own @definition.constant row (t="var", fieldConstantCaptureKept); a mutable
@@ -2116,7 +2634,7 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     {
         return false;   // no other grammar carries the capture — a query that grew one would need its own arm here
     }
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -2131,7 +2649,7 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
         return false;   // `obj.x = …` / `cls.x = …` — not an instance attribute of the enclosing class
     }
     bool sawFunction = false;
-    for( TSNode up = ts_node_parent( roleNode ); !ts_node_is_null( up ); up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( roleNode ); !ts_node_is_null( up ); up = parentOf( up ) )
     {
         const char* ut = ts_node_type( up );
         if( kindIs( ut, "function_definition" ) )
@@ -2165,13 +2683,13 @@ inline bool cppInternalLinkage( TSNode defNode, std::string_view src ) noexcept
     {
         return false;
     }
-    const TSNode parent      = ts_node_parent( defNode );
+    const TSNode parent      = parentOf( defNode );
     const bool   classMember = !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "field_declaration_list" );
     if( !classMember && !childTokenAmong( defNode, src, "storage_class_specifier", /*acceptAnonymousToken=*/false, { "static" } ).empty() )
     {
         return true;   // shape 2
     }
-    for( TSNode p = parent; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parent; !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( kindIs( ts_node_type( p ), "namespace_definition" ) && ts_node_is_null( fieldChild( p, NodeField::Name ) ) )
         {
@@ -2324,12 +2842,12 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 {
     // the declarator of a DECLARATION, through the `*` / `&` it may sit under. A definition's, a member's or a parameter's
     // function_declarator stops at the first parent — almost every capture this pattern makes.
-    TSNode decl    = ts_node_parent( fnDeclarator );
+    TSNode decl    = parentOf( fnDeclarator );
     bool   wrapped = false;
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && ( kindIs( ts_node_type( decl ), "pointer_declarator" ) || kindIs( ts_node_type( decl ), "reference_declarator" ) ); ++guard )
     {
         wrapped = true;
-        decl    = ts_node_parent( decl );
+        decl    = parentOf( decl );
     }
     if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "declaration" ) )
     {
@@ -2338,6 +2856,559 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
     // block scope: a function or lambda body owns the declaration before any class, namespace or file scope does
     return !cppDeclarationPrototypeOnly( decl, wrapped, src ) && cppArgumentListDeclarator( fnDeclarator )
         && nearestScopeOwnerIs( decl, { "function_definition", "lambda_expression" }, { "field_declaration_list", "declaration_list", "translation_unit" } );
+}
+
+// ---- MACRO-P0: a macro INVOCATION the grammar reads as a typeless declarator (test/macroedgecheck.sh section 9) ----
+// tree-sitter cannot expand a macro, so an invocation written where a declaration may stand parses as a function
+// declarator with no type: `REGISTER_FACTORY( F, B ){ "name" };` as a function_definition whose "body" is the brace
+// initialiser, `FALSE_RUNTIME_GUARD( x );` / a class-member `MOCK_METHOD( … );` / `DECLARE_LUA_FUNCTION( C, f );` as a
+// declaration, and an in-function `ASSIGN_OR_CO_RETURN( auto e, co_await f() );` inside an ERROR node. queries/c|cpp|objc
+// tags.scm minted a function definition named after the MACRO for each one (envoy 1,664, cpython 1,135). Worse than the
+// phantom rows: a phantom makes the macro's name non-unique, so model.h retagMacroCallReferences — which may only retag a
+// name that is UNIQUELY a macro — skipped every real invocation, and envoy's REGISTER_FACTORY read in=0 against 573
+// sites. THE TRAP: removing all but one phantom changes nothing (the name is still shared), so the rule must catch every
+// shape, which is why the gate counts phantoms and FAILs on any.
+//
+// The rule is syntactic and one-sided: the capture is an invocation only when ALL of these hold —
+//   * the name is SCREAMING_SNAKE (the macro convention) and not a block-forming test macro (kBlockFormingTestMacros: an
+//     empty `TEST( S, N ) {}` keeps its def, the documented floor of quality.h kBuiltinRegisterMacros);
+//   * the declarator names a plain identifier: a qualified `HSV::HSV() {}` is a member, and a macro is never qualified;
+//   * its owner (a function_definition, declaration or field_declaration, through `*` / `&` / init declarators) carries
+//     no type; or the owner is an ERROR node and no type node stands right before the declarator;
+//   * it is not a constructor (the enclosing class's own name: `struct RGB { RGB() {} };`);
+//   * a definition's braces hold no `;` before their own closing brace, or they do not follow the invocation's own closed
+//     `( … )` (bodyFollowsClosedParameters: error recovery read a later body): a body with a statement right after the
+//     parentheses is a block-forming macro (`TEST_F( S, N ) { … ; }`, cpython `TARGET( op ) { … ; }`) and keeps its def,
+//     named after the macro.
+// A trailing annotation macro (`T f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }`) is one too, though its body holds `;`:
+// MACRO-P1 below (annotationHostDeclarator), and the prototype half adopts the body.
+inline constexpr std::array<std::string_view, 10> kBlockFormingTestMacros = {
+    "TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P",                                   // GoogleTest
+    "BENCHMARK", "BENCHMARK_F", "BENCHMARK_DEFINE_F", "BENCHMARK_TEMPLATE", "BENCHMARK_CAPTURE" // Google Benchmark
+};
+
+// Does a declarator name a plain identifier? A qualified `HSV::HSV() {}` is a member, and a macro is never qualified.
+inline bool plainDeclaratorName( TSNode declared ) noexcept
+{
+    return !ts_node_is_null( declared ) && ( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) );
+}
+
+// A name a macro invocation can carry: SCREAMING_SNAKE (the macro convention), and not a block-forming test macro.
+inline bool macroInvocationName( std::string_view name ) noexcept
+{
+    return isScreamingSnakeName( name ) && std::ranges::find( kBlockFormingTestMacros, name ) == kBlockFormingTestMacros.end();
+}
+
+// Is the `'` at `i` a C++14 digit separator (`1'000`, `0x1'FF`) — inside a numeric literal, i.e. the token it splits starts with a
+// digit — rather than a character literal's quote (`'a'`, and the prefixed `L'a'` / `u8'a'`, whose token starts with a letter)?
+inline bool digitSeparatorAt( std::string_view text, std::size_t i ) noexcept
+{
+    if( i == 0 || i + 1 >= text.size() || !std::isalnum( static_cast<unsigned char>( text[i + 1] ) ) )
+    {
+        return false;
+    }
+    std::size_t start = i;
+    while( start > 0 && ( std::isalnum( static_cast<unsigned char>( text[start - 1] ) ) || text[start - 1] == '\'' || text[start - 1] == '.' ) )
+    {
+        --start;
+    }
+    return start < i && std::isdigit( static_cast<unsigned char>( text[start] ) );
+}
+
+// Does a brace block's text hold a `;` before the `}` that closes its own `{`? Strings, character literals and comments
+// are skipped (a digit separator is no quote: digitSeparatorAt). Bounded by the matching brace on purpose: error recovery
+// can stretch a recovered body past it (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
+inline bool braceBlockHoldsStatement( std::string_view block ) noexcept
+{
+    int depth = 0;
+    for( std::size_t i = 0; i < block.size(); ++i )
+    {
+        const char c = block[i];
+        if( c == '\'' && digitSeparatorAt( block, i ) )
+        {
+            continue;
+        }
+        if( c == '"' || c == '\'' )
+        {
+            for( ++i; i < block.size() && block[i] != c; ++i )
+            {
+                i += block[i] == '\\' ? 1u : 0u;
+            }
+        }
+        else if( c == '/' && i + 1 < block.size() && ( block[i + 1] == '/' || block[i + 1] == '*' ) )
+        {
+            const std::size_t end = block[i + 1] == '/' ? block.find( '\n', i ) : block.find( "*/", i + 2 );
+            i                     = end == std::string_view::npos ? block.size() : end;
+        }
+        else if( c == '{' || c == '}' )
+        {
+            depth += c == '{' ? 1 : -1;
+            if( depth == 0 )
+            {
+                return false;
+            }
+        }
+        else if( c == ';' )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is this ERROR-recovered declarator typeless — no type node right before it (cFamilyMacroInvocationDecl's ERROR arm)?
+// A macro_type_specifier (`NAME( x )`) does not count as a type here: in a C run of `;`-less invocations
+// (`EXPORT_FUNC( a )` `EXPORT_FUNC( b )`, cpython PC/python3dll.c) tree-sitter-c reads the previous invocation as one.
+inline bool errorDeclaratorUntyped( TSNode fnDeclarator ) noexcept
+{
+    static constexpr std::string_view kTypeKinds[] = { "primitive_type", "type_identifier", "qualified_identifier", "template_type", "sized_type_specifier",
+                                                       "struct_specifier", "class_specifier", "union_specifier", "enum_specifier", "type_qualifier",
+                                                       "storage_class_specifier", "placeholder_type_specifier" };
+    const TSNode prev = ts_node_prev_named_sibling( fnDeclarator );
+    if( ts_node_is_null( prev ) )
+    {
+        return true;
+    }
+    const std::string_view kind = ts_node_type( prev );
+    return std::ranges::find( kTypeKinds, kind ) == std::end( kTypeKinds );
+}
+
+// Does a definition's body follow its declarator's own CLOSED parameter list, with only blanks and comments between? A
+// block-forming macro does (`TEST_F( S, N ) { … }`, `WASM_EXPORT( T, f, ( a ) ) { … }`). Error recovery that read an
+// invocation's arguments past its `)` does not: `CONSTRUCT_ON_FIRST_USE( int, []() -> int { … }() );` closes the list with a
+// MISSING ")" and reads the argument lambda's body as the def's, and envoy's multi-line MOCK_METHOD( …, ( a, ( b ) ), (const) );
+// recovers with the NEXT method's body, error nodes between.
+inline bool bodyFollowsClosedParameters( TSNode fnDeclarator, TSNode body, std::string_view src ) noexcept
+{
+    const TSNode        parameters = fieldChild( fnDeclarator, NodeField::Parameters );
+    const std::uint32_t childCount = ts_node_is_null( parameters ) ? 0u : ts_node_child_count( parameters );
+    if( childCount == 0 )
+    {
+        return false;
+    }
+    const TSNode close = ts_node_child( parameters, childCount - 1 );
+    if( ts_node_is_missing( close ) || !kindIs( ts_node_type( close ), ")" ) || ts_node_start_byte( body ) < ts_node_end_byte( parameters ) )
+    {
+        return false;
+    }
+    const std::string_view gap = src.substr( ts_node_end_byte( parameters ), ts_node_start_byte( body ) - ts_node_end_byte( parameters ) );
+    for( std::size_t i = 0; i < gap.size(); )
+    {
+        const std::string_view rest = gap.substr( i );
+        if( rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '\r' )
+        {
+            ++i;
+            continue;
+        }
+        if( !rest.starts_with( "//" ) && !rest.starts_with( "/*" ) )
+        {
+            return false;
+        }
+        const std::size_t close = rest.starts_with( "//" ) ? rest.find( '\n' ) : rest.find( "*/", 2 );
+        i                       = close == std::string_view::npos ? gap.size() : i + close + ( rest[1] == '*' ? 2u : 1u );
+    }
+    return true;
+}
+
+// Is the definition/declaration `owner` a constructor of the class whose member list holds it? A templated constructor
+// (`template <class T> RGB( T ) {}`) sits under a template_declaration inside that list.
+inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
+{
+    TSNode list = parentOf( owner );
+    if( !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "template_declaration" ) )
+    {
+        list = parentOf( list );
+    }
+    const bool   inMember = !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "field_declaration_list" );
+    return inMember && nodeFieldText( parentOf( list ), NodeField::Name, src ) == name;
+}
+
+// ---- MACRO-P1: a trailing ANNOTATION macro (test/macroedgecheck.sh section 10) ----
+// `T f( a ) ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }` — an ALL-CAPS macro call between a declarator's `)` (or its
+// const/noexcept/override) and the body — parses as a prototype `f` closed by a MISSING ";" and a typeless definition named
+// after the annotation that OWNS f's body and calls (envoy: 41 sites, CondVar::waitFor at thread.h:70). A constructor's or
+// destructor's prototype half is an ERROR node instead (it has no type to make a declaration of). The annotation is a use of
+// the macro (cFamilyMacroInvocationDecl), and the prototype adopts the body (annotatedDefinitionAfter, ingest_sidecap.h).
+// The syntax decides, never a name list: Q_INVOKABLE-style LEADING annotations and no-argument trailing ones in a class
+// parse cleanly already.
+
+// The last named child of `n` that is not a comment (null when there is none).
+inline TSNode lastNamedNonComment( TSNode n ) noexcept
+{
+    for( std::uint32_t i = ts_node_named_child_count( n ); i > 0; --i )
+    {
+        const TSNode c = ts_node_named_child( n, i - 1 );
+        if( !kindIs( ts_node_type( c ), "comment" ) )
+        {
+            return c;
+        }
+    }
+    return {};
+}
+
+// The function declarator under a declaration's `declarator:` field, through `*` / `&` wrappers (null when it is not one).
+inline TSNode functionDeclaratorOf( TSNode owner ) noexcept
+{
+    TSNode d = fieldChild( owner, NodeField::Declarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && ( kindIs( ts_node_type( d ), "pointer_declarator" ) || kindIs( ts_node_type( d ), "reference_declarator" ) ); ++guard )
+    {
+        d = fieldChild( d, NodeField::Declarator );
+    }
+    return !ts_node_is_null( d ) && kindIs( ts_node_type( d ), "function_declarator" ) ? d : TSNode {};
+}
+
+// Does the function declarator `fn`, the last child of the ERROR node `error`, declare a constructor or destructor: `~A()`,
+// `A::A( … )`, `A::~A()`, or in a class body `A( … )` named after its class? Only those have no type to make a declaration of;
+// anything else in an ERROR before a definition is a different recovery (cpython's `Py_LOCAL_INLINE( void * )` line before
+// `CHECK_CALL( Parser* p, … ) { … }`, a real function).
+inline bool constructorOrDestructorDeclarator( TSNode error, TSNode fn, std::string_view src ) noexcept
+{
+    const TSNode declared = fieldChild( fn, NodeField::Declarator );
+    if( ts_node_is_null( declared ) )
+    {
+        return false;
+    }
+    const char* kind = ts_node_type( declared );
+    if( kindIs( kind, "destructor_name" ) )
+    {
+        return true;
+    }
+    if( kindIs( kind, "qualified_identifier" ) )
+    {
+        TSNode innermost = declared;   // tree-sitter-cpp nests `a::B::B` right-recursively
+        for( int guard = 0; guard < 16; ++guard )
+        {
+            const TSNode name = fieldChild( innermost, NodeField::Name );
+            if( ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "qualified_identifier" ) )
+            {
+                break;
+            }
+            innermost = name;
+        }
+        const TSNode name = fieldChild( innermost, NodeField::Name );
+        return !ts_node_is_null( name ) && ( kindIs( ts_node_type( name ), "destructor_name" ) || nodeTextOf( name, src ) == nodeFieldText( innermost, NodeField::Scope, src ) );
+    }
+    return kindIs( kind, "identifier" ) && ownerIsConstructorOf( error, nodeTextOf( declared, src ), src );
+}
+
+// The prototype half of an annotated function that stands right before `owner` (comments skipped): the function declarator
+// of a declaration closed by a MISSING ";" (inside a template_declaration too), or of an ERROR node's last child when that
+// declares a constructor or destructor, or an out-of-line destructor's `A::~A()` the grammar read as a call (inside an
+// ERROR, or as an expression statement closed by a MISSING ";"). Null when `owner` follows anything else.
+inline TSNode annotationHostDeclarator( TSNode owner, std::string_view src ) noexcept
+{
+    TSNode prev = ts_node_prev_named_sibling( owner );
+    while( !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "comment" ) )
+    {
+        prev = ts_node_prev_named_sibling( prev );
+    }
+    if( ts_node_is_null( prev ) )
+    {
+        return {};
+    }
+    const TSNode inner = kindIs( ts_node_type( prev ), "template_declaration" ) ? lastNamedNonComment( prev ) : prev;
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const char*         kind    = ts_node_type( inner );
+    const std::uint32_t count   = ts_node_child_count( inner );
+    const bool          missing = count != 0 && ts_node_is_missing( ts_node_child( inner, count - 1 ) );
+    if( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) )
+    {
+        return missing ? functionDeclaratorOf( inner ) : TSNode {};
+    }
+    if( !( kindIs( kind, "ERROR" ) || ( missing && kindIs( kind, "expression_statement" ) ) ) )
+    {
+        return {};
+    }
+    const TSNode last = lastNamedNonComment( inner );
+    if( ts_node_is_null( last ) )
+    {
+        return {};
+    }
+    if( kindIs( ts_node_type( last ), "function_declarator" ) )
+    {
+        return constructorOrDestructorDeclarator( inner, last, src ) ? last : TSNode {};
+    }
+    const TSNode callee = kindIs( ts_node_type( last ), "call_expression" ) ? fieldChild( last, NodeField::Function ) : TSNode {};
+    const TSNode tail   = ts_node_is_null( callee ) || !kindIs( ts_node_type( callee ), "qualified_identifier" ) ? TSNode {} : fieldChild( callee, NodeField::Name );
+    return !ts_node_is_null( tail ) && kindIs( ts_node_type( tail ), "destructor_name" ) ? last : TSNode {};
+}
+
+// The empty-parentheses shape: `void A::f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { … }` reads `A::f()` as a variable
+// initialised by an empty argument list (an init_declarator), so tags.scm captures no prototype and the function is MISSING
+// from the index (envoy: AdminResponse::sendErrorLockHeld, SymbolTable::newSymbol, ReleasableLockGuard::release). The name
+// node such an init_declarator declares — an identifier or field_identifier, the innermost of a qualified one, never an
+// ALL-CAPS one — or null.
+inline TSNode emptyCallInitName( TSNode init, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( init ) || !kindIs( ts_node_type( init ), "init_declarator" ) )
+    {
+        return {};
+    }
+    const TSNode value = fieldChild( init, NodeField::Value );
+    if( ts_node_is_null( value ) || !kindIs( ts_node_type( value ), "argument_list" ) || ts_node_named_child_count( value ) != 0 )
+    {
+        return {};
+    }
+    TSNode name = fieldChild( init, NodeField::Declarator );
+    for( int guard = 0; guard < 16 && !ts_node_is_null( name ) && kindIs( ts_node_type( name ), "qualified_identifier" ); ++guard )
+    {
+        name = fieldChild( name, NodeField::Name );
+    }
+    const bool plain = !ts_node_is_null( name ) && ( kindIs( ts_node_type( name ), "identifier" ) || kindIs( ts_node_type( name ), "field_identifier" ) );
+    return plain && !isScreamingSnakeName( nodeTextOf( name, src ) ) ? name : TSNode {};
+}
+
+// The annotation definition that must carry the REAL function's name, because no prototype half was captured: where the
+// definition (`macroDeclarator`'s function_definition) and the node its span starts at. `start` is the declaration closed by
+// a MISSING ";" for a typeless definition, and null for a typed one (whose ERROR child already lies inside its span).
+struct AnnotationRename
+{
+    TSNode name;
+    TSNode start;
+};
+inline AnnotationRename annotationRenamedName( TSNode macroDeclarator, std::string_view src ) noexcept
+{
+    const TSNode owner = parentOf( macroDeclarator );
+    if( ts_node_is_null( owner ) || !kindIs( ts_node_type( owner ), "function_definition" ) )
+    {
+        return {};
+    }
+    if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
+    {
+        const TSNode prev = ts_node_prev_named_sibling( macroDeclarator );
+        return { !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "ERROR" ) ? emptyCallInitName( lastNamedNonComment( prev ), src ) : TSNode {}, {} };
+    }
+    TSNode prev = ts_node_prev_named_sibling( owner );
+    while( !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "comment" ) )
+    {
+        prev = ts_node_prev_named_sibling( prev );
+    }
+    const std::uint32_t count = ts_node_is_null( prev ) ? 0u : ts_node_child_count( prev );
+    if( count == 0 || !ts_node_is_missing( ts_node_child( prev, count - 1 ) ) )
+    {
+        return {};
+    }
+    const char* kind = ts_node_type( prev );
+    TSNode      name {};
+    if( ( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) && !ts_node_is_null( fieldChild( prev, NodeField::Type ) ) )
+    {
+        name = emptyCallInitName( fieldChild( prev, NodeField::Declarator ), src );
+    }
+    else if( kindIs( kind, "expression_statement" ) )
+    {
+        // `absl::flat_hash_set<const D*>& active()` read as the expression `a::b<…> & active()`: a reference or pointer
+        // return type taken for a multiplication or bitwise and, whose right side calls the real function's name
+        const TSNode expr     = ts_node_named_child( prev, 0 );
+        const bool   typeLike = !ts_node_is_null( expr ) && kindIs( ts_node_type( expr ), "binary_expression" )
+                              && ( nodeFieldText( expr, NodeField::Operator, src ) == "&" || nodeFieldText( expr, NodeField::Operator, src ) == "*" );
+        const TSNode call     = typeLike ? fieldChild( expr, NodeField::Right ) : TSNode {};
+        const TSNode callee   = !ts_node_is_null( call ) && kindIs( ts_node_type( call ), "call_expression" ) ? fieldChild( call, NodeField::Function ) : TSNode {};
+        const TSNode args     = ts_node_is_null( callee ) ? TSNode {} : fieldChild( call, NodeField::Arguments );
+        const bool   empty    = !ts_node_is_null( args ) && ts_node_named_child_count( args ) == 0;
+        name                  = empty && kindIs( ts_node_type( callee ), "identifier" ) && !isScreamingSnakeName( nodeTextOf( callee, src ) ) ? callee : TSNode {};
+    }
+    return { name, ts_node_is_null( name ) ? TSNode {} : prev };
+}
+
+// A TYPED owner whose real declarator the grammar read into an ERROR right before the macro's: `bool tryLock()
+// DISABLE( ABSL_UNLOCK_FUNCTION() ) { … }` (the ERROR holds `tryLock()`, which keeps the def and its body) and a data
+// member `int g_ ABSL_GUARDED_BY( mu_ );` (the ERROR holds `g_`). An ALL-CAPS identifier there is a calling-convention
+// macro in front of a real function (`int WINAPI CAPS_FN( int )`), so it does not count.
+inline bool annotationAfterErrorDeclarator( TSNode fnDeclarator, std::string_view src ) noexcept
+{
+    const TSNode wrapper = parentOf( fnDeclarator );
+    const TSNode anchor  = !ts_node_is_null( wrapper ) && ( kindIs( ts_node_type( wrapper ), "pointer_declarator" ) || kindIs( ts_node_type( wrapper ), "reference_declarator" ) ) ? wrapper : fnDeclarator;
+    TSNode       prev    = ts_node_prev_named_sibling( fnDeclarator );
+    if( ts_node_is_null( prev ) || !kindIs( ts_node_type( prev ), "ERROR" ) )
+    {
+        prev = ts_node_eq( anchor, fnDeclarator ) ? TSNode {} : ts_node_prev_named_sibling( anchor );
+    }
+    if( ts_node_is_null( prev ) || !kindIs( ts_node_type( prev ), "ERROR" ) )
+    {
+        return false;
+    }
+    const TSNode last = lastNamedNonComment( prev );
+    if( ts_node_is_null( last ) )
+    {
+        return false;
+    }
+    const char* kind = ts_node_type( last );
+    if( kindIs( kind, "function_declarator" ) || !ts_node_is_null( emptyCallInitName( last, src ) ) )
+    {
+        return true;   // the real function: kept by its own capture, or renamed onto this definition (annotationRenamedName)
+    }
+    return ( kindIs( kind, "identifier" ) || kindIs( kind, "field_identifier" ) ) && !isScreamingSnakeName( nodeTextOf( last, src ) );
+}
+
+// A definition whose `type` is an ALL-CAPS type_identifier right after an annotated prototype: the first of two trailing
+// annotations, read as the type of a definition the second one names.
+inline bool annotationTypedAsType( TSNode definition, std::string_view src ) noexcept
+{
+    const TSNode type = fieldChild( definition, NodeField::Type );
+    return !ts_node_is_null( type ) && kindIs( ts_node_type( type ), "type_identifier" ) && isScreamingSnakeName( nodeTextOf( type, src ) )
+        && !ts_node_is_null( annotationHostDeclarator( definition, src ) );
+}
+
+inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    if( !macroInvocationName( name ) )
+    {
+        return false;
+    }
+    if( !plainDeclaratorName( fieldChild( fnDeclarator, NodeField::Declarator ) ) )
+    {
+        return false;
+    }
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    if( !ts_node_is_null( owner ) && kindIs( ts_node_type( owner ), "init_declarator" ) )   // `F( a, b ){ { … } };` reads as a brace-initialised declarator
+    {
+        owner = parentOf( owner );
+    }
+    if( ts_node_is_null( owner ) )
+    {
+        return false;
+    }
+    const char* ownerKind = ts_node_type( owner );
+    if( kindIs( ownerKind, "ERROR" ) )
+    {
+        return errorDeclaratorUntyped( fnDeclarator );
+    }
+    const bool isDefinition = kindIs( ownerKind, "function_definition" );
+    if( !( isDefinition || kindIs( ownerKind, "declaration" ) || kindIs( ownerKind, "field_declaration" ) ) || !ts_node_is_null( fieldChild( owner, NodeField::Type ) )
+        || ownerIsConstructorOf( owner, name, src ) )
+    {
+        return false;
+    }
+    const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
+    return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
+}
+
+// The node that owns a declarator: its parent, through `*` / `&` wrappers (null at the root).
+inline TSNode declaratorOwner( TSNode fnDeclarator ) noexcept
+{
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    return owner;
+}
+
+// `T name ABSL_GUARDED_BY( mu );` at namespace scope recovered as `name ::ABSL_GUARDED_BY( mu )` behind a MISSING "::": the
+// "scope" is the variable, the "name" the annotation. A real qualified name has its own `::`.
+inline bool qualifiedBehindMissingScope( TSNode declared ) noexcept
+{
+    if( ts_node_is_null( declared ) || !kindIs( ts_node_type( declared ), "qualified_identifier" ) || !ts_node_has_error( declared ) )
+    {
+        return false;
+    }
+    for( std::uint32_t i = 0; i < ts_node_child_count( declared ); ++i )
+    {
+        if( ts_node_is_missing( ts_node_child( declared, i ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// MACRO-P1: is the ALL-CAPS function declarator `fnDeclarator` a trailing ANNOTATION — a use of the macro, never a definition?
+// A typeless definition right after the annotated prototype (annotationHostDeclarator) or after a real function the grammar
+// read as a variable (annotationRenamedName); a typed definition or declaration whose real declarator sits in an ERROR
+// before it (annotationAfterErrorDeclarator) or whose type is a first annotation (annotationTypedAsType); a qualified name
+// behind a MISSING "::". P0's cFamilyMacroInvocationDecl keeps every one of these as a definition.
+inline bool cFamilyAnnotationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
+    if( !macroInvocationName( name ) )
+    {
+        return false;
+    }
+    if( qualifiedBehindMissingScope( declared ) )
+    {
+        return true;
+    }
+    if( !plainDeclaratorName( declared ) )
+    {
+        return false;
+    }
+    const TSNode owner = declaratorOwner( fnDeclarator );
+    const char*  kind  = ts_node_is_null( owner ) ? "" : ts_node_type( owner );
+    const bool   isDefinition = kindIs( kind, "function_definition" );
+    if( !( isDefinition || kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) )
+    {
+        return false;
+    }
+    if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
+    {
+        return annotationAfterErrorDeclarator( fnDeclarator, src ) || ( isDefinition && annotationTypedAsType( owner, src ) );
+    }
+    return isDefinition && ( !ts_node_is_null( annotationHostDeclarator( owner, src ) ) || !ts_node_is_null( annotationRenamedName( fnDeclarator, src ).name ) );
+}
+
+// MACRO-P1, the prototype side: the annotated definition whose body the prototype declarator `fnDeclarator` owns — the
+// typeless definition right after it whose annotationHostDeclarator is this very declarator. Null for every other
+// declarator; only a declaration closed by a MISSING ";", or an ERROR's last child, looks at its next sibling.
+inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view src ) noexcept
+{
+    const TSNode owner = declaratorOwner( fnDeclarator );
+    if( ts_node_is_null( owner ) )
+    {
+        return {};
+    }
+    const char* kind = ts_node_type( owner );
+    TSNode      outer {};
+    if( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) )
+    {
+        const std::uint32_t count = ts_node_child_count( owner );
+        if( count == 0 || !ts_node_is_missing( ts_node_child( owner, count - 1 ) ) )
+        {
+            return {};
+        }
+        const TSNode up = parentOf( owner );
+        outer           = !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "template_declaration" ) ? up : owner;
+    }
+    else if( kindIs( kind, "ERROR" ) && ts_node_eq( lastNamedNonComment( owner ), fnDeclarator ) )
+    {
+        outer = owner;
+    }
+    else
+    {
+        return {};
+    }
+    TSNode next = ts_node_next_named_sibling( outer );
+    while( !ts_node_is_null( next ) && kindIs( ts_node_type( next ), "comment" ) )
+    {
+        next = ts_node_next_named_sibling( next );
+    }
+    if( ts_node_is_null( next ) || !kindIs( ts_node_type( next ), "function_definition" )
+        || !( ts_node_is_null( fieldChild( next, NodeField::Type ) ) || annotationTypedAsType( next, src ) ) )
+    {
+        return {};
+    }
+    const TSNode macro = fieldChild( next, NodeField::Declarator );
+    if( ts_node_is_null( macro ) || !kindIs( ts_node_type( macro ), "function_declarator" ) || !ts_node_eq( annotationHostDeclarator( next, src ), fnDeclarator )
+        || !cFamilyAnnotationDecl( macro, nodeFieldText( macro, NodeField::Declarator, src ), src ) )
+    {
+        return {};
+    }
+    return next;
+}
+
+// The capture-side question: a C-family @definition.function/@definition.method on a function_declarator that
+// cFamilyMacroInvocationDecl reads as a macro invocation. Asked BEFORE dropGatedCapture (ingest_sidecap.h), because the
+// site does not vanish: it becomes a call-shaped use of the macro, which model.h retags role="macro".
+inline bool cFamilyMacroInvocationCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode roleNode, std::string_view src ) noexcept
+{
+    return macroRefLang( lang ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" ) && kindIs( ts_node_type( roleNode ), "function_declarator" )
+        && ( cFamilyMacroInvocationDecl( roleNode, name, src ) || cFamilyAnnotationDecl( roleNode, name, src ) );
 }
 
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
@@ -2413,7 +3484,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
 
 // YAML's @definition.yamlkey gate — the yaml tier's one in-C++ predicate (see queries/yaml/tags.scm's
 // header for why the depth cut cannot live in the query: sequence nesting between a pair and its
-// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates never run).
+// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates did not run before #355).
 // A mapping key is a symbol iff its MAPPING depth is <= 2 — block and flow mappings counted alike
 // (flow is a presentation style of the same mapping node), sequences counted NOT AT ALL (sequence
 // transparency: 25.3% of real keys sit directly inside a sequence element — the steps:/containers:/
@@ -2431,7 +3502,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
         return true;
     }
     std::uint32_t mappingDepth = 0;
-    for( TSNode p = roleNode; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = roleNode; !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* pt = ts_node_type( p );
         if( kindIs( pt, "block_mapping" ) || kindIs( pt, "flow_mapping" ) )
@@ -2452,7 +3523,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
 // test/pyshapecheck.sh) drops when the enclosing class's base NAME is not an enum family;
 // @definition.cjsexport / @definition.protomethod (the JS shape round, test/jsshapecheck.sh) drop when
 // the LEFT side is not really exports/module.exports/.prototype. — the query captures every `a.b = fn`
-// shape and cannot text-test, because tags-pass predicates never run (see constCaptureNeedsScreamingGate
+// shape and cannot text-test, because tags-pass predicates did not run before #355 (see constCaptureNeedsScreamingGate
 // above).
 inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode nameNode, TSNode roleNode, std::string_view src )   // NOT noexcept: the class-factory gate's scope lookup allocates
 {
@@ -2499,7 +3570,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
         // macro-edges round: an EMPTY-body function-like `#define NOOP(x)` defines nothing callable — drop
         // it before it mints a symbol. The @name capture's parent IS the preproc node; object-like
         // preproc_def and Rust macro_definition fail the node-type test and are never gated.
-        const TSNode defineNode = ts_node_parent( nameNode );
+        const TSNode defineNode = parentOf( nameNode );
         return !ts_node_is_null( defineNode )
             && kindIs( ts_node_type( defineNode ), "preproc_function_def" )
             && !preprocFunctionDefHasBody( defineNode, src );
@@ -2516,7 +3587,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
 // with interior spacing would still pass, a decoy like `moduleLike.exports` cannot).
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) )
     {
         return false;
@@ -2547,7 +3618,7 @@ inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
 // file's stem, the rule a Markdown file's own node is named by (ingest_parsepool.h: `fs::path( path ).stem()`).
 inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) || !kindIs( ts_node_type( member ), "member_expression" ) || nodeTextOf( nameNode, src ) != "exports" )
     {
         return false;
@@ -2561,7 +3632,7 @@ inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) no
 // share the captured shape and fail exactly this test.
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) )
     {
         return false;
@@ -2584,7 +3655,7 @@ inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noe
 // literal name, an assignment without a declaration (`Sub = Base.extend('Sub')`), and `exports.Sub = …` are not read.
 inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode decl = ts_node_parent( nameNode );
+    const TSNode decl = parentOf( nameNode );
     if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "variable_declarator" ) )
     {
         return TSNode{};
@@ -2632,7 +3703,7 @@ inline constexpr int kExtendChainCap = 16;   // factory-of-a-factory links the r
 // `{ fields: [ … ] }`) is not one — such a factory is a class only by its receiver.
 inline bool jsFactoryHasClassBody( TSNode nameNode ) noexcept
 {
-    const TSNode call = fieldChild( ts_node_parent( nameNode ), NodeField::Value );
+    const TSNode call = fieldChild( parentOf( nameNode ), NodeField::Value );
     const TSNode args = ts_node_is_null( call ) ? call : fieldChild( call, NodeField::Arguments );
     const std::uint32_t n = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args );
     for( std::uint32_t i = 1; i < n; ++i )
@@ -2676,8 +3747,8 @@ inline bool jsClassFactoryMakesClass( TSNode nameNode, std::string_view src, int
     {
         return false;
     }
-    const TSNode declarator = ts_node_parent( nameNode );   // jsClassFactoryReceiver proved it a variable_declarator
-    const TSNode statement  = ts_node_parent( declarator );
+    const TSNode declarator = parentOf( nameNode );   // jsClassFactoryReceiver proved it a variable_declarator
+    const TSNode statement  = parentOf( declarator );
     const BaseScopeHit hit  = findOutward( recv, statement, nodeTextOf( recv, src ), /*scopeOwner=*/false, src );
     if( hit.cut || hit.ambiguous || ts_node_is_null( hit.decl ) )
     {
@@ -2689,7 +3760,7 @@ inline bool jsClassFactoryMakesClass( TSNode nameNode, std::string_view src, int
         return true;
     }
     // a declarator: baseDeclNames answered with its NAME node, whose parent is the variable_declarator
-    const TSNode boundDecl = ts_node_parent( hit.name );
+    const TSNode boundDecl = parentOf( hit.name );
     const TSNode value     = ts_node_is_null( boundDecl ) ? boundDecl : fieldChild( boundDecl, NodeField::Value );
     if( ts_node_is_null( value ) )
     {
@@ -2712,7 +3783,7 @@ inline std::string_view prototypeCtorName( TSNode nameNode, std::string_view src
     {
         return {};
     }
-    const TSNode member     = ts_node_parent( nameNode );
+    const TSNode member     = parentOf( nameNode );
     const TSNode protoMember = fieldChild( member, NodeField::Object );
     const TSNode ctor       = fieldChild( protoMember, NodeField::Object );
     if( ts_node_is_null( ctor ) )
@@ -2740,10 +3811,10 @@ inline std::string_view prototypeCtorName( TSNode nameNode, std::string_view src
 // are checked statically, never resolved — the gate pins that direction too.
 inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode assign = ts_node_parent( nameNode );                                    // assignment
-    const TSNode stmt   = ts_node_is_null( assign ) ? assign : ts_node_parent( assign );  // expression_statement
-    const TSNode body   = ts_node_is_null( stmt )   ? stmt   : ts_node_parent( stmt );    // block
-    const TSNode cls    = ts_node_is_null( body )   ? body   : ts_node_parent( body );    // class_definition
+    const TSNode assign = parentOf( nameNode );                                    // assignment
+    const TSNode stmt   = ts_node_is_null( assign ) ? assign : parentOf( assign );  // expression_statement
+    const TSNode body   = ts_node_is_null( stmt )   ? stmt   : parentOf( stmt );    // block
+    const TSNode cls    = ts_node_is_null( body )   ? body   : parentOf( body );    // class_definition
     if( ts_node_is_null( cls ) || !kindIs( ts_node_type( cls ), "class_definition" ) )
     {
         return false;

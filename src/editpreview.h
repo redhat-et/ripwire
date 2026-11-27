@@ -7,7 +7,7 @@
 //
 // THE DESIGN RULE, and it is the whole reason this file is small: the preview does not re-derive the
 // answer. It re-derives the TREE and hands it to the SAME editCheckBundleText() the post-hoc verb calls.
-// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [sigStartByte,
+// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [declStartByte,
 // endByte) span, with the SAME CRLF harmonisation the write path applies, so "what the preview measured"
 // and "what an apply would write" are one function. (2) Every fact downstream — the HEAD baseline, the
 // root spelling, the at= commit anchor, the note children, the legend — is the real tree's, because the
@@ -206,6 +206,10 @@ inline IngestResult previewMerge( const IngestResult& ing, std::uint32_t fileId,
     for( const FnLocalScope& f : ing.fnLocalScopes ) { if( f.id < lo ) { out.fnLocalScopes.push_back( f ); } }
     for( FnLocalScope f : one.fnLocalScopes )         { f.id = NodeId( lo + f.id ); out.fnLocalScopes.push_back( f ); }
     for( FnLocalScope f : ing.fnLocalScopes )         { if( f.id >= hi ) { f.id = shift( f.id ); out.fnLocalScopes.push_back( f ); } }
+    // the tangle block-facts side table (model.h TangleBlockFacts): the same seam, the same ascending-id rule
+    for( const TangleBlockFacts& f : ing.tangleBlocks ) { if( f.id < lo ) { out.tangleBlocks.push_back( f ); } }
+    for( TangleBlockFacts f : one.tangleBlocks )         { f.id = NodeId( lo + f.id ); out.tangleBlocks.push_back( f ); }
+    for( TangleBlockFacts f : ing.tangleBlocks )         { if( f.id >= hi ) { f.id = shift( f.id ); out.tangleBlocks.push_back( f ); } }
     // the alias-target side table (model.h AliasTarget): the same seam, the same ascending-id rule
     for( const AliasTarget& a : ing.aliasTargets ) { if( a.id < lo ) { out.aliasTargets.push_back( a ); } }
     for( AliasTarget a : one.aliasTargets )         { a.id = NodeId( lo + a.id ); out.aliasTargets.push_back( a ); }
@@ -300,7 +304,9 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     // No excludes: the ONE file here is the one the caller already resolved through the main index, so a
     // --exclude that would drop it can only produce a false "the payload defines nothing".
     std::lock_guard<std::mutex> ingestLk( quality::headSnapshotIngestMutex() );
-    return ingest( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
+    // M1: the one file came out of the main index, which already decided its directory is crawled — a tracked build/
+    // file would otherwise be pruned here by name and read as "the payload defines nothing" (ingest.h ingestTrackedTree).
+    return ingestTrackedTree( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
 // E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
@@ -366,7 +372,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     {
         return refuse( "cannot read '" + path + "' to preview the edit" );
     }
-    const std::size_t a = fsym.sigStartByte, b = fsym.endByte;
+    const std::size_t a = declStartByte( ing, fsym, src ), b = fsym.endByte;   // the span mcpedit splices (declwrap.h)
     if( !( a < b && b <= src.size() ) )
     {
         return refuse( "the definition span for '" + std::string( selector ) + "' does not fit '" + path
@@ -462,7 +468,10 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     // differently from the answer it predicts would be worth nothing (test/editpreviewcheck.sh compares
     // the two documents).
     oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].focusNode, ni, true,
-                                   EditCheckPage{ pageLimit, pageOffset }, previewUnprovenDefs, /*notesDegraded=*/false,
+                                   // XF-QUALIFIED-ENDPOINTS fix 1 (SF-1): the selector narrows the overload set exactly as the post-hoc
+                                   // answer does (editCheckOwnerNarrowed). It moves no rows_next= bytes: verdictOnly stays false, and
+                                   // only the verdict-only answer (never taken on a preview) spells rows_next= from page.selector.
+                                   EditCheckPage{ pageLimit, pageOffset, /*verdictOnly=*/false, selector }, previewUnprovenDefs, /*notesDegraded=*/false,
                                    EditCheckSpliced{ newBytes, fsym.fileId, true } );   // the merged spans index the spliced bytes
     // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so
     // the Read an agent makes before an edit "to see what I am about to overwrite" is already in the preview.

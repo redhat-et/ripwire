@@ -61,6 +61,11 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the rank assertions"; exit 2; }
 echo "docdemotecheck: BIN=$BIN"
 
+# doc-body (FOR-DOC-BODY, #561, 2026-11-06; fordocbodycheck owns it): a prose --for over a documents-heavy tree now ends with a
+# <doc_body> block (the first doc files' best sections). The goldens below are the pre-doc-body answers byte for byte, and
+# the demotion/ranking arms read rows, not the block, so every run here switches it off; fordocbodycheck (f3) pins
+# "answer minus block == the RIPWIRE_NO_FOR_DOC_BODY=1 answer", which is what keeps these goldens honest.
+export RIPWIRE_NO_FOR_DOC_BODY=1
 cp -R "$ROOT/test/docdemotefix" "$TMP/docdemotefix"
 cd "$TMP"
 
@@ -99,6 +104,42 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-23 (basename field default 2 -> 1, src/lexical.h kForBasenameFieldW; rule 4): docdemotegolden_for.xml 6326 -> 6326 B
+# (est_tokens unchanged). At weight 1 the basename no longer outweighs pin_page's own text: PageCache.pin_page is r=1 again and
+# evict_one r=2 (the pre-basename order), confidence/margin_pct/coverage re-read (76 -> 77, 33 -> 35) and the act line lists the
+# two reads in that order. Mechanically: the same call under RIPWIRE_BASENAME_W=2 is the previous golden byte for byte.
+# RE-PIN 2026-11-22 (lane FS2; rule 4): docdemotegolden_for.xml 6053 -> 6326 B (est_tokens "2423" -> "2530"), two intended 0.7.0 train
+# changes, each proven separately. (1) LP1 (4ba1fdec6) kForBasenameFieldW=2: the query word "evictor" now meets src/evictor.py's
+# basename, so evict_one rises to r=1 over PageCache.pin_page (r=2), and confidence/margin_pct/coverage re-read (78 -> 76, 36 -> 33).
+# (2) BR1B (53824ea8a) the act line: <act read="src/evictor.py:4-11,src/pagecache.py:12-14,src/pagecache.py:4-29"/> and its clause.
+# Mechanically: the same call under RIPWIRE_NO_ACTLINE=1 RIPWIRE_BASENAME_W=0 is the previous golden byte for byte; under
+# RIPWIRE_BASENAME_W=0 alone it is the previous golden plus the act element and clause only (est_tokens masked); and the new capture
+# minus the act line is the RIPWIRE_NO_ACTLINE=1 capture. No demotion byte moved; (g) and (h) are unchanged.
+# RE-PIN 2026-11-18 (lane AF4 T-C, pointer kind as ptr=; rule 4): docdemotegolden_for.xml 6040 -> 6053 B (est_tokens "2418" -> "2423")
+# and docdemotegolden_noroute.xml 9550 -> 9563 B ("3387" -> "3392"). The whole diff, read mechanically: est_tokens= and the demote
+# legend's wording "a <t> in sigs is" -> "a <t> in sigs with no ptr= is" (13 B); no row, rank, pointer or comment position moved
+# (these are demote-only answers, so no pointer gains ptr=).
+# RE-PIN 2026-11-17 (BAND BC, lane body-callee-file; rule 4): docdemotegolden_noroute.xml 9514 -> 9558 B (est_tokens "3369" -> "3387"). The whole diff,
+# read mechanically: est_tokens= and 44 B of the auto-bundle legend, whose bodies clause now reads "callee signatures (c p= their file when it
+# is not the body's)". No row, rank or route byte moved: a fixture whose <c> rows are all same-file prints no p=.
+# RE-PIN 2026-11-17 (BAND CF, lane callee-row-file; rule 4): docdemotegolden_for.xml 5985 -> 6040 B (est_tokens "2396" -> "2418").
+# The whole diff, read mechanically: est_tokens= and 55 B of the bundle legend, whose callee clause now reads "same-named callees
+# of one file, c p= that file when it is not the h row's". The golden's <hops> is shown="0" and prints no <c> row, so no row moved.
+# RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): docdemotegolden_for.xml 5999 -> 5989 B (est_tokens "2400" -> "2396") and
+# docdemotegolden_noroute.xml 9524 -> 9514 B ("3373" -> "3369"): nextAttrXml leaves ' raw inside the double-quoted next=
+# (2 entities each). Verified mechanically: &apos; -> ' inside next-family values, est_tokens= masked, gives each capture exactly.
+# RE-PIN 2026-11-08 (lane SIBLING-DEMOTE, stacked on R-DEDUP-B; rule 4): docdemotegolden_for.xml 6431 -> 5999 B and
+# docdemotegolden_noroute.xml 9939 -> 9524 B, diffed by hand: only est_tokens and the deep same-file sibling <d> rows past answer row 10
+# (for: CHANGELOG r=11/12, Contributing r=14, both tier_probe rows r=16/18; noroute: PageCache.flush_cache/request_page/__init__ r=12/13/19,
+# paging_design r=15, CHANGELOG r=17/18) now print in place as <t p= sym= r=/> pointers, with the demote legend comment before the first.
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): docdemotegolden_for.xml 6709 -> 6431 B and
+# docdemotegolden_noroute.xml 10216 -> 9939 B. The moves: the tail legend clause (sym= minus names a sigs row or the syms block
+# shows) and est_tokens; every tail row of a file whose positive-score names the sigs rows all show now prints p= only
+# (pagecache.py, evictor.py, the .md pages); and SIZE-3a's same_as= on the second tier_probe <d> row (its text repeats the
+# first's), which SIZE-TRIM's own test fix (next note) re-pins on its side; this golden carries both.
+# RE-PIN 2026-11-08 (SIZE-TRIM test fix; rule 4): docdemotegolden_for.xml 6709 -> 6624 B (est_tokens "2684" -> "2650") and
+# docdemotegolden_noroute.xml 10216 -> 10131 B ("3650" -> "3616"). SIZE-3a's same_as= on the second tier_probe <d> row (its text
+# repeats the first's) and the legend clause that explains it are the whole diff (checked mechanically against the previous goldens).
 # RE-PIN 2026-11-02 b (lane docs-rest CI fix 2, the tail-order legend clause; rule 4): docdemotegolden_for.xml 6542 -> 6709 B
 # (est_tokens "2617" -> "2684") and docdemotegolden_noroute.xml 10049 -> 10216 B ("3583" -> "3650"). Both are code questions, so
 # both carry serialize.h kForFileTailCodeFirstLegend (167 B) after the tail clause; removing it and masking est_tokens= gives the

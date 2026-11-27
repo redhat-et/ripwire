@@ -5,7 +5,10 @@
 #include <system_error> // std::errc — from_chars' result
 #include <cstdio>      // stdout / stderr — the two streams the shims below name
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
+#include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
+#include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
+#include "filter.h"   // isToolOrVendoredPath — the shipped-not-authored path tier --lint's order sorts last (LT1)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
                        // pilot conversion used to spell the fallback here; the choice now lives in one header.
@@ -238,7 +241,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
             // empty or missing slot falls through to the read below and yields the same bytes, so the two
             // paths cannot disagree; the size guard keeps a vector built for another corpus in bounds.
             std::vector<std::string> fileBytes( ing.files.size() );
-            HashMap<std::uint32_t, bool> fileRead;
+            HashSet<std::uint32_t>       fileRead;
             const auto getBytes = [ & ]( std::uint32_t fid ) -> const std::string&
             {
                 if( preRead != nullptr && fid < preRead->size() && !( *preRead )[fid].empty() )
@@ -256,7 +259,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
                         if( sz > 0 ) { fileBytes[fid].resize( std::size_t( sz ) ); std::fread( fileBytes[fid].data(), 1, std::size_t( sz ), fp ); }
                         std::fclose( fp );
                     }
-                    fileRead[fid] = true;
+                    fileRead.insert( fid );
                 }
                 return fileBytes[fid];
             };
@@ -418,6 +421,19 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
 // built-ins (facts, not severities); user findings carry their declared sev=. Lives at file scope
 // (not local to runLint) so dedupeLintFindings below can share it.
 struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, text; };
+
+// THE in= lookup of the lint family: the innermost symbol whose span holds a byte of a file — atoms.h's
+// OwnerIndex, the same rule the atoms pack applies, bound to the corpus it indexes. Built once per --match /
+// --pattern / --lint run; every step that names a row's enclosing symbol reads this one.
+struct EnclosingSymbolIndex
+{
+    const rw::IngestResult&                  ing;
+    const rw::atoms::atomdetail::OwnerIndex owners;
+
+    explicit EnclosingSymbolIndex( const rw::IngestResult& ingest ) : ing( ingest ), owners( ingest ) {}
+
+    const rw::Symbol* operator()( std::uint32_t fileId, std::uint32_t byteOffset ) const { return owners.ownerOf( ing, fileId, byteOffset ); }
+};
 
 // One <rule> tally row. The built-in and user-rule tally loops in runLint differ ONLY in whether sev=
 // is present (nullptr ⇒ omitted, a built-in row) — everything else (capped=, and L7's applicable=) is
@@ -958,7 +974,8 @@ LintApplicability computeLintApplicability( const rw::IngestResult& ing, bool bu
     return out;
 }
 
-// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
+// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text) — the TIE-BREAK since LT1 (rankLintRowsByImportance
+// below sorts the most important rows first and keeps this order inside each of its groups). sev and text are part of
 // the KEY, not decoration. (file, startByte, rule) alone is NOT a total order — one rule can emit two
 // findings at the same byte (naming-confusable pairs `rbegin` with both `begin` and `cbegin`, both
 // anchored at the symbol's own offset) — and std::sort is unstable, so tied rows came out in whatever
@@ -979,6 +996,95 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
     } );
 }
 
+// LT1 (2026-11-21): THE IMPORTANCE ORDER, applied over sortLintRows' total order by a STABLE sort, so the emitted order is
+//   (1) the file's TIER — a shipped-not-authored file (lintShippedFiles below) sorts after every authored one: its findings are
+//       its upstream's to fix, not the reader's;
+//   (2) the rule's SEVERITY, error > warn > info: the lint catalog's sev for a built-in rule, a user rule's own sev=;
+//   (3) the file's CENTRALITY: first the house's path tier (source before a test / bench / fixture file, filter.h pathTierOf —
+//       the same down-weight every ranking lens prices), then its place in the map's PageRank file order (filter.h fileRanks
+//       over the map's default rank) — a file with no ranked symbol after every ranked one;
+//   (4) sortLintRows' (file path, startByte, rule, sev, text), whole, as the tie-break — so the order stays TOTAL.
+// WHY: the output ceiling (outputceiling.h) made a default answer a byte-budgeted PREFIX of these rows, so the order decides what
+// page 1 shows. MEASURED on GA1 DEV ga-eslint-01 (parent dfc8d95fd, 571 findings, 99 on page 1): path order opened with a
+// do-while in Makefile.js and then ten rows of a vendored ponyfill. The path tier inside (3) is MEASURED too (results LT1 §4):
+// without it 382 of 1,248 page-1 rows across GA1 DEV's 11 trees were test/fixture rows (bat's page 1 opened on syntax-test
+// fixtures, black's on formatter test cases), because raw PageRank ranks such files high. Nothing is dropped: the order is
+// total, so --offset pages chain without a gap or a repeat, and --page-bytes=0 prints every row in it. Keys (1)-(3) are
+// constant within one file and one rule, so they never split a group dedupeLintFindings would merge.
+struct LintRowOrder
+{
+    std::vector<char>          shipped;   // per file: 1 = shipped, not authored (lintShippedFiles)
+    std::vector<char>          testTier;  // per file: 1 = a test / bench / fixture path (filter.h pathTierOf TestOrBench)
+    std::vector<std::uint32_t> place;     // per file: 1-based place in the map's PageRank file order; 0 = no ranked symbol
+};
+
+// The files nobody here authors, by the house's OWN verdicts — no new heuristic: a tool / vendored / generated path
+// (filter.h rw::isToolOrVendoredPath, which already holds the demo/generated table), a minified file
+// (--skipped's minified-suspect, ingest.h isMinifiedHealth), and a bundle (filter.h's evidence tier, vendoredBundleFiles).
+std::vector<char> lintShippedFiles( const rw::IngestResult& ing )
+{
+    std::vector<char> shipped = rw::vendoredBundleFiles( ing );
+    for( std::uint32_t f = 0; f < shipped.size(); ++f )
+    {
+        const bool minified = f < ing.fileHealth.size() && rw::isMinifiedHealth( ing.fileHealth[f] );
+        shipped[f] = char( shipped[f] != 0 || minified || rw::isToolOrVendoredPath( rw::rootRelPath( ing, f ) ) );
+    }
+    return shipped;
+}
+
+LintRowOrder lintRowOrder( const rw::IngestResult& ing, const rw::Graph& g )
+{
+    std::vector<char> testTier( ing.files.size(), 0 );
+    for( std::uint32_t f = 0; f < testTier.size(); ++f )
+    {
+        testTier[f] = char( rw::pathTierOf( rw::rootRelPath( ing, f ) ) == rw::PathTier::TestOrBench );
+    }
+    return LintRowOrder{ .shipped = lintShippedFiles( ing ), .testTier = std::move( testTier ),
+                         .place = rw::fileRanks( ing, rw::warmsnap::defaultRank( g ).rank ) };
+}
+
+// error 0, warn 1, info 2 (kLintSeverities lists them info-first); 3 for a rule the catalog does not name.
+std::uint8_t lintSeverityRank( const LintOut& o ) noexcept
+{
+    std::string_view sev = o.sev;
+    if( sev.empty() )
+    {
+        const rw::lintcatalog::LintCatalogRow* row = rw::lintcatalog::lintCatalogFind( o.rule );
+        sev = row != nullptr ? row->severity : std::string_view();
+    }
+    const auto at = std::ranges::find( rw::kLintSeverities, sev );
+    return at == rw::kLintSeverities.end() ? std::uint8_t( 3 ) : std::uint8_t( rw::kLintSeverities.size() - 1 - std::size_t( at - rw::kLintSeverities.begin() ) );
+}
+
+// One row's importance key, packed most-significant first: shipped (1 bit), severity (2 bits), test tier (1 bit), then the
+// file's PageRank place (32 bits; 0 = unranked → last). A smaller key is more important.
+std::uint64_t lintImportanceKey( const LintRowOrder& order, const LintOut& o ) noexcept
+{
+    const std::uint32_t f       = o.fileId;
+    const std::uint64_t shipped = f < order.shipped.size() && order.shipped[f] != 0 ? 1u : 0u;
+    const std::uint64_t test    = f < order.testTier.size() && order.testTier[f] != 0 ? 1u : 0u;
+    const std::uint32_t place   = f < order.place.size() ? order.place[f] : 0;
+    return ( shipped << 35 ) | ( std::uint64_t( lintSeverityRank( o ) ) << 33 ) | ( test << 32 ) | ( place == 0 ? UINT32_MAX : place );
+}
+
+// Reorders sortLintRows' output most important first; std::stable_sort keeps its total order inside each importance group.
+void rankLintRowsByImportance( const LintRowOrder& order, std::vector<LintOut>& outs )
+{
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> keyed( outs.size() );
+    for( std::uint32_t i = 0; i < outs.size(); ++i )
+    {
+        keyed[i] = { lintImportanceKey( order, outs[i] ), i };
+    }
+    std::stable_sort( keyed.begin(), keyed.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
+    std::vector<LintOut> ranked;
+    ranked.reserve( outs.size() );
+    for( const auto& [ key, i ] : keyed )
+    {
+        ranked.push_back( std::move( outs[i] ) );
+    }
+    outs.swap( ranked );
+}
+
 // §P6.1: two DIFFERENT AST captures (different startByte — e.g. the same magic-number value
 // spelled twice on one line, `h >> 33` appearing twice in the same expression) can still render
 // as a byte-identical <f> row, because the row carries only file:line — no column — so a reader
@@ -987,35 +1093,15 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
 // file:line, enclosing symbol, text) — keep the first occurrence in the caller's already-
 // deterministic sort order. This also keeps findings= and each rule's count= truthful: they
 // count distinct VISIBLE findings, not raw captures. Lifted out of the --lint block (same reason
-// as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar.
-std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vector<LintOut> outs )
+// as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar. `enclosing` is
+// the run's own index (the in= every row prints, over the corpus it indexes), not a second copy built here.
+std::vector<LintOut> dedupeLintFindings( const EnclosingSymbolIndex& enclosing, std::vector<LintOut> outs )
 {
     using namespace rw;
-    // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
-    const SymbolsByFile fileSyms = symbolsByFile( ing,
-                                                  []( const Symbol& ) { return true; },
-                                                  [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-    const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
-    {
-        const Symbol* best = nullptr;
-        for( NodeId id : fileSyms[f] )
-        {
-            const Symbol& s = ing.symbols[id];
-            if( s.sigStartByte > off )
-            {
-                break;
-            }
-            if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
-            {
-                best = &s;
-            }
-        }
-        return best;
-    };
-
+    const IngestResult& ing = enclosing.ing;
     HashMap<std::string, char> seenRow;
     std::vector<LintOut>       deduped;  deduped.reserve( outs.size() );
-    for( const LintOut& o : outs )
+    for( LintOut& o : outs )   // `outs` is ours (moved in): a kept row moves out of it
     {
         const Symbol* e = enclosing( o.fileId, o.startByte );
         std::string   key;
@@ -1031,7 +1117,7 @@ std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vecto
             continue; // same visible row already kept
         }
         seenRow.emplace( std::move( key ), 0 );
-        deduped.push_back( o );
+        deduped.push_back( std::move( o ) );
     }
     return deduped;
 }
@@ -1302,13 +1388,90 @@ struct PatternSearchOutcome
     bool                      ellipsisCapped = false;   // an ellipsis probe abandoned a node at the bound (V-2)
     std::uint64_t             ellipsisSkipped = 0;      // how many times — a floor on the nodes left unevaluated
     std::uint64_t             qualifiedUnmatched = 0;   // nodes only a qualified spelling of a pattern leaf matches (not hits)
+    std::uint64_t             memberUnmatched    = 0;   // member calls only the bare callee names (kMemberCallShapes; not hits)
+    std::uint64_t             memberCapped       = 0;   // member probes the ellipsis bound abandoned: memberUnmatched is a floor
+    std::uint64_t             memberArrow        = 0;   // of memberUnmatched, the calls spelled `->`
+    std::uint64_t             memberOptChain     = 0;   // of memberUnmatched, the calls spelled `?.` (JS/TS optional chaining)
 };
 
-// unmatched_qualified= (present only when non-zero): its reading rides the answer that carries it, beside the root.
+// unmatched_qualified= / unmatched_member= (present only when non-zero): their reading rides the answer that carries
+// either, beside the root. ONE comment for both near-miss counts, emitted once.
 inline constexpr std::string_view kPatternQualifiedLegend =
     "<!-- unmatched_qualified=N: N more nodes match only when a name in q= is read as the last segment of a "
     "scope-qualified name (ns::name, a::b::name) - NOT in hits=; spell the qualifier in the pattern to match them. "
+    "unmatched_member=N: N more calls match only when the called name is read as a member (obj.f(x), self.f(x)) "
+    "- NOT in hits=; next= is the pattern with a receiver metavariable that matches them (C, C++, Go, Rust, "
+    "JS/TS, Python, C#; Java, Swift and ObjC member calls are not counted). "
+    "unmatched_member_arrow=K: K of them call through a pointer (the arrow); next= spells the arrow only when all do, "
+    "else repeat it with the arrow. unmatched_member_optchain=K: K of them use optional chaining (obj?.f(x)), the same "
+    "way: next= spells ?. only when all do. unmatched_member_capped=1: a member call too long to probe was skipped (the "
+    "ellipsis bound), so unmatched_member= is a floor. "
     "A floor when the hit budget stops the walk (hits_capped=1): nodes past the stop are not counted -->";
+
+// unmatched_member='s next=: the same pattern with a receiver metavariable in front of its leading callee name, or ""
+// when the pattern does not start with `name(` or the continuation would pass the pattern byte limit (then the count
+// still rides, with no follow-up to offer). The receiver
+// is the first of `$O`, `$RECV`, `$RW_RECEIVER`, `$RW_RECEIVER2`, ... the pattern does not already spell, so it never
+// binds to one of the pattern's own metavariables (CR #624). `op` is the member operator every counted call shares
+// (`->` or `?.`), else `.`.
+inline std::string memberPatternNext( std::string_view pattern, std::string_view op )
+{
+    std::size_t start = 0;
+    while( start < pattern.size() && ( pattern[start] == ' ' || pattern[start] == '\t' ) )
+    {
+        ++start;
+    }
+    std::size_t end = start;
+    while( end < pattern.size() && rw::namesplit::isIdentChar( pattern[end] ) )
+    {
+        ++end;
+    }
+    std::size_t paren = end;
+    while( paren < pattern.size() && pattern[paren] == ' ' )
+    {
+        ++paren;
+    }
+    if( end == start || !rw::namesplit::isIdentStart( pattern[start] ) || paren >= pattern.size() || pattern[paren] != '(' )
+    {
+        return {};
+    }
+    static constexpr std::string_view kReceivers[] = { "$O", "$RECV", "$RW_RECEIVER" };
+    std::string                       receiver( kReceivers[0] );
+    for( std::size_t k = 1; pattern.find( receiver ) != std::string_view::npos; ++k )
+    {
+        receiver = k < std::size( kReceivers ) ? std::string( kReceivers[k] ) : std::string( kReceivers[2] ) + std::to_string( k - 1 );
+    }
+    // PATTERN-NEXT-LIMITS (CodeRabbit #633): a pattern already at the metavariable limit takes the anonymous `$_`
+    // receiver (it binds nothing, so it needs no slot), and a continuation past the byte limit is not offered: next=
+    // must compile when pasted.
+    if( rw::pattern::normalizePattern( pattern, "$" ).metaNames.size() >= rw::pattern::kMaxMetavars )
+    {
+        receiver = "$_";
+    }
+    std::string next( pattern.substr( 0, start ) );
+    next += receiver;
+    next += op;
+    next += pattern.substr( start );
+    if( next.size() > rw::pattern::kMaxPatternBytes )
+    {
+        return {};
+    }
+    return rw::nextFlag( "--pattern=", next );
+}
+
+// The member near-miss attributes, in reading order: the count, its floor and arrow facts, then the pasteable next=.
+inline std::string memberNearMissAttrs( const PatternSearchOutcome& ps, std::string_view pattern )
+{
+    // the operator next= spells is one the counted calls use (CodeRabbit 4570578110): `.` while any dot call is among them, else
+    // `->`, else `?.` (a fixed priority: C++ `p->f(1)` beside JS `o?.f(1)` with no dot call took `.`, which matched neither)
+    const auto             dots = ps.memberUnmatched - std::min( ps.memberUnmatched, ps.memberArrow + ps.memberOptChain );
+    const std::string_view op   = dots > 0 || ps.memberUnmatched == 0 ? "." : ps.memberArrow > 0 ? "->" : ps.memberOptChain > 0 ? "?." : ".";
+    return " unmatched_member=\"" + std::to_string( ps.memberUnmatched ) + "\""
+         + ( ps.memberArrow > 0 ? " unmatched_member_arrow=\"" + std::to_string( ps.memberArrow ) + "\"" : std::string() )
+         + ( ps.memberOptChain > 0 ? " unmatched_member_optchain=\"" + std::to_string( ps.memberOptChain ) + "\"" : std::string() )
+         + ( ps.memberCapped > 0 ? std::string( " unmatched_member_capped=\"1\"" ) : std::string() )
+         + rw::nextAttrXml( memberPatternNext( pattern, op ) );
+}
 
 // Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
 // disclosures. The refusal path is the load-bearing half: §P0.1's rule one level out — a pattern nothing
@@ -1330,6 +1493,7 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
 
     std::atomic<std::uint64_t> ellipsisCapped{ 0 };
     std::atomic<std::uint64_t> qualifiedUnmatched{ 0 };
+    rw::MemberNearMissTally    member;
 
     rw::AstQueryGroup grp;
     grp.walk              = rw::AstWalk::Pattern;
@@ -1337,11 +1501,16 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     grp.maxMatches        = rw::pattern::kMaxHits;
     grp.ellipsisCappedOut = &ellipsisCapped;
     grp.qualifiedUnmatchedOut = &qualifiedUnmatched;
+    grp.memberOut             = &member;
     out.matches           = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
 
     out.ellipsisSkipped = ellipsisCapped.load( std::memory_order_relaxed );
     out.ellipsisCapped  = out.ellipsisSkipped != 0;
     out.qualifiedUnmatched = qualifiedUnmatched.load( std::memory_order_relaxed );
+    out.memberUnmatched    = member.counted.load( std::memory_order_relaxed );
+    out.memberCapped       = member.capped.load( std::memory_order_relaxed );
+    out.memberArrow        = member.arrow.load( std::memory_order_relaxed );
+    out.memberOptChain     = member.optchain.load( std::memory_order_relaxed );
 
     out.grammarsAttr                 = joinOwned( rw::pattern::resolvedNames( progs ), "," );
     out.shapesAttr                   = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
@@ -1388,842 +1557,1035 @@ static std::string matchNearestKindClause( const std::string& kind, const std::s
     return clause;
 }
 
-std::optional<int> runLint( const MainDispatch& d )
+// The facts every --match / --pattern / --lint answer reads while it EMITS, built once by runLint before the
+// three verbs split: the enclosing-symbol index behind every row's in=, how a row's p= is spelled, the root=
+// attribute, and the XML escaper. R-E (2026-08-17 harvest): same single-root condition every other verb's root=
+// uses (sarif.h) — --lint's OWN --sarif re-serialization (writeSarifResult) already applies it; this brings the
+// native --match/--lint XML forms into parity rather than leaving them the only two still absolute per row.
+struct LintAnswerView
+{
+    mutable std::vector<char>  esc;   // ex()'s scratch, declared first: rootAttr's initializer already escapes
+    const rw::IngestResult&    ing;
+    const EnclosingSymbolIndex enclosing;
+    const bool                 singleRoot;
+    const std::string          rootPrefix;
+    const rw::VrRender         render;   // p= spelled as every other verb's row (valuerefs.h vrPath); views rootPrefix above
+    const std::string          rootAttr;
+
+    LintAnswerView( const rw::Config& cfg, const rw::IngestResult& ingest )
+        : ing( ingest ),
+          enclosing( ingest ),
+          singleRoot( ingest.realPaths.empty() && cfg.roots.size() == 1 ),
+          rootPrefix( singleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string() ),
+          render{ singleRoot, rootPrefix },
+          rootAttr( singleRoot ? " root=\"" + ex( cfg.roots[0] ) + "\"" : std::string() )
+    {
+    }
+    LintAnswerView( const LintAnswerView& )            = delete;   // render views this object's own rootPrefix
+    LintAnswerView& operator=( const LintAnswerView& ) = delete;
+
+    std::string ex( std::string_view s ) const { return std::string( rw::escapeXml( s, esc ) ); }
+
+    // a row's p= path: root-relative under a single root, the indexed path otherwise
+    std::string rowPath( std::uint32_t fileId ) const { return rw::vrPath( ing, fileId, render ); }
+};
+
+// A captured node's text as element content: only the three markup characters are escaped (quotes stay as
+// they are — this is never an attribute value).
+void emitEscapedText( const std::string& s )
+{
+    for( char ch : s )
+    {
+        if( ch == '<' )
+        {
+            std::fputs( "&lt;", stdout );
+        }
+        else if( ch == '>' )
+        {
+            std::fputs( "&gt;", stdout );
+        }
+        else if( ch == '&' )
+        {
+            std::fputs( "&amp;", stdout );
+        }
+        else
+        {
+            std::fputc( ch, stdout );
+        }
+    }
+}
+
+// #157: a file the nesting guard refused is excluded from every walk below, so each answer over a corpus that
+// held one says how many. Absent when 0 (absent = nothing to say), so an answer over a corpus with no refusal
+// is byte-identical to one from before the disclosure existed.
+std::string nestRefusedAttr( const rw::IngestResult& ing )
+{
+    return ing.crawlSkips.nestRefusedFiles > 0 ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\"" : std::string();
+}
+
+// The row window's default cap for the two structural-search verbs: --pack-top-n, else 100 (§P8 G3).
+int searchRowCap( const rw::Config& cfg )
+{
+    return cfg.packTopN > 0 ? cfg.packTopN : 100;
+}
+
+// The <m> rows --match and --pattern share: one per hit inside the page window, each the hit's file:line, its
+// enclosing symbol, and the captured text.
+void emitSearchHitRows( const LintAnswerView& view, const std::vector<rw::AstMatch>& hits, rw::PageWindow page )
+{
+    for( std::size_t hitIndex = page.begin; hitIndex < page.end; ++hitIndex )
+    {
+        const rw::AstMatch& m = hits[ hitIndex ];
+        const rw::Symbol*   e = view.enclosing( m.fileId, m.startByte );
+        lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", view.ex( view.rowPath( m.fileId ) ), m.line, e ? view.ex( e->name ) : "" );
+        emitEscapedText( m.text );
+        lintPrintOut( "</m>" );
+    }
+}
+
+// §P0.1: astQuery reports CAPTURES, so a query binding none matches nothing it can report —
+// `--match='(if_statement)'` produced a clean, confident hits="0" next to 5000 for the same
+// query with `@i`. A capture-less bare zero must be unreachable: auto-capture the query when
+// appending a capture is provably what the user would have typed (exactly one top-level
+// pattern), and refuse loudly otherwise. Never scan a query we did not understand.
+// nullopt ⇒ refused, the refusal already printed.
+struct CapturedMatchQuery { std::string query; bool autoCaptured = false; };
+
+std::optional<CapturedMatchQuery> captureMatchQuery( std::string_view rawQuery )
+{
+    CapturedMatchQuery out{ std::string( rawQuery ), false };
+    const rw::AstQueryShape shape = rw::astQueryShape( out.query );
+    if( shape.hasCapture )
+    {
+        return out;
+    }
+    // A `;` comment makes appending unsafe (` @m` on the end of a comment line is itself
+    // commented out), so a capture-less query that carries one is refused, not guessed at.
+    if( !shape.isSingleTopLevel || shape.hasComment )
+    {
+        // Deliberately does NOT assert a cause: this branch catches several top-level
+        // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
+        // would be its own small fabrication. Show the query as received and let the
+        // reader see the stray quote / second pattern for themselves.
+        lintPrintErr( "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
+                            "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
+                            "(query as received: {})\n",
+                    out.query );
+        return std::nullopt;
+    }
+    out.query       += " @m";
+    out.autoCaptured = true;
+    return out;
+}
+
+// --match=QUERY: structural search with the user's tree-sitter query (≥1 @capture).
+// P2.1: the listing stops at `cap` (--pack-top-n, default 100) while hits= counted everything the
+// engine collected — a `hits="5000"` header over 100 rows said nothing about the other 4900.
+// And hits= is itself bounded by astQuery's own maxMatches, so `hits="5000"` is a FLOOR, not a
+// total; hits_capped= says which of the two it is (same contract as --grep's).
+int runMatchVerb( const rw::Config& cfg, const LintAnswerView& view )
+{
+    const rw::IngestResult& ing = view.ing;
+    const std::optional<CapturedMatchQuery> captured = captureMatchQuery( cfg.match );
+    if( !captured )
+    {
+        return 1;
+    }
+    constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
+    const MatchQueryOutcome      mq = runMatchQuery( ing, captured->query, kMatchMaxHits );
+    const std::vector<rw::AstMatch>& ms        = mq.matches;
+    // The engine stopped at kMatchMaxHits: hits= is a FLOOR. hits_capped= and the page disclosure's
+    // collectionCapped (counts_floor=/capped= on the root) both say so, from this one fact.
+    const bool                       hitsCapped = ms.size() >= kMatchMaxHits;
+    // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
+    // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
+    if( !mq.uncompiled.empty() )
+    {
+        lintPrintErr( "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
+                            "(query as received: {}){}\n",
+                    cfg.match, matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ) );
+        return 1;
+    }
+    if( refuseUndecidedMatchRegex( "--match", mq.regexRefused, mq.regexUndecided, undecidedPredicateFirstSite( cfg, ing, mq.regexUndecided ),
+                                   "query as received: " + std::string( cfg.match ) ) )
+    {
+        return 1;
+    }
+    // §P8 G3: --match was missed when its sibling --grep got paging — `--limit=5` still emitted the
+    // full 100-row cap, so the two structurally identical search verbs disagreed about whether
+    // --limit meant anything. Same window, same disclosure, same default cap (--pack-top-n, else
+    // 100): pageDisclosure emits exactly the ` shown= capped=` bytes this tag used to hand-roll, so
+    // an un-paginated --match is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
+    const rw::PageWindow matchPage  = rw::pageWindow( ms.size(), rw::effectiveRowCap( cfg.pageLimit, searchRowCap( cfg ) ), cfg.pageOffset );
+    const std::size_t    matchShown = matchPage.end - matchPage.begin;
+    char                 mpab[ rw::kPageDisclosureCap ];
+    // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
+    // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
+    // #157: a file the nesting guard refused is excluded from eligible_files= and never reaches this
+    // walk, so a reader must be told the corpus held one rather than reading a clean match answer as
+    // proof the pattern does not occur there too. Same reused why token the skipped verb's rows carry.
+    lintPrintOut( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
+                "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
+                "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
+                "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
+                "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
+                "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
+                "language set vs total indexed files. nest_refused= (absent if 0) counts corpus files a pre-parse nesting guard "
+                "refused before this walk could reach them, excluded from eligible_files=; see the skipped verb's why=\"nest-refused\" "
+                "rows for which. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
+    lintPrintOut( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}{}>",
+                ms.size(),
+                rw::pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
+                                    cfg.pageLimit, cfg.pageOffset, true, rw::kXmlPageSyntax,
+                                    /*collectionCapped=*/ hitsCapped ),   // H8: the same cap hits_capped= names
+                hitsCapped ? 1 : 0,
+                captured->autoCaptured ? " auto_captured=\"1\"" : "",
+                view.ex( mq.grammarsAttr ),   // §L3: which grammars the query compiled against
+                mq.eligibleFiles,
+                ing.files.size(),
+                view.rootAttr,
+                nestRefusedAttr( ing ) );
+    emitSearchHitRows( view, ms, matchPage );
+    lintPrintOut( "</match>" );
+    return 0;
+}
+
+// R2 — the PATTERN surface: structural search written in CODE instead of in node kinds.
+// A sibling of --match because it answers the same question through the same walk and must
+// emit through the same conventions (enclosing symbol, page window, grammar applicability). The
+// work BEFORE the walk — compile per grammar, refuse or proceed, assemble the disclosures — is
+// runPatternSearch, extracted for exactly the reason runMatchQuery was.
+int runPatternVerb( const rw::Config& cfg, const LintAnswerView& view )
+{
+    const rw::IngestResult&    ing = view.ing;
+    const PatternSearchOutcome ps  = runPatternSearch( ing, cfg.pattern );
+    if( !ps.refusal.empty() )
+    {
+        lintPrintErr( "{}", ps.refusal );
+        return 1;
+    }
+    const rw::PageWindow patPage  = rw::pageWindow( ps.matches.size(), rw::effectiveRowCap( cfg.pageLimit, searchRowCap( cfg ) ), cfg.pageOffset );
+    const std::size_t    patShown = patPage.end - patPage.begin;
+    char                 ppab[ rw::kPageDisclosureCap ];
+    lintPrintOut( "{}", kPatternLegend );
+    const bool memberNearMiss = ps.memberUnmatched > 0 || ps.memberCapped > 0;
+    if( ps.qualifiedUnmatched > 0 || memberNearMiss )
+    {
+        lintPrintOut( "{}", kPatternQualifiedLegend );
+    }
+    // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
+    // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
+    // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
+    // matched .tsx sat beside a silently unread .ts.
+    const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
+    // #157: same disclosure as --match, over the same shared walk (AstWalk::Pattern reaches the
+    // identical per-file skip). Absent when nothing was refused.
+    const std::string patNestRefusedAttr = nestRefusedAttr( ing )
+        + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() )
+        + ( memberNearMiss ? memberNearMissAttrs( ps, cfg.pattern ) : std::string() );
+    lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
+                ps.matches.size(),
+                rw::pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
+                                    rw::kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
+                ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
+                view.ex( cfg.pattern ),
+                view.ex( ps.grammarsAttr ),
+                view.ex( ps.shapesAttr ),
+                rw::pattern::kUnsupportedGrammars,
+                ps.ellipsisAttr,
+                tellUnresolved ? ps.unresolvedAttr : std::string(),
+                ps.eligibleFiles,
+                ps.skippedFiles,
+                ing.files.size(),
+                view.rootAttr,
+                patNestRefusedAttr );
+    emitSearchHitRows( view, ps.matches, patPage );
+    lintPrintOut( "</pattern>" );
+    return 0;
+}
+
+// All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
+// Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
+// The atoms and cache packs append their own names to this list when they merge (mergeAtomsPack /
+// mergeCachePack), so the list a run tallies is this one plus whatever its packs registered.
+std::vector<std::string> builtInLintRuleNames()
+{
+    return {
+        "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
+        "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
+        "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
+        "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
+        "naming-predicate", "naming-setter", "naming-confusable", "naming-uninformative",
+    };
+}
+
+// --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
+// never the [FLOW]/[TYPE] checks ripwire can't see soundly.
+//
+// S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
+// inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
+// Checks skipped (too noisy / require real semantics):
+//   missing-const — needs type inference + mutation analysis ([TYPE]) — false positives on out-params
+//   non-virtual-dtor — needs inheritance graph ([TYPE]) — not reliably detectable from the AST alone
+//   implicit-bool-conv — `if(ptr)` is idiomatic C++; flagging it produces near-universal noise
+std::vector<rw::AstQuerySpec> builtInLintQueries()
+{
+    return {
+        { "(cast_expression) @c",                                                                       "c-style-cast" },         // cppcoreguidelines-pro-type-cstyle-cast
+        { "(goto_statement) @c",                                                                        "goto" },                  // cppcoreguidelines-avoid-goto
+        { "(do_statement) @c",                                                                          "do-while" },              // cppcoreguidelines-avoid-do-while
+        { "(call_expression function: (identifier) @c (#match? @c \"^(strcpy|strcat|sprintf|gets)$\"))","unsafe-c-fn" },           // bugprone unbounded C string fns
+        { "(call_expression function: (identifier) @c (#match? @c \"^(MD5|md5|SHA1|sha1|MD4|md4|RC4|rc4)$\"))","weak-crypto" },   // broken hash/cipher (the one [AST] security item; insecure rand() excluded — too noisy)
+        { "(parenthesized_expression (parenthesized_expression) @c)",                                   "redundant-parens" },      // clang-tidy readability-redundant-parentheses
+        { "(if_statement consequence: (expression_statement) @c)",                                      "suspicious-semicolon" },  // clang-tidy bugprone-suspicious-semicolon (post-filtered below)
+        // S6-A new checks:
+        { "(type_definition declarator: (type_identifier) @c)",                                         "typedef-over-using" },    // C-style typedef struct/union in C++ — prefer using T = ...
+        { "(number_literal) @c",                                                                        "magic-number" },          // numeric literal outside const/constexpr init (post-filtered below)
+        { "(catch_clause body: (compound_statement) @c)",                                               "empty-catch" },           // catch block with empty/comment-only body (post-filtered below)
+        { "(assignment_expression left: (_) @lhs right: (_) @rhs (#eq? @lhs @rhs))",                   "self-assign" },           // x = x — predicate rejects unequal pairs before post-filtering
+    };
+}
+
+// §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
+// by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed in
+// the tally. Saturation is measured on the RAW captures, before the post-filters below thin them.
+void recordSaturatedQueryRules( const std::vector<rw::AstQuerySpec>& checks, const std::vector<rw::AstMatch>& rawCaptures, std::size_t maxPerRule,
+                                std::vector<RuleCap>& saturatedRules )
+{
+    for( const rw::AstQuerySpec& check : checks )
+    {
+        const auto rawForRule = std::size_t( std::count_if( rawCaptures.begin(), rawCaptures.end(), [ & ]( const rw::AstMatch& m ) { return m.tag == check.tag; } ) );
+        if( rawForRule >= maxPerRule )
+        {
+            saturatedRules.push_back( { check.tag, false } );
+        }
+    }
+}
+
+// The whitespace the built-in post-filters trim a captured node's text by, at both ends: space, tab, LF, CR.
+std::string_view trimCaptureSpace( std::string_view t ) noexcept
+{
+    const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    while( !t.empty() && ws( t.front() ) )
+    {
+        t.remove_prefix( 1 );
+    }
+    while( !t.empty() && ws( t.back() ) )
+    {
+        t.remove_suffix( 1 );
+    }
+    return t;
+}
+
+// suspicious-semicolon: the query also matches a normal `if(x) foo();` (the grammar gives both an
+// expression_statement consequence). Keep ONLY an empty body — matched text trims to just ";" — the real bug.
+bool isFilledIfBody( const rw::AstMatch& m )
+{
+    return m.tag == "suspicious-semicolon" && trimCaptureSpace( m.text ) != ";";   // non-empty body → not the bug → drop
+}
+
+// empty-catch: keep ONLY catch bodies whose trimmed text is empty (nothing but whitespace/braces).
+// The captured node is the compound_statement — its text is "{...}"; trim and check for "{}".
+bool isNonEmptyCatchBody( const rw::AstMatch& m )
+{
+    if( m.tag != "empty-catch" )
+    {
+        return false;
+    }
+    const std::string_view t = trimCaptureSpace( m.text );
+    // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
+    if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
+    {
+        return true; // malformed — drop
+    }
+    return !trimCaptureSpace( t.substr( 1, t.size() - 2 ) ).empty();   // non-whitespace inside → not empty → drop
+}
+
+// magic-number: drop literals that are:
+//   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
+//   (b) inside a const/constexpr variable initializer (that's exactly the right place for numbers)
+//   (c) inside an enum body (enumerator values are naturally numeric)
+// Keep only literals inside function/method bodies to limit noise.
+// The enclosing symbol check (Function/Method) is the main guard. A file's text is read on the first
+// literal that survives (a), once.
+void dropUnflaggedMagicNumbers( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, std::vector<rw::AstMatch>& ms )
+{
+    std::vector<std::string> magicFileBytes( ing.files.size() );
+    std::vector<char>        magicFileRead( ing.files.size(), 0 );
+    const auto magicBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
+    {
+        if( !magicFileRead[fileId] )
+        {
+            magicFileBytes[fileId] = rw::darkflags::readWhole( rw::diskPath( ing, fileId ) ).value_or( std::string() );
+            magicFileRead[fileId] = 1;
+        }
+        return magicFileBytes[fileId];
+    };
+    std::erase_if( ms, [ & ]( const rw::AstMatch& m )
+    {
+        if( m.tag != "magic-number" )
+        {
+            return false;
+        }
+        if( isUniversalOrAllowlistedNumber( m.text ) )
+        {
+            return true;
+        }
+        const std::string& src = magicBytes( m.fileId );
+        if( !src.empty() && isConstantInitializerNumber( src, m.startByte ) )
+        {
+            return true;
+        }
+        // must be inside a function/method body to be a magic-number finding
+        const rw::Symbol* e = enclosing( m.fileId, m.startByte );
+        return !e || ( e->kind != rw::SymKind::Function && e->kind != rw::SymKind::Method );
+    } );
+}
+
+// #eq? rejected unequal assignment pairs inside tree-sitter, so the remaining captures arrive as
+// lhs/rhs twins in byte order. Collapse every complete twin pair into one finding; unlike the old
+// (file,line) bucket this cannot cross-wire two independent assignments sharing a source line.
+// The collapsed findings go to the END of ms, sorted by (file, line) for determinism.
+void collapseSelfAssignPairs( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms )
+{
+    std::vector<rw::AstMatch> saCaptured;
+    for( const rw::AstMatch& m : ms )
+    {
+        if( m.tag == "self-assign" )
+        {
+            saCaptured.push_back( m );
+        }
+    }
+    std::erase_if( ms, []( const rw::AstMatch& m ) { return m.tag == "self-assign"; } );
+    std::vector<rw::AstMatch> saKeep;
+    for( std::size_t i = 0; i + 1 < saCaptured.size(); i += 2 )
+    {
+        const rw::AstMatch& lhs = saCaptured[i];
+        const rw::AstMatch& rhs = saCaptured[i + 1];
+        if( lhs.fileId != rhs.fileId || lhs.text != rhs.text )
+        {
+            continue; // defensive: an incomplete/crossed capture pair is never evidence
+        }
+        const std::string expression( trimCaptureSpace( lhs.text ) );
+        rw::AstMatch hit;
+        hit.fileId    = lhs.fileId;
+        hit.startByte = lhs.startByte;
+        hit.endByte   = lhs.endByte;
+        hit.line      = lhs.line;
+        hit.tag       = "self-assign";
+        hit.text      = expression + " = " + expression;
+        saKeep.push_back( std::move( hit ) );
+    }
+    std::sort( saKeep.begin(), saKeep.end(), [ & ]( const rw::AstMatch& x, const rw::AstMatch& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        return x.line < y.line;
+    } );
+    for( rw::AstMatch& hit : saKeep )
+    {
+        ms.push_back( std::move( hit ) );
+    }
+}
+
+// Every --lint built-in finding, in its final deterministic order: the one grouped walk's rule captures
+// (saturation recorded, post-filtered, self-assign twins collapsed), then the symbol-level checks, the
+// unreachable-code sketch, and the three packs. Fills saturatedRules with the floors and allRuleNames with
+// the packs' own rule names on the way.
+std::vector<rw::AstMatch> collectBuiltInLintFindings( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing,
+                                                      std::size_t lintMaxPerRule, std::vector<RuleCap>& saturatedRules,
+                                                      std::vector<std::string>& allRuleNames )
 {
     using namespace rw;
-    const Config&                     cfg          = d.cfg;
-    const IngestResult&               ing          = d.ing;
-    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — --lint's
-    // OWN --sarif re-serialization (writeSarifResult) already applies it; this brings the native --match/
-    // --lint XML forms into parity rather than leaving them the only two still absolute per row.
-    const bool         lintSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
-    const std::string  lintRootPrefix = lintSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
-    std::vector<char>  lintRootEsc;
-    const std::string  lintRootAttr   = lintSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], lintRootEsc ) ) + "\"" ) : std::string();
+    const std::vector<AstQuerySpec> checks = builtInLintQueries();
+    // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
+    // do not re-open the same files a second and third time. Lives exactly as long as this collection.
+    std::vector<std::string>           corpusBytes;
+    std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes, lintMaxPerRule );
+    std::vector<AstMatch>              ms      = std::move( grouped[0] );
+    recordSaturatedQueryRules( checks, ms, lintMaxPerRule, saturatedRules );
+    std::erase_if( ms, isFilledIfBody );
+    std::erase_if( ms, isNonEmptyCatchBody );
+    dropUnflaggedMagicNumbers( ing, enclosing, ms );
+    collapseSelfAssignPairs( ing, ms );
 
-    // --lint-catalog: the built-in rule registry, standalone — needs no corpus at all (lintcatalog.h's
-    // table is static), so it is handled before the match/lint/lint-rules setup below even starts.
+    // Symbol-level checks (S6-A): walk each Function/Method body — checks that need line-counting or
+    // control-flow nesting depth, which a single tree-sitter @capture can't give without reparsing.
+    // These produce AstMatch entries (same format) so they flow into the same XML tally/listing.
+    //
+    //   large-function    — body line-span (newlines in [sigEndByte, endByte)) > 80
+    //   deep-nesting      — curly-brace nesting depth inside [sigEndByte, endByte) > 4
+    //   inconsistent-return — mix of `return;` and `return <expr>;` in the same body
+    //
+    // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
+    // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
+    // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
+    { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
+    for( AstMatch& symHit : lintSymbolLevelChecks( ing, &corpusBytes ) )
+    {
+        ms.push_back( std::move( symHit ) );
+    }
+    }
+
+    // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
+    // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
+    // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
+    // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
+    // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
+    // spending a fourth read + parse of the whole corpus on its own pool.
+    {
+        PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
+        for( auto& h : grouped[3] )
+        {
+            ms.push_back( std::move( h ) );
+        }
+    }
+
+    // The packs that live outside this function: the atoms-of-confusion pack (src/atoms.h), the
+    // identifier-naming lens (src/naminglens.h) and the cache-friendliness pack (src/cachelint.h).
+    // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
+    // owned by the pack — its own rule names. All run here, so the sort below covers every built-in
+    // finding regardless of its source.
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ), lintMaxPerRule ); }
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes, lintMaxPerRule ); }
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ), lintMaxPerRule ); }
+
+    // Re-sort the combined findings (AST + symbol-level) for deterministic output.
+    std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        if( x.startByte != y.startByte ) { return x.startByte < y.startByte; }
+        return x.tag < y.tag;
+    } );
+    return ms;
+}
+
+// THE state one --lint / --lint-rules answer is assembled from, filled by runLintVerb's named steps in
+// order — the built-in findings (with the packs' rule names and floors), then the user rules' findings,
+// floors and uncompiled ids — and read whole by the emitting steps after it.
+// LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
+// at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
+// built-ins (facts, not severities); user findings carry their declared sev=.
+struct LintFindingSet
+{
+    std::vector<std::string>  allRuleNames = builtInLintRuleNames();
+    std::vector<RuleCap>      saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
+    std::vector<LintOut>      outs;
+    std::vector<rw::LintRule> userRules;
+    std::vector<std::string>  uncompiledUserRuleIds;   // §L10: main query compiled for NO grammar
+};
+
+// --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
+// files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Refuse (exit 1) ONLY
+// if the flag was given but zero rules loaded (nothing to run = a user mistake worth surfacing), or a
+// #match? predicate could not be decided. false ⇒ refused, the refusal already printed.
+bool appendUserRuleFindings( const rw::Config& cfg, const rw::IngestResult& ing, std::size_t lintMaxPerRule, LintFindingSet& run )
+{
+    using namespace rw;
+    run.userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
+    if( run.userRules.empty() )
+    {
+        lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
+        return false;
+    }
+    const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, run.userRules, lintMaxPerRule );
+    if( refuseUndecidedMatchRegex( "--lint-rules", regexRefused, regexUndecided, undecidedPredicateFirstSite( cfg, ing, regexUndecided ),
+                                   "rules loaded from " + std::string( cfg.lintRulesDir ) + " whose queries carry a #match?/#not-match? predicate: "
+                                       + rulesWithMatchPredicate( run.userRules ) ) )
+    {
+        return false;
+    }
+    for( const LintFinding& f : userFindings )
+    {
+        run.outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
+    }
+    for( const std::string& id : saturatedUserRuleIds )
+    {
+        run.saturatedRules.push_back( { id, true } );
+    }
+    run.uncompiledUserRuleIds = uncompiledIds;
+    return true;
+}
+
+// The one "is this rule in the answer" predicate of --lint-select / --lint-ignore: an inactive selection
+// keeps every rule.
+bool lintRuleSelected( const rw::lintcatalog::LintSelection& sel, std::string_view rule ) noexcept
+{
+    return !sel.active || rw::lintcatalog::lintSelectionKeeps( sel, rule );
+}
+
+// W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
+// 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
+// ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
+// a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
+// choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
+// polyglot fixture (ripwire's pre-cutover ancestor, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
+// kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
+// staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
+// --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
+// a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
+// caller who already knew to page past a cap sees no change.
+inline constexpr std::size_t kLintDefaultPayloadBytes = 100000;
+
+// CL1 (outputceiling.h): the DEFAULT page's row budget, so the WHOLE answer — legend, root, one <rule> tally row per rule and
+// the <f> rows — stays under kOutputCeilingChars. MEASURED on base 36a95d732 (GA1 DEV, one tree per repo): 9 of 11 default
+// --lint answers printed over 30,000 characters (max 83,162), past the agent harness's inline limit.
+// The reserve covers what is not a finding: the legend (579 B compact on Newtonsoft.Json; the full one ~3.7 KB), the root,
+// and kLintTallyRowBytes per possible tally row (85 B on average there). lintFindingsWindow keeps kLintDefaultPayloadBytes as the
+// upper bound. A page always holds at least one row, so a reserve past the ceiling still advances.
+inline constexpr std::size_t kLintNonRowReserveBytes = 4000;
+inline constexpr std::size_t kLintTallyRowBytes      = 90;
+inline std::size_t lintPagePayloadBytes( std::size_t tallyRows ) noexcept
+{
+    const std::size_t reserve = kLintNonRowReserveBytes + kLintTallyRowBytes * tallyRows;
+    return rw::kOutputCeilingChars > reserve ? rw::kOutputCeilingChars - reserve : 0;
+}
+
+// One <f> row's printed bytes, from above: the escaped text exactly (emitEscapedText grows & < > to 5/4/4 bytes), the
+// rule, severity, path and enclosing name, plus a flat 40 for the tag markup and line number (26 B + the line's digits).
+inline std::size_t lintRowBytes( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const LintOut& m )
+{
+    std::size_t text = m.text.size();
+    for( char ch : m.text )
+    {
+        text += ch == '&' ? 4 : ( ch == '<' || ch == '>' ) ? 3 : 0;
+    }
+    const rw::Symbol* e = enclosing( m.fileId, m.startByte );
+    return text + m.rule.size() + m.sev.size() + rw::rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative
+         + ( e ? e->name.size() : 0 ) + 40;
+}
+
+// The tally rows a --lint answer can print: every built-in rule and the atoms and cache packs' rules (they join allRuleNames
+// when their pass runs, not in builtInLintRuleNames), plus each user rule that found something (a user finding carries sev=). A user rule that found nothing also prints a row and is not counted here; the row estimate's margin (+40
+// markup per finding, ~10 B over) covers a handful of them.
+inline std::size_t lintTallyRowsBound( const std::vector<LintOut>& outs )
+{
+    std::vector<std::string_view> userRules;   // a handful of user rules at most: a linear membership test is the cheap one
+    for( const LintOut& o : outs )
+    {
+        if( !o.sev.empty() && std::ranges::find( userRules, std::string_view( o.rule ) ) == userRules.end() )
+        {
+            userRules.emplace_back( o.rule );
+        }
+    }
+    return builtInLintRuleNames().size() + std::size( rw::atoms::kAtomRuleNames ) + std::size( rw::cachelint::kCacheRuleNames ) + userRules.size();
+}
+
+// The <f> rows a --lint answer prints: the --limit page when the caller sized one, every row from --offset under --page-bytes=0
+// (the whole answer, LT1), else the sorted run from --offset (0 on a bare call) that fits the page budget (lintPagePayloadBytes). CL1: --offset alone is a CONTINUATION of the default page, so
+// it is byte-budgeted too — before, `--lint --offset=K` printed every row from K on, so the page after a capped default answer
+// was larger than the answer it continued. Rows keep their final sorted order, so pages chain without a gap or a repeat.
+rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs )
+{
+    if( cfg.pageLimit > 0 )
+    {
+        return rw::pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset );
+    }
+    const std::size_t begin = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, outs.size() );
+    if( rw::wholeAnswerAsked( cfg ) )
+    {
+        return rw::PageWindow{ begin, outs.size() };   // LT1: --page-bytes=0, the whole answer (from --offset=K when one was given)
+    }
+    // Byte-budget the default run. The stopping rule is bytes because a corpus with long text= rows (E6's vendored-bundle
+    // case: 2,037,645 B / 6,169 findings) needs far FEWER rows to reach the same budget than a corpus of short rows does.
+    const std::size_t budget           = std::min( lintPagePayloadBytes( lintTallyRowsBound( outs ) ), kLintDefaultPayloadBytes );   // the historic cap stays the upper bound
+    std::size_t       bytesUsed        = 0;
+    std::size_t       lintDefaultShown = 0;
+    for( std::size_t i = begin; i < outs.size(); ++i )
+    {
+        const std::size_t rowBytes = lintRowBytes( ing, enclosing, outs[i] );
+        if( lintDefaultShown > 0 && bytesUsed + rowBytes > budget )
+        {
+            break;   // the page already kept at least one row — stop BEFORE the overflow row
+        }
+        bytesUsed += rowBytes;
+        ++lintDefaultShown;
+    }
+    return rw::PageWindow{ begin, begin + lintDefaultShown };
+}
+
+// CL1: the next page of a capped --lint answer, as one pasteable call — the run's own rule-shaping flags, then --offset=K
+// (and --limit=N when the caller sized the page). "" when nothing is left. A user selection is kept AS TYPED, so the next
+// page windows the same findings.
+inline std::string lintPageNext( const rw::Config& cfg, std::size_t windowEnd, std::size_t total )
+{
+    if( windowEnd >= total )
+    {
+        return {};
+    }
+    std::string inv = cfg.lint ? "--lint" : "";
+    const auto  add = [ & ]( const std::string& flag ) { inv += inv.empty() ? flag : " " + flag; };
+    if( !cfg.lintRulesDir.empty() ) { add( rw::nextFlag( "--lint-rules=", cfg.lintRulesDir ) ); }
+    if( !cfg.lintSelect.empty() )   { add( rw::nextFlag( "--lint-select=", cfg.lintSelect ) ); }
+    if( !cfg.lintIgnore.empty() )   { add( rw::nextFlag( "--lint-ignore=", cfg.lintIgnore ) ); }
+    if( cfg.lintMaxPerRule > 0 )    { add( "--lint-max-per-rule=" + std::to_string( cfg.lintMaxPerRule ) ); }
+    if( cfg.namingLocals )          { add( "--naming-locals" ); }
+    if( !cfg.withProfile.empty() )  { add( rw::nextFlag( "--with-profile=", cfg.withProfile ) ); }
+    return rw::pagedNext( inv, cfg.pageLimit, windowEnd );
+}
+
+// §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
+bool ruleFloored( const std::vector<RuleCap>& saturatedRules, std::string_view ruleName, bool isUserRule )
+{
+    return std::any_of( saturatedRules.begin(), saturatedRules.end(),
+                        [ & ]( const RuleCap& rc ) { return rc.rule == ruleName && rc.isUserRule == isUserRule; } );
+}
+
+// The root's floor pair. H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS,
+// never over every rule that saturated. `--lint-select=cache-` used to inherit findings_capped="1" from the
+// UNSELECTED magic-number rule, so 398 had to be read as a floor when, by the legend's own definition, it
+// was a total. Same predicate as the tally rows and the SARIF twin (lintRuleEmitted).
+// knob-honesty-068: findingsNext is the call that counts the floored rules' rest, over the SAME emitted-rules
+// predicate (H8).
+struct LintFloors { bool anyRuleCapped = false; std::string findingsNext; };
+
+LintFloors lintFloorsOf( const rw::Config& cfg, const std::vector<RuleCap>& saturatedRules, const rw::lintcatalog::LintSelection& lintSel,
+                         std::size_t lintMaxPerRule )
+{
+    const auto lintRuleEmitted = [ & ]( const RuleCap& rc ) -> bool { return lintRuleSelected( lintSel, rc.rule ); };
+    LintFloors floors;
+    floors.anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
+    floors.findingsNext  = lintFindingsNext( cfg, saturatedRules, lintRuleEmitted, lintMaxPerRule );
+    ASSUME( floors.findingsNext.empty() != floors.anyRuleCapped, "findings_next= rides exactly the answers findings_capped=\"1\" floors (one predicate)" );
+    return floors;
+}
+
+// §L7 root disclosure: inert_rules= (only when >0 — same "absent = nothing to say" convention as
+// findings_capped=) and, only when --lint-select/--lint-ignore were given, selected="K of N" plus
+// the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
+std::string lintRootExtraAttrs( const rw::Config& cfg, const LintAnswerView& view, std::size_t inertRuleCount, const rw::lintcatalog::LintSelection& lintSel )
+{
+    std::string lintRootExtra;
+    if( inertRuleCount > 0 )
+    {
+        lintRootExtra += std::format( " inert_rules=\"{}\"", inertRuleCount );
+    }
+    if( lintSel.active )
+    {
+        lintRootExtra += std::format( " selected=\"{} of {}\"", lintSel.selectedCount, lintSel.totalCount );
+        if( !cfg.lintSelect.empty() )
+        {
+            lintRootExtra += " select=\"" + view.ex( cfg.lintSelect ) + "\"";
+        }
+        if( !cfg.lintIgnore.empty() )
+        {
+            lintRootExtra += " ignore=\"" + view.ex( cfg.lintIgnore ) + "\"";
+        }
+    }
+    // capture-audit 2026-09-04 (M16): a modifier's effect is stamped on the root the way --lint-select's
+    // selected=/select= is — `--lint --naming-locals` moved the count 3717 -> 4898 on this repo with no
+    // attribute saying why. Absent when the modifier is off (absent = nothing to say, as with inert_rules=).
+    if( cfg.namingLocals )
+    {
+        lintRootExtra += " naming_locals=\"1\"";
+    }
+    // #157 (CodeRabbit on #331): the rule walk is astQueryGrouped, which skips every file ingest's nesting guard
+    // refused — the same skip --match and --pattern disclose as nest_refused=, and the one the --skipped legend
+    // says all three share. Without it here a refused .kt file vanished from every rule's count with no trace.
+    // Absent when 0, like inert_rules=, so every lint answer over a corpus with no refusal is byte-identical.
+    lintRootExtra += nestRefusedAttr( view.ing );
+    return lintRootExtra;
+}
+
+// The --lint answer's legend comments: the main one always, then one per present-only root attribute
+// (findings_next=, nest_refused=, the --with-profile heat columns) that this answer carries.
+void emitLintLegends( const rw::Config& cfg, bool findingsFloored, bool nestRefused )
+{
+    // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
+    lintPrintOut( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
+                "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
+                "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
+                "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
+                "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
+                "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one PRINTED rule row is a "
+                "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
+                "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
+                "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
+                "next= on the root is that next page as one pasteable call: lint at offset=next_offset, with the rule-shaping flags this run was given. "
+                "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
+                "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
+                "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
+                "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
+                "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
+                "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
+                "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
+                "naming_locals=\"1\" on the root ⇒ the opt-in naming-locals modifier was on (the naming-* rules also read local "
+                "variables inside already-flagged functions); absent ⇒ off, and the naming-* counts cover declarations only. "
+                "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
+                "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
+                "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
+                "rule with one that measured zero); this is a DIFFERENT fact from the row's own count_capped=\"1\" above (that rule's "
+                "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. "
+                "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
+                "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
+                "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
+                "well-formed query that ran and found nothing); absent ⇒ the query compiled. "
+                "The rules that found nothing print no rule row: ONE <zero_rules> row after the counted rows names them all — n= how many, "
+                "ran= those that ran on a language this corpus holds and matched nothing (a measured zero), inert= those none of whose "
+                "languages are here (applicable=\"0\": structural, never a clean bill); every selected rule is named once, on its row or there. "
+                "<f> rows run most important first: files nobody here authors (a tool, vendored or generated path, a minified file, a "
+                "bundle) last; then rule severity, error before warn before info; then source files before test, bench and fixture files; "
+                "then the file's place in the map's PageRank order; then path and line. page-bytes=0 prints every row in one answer. -->" );
+    if( findingsFloored )
+    {
+        // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
+        lintPrintOut( "<!-- lint findings_next= on the root is the one call that counts the floored rules' rest: only the rules "
+                    "that carry count_capped=\"1\", under a 10x per-rule budget (the lint-max-per-rule flag; the default budget is a "
+                    "runaway guard, not a target); a re-run still floored names its own. -->" );
+    }
+    if( nestRefused )
+    {
+        lintPrintOut( "<!-- lint nest_refused= on the root counts corpus files a pre-parse nesting guard refused before any rule's walk "
+                    "could reach them, so no count= includes them; the count is corpus-wide, not narrowed to a language any rule here "
+                    "declares, so some of it was never going to be read by lint regardless; see the skipped verb's why=\"nest-refused\" "
+                    "rows for which. -->" );
+    }
+    if( !cfg.withProfile.empty() )
+    {
+        lintPrintOut( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
+                    "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
+                    "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
+                    "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
+    }
+}
+
+// LT1: the rules that found nothing, folded into ONE row after the counted ones — <zero_rules n= ran= inert=/>. The honesty rule
+// still holds (what was checked and found nothing is SAID, never omitted): every selected rule is named exactly once, either on
+// its own <rule> row or here. ran= names the rules that ran on a language this corpus holds and matched nothing (a measured
+// zero); inert= the rules none of whose languages are here (what a row's applicable="0" said: structural, never a clean bill).
+// MEASURED on GA1 DEV ga-eslint-01 (parent dfc8d95fd): 31 of 39 <rule> rows were count="0". A user rule whose query compiled for
+// no grammar keeps its own row (compiled="0" — it never ran, a different claim from either list).
+struct ZeroRuleFold
+{
+    std::size_t n = 0;
+    std::string ran, inert;
+    void add( std::string_view name, bool applicable )
+    {
+        std::string& to = applicable ? ran : inert;
+        to += to.empty() ? "" : ",";
+        to += name;
+        ++n;
+    }
+    // true (and the name folded) when the rule found nothing; false: the caller prints its row
+    bool foldIfZero( std::string_view name, std::uint32_t count, bool applicable )
+    {
+        if( count == 0 )
+        {
+            add( name, applicable );
+        }
+        return count == 0;
+    }
+    void emit() const
+    {
+        if( n > 0 )
+        {
+            lintPrintOut( "<zero_rules n=\"{}\"{}{}/>", n, ran.empty() ? std::string() : " ran=\"" + ran + "\"", inert.empty() ? std::string() : " inert=\"" + inert + "\"" );
+        }
+    }
+};
+
+// The user rules' half of emitLintRuleTally (declaration order): a row per selected rule that found something or whose query
+// compiled for no grammar (compiled="0" — it never ran, so it is never folded as a zero); the rest fold into `zeros`.
+void emitUserRuleTally( const LintAnswerView& view, const LintFindingSet& run, const rw::lintcatalog::LintSelection& lintSel, rw::PageWindow lintPage,
+                        std::uint32_t corpusLangs, ZeroRuleFold& zeros )
+{
+    for( const rw::LintRule& r : run.userRules )
+    {
+        if( !lintRuleSelected( lintSel, r.id ) )
+        {
+            continue;
+        }
+        const RuleTally   rt         = tallyLintRule( run.outs, r.id, /*wantSevEmpty=*/false, lintPage );
+        const bool        applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+        const bool        compiled   = std::find( run.uncompiledUserRuleIds.begin(), run.uncompiledUserRuleIds.end(), r.id ) == run.uncompiledUserRuleIds.end();
+        if( compiled && zeros.foldIfZero( view.ex( r.id ), rt.count, applicable ) )
+        {
+            continue;
+        }
+        const std::string sevEx      = view.ex( r.severity );
+        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, ruleFloored( run.saturatedRules, r.id, true ), applicable, compiled );
+    }
+}
+
+// One <rule> tally row per SELECTED rule that found something — the built-ins (declaration order, only under --lint) then the
+// user rules (emitUserRuleTally) — then ONE <zero_rules> row naming every selected rule that found nothing, so the tally order
+// is deterministic and a deselected rule has no row and no name at all (it can never look like a checked-and-empty rule).
+void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const LintFindingSet& run, const rw::lintcatalog::LintSelection& lintSel,
+                        rw::PageWindow lintPage, std::uint32_t corpusLangs )
+{
+    ZeroRuleFold zeros;
+    if( cfg.lint )
+    {
+        for( const std::string& rn : run.allRuleNames )
+        {
+            if( !lintRuleSelected( lintSel, rn ) )
+            {
+                continue;
+            }
+            const RuleTally rt = tallyLintRule( run.outs, rn, /*wantSevEmpty=*/true, lintPage );
+            const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
+            const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
+            if( zeros.foldIfZero( rn, rt.count, applicable ) )
+            {
+                continue;
+            }
+            printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, ruleFloored( run.saturatedRules, rn, false ), applicable );
+        }
+    }
+    emitUserRuleTally( view, run, lintSel, lintPage, corpusLangs, zeros );
+    zeros.emit();
+}
+
+// The <f> rows inside the window: a built-in finding keeps its bare shape (no sev=), a user finding carries
+// sev=; either one gains the --with-profile heat attributes when they were joined.
+void emitLintFindingRows( const LintAnswerView& view, const std::vector<LintOut>& outs, rw::PageWindow lintPage, const std::vector<std::string>& heatByFinding )
+{
+    for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
+    {
+        const LintOut&    m    = outs[ findingIndex ];
+        const rw::Symbol* e    = view.enclosing( m.fileId, m.startByte );
+        const std::string heat = heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ];
+        if( m.sev.empty() )
+        {
+            lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", view.ex( m.rule ), view.ex( view.rowPath( m.fileId ) ), m.line, e ? view.ex( e->name ) : "", heat );
+        }
+        else
+        {
+            lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", view.ex( m.rule ), view.ex( m.sev ), view.ex( view.rowPath( m.fileId ) ), m.line,
+                        e ? view.ex( e->name ) : "", heat );
+        }
+        emitEscapedText( m.text );
+        lintPrintOut( "</f>" );
+    }
+}
+
+// --lint (built-in checks) and/or --lint-rules=DIR (user rules): collect, select, order, window, then emit
+// as SARIF or as the native <lint> document.
+int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+    // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
+    const std::size_t lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
+
+    LintFindingSet run;
+    if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
+    {
+        std::vector<AstMatch> builtIns = collectBuiltInLintFindings( cfg, ing, view.enclosing, lintMaxPerRule, run.saturatedRules, run.allRuleNames );
+        run.outs.reserve( builtIns.size() );
+        for( AstMatch& m : builtIns )
+        {
+            run.outs.push_back( { m.fileId, m.startByte, m.line, std::move( m.tag ), std::string(), std::move( m.text ) } );
+        }
+    }
+    if( !cfg.lintRulesDir.empty() && !appendUserRuleFindings( cfg, ing, lintMaxPerRule, run ) )
+    {
+        return 1;
+    }
+
+    // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
+    // because a PREFIX can legitimately name a user rule id that --lint-rules=DIR has only just
+    // loaded above. See resolveLintSelection's own header for the pool it validates against.
+    const std::optional<rw::lintcatalog::LintSelection> lintSelOpt = resolveLintSelection( cfg, run.userRules );
+    if( !lintSelOpt )
+    {
+        return 1;   // refusal already printed
+    }
+    const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
+    std::erase_if( run.outs, [ & ]( const LintOut& o ) { return !lintRuleSelected( lintSel, o.rule ); } );
+
+    // Final deterministic order over the COMBINED set: most important first (LT1), then the old total order — see
+    // sortLintRows for the keys and why the tie-break runs all the way out to the row's own text.
+    sortLintRows( ing, run.outs );
+    // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
+    // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
+    // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
+    run.outs = dedupeLintFindings( view.enclosing, std::move( run.outs ) );
+    rankLintRowsByImportance( lintRowOrder( ing, d.g ), run.outs );   // LT1: most important first, the order above kept inside each group
+
+    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
+    const std::size_t shownCount = lintPage.end - lintPage.begin;
+    const LintFloors  floors     = lintFloorsOf( cfg, run.saturatedRules, lintSel, lintMaxPerRule );
+
+    // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
+    // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
+    // Applicability is per-LANGUAGE granularity (does the corpus contain ANY file of a language this
+    // rule's grammar could ever satisfy), never per-file-content — a rule can be "applicable" and
+    // still find nothing. See computeLintApplicability's own header for why it lives outside this function.
+    const LintApplicability lintApplicability = computeLintApplicability( ing, cfg.lint, run.allRuleNames, run.userRules, lintSel );
+
+    // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
+    // validateConfig already refused this alongside --match / --with-profile / paging.
+    if( cfg.sarif )
+    {
+        emitRunLintSarif( d, run.allRuleNames, run.userRules, run.saturatedRules, run.outs, lintSel, lintApplicability.corpusLangs, view.enclosing );
+        return 0;
+    }
+
+    // --with-profile join, lifted into buildHeatAnnotations: per-finding heat_* attribute strings
+    // index-aligned with `outs`, + the root attribute.
+    std::pair<std::vector<std::string>, std::string> heat;   // (heatByFinding, heatJoinedAttr)
+    if( !cfg.withProfile.empty() )
+    {
+        auto joined = buildHeatAnnotations( cfg.withProfile, ing, run.outs, view.enclosing );
+        if( !joined )
+        {
+            return 1;   // refusal already printed — never join nothing silently
+        }
+        heat = std::move( *joined );
+    }
+
+    const std::string lintRootExtra = lintRootExtraAttrs( cfg, view, lintApplicability.inertRuleCount, lintSel );
+    emitLintLegends( cfg, !floors.findingsNext.empty(), ing.crawlSkips.nestRefusedFiles > 0 );
+    // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
+    // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
+    // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
+    // the shape was the one verb that did not spell it — fixed here by calling the shared helper
+    // instead of hand-rolling a second copy (W3-S: this is also what lets the default byte cap
+    // disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
+    // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
+    // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
+    // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
+    // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
+    // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
+    char lintPageBuf[ kPageDisclosureCap ];
+    lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}{}>", run.outs.size(),
+                pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, run.outs.size(), lintPage.end,
+                               cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
+                               /*collectionCapped=*/ floors.anyRuleCapped ),   // H8: a floored rule floors findings=
+                floors.anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( floors.findingsNext, "findings_next" ) : std::string(),
+                heat.second, lintRootExtra, view.rootAttr, rw::nextAttrXml( lintPageNext( cfg, lintPage.end, run.outs.size() ) ) );
+    emitLintRuleTally( cfg, view, run, lintSel, lintPage, lintApplicability.corpusLangs );
+    emitLintFindingRows( view, run.outs, lintPage, heat.first );
+    lintPrintOut( "</lint>" );
+    return 0;
+}
+
+// The lint verb family's dispatcher: --lint-catalog needs no corpus; --match, --pattern and --lint /
+// --lint-rules all ride the shared AST-query pass and annotate each hit with its enclosing symbol, so they
+// share one LintAnswerView and split into their own verbs. nullopt ⇒ none of the family's flags was given.
+std::optional<int> runLint( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
     if( cfg.lintCatalog )
     {
         return emitLintCatalog();
     }
-
-    // --match=QUERY (structural search) and --lint (built-in checks) both ride the shared AST-query pass and
-    // annotate each hit with its enclosing symbol — so they share this setup.
-    if( !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
+    const bool lintFamilyAsked = !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty();
+    if( !lintFamilyAsked )
     {
-        // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
-        const SymbolsByFile fileSyms = symbolsByFile( ing,
-                                                      []( const Symbol& ) { return true; },
-                                                      [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-        const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
-        {
-            const Symbol* best = nullptr;
-            for( NodeId id : fileSyms[f] )
-            {
-                const Symbol& s = ing.symbols[id];
-                if( s.sigStartByte > off )
-                {
-                    break;
-                }
-                if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
-                {
-                    best = &s;
-                }
-            }
-            return best;
-        };
-        const auto emitEscaped = []( const std::string& s )
-        {
-            for( char ch : s )
-            {
-                if( ch == '<' )
-                {
-                    std::fputs( "&lt;", stdout );
-                }
-                else if( ch == '>' )
-                {
-                    std::fputs( "&gt;", stdout );
-                }
-                else if( ch == '&' )
-                {
-                    std::fputs( "&amp;", stdout );
-                }
-                else
-                {
-                    std::fputc( ch, stdout );
-                }
-            }
-        };
-        std::vector<char> esc;
-        const auto        ex  = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        const int         cap = cfg.packTopN > 0 ? cfg.packTopN : 100;
-
-        if( !cfg.match.empty() )   // structural search: the user's tree-sitter query (≥1 @capture)
-        {
-            // P2.1: the listing stops at `cap` (--pack-top-n, default 100) while hits= counted everything the
-            // engine collected — a `hits="5000"` header over 100 rows said nothing about the other 4900.
-            // And hits= is itself bounded by astQuery's own maxMatches, so `hits="5000"` is a FLOOR, not a
-            // total; hits_capped= says which of the two it is (same contract as --grep's).
-            // §P0.1: astQuery reports CAPTURES, so a query binding none matches nothing it can report —
-            // `--match='(if_statement)'` produced a clean, confident hits="0" next to 5000 for the same
-            // query with `@i`. A capture-less bare zero must be unreachable: auto-capture the query when
-            // appending a capture is provably what the user would have typed (exactly one top-level
-            // pattern), and refuse loudly otherwise. Never scan a query we did not understand.
-            std::string matchQuery( cfg.match );
-            bool        autoCaptured = false;
-            {
-                const AstQueryShape shape = astQueryShape( matchQuery );
-                if( !shape.hasCapture )
-                {
-                    // A `;` comment makes appending unsafe (` @m` on the end of a comment line is itself
-                    // commented out), so a capture-less query that carries one is refused, not guessed at.
-                    if( !shape.isSingleTopLevel || shape.hasComment )
-                    {
-                        // Deliberately does NOT assert a cause: this branch catches several top-level
-                        // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
-                        // would be its own small fabrication. Show the query as received and let the
-                        // reader see the stray quote / second pattern for themselves.
-                        lintPrintErr( "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
-                                            "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
-                                            "(query as received: {})\n",
-                                    matchQuery );
-                        return 1;
-                    }
-                    matchQuery  += " @m";
-                    autoCaptured = true;
-                }
-            }
-            constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
-            const MatchQueryOutcome      mq = runMatchQuery( ing, matchQuery, kMatchMaxHits );
-            const std::vector<AstMatch>& ms            = mq.matches;
-            const std::string&           grammarsAttr  = mq.grammarsAttr;   // §L3: which grammars the query compiled against
-            const std::size_t&           eligibleFiles = mq.eligibleFiles;
-            // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
-            // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
-            if( !mq.uncompiled.empty() )
-            {
-                lintPrintErr( "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
-                                    "(query as received: {}){}\n",
-                            cfg.match, matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ) );
-                return 1;
-            }
-            if( refuseUndecidedMatchRegex( "--match", mq.regexRefused, mq.regexUndecided, undecidedPredicateFirstSite( cfg, ing, mq.regexUndecided ),
-                                           "query as received: " + std::string( cfg.match ) ) )
-            {
-                return 1;
-            }
-            // §P8 G3: --match was missed when its sibling --grep got paging — `--limit=5` still emitted the
-            // full 100-row cap, so the two structurally identical search verbs disagreed about whether
-            // --limit meant anything. Same window, same disclosure, same default cap (--pack-top-n, else
-            // 100): pageDisclosure emits exactly the ` shown= capped=` bytes this tag used to hand-roll, so
-            // an un-paginated --match is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
-            const PageWindow  matchPage  = pageWindow( ms.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
-            const std::size_t matchShown = matchPage.end - matchPage.begin;
-            char              mpab[ kPageDisclosureCap ];
-            // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
-            // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
-            // #157: a file the nesting guard refused is excluded from eligible_files= and never reaches this
-            // walk, so a reader must be told the corpus held one rather than reading a clean match answer as
-            // proof the pattern does not occur there too. Same reused why token the skipped verb's rows carry.
-            const std::string matchNestRefusedAttr = ing.crawlSkips.nestRefusedFiles > 0
-                ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
-                : std::string();
-            lintPrintOut( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
-                        "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
-                        "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
-                        "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
-                        "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
-                        "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
-                        "language set vs total indexed files. nest_refused= (absent if 0) counts corpus files a pre-parse nesting guard "
-                        "refused before this walk could reach them, excluded from eligible_files=; see the skipped verb's why=\"nest-refused\" "
-                        "rows for which. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
-            lintPrintOut( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}{}>",
-                        ms.size(),
-                        pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
-                                        cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
-                                        /*collectionCapped=*/ ms.size() >= kMatchMaxHits ),   // H8: the same cap hits_capped= names
-                        ms.size() >= kMatchMaxHits ? 1 : 0,
-                        autoCaptured ? " auto_captured=\"1\"" : "",
-                        ex( grammarsAttr ),
-                        eligibleFiles,
-                        ing.files.size(),
-                        lintRootAttr,
-                        matchNestRefusedAttr );
-            for( std::size_t hitIndex = matchPage.begin; hitIndex < matchPage.end; ++hitIndex )
-            {
-                const AstMatch&         m  = ms[ hitIndex ];
-                const Symbol*           e  = enclosing( m.fileId, m.startByte );
-                const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
-                emitEscaped( m.text );
-                lintPrintOut( "</m>" );
-            }
-            lintPrintOut( "</match>" );
-            return 0;
-        }
-
-        // R2 — the PATTERN surface: structural search written in CODE instead of in node kinds.
-        // Sits here, beside --match, because it answers the same question through the same walk and must
-        // emit through the same conventions (enclosing symbol, page window, grammar applicability). The
-        // work BEFORE the walk — compile per grammar, refuse or proceed, assemble the disclosures — is
-        // runPatternSearch, extracted for exactly the reason runMatchQuery was: runLint's dispatcher body
-        // is already one of the largest in this file and must not grow a verb's worth of plumbing.
-        if( !cfg.pattern.empty() )
-        {
-            const PatternSearchOutcome ps = runPatternSearch( ing, cfg.pattern );
-            if( !ps.refusal.empty() )
-            {
-                lintPrintErr( "{}", ps.refusal );
-                return 1;
-            }
-            const PageWindow  patPage  = pageWindow( ps.matches.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
-            const std::size_t patShown = patPage.end - patPage.begin;
-            char              ppab[ kPageDisclosureCap ];
-            lintPrintOut( "{}", kPatternLegend );
-            if( ps.qualifiedUnmatched > 0 )
-            {
-                lintPrintOut( "{}", kPatternQualifiedLegend );
-            }
-            // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
-            // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
-            // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
-            // matched .tsx sat beside a silently unread .ts.
-            const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
-            // #157: same disclosure as --match, over the same shared walk (AstWalk::Pattern reaches the
-            // identical per-file skip). Absent when nothing was refused.
-            const std::string patNestRefusedAttr = ( ing.crawlSkips.nestRefusedFiles > 0
-                ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
-                : std::string() )
-                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() );
-            lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
-                        ps.matches.size(),
-                        pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
-                                        kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
-                        ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
-                        ex( cfg.pattern ),
-                        ex( ps.grammarsAttr ),
-                        ex( ps.shapesAttr ),
-                        rw::pattern::kUnsupportedGrammars,
-                        ps.ellipsisAttr,
-                        tellUnresolved ? ps.unresolvedAttr : std::string(),
-                        ps.eligibleFiles,
-                        ps.skippedFiles,
-                        ing.files.size(),
-                        lintRootAttr,
-                        patNestRefusedAttr );
-            for( std::size_t hitIndex = patPage.begin; hitIndex < patPage.end; ++hitIndex )
-            {
-                const rw::AstMatch&    m  = ps.matches[ hitIndex ];
-                const Symbol*          e  = enclosing( m.fileId, m.startByte );
-                const std::string_view rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
-                emitEscaped( m.text );
-                lintPrintOut( "</m>" );
-            }
-            lintPrintOut( "</pattern>" );
-            return 0;
-        }
-
-        // --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
-        // never the [FLOW]/[TYPE] checks ripwire can't see soundly.
-        //
-        // S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
-        // inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
-        // Checks skipped (too noisy / require real semantics):
-        //   missing-const — needs type inference + mutation analysis ([TYPE]) — false positives on out-params
-        //   non-virtual-dtor — needs inheritance graph ([TYPE]) — not reliably detectable from the AST alone
-        //   implicit-bool-conv — `if(ptr)` is idiomatic C++; flagging it produces near-universal noise
-        std::vector<AstMatch> ms;   // combined findings (built-in tags + user rule ids); shared by both sources
-
-        std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
-        // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
-        const std::size_t    lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
-
-        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
-        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
-        // Declared BEFORE the --lint block so the atoms pack can append its own names from inside it (one
-        // guarded region instead of two, which is also what keeps runLint's branch count from growing per pack).
-        std::vector<std::string> allRuleNames = {
-            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
-            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
-            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
-            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-            "naming-predicate", "naming-setter", "naming-confusable", "naming-uninformative",
-        };
-
-        if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
-        {
-        const std::vector<AstQuerySpec> checks = {
-            { "(cast_expression) @c",                                                                       "c-style-cast" },         // cppcoreguidelines-pro-type-cstyle-cast
-            { "(goto_statement) @c",                                                                        "goto" },                  // cppcoreguidelines-avoid-goto
-            { "(do_statement) @c",                                                                          "do-while" },              // cppcoreguidelines-avoid-do-while
-            { "(call_expression function: (identifier) @c (#match? @c \"^(strcpy|strcat|sprintf|gets)$\"))","unsafe-c-fn" },           // bugprone unbounded C string fns
-            { "(call_expression function: (identifier) @c (#match? @c \"^(MD5|md5|SHA1|sha1|MD4|md4|RC4|rc4)$\"))","weak-crypto" },   // broken hash/cipher (the one [AST] security item; insecure rand() excluded — too noisy)
-            { "(parenthesized_expression (parenthesized_expression) @c)",                                   "redundant-parens" },      // clang-tidy readability-redundant-parentheses
-            { "(if_statement consequence: (expression_statement) @c)",                                      "suspicious-semicolon" },  // clang-tidy bugprone-suspicious-semicolon (post-filtered below)
-            // S6-A new checks:
-            { "(type_definition declarator: (type_identifier) @c)",                                         "typedef-over-using" },    // C-style typedef struct/union in C++ — prefer using T = ...
-            { "(number_literal) @c",                                                                        "magic-number" },          // numeric literal outside const/constexpr init (post-filtered below)
-            { "(catch_clause body: (compound_statement) @c)",                                               "empty-catch" },           // catch block with empty/comment-only body (post-filtered below)
-            { "(assignment_expression left: (_) @lhs right: (_) @rhs (#eq? @lhs @rhs))",                   "self-assign" },           // x = x — predicate rejects unequal pairs before post-filtering
-        };
-        // §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
-        // by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed below.
-        // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
-        // do not re-open the same files a second and third time. Lives exactly as long as this lint block.
-        std::vector<std::string>           corpusBytes;
-        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes, lintMaxPerRule );
-        ms = std::move( grouped[0] );
-        for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
-        {
-            std::size_t rawForRule = 0;
-            for( const AstMatch& m : ms )
-            {
-                if( m.tag == check.tag )
-                {
-                    ++rawForRule;
-                }
-            }
-            if( rawForRule >= lintMaxPerRule )
-            {
-                saturatedRules.push_back( { check.tag, false } );
-            }
-        }
-
-        // suspicious-semicolon: the query also matches a normal `if(x) foo();` (the grammar gives both an
-        // expression_statement consequence). Keep ONLY an empty body — matched text trims to just ";" — the real bug.
-        ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-                                  {
-                                      if( m.tag != "suspicious-semicolon" )
-                                      {
-                                          return false;
-                                      }
-                                      const auto ws = []( char c )
-                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                                      std::string_view t  = m.text;
-                                      while( !t.empty() && ws( t.front() ) )
-                                      {
-                                          t.remove_prefix( 1 );
-                                      }
-                                      while( !t.empty() && ws( t.back() ) )
-                                      {
-                                          t.remove_suffix( 1 );
-                                      }
-                                      return t != ";";   // non-empty body → not the bug → drop
-                                  } ),
-                  ms.end() );
-
-        // empty-catch: keep ONLY catch bodies whose trimmed text is empty (nothing but whitespace/braces).
-        // The captured node is the compound_statement — its text is "{...}"; trim and check for "{}".
-        ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-                                  {
-                                      if( m.tag != "empty-catch" )
-                                      {
-                                          return false;
-                                      }
-                                      const auto ws = []( char c )
-                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                                      std::string_view t = m.text;
-                                      while( !t.empty() && ws( t.front() ) )
-                                      {
-                                          t.remove_prefix( 1 );
-                                      }
-                                      while( !t.empty() && ws( t.back() ) )
-                                      {
-                                          t.remove_suffix( 1 );
-                                      }
-                                      // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
-                                      if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
-                                      {
-                                          return true; // malformed — drop
-                                      }
-                                      std::string_view inner = t.substr( 1, t.size() - 2 );
-                                      for( char c : inner )
-                                      {
-                                          if( !ws( c ) )
-                                          {
-                                              return true; // non-whitespace inside → not empty → drop
-                                          }
-                                      }
-                                      return false;   // truly empty catch body → keep the finding
-                                  } ),
-                  ms.end() );
-
-        std::vector<std::string> magicFileBytes( ing.files.size() );
-        std::vector<char>        magicFileRead( ing.files.size(), 0 );
-        const auto magicBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
-        {
-            if( !magicFileRead[fileId] )
-            {
-                magicFileBytes[fileId] = darkflags::readWhole( diskPath( ing, fileId ) ).value_or( std::string() );
-                magicFileRead[fileId] = 1;
-            }
-            return magicFileBytes[fileId];
-        };
-
-        // magic-number: drop literals that are:
-        //   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
-        //   (b) inside a const/constexpr variable initializer (that's exactly the right place for numbers)
-        //   (c) inside an enum body (enumerator values are naturally numeric)
-        // Keep only literals inside function/method bodies to limit noise.
-        // The enclosing symbol check (Function/Method) is the main guard.
-        ms.erase( std::remove_if( ms.begin(), ms.end(), [ & ]( const AstMatch& m )
-                                  {
-                                      if( m.tag != "magic-number" )
-                                      {
-                                          return false;
-                                      }
-                                      if( isUniversalOrAllowlistedNumber( m.text ) )
-                                      {
-                                          return true;
-                                      }
-                                      const std::string& src = magicBytes( m.fileId );
-                                      if( !src.empty() && isConstantInitializerNumber( src, m.startByte ) )
-                                      {
-                                          return true;
-                                      }
-                                      // must be inside a function/method body to be a magic-number finding
-                                      const Symbol* e = enclosing( m.fileId, m.startByte );
-                                      if( !e || ( e->kind != SymKind::Function && e->kind != SymKind::Method ) )
-                                      {
-                                          return true;
-                                      }
-                                      return false;   // non-trivial literal in a function body → flag it
-                                  } ),
-                  ms.end() );
-
-        // #eq? rejected unequal assignment pairs inside tree-sitter, so the remaining captures arrive as
-        // lhs/rhs twins in byte order. Collapse every complete twin pair into one finding; unlike the old
-        // (file,line) bucket this cannot cross-wire two independent assignments sharing a source line.
-        {
-            std::vector<AstMatch> saKeep;
-            std::vector<AstMatch> saCaptured;
-            for( const AstMatch& m : ms )
-            {
-                if( m.tag == "self-assign" )
-                {
-                    saCaptured.push_back( m );
-                }
-            }
-            ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m ) { return m.tag == "self-assign"; } ), ms.end() );
-            for( std::size_t i = 0; i + 1 < saCaptured.size(); i += 2 )
-            {
-                const AstMatch& lhs = saCaptured[i];
-                const AstMatch& rhs = saCaptured[i + 1];
-                if( lhs.fileId != rhs.fileId || lhs.text != rhs.text )
-                {
-                    continue; // defensive: an incomplete/crossed capture pair is never evidence
-                }
-                const auto trim = []( std::string_view t ) -> std::string
-                {
-                    const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                    while( !t.empty() && ws( t.front() ) )
-                    {
-                        t.remove_prefix( 1 );
-                    }
-                    while( !t.empty() && ws( t.back() ) )
-                    {
-                        t.remove_suffix( 1 );
-                    }
-                    return std::string( t );
-                };
-                const std::string expression = trim( lhs.text );
-                AstMatch hit;
-                hit.fileId    = lhs.fileId;
-                hit.startByte = lhs.startByte;
-                hit.endByte   = lhs.endByte;
-                hit.line      = lhs.line;
-                hit.tag       = "self-assign";
-                hit.text      = expression + " = " + expression;
-                saKeep.push_back( std::move( hit ) );
-            }
-            // Sort saKeep for determinism before appending.
-            std::sort( saKeep.begin(), saKeep.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-                       {
-                if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-                return x.line < y.line; } );
-            for( auto& hit : saKeep )
-            {
-                ms.push_back( std::move( hit ) );
-            }
-        }
-
-        // Symbol-level checks (S6-A): walk each Function/Method body — checks that need line-counting or
-        // control-flow nesting depth, which a single tree-sitter @capture can't give without reparsing.
-        // These produce AstMatch entries (same format) so they flow into the same XML tally/listing.
-        //
-        //   large-function    — body line-span (newlines in [sigEndByte, endByte)) > 80
-        //   deep-nesting      — curly-brace nesting depth inside [sigEndByte, endByte) > 4
-        //   inconsistent-return — mix of `return;` and `return <expr>;` in the same body
-        //
-        // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
-        // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
-        // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
-        { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
-        for( AstMatch& symHit : lintSymbolLevelChecks( ing, &corpusBytes ) )
-        {
-            ms.push_back( std::move( symHit ) );
-        }
-        }
-
-        // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
-        // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
-        // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
-        // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
-        // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
-        // spending a fourth read + parse of the whole corpus on its own pool.
-        {
-            PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
-            for( auto& h : grouped[3] )
-            {
-                ms.push_back( std::move( h ) );
-            }
-        }
-
-        // The packs that live outside this function: the atoms-of-confusion pack (src/atoms.h), the
-        // identifier-naming lens (src/naminglens.h) and the cache-friendliness pack (src/cachelint.h).
-        // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
-        // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
-        // below covers every built-in finding regardless of its source.
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ), lintMaxPerRule ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes, lintMaxPerRule ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ), lintMaxPerRule ); }
-
-        // Re-sort the combined findings (AST + symbol-level) for deterministic output.
-        std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-                   {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
-}
-            return x.tag < y.tag; } );
-        }   // if( cfg.lint ) — built-in checks
-
-        // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
-        // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
-        // built-ins (facts, not severities); user findings carry their declared sev=.
-        std::vector<LintOut> outs;  outs.reserve( ms.size() );
-        for( const AstMatch& m : ms )
-        {
-            outs.push_back( { m.fileId, m.startByte, m.line, m.tag, std::string(), m.text } );
-        }
-
-        // --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
-        // files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Exit 1 ONLY if the
-        // flag was given but zero rules loaded (nothing to run = a user mistake worth surfacing).
-        std::vector<LintRule>    userRules;
-        std::vector<std::string> uncompiledUserRuleIds;   // §L10: main query compiled for NO grammar
-        if( !cfg.lintRulesDir.empty() )
-        {
-            userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
-            if( userRules.empty() )
-            {
-                lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
-                return 1;
-            }
-            const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, userRules, lintMaxPerRule );
-            if( refuseUndecidedMatchRegex( "--lint-rules", regexRefused, regexUndecided, undecidedPredicateFirstSite( cfg, ing, regexUndecided ),
-                                           "rules loaded from " + std::string( cfg.lintRulesDir ) + " whose queries carry a #match?/#not-match? predicate: "
-                                               + rulesWithMatchPredicate( userRules ) ) )
-            {
-                return 1;
-            }
-            for( const LintFinding& f : userFindings )
-            {
-                outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
-            }
-            for( const std::string& id : saturatedUserRuleIds )
-            {
-                saturatedRules.push_back( { id, true } );
-            }
-            uncompiledUserRuleIds = uncompiledIds;
-        }
-
-        // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
-        // because a PREFIX can legitimately name a user rule id that --lint-rules=DIR has only just
-        // loaded above. See resolveLintSelection's own header for the pool it validates against.
-        const std::optional<rw::lintcatalog::LintSelection> lintSelOpt = resolveLintSelection( cfg, userRules );
-        if( !lintSelOpt )
-        {
-            return 1;   // refusal already printed
-        }
-        const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
-        if( lintSel.active )
-        {
-            outs.erase( std::remove_if( outs.begin(), outs.end(),
-                                        [ & ]( const LintOut& o ) { return !rw::lintcatalog::lintSelectionKeeps( lintSel, o.rule ); } ),
-                       outs.end() );
-        }
-
-        // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
-        // way out to the row's own text.
-        sortLintRows( ing, outs );
-
-        // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
-        // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
-        // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
-        outs = dedupeLintFindings( ing, std::move( outs ) );
-
-        // W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
-        // 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
-        // ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
-        // a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
-        // choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
-        // polyglot fixture (ripwire's pre-cutover ancestor, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
-        // kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
-        // staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
-        // --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
-        // a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
-        // caller who already knew to page past a cap sees no change.
-        static constexpr std::size_t kLintDefaultPayloadBytes = 100000;
-        const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
-        std::size_t lintDefaultShown = outs.size();
-        if( !paging )
-        {
-            // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
-            // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
-            // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
-            // the same budget than a corpus of short rows does. text= dominates real row size and is summed
-            // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
-            // which are all short in practice — an estimate, not a second full render (that would mean
-            // rendering the very tail this exists to avoid paying for), and one that can only ever be
-            // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
-            // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
-            std::size_t bytesUsed = 0;
-            lintDefaultShown = 0;
-            for( std::size_t i = 0; i < outs.size(); ++i )
-            {
-                const LintOut& m = outs[i];
-                const Symbol*  e = enclosing( m.fileId, m.startByte );
-                const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
-                                            + rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative, so the cap charges that
-                                            + ( e ? e->name.size() : 0 ) + 80;
-                if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
-                {
-                    break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
-                }
-                bytesUsed += rowBytes;
-                ++lintDefaultShown;
-            }
-        }
-        const PageWindow lintPage = paging
-                                  ? pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset )
-                                  : PageWindow{ 0, lintDefaultShown };
-        const std::size_t shownCount = lintPage.end - lintPage.begin;
-
-        // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
-        const auto capOf = [ & ]( const std::string& ruleName, bool isUserRule ) -> const RuleCap*
-        {
-            for( const RuleCap& rc : saturatedRules )
-            {
-                if( rc.rule == ruleName && rc.isUserRule == isUserRule )
-                {
-                    return &rc;
-                }
-            }
-            return nullptr;
-        };
-        // H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS, never over every
-        // rule that saturated. `--lint-select=cache-` used to inherit findings_capped="1" from the UNSELECTED
-        // magic-number rule, so 398 had to be read as a floor when, by the legend's own definition, it was a
-        // total. Same predicate as the tally-row loop below and the SARIF twin (lintRuleEmitted).
-        const auto lintRuleEmitted = [ & ]( const RuleCap& rc ) -> bool
-        {
-            return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule );
-        };
-        const bool anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
-        // knob-honesty-068: the call that counts the floored rules' rest, over the SAME emitted-rules predicate (H8)
-        const std::string findingsNext = lintFindingsNext( cfg, saturatedRules, lintRuleEmitted, lintMaxPerRule );
-        ASSUME( findingsNext.empty() != anyRuleCapped, "findings_next= rides exactly the answers findings_capped=\"1\" floors (one predicate)" );
-
-        // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
-        // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
-        // Applicability is per-LANGUAGE granularity (does the corpus contain ANY file of a language this
-        // rule's grammar could ever satisfy), never per-file-content — a rule can be "applicable" and
-        // still find nothing. See computeLintApplicability's own header for why it lives outside this function.
-        const LintApplicability lintApplicability = computeLintApplicability( ing, cfg.lint, allRuleNames, userRules, lintSel );
-        const std::uint32_t     corpusLangs        = lintApplicability.corpusLangs;
-        const std::size_t       inertRuleCount      = lintApplicability.inertRuleCount;
-
-        // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
-        // validateConfig already refused this alongside --match / --with-profile / paging.
-        if( cfg.sarif )
-        {
-            emitRunLintSarif( d, allRuleNames, userRules, saturatedRules, outs, lintSel, corpusLangs, enclosing );
-            return 0;
-        }
-
-        // --with-profile join, lifted into buildHeatAnnotations (runLint was already the file's largest
-        // verb): per-finding heat_* attribute strings index-aligned with `outs`, + the root attribute.
-        std::vector<std::string> heatByFinding;
-        std::string              heatJoinedAttr;
-        if( !cfg.withProfile.empty() )
-        {
-            auto heat = buildHeatAnnotations( cfg.withProfile, ing, outs, enclosing );
-            if( !heat )
-            {
-                return 1;   // refusal already printed — never join nothing silently
-            }
-            heatByFinding  = std::move( heat->first );
-            heatJoinedAttr = std::move( heat->second );
-        }
-
-        // §L7 root disclosure: inert_rules= (only when >0 — same "absent = nothing to say" convention as
-        // findings_capped=) and, only when --lint-select/--lint-ignore were given, selected="K of N" plus
-        // the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
-        std::string lintRootExtra;
-        if( inertRuleCount > 0 )
-        {
-            lintRootExtra += std::format( " inert_rules=\"{}\"", inertRuleCount );
-        }
-        if( lintSel.active )
-        {
-            lintRootExtra += std::format( " selected=\"{} of {}\"", lintSel.selectedCount, lintSel.totalCount );
-            if( !cfg.lintSelect.empty() )
-            {
-                lintRootExtra += " select=\"" + ex( cfg.lintSelect ) + "\"";
-            }
-            if( !cfg.lintIgnore.empty() )
-            {
-                lintRootExtra += " ignore=\"" + ex( cfg.lintIgnore ) + "\"";
-            }
-        }
-        // capture-audit 2026-09-04 (M16): a modifier's effect is stamped on the root the way --lint-select's
-        // selected=/select= is — `--lint --naming-locals` moved the count 3717 -> 4898 on this repo with no
-        // attribute saying why. Absent when the modifier is off (absent = nothing to say, as with inert_rules=).
-        if( cfg.namingLocals )
-        {
-            lintRootExtra += " naming_locals=\"1\"";
-        }
-        // #157 (CodeRabbit on #331): the rule walk is astQueryGrouped, which skips every file ingest's nesting guard
-        // refused — the same skip --match and --pattern disclose as nest_refused=, and the one the --skipped legend
-        // says all three share. Without it here a refused .kt file vanished from every rule's count with no trace.
-        // Absent when 0, like inert_rules=, so every lint answer over a corpus with no refusal is byte-identical.
-        const bool lintNestRefused = ing.crawlSkips.nestRefusedFiles > 0;
-        if( lintNestRefused )
-        {
-            lintRootExtra += std::format( " nest_refused=\"{}\"", ing.crawlSkips.nestRefusedFiles );
-        }
-
-        // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
-        lintPrintOut( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
-                    "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
-                    "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
-                    "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
-                    "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
-                    "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one PRINTED rule row is a "
-                    "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
-                    "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
-                    "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
-                    "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
-                    "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
-                    "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
-                    "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
-                    "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
-                    "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
-                    "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
-                    "naming_locals=\"1\" on the root ⇒ the opt-in naming-locals modifier was on (the naming-* rules also read local "
-                    "variables inside already-flagged functions); absent ⇒ off, and the naming-* counts cover declarations only. "
-                    "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
-                    "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
-                    "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
-                    "rule with one that measured zero); this is a DIFFERENT fact from the row's own count_capped=\"1\" above (that rule's "
-                    "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. "
-                    "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
-                    "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
-                    "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
-                    "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
-        if( !findingsNext.empty() )
-        {
-            // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
-            lintPrintOut( "<!-- lint findings_next= on the root is the one call that counts the floored rules' rest: only the rules "
-                        "that carry count_capped=\"1\", under a 10x per-rule budget (the lint-max-per-rule flag; the default budget is a "
-                        "runaway guard, not a target); a re-run still floored names its own. -->" );
-        }
-        if( lintNestRefused )
-        {
-            lintPrintOut( "<!-- lint nest_refused= on the root counts corpus files a pre-parse nesting guard refused before any rule's walk "
-                        "could reach them, so no count= includes them; the count is corpus-wide, not narrowed to a language any rule here "
-                        "declares, so some of it was never going to be read by lint regardless; see the skipped verb's why=\"nest-refused\" "
-                        "rows for which. -->" );
-        }
-        if( !cfg.withProfile.empty() )
-        {
-            lintPrintOut( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
-                        "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
-                        "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
-                        "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
-        }
-        {
-            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
-            // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
-            // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
-            // the shape was the one verb that did not spell it — fixed here by calling the shared helper
-            // instead of hand-rolling a second copy (W3-S: this is also what lets the new default byte cap
-            // above disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
-            // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
-            // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
-            // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
-            // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
-            // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
-            char lintPageBuf[ kPageDisclosureCap ];
-            lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}>", outs.size(),
-                        pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
-                                       cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
-                                       /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
-                        anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( findingsNext, "findings_next" ) : std::string(),
-                        heatJoinedAttr, lintRootExtra, lintRootAttr );
-        }
-        if( cfg.lint )
-        { // built-in per-rule tally (order → deterministic)
-            for( const std::string& rn : allRuleNames )
-            {
-                if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, rn ) )
-                { // deselected — no row at all, so it can never look like a checked-and-empty rule
-                    continue;
-                }
-                const RuleTally rt = tallyLintRule( outs, rn, /*wantSevEmpty=*/true, lintPage );
-                const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
-                const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
-                printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, capOf( rn, false ) != nullptr, applicable );
-            }
-        }
-        for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
-        {
-            if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, r.id ) )
-            {
-                continue;
-            }
-            const RuleTally rt = tallyLintRule( outs, r.id, /*wantSevEmpty=*/false, lintPage );
-            const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
-            const bool  compiled   = std::find( uncompiledUserRuleIds.begin(), uncompiledUserRuleIds.end(), r.id ) == uncompiledUserRuleIds.end();
-            const std::string sevEx = ex( r.severity );
-            printLintRuleTallyRow( ex( r.id ), &sevEx, rt.count, rt.shown, capOf( r.id, true ) != nullptr, applicable, compiled );
-        }
-        for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
-        {
-            const LintOut&          m  = outs[ findingIndex ];
-            const Symbol*           e  = enclosing( m.fileId, m.startByte );
-            const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-            if( m.sev.empty() )
-            { // built-in finding — unchanged shape (no sev=)
-                lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( rp ), m.line, e ? ex( e->name ) : "",
-                            heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
-            }
-            else
-            { // user finding — carries sev=
-                lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( m.sev ), ex( rp ), m.line, e ? ex( e->name ) : "",
-                            heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
-            }
-            emitEscaped( m.text );
-            lintPrintOut( "</f>" );
-        }
-        lintPrintOut( "</lint>" );
-        return 0;
+        return std::nullopt;
     }
-    return std::nullopt;
+    const LintAnswerView view( cfg, d.ing );
+    if( !cfg.match.empty() )
+    {
+        return runMatchVerb( cfg, view );
+    }
+    if( !cfg.pattern.empty() )
+    {
+        return runPatternVerb( cfg, view );
+    }
+    return runLintVerb( d, view );
 }
 
 }   // namespace — verbs_lint.h section of main.cpp

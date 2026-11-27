@@ -1,0 +1,107 @@
+# ripwire-find-bug — reference: branches (read on demand; the recipe is in SKILL.md)
+
+Contents: Branch A — "I have a symptom, no idea where it lives" · 1. Symptom search · 2. If several candidates remain, maintenance hotspots · 3. If the symptom is broad, blast radius of each remaining c · 4. Read narrowly · Branch B — "I suspect a subsystem — narrow it" · 1. Symptom-to-code · 2. Hotspots in those directories · 3. Find the exact emit site · Branch C — "I changed X and now something's broken" (regress · 1. Situational awareness on the change · 2. Who calls the broken symbol · 3. Co-change history · 4. Read · Branch D — "I have a stack trace / sanitizer report / compil · 1. Map the trace onto symbols · 2. Read rank 1 first · 3. Compose the budget · 4. Or skip the run-read-paste loop entirely · Output
+
+# Find the bug with ripwire
+
+> Nearest neighbours:
+> • You already know the symbol and just want to understand it → **ripwire-navigate**.
+> • You want the blast radius / tests for a *change* (not to find a bug) → **ripwire-change-check**.
+> • Repo-wide quality once-over, no specific symptom → **ripwire-fresh-eyes**.
+> • "Why don't I see feature X?" and nothing looks broken — the code may be built but compiled/flagged OFF,
+>   not buggy: `ripwire <dir> --flags[=SUBSTR] --legend=compact` (`--flip=NAME` for the blast radius of turning one ON) —
+>   lives in **ripwire-fresh-eyes**, worth a look before you go hunting for a bug that isn't one.
+
+`<dir>` = repo root. Calls are warm after the first parse — chain freely. **Pick the branch that matches
+what you already know**; each converges on the same evidence trail (relevance × maintenance pain × blast
+radius), so you can escalate between them.
+
+**Evidence-sufficiency stop:** escalate only while the responsible code is still ambiguous. If `--for`
+ranks one file/symbol clearly and a focused source read explains the symptom with a minimal fix, stop
+retrieval and implement/validate it. Do not automatically add `--hotspots`, `--impact`, another skill, or a
+whole-file read after the defect is already proven; those answer different questions and can cost more than
+the original localization. Resume the ladder only when the source contradicts the candidate, several
+candidates remain plausible, or the change's blast radius is itself part of the task.
+
+## Branch A — "I have a symptom, no idea where it lives"
+
+1. **Symptom search** — `ripwire <dir> --for="<symptom in plain words>"`
+   `<sigs>` ranked by relevance — signatures + doc-comments closest to the symptom. The `in=` reuse count
+   and `cx=` complexity are inline; **prefer high-`cx`, high-`in` matches** — complex, widely-called code
+   fails in more ways. If the bundle says `weak="1"`, reformulate — split camelCase terms, add synonyms
+   from the domain, or quote an exact path/symbol from the issue — before trusting the ranking below it.
+2. **If several candidates remain, maintenance hotspots** — `ripwire <dir> --hotspots --legend=compact`
+   `<hotspots>` ranked by `score = churn × ccx`; `top=` names the worst function per file. Bugs cluster in
+   high-score files — **cross with step 1: a symbol in both lists is your prime suspect.**
+3. **If the symptom is broad, blast radius of each remaining candidate** — `ripwire <dir> --impact=SYM --legend=compact`
+   for the top 2–3 from step 1.
+   `<impact of="SYM" defs="D" reaches="N">` lists everything that reaches SYM. A large `reaches` count is
+   consistent with a symptom that appears in many places — that's the root, not a downstream effect.
+4. **Read narrowly** — start with the top symbol/body or the smallest source range that can confirm or
+   reject it. Use the hotspot intersection only when step 1 did not already isolate a defensible candidate.
+
+## Branch B — "I suspect a subsystem — narrow it"
+
+1. **Symptom-to-code** — `ripwire <dir> --for="<symptom>"` → note the file paths of the top 5 (each row starts with its path; `p=` on an XML row). Which
+   directories recur? That's your first narrowing.
+2. **Hotspots in those directories** — `ripwire <dir> --hotspots --legend=compact` → files that are relevant to the symptom
+   AND high churn+complexity are the most likely bug homes.
+3. **Find the exact emit site** — `ripwire <dir> --grep="ERROR_STRING" --legend=compact` (literal + enclosing symbol) or
+   `--regex="pattern"`. Add `--grep-context=N` (or `--grep-before=N`/`--grep-after=N`) for ripgrep-style
+   lines of source around each hit — often enough to confirm the bug without a follow-up `--expand`. The
+   enclosing symbol (`in=`) is ground truth — now `--callers=SYM` to trace up one level to the true root.
+
+## Branch C — "I changed X and now something's broken" (regression)
+
+1. **Situational awareness on the change** — `ripwire <dir> --situ=fileA.cpp,fileB.h` (or bare `--situ` to
+   read from `git diff`). Emits, in one pass:
+   - **blast radius** — everything that transitively reaches the changed symbols
+   - **tests to run now** (`--affected` under the hood)
+   - **co-change partners NOT in your diff** — files that historically move together (hidden coupling). This is
+     the Shotgun Surgery check: did the change land everywhere it usually has to?
+2. **Who calls the broken symbol** — `ripwire <dir> --callers=SYM --legend=compact` → each recorded caller (a floor — counts_floor=) is a candidate for an
+   unexpected side-effect.
+3. **Co-change history** — `ripwire <dir> --cochange=fileA.cpp --legend=compact` → partners ranked by `deg` (fraction of
+   commits). A `surprising="1"` partner has no `#include` link — pure behavioural coupling, the non-obvious
+   suspect.
+4. **Read** the functions that appear in BOTH the blast radius and the co-change list first.
+
+## Branch D — "I have a stack trace / sanitizer report / compiler error"
+
+You have the failing artifact's TEXT (a Python traceback, an ASan/UBSan report, a node/js stack, a
+clang/gcc diagnostic) — don't hand-translate its frames into queries one by one. Pipe it straight in:
+
+1. **Map the trace onto symbols** — `ripwire <dir> --from-trace=FILE --legend=compact` (or `--from-trace=-` to read the
+   trace from stdin, e.g. `pytest ... 2>&1 | ripwire <dir> --from-trace=- --legend=compact`). Table-driven frame extraction
+   (python / asan / node / compiler / generic), ranked **innermost-first** over the frames that resolve to
+   your indexed code. Out-of-corpus frames (stdlib, vendored deps) are listed and counted, never ranked.
+2. **Read rank 1 first** — the `innermost="1"` suspect is the crash/throw site; its FULL body is emitted
+   inline, the other suspects as signatures. `skipped=` tells you how many frames fell outside every root.
+3. **Compose the budget** — `--from-trace=FILE --token-budget=N` fits the bundle to N tokens for a tight
+   context window. Unparseable input refuses loudly (never a misleading empty map).
+4. **Or skip the run-read-paste loop entirely** — `ripwire <dir> --run-trace="make -j" --legend=compact` RUNS the
+   build/test command itself (`sh -c`, your user, your environment — the make trust model, no sandbox)
+   and, on a non-zero exit, serves the SAME from-trace bundle for the captured output plus a token-frugal
+   `<lines view="relevant">` cut of the error/frame-shaped output lines. Exit 0 gets a minimal success
+   record and no bundle — nothing failed, nothing to map. The command's own exit code is always disclosed
+   (`<run exit=>`), and `--run-timeout=SECONDS` caps a hanging command (default 600 s, reported
+   `timed_out="1"` honestly, never as an empty success).
+
+## Output
+
+Report the branch you took, then: ranked candidate symbol(s) with `name`, `file:line`, and why (from
+`--for`); their hotspot score if present; their blast-radius count (`--impact reaches=`); the error site's
+enclosing symbol if `--grep` found it; and any `surprising="1"` co-change partner (branch C). Recommend the
+top 1–2 to inspect first, with the evidence trail.
+
+**Honesty:** the call graph gives *structure*; `--slice=SYM:VAR` (add `--slice-flow=back|fwd|both` for the
+transitive reaching-definition walk) gives *intra-procedural, name-based* data flow — reach for it on a
+wrong-value symptom instead of re-reading the whole function by eye. Its own legend discloses the limits
+that matter here, so trust that over this line: statement/line-granular, flow-sensitive reaching definitions inside one function for C-family/Python and source-ordered for JS/Go/Java/Rust (the root's `reach=` says which; each use row's `rd=` lists its reaching def lines),
+no alias analysis, block scopes separated (a shadowed name's rows carry `b=`, the declaration each binds to; `pp="1"` marks a build-dependent `#ifdef` row), and it stops at the function boundary (chain
+`--callers`/`--impact` for the inter-procedural half). For use-after-move / taint / null / type bugs that
+cross that boundary you still need the compiler — use these results to focus *where* to look, not as proof.
+A high-`amb` symbol can be a dispatch hub, not the bug.
+
+**Found it?** Pin the gotcha with `ripwire <dir> --note-add="SYM_or_path: what actually went wrong"` — the
+next agent (or you, next session) gets it automatically the next time `--for`/`--expand` surfaces that symbol.

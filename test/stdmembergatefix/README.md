@@ -13,7 +13,8 @@ and `StdMap`, an alias of a standard map.
   result, a `std::string`, a field written in `std`, a local declared with the standard-map alias): the call must be
   declined and disclosed (declined_calls=, the callees answer's `<stdm>` line), never bound to an in-tree namesake.
 
-Controls: a name outside the table (`grow`) keeps the ladder; a bare call `size( b )` reaches the free function; `c/`
+Controls: a name outside the table (`grow`) gates nothing by its name (lane std-namesake: its receiver is a written
+`std::vector`, so no in-tree `Vec::grow` is a candidate either); a bare call `size( b )` reaches the free function; `c/`
 holds a C function-pointer call (C has no member functions, so no gate); `gogate/` holds a Go `f().Len()` (Go's row is
 empty, so the ladder is unchanged).
 

@@ -189,10 +189,13 @@ IMP_CLI="$( "$BIN" "$ROOT" --impact=escapeXml --limit=3 --offset=2 --legend=full
 # lane/lean-answers-068: the whereis default may list only the definitions (listing="defs", references counted), and on a
 # single-branch checkout runMcp has ONE def row, so limit=2 there cannot show 2. The arm keeps its exact assertion on the
 # whole list (listing:"all", the pre-listing answer); the twin below holds limit= on the default's LISTED rows.
-WH="$( mcp_text "$( call whereis '{"path":"'"$ROOT"'","symbol":"runMcp","limit":2,"listing":"all"}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
+# Both ask test/lib/sweeproot.sh's root: whereis reads only the newest 512 local branches past its window (a dev clone or its worktree).
+. "$ROOT/test/lib/sweeproot.sh"
+WROOT="$( sweepRoot "$ROOT" "$TMP/sweep" )"
+WH="$( mcp_text "$( call whereis '{"path":"'"$WROOT"'","symbol":"runMcp","limit":2,"listing":"all"}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
 case "$WH" in *'shown="2"'*'has_more="1"'*'next_offset="2"'*) ok "M4 [live]: whereis honors limit= and discloses has_more/next_offset";;
               *) no "M4 [live]: whereis still ignores limit= — $WH";; esac
-WHD="$( mcp_text "$( call whereis '{"path":"'"$ROOT"'","symbol":"runMcp","limit":1}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
+WHD="$( mcp_text "$( call whereis '{"path":"'"$WROOT"'","symbol":"runMcp","limit":1}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
 WHD_TOTAL="$( printf '%s' "$WHD" | grep -oE ' total="[0-9]+"' | grep -oE '[0-9]+' )"
 WHD_SHOWN="$( printf '%s' "$WHD" | grep -oE ' shown="[0-9]+"' | grep -oE '[0-9]+' )"
 if [ -n "$WHD_TOTAL" ] && [ -n "$WHD_SHOWN" ] && [ "$WHD_TOTAL" -ge 1 ] && [ "$WHD_SHOWN" = "1" ]; then
@@ -320,7 +323,7 @@ mcp_text "$( call owners '{"path":"'"$ROOT"'"}' )" | grep -q "two different thin
     || no "M12: the owners depth collision is still shipped undefused on the MCP arm"
 mcp_text "$( call grep '{"path":"'"$ROOT"'","pattern":"pageDisclosure"}' )" >"$TMP/grep.json"
 GREP_CLI_FILES="$( "$BIN" "$ROOT" --grep=pageDisclosure 2>/dev/null | tr '<' '\n' | grep '^grep ' | head -1 \
-                   | sed -n 's/.*files="\([0-9]*\)".*/\1/p' )"
+                   | sed -n 's/.* files="\([0-9]*\)".*/\1/p' )"   # " files=" whole-word: BX2 FIX 6's held_files= also ends in files= (INT1)
 python3 - "$TMP/grep.json" "$GREP_CLI_FILES" <<'PY' >"$TMP/grep.res" 2>&1
 import sys, json
 j = json.load(open(sys.argv[1])); want = sys.argv[2]

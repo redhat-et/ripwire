@@ -133,9 +133,9 @@ PQ="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>"$WORK/pq_err" )"; rcp=$
 # and the tree is compared against git HEAD. The two copies below ARE new against HEAD, so new-symbol rows
 # are the truth here, not a disarmed gate; what must never appear is a was=0 now=0 phantom.
 PQPHANTOM="$( printf '%s' "$PQ" | tr '<' '\n' | grep '^r kind=' | grep -c 'was="0" now="0"' )"
-{ [ "$PQPHANTOM" -eq 0 ] && printf '%s' "$PQ" | grep -q 'baseline="git-HEAD (sidecar unreadable)"'; } \
+{ [ "$rcp" = 0 ] && [ "$PQPHANTOM" -eq 0 ] && printf '%s' "$PQ" | grep -q 'baseline="git-HEAD (sidecar unreadable)"'; } \
     && ok "pre-Q1 sidecar: refused and named on the root (sidecar unreadable), no was=0 now=0 phantom row (exit $rcp)" \
-    || { no "pre-Q1 sidecar: $PQPHANTOM phantom row(s), root marker: $( printf '%s' "$PQ" | grep -o 'baseline="[^"]*"' )"; printf '%s' "$PQ" | tr '<' '\n' | grep 'was="0" now="0"' | head -3; }
+    || { no "pre-Q1 sidecar: exit $rcp (want 0), $PQPHANTOM phantom row(s), root marker: $( printf '%s' "$PQ" | grep -o 'baseline="[^"]*"' )"; printf '%s' "$PQ" | tr '<' '\n' | grep 'was="0" now="0"' | head -3; }
 grep -q 'pre-Q1' "$WORK/pq_err" && grep -q 'quality-baseline' "$WORK/pq_err" \
     && ok "pre-Q1 sidecar: stderr names the format and the re-pin (the Release-visible line — this refusal raises no debug alert)" \
     || { no "pre-Q1 sidecar: stderr does not name pre-Q1 + the re-pin"; head -3 "$WORK/pq_err"; }
@@ -202,5 +202,13 @@ PE="$( cd "$P" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 printf '%s' "$PE" | grep -q 'kind="new-clone-of-reused-helper"' \
     && ok "a new clone of a PREEXISTING reused helper is still reported (the kind is narrowed, not emptied)" \
     || { no "the reuse-decline kind no longer fires on its own headline case"; printf '%s' "$PE" | tr '<' '\n' | grep '^r kind='; }
+# (e2) CR721: that row's sym= is a member LIST and p= is the first member's, so it hands no --expand next= (a single-body
+#      selector would be "FILE:a | b", which resolves nothing). Premise: the row is there and gates. RED before CR721
+#      (main b576a95e3 and train GE3 cbed31d4c): next="--expand='copy.cpp:… | …'".
+crow="$( printf '%s' "$PE" | grep -oE '<r kind="new-clone-of-reused-helper"[^>]*' | head -1 )"
+# CR721: the two facts are tested independently, so a next= BEFORE gating="1" cannot slip past an order-bound pattern.
+if ! printf '%s' "$crow" | grep -q ' gating="1"'; then no "(e2) PREMISE: want a gating new-clone-of-reused-helper row, got '${crow:-none}'"
+elif printf '%s' "$crow" | grep -q ' next='; then   no "(e2) the gating clone-group row offers a single-body next=: $crow"
+else                                                  ok "(e2) the gating clone-group row carries no next=: $crow"; fi
 
 [ "$fail" -eq 0 ] && echo "qoriginoraclecheck: ALL PASS" || { echo "qoriginoraclecheck: SOME CHECKS FAILED"; exit 1; }

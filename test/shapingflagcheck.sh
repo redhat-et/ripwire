@@ -115,10 +115,24 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # is the multi-definition twin of V1's exact-name predicate — it reads cfg.topKExplicit and cfg.maxTokens to decide whether
 # the lean default applies (an explicit --top-k and a --max-tokens-sized map both stand it aside). --expand/--outline
 # already honour both flags in kShapingVerbs, so this is a re-pin, not a column change.
+# k-wrongsym (2026-11-06, 22->23): ONE new read, the same kind as V1's. `appendForFileSyms` (src/verbs_for.h) reads cfg.maxTokens beside
+# cfg.tokenBudget to decide whether the appended <syms> block is held (a budgeted answer names the call and prints no rows). --for already
+# honours both flags in kShapingVerbs, so this is a re-pin, not a column change. (The count was already 23 at dbb87c6f9; the landing
+# gates and the --for gate family do not run this gate, tools/prereview.sh item 19b does.)
+# TOKEN-BUDGET-MONOTONE (2026-11-14, 23->25): TWO new reads, both --for's. `forBudgetFitsAfterPosture` (src/verbs_for.h) reads
+# cfg.maxTokens beside cfg.tokenBudget to route a budgeted XML answer through the fitter, and `runForLensFitted` reads it as the
+# ceiling it sheds against. --for already honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
+# lane/rt1-route (2026-11-18, 25->26): ONE new read, --for's. `forVerbRouteApplies` (src/verbs_forroute.h) reads cfg.maxTokens only to
+# STAND ASIDE: a budgeted --for is never routed to a verb, so the budget keeps shaping the --for answer it always shaped. --for already
+# honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
+# lane/rt2-route ES (2026-11-18, 26->27): ONE new read, --for's. `forEarlyStopPage` (src/verbs_forroute.h) reads cfg.maxTokens only to
+# STAND ASIDE: a budgeted --for page 1 never ends early. A re-pin, not a column change.
+# lane/theta6-tiny (2026-11-24, 27->28): ONE new read, --for's. `forTinyShapeEligible` (src/verbs_for.h) reads cfg.maxTokens only to
+# STAND ASIDE: a budgeted --for never takes the tiny shape (on by default since THETA6-FLIP; RIPWIRE_TINY_SHAPE=0 off). A re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 22 ] && ok "(A) --max-tokens has 22 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 22 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 28 ] && ok "(A) --max-tokens has 28 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 28 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 15 ] && ok "(A) --top-k has 15 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 15 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.
@@ -428,7 +442,7 @@ fprobeFor()
         --format=)       printf '%s' '--format=columnar' ;;
         --color-by=)     printf '%s' '--color-by=lang' ;;
         --grep-scope=)   printf '%s' '--grep-scope=file' ;;
-        --grep-in=)      printf '%s' '--grep-in=any' ;;  --whereis-listing=) printf '%s' '--whereis-listing=all' ;;  --mcp-legend=) printf '%s' '--mcp-legend=inline' ;;  # closed value sets: a bogus value refuses before any knob
+        --grep-in=)      printf '%s' '--grep-in=any' ;;  --whereis-listing=) printf '%s' '--whereis-listing=all' ;;  --mcp-legend=) printf '%s' '--mcp-legend=inline' ;;  --legend-have=) printf '%s' "--legend-have=$( "$BIN" --legend-dict 2>/dev/null | head -1 | grep -oE '[0-9a-f]{8,}' | head -1 )" ;;  # closed value sets, and --legend-have='s dictionary version: a bogus value refuses before any knob (its valid value is no constant, so it is read from $BIN)
         --legend=)       printf '%s' '--legend=compact' ;;
         --slice-flow=)   printf '%s' '--slice-flow=back' ;;
         --agent=)        printf '%s' '--agent=codex' ;;

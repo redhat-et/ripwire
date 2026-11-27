@@ -7,7 +7,7 @@
 // 2026-08-29 split: base-clause type references (isBaseTypeNode/emitBaseRef/captureBases with the
 // Rust impl walk), function-like #define body call edges (the macro-edges round), field/composition
 // capture (captureFields), and the import/include layer — importName and the per-language
-// specifier readers (C# using, PHP use, JS module loads, preproc include/import), the
+// specifier readers (PHP use, JS module loads, preproc include/import; C# using moved to ingest_importcap.h in #358), the
 // import-container tables by language, directiveTargetOf and captureIncludes. Everything that turns
 // one file's AST into edges BETWEEN symbols and files. Same contract as every ingest_*.h: reopens
 // `namespace rw` and the unnamed namespace inside it — one TU, one unnamed namespace, internal
@@ -59,7 +59,7 @@ inline bool isBaseTypeNodeIn( const char* nt, Lang lang ) noexcept
 // One use-site RawRef sited at node `at`: its start byte (the byte-span sweep attributes the ref to the enclosing def)
 // and its 1-based line (ABS-3: --uses p="file:line"), with the role and name the caller decides; every other field keeps
 // RawRef's default.
-inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string name )
+inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string_view name )
 {
     RawRef r;
     r.fileId    = fileId;
@@ -67,7 +67,7 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
     r.line      = ts_node_start_point( at ).row + 1;
     r.lang      = lang;
     r.role      = role;
-    r.name      = std::move( name );
+    r.name.assign( name );
     return r;
 }
 
@@ -394,7 +394,7 @@ inline BaseScopeHit lookupInReopenedNamespace( TSNode ns, std::string_view name,
 {
     BaseScopeHit hit;
     const TSNode nsName = fieldChild( ns, NodeField::Name );
-    const TSNode outer  = ts_node_parent( ns );
+    const TSNode outer  = parentOf( ns );
     if( ts_node_is_null( nsName ) || ts_node_is_null( outer ) )
     {
         return hit;
@@ -430,7 +430,7 @@ inline BaseScopeHit lookupInReopenedNamespace( TSNode ns, std::string_view name,
 // ambiguous scope stops the walk with its flag set.
 inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name, bool scopeOwner, std::string_view src )   // allocates (the file's scope index)
 {
-    for( TSNode p = ts_node_parent( site ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( site ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         BaseScopeHit hit = lookupInScope( p, name, scopeOwner, self, src );
         if( ts_node_is_null( hit.name ) && !hit.cut && !hit.ambiguous && isNamespaceDeclKind( ts_node_type( p ) ) )
@@ -443,16 +443,6 @@ inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name
         }
     }
     return BaseScopeHit{};
-}
-
-// the tree root above `n` (the global scope a C++ `::Mid` names)
-inline TSNode rootOf( TSNode n ) noexcept
-{
-    for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
-    {
-        n = p;
-    }
-    return n;
 }
 
 // Resolve `segs` from the class header at `site` (owned by `self`) and return the binding's encoding for RawRef::baseBind:
@@ -640,7 +630,7 @@ inline FnLiteralBinding fnLiteralBoundTo( TSNode roleNode, TSNode nameNode, Lang
     {
         return {};
     }
-    TSNode binding = ts_node_parent( nameNode );
+    TSNode binding = parentOf( nameNode );
     for( int hop = 0; !ts_node_is_null( binding ) && hop < 6; ++hop )
     {
         if( const TSNode value = fnLiteralBoundValue( binding ); !ts_node_is_null( value ) && extent::inSet( kFnLiteralBinding.literals, std::string_view( ts_node_type( value ) ) ) )
@@ -651,7 +641,7 @@ inline FnLiteralBinding fnLiteralBoundTo( TSNode roleNode, TSNode nameNode, Lang
         {
             break;
         }
-        binding = ts_node_parent( binding );
+        binding = parentOf( binding );
     }
     return {};
 }
@@ -693,7 +683,7 @@ inline DefBodyNodes defBodyNodeOf( TSNode roleNode, TSNode nameNode, SymKind kin
         return { body, {}, roleNode };
     }
     const bool oneOfSeveral = !ts_node_eq( binding, roleNode ) && ts_node_named_child_count( roleNode ) > 1
-                              && ts_node_eq( ts_node_parent( binding ), roleNode );
+                              && ts_node_eq( parentOf( binding ), roleNode );
     return { fieldChild( literal, NodeField::Body ), literal, oneOfSeveral ? binding : roleNode };
 }
 
@@ -1085,8 +1075,9 @@ void rustImplVisitNode( RustImplCtx& cx, TSNode node, const char* t )
         const std::string_view path    = written.substr( 0, std::min( written.find( '<' ), written.size() ) );
         if( path.find( "::" ) != std::string_view::npos )
         {
-            r.memberPath.assign( path );
-            std::erase_if( r.memberPath, []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
+            std::string spelled( path );
+            std::erase_if( spelled, []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
+            r.setMemberPath( spelled );
         }
         cx.refs->push_back( std::move( r ) );
     }
@@ -1164,8 +1155,8 @@ inline std::pair<TSNode, TSNode> aliasSpecifierAndName( TSNode n, const char* t 
 // true ⇒ `n` sits in a function body or a lambda — or deeper than the side stream's own cap, where its enclosure is unknown
 inline bool insideFunctionBody( TSNode n ) noexcept
 {
-    TSNode parent = ts_node_parent( n );
-    for( int depth = 0; !ts_node_is_null( parent ); ++depth, parent = ts_node_parent( parent ) )
+    TSNode parent = parentOf( n );
+    for( int depth = 0; !ts_node_is_null( parent ); ++depth, parent = parentOf( parent ) )
     {
         const char* pt = ts_node_type( parent );
         if( depth >= 256 || kindIs( pt, "compound_statement" ) || kindIs( pt, "function_definition" ) || kindIs( pt, "lambda_expression" ) )
@@ -1255,7 +1246,7 @@ inline std::string cppScopePath( TSNode node, std::string_view src )
 {
     std::vector<std::string> innerFirst;
     int                      guard = 0;
-    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ) && guard < 128; up = ts_node_parent( up ), ++guard )
+    for( TSNode up = parentOf( node ); !ts_node_is_null( up ) && guard < 128; up = parentOf( up ), ++guard )
     {
         const char* t = ts_node_type( up );
         if( kindIs( t, "function_definition" ) || kindIs( t, "compound_statement" ) || kindIs( t, "lambda_expression" ) )
@@ -1303,11 +1294,11 @@ inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std:
     r.line       = ts_node_start_point( aliasNode ).row + 1;
     r.lang       = cx.lang;
     r.isCompose  = true;
-    r.composeRel = "alias";
+    r.setComposeRel( "alias" );
     r.name       = target;
     r.recvVar    = alias;
     r.qualifier  = writtenTypeNamespace( spec, cx.src );
-    r.memberPath = stdElementContainerText( spec, cx.src );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
+    r.setMemberPath( stdElementContainerText( spec, cx.src ) );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
     if( langFacts( cx.lang ).aliasPeelsSmartPointer )
     {
         // lane iface-peel: `using FilterSharedPtr = std::shared_ptr<Filter>;` — the pointee `->` reaches (memberCtor) and the
@@ -1320,12 +1311,12 @@ inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std:
             const std::vector<std::string> params = enclosingTemplateParameterNames( aliasNode, cx.src );
             if( pointee.qualifier.empty() && std::ranges::find( params, std::string( pointee.name ) ) != params.end() )
             {
-                r.memberCtor.clear();
+                r.setMemberCtor( std::string_view() );
             }
             else
             {
-                r.memberCtor = pointee.name;
-                r.memberVia  = pointee.qualifier;
+                r.setMemberCtor( pointee.name );
+                r.setMemberVia( pointee.qualifier );
             }
         }
         r.memberRoot = cppScopePath( aliasNode, cx.src );   // fix round 1: the lexical scope the alias is declared in (its target is looked up there)
@@ -1380,7 +1371,7 @@ inline std::vector<std::string> enclosingTemplateParameterNames( TSNode classNod
 {
     std::vector<std::string> names;
     int                      guard = 0;
-    for( TSNode up = ts_node_parent( classNode ); !ts_node_is_null( up ) && guard < 64; up = ts_node_parent( up ), ++guard )
+    for( TSNode up = parentOf( classNode ); !ts_node_is_null( up ) && guard < 64; up = parentOf( up ), ++guard )
     {
         if( !kindIs( ts_node_type( up ), "template_declaration" ) )
         {
@@ -1514,11 +1505,11 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
                     r.startByte  = ts_node_start_byte( fdecl );
                     r.lang       = lang;
                     r.isCompose  = true;
-                    r.composeRel = "elem";
+                    r.setComposeRel( "elem" );
                     r.name       = std::string( nodeFieldText( fieldChild( typeNode, NodeField::Name ), NodeField::Name, src ) );
                     r.qualifier  = "std";
                     r.recvVar    = std::string( nodeTextOf( elemDecl, src ) );
-                    r.memberPath = std::string( containerText );
+                    r.setMemberPath( std::string( containerText ) );
                     refs.push_back( std::move( r ) );
                 }
                 continue;
@@ -1619,16 +1610,16 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             r.isCompose  = true;
             r.name       = typeName;        // the member-type name (SpherePool, SoundEngine, ...)
             r.qualifier  = writtenTypeNamespace( typeNode, src );   // `std` for `std::string name_;`, "" unqualified
-            r.fieldName  = std::move( fieldName );
-            r.composeRel = ( isRefOrPtr || declIsRefOrPtr ) ? "uses" : "creates";
+            r.setFieldName( std::move( fieldName ) );
+            r.setComposeRel( ( isRefOrPtr || declIsRefOrPtr ) ? "uses" : "creates" );
             r.memberRoot = classScope;   // the lexical scope the written type is looked up in (model.h kAnonScopeElement)
             if( pointee.name.empty() && kindIs( dt, "pointer_declarator" ) )
             {
-                r.memberVia = std::string( kPointerMemberType );   // CR (review 5712563408, :1612): `FilterSharedPtr* p_;` — `p_->` reaches the smart pointer
+                r.setMemberVia( std::string( kPointerMemberType ) );   // CR (review 5712563408, :1612): `FilterSharedPtr* p_;` — `p_->` reaches the smart pointer
             }
             else if( pointee.name.empty() && std::ranges::find( templateParams, r.name ) != templateParams.end() )
             {
-                r.memberVia = std::string( kTemplateParamMemberType );   // `Handle h_;` under `template <class Handle>`: the parameter, not an alias
+                r.setMemberVia( std::string( kTemplateParamMemberType ) );   // `Handle h_;` under `template <class Handle>`: the parameter, not an alias
             }
             if( !pointee.name.empty() )
             {
@@ -1686,41 +1677,12 @@ inline std::string importSpecifierText( TSNode node, std::string_view src )
     return std::string( s );
 }
 
-// C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;` target extraction, factored out of
-// captureIncludes (kept as its own def to hold captureIncludes' own complexity/LOC down — one AST shape
-// per language stays a one-line call at the use site, matching the existing per-branch grain there).
-//
-// C# namespaces do not map 1:1 onto files (unlike a Python module or a Rust `mod`), so — same as Go/
-// Swift below — this is captured for --uses/--deps visibility only; resolve.h's Rule 3 precise-import
-// narrower (includeLangOf) has no C# entry and DEFERS (kNoFile), matching Java's existing "Other"
-// treatment: the conservative fall-through the P2-D Rule 3 contract requires.
-//
-// The ALIAS form `using X = Foo.Bar;` exposes a `name` field, but it names the ALIAS (`X`), not the
-// aliased type — walk the `type` field instead so the target is the real aliased spelling. The plain/
-// `static` form (`using Foo.Bar;` / `using static Foo;`) has NO named field at all: the grammar's
-// `$._name` production is hidden-inlined, so its resolved concrete node (a qualified_name for a dotted
-// path, else a bare identifier/generic_name) is just an unnamed-field child of using_directive — scan
-// for the first one.
-inline std::string csharpUsingTarget( TSNode usingNode, std::string_view src )
-{
-    if( const TSNode aliasType = fieldChild( usingNode, NodeField::Type ); !ts_node_is_null( aliasType ) )
-    {
-        return importSpecifierText( aliasType, src );
-    }
-
-    // O(children): `using /*…*/ System.Text;` puts the comments in the using_directive itself — 16 000 of
-    // them measured 36x the identical flood inside a method body (test/childwalkscalecheck.sh, arm B16)
-    const TSNode c = firstChildOfKind( usingNode, /*namedOnly=*/true, { "qualified_name", "identifier", "generic_name", "alias_qualified_name" } );
-    return ts_node_is_null( c ) ? std::string {} : importSpecifierText( c, src );
-}
-
-// csharpUsingTarget's PHP sibling: the written specifier of a `use` statement. Node shapes read off
+// PHP: the written specifier of a `use` statement. Node shapes read off
 // tree-sitter-php v0.24.2's node-types.json and confirmed on a real parse:
 //   use Foo\Bar;             namespace_use_declaration > namespace_use_clause > qualified_name
 //   use Bar;                 namespace_use_declaration > namespace_use_clause > name
 //   use Foo\Bar as Baz;      the same, plus an `alias:` field we deliberately ignore — the DEPENDENCY is
-//                            the real name, not the local nickname (mirroring csharpUsingTarget, which
-//                            also reports the aliased target rather than the alias)
+//                            the real name, not the local nickname
 //   use function Foo\bar;    a `type:` field on the CLAUSE ("function"/"const"); the specifier is
 //                            unchanged, so nothing here needs to branch on it
 //   use Foo\{A, B};          namespace_use_declaration > namespace_name + namespace_use_group — the
@@ -1770,9 +1732,8 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
 }
 
 // TS/JS `require("./x")` and dynamic `import("./x")` → the written specifier, or empty when this call
-// expression is not a module load. Its own function for the same reason csharpUsingTarget and phpUseTarget
-// are: one AST shape per language stays a one-line call at the use site rather than one branch plus one nested
-// scan. #358: its readers are now the DepDialect::Web normaliser (src/ingest_importcap.h — the captured
+// expression is not a module load. Like phpUseTarget, one AST shape stays a one-line call at the use site
+// rather than one branch plus a nested scan. #358: its readers are now the DepDialect::Web normaliser (src/ingest_importcap.h — the captured
 // `require`/`import` call) and captureJsImportFacts (src/ingest_jsimports.h — the binding a destructured
 // require makes); directiveTargetOf no longer reads it, because the walk no longer visits TS/JS.
 //
@@ -2207,7 +2168,7 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
     TSNode cur = n;
     for( int guard = 0; guard < 4; ++guard )   // visibility wrapper + block wrapper + body_statement is the deepest real chain
     {
-        const TSNode p = ts_node_parent( cur );
+        const TSNode p = parentOf( cur );
         if( ts_node_is_null( p ) )
         {
             return false;
@@ -2230,7 +2191,7 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
             // Inline visibility: the sole argument of a receiverless visibility call, and the VISIBILITY
             // call's own parent chain must pass the same gate (next hop(s)) — this is what keeps
             // `def m; private attr_reader :x; end` out (`private` inside a method body fails the ascent).
-            const TSNode outer = ts_node_parent( p );
+            const TSNode outer = parentOf( p );
             if( !ts_node_is_null( outer ) && kindIs( ts_node_type( outer ), "call" )
                 && !rubyNamedDirective( outer, src, kRubyVisibilityNames ).empty()
                 && ts_node_named_child_count( p ) == 1 && ts_node_eq( ts_node_named_child( p, 0 ), cur ) )
@@ -2271,13 +2232,13 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
 // assembles its Read, Write and PrimaryKey modules exactly so.
 inline bool rubyInConcernIncludedBlock( TSNode call, std::string_view src ) noexcept
 {
-    TSNode up = ts_node_parent( call );
+    TSNode up = parentOf( call );
     if( !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "body_statement" ) || kindIs( ts_node_type( up ), "block_body" ) ) )
     {
-        up = ts_node_parent( up );   // do … end wraps its statements in body_statement, { } in block_body
+        up = parentOf( up );   // do … end wraps its statements in body_statement, { } in block_body
     }
     const TSNode block = up;
-    const TSNode owner = ts_node_is_null( block ) ? block : ts_node_parent( block );
+    const TSNode owner = ts_node_is_null( block ) ? block : parentOf( block );
     return !ts_node_is_null( owner ) && ( kindIs( ts_node_type( block ), "do_block" ) || kindIs( ts_node_type( block ), "block" ) )
         && kindIs( ts_node_type( owner ), "call" ) && rubyNamedDirective( owner, src, std::array<std::string_view, 1>{ "included" } ) == "included"
         && rubyAttrAtClassBodyLevel( owner, src );
@@ -2357,7 +2318,7 @@ inline std::string rubyReceiverTarget( TSNode n, std::string_view src )
 inline std::vector<std::string> rubyArgumentTargets( TSNode argList, std::string_view src )
 {
     std::vector<std::string> out;
-    const TSNode parent = ts_node_parent( argList );
+    const TSNode parent = parentOf( argList );
     if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "call" ) && !rubyNamedDirective( parent, src, kRubyConstantDirectives ).empty() )
     {
         return out;
@@ -2507,16 +2468,9 @@ inline std::vector<std::string> elixirAliasGroup( TSNode n, std::string_view src
 // one pass, and a grammar bump that renames a node kind is a one-line edit here.
 inline constexpr std::array<std::string_view, 5> kPreprocConditionalNodes = { "preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif", "preproc_elifdef" };
 
-// One membership test for every node-kind table below — a single shape rather than one hand-rolled scan
-// per table (the repo already spells this `std::find( … ) != end` elsewhere; see graph.h / flipimpact.h).
-inline bool namesNode( std::span<const std::string_view> table, const char* type ) noexcept
-{
-    return std::find( table.begin(), table.end(), std::string_view( type ) ) != table.end();
-}
-
 inline bool isPreprocConditional( const char* type ) noexcept
 {
-    return namesNode( kPreprocConditionalNodes, type );
+    return isOneOf( type, kPreprocConditionalNodes );
 }
 
 // ─── Non-preprocessor import containers, keyed by language ───────────────────────────────────────────
@@ -2668,11 +2622,11 @@ inline bool isFunctionLike( Lang lang, const char* type ) noexcept
 {
     if( lang == Lang::TypeScript || lang == Lang::JavaScript )
     {
-        return namesNode( kJsFunctionContainers, type );
+        return isOneOf( type, kJsFunctionContainers );
     }
     if( lang == Lang::Ruby )
     {
-        return namesNode( kRubyClosureContainers, type );
+        return isOneOf( type, kRubyClosureContainers );
     }
     return false;
 }
@@ -2762,7 +2716,7 @@ inline bool isImportContainer( Lang lang, const char* type ) noexcept
     {
         if( e.lang == lang )
         {
-            return namesNode( e.nodes, type );
+            return isOneOf( type, e.nodes );
         }
     }
     return false;
@@ -2779,7 +2733,7 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // at all. Split out of captureIncludes so the walk that FINDS directives and the per-grammar table that
 // READS them stay separately readable — the walk is one shape, this is one branch per grammar spelling.
 //
-// Node types confirmed per grammar: Swift import_declaration; Rust use_declaration + mod_item; C# using_directive; plus the kParserVer-81 four (bash
+// Node types confirmed per grammar: Swift import_declaration; Rust use_declaration + mod_item; plus the kParserVer-81 four (bash
 // `command`, lua `function_call`, ruby `call`, elixir `call`). LEVER-B B0: non-C imports capture the
 // CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
 // sliced clause — the sound resolver input.
@@ -2937,10 +2891,6 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // landing. Keep the best-effort target for --uses / --deps back-compat.
         target = importClauseTarget( n, src );
     }
-    else if( kindIs( t, "using_directive" ) )
-    { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
-        target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
-    }
     else if( kindIs( t, "namespace_use_declaration" ) )
     { // PHP `use Foo\Bar;` / `use Foo\Bar as Baz;` / `use function Foo\bar;` / `use Foo\{A, B};`
         // Captured for --uses / --deps visibility, NEVER precise-resolved: PHP has no entry in
@@ -2978,6 +2928,7 @@ struct ExtractShortfall
         ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
         RestUnitsCapped,          // a reST file past kMaxRestUnits or kMaxRestDepth: later units stay in the whole-file node
+        MacroArgsNestedTooDeep,   // Rust macro arguments nested past kMacroArgNestingDepth: the deeper calls are not captured
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
@@ -3101,14 +3052,14 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.startByte = ts_node_start_byte( n );   // the DIRECTIVE, not its enclosing #if → file-scope attribution
                 r.line      = ts_node_start_point( n ).row + 1;
                 r.role      = RefRole::Import;
-                r.name      = std::move( nm );
+                r.name      = nm;
                 refs.push_back( std::move( r ) );
             }
             // The site byte. A Ruby `superclass` carries its CLASS's own start byte: the superclass expression is
             // evaluated in the ENCLOSING scope (Ruby has not opened the class yet), and resolve.h's containment
             // is strict at the start, so that byte reads as outside the class — the nesting Ruby actually uses.
             const bool          superclassSite = ( lang == Lang::Ruby && kindIs( t, "superclass" ) );
-            const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( ts_node_parent( n ) ) : ts_node_start_byte( n );
+            const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( parentOf( n ) ) : ts_node_start_byte( n );
             incs.push_back( { fileId, /*isAngle*/ false, lazy, symbolic, siteByte, valueUse, std::move( tgt ) } );
         };
         // The constant-USE dedupe (parser version 83 for receivers; arguments and rescue classes joined at 93). Key =

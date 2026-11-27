@@ -124,6 +124,22 @@ QUERY="frobnicate widget cache"
 # ranking, body or anchor byte moved (anchor-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
+# RE-PIN 2026-11-22 (lane FS2; rule 4): golden_for.xml 4119 -> 4366 B, est_tokens "1572" -> "1671". CAUSE: the --for act line
+# (BR1/BR1B, merged into the 0.7.0 train at 53824ea8a "the act line ... rides the raw render"), which now rides --no-route too:
+# <act read="frob.cpp:4-8,frob.cpp:18-21,frob.cpp:11-15"/> after </sigs> and its one full-legend clause. Nothing to do with
+# --anchor. Verified mechanically: the same call under RIPWIRE_NO_ACTLINE=1 (the act line's A/B handle) is the previous golden
+# byte for byte, and deleting the <act> element and its clause from the new capture with est_tokens= masked gives it too.
+# RE-PIN 2026-11-18 (train byte-token-070, aeaacdad2 "a callee signature row under a <b> body names the file its line is in";
+# rule 4): golden_for.xml 4061 -> 4119 B, est_tokens "1551" -> "1572". The train changed the output and did not re-pin here:
+# the full legend's calls clause gains " (c p= their file when it is not the body's)" and a callee <c> row whose line is in another
+# file carries p=. Verified mechanically: deleting that clause and every <c ... l="N"> p= attribute from the new capture, with
+# est_tokens= masked, gives the previous golden byte for byte. No ranking, body, or anchor byte moved.
+# RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): golden_for.xml 4071 -> 4061 B, est_tokens "1555" -> "1551". nextAttrXml
+# leaves ' raw inside the double-quoted next= (2 entities). Verified mechanically: &apos; -> ' inside next-family values
+# of the old golden, est_tokens= masked, gives the new capture byte for byte (nextaposcheck.sh arm d is the same proof live).
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): golden_for.xml 4085 -> 4071 B: the tail legend clause
+# (minus names a sigs row or the syms block shows), est_tokens, and the frob.cpp tail row (all three names shown as sigs rows)
+# printing p= only.
 # RE-PIN 2026-10-18 (train 30, lane tail-sym merged; rule 4): golden_for.xml 4067 -> 4085 B (est_tokens "1553" -> "1560"),
 # re-captured from the merged binary and diffed by hand: the ONLY bytes that moved are the tail legend clause only: "first t p= alone" / "then t p= sym=" lose the `t p=` words and sym= reads "its top symbols by lens rank (a pointer, not the answer)".
 # RE-PIN 2026-10-15 (forbudget-soft round C, FOLD C; rule 4): golden_for.xml re-captured — the ONLY bytes that moved are the

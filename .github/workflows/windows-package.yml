@@ -70,6 +70,10 @@ jobs:
 
       # One cmd step: vcvars64.bat exports INCLUDE/LIB/PATH into its own process only (as ci.yml's windows job).
       # dumpbin is read here, inside the VC environment, and judged in the next step.
+      # clang-cl is Visual Studio's bundled one, the standalone C:\Program Files\LLVM only a fallback: the MSVC STL
+      # static_asserts a minimum clang (STL1000) and only the bundled clang ships in lockstep with it. 2026-11-18,
+      # run 44390371541: image win25-vs2026/20261116.315 paired MSVC 14.52.37025 (requires Clang >= 22) with a
+      # standalone LLVM 20.1.8, and every TU failed. Same reasoning as ci.yml's windows job.
       - name: Build (clang-cl, Ninja, Release = LTO, static CRT /MT, portable x86-64-v3)
         shell: cmd
         run: |
@@ -77,8 +81,8 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
           if not defined VSINSTALL ( echo windows-package: no Visual Studio install with the x64 C++ tools & exit /b 1 )
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "PATH=%RW_LLVM%;%PATH%"
           clang-cl --version || exit /b 1
           cmake --version || exit /b 1
@@ -148,6 +152,8 @@ jobs:
           # the tarballs' payload, file for file (release.yml's Package step says why each part travels)
           cp -R skills/ripwire-* "dist/${asset}/skills/"
           cp skills/install.sh "dist/${asset}/skills/"
+          # the Claude Code locator subagent: skills/install.sh installs skills/agents/ripwire-locator.md beside the skills
+          cp -R skills/agents "dist/${asset}/skills/"
           cp -R hooks "dist/${asset}/hooks"
           if grep -rlI $'\r' "dist/${asset}/skills" "dist/${asset}/hooks"; then
             echo "windows-package: the files above carry CR bytes; skills/install.sh and hooks/*.sh must ship LF" >&2; exit 1
@@ -203,7 +209,7 @@ jobs:
           repo="$( cygpath -w "$GITHUB_WORKSPACE" )"
           cd "$cwd"
           "$exe" --version | tee version.txt
-          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+ \(' version.txt
+          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+(\+dirty|-dev(\.[0-9]+)?(\+g[0-9a-f]{7,40}(\.dirty)?)?)? \(' version.txt   # the label shapes cmake/version_stamp.cmake stamps (tag, +dirty, -dev.N+g<sha>, -dev+g<sha>, -dev)
           grep -q 'emit=std::print' version.txt
           test "$( "$exe" --help | wc -c )" -gt 1000
           start=$SECONDS
@@ -272,11 +278,15 @@ jobs:
             *) echo "windows-package: the cache directory $long is not <user temp>/ripwire-<uid> ($tmp)" >&2; exit 1 ;;
           esac
 
-      # (g) A cold crawl of a fresh copy creates a cache blob; a warm crawl reuses it: same bytes out, no new blob,
-      # and --doctor's index-cache row reads the lean artifact for that root as present and openable. Counting blobs
-      # cannot tell reuse from a refuse-and-rewrite of the same path (#334: a tester saw `format-version — not used`
-      # on every run), so the warm run's own cache-stats line must say every file was reused and none re-parsed, and
-      # its stderr must carry no "not used" refusal.
+      # (g) A cold crawl of a fresh copy creates a cache blob; a warm crawl reuses it: same bytes out, and --doctor's
+      # index-cache row reads the lean artifact for that root as present and openable. Counting blobs cannot tell
+      # reuse from a refuse-and-rewrite of the same path (#334: a tester saw `format-version — not used` on every
+      # run), so the warm run's own cache-stats line must say every file was reused and none re-parsed, and its
+      # stderr must carry no "not used" refusal. The count cannot tell ONE KIND of artifact from another either:
+      # the first warm run of a configuration also records a warm snapshot (src/warmsnap.h), a derived cache in this
+      # same directory, one per (root, configuration) and rewritten in place after that. So the count is held to
+      # what it can actually say — the directory gains at most that one artifact across every warm run, never one
+      # per run, which is the shape #334 had.
       - name: The cache is created on the first run and reused on the second
         run: |
           unset TMPDIR XDG_CACHE_HOME
@@ -291,12 +301,16 @@ jobs:
           RIPWIRE_CACHE_STATS=1 "$exe" cachefx > warm.xml 2> warm.err
           cat warm.err
           b2="$( blobs d2.xml )"
-          lean="$( grep -o '<c n="index-cache"[^>]*>' d2.xml | grep -o ' lean="[a-z-]*"' )"
-          echo "blobs: before=$b0 after-cold=$b1 after-warm=$b2; index-cache$lean"
+          RIPWIRE_CACHE_STATS=1 "$exe" cachefx > warm2.xml 2> warm2.err
+          b3="$( blobs d3.xml )"
+          lean="$( grep -o '<c n="index-cache"[^>]*>' d3.xml | grep -o ' lean="[a-z-]*"' )"
+          echo "blobs: before=$b0 after-cold=$b1 after-warm=$b2 after-warm2=$b3; index-cache$lean"
           [ -n "$b0" ] && [ -n "$b1" ] && [ "$b1" -gt "$b0" ] || { echo "windows-package: the cold run wrote no cache blob ($b0 -> $b1)" >&2; exit 1; }
-          [ "$b2" = "$b1" ] || { echo "windows-package: the warm run wrote a new blob instead of reusing one ($b1 -> $b2)" >&2; exit 1; }
-          [ "$lean" = ' lean="ok"' ] || { echo "windows-package: --doctor does not see the root's lean artifact as ok after two runs:$lean" >&2; exit 1; }
+          [ -n "$b2" ] && [ -n "$b3" ] && [ "$b3" -ge "$b2" ] && [ "$b2" -ge "$b1" ] && [ "$b3" -le "$((b1 + 1))" ] \
+            || { echo "windows-package: the warm runs kept adding cache-dir artifacts ($b1 -> $b2 -> $b3) — a duplicate write per run, not a reuse plus one warm snapshot" >&2; exit 1; }
+          [ "$lean" = ' lean="ok"' ] || { echo "windows-package: --doctor does not see the root's lean artifact as ok after three runs:$lean" >&2; exit 1; }
           cmp cold.xml warm.xml || { echo "windows-package: cold and warm runs printed different bytes" >&2; exit 1; }
+          cmp cold.xml warm2.xml || { echo "windows-package: cold and second-warm runs printed different bytes" >&2; exit 1; }
           if grep 'not used' warm.err; then echo "windows-package: the warm run refused the blob the cold run wrote" >&2; exit 1; fi
           stats="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' warm.err )"
           reparsed="$( printf '%s' "$stats" | sed -n 's/.*reparsed=\([0-9]*\).*/\1/p' )"

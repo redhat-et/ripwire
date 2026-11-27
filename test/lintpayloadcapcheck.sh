@@ -75,7 +75,12 @@ PY_EOF
 #    3213 shown on the real corpus, arm 8 below re-confirms the analogous fact on this sandbox corpus), so
 #    this rule's one-and-only row is guaranteed to fall entirely outside the printed <f> window: count=1,
 #    shown_rows=0 — the exact "count>0, zero visible rows" shape the recorded liability is about.
-cat > "$CORPUS/src/zzz_lonely.c" <<'EOF'
+#    LT1: the order is now most important first (verbs_lint.h rankLintRowsByImportance) and goto is warn, above the
+#    info magic-number flood, so a src/ path would put it on page 1. It is planted under min/ instead — a generated-
+#    asset path (filter.h kDemoOrGeneratedDirs), whose rows sort LAST — which keeps the same guarantee: it falls
+#    entirely outside the printed window.
+mkdir -p "$CORPUS/min"
+cat > "$CORPUS/min/zzz_lonely.c" <<'EOF'
 int lonelyGoto( int seed )
 {
     if( seed > 0 )
@@ -146,7 +151,7 @@ else
 fi
 RULE_COUNT="$( printf '%s' "$DEFAULT_OUT" | grep -o '<rule name="magic-number" count="[0-9]*"' | sed -n 's/.*count="\([0-9]*\)".*/\1/p' )"
 # findings= is magic-number's own total PLUS the one lone "goto" finding wave-4 item 12's fixture plants
-# (src/zzz_lonely.c, added below) — so the equality is against findings-1, not findings, now that the
+# (min/zzz_lonely.c, added below) — so the equality is against findings-1, not findings, now that the
 # corpus fires two distinct rules instead of one.
 if [ -n "$RULE_COUNT" ] && [ -n "$FINDINGS" ] && [ "$RULE_COUNT" = "$(( FINDINGS - 1 ))" ]; then
     ok "arm3b: magic-number rule count=$RULE_COUNT still equals findings-1=$(( FINDINGS - 1 )) (row cap did not shrink the rule tally)"
@@ -217,7 +222,7 @@ else
     no "arm7: only $RULE_SHOWN_LINES shown_rows= / $RULE_ROWSCAP_LINES rows_capped= of $RULE_COUNT_LINES <rule> rows — per-rule disclosure is not universal"
 fi
 
-# ── arm 8 (the decisive arm): "goto" fires exactly once in the whole corpus, planted in src/zzz_lonely.c —
+# ── arm 8 (the decisive arm): "goto" fires exactly once in the whole corpus, planted in min/zzz_lonely.c (LT1: a generated-asset path, sorted last) —
 #    a path that sorts after all 250 src/uNNN.c magic-number files, so the byte cap (already shown to stop
 #    well short of the full corpus) never reaches it. count="1" (the true total: --lint's own tally never
 #    lies) but shown_rows="0" rows_capped="1" (that row never made it into the printed window) is the

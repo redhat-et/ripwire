@@ -23,7 +23,7 @@
 //
 // BASES. The proven implementors edges, plus the edge buildGraph never draws: a base clause spelled with a RENAMED import
 // (`from m import Command as RunserverCommand`; class Command(RunserverCommand)), where no class has the written name so the map holds
-// nothing. That one is read here, for this element only, under the resolver's own rule for a renamed import (buildPythonRenamedImports,
+// nothing. That one is read here, for this element only, under the resolver's own rule for a renamed import (buildPythonImportPins,
 // the module-scope rebind table, the star-import and dynamic-namespace marks, the endpoint's one binding: the tables pythonRenamedImportPin
 // reads) and a full module path; it enters no graph table (--lego keeps its answer).
 //
@@ -37,6 +37,7 @@
 #include "filter.h"          // isTestSymbol
 #include "graph.h"           // readTextIfPresent, the renamed-import tables, pythonClassScopeChain
 #include "infra/fieldid.h"   // fieldChild
+#include "infra/namesplit.h" // trimTrailing
 #include "infra/sortutil.h"    // sortutil::svLess: the explicit byte order for a string_view key (portablebuildcheck #6)
 #include "infra/tschildren.h"
 #include "memberowner.h"
@@ -227,7 +228,7 @@ inline bool decoratedWith( const ParsedFile& f, TSNode fn, std::string_view name
         std::string_view t = f.text( d );
         t.remove_prefix( std::min<std::size_t>( 1, t.size() ) );   // the @
         t.remove_prefix( std::min( t.find_first_not_of( " \t" ), t.size() ) );
-        t.remove_suffix( t.size() - std::min( t.find_last_not_of( " \t\r\n" ) + 1, t.size() ) );
+        t = rw::namesplit::trimTrailing( t, " \t\r\n" );
         if( t == name || ( qualified && t.size() > name.size() && t.ends_with( name ) && t[ t.size() - name.size() - 1 ] == '.' ) )
         {
             return true;
@@ -720,8 +721,8 @@ inline void addRenamedImportBases( const IngestResult& ing, std::vector<std::pai
     {
         return;
     }
-    const PythonRenamedImports imports = buildPythonRenamedImports( ing );
-    const ExternalVetoTables   veto    = buildExternalVetoTables( ing );
+    const ExternalVetoTables veto    = buildExternalVetoTables( ing );
+    const PythonImportPins   imports = buildPythonImportPins( ing, veto.pythonMultiFileClasses );
     // the module-level classes by (name, file), to find the one a member names
     std::vector<std::tuple<std::string_view, std::uint32_t, NodeId>> classes;
     for( NodeId c = 0; c < ing.symbols.size(); ++c )
@@ -799,8 +800,7 @@ inline std::vector<NodeId> classesWithUnprovenBase( const Graph& g )
             }
         }
     }
-    std::ranges::sort( out );
-    out.erase( std::ranges::unique( out ).begin(), out.end() );
+    sortutil::sortUnique( out );
     return out;
 }
 // Breadth-first up the proven edges from `cls`, each base once at its shallowest depth; `cls` itself is never listed.
@@ -1257,8 +1257,7 @@ struct RowWriter
         {
             unread.push_back( lost );
         }
-        std::ranges::sort( unread );
-        unread.erase( std::ranges::unique( unread ).begin(), unread.end() );
+        sortutil::sortUnique( unread );
         x += " defs=\"" + std::to_string( d.defs ) + '"';
         if( d.testDefs > 0 )
         {

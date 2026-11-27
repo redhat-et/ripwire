@@ -28,7 +28,8 @@
 // The rules (each cites the empirical work it mechanizes; bracketed tags are the lineage):
 //   naming-short         — 1–2 letter Function/Method/Var name (Var = module/global role; a
 //                          function name is visible far beyond any 20-line scope) [Beniamini/Hofmeister]
-//   naming-wordy         — more than 5 split tokens in one name [Butler; AlSuhaibani]
+//   naming-wordy         — more than 5 split tokens in one name [Butler; AlSuhaibani]; a marker prefix (the k of
+//                          kMaxNodes; C-family g_/m_/s_) is not a word of the name (namingWordCount, measured 2026-11-17)
 //   naming-series        — foo1/foo2/… digit-suffix siblings sharing a base in one scope [Butler]
 //   naming-underscore    — internal consecutive underscores; C-family reserved __x / _X forms [Butler]
 //   naming-case          — snake_case and camelCase mixed inside ONE name [Butler]
@@ -60,6 +61,7 @@
 #include "model.h"
 #include "ingest.h"              // AstMatch — naming findings ride the shared lint finding shape
 #include "lexindex.h"            // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
+#include "infra/tablelookup.h"   // isOneOf
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 namespace rw
@@ -74,14 +76,6 @@ inline bool ncDigit( char c ) noexcept { return c >= '0' && c <= '9'; }
 inline bool ncAlpha( char c ) noexcept { return ncUpper( c ) || ncLower( c ); }
 inline bool ncAlnum( char c ) noexcept { return ncAlpha( c ) || ncDigit( c ); }
 inline bool ncIdent( char c ) noexcept { return ncAlnum( c ) || c == '_'; }
-
-// the one set-membership primitive this unit uses — the bool-type names, the C-family non-type keywords
-// and the width suffixes are all "is this token one of a fixed list", and each spelling it out separately
-// was three copies of the same loop.
-inline bool ncAnyOf( std::string_view token, std::initializer_list<std::string_view> set ) noexcept
-{
-    return std::find( set.begin(), set.end(), token ) != set.end();
-}
 
 inline bool ncAllAscii( std::string_view name ) noexcept
 {
@@ -208,7 +202,7 @@ inline bool ncWidthSuffix( std::string_view name ) noexcept
     {
         return false;
     }
-    return ncAnyOf( name.substr( base.size() ), { "8", "16", "32", "64", "128", "256", "512" } );
+    return isOneOf( name.substr( base.size() ), { "8", "16", "32", "64", "128", "256", "512" } );
 }
 
 // ---- return-type recovery from the SIGNATURE bytes (the index stores a symbol's signature span but
@@ -223,7 +217,7 @@ struct ReturnTypeFact
 
 inline bool ncBoolTypeName( std::string_view token ) noexcept
 {
-    return ncAnyOf( token, { "bool", "_Bool", "Bool", "BOOL", "boolean", "Boolean", "jboolean" } );
+    return isOneOf( token, { "bool", "_Bool", "Bool", "BOOL", "boolean", "Boolean", "jboolean" } );
 }
 
 // a bare identifier token, or empty view if the text is anything more structured (generics,
@@ -255,7 +249,7 @@ inline std::string_view bareIdentifierOnly( std::string_view text ) noexcept
 // tokens that mean "the token before the name is NOT a usable return type" in C-family signatures.
 inline bool ncCFamilyNonType( std::string_view token ) noexcept
 {
-    return ncAnyOf( token, { "auto", "decltype", "const", "constexpr", "consteval", "constinit", "static", "inline", "virtual",
+    return isOneOf( token, { "auto", "decltype", "const", "constexpr", "consteval", "constinit", "static", "inline", "virtual",
                              "extern", "friend", "explicit", "typename", "mutable", "register", "volatile", "thread_local",
                              "signed", "unsigned", "long", "short", "operator", "template", "typedef", "using", "struct",
                              "class", "enum", "union", "public", "private", "protected", "final", "abstract", "synchronized",
@@ -433,7 +427,7 @@ inline constexpr std::size_t kConfusableWindow   = 24;    //   degrades to a sor
 // copies that can drift apart.
 inline bool namingEvaluableLang( Lang lang ) noexcept
 {
-    return lang != Lang::Json && lang != Lang::Toml && lang != Lang::Yaml && lang != Lang::Markdown && lang != Lang::Unknown;
+    return lang != Lang::Json && lang != Lang::Toml && lang != Lang::Yaml && lang != Lang::Proto && lang != Lang::Markdown && lang != Lang::Unknown;
 }
 
 // naming-uninformative thresholds (§9.0a candidate 1). Both are principled, not fitted:
@@ -527,19 +521,40 @@ inline bool isPythonDunder( std::string_view name ) noexcept
 }
 
 // local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md): the four NAME-SHAPE facts
-// checkNameShape computes, as booleans — pure function of (name, lang, toks), no Symbol/RuleSink
+// checkNameShape computes, as booleans (naming-wordy as its word count) — pure function of (name, lang, toks), no Symbol/RuleSink
 // dependency, so it is equally usable for an indexed Symbol OR an un-indexed local variable name. This is
 // the checkNameShapeCore extraction the plan specifies; `reservedForm` disambiguates naming-underscore's
 // TWO message variants (both existing Symbol callers and the new local-scoped caller need it).
 struct NameShapeFacts
 {
+    std::size_t wordCount = 0;     // naming-wordy's count: split tokens minus a marker prefix (namingWordCount)
     bool shortName      = false;   // naming-short candidate (1-2 letter alphabetic core)
-    bool wordy           = false;   // naming-wordy candidate (>5 split tokens)
     bool underscoreIssue = false;   // naming-underscore candidate (either sub-case below)
     bool reservedForm    = false;   // TRUE ⇒ underscoreIssue is the C-family reserved-identifier form,
                                     // FALSE ⇒ it is the internal-consecutive-underscores form (message text differs)
     bool caseIssue       = false;   // naming-case candidate (snake_case + camelCase mixed)
+
+    bool wordy() const noexcept { return wordCount > 5; }   // naming-wordy candidate (>5 words)
 };
+
+// naming-wordy counts the WORDS of a name, and a scope or kind MARKER prefix is not one: the `k` of a
+// constant (`k` + an uppercase letter: kPathFromReachMaxNodes is five words, not six) and, in the C family only,
+// the `g_` / `m_` / `s_` of a global, member or static. Measured 2026-11-17 (test/namingcalibrationcheck.sh
+// LIVE arm): EVERY naming-wordy fire on a developer's CHOSEN spelling (7 at main 5139f7840, 8 with #565) was a
+// k constant that gained a unit or role word under the house cap convention (kCMakeCallLines -> kCMakeMaxCallLines):
+// five words plus the k.
+// The scope markers are C-family only on evidence: across 88 cloned Python repos g_/m_/s_ open real words
+// (g_loss = generator loss, s_start, m_name), while C/C++ use them as markers (m_tempPool, g_object_new).
+// Deliberately NOT stripped: an acronym run the splitter breaks (CMake -> C|Make). Telling CMake from
+// IThing or XAxis needs a dictionary, and the calibration pairs never needed it.
+inline std::size_t namingWordCount( std::string_view name, bool cFamily, const std::vector<std::string>& toks ) noexcept
+{
+    const bool constantMarker = name.size() >= 2 && name[0] == 'k' && ncUpper( name[1] );
+    const bool scopeMarker    = cFamily && name.size() >= 3 && ( name[0] == 'g' || name[0] == 'm' || name[0] == 's' )
+                                && name[1] == '_' && ncAlpha( name[2] );
+    const bool markerPrefix   = ( constantMarker || scopeMarker ) && !toks.empty();
+    return toks.size() - ( markerPrefix ? 1 : 0 );
+}
 
 // N1 + N2 + N4: facts derivable from the name alone (plus lang for the C-family reserved-form gate).
 // role (Var vs Function/Method vs local) is NOT a parameter here — it only ever changes MESSAGE TEXT,
@@ -547,6 +562,8 @@ struct NameShapeFacts
 inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, const std::vector<std::string>& toks ) noexcept
 {
     NameShapeFacts facts;
+    // the C family (C/C++/ObjC) owns the reserved-identifier forms and the g_/m_/s_ scope markers.
+    const bool cFamily = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
 
     // naming-short — strip decorating underscores; a 1–2 letter alphabetic core.
     {
@@ -567,8 +584,8 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
         facts.shortName = allAlpha && core.size() <= 2;
     }
 
-    // naming-wordy — more than 5 split tokens.
-    facts.wordy = toks.size() > 5;
+    // naming-wordy — more than 5 words (split tokens, a marker prefix not counted: namingWordCount; facts.wordy()).
+    facts.wordCount = namingWordCount( name, cFamily, toks );
 
     // naming-underscore — internal consecutive underscores anywhere; C-family reserved forms
     // (leading __ or _Capital). Python dunders and single leading/trailing underscores are idiomatic.
@@ -589,7 +606,6 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
             }
         }
         // the reserved-identifier forms are a C-family rule only (C/C++/ObjC reserve leading _Capital and __).
-        const bool cFamily  = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
         const bool reserved = cFamily && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
         facts.underscoreIssue = ( internalDouble && !isPythonDunder( name ) ) || reserved;
         facts.reservedForm    = reserved;
@@ -629,9 +645,9 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
                   s.kind == SymKind::Var ? s.name + " (1-2 letter name for a module/global variable)"
                                          : s.name + " (1-2 letter function name; visible far beyond a 20-line scope)" );
     }
-    if( facts.wordy )
+    if( facts.wordy() )
     {
-        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( toks.size() ) + " words in one name)" );
+        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( facts.wordCount ) + " words in one name)" );
     }
     if( facts.underscoreIssue )
     {
@@ -680,10 +696,10 @@ inline void checkLocalNameShape( const Symbol& enclosingFn, const LocalNameFact&
                   local.name + " (1-2 letter local variable name, nested " + std::to_string( local.declDepth )
                       + " blocks deep in " + enclosingFn.name + ")" );
     }
-    if( facts.wordy )
+    if( facts.wordy() )
     {
         sink.add( "naming-wordy", enclosingFn, local.line,
-                  local.name + " (" + std::to_string( toks.size() ) + " words in one local variable name, in " + enclosingFn.name + ")" );
+                  local.name + " (" + std::to_string( facts.wordCount ) + " words in one local variable name, in " + enclosingFn.name + ")" );
     }
     if( facts.underscoreIssue )
     {

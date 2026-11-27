@@ -156,7 +156,7 @@ printf 'static int sdone( int x ) { return x; }\nint sdonecaller( void ) { retur
 SD7_OUT="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany 2>/dev/null )"
 SD7_ROW="$( printf '%s' "$SD7_OUT" | sed 's/<!--.*-->//' | grep -oE '<c n="sdcaller"[^>]*/>' )"
 SD7_AT="$( printf '%s' "$SD7_ROW" | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' )"
-{ [ "$( printf '%s' "$SD7_AT" | wc -w | tr -d ' ' )" = 16 ] && [ "${SD7_AT%% *}" = "m.c:5" ] && printf '%s' "$SD7_ROW" | grep -q ' sites_total="20"' \
+{ [ "$( printf '%s' "$SD7_AT" | wc -w | tr -d ' ' )" = 16 ] && [ "${SD7_AT%% *}" = "5" ] && printf '%s' "$SD7_ROW" | grep -q ' p="m.c:2"' && printf '%s' "$SD7_ROW" | grep -q ' sites_total="20"' \
   && printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' | grep -q ' next="--uses=sdmany"'; } \
     && ok "(7) a 20-site caller lists 16 file:line sites, sites_total=\"20\", and next=\"--uses=sdmany\" lists every one" \
     || no "(7) cut safe-delete row/root: $SD7_ROW $( printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' )"
@@ -165,7 +165,7 @@ SD7_FULL="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany --legend=full 2>/dev/
   && printf '%s' "$SD7_OUT" | grep -o '<!--.*-->' | grep -q 'next=: ' && printf '%s' "$SD7_FULL" | xmllint --noout - 2>/dev/null; } \
     && ok "(7) both legends define that next= and sites_total= where they ride (full: well-formed)" || no "(7) next=/sites_total= undefined in a legend of the cut answer"
 SD7_ONE="$( "$BIN" "$SD7" --no-cache --safe-delete=sdone 2>/dev/null )"
-{ printf '%s' "$SD7_ONE" | grep -q '<c n="sdonecaller" p="o.c:2" sites_at="o.c:2"/>' \
+{ printf '%s' "$SD7_ONE" | grep -q '<c n="sdonecaller" p="o.c:2" sites_at="2"/>' \
   && ! printf '%s' "$SD7_ONE" | grep -o '<safe-delete [^>]*>' | grep -q ' next=' && ! printf '%s' "$SD7_ONE" | grep -q 'sites_total'; } \
     && ok "(7) near miss: an uncut answer carries sites_at= with neither sites_total= nor a next=" \
     || no "(7) uncut answer: $SD7_ONE"
@@ -191,10 +191,10 @@ SD8="$( "$BIN" "$SD7" --no-cache --safe-delete=sdnoise 2>/dev/null )"
 SD8_ALL="$( printf '%s' "$SD8" | sed 's/<!--.*-->//' | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' | tr '\n' ' ' | sed 's/ $//' )"
 if ! printf '%s' "$SD8" | grep -q '<c n="sdnoisecaller"'; then
     no "(8) premise: --safe-delete=sdnoise printed no sdnoisecaller row: $SD8"
-elif [ "$SD8_ALL" = "n.c:11" ]; then
-    ok "(8) near miss: a value use, &f, a local prototype, a string and comments are not sites (only n.c:11)"
+elif [ "$SD8_ALL" = "11" ] && printf '%s' "$SD8" | sed 's/<!--.*-->//' | grep -qE '<c [^>]*p="n\.c:[0-9]+"[^>]* sites_at="11"'; then
+    ok "(8) near miss: a value use, &f, a local prototype, a string and comments are not sites (only line 11 of n.c)"
 else
-    no "(8) non-call references printed as call sites: every sites_at= is \"$SD8_ALL\", want \"n.c:11\""
+    no "(8) non-call references printed as call sites: every sites_at= is \"$SD8_ALL\", want \"11\" on a p=n.c row"
 fi
 
 # (9)-(17) IX-3 name-template dispatch (lane name-template-dispatch): a method a template lookup can name is no
@@ -400,6 +400,32 @@ case "$PD20e|$PD20f" in "count=- reaches=0 pd=- pw=1|"*'pattern_too_wide="1"'*) 
 PD20g="$( pdjson --callers=Widget.plain_handler )"
 [ "$PD20g" = "count=0 reaches=- pd=- pw=-" ] && ok "(20g) near miss: a literal getattr makes no pattern key on --json ($PD20g)" \
                                            || no "(20g) --callers=Widget.plain_handler --json: expected count 0 and no pattern keys, got $PD20g"
+
+# (21) CR676-USES-EXIST-EMPTY: a function used only as a value (a designated initialiser, no caller) reads risk=uses-exist over
+#      an EMPTY radius (impact_reaches=0, radius_tested=0). The full legend's sentence for it must not claim "at least part of the
+#      radius is test-covered" there; it states the empty radius instead. Near miss: helperCalled (a tested radius) keeps the
+#      coverage sentence byte-for-byte. RED on the base binary (it printed the coverage claim on the empty radius).
+SD21="$( mktemp -d )"; trap 'rm -rf "$WORK" "$SD7" "$SD21"' EXIT
+printf 'static int viaTableOnly( int x ) { return x + 4; }\nstruct ops { int (*open)( int ); };\nstruct ops table = { .open = viaTableOnly };\n' > "$SD21/b.c"
+SD21_OUT="$( "$BIN" "$SD21" --no-cache --safe-delete=viaTableOnly --legend=full 2>/dev/null )"   # status: the root element is the premise; a refusal prints none and the premise FAILs
+SD21_ROOT="$( printf '%s' "$SD21_OUT" | grep -o '<safe-delete [^>]*>' )"
+SD21_LEG="$( printf '%s' "$SD21_OUT" | grep -o '<!--.*-->' )"
+if ! { printf '%s' "$SD21_ROOT" | grep -q ' risk="uses-exist"' && printf '%s' "$SD21_ROOT" | grep -q ' impact_reaches="0"' \
+       && printf '%s' "$SD21_ROOT" | grep -q ' radius_tested="0"'; }; then
+    no "(21) premise: viaTableOnly should read risk=uses-exist with impact_reaches=0 radius_tested=0: $SD21_ROOT"
+elif printf '%s' "$SD21_LEG" | grep -q 'at least part of the radius is test-covered'; then
+    no "(21) an empty radius (impact_reaches=0) still claims part of it is test-covered"
+elif printf '%s' "$SD21_LEG" | grep -q 'uses-exist: callers or uses exist, but the transitive blast radius is empty (impact_reaches=0), so it claims no test coverage'; then
+    ok "(21) uses-exist over an empty radius states the empty radius, no coverage claim"
+else
+    no "(21) uses-exist over an empty radius carries no sentence for its value"
+fi
+SD21_NEAR="$( sd helperCalled )"   # status: its risk=/radius_tested= attributes are the verdict; a refusal prints none and the arm FAILs
+SD21_NFULL="$( cd "$WORK" && "$BIN" . --safe-delete=helperCalled --no-cache --legend=full 2>/dev/null )"; sd21rc=$?
+[ "$sd21rc" = 0 ] && printf '%s' "$SD21_NFULL" | grep -q 'uses-exist: callers or uses exist, and at least part of the radius is test-covered\. ' \
+    && [ "$( attr "$SD21_NEAR" risk )" = 'risk="uses-exist"' ] && [ "$( attr "$SD21_NEAR" radius_tested )" != 'radius_tested="0"' ] \
+    && ok "(21) near miss: helperCalled (a tested radius) keeps the coverage sentence" \
+    || no "(21) near miss: helperCalled lost its uses-exist coverage sentence"
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

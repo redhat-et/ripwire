@@ -782,8 +782,9 @@ else
 fi
 # (b) source-level: ev is read nowhere outside the emitters + the single gated annotation line.
 # ingest.cpp's TU spans its ingest_*.h sections since the 2026-08-29 split, so the extraction-side
-# reads live under both spellings; the allowed set is the ingest TU, not one file name.
-EVREADS="$( git -C "$ROOT" grep -n '\.ev\b' -- 'src/*.h' 'src/*.cpp' | grep -vE '^src/(serialize\.h|model\.h|ingest\.cpp|ingest_[a-z]+\.h):' || true )"
+# reads live under both spellings; the allowed set is the ingest TU, not one file name. warmsnap_model.h is a
+# section of that TU too: it stores and restores the Symbol row whole (ev among its fields) and ranks nothing.
+EVREADS="$( git -C "$ROOT" grep -n '\.ev\b' -- 'src/*.h' 'src/*.cpp' | grep -vE '^src/(serialize\.h|model\.h|ingest\.cpp|ingest_[a-z]+\.h|warmsnap_model\.h):' || true )"
 EXTRA="$( printf '%s\n' "$EVREADS" | grep -v '^$' | grep -v '^src/ensemble\.h:' || true )"
 if [ -n "$EXTRA" ]; then
     no "no-ranking: .ev is read outside the allowed emitters — $EXTRA"

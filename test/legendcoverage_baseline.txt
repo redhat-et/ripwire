@@ -211,6 +211,13 @@ whereis | hit@tip
 # own next= is still, separately, un-charged-header undefined (P3/P7's original reason stands); the closure
 # rides a DIFFERENT clause that happens to share the word.
 for | d@pure
+# 'for | field@rel|type' RE-RECORDED (0.7.0 rebases of #720 and #722, 2026-11-23): the --for compose <field name=
+# type= owner= rel=/> row (src/serialize.h, see the NEWLY VISIBLE note above) reaches the "rank symbols by pagerank"
+# first screen again on a tree whose src/ differs from main's (#720 darkflags.h, #722 skillscan): the ranked pool
+# shifts. Tree, not binary: main's own 5a3df049e binary reds identically on the #720 tree and is green on main's,
+# where these lines report as (B2) gone. Shape-dependent like d@pure; close them in the --for legend, not here.
+for | field@rel
+for | field@type
 # for-sections (L2 round-1 lever B1, 2026-09-19): --sections=lego,compose is the one roster row that renders
 # the FULL <lego><iface…><m pure=…><impl…></lego> / <compose><field…></compose> shape instead of the default
 # counted stub, so it is also the one row where the attributes below — every one of them PRE-EXISTING debt

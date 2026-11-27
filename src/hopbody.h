@@ -92,7 +92,10 @@ inline bool hopBodiesOn()
 // whole; else a body over it is cut at a line end with truncated="1" lines= next= (packBodies' first-body truncation). nullopt when
 // the buffer failed or the span rendered nothing.
 inline std::optional<std::string> renderBodyElement( const IngestResult& ing, NodeId id, std::size_t capBytes, bool compress, RedactCounts* redact,
-                                                     std::string_view rootArg, const std::vector<float>* rank )
+                                                     std::string_view rootArg, const std::vector<float>* rank,
+                                                     std::uint32_t bodyLineCap = 0 )   // CB1: 0 => INERT, so route/hops/launch
+                                                                                        //   bodies are byte-identical; only the
+                                                                                        //   "key" group opts in.
 {
     static const std::vector<std::uint32_t> kNoOff;
     static const std::vector<NodeId>        kNoTargets;
@@ -100,7 +103,7 @@ inline std::optional<std::string> renderBodyElement( const IngestResult& ing, No
     ChargedSection sec = chargeSection( [ & ]( std::FILE* f )
         { packBodies( f, ing, { id }, capBytes, kNoOff, kNoTargets, CalleeEdgeBytes( kNoNameOnly ), compress, redact,
                       /*ranges=*/nullptr, /*notes=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
-                      /*withFileContext=*/false, rootArg, rank, {} ); },
+                      /*withFileContext=*/false, rootArg, rank, {}, bodyLineCap ); },
         kBytesPerTokenBody );
     if( !sec.isRendered )
     {
@@ -401,6 +404,8 @@ inline std::string pathMiddleHopNext( const IngestResult& ing, std::span<const N
 // THE ONE BODY PRINTER (the reached path's middle hops and the unreached route alike): <bodies of=OF{rootAttrs} shown= total= capped=
 // [next=]> holding at most maxBodies bodies, each whole up to kHopBodyCapBytes (a longer one is cut, truncated="1"), each <b> carrying
 // its hop's hedge. Past maxBodies (a spew guard): capped="1" and next= the first unshown body's --expand. "" when none renders.
+// `redact`: the run's redaction tally, every body passes it as any served body does (nullptr: --no-redact). REDACT-TOUCH: this
+// printer passed nullptr, so a hop or route body reached --path, MCP path_between and the --for graph block unredacted.
 struct RouteBodiesXml
 {
     std::string         xml;
@@ -408,7 +413,10 @@ struct RouteBodiesXml
     std::vector<NodeId> ids;              // the definitions whose <b> rendered (not the ones asked for): what <alts> must not list again
 };
 inline RouteBodiesXml routeBodiesXml( const IngestResult& ing, std::span<const RouteBody> bodies, std::string_view of, std::string_view rootAttrs,
-                                      std::size_t maxBodies, std::string_view rootArg )
+                                      std::size_t maxBodies, std::string_view rootArg, RedactCounts* redact,
+                                      std::uint32_t bodyLineCap = 0 )   // CB1: 0 => INERT. The "hops" and "route" groups keep the
+                                                                         //   default and move no byte; only forkeybody.h's "key"
+                                                                         //   group passes kCappedBodyLines.
 {
     RouteBodiesXml out;
     std::string    children;
@@ -422,7 +430,8 @@ inline RouteBodiesXml routeBodiesXml( const IngestResult& ing, std::span<const R
             next = expandSelectorOf( ing, rb.id, rootArg );
             break;
         }
-        if( std::optional<std::string> b = renderBodyElement( ing, rb.id, kHopBodyCapBytes, /*compress=*/false, /*redact=*/nullptr, rootArg, nullptr ) )
+        if( std::optional<std::string> b = renderBodyElement( ing, rb.id, kHopBodyCapBytes, /*compress=*/false, redact, rootArg, nullptr,
+                                                              bodyLineCap ) )
         {
             if( !rb.hedge.empty() )
             {
@@ -446,9 +455,9 @@ inline RouteBodiesXml routeBodiesXml( const IngestResult& ing, std::span<const R
 }
 
 // THE PATH'S <bodies of="hops"> ELEMENT: every middle hop's body (a reached chain has at most kPathHopBodyMaxHops - 1 of them).
-inline RouteBodiesXml pathHopBodiesXml( const IngestResult& ing, std::span<const RouteBody> hops, std::string_view rootArg )
+inline RouteBodiesXml pathHopBodiesXml( const IngestResult& ing, std::span<const RouteBody> hops, std::string_view rootArg, RedactCounts* redact )
 {
-    return routeBodiesXml( ing, hops, "hops", {}, kPathHopBodyMaxHops, rootArg );
+    return routeBodiesXml( ing, hops, "hops", {}, kPathHopBodyMaxHops, rootArg, redact );
 }
 
 // The full dialect's clause for <bodies of="hops">, present-only (no "--": it rides inside the path's XML comment).

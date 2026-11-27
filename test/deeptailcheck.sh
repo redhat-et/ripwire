@@ -22,6 +22,9 @@
 # no longer tells the two kinds apart. The reader below splits the tail structurally instead: tail = R + (page 0 minus R),
 # R = the SHORTEST prefix for which the rest is exactly the --limit=40 page's rows not in R, in page order (a cut tail:
 # a prefix of them). No split → the reader prints SPLIT-FAIL and the arm reading it fails. Arm 1t pins the new sym=.
+# R-DEDUP (2026-11-07): a page row of a file the head shows no longer repeats the names its <d> rows print: its sym= is the
+# file's next positive-score symbols in lens order (at most 3), p= only when every one is shown. The page-row arms read the
+# expected names off the corpus (every score ties, so lens order = definition order); arm 1d pins it, with a positive twin.
 #
 # RED-FIRST: every d1/d2 assertion below FAILS against the prebuilt d8e257d baseline (which emits neither
 # surface); each fuses presence with content bytes so a bare-exit arm cannot pass green-while-inert.
@@ -31,10 +34,22 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# TAIL-SYM-TERMS (2026-11-14): this gate pins the tail's ROWS and their sym= (rank, page, fold, R-DEDUP, JSON, MCP), so it reads
+# the tail without the task-word names a row may add after sym= (tsym=; this fixture's task names every file's symbols).
+# test/tailsymtermscheck.sh arm (b) proves the default tail IS this one plus tsym= on each row (same attributes, same order), so the
+# pins here hold for the default answer too.
+export RIPWIRE_NO_TAIL_SYM_TERMS=1
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -61,6 +76,9 @@ Q="widget frobnicate helper"
 # L1 (2026-09-19): the CLI default legend is compact; arm 8 reads the FULL legend's prose off $XML, so it asks for it.
 XML="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 --legend=full 2>/dev/null )"
 printf '%s' "$XML" > "$TMP/for.xml"
+# R-DEDUP: <syms> has priority over a head file's tail row (src/forfilesyms.h tailRowsWithoutPicks cuts the names it prints), so
+# the tail walk's own rows (FOLD C, 1d) read the block-off twin; (1s) pins the cut on $XML.
+RIPWIRE_NO_FILE_SYMS=1 "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 --legend=full > "$TMP/for_nosyms.xml" 2>/dev/null
 
 # ── 1) d2: the file-grain tail — present, complete; its rank rows disjoint from the head ───────────────
 # a python reader of the tail (XML, or the --json twin's "tail" object): "rank" rows and "page" rows (p, sym), in order,
@@ -97,13 +115,22 @@ for i, ( p, sym ) in enumerate( rows ):
 PY
 # the page rows a tail must carry: page 0 of the file page, minus the rank rows, in page order
 "$BIN" "$CORPUS" --no-cache --for="$Q" --limit=40 2>/dev/null > "$TMP/page40.xml"
+# R-DEDUP: a file the answer's head shows ($2, the answer) names its first 3 symbols NOT among those <d> rows, in definition order
 pagerows(){ python3 -c '
 import re, sys, html
 rank = set( open( sys.argv[ 1 ] ).read().split( "\n" ) )
+shown = {}
+for n, f in re.findall( r"<d [^>]*?\bn=\"([^\"]*)\" p=\"([^\"]*)\"", open( sys.argv[ 2 ] ).read() ):
+    shown.setdefault( html.unescape( f ), set() ).add( html.unescape( n ) )
 for p, sym in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", sys.stdin.read() ):
     p = html.unescape( p )
-    if p not in rank: print( p + "\t" + html.unescape( sym ) )
-' "$1" < "$TMP/page40.xml"; }
+    if p in shown:
+        defs = re.findall( r"^def (\w+)", open( sys.argv[ 3 ] + "/" + p ).read(), re.M )
+        sym = ",".join( [ n for n in defs if n not in shown[ p ] ][ :3 ] )
+    else:
+        sym = html.unescape( sym )
+    if p not in rank: print( p + "\t" + sym )
+' "$1" "$2" "$CORPUS" < "$TMP/page40.xml"; }
 TAILTAG="$( printf '%s' "$XML" | grep -o '<tail [^>]*>' | head -1 )"
 case "$TAILTAG" in
     *'total="12"'*'shown="12"'*'capped="0"'*) ok "tail element: every positive-score file (12), all shown: $TAILTAG" ;;
@@ -139,13 +166,56 @@ PY
 )"
 if [ "$DUP" = "0" ]; then ok "tail rank rows are disjoint from the head's files"; else no "$DUP tail rank row(s) duplicate a head file"; fi
 # FOLD C: the page rows ARE the file page's first 40 rows not listed above, in page order, sym= included
-python3 "$TMP/tail.py" "$TMP/for.xml" page "$TMP/page40.xml" > "$TMP/page1.txt"
-pagerows "$TMP/rank1.txt" > "$TMP/page1_want.txt"
+python3 "$TMP/tail.py" "$TMP/for_nosyms.xml" page "$TMP/page40.xml" > "$TMP/page1.txt"
+pagerows "$TMP/rank1.txt" "$TMP/for_nosyms.xml" > "$TMP/page1_want.txt"
 if [ -s "$TMP/page1_want.txt" ] && cmp -s "$TMP/page1.txt" "$TMP/page1_want.txt"; then
     ok "FOLD C: the tail's page rows are the --limit=40 page's rows not listed above ($( grep -c . "$TMP/page1.txt" ), sym= equal)"
 else
     no "FOLD C: tail page rows differ from the file page's ($( grep -c . "$TMP/page1.txt" ) vs $( grep -c . "$TMP/page1_want.txt" ))"
 fi
+# (1d) R-DEDUP: no tail row repeats a name its file's <d> rows print, and the head file w01 (a..d shown) refills from the next
+#      lens rank (e). Positive twin: every row of a file outside the head keeps its 3 names. Reads the tail rows ("all"); an
+#      empty or unsplittable tail fails both halves.
+python3 "$TMP/tail.py" "$TMP/for_nosyms.xml" all "$TMP/page40.xml" > "$TMP/all1.txt"
+DD="$( python3 - "$TMP/for_nosyms.xml" "$TMP/all1.txt" <<'PY'
+import re, sys, html
+shown = {}
+for n, f in re.findall( r'<d [^>]*?\bn="([^"]*)" p="([^"]*)"', open( sys.argv[ 1 ] ).read() ):
+    shown.setdefault( html.unescape( f ), set() ).add( html.unescape( n ) )
+rows = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 2 ] ) if "\t" in l ]
+rep = sum( 1 for p, y in rows if set( y.split( "," ) ) & shown.get( p, set() ) )
+w01 = [ y for p, y in rows if p == "w01.py" ]
+full = sum( 1 for p, y in rows if p not in shown and len( y.split( "," ) ) == 3 )
+print( rep, "|".join( w01 ), full, len( rows ) )
+PY
+)"
+case "$DD" in
+    "0 widget_frobnicate_01_e 11 12") ok "(1d) R-DEDUP: no tail sym= repeats a <d> name of its file; head file w01 refills from rank 5 (e); 11 non-head rows keep 3 names" ;;
+    *) no "(1d) R-DEDUP: repeats / w01 sym= / non-head rows with 3 names / rows = $DD (expected 0 widget_frobnicate_01_e 11 12)" ;;
+esac
+# (1s) R-DEDUP: <syms> has priority. With the block on, it prints widget_frobnicate_01_e (w01.py, a head file), so w01's tail row
+#      drops it (no name left: p= only); no head file's tail row names a <syms> row; every other byte is the block-off twin's.
+#      Positive twin: the block-off answer's w01 row names it (1d).
+SS="$( python3 - "$TMP/for.xml" "$TMP/for_nosyms.xml" <<'PY'
+import re, sys
+on, off = open( sys.argv[ 1 ] ).read(), open( sys.argv[ 2 ] ).read()
+at = on.find( "<syms" )
+lo, hi = ( on.rfind( "<!--", 0, at ), on.find( "</syms>", at ) + 7 ) if at >= 0 else ( 0, 0 )   # the block and its legend comment
+picked = set( re.findall( r'<y [^>]*\bn="([^"]*)"', on[ at:hi ] ) ) if at >= 0 else set()
+heads = set( re.findall( r'<d [^>]*?\bp="([^"]*)"', on ) )
+tail = re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?', on )
+w01 = [ y for p, _, y in tail if p == "w01.py" ]
+rep = sum( 1 for p, _, y in tail if p in heads and set( y.split( "," ) ) & picked )
+rest = on[ :lo ] + on[ hi: ]
+cut = off.replace( '<t p="w01.py" sym="widget_frobnicate_01_e"', '<t p="w01.py"' )
+mask = lambda t: re.sub( r' at="[^"]*"| est_tokens="\d+"', '', t )
+print( int( "widget_frobnicate_01_e" in picked ), "|".join( w01 ) or "-", rep, int( mask( rest ) == mask( cut ) ) )
+PY
+)"
+case "$SS" in
+    "1 - 0 1") ok "(1s) R-DEDUP: <syms> prints widget_frobnicate_01_e, w01's tail row drops it (p= only), no head tail row names a <syms> row, rest = block-off twin" ;;
+    *) no "(1s) R-DEDUP: picked / w01 sym= / head rows naming a <syms> row / rest==twin = $SS (expected 1 - 0 1)" ;;
+esac
 
 # ── 2) d1: r= on every ranked row, exactly the ranks 1..K ──────────────────────────────────────────────
 RSEQ="$( printf '%s' "$XML" | grep -o '<d l="[^>]*>' | grep -o ' r="[0-9]*"' | grep -o '[0-9]*' | sort -n | tr '\n' ' ' )"
@@ -170,12 +240,15 @@ xml = open( sys.argv[2] ).read()
 rs = sorted( s.get( "r", 0 ) for s in d.get( "sigs", [] ) )   # P7: flat sigs array
 tail = d.get( "tail" )
 import html
+xml = xml[ xml.find( "<tail" ): ]   # the tail block rows only: a SIBLING-DEMOTE pointer inside sigs is a t row too
 xrows = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r"<t p=\"([^\"]*)\"( sym=\"([^\"]*)\")?/>", xml ) ]
 xrows = [ ( p, y ) for p, _h, y in [ ( r[0], None, r[1] ) for r in xrows ] ]
 checks = [
     bool( rs ) and rs == list( range( 1, len( rs ) + 1 ) ),
     tail is not None and tail.get( "total" ) == 12 and tail.get( "shown" ) == 12
-        and sys.argv[ 3 ] == "w09.py,w10.py,w11.py,w12.py," and all( tail.get( "sym", [] ) ),
+        and sys.argv[ 3 ] == "w09.py,w10.py,w11.py,w12.py,"
+        # R-DEDUP: w01..w08 are wholly shown (5 of 5 rows each), so their page rows print p= only; w09..w12 keep sym=
+        and [ f for f, y in zip( tail.get( "files", [] ), tail.get( "sym", [] ) ) if y ] == [ "w09.py", "w10.py", "w11.py", "w12.py" ],
     tail is not None and list( zip( tail.get( "files", [] ), tail.get( "sym", [] ) ) ) == xrows,
 ]
 print( " ".join( "Y" if c else "N" for c in checks ) )
@@ -312,9 +385,11 @@ esac
 # ── 8) the legend defines both new surfaces where the reader meets them ────────────────────────────────
 HDR="$( printf '%s' "$XML" | sed 's/-->.*//' )"
 if printf '%s' "$HDR" | grep -q 'tail: file-grain rows, WEAKER evidence' && printf '%s' "$HDR" | grep -q 'sym= its top symbols'; then ok "legend defines the tail (file-grain, weaker evidence; rank rows, then page rows with sym=)"; else no "legend does not define the tail"; fi
-if printf '%s' "$HDR" | grep -q 'cover); sym= its top symbols by lens rank (a pointer, not the answer); total='; then ok "legend: sym= on either tail row kind is the file's top lens symbols, a pointer, not the answer (tail-sym)"; else no "legend does not say what sym= on a rank row means"; fi
-CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | sed 's/-->.*//' )"
-if printf '%s' "$CL" | grep -q 't sym= its top symbols (a pointer, not the answer)'; then ok "compact legend: t sym= is the file's top symbols, a pointer (tail-sym)"; else no "compact legend does not define t sym= for every tail row"; fi
+if printf '%s' "$HDR" | grep -q 'cover); sym= its top symbols by lens rank, minus names a sigs row or the syms block shows (a pointer, not the answer); total='; then ok "legend: sym= on either tail row kind is the file's top lens symbols, a pointer, not the answer (tail-sym)"; else no "legend does not say what sym= on a rank row means"; fi
+# AF1 (2026-11-18): the default --for answer is answer-first, its compact legend AFTER the rows (inside the same answer), so the
+# legend is every comment of the answer, not the text before the first "-->" (the legend-first shape).
+CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | python3 -c 'import re,sys; d=re.sub(r"<!\[CDATA\[.*?\]\]>","",sys.stdin.read(),flags=re.S); print("".join(re.findall(r"<!--.*?-->",d,re.S)))' )"
+if printf '%s' "$CL" | grep -q 't sym= its top symbols not in sigs/syms (a pointer, not the answer)'; then ok "compact legend: t sym= is the file's top symbols, a pointer (tail-sym)"; else no "compact legend does not define t sym= for every tail row"; fi
 if printf '%s' "$HDR" | grep -q 'r= on a ranked row'; then ok "legend defines r= (true ranker order)"; else no "legend does not define r="; fi
 
 # ── 9) determinism + well-formedness ───────────────────────────────────────────────────────────────────
@@ -338,9 +413,12 @@ r = json.load( sys.stdin )
 print( "" if "error" in r else r["result"]["content"][0]["text"] )
 ' )"
 if printf '%s' "$MCP_INNER" | grep -q '<tail total=' && printf '%s' "$MCP_INNER" | grep -q '<t p="[^"]*" sym="'; then ok "MCP for verb serves the file-grain tail, page rows included (sym=)"; else no "MCP for verb has no <tail> or no page rows"; fi
-MCP_BARE="$( printf '%s' "$MCP_INNER" | grep -o '<t p="[^"]*"/>' | grep -c . )"
-MCP_SYM="$( printf '%s' "$MCP_INNER" | grep -o '<t p="[^"]*" sym="[^"]*"/>' | grep -c . )"
-if [ "$MCP_BARE" = "0" ] && [ "$MCP_SYM" -gt 4 ]; then ok "(10t) MCP for twin: every tail row carries sym=, rank rows included ($MCP_SYM rows, tail-sym)"; else no "(10t) MCP for twin: $MCP_BARE tail row(s) without sym= ($MCP_SYM with)"; fi
+MCP_TAIL="${MCP_INNER#*<tail }"   # the tail block's rows (a SIBLING-DEMOTE pointer inside <sigs> is a <t> too)
+MCP_BARE="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*"/>' | grep -c . )"
+MCP_SYM="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*" sym="[^"]*"/>' | grep -c . )"
+# R-DEDUP: the default head shows w01..w08 whole, so exactly those 8 page rows print p= only; the other 4 keep sym=
+MCP_BAREF="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*"/>' | tr '\n' ',' )"
+if [ "$MCP_BAREF" = '<t p="w01.py"/>,<t p="w02.py"/>,<t p="w03.py"/>,<t p="w04.py"/>,<t p="w05.py"/>,<t p="w06.py"/>,<t p="w07.py"/>,<t p="w08.py"/>,' ] && [ "$MCP_SYM" = "4" ]; then ok "(10t) MCP for twin: the 4 rows outside the head carry sym=, the 8 wholly shown head files p= only (R-DEDUP)"; else no "(10t) MCP for twin: $MCP_BARE tail row(s) without sym= ($MCP_SYM with; bare: $MCP_BAREF)"; fi
 if printf '%s' "$MCP_INNER" | grep -q '<d l="[^>]*r="1"'; then ok "MCP for verb rows carry r="; else no "MCP for verb rows carry no r="; fi
 
 echo

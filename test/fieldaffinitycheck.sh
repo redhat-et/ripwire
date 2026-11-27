@@ -217,11 +217,13 @@ fi
 # ── 18) §L10: an unmodeled struct's why= names layout's own refusal reason for THIS definition ─────────
 # Isolated fixture (never the shared fieldaffinityfix corpus — its amb_skipped=2 and every hand-computed
 # offset are pinned by earlier arms, and a new struct there risks perturbing them). Derived inherits from
-# Base, so layout.h's own base-class refusal fires (readHeadAttributes, src/layout.h) — the same reason
-# --layout itself reports on this struct via its own <caveat k="base-class" .../> row.
+# Base, so layout.h's own base-class refusal fires (placeBase, src/layout.h) — the same reason --layout itself
+# reports on this struct via its own <caveat k="base-class" .../> row. Base carries 3 B of TAIL PADDING: since
+# LAYOUT-SIZED (2026-11-11) one plain base is placed at offset 0, and a tail-padded one is what still refuses
+# (Itanium may reuse that padding, MSVC never does).
 WHYFIX="$TMP/whyfix"; mkdir -p "$WHYFIX"
 cat >"$WHYFIX/a.cpp" <<'EOF2'
-struct Base { int x; };
+struct Base { int x; char c; };
 struct Derived : Base { int y; int z; };
 int touchY( Derived& d ) { return d.y; }
 int touchZ( Derived& d ) { return d.y + d.z; }
@@ -250,8 +252,10 @@ printf '%s' "$WHY_OUT" | xmllint --noout - 2>/dev/null \
 # Isolated fixtures, like arm 18: the shared corpus's pins stay untouched. Each fixture's <fn f=> rows are the
 # independent witness: they list the touched names per function straight from the access scan.
 PAIRFIX="$TMP/pairfix"; mkdir -p "$PAIRFIX/sorted" "$PAIRFIX/cut" "$PAIRFIX/tail"
+# Both base-class fixtures below give Base tail padding so the derived struct stays UNMODELED (sorted by name), as these
+# arms need: a plain base is placed since LAYOUT-SIZED (2026-11-11).
 cat >"$PAIRFIX/sorted/a.cpp" <<'EOF2'
-struct Base { int b0; };
+struct Base { int b0; char pad; };
 struct Mixed : Base { int zz; int yy; int xx; };
 int readZY( Mixed& m ) { return m.zz + m.yy; }
 int readZY2( Mixed& m ) { return m.zz - m.yy; }
@@ -259,7 +263,7 @@ int readX( Mixed& m ) { return m.xx; }
 EOF2
 # (b) 40 fields declared f39..f00 on an unmodeled struct: the name sort moves f02/f01 (declared 37/38) to rows
 # 2/1, so the old code read slots 37/38 of a vector already cut to 32.
-{ printf 'struct Base { int b0; };\nstruct Wide : Base {\n'
+{ printf 'struct Base { int b0; char pad; };\nstruct Wide : Base {\n'
   for i in $( seq 39 -1 0 ); do printf '    int f%02d;\n' "$i"; done
   printf '};\n'
   for i in $( seq 0 39 ); do printf 'int t%02d( Wide& w ) { return w.f%02d; }\n' "$i" "$i"; done

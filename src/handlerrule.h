@@ -185,8 +185,7 @@ public:
                     out.insert( out.end(), it->second.begin(), it->second.end() );
                 }
             }
-            std::ranges::sort( out );
-            out.erase( std::ranges::unique( out ).begin(), out.end() );
+            sortutil::sortUnique( out );
         }
         return out;
     }
@@ -763,8 +762,7 @@ private:
                     site.names.push_back( nameUnder( *rule, c ) );
                 }
             }
-            std::ranges::sort( site.names, sortutil::svLess );
-            site.names.erase( std::ranges::unique( site.names ).begin(), site.names.end() );
+            sortutil::sortUnique( site.names, sortutil::svLess );
             if( !site.names.empty() )
             {
                 m_siteOfRef[ i ] = std::uint32_t( m_sites.size() );

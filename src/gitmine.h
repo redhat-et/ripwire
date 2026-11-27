@@ -1,6 +1,8 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "gitstampstore.h"  // C1-STAMP: the stored answers to the small git questions a served --for asks
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <format>            // gitWalkCutSentence
 
@@ -35,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <memory>       // gitFileAuthors' per-file author maps, built on first touch
 #include <optional>     // CoCouplingCache — the lazily-built StaticIncludeCoupling shared across probes
 #include <mutex>        // gitRepoToplevel's per-directory memo — one rev-parse probe per root, not per miner
 #include <string>
@@ -743,6 +746,25 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     return out;
 }
 
+// C1-STAMP (gitstampstore.h): the line reader for the few questions a STAMP record may answer. `dir` is the directory the
+// question is about, `isRecordable` judges git's answer, and only a well-formed success is ever recorded. Unless
+// gitstampcache.h armed the table for this root — a one-shot --for — this is gitCommandLines( cmd ) and nothing else.
+template <class IsRecordable>
+inline GitCommandLines gitCommandLinesStamped( std::string_view dir, const std::string& cmd, IsRecordable&& isRecordable )
+{
+    if( std::optional<gitstampstore::Answer> hit = gitstampstore::lookup( dir, cmd ) )
+    {
+        GitCommandLines served;
+        served.isStarted = true;
+        served.status    = hit->status;
+        served.lines     = std::move( hit->lines );
+        return served;
+    }
+    GitCommandLines res = gitCommandLines( cmd );
+    gitstampstore::offer( dir, cmd, res.isStarted && !res.abandoned && !res.timedOut && isRecordable( res ), res.status, res.lines );
+    return res;
+}
+
 // ── the ONE git-log record frame (audit finding #4): every --name-only consumer reads through here ──
 //
 // The old frame was a LINE frame: `--format=tformat:__C__…` printed a marker LINE, and the five
@@ -1324,7 +1346,8 @@ inline std::string gitRepoToplevel( const std::string& absDir )
         // the ONE git command in this file without `-c core.quotepath=false`, deliberately: that flag governs
         // how git renders PATHSPEC OUTPUT, and `rev-parse --show-toplevel` prints the directory verbatim —
         // measured on a root spelled "répo dïr", which comes back raw and joins correctly.
-        const GitCommandLines probe = gitCommandLines( gitCmd( " -C " ) + shSingleQuote( absDir ) + " rev-parse --show-toplevel 2>/dev/null" );
+        const GitCommandLines probe = gitCommandLinesStamped( absDir, gitCmd( " -C " ) + shSingleQuote( absDir ) + " rev-parse --show-toplevel 2>/dev/null",
+                                                              []( const GitCommandLines& r ) { return r.status == 0 && !r.lines.empty() && r.lines.front().starts_with( '/' ); } );
         if( probe.isStarted && probe.status == 0 && !probe.lines.empty() )
         {
             char resolved[ PATH_MAX ];
@@ -2034,8 +2057,7 @@ struct CommitWindowCensus
 inline void recordCommitFileSet( std::vector<std::uint32_t>& cur, std::size_t maxFiles,
                                  std::vector<std::vector<std::uint32_t>>& sets, CommitWindowCensus* census )
 {
-    std::sort( cur.begin(), cur.end() );
-    cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+    rw::sortutil::sortUnique( cur );
     if( cur.empty() )
     {
         cur.clear();
@@ -2180,11 +2202,18 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitWindowBoundarySha (cheap window-drift probe)" );
     // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. `| tail -1` already reduces
     // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                          + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
-                          + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
-                          + " --format=%H 2>/dev/null | tail -1";
-    const GitCommandLines res = gitCommandLines( cmd );
+    const std::string since = defaultWindowSince( root, coSince );   // F1: the probe must resolve the window it guards, by the same rule
+    const std::string cmd   = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                            + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( since )
+                            + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
+                            + " --format=%H 2>/dev/null | tail -1";
+    // C1-STAMP: recorded only for a HEAD-anchored window ("@<epoch>": a pure function of the history the record keys), and
+    // only when it names a commit — `| tail -1` exits 0 whatever git did, so an empty answer is never trusted to be one.
+    const bool            isAnchored = since.starts_with( '@' );
+    const GitCommandLines res        = gitCommandLinesStamped( root, cmd, [ isAnchored ]( const GitCommandLines& r )
+    {
+        return isAnchored && !r.lines.empty() && isBareCommitSha( r.lines.back() );
+    } );
     if( !res.isStarted || res.lines.empty() )
     {
         return {};
@@ -2234,8 +2263,7 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         if( cur.size() >= 1 && cur.size() <= maxFiles )
         {
             sets.push_back( std::move( cur ) ); // keep 1..max (freq needs size-1 too)
@@ -2305,7 +2333,10 @@ inline std::int64_t gitHeadCommitEpoch( const std::string& root )
     // G3: the shared reader. `log -1 --format=%ct` prints exactly one line, so the first is the whole
     // answer; gitCommandLines strips the CR/LF tail, and the trailing-space strip is kept for the value.
     const std::string     cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv -1 --format=%ct HEAD 2>/dev/null";
-    const GitCommandLines res = gitCommandLines( cmd );
+    const GitCommandLines res = gitCommandLinesStamped( root, cmd, []( const GitCommandLines& r )
+    {
+        return r.status == 0 && r.lines.size() == 1 && std::strtoll( r.lines.front().c_str(), nullptr, 10 ) > 0;
+    } );
     if( !res.isStarted || res.lines.empty() )
     {
         return 0;
@@ -2377,8 +2408,7 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         for( std::uint32_t f : cur )
         {
             ++counts[f];
@@ -2585,8 +2615,7 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         if( cur.size() >= 1 && cur.size() <= maxFiles )
         {
             for( std::uint32_t f : cur )
@@ -2879,12 +2908,18 @@ inline std::vector<FileOwnership> gitFileAuthors(
     // rather than a growth. Coverage 84.9%/77.2% across the two census corpora against 73.0%/59.9% at N=1;
     // marginal coverage per byte then falls 2.16 → 0.70 going 2→4, so 2 is the knee. Most (file, author)
     // pairs are one commit — 1 613/3 002 inner lists on the two corpora, nearly all of them singletons.
-    HashMap<std::uint32_t, HashMap<std::string, rw::SmallVec<std::int64_t, 2>>> perFile;
-    HashMap<std::uint32_t, std::int64_t>                                        newestTsByFile;
+    // fileId is dense (0..fileCount-1), so the whole-repo accumulator is a flat table indexed by it, with
+    // each file's author map built on first touch (files without mined history allocate nothing). A
+    // single-file query uses one map. Reducing in ascending fileId order leaves the result sorted.
+    using AuthorTimestamps = HashMap<std::string, rw::SmallVec<std::int64_t, 2>>;
+    AuthorTimestamps                               singleAuthorTs;
+    std::int64_t                                   singleNewestTs = 0;
+    std::vector<std::unique_ptr<AuthorTimestamps>> perFile;
+    std::vector<std::int64_t>                      newestTsByFile;
     if( !singleFile )
     {
-        perFile.reserve( fileCount );
-        newestTsByFile.reserve( fileCount );
+        perFile.resize( fileCount );
+        newestTsByFile.resize( fileCount, 0 );
     }
 
     // F6 companion: this used to be a SIXTH hand-rolled index, and a DIVERGENT one — it keyed on the
@@ -2950,24 +2985,29 @@ inline std::vector<FileOwnership> gitFileAuthors(
             {
                 continue;
             }
-            perFile[ f ][ curEmail ].push_back( curTs );
-            std::int64_t& newest = newestTsByFile[ f ];
-            if( curTs > newest )
+            if( singleFile )
             {
-                newest = curTs;
+                singleAuthorTs[ curEmail ].push_back( curTs );
+                singleNewestTs = std::max( singleNewestTs, curTs );
+                continue;
             }
+            std::unique_ptr<AuthorTimestamps>& slot = perFile[ f ];
+            if( !slot )
+            {
+                slot = std::make_unique<AuthorTimestamps>();
+            }
+            ( *slot )[ curEmail ].push_back( curTs );
+            newestTsByFile[ f ] = std::max( newestTsByFile[ f ], curTs );
         }
     } );
 
     std::vector<FileOwnership> result;
-    result.reserve( perFile.size() );
-    for( auto& [ fid, authorTs ] : perFile )
+    const auto reduceFile = [ & ]( std::uint32_t fid, const AuthorTimestamps& authorTs, std::int64_t newestTs )
     {
         if( authorTs.empty() )
         {
-            continue;
+            return;
         }
-        const std::int64_t newestTs = newestTsByFile[ fid ];
 
         // Compute decay scores
         double totalScore = 0.0;
@@ -3009,11 +3049,22 @@ inline std::vector<FileOwnership> gitFileAuthors(
                    { return x.score != y.score ? x.score > y.score : x.email < y.email; } );
 
         result.push_back( { fid, std::move( authors ), std::uint32_t( authorTs.size() ), topOver80 } );
-    }
+    };
 
-    // Sort result by fileId for deterministic output (HashMap iteration order above is not stable)
-    std::sort( result.begin(), result.end(), []( const FileOwnership& a, const FileOwnership& b )
-               { return a.fileId < b.fileId; } );
+    if( singleFile )
+    {
+        reduceFile( onlyFileId, singleAuthorTs, singleNewestTs );
+    }
+    else
+    {
+        for( std::uint32_t fid = 0; fid < fileCount; ++fid )
+        {
+            if( perFile[ fid ] )
+            {
+                reduceFile( fid, *perFile[ fid ], newestTsByFile[ fid ] );
+            }
+        }
+    }
 
     return result;
 }
@@ -3518,12 +3569,13 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
 // paths pay literally zero added cost. A hit does NOT guarantee usable history (a fresh or depth-1 clone
 // has none) — the support>=3 threshold in applyCoChangeBoost is the real inertness gate; this is only the
 // no-subprocess fast path. Pure filesystem reads; never spawns anything.
-inline bool hasEnclosingGitRepo( const std::string& root )
+// The directory whose `.git` bounds `root`, by the filesystem alone (realpath'd, walking up), or "" when there is none.
+inline std::string enclosingGitWorkTree( const std::string& root )
 {
     char resolved[ PATH_MAX ];
     if( !os::realpath( root.c_str(), resolved ) )
     {
-        return false; // unresolvable root → treat as no repo (degrade)
+        return {}; // unresolvable root → treat as no repo (degrade)
     }
     std::string dir{ resolved };   // brace-init: dir( resolved ) parses as a function declarator (vexing-parse lookalike) and would pollute the symbol map
 
@@ -3533,7 +3585,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
         os::stat_t st;
         if( os::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
         {
-            return true;
+            return dir;
         }
         if( dir == "/" )
         {
@@ -3546,7 +3598,12 @@ inline bool hasEnclosingGitRepo( const std::string& root )
         }
         dir.resize( slash == 0 ? 1 : slash );   // parent dir; "/" is its own parent → loop exit above
     }
-    return false;
+    return {};
+}
+
+inline bool hasEnclosingGitRepo( const std::string& root )
+{
+    return !enclosingGitWorkTree( root ).empty();
 }
 
 // ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────

@@ -116,6 +116,15 @@ fi
 # plus two negative controls: a body edit that renames a PARAMETER (mined, then dropped by the join,
 # because no rule could ever have seen it) and a one-to-many split (dropped as ambiguous — a split is
 # several developer decisions wearing one label).
+#
+# And the PROSE controls (prose.cpp, prose.py): a word changed inside a comment is not a rename. Each comment names
+# a word (oldSpan / oldBand / oldPace) that is rewritten into the name of a function that already exists
+# (newSpan / newBand / newPace) — the exact shape that once credited a function called `is` with an `are -> is`
+# rename after a grammar fix in a Rust comment and pushed naming-short under its floor. Three comment syntaxes
+# (a `//` line, a `*` continuation inside a block comment, a `#` line in Python), all three must mine NOTHING.
+# The positive twin is a code line that ends in a comment (`return oldKnob( amount ); // calls it`): the line
+# is code, so its rename is still mined and still joins, which proves the filter drops comment-only lines
+# and not every line that mentions a comment.
 FIX="$TMP/fixture"
 mkdir -p "$FIX"
 cat >"$FIX/lens.cpp" <<'CPP'
@@ -153,6 +162,56 @@ cat >"$FIX/split.cpp" <<'CPP'
 int oldRouter( int x )
 {
     return x;
+}
+CPP
+
+cat >"$FIX/prose.cpp" <<'CPP'
+// the oldSpan walks the rows
+int newSpan( int amount )
+{
+    return amount + 1;
+}
+
+/*
+ * the oldBand covers the rows
+ */
+int newBand( int amount )
+{
+    return amount + 2;
+}
+
+int useKnob( int amount ) { return oldKnob( amount ); } // calls it
+int newKnob( int amount )
+{
+    return amount + 3;
+}
+CPP
+cat >"$FIX/prose.py" <<'PY'
+# the oldPace is read
+def newPace():
+    return 1
+PY
+
+# an added line `++counter;` is the patch line `+++counter;` (not a file header), and a path with a space ends its header in a tab:
+# neither may leave the file's comment syntax unknown, or the comment-only word change below it votes as a rename
+cat >"$FIX/inc.cpp" <<'CPP'
+int bump( int counter )
+{
+    counter = counter + 1;
+    return counter;
+}
+
+// the oldGrip holds the rows
+int newGrip( int amount )
+{
+    return amount + 4;
+}
+CPP
+cat >"$FIX/prose space.cpp" <<'CPP'
+// the oldCrew walks the rows
+int newCrew( int amount )
+{
+    return amount + 5;
 }
 CPP
 
@@ -196,6 +255,14 @@ int stableHelper( int counter )
 CPP
 git -C "$FIX" commit -q -am "rename the five" >/dev/null 2>&1
 
+# the prose commit: five comment-only word changes (must mine nothing) and one trailing-comment code line (must mine)
+sed -i.bak -e 's/oldSpan/newSpan/' -e 's/oldBand/newBand/' -e 's/return oldKnob/return newKnob/' "$FIX/prose.cpp"
+sed -i.bak -e 's/oldPace/newPace/' "$FIX/prose.py"
+sed -i.bak -e 's/^    counter = counter + 1;$/++counter;/' -e 's/oldGrip/newGrip/' "$FIX/inc.cpp"
+sed -i.bak -e 's/oldCrew/newCrew/' "$FIX/prose space.cpp"
+rm -f "$FIX/prose.cpp.bak" "$FIX/prose.py.bak" "$FIX/inc.cpp.bak" "$FIX/prose space.cpp.bak"
+git -C "$FIX" commit -q -am "reword the comments" >/dev/null 2>&1
+
 cat >"$FIX/split.cpp" <<'CPP'
 int routeA( int x )
 {
@@ -219,15 +286,16 @@ if [ "$rc" = "0" ]; then ok "instrument: exit 0 (a measurement, never a verdict)
 hdr="$( rows "$FIXOUT" | grep '^naming-calibration ' | head -1 )"
 [ -n "$hdr" ] || no "instrument: no <naming-calibration> element emitted"
 fixpairs="$( attr "$hdr" pairs )"
-[ "${fixpairs:-0}" = "5" ] && ok "instrument: the 5 planted renames survived mine + join (pairs=5)" \
-                           || no "instrument: pairs=${fixpairs:-none}, expected 5 — mining or the join changed"
+[ "${fixpairs:-0}" = "6" ] && ok "instrument: the 5 planted renames and the trailing-comment code rename survived mine + join (pairs=6)" \
+                           || no "instrument: pairs=${fixpairs:-none}, expected 6 — mining or the join changed (a comment-only word change counted as a rename shows here as 7+)"
 
 for want in \
     'o="computeTotalWeightedAverageScoreValue" n="totalScore"' \
     'o="handle__relay" n="handleRelay"' \
     'o="fetch_remoteCount" n="fetchRemote"' \
     'o="isBrokenState" n="stateCode"' \
-    'o="okayNamed" n="ab"'
+    'o="okayNamed" n="ab"' \
+    'o="oldKnob" n="newKnob"'
 do
     if grep -q "$want" "$FIXOUT"; then ok "instrument: pair $want mined"; else no "instrument: pair $want MISSING"; fi
 done
@@ -267,6 +335,11 @@ for group in naming-series naming-confusable; do
 done
 
 # negative controls
+# a word changed inside a comment is not a rename, whatever the comment syntax (see the PROSE controls above)
+for prose in oldSpan:newSpan oldBand:newBand oldPace:newPace oldGrip:newGrip oldCrew:newCrew; do
+    if grep -q "o=\"${prose%%:*}\"" "$FIXOUT"; then no "instrument: the comment-only change ${prose%%:*} -> ${prose##*:} was mined as a rename"
+    else ok "instrument: the comment-only change ${prose%%:*} -> ${prose##*:} mined nothing"; fi
+done
 grep -q 'o="stableHelper"' "$FIXOUT" && no "instrument: an unrenamed symbol became a pair" \
                                      || ok "instrument: the unrenamed symbol never became a pair"
 grep -q 'o="oldRouter"' "$FIXOUT" && no "instrument: a one-to-many split was scored as one rename" \

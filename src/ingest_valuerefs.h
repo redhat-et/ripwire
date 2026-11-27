@@ -76,7 +76,7 @@ inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee
 // whose bodies of one tag read the same are one type; bodies that differ are two (valuerefindex.h SlotIndex::addFact).
 inline std::string vrBodyDigest( std::string_view body )
 {
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     for( const char c : body )
     {
         if( c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v' )
@@ -166,8 +166,7 @@ inline std::string vrClean( std::string_view s )
 // A `fed` list (VrScope::fed, m_fileFed) as a sorted set: the Through filters then binary-search it.
 inline void vrSortUnique( std::vector<std::string>& v )
 {
-    std::ranges::sort( v );
-    v.erase( std::ranges::unique( v ).begin(), v.end() );
+    rw::sortutil::sortUnique( v );
 }
 
 // IX-3 name-template dispatch: the dynamic-lookup FORMS per value-ref family, as data (one row per form; no Lang compare in
@@ -1130,12 +1129,12 @@ private:
     // value goes, never stored itself.
     bool pyStoreKey( TSNode id ) const
     {
-        const TSNode sub = ts_node_parent( id );
+        const TSNode sub = parentOf( id );
         if( ts_node_is_null( sub ) || !kindIs( ts_node_type( sub ), "subscript" ) || !ts_node_eq( child( sub, m_fSubscript ), id ) )
         {
             return false;
         }
-        const TSNode as = ts_node_parent( sub );
+        const TSNode as = parentOf( sub );
         return !ts_node_is_null( as ) && kindIs( ts_node_type( as ), "assignment" ) && ts_node_eq( child( as, m_fLeft ), sub )
             && pySelfRooted( sub );
     }
@@ -1143,7 +1142,7 @@ private:
     // Python: is identifier `id` only a label (an attribute name or a keyword-argument name), never a read of a variable?
     bool pyLabel( TSNode id ) const
     {
-        const TSNode parent = ts_node_parent( id );
+        const TSNode parent = parentOf( id );
         return !ts_node_is_null( parent )
             && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), id ) )
                  || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), id ) ) );
@@ -1417,7 +1416,7 @@ private:
     };
     static bool isDeclaratorWrapper( const char* t ) noexcept
     {
-        return std::ranges::find( kDeclaratorWrappers, std::string_view( t ) ) != std::ranges::end( kDeclaratorWrappers );
+        return isOneOf( t, kDeclaratorWrappers );
     }
 
     // Is node kind `t` (about to be entered; its parent is m_anc.back()) a parameter list, or a parameter of one, that
@@ -1742,13 +1741,9 @@ private:
         {
             return;
         }
-        const auto sortUnique = []( std::vector<std::string_view>& v )
-        {
-            std::ranges::sort( v, rw::sortutil::svLess );   // never the default: libstdc++ debug aborts on string_view operator< (portablebuildcheck #6b)
-            v.erase( std::ranges::unique( v ).begin(), v.end() );
-        };
-        sortUnique( m_fnDeclNames );
-        sortUnique( m_relImportNames );
+        // never the default comparator: libstdc++ debug aborts on string_view operator< (portablebuildcheck #6b)
+        rw::sortutil::sortUnique( m_fnDeclNames, rw::sortutil::svLess );
+        rw::sortutil::sortUnique( m_relImportNames, rw::sortutil::svLess );
         const std::vector<std::string_view>& fileDecls = m_scopes.front().decls;
         for( RawRef& r : m_fwdSites )
         {
@@ -2055,7 +2050,7 @@ private:
 
     // The classified value `name` at anc[i] (effective position anc[j]): a container it fills is marked fed (its scope's, or
     // the file's), then its Value row. `owner` non-empty: a method value of that receiver type (methodValueAt).
-    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via = {} )
+    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, const std::string& via = {} )
     {
         if( !s.container.empty() && ( s.scope == 'f' || s.scope == 'l' ) )
         {
@@ -2072,7 +2067,7 @@ private:
             }
         }
 
-        emitValueRef( i, j, name, s, fileShadow, owner, std::move( via ) );
+        emitValueRef( i, j, name, s, fileShadow, owner, via );
     }
 
     // A node a method value may be written as: Go `b.opPlan` (methodValueAt), C++ `&Cls::m` (memberPointerValueAt).
@@ -2095,14 +2090,23 @@ private:
 
     // IX1-V2 (Go): `recv.m` in a value position, where recv is the enclosing METHOD's own receiver (no closer scope redeclares
     // it): a Value row naming m with memberRoot = the receiver's type name, so the join resolves it to that type's method m
-    // only (valuerefindex.h resolveName), never to a same-named method of another type. Any other `x.m` stays a floor (x's
-    // type is not read here).
+    // only (valuerefindex.h resolveName), never to a same-named method of another type. A method expression `(*T).m` lands the
+    // same row with memberRoot T (methodExpressionType). Any other `x.m` stays a floor (x's type is not read here).
     void methodValueAt( std::size_t i )
     {
         const TSNode n   = m_anc[i].node;
         const TSNode op  = child( n, m_fOperand );
         const TSNode fld = child( n, m_fField );
-        if( ts_node_is_null( op ) || ts_node_is_null( fld ) || !kindIs( ts_node_type( op ), "identifier" ) || i < 2 )
+        if( ts_node_is_null( op ) || ts_node_is_null( fld ) || i < 2 )
+        {
+            return;
+        }
+        if( kindIs( ts_node_type( op ), "parenthesized_expression" ) )
+        {
+            landMethodValue( i, text( fld ), methodExpressionType( op ) );
+            return;
+        }
+        if( !kindIs( ts_node_type( op ), "identifier" ) )
         {
             return;
         }
@@ -2122,7 +2126,33 @@ private:
         {
             rt = ts_node_named_child( rt, 0 );
         }
-        const std::string_view owner = goTypeName( rt );
+        landMethodValue( i, text( fld ), goTypeName( rt ) );
+    }
+
+    // GO-METHOD-EXPR: the type T of a METHOD EXPRESSION's operand `( *T )`, T an identifier no closer scope declares; "" for any
+    // other parenthesised operand (`( x ).m`, `( *p ).m` on a local or parameter p: a method value of a variable, its type not read
+    // here). Its Value row joins like the receiver's: to T's method m in the caller's own package (valuerefindex.h ownedBy). Go lets
+    // no package-level name be both a type and anything else, and an import name collides with every package-level declaration, so
+    // an undeclared T owning a method m is that type. A plain `T.m` stays a floor: its operand is spelled like a package or a variable.
+    std::string_view methodExpressionType( TSNode op ) const noexcept
+    {
+        const TSNode deref = ts_node_named_child_count( op ) == 1 ? ts_node_named_child( op, 0 ) : TSNode{};
+        if( ts_node_is_null( deref ) || !kindIs( ts_node_type( deref ), "unary_expression" ) || text( child( deref, m_fOperator ) ) != "*" )
+        {
+            return {};
+        }
+        const TSNode type = child( deref, m_fOperand );
+        if( ts_node_is_null( type ) || !kindIs( ts_node_type( type ), "identifier" ) || declaringScope( text( type ) ) != 0 )
+        {
+            return {};
+        }
+        return text( type );
+    }
+
+    // IX1-V2 / GO-METHOD-EXPR: the Value row of method `name` of type `owner` at selector anc[i], when the selector sits in a value
+    // position; nothing for an empty owner, or for the callee of a call (`b.opPlan( x )`) or an operand
+    void landMethodValue( std::size_t i, std::string_view name, std::string_view owner )
+    {
         if( owner.empty() )
         {
             return;
@@ -2133,11 +2163,10 @@ private:
             --j;
         }
         Slot s;
-        if( !classify( i, j, s ) )
+        if( classify( i, j, s ) )
         {
-            return;   // the callee of a call (`b.opPlan( x )`), an operand: not a value use
+            landValue( i, j, name, s, false, owner );
         }
-        landValue( i, j, text( fld ), s, false, owner );
     }
 
     // FN-SLOT S2 (C++, model.h kVrSlotLangs memberPointers): `&Cls::m` in a value position — a Value row naming m with memberRoot
@@ -2204,10 +2233,13 @@ private:
 
     // IX1-V2: a PARAMETER (`impl`, position k of the function `fnName` declared at scope d) stored into a field slot
     // (goValueSlot: `Command{ EvalRW: impl }`, `x.F = impl`) — a slot fact (model.h kValueRefSlotParamScope), no row.
+    // BX2 FIX 8 (test/paramslotcheck.sh): the C family too (a ThroughRows slot row: valueSlot's field store, `tp->signalcb = signalcb`,
+    // typed by the object's declared struct type exactly as a function stored there is). tmux registers client_signal through
+    // proc_set_signals, which stores the parameter into tp->signalcb; proc_signal_cb calls the field — the join now names it.
     void paramSlotFact( std::size_t i, std::size_t d, std::string_view name )
     {
         const VrScope& sc = m_scopes[d];
-        if( !m_slotByName || !sc.isFunction || sc.fnName.empty() || i < 2 )
+        if( ( !m_slotByName && m_slot == nullptr ) || !sc.isFunction || sc.fnName.empty() || i < 2 )
         {
             return;
         }
@@ -2227,8 +2259,8 @@ private:
         {
             return;
         }
-        goValueSlot( j, r );
-        if( r.memberPath.empty() )
+        valueSlot( j, r );   // Go's goValueSlot, or the C family's field store (BX2 FIX 8)
+        if( r.memberPath().empty() )
         {
             return;
         }
@@ -2324,7 +2356,7 @@ private:
         r.recvVar       = std::string( sc.fnName );
         r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin() - 1, 0xFFFF ) );
         r.argCountKnown = true;
-        r.memberPath    = std::string( field );
+        r.setMemberPath( std::string( field ) );
         m_out.push_back( std::move( r ) );
     }
     // `self.<field>` → field; anything else → "".
@@ -2343,7 +2375,7 @@ private:
     }
 
     // The Value row of identifier anc[i] (effective position anc[j]) landing in slot `s`.
-    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via )
+    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, const std::string& via )
     {
         RawRef r;
         r.fileId        = m_fileId;
@@ -2352,19 +2384,17 @@ private:
         r.lang          = m_lang;
         r.role          = RefRole::Value;
         r.name          = std::string( name );
-        r.qualifier     = std::string{ s.scope, fileShadow ? '1' : '0' };
-        r.recvVar       = std::move( s.container );
-        r.composeRel    = std::move( s.key );
-        r.fieldName     = std::move( s.into );
+        const char qualifier[ 2 ] = { s.scope, fileShadow ? '1' : '0' };
+        r.qualifier     = std::string_view( qualifier, 2 );   // one of a few dozen two-character texts: never position-keyed
+        r.litAt         = s.litAt;   // REGISTRAR: the object literal, a row field (MEM-R1a; read only by regindex.h)
+        r.recvVar       = s.container;
+        r.setComposeRel( std::move( s.key ) );
+        r.setFieldName( std::move( s.into ) );
         r.argCount      = s.argIndex;
         r.argCountKnown = s.isArg;
-        if( s.litAt != 0 )
-        {
-            r.qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
-        }
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
         r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
-        r.memberVia  = std::move( via );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
+        r.setMemberVia( std::move( via ) );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
         m_out.push_back( std::move( r ) );
     }
 
@@ -2794,7 +2824,7 @@ private:
             r.role      = RefRole::Value;
             r.name      = std::string( fnName );
             r.qualifier = "x0";
-            r.fieldName = "@" + vrClean( text( e ) );
+            r.setFieldName( "@" + vrClean( text( e ) ) );
             m_out.push_back( std::move( r ) );
             return true;
         } );
@@ -2866,7 +2896,7 @@ private:
         {
             return;   // a Python attribute call is a method call, never a dict-slot lookup
         }
-        emitThrough( call, obj, f, std::move( key ), kindIs( ft, "identifier" ) );
+        emitThrough( call, obj, f, key, kindIs( ft, "identifier" ) );
     }
 
     // ── slot-type join (IX-1) ──────────────────────────────────────────────────────────────────────────
@@ -3227,20 +3257,20 @@ private:
     }
 
     // One no-row fact record (role Value, name "": no identifier is empty, so no row): the slot facts and the dotted-string facts.
-    void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
+    void emitValueFact( TSNode at, char scope, const std::string& recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
     {
         RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
         r.qualifier  = std::string( 1, scope );
-        r.recvVar    = std::move( recvVar );
-        r.composeRel = std::string( composeRel );
-        r.memberCtor = std::string( memberCtor );
-        r.memberPath = std::string( memberPath );
+        r.recvVar    = recvVar;
+        r.setComposeRel( std::string( composeRel ) );
+        r.setMemberCtor( std::string( memberCtor ) );
+        r.setMemberPath( std::string( memberPath ) );
         m_out.push_back( std::move( r ) );
     }
 
-    void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
+    void emitSlotFact( TSNode at, const std::string& owner, std::string_view field, const std::string& type )
     {
-        emitValueFact( at, kValueRefSlotFactScope, std::move( owner ), field, type );
+        emitValueFact( at, kValueRefSlotFactScope, owner, field, type );
     }
 
     // The struct type a name is declared with, innermost scope first: declared = some scope declares it; key "" with
@@ -3459,10 +3489,10 @@ private:
             {
                 return;   // a map / slice / inline struct literal: the key is not a field of a named struct type
             }
-            r.memberPath = std::string( text( k ) );
+            r.setMemberPath( std::string( text( k ) ) );
             // fix1 F-2: `pkg.T` kept WHOLE (the join maps pkg through the file's import to its directory); a bare `T` is the
             // file's own package's
-            r.memberCtor = kindIs( ts_node_type( tyNode ), "qualified_type" ) ? std::string( text( tyNode ) ) : std::string( ty );
+            r.setMemberCtor( kindIs( ts_node_type( tyNode ), "qualified_type" ) ? std::string( text( tyNode ) ) : std::string( ty ) );
             return;
         }
         if( kindIs( p.kind, "assignment_statement" ) && m_anc[j].field == m_fRight && kindIs( m_anc[j].kind, "expression_list" ) && j + 1 < m_anc.size() )
@@ -3478,8 +3508,8 @@ private:
             {
                 return;   // `a, b.F = f()`: a multi-value call, no position maps one value to one field
             }
-            r.memberPath = std::string( text( fld ) );
-            r.memberCtor.clear();
+            r.setMemberPath( std::string( text( fld ) ) );
+            r.setMemberCtor( std::string_view() );
         }
     }
 
@@ -3510,9 +3540,10 @@ private:
             {
                 return;   // a nested `.a.b =` / array `[i] =` designator: not one field of this literal's type
             }
-            r.memberPath = std::string( fld );
-            const auto [ lt, ltKw ] = designatedType( j - 2, r.memberPath );
-            r.memberCtor = slotCtor( lt, ltKw );
+            std::string path( fld );
+            const auto [ lt, ltKw ] = designatedType( j - 2, path );
+            r.setMemberPath( path );
+            r.setMemberCtor( slotCtor( lt, ltKw ) );
             return;
         }
         if( kindIs( pt, "initializer_list" ) )
@@ -3526,8 +3557,8 @@ private:
             const std::ptrdiff_t idx = sf == m_structs.end() ? -1 : vrPositionOf( p.node, m_anc[j].node, *sf, m_fDesignator, m_src );
             if( idx >= 0 )
             {
-                r.memberPath = std::string( sf->fields[ static_cast<std::size_t>( idx ) ].name );
-                r.memberCtor = slotCtor( t, tKw );
+                r.setMemberPath( std::string( sf->fields[ static_cast<std::size_t>( idx ) ].name ) );
+                r.setMemberCtor( slotCtor( t, tKw ) );
             }
             return;   // an index not provable exactly: no slot (never a guessed field)
         }
@@ -3549,8 +3580,8 @@ private:
             {
                 return;   // a non-struct object
             }
-            r.memberPath = std::move( chain );
-            r.memberCtor = slotCtor( std::string( ty.key ), ty.structKw );
+            r.setMemberPath( std::move( chain ) );
+            r.setMemberCtor( slotCtor( std::string( ty.key ), ty.structKw ) );
         }
     }
 
@@ -3626,10 +3657,10 @@ private:
         const std::size_t dot = chain.rfind( '.' );
         RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string( text( root ) ) );
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
-        r.fieldName  = vrClean( text( f ) );
-        r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
-        r.memberCtor = slotCtor( std::move( key ), kw );
-        r.memberPath = std::move( chain );
+        r.setFieldName( vrClean( text( f ) ) );
+        r.setComposeRel( "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) ) );
+        r.setMemberCtor( slotCtor( key, kw ) );
+        r.setMemberPath( std::move( chain ) );
         m_out.push_back( std::move( r ) );
     }
     // FN-SLOT S2 (c): a call of a bare identifier (a function-like macro, or a function returning a struct pointer) as a field
@@ -3980,7 +4011,7 @@ private:
                     break;
                 }
             }
-            emitValueFact( call, kValueRefDottedStringScope, std::move( flow ), kDottedShapeVariable, {}, sink );
+            emitValueFact( call, kValueRefDottedStringScope, flow, kDottedShapeVariable, {}, sink );
         }
     }
     // The assignment target's last name: `NAME`, `self.NAME`, `a.b.NAME`; "" for anything else (a tuple target, a subscript).
@@ -4219,9 +4250,9 @@ private:
         r.qualifier  = !( pre || suf ) ? "w" : t.callable ? "" : "t";
         // an unusable side is no constraint: a template `x_{a}.{b}` keeps only its usable prefix; a too-wide one keeps
         // both sides as written (valuerefindex.h counts the members they could name, pattern_too_wide=)
-        r.fieldName  = pre || !suf ? t.prefix : std::string();
-        r.composeRel = suf || !pre ? t.suffix : std::string();
-        r.name       = r.fieldName + "*" + r.composeRel;
+        r.setFieldName( pre || !suf ? t.prefix : std::string() );
+        r.setComposeRel( suf || !pre ? t.suffix : std::string() );
+        r.name       = r.fieldName() + "*" + r.composeRel();
         r.recvVar    = ts_node_is_null( recv ) ? std::string() : vrClean( text( recv ) );
         m_out.push_back( std::move( r ) );
     }
@@ -4292,7 +4323,7 @@ private:
             return;
         }
         // `o[ 'on' + e ] = fn` stores a function under the name (an assignment target, `++`, `delete`): no lookup, so no call
-        const TSNode parent = ts_node_parent( sub );
+        const TSNode parent = parentOf( sub );
         const char*  pk     = ts_node_is_null( parent ) ? "" : ts_node_type( parent );
         const bool   store  = ( ( kindIs( pk, "assignment_expression" ) || kindIs( pk, "augmented_assignment_expression" ) )
                                 && ts_node_eq( child( parent, m_fLeft ), sub ) )
@@ -4304,7 +4335,7 @@ private:
     }
 
     // Record one call through the container `obj` (written callee `f`), routed by where `obj` is declared.
-    void emitThrough( TSNode call, TSNode obj, TSNode f, std::string key, bool bareCall )
+    void emitThrough( TSNode call, TSNode obj, TSNode f, const std::string& key, bool bareCall )
     {
         if( ts_node_is_null( obj ) )
         {
@@ -4318,8 +4349,8 @@ private:
         r.lang      = m_lang;
         r.role      = RefRole::Through;
         r.name      = std::string( x );
-        r.composeRel = std::move( key );
-        r.fieldName = vrClean( text( f ) );
+        r.setComposeRel( std::move( key ) );
+        r.setFieldName( vrClean( text( f ) ) );
 
         const std::size_t d = declaringScope( x );
         if( d != 0 )

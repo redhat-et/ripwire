@@ -21,6 +21,10 @@
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/nextverbcheck.sh
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
@@ -280,7 +284,8 @@ q3="$( qnext --exclude='a b' )"
 if [ -z "$q3" ]; then no "(9) the space-value arm produced no next= — the control below proves nothing"
 else
     case "$q3" in
-        *"--exclude=&apos;a b&apos;"*) ok "(9) control: a value a shell WOULD split is still quoted (--exclude=&apos;a b&apos;), so only the tilde case narrowed" ;;
+        # RE-PIN (NEXT-APOS-RAW, 2026-11-15): the quotes are raw now (nextverb.h appendNextValueXml), so the control reads '…'
+        *"--exclude='a b'"*) ok "(9) control: a value a shell WOULD split is still quoted (--exclude='a b'), so only the tilde case narrowed" ;;
         *)                             no "(9) control: a space-bearing value lost its quoting — the fix disabled quoting instead of narrowing it: $q3" ;;
     esac
 fi

@@ -10,6 +10,9 @@
 # its preconditions (git repo, ripwire on PATH) aren't met. This gate feeds it synthetic PreToolUse JSON
 # on stdin and asserts each of those properties, plus the installer's idempotency.
 #
+# Section (15) reaches past ripwire-nudge.sh: it sweeps EVERY hook under hooks/ and asserts none of them answers a
+# permission decision (a PreToolUse "allow" skips the user's permission prompt), in any mode or meter arm.
+#
 # Usage:  test/hookcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Never touches the
 # real ~/.claude, and — since 2026-08-12, enforced by section (13) rather than asserted here — never
@@ -253,6 +256,10 @@ REALBIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${REALBIN#/}" = "$REALBIN" ] && REALBIN="$ROOT/$REALBIN"
 if [ -x "$REALBIN" ]; then
     RBIN="$TMP/realbin"; mkdir -p "$RBIN"; ln -sf "$REALBIN" "$RBIN/ripwire"
+    # The primer stays silent when a CLAUDE.md Claude Code loads already holds the block (3i6); the user-level one is
+    # ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, and these arms keep the operator's HOME. A sandbox for the arms of this block only
+    # (unset after it: install.sh honours CLAUDE_CONFIG_DIR too), so an operator's own pasted block cannot silence one.
+    export CLAUDE_CONFIG_DIR="$TMP/claudeconfig"; mkdir -p "$CLAUDE_CONFIG_DIR"
     WITH_REAL="$RBIN:$PATH"
     T3I="$TMP/t3i"; mkdir -p "$T3I"
     SS_JSON='{"session_id":"sscase","cwd":"'"$REPO"'","source":"startup"}'
@@ -333,6 +340,185 @@ if [ -x "$REALBIN" ]; then
     [ "$RC3I4P" -eq 0 ] && printf '%s' "$OUT3I4P" | grep -q 'Do NOT open a file you have not located first' \
         && ok "SessionStart positive control: a real work tree still gets the primer" \
         || no "SessionStart positive control: exit=$RC3I4P out=[$( printf '%s' "$OUT3I4P" | head -c 160 )] — the bare/.git arms above prove nothing"
+    # ── (3i6) HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND the hook installed, the primer sent the same
+    # ~3.9 KB a second time, re-read on every request. It now stays silent when a CLAUDE.md that Claude Code loads holds the
+    # block word for word. Three cases, all from a subdirectory of a work tree:
+    #   PRESENT (each file Claude Code loads at start; CRLF too)  -> no output;
+    #   ABSENT                                                    -> byte-identical to the wrap block as SessionStart JSON (unchanged);
+    #   PRESENT BUT STALE OR EDITED (CHOSEN, pinned here)        -> the CURRENT block is sent, byte-identical to ABSENT: an old or
+    #     edited block is not this version's guidance, and the match is the exact text, never a heading grep.
+    #   NOT DELIVERED (CodeRabbit #744 round 1)                   -> byte-identical to ABSENT: the block only inside an HTML comment
+    #     (Claude Code strips those), or any settings file naming claudeMdExcludes (the hook keeps the primer, conservatively).
+    #   INSTRUCTION MODE (CodeRabbit #744 round 2)                -> byte-identical to ABSENT: pluginConfigs[...].options.instructionFiles
+    #     `managed-only` drops the project, local and user CLAUDE.md files, so a block there is never delivered; any value but the
+    #     default keeps the primer (conservative), and the default written out explicitly still dedups (control).
+    #   OVER THE SIZE LIMIT (CodeRabbit #744 round 3)             -> byte-identical to ABSENT: Claude Code skips a CLAUDE.md over 4 MiB
+    #     and loads none of it (code.claude.com/docs/en/memory); a file of exactly 4 MiB still dedups (control).
+    # Codex's primer is not deduped against CLAUDE.md (Codex reads AGENTS.md). Every arm counts what it planted and FAILS on zero.
+    # RED on the hook without claudeMdHoldsBlurb: every PRESENT arm prints the block.
+    SSD_BLURB="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_CODEX="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )"
+    SSD_LINES="$( printf '%s\n' "$SSD_BLURB" | grep -c . )"
+    SSDREPO="$TMP/ssdrepo"; SSDCWD="$SSDREPO/sub"; mkdir -p "$SSDCWD/.claude"; git -C "$SSDREPO" init -q
+    ssd_run() # SESSION [env args: -u NAME / VAR=value...] -> the primer's stdout for cwd $SSDCWD, treatment arm
+    {
+        local s="$1"; shift; mkdir -p "$TMP/ssd.$s"
+        printf '%s' '{"session_id":"ssd'"$s"'","cwd":"'"$SSDCWD"'","source":"startup"}' \
+            | env "$@" RIPWIRE_METER_ARM=treatment PATH="$WITH_REAL" TMPDIR="$TMP/ssd.$s" bash "$HOOK" --session-start
+    }
+    ssd_plant() # FILE TEXT: the text inside a CLAUDE.md that has other notes around it
+    {
+        mkdir -p "${1%/*}"; printf '# Project notes\n<!-- team: keep this file short -->\nBuild with make.\n\n%s\n\n## More notes\nKeep tests green.\n' "$2" > "$1"
+    }
+    # The managed-policy memory and settings files are read too and a gate cannot sandbox /etc or /Library: when one already
+    # holds the block (every case below silent) or a managed settings file names claudeMdExcludes or a non-default instruction
+    # mode (every PRESENT case keeps the primer), the section reports why it cannot run instead of failing.
+    ssd_managed=""
+    for ssd_f in "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md"; do
+        [ -r "$ssd_f" ] && grep -q '^## ripwire' "$ssd_f" 2>/dev/null && ssd_managed="the managed-policy file $ssd_f holds a ripwire block"
+    done
+    for ssd_f in "/Library/Application Support/ClaudeCode/managed-settings.json" "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json \
+                 "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json; do
+        [ -r "$ssd_f" ] || continue
+        grep -q claudeMdExcludes "$ssd_f" 2>/dev/null && ssd_managed="the managed settings file $ssd_f names claudeMdExcludes"
+        sed -E 's/"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"//g' "$ssd_f" 2>/dev/null | grep -q instructionFiles \
+            && ssd_managed="the managed settings file $ssd_f sets a non-default instructionFiles mode"
+    done
+  if [ -n "$ssd_managed" ]; then
+    echo "  SKIP  SessionStart dedup (3i6): $ssd_managed on this machine"
+  else
+    if command -v jq >/dev/null 2>&1; then
+        SSD_WANT="$( jq -n --arg m "$SSD_BLURB" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$m}}' )"
+    else
+        SSD_WANT="$( printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+            "$( printf '%s' "$SSD_BLURB" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{printf "%s\\n", $0}' )" )"
+    fi
+    if [ "${SSD_LINES:-0}" -ge 10 ] && printf '%s' "$SSD_BLURB" | grep -q '^## ripwire'; then
+        ok "SessionStart dedup: the wrap claude block to plant has $SSD_LINES lines"
+    else no "SessionStart dedup: the wrap claude block has ${SSD_LINES:-0} lines (expected >= 10 under a '## ripwire' heading); every arm below is vacuous"; fi
+    SSD_ABS="$( ssd_run absent )"
+    [ -n "$SSD_ABS" ] && [ "$SSD_ABS" = "$SSD_WANT" ] \
+        && ok "SessionStart dedup ABSENT: no CLAUDE.md holds the block -> the block is sent, byte-identical to before (${#SSD_ABS} B)" \
+        || no "SessionStart dedup ABSENT: ${#SSD_ABS} B, expected ${#SSD_WANT} B byte-identical to the wrap block as JSON"
+    # PRESENT: one file at a time, each a place Claude Code loads at session start
+    ssd_seen=0; ssd_silent=0
+    for ssd_case in "cwd CLAUDE.md|$SSDCWD/CLAUDE.md" "cwd .claude/CLAUDE.md|$SSDCWD/.claude/CLAUDE.md" \
+                    "cwd CLAUDE.local.md|$SSDCWD/CLAUDE.local.md" "parent dir CLAUDE.md|$SSDREPO/CLAUDE.md" \
+                    "user-level \$CLAUDE_CONFIG_DIR/CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"
+        ssd_planted="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        [ "${ssd_planted:-0}" -ge 1 ] && ssd_seen=$(( ssd_seen + 1 ))
+        ssd_out="$( ssd_run "p$ssd_seen" )"
+        if [ "${ssd_planted:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT ($ssd_name): silent"
+        else no "SessionStart dedup PRESENT ($ssd_name): planted=${ssd_planted:-0} out=${#ssd_out} B, expected silent"; fi
+        rm -f "$ssd_file"
+    done
+    # CRLF line endings (a block pasted on Windows) and the default user level ~/.claude when CLAUDE_CONFIG_DIR is unset
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; sed 's/$/\r/' "$SSDCWD/CLAUDE.md" > "$SSDCWD/CLAUDE.md.crlf"; mv "$SSDCWD/CLAUDE.md.crlf" "$SSDCWD/CLAUDE.md"
+    ssd_cr="$( grep -c $'\r$' "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run crlf )"
+    if [ "${ssd_cr:-0}" -ge "$SSD_LINES" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (CRLF, $ssd_cr CR lines): silent"
+    else no "SessionStart dedup PRESENT (CRLF): CR lines=${ssd_cr:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    SSDHOME="$TMP/ssdhome"; ssd_plant "$SSDHOME/.claude/CLAUDE.md" "$SSD_BLURB"
+    ssd_out="$( ssd_run home -u CLAUDE_CONFIG_DIR HOME="$SSDHOME" )"
+    if [ -s "$SSDHOME/.claude/CLAUDE.md" ] && [ -z "$ssd_out" ]; then ssd_silent=$(( ssd_silent + 1 )); ok "SessionStart dedup PRESENT (~/.claude/CLAUDE.md, no CLAUDE_CONFIG_DIR): silent"
+    else no "SessionStart dedup PRESENT (~/.claude/CLAUDE.md): out=${#ssd_out} B, expected silent"; fi
+    rm -rf "$SSDHOME"
+    [ "$ssd_seen" -eq 5 ] && [ "$ssd_silent" -eq 7 ] && ok "SessionStart dedup PRESENT: 7 of 7 placements silent (5 planted files seen)" \
+        || no "SessionStart dedup PRESENT: $ssd_silent of 7 silent, $ssd_seen of 5 planted files seen (0 seen = a vacuous arm)"
+    # STALE OR EDITED (chosen behaviour): the current block is sent, byte-identical to ABSENT
+    ssd_stale=0
+    for ssd_case in "last line dropped|$( printf '%s\n' "$SSD_BLURB" | sed '$d' )" \
+                    "one word edited|$( printf '%s\n' "$SSD_BLURB" | sed '2s/BEFORE/before/' )" \
+                    "heading line only|$( printf '%s\n' "$SSD_BLURB" | head -n1 )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_text="${ssd_case#*|}"
+        if [ -z "$ssd_text" ] || [ "$ssd_text" = "$SSD_BLURB" ]; then no "SessionStart dedup STALE ($ssd_name): the edit did not change the block"; continue; fi
+        ssd_plant "$SSDCWD/CLAUDE.md" "$ssd_text"
+        ssd_out="$( ssd_run "s$ssd_stale${#ssd_text}" )"
+        if [ "$ssd_out" = "$SSD_ABS" ] && [ -n "$ssd_out" ]; then ssd_stale=$(( ssd_stale + 1 )); ok "SessionStart dedup STALE ($ssd_name): the current block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup STALE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"; fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
+    [ "$ssd_stale" -eq 3 ] && ok "SessionStart dedup STALE: 3 of 3 edited blocks still get the current one" \
+        || no "SessionStart dedup STALE: $ssd_stale of 3"
+    # NOT DELIVERED: the exact block is in the file but Claude Code would not inject it (or may not): the primer still speaks
+    ssd_kept=0
+    printf '# notes\n<!--\n%s\n-->\nBuild with make.\n' "$SSD_BLURB" > "$SSDCWD/CLAUDE.md"
+    ssd_n="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"; ssd_out="$( ssd_run comment )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (block only inside an HTML comment): the block is sent, byte-identical to ABSENT"
+    else no "SessionStart dedup NOT DELIVERED (HTML comment): planted=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+    for ssd_case in "project .claude/settings.json|$SSDCWD/.claude/settings.json" "project .claude/settings.local.json|$SSDREPO/.claude/settings.local.json" \
+                    "user-level settings.json|$CLAUDE_CONFIG_DIR/settings.json"; do
+        ssd_name="${ssd_case%%|*}"; ssd_file="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"; mkdir -p "${ssd_file%/*}"
+        printf '{"claudeMdExcludes":["**/vendor/**/CLAUDE.md"]}\n' > "$ssd_file"
+        ssd_n="$( grep -c claudeMdExcludes "$ssd_file" )"; ssd_out="$( ssd_run "x$ssd_kept" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_kept=$(( ssd_kept + 1 )); ok "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup NOT DELIVERED (claudeMdExcludes in $ssd_name): seen=${ssd_n:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$SSDCWD/CLAUDE.md"
+    done
+    if [ "$ssd_kept" -eq 4 ]; then ok "SessionStart dedup NOT DELIVERED: 4 of 4 keep the primer"
+    else no "SessionStart dedup NOT DELIVERED: $ssd_kept of 4"; fi
+    # OVER THE SIZE LIMIT: the block, then filler to an exact byte size; RED on the hook that read the file whatever its size
+    for ssd_case in "4194305|over 4 MiB (4194305 B)" "4194304|exactly 4 MiB (4194304 B), control"; do
+        ssd_size="${ssd_case%%|*}"; ssd_name="${ssd_case#*|}"
+        ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; yes 'Keep tests green.' | head -c "$(( ssd_size - ssd_n ))" >> "$SSDCWD/CLAUDE.md"
+        ssd_n="$( wc -c < "$SSDCWD/CLAUDE.md" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$SSDCWD/CLAUDE.md" )"
+        ssd_out="$( ssd_run "z$ssd_size" )"
+        if [ "$(( ssd_n ))" -ne "$ssd_size" ] || [ "${ssd_p:-0}" -lt 1 ]; then
+            no "SessionStart dedup SIZE ($ssd_name): planted $(( ssd_n )) B with ${ssd_p:-0} block heading(s), expected $ssd_size B with the block"
+        elif [ "$ssd_size" -gt 4194304 ]; then
+            [ "$ssd_out" = "$SSD_ABS" ] && ok "SessionStart dedup SIZE ($ssd_name): Claude Code skips the file, the block is sent, byte-identical to ABSENT" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected ${#SSD_ABS} B byte-identical to ABSENT"
+        else
+            [ -z "$ssd_out" ] && ok "SessionStart dedup SIZE ($ssd_name): silent" \
+                || no "SessionStart dedup SIZE ($ssd_name): out=${#ssd_out} B, expected silent"
+        fi
+        rm -f "$SSDCWD/CLAUDE.md"
+    done
+    # INSTRUCTION MODE: the block is in a project or user CLAUDE.md and the user-level settings.json (where Claude Code reads the
+    # mode, as in managed settings) sets it; RED on the hook that only knew claudeMdExcludes (every keep arm went silent)
+    ssd_pc='{"pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"%s"}}}}\n'
+    ssd_mode=0
+    for ssd_case in "managed-only, block in the project CLAUDE.md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only, block in the user CLAUDE.md|$CLAUDE_CONFIG_DIR/CLAUDE.md|$( printf "$ssd_pc" managed-only )" \
+                    "managed-only under the pre-2.1.285 ID agents-md@builtin, pretty-printed|$SSDCWD/CLAUDE.md|$( printf '{\n  "pluginConfigs": {\n    "agents-md@builtin": {\n      "options": {\n        "instructionFiles" : "managed-only"\n      }\n    }\n  }\n}\n' )" \
+                    "non-default claude-md|$SSDCWD/CLAUDE.md|$( printf "$ssd_pc" claude-md )" \
+                    "default under one ID, managed-only under the other|$SSDCWD/CLAUDE.md|$( printf '{"pluginConfigs":{"agents-md@builtin":{"options":{"instructionFiles":"claude-md-or-agents-md"}},"cc-plugin-agents-md@builtin":{"options":{"instructionFiles":"managed-only"}}}}\n' )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; ssd_set="${ssd_rest#*|}"
+        ssd_plant "$ssd_file" "$SSD_BLURB"; printf '%s\n' "$ssd_set" > "$CLAUDE_CONFIG_DIR/settings.json"
+        ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_p="$( grep -cFx -e "$( printf '%s' "$SSD_BLURB" | head -n1 )" "$ssd_file" )"
+        ssd_out="$( ssd_run "m$ssd_mode${#ssd_name}" )"
+        if [ "${ssd_n:-0}" -ge 1 ] && [ "${ssd_p:-0}" -ge 1 ] && [ "$ssd_out" = "$SSD_ABS" ]; then ssd_mode=$(( ssd_mode + 1 )); ok "SessionStart dedup INSTRUCTION MODE ($ssd_name): the block is sent, byte-identical to ABSENT"
+        else no "SessionStart dedup INSTRUCTION MODE ($ssd_name): seen=${ssd_n:-0} planted=${ssd_p:-0} out=${#ssd_out} B, expected ${#SSD_ABS} B"; fi
+        rm -f "$ssd_file" "$CLAUDE_CONFIG_DIR/settings.json"
+    done
+    [ "$ssd_mode" -eq 5 ] && ok "SessionStart dedup INSTRUCTION MODE: 5 of 5 non-default modes keep the primer" \
+        || no "SessionStart dedup INSTRUCTION MODE: $ssd_mode of 5"
+    # control: the default mode written out explicitly (with the other key in the file) still dedups
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_BLURB"
+    printf '{"model":"x","pluginConfigs":{"cc-plugin-agents-md@builtin":{"options":{"instructionFiles": "claude-md-or-agents-md"}}}}\n' > "$CLAUDE_CONFIG_DIR/settings.json"
+    ssd_n="$( grep -c instructionFiles "$CLAUDE_CONFIG_DIR/settings.json" )"; ssd_out="$( ssd_run mdefault )"
+    if [ "${ssd_n:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ok "SessionStart dedup INSTRUCTION MODE (default claude-md-or-agents-md written out): silent"
+    else no "SessionStart dedup INSTRUCTION MODE (default written out): seen=${ssd_n:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$SSDCWD/CLAUDE.md" "$CLAUDE_CONFIG_DIR/settings.json"
+    # Codex: its primer is not deduped against CLAUDE.md, even when CLAUDE.md holds Codex's own block
+    ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssd_out="$( ssd_run codex RIPWIRE_METER_AGENT=codex )"
+    if [ -n "$SSD_CODEX" ] && printf '%s' "$ssd_out" | grep -Fq -e '--replace-symbol-body'; then ok "SessionStart dedup: the Codex primer still speaks with CLAUDE.md holding its block"
+    else no "SessionStart dedup: the Codex primer (block ${#SSD_CODEX} B) went silent or changed (out=${#ssd_out} B)"; fi
+    rm -f "$SSDCWD/CLAUDE.md"
+    # the recipe names the paste as the reliable path and says the hook skips the control arm, for Claude only; it never says
+    # the hook alone delivers the block (the control arm, half the sessions under the default arm=auto, gets no primer)
+    ssd_wcl="$( PATH="$WITH_REAL" ripwire wrap claude 2>/dev/null )"; ssd_wxl="$( PATH="$WITH_REAL" ripwire wrap codex 2>/dev/null )"
+    ssd_wc="$( printf '%s\n' "$ssd_wcl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wx="$( printf '%s\n' "$ssd_wxl" | grep -c -e 'Pasting it is the reliable path' -e 'its control arm, which gets no primer' )"
+    ssd_wo="$( printf '%s\n%s\n' "$ssd_wcl" "$ssd_wxl" | grep -c -i -e 'either one delivers' -e 'rely on the hook' )"
+    [ "$ssd_wc" = 2 ] && [ "$ssd_wx" = 0 ] && [ "$ssd_wo" = 0 ] && ok "wrap claude names the paste as the reliable path and the control arm the hook skips (codex: not said; no hook-alone promise)" \
+        || no "wrap paste/hook note: claude=$ssd_wc (want 2) codex=$ssd_wx (want 0) hook-alone wording=$ssd_wo (want 0)"
+  fi
+    unset CLAUDE_CONFIG_DIR
 else
     echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"
 fi
@@ -1799,15 +1985,16 @@ echo "-- live-shape rows --"; [ -f "$LV2" ] && cat "$LV2"
     || no "V2d live-shape: Edit row = [$( meterrowget "$LV2" 4 class )/$( meterrowget "$LV2" 4 family )] target=[$( meterrowget "$LV2" 4 target )] nudged=[$( meterrowget "$LV2" 4 nudged )] nudge=[$( meterrowget "$LV2" 4 nudge )]"
 V2E_BAD=""
 for i in 1 2 3 4; do
-    [ "$( meterrowget "$LV2" "$i" v )" = "3" ] || V2E_BAD="$V2E_BAD v[$i]=$( meterrowget "$LV2" "$i" v )"
+    # v4 since §FACTORIAL (2026-11-26) added `primer` and `first_edit`; every v3 field is still on the row.
+    [ "$( meterrowget "$LV2" "$i" v )" = "4" ] || V2E_BAD="$V2E_BAD v[$i]=$( meterrowget "$LV2" "$i" v )"
     [ "$( meterrowget "$LV2" "$i" agent )" = "claude" ] || V2E_BAD="$V2E_BAD agent[$i]=$( meterrowget "$LV2" "$i" agent )"
     [ "$( meterrowget "$LV2" "$i" session )" = "live1" ] || V2E_BAD="$V2E_BAD session[$i]=$( meterrowget "$LV2" "$i" session )"
 done
 [ "$( meterrowget "$LV2" 1 surface )" = "cli" ] && [ "$( meterrowget "$LV2" 2 surface )" = "native" ] \
     && [ "$( meterrowget "$LV2" 4 surface )" = "native" ] || V2E_BAD="$V2E_BAD surface=[$( meterrowget "$LV2" 1 surface )/$( meterrowget "$LV2" 2 surface )/$( meterrowget "$LV2" 4 surface )]"
 [ -z "$V2E_BAD" ] \
-    && ok "V2e schema v3: every row carries v=3, agent=claude, the live session id, and surface cli/native/mcp" \
-    || no "V2e schema v3:$V2E_BAD"
+    && ok "V2e schema v4: every row carries v=4, agent=claude, the live session id, and surface cli/native/mcp" \
+    || no "V2e schema v4:$V2E_BAD"
 # The other three native edit tools, and NotebookEdit's differently-named path key.
 LV2F="$TMP/v2f.jsonl"; TV2F="$TMP/tv2f"; mkdir -p "$TV2F"
 run_meter "$LV2F" "$( livejson live2 Write '{"file_path":"/x/repo/docs/new.md","content":"hi"}' )" "$TV2F" >/dev/null 2>&1
@@ -2015,6 +2202,536 @@ if [ -f "$REPORT" ]; then
     grep -Fqx " --replace-symbol-body 4 25.0% 0 2 1 0" "$TMP/editmut.sq" \
         && ok "E9 edit-band: MUTATION CONTROL — re-pointing the policy Read at another file moves the row (50.0% -> 25.0%, policy-read 1 -> 0, sweep 1 -> 2): the column is live" \
         || no "E9 edit-band: the mutated fixture did not move the row — see $TMP/editmut.sq"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (15) NO PERMISSION DECISION FROM ANY ADVISORY HOOK — every hook under hooks/, every mode, every arm
+#
+# In Claude Code a PreToolUse `permissionDecision:"allow"` SKIPS the user's permission prompt, and the legacy
+# top-level `decision:"approve"` does the same. An advisory hook that answers either one does not add context to a
+# tool call: it approves it. hooks/ripwire-claude-toolroute.sh did exactly that from 2026-09-03 until lane
+# HOOK-NOALLOW (11-26) — its treatment arm returned "allow" beside its additionalContext, so a recursive grep, or a
+# compound Bash command whose FIRST segment was one (`grep -rn X src/ && <anything>`), ran without the prompt the
+# user had configured. Exit 2 is the other way a PreToolUse hook takes the decision away (it blocks), so it is
+# asserted here too.
+#
+# THE SWEEP. Every executable hooks/*.sh, with no argument and with each `--mode` the file itself compares "${1:-}"
+# against (a wrapper that forwards "$@" to a sibling inherits the sibling's modes), under the meter arms treatment,
+# control and unset (the installed `auto` default), fed one payload per event shape the hooks are wired to — the
+# compound-Bash case included. Each run gets its own session id, so no dedup marker or per-session cap can silence a
+# later run and turn an arm vacuous. The sweep is fed through a REAL ripwire when one is built (toolroute's --expand
+# resolution and the SessionStart blurb need it) and through the stub otherwise.
+#
+# NOT VACUOUS. A "must not print X" check passes on a hook that prints nothing, so PD2 requires the toolroute
+# treatment arm to SPEAK (non-empty additionalContext) on both the recursive grep and the compound Bash payload. PD1
+# is only a verdict about hooks that actually answered.
+#
+# A REMOVED KNOB STAYS REMOVED. `ripwire-nudge.sh --agent-brief` once added `permissionDecision` when the operator
+# exported RIPWIRE_AGENT_BRIEF_DECISION=allow (a hand-run probe knob; removed in lane HOOK-NOALLOW on the owner's
+# ruling). Arm `briefallow` runs every hook's --agent-brief mode with that variable EXPORTED, so the sweep proves the
+# code path is gone rather than merely unset; PD4 requires the mode to answer its updatedInput there, so the arm is
+# not vacuous either. The other arms run with the variable cleared, as an installed hook sees it.
+# hooks/opencode/*.js is a plugin, not a stdin hook: it calls ripwire-legend-seen.sh (swept above), so PD3 checks the
+# plugin's own text instead.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(15) no advisory hook returns a permission decision"
+PDT="$TMP/pd"; mkdir -p "$PDT/home" "$PDT/tmp" "$PDT/rwhome" "$PDT/legend" "$PDT/claudeconfig"
+PDREPO="$PDT/repo"; mkdir -p "$PDREPO/src"
+printf 'int fooBar( int x )\n{\n    return x + 1;\n}\n' >"$PDREPO/src/fooBar.c"
+git -C "$PDREPO" init -q
+git -C "$PDREPO" -c user.email=dev@x.com -c user.name=Dev add -A
+git -C "$PDREPO" -c user.email=dev@x.com -c user.name=Dev commit -qm init
+PDBIN="$BIN"
+PDREAL="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${PDREAL#/}" = "$PDREAL" ] && PDREAL="$ROOT/$PDREAL"
+if [ -x "$PDREAL" ]; then
+    PDBIN="$PDT/realbin"; mkdir -p "$PDBIN"; ln -sf "$PDREAL" "$PDBIN/ripwire"
+    echo "  (sweep runs through the real binary $PDREAL)"
+else
+    echo "  (no built binary: sweep runs through the stub; toolroute's --expand resolution is not exercised)"
+fi
+
+# One payload per line: EVENT<TAB>TOOL<TAB>tool_input-or-extra JSON. SID and CWD are filled in per run.
+PDCASES="$PDT/cases.tsv"
+{
+    printf 'PreToolUse\tBash\t{"command":"grep -rn fooBar src/"}\n'
+    printf 'PreToolUse\tBash\t{"command":"grep -rn fooBar src/ && rm -rf build/tmp"}\n'
+    printf 'PreToolUse\tBash\t{"command":"rg fooBar ."}\n'
+    printf 'PreToolUse\tBash\t{"command":"git diff HEAD"}\n'
+    printf 'PreToolUse\tBash\t{"command":"ripwire . --callers=fooBar"}\n'
+    printf 'PreToolUse\tGrep\t{"pattern":"fooBar","path":"src"}\n'
+    printf 'PreToolUse\tRead\t{"file_path":"%s/src/fooBar.c"}\n' "$PDREPO"
+    printf 'PreToolUse\tAgent\t{"description":"fix it","prompt":"Fix the off-by-one in fooBar.","subagent_type":"general-purpose"}\n'
+    printf 'PreToolUse\tTask\t{"description":"fix it","prompt":"Fix the off-by-one in fooBar.","subagent_type":"general-purpose"}\n'
+    printf 'PostToolUse\tBash\t{"command":"ripwire . --callers=fooBar"}\n'
+    printf 'UserPromptSubmit\t-\t{"prompt":"who calls fooBar in src/fooBar.c?"}\n'
+    printf 'SessionStart\t-\t{"source":"startup"}\n'
+    printf 'SubagentStart\t-\t{"agent_id":"a1","agent_type":"general-purpose"}\n'
+    # LAST, so the SPOKE_GREP/SPOKE_COMPOUND indices above do not move: the first source edit, where the nudge's
+    # §FIRSTEDIT block speaks (PD5 below requires it to, so PD1 is a verdict about that text too). §FIRSTEDIT is OPT-IN,
+    # so every sweep run exports RIPWIRE_FIRST_EDIT=1: the sweep covers the text an opted-in install can produce.
+    printf 'PreToolUse\tEdit\t{"file_path":"%s/src/fooBar.c","old_string":"return x + 1;","new_string":"return x + 2;"}\n' "$PDREPO"
+} >"$PDCASES"
+
+pd_payload()
+{
+    # pd_payload EVENT TOOL EXTRA SID -> one hook payload on stdout
+    jq -cn --arg ev "$1" --arg tn "$2" --argjson x "$3" --arg sid "$4" --arg cwd "$PDREPO" '
+        {session_id:$sid, cwd:$cwd, hook_event_name:$ev, transcript_path:"/dev/null", permission_mode:"default"}
+        + (if $tn == "-" then $x else {tool_name:$tn, tool_input:$x} end)
+        + (if $ev == "PostToolUse" then {tool_response:{stdout:"<ctx/>",stderr:"",interrupted:false}} else {} end)'
+}
+
+pd_modes()
+{
+    # pd_modes HOOKFILE -> "" plus every --mode the file (or a sibling it forwards "$@" to) compares "${1:-}" against
+    local f="$1" sib
+    printf '\n'
+    grep -o '"\${1:-}" = "--[a-z-]*"' "$f" 2>/dev/null | sed 's/.*= "//; s/"$//'
+    for sib in $( grep -o '\$dir/ripwire-[a-z-]*\.sh" "\$@"' "$f" 2>/dev/null | sed 's|^\$dir/||; s|" "\$@"$||' ); do
+        grep -o '"\${1:-}" = "--[a-z-]*"' "$ROOT/hooks/$sib" 2>/dev/null | sed 's/.*= "//; s/"$//'
+    done
+}
+
+PDRUNS=0; PDSPOKE=0; PDBAD=""; PDGREP=""; PDCOMPOUND=""; PDHOOKS=0
+for pdh in "$ROOT"/hooks/*.sh; do
+    [ -x "$pdh" ] || continue
+    PDHOOKS=$(( PDHOOKS + 1 ))
+    pdname="$( basename "$pdh" )"
+    pdmodes="$( pd_modes "$pdh" | sort -u )"
+    for pdarm in treatment control unset briefallow; do
+        printf '%s\n' "$pdmodes" | while IFS= read -r pdmode; do
+            [ "$pdarm" = briefallow ] && [ "$pdmode" != --agent-brief ] && continue
+            pdi=0
+            while IFS="$( printf '\t' )" read -r pdev pdtn pdx; do
+                pdi=$(( pdi + 1 ))
+                sid="pd-${pdname}-${pdarm}-${pdmode:-none}-${pdi}"
+                payload="$( pd_payload "$pdev" "$pdtn" "$pdx" "$sid" )" || { echo "BAD|$sid|payload did not build"; continue; }
+                if [ "$pdarm" = unset ]; then
+                    out="$( printf '%s' "$payload" | env -u RIPWIRE_METER_ARM -u RIPWIRE_AGENT_BRIEF_DECISION HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                elif [ "$pdarm" = briefallow ]; then
+                    out="$( printf '%s' "$payload" | env RIPWIRE_AGENT_BRIEF_DECISION=allow RIPWIRE_METER_ARM=treatment HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                else
+                    out="$( printf '%s' "$payload" | env -u RIPWIRE_AGENT_BRIEF_DECISION RIPWIRE_METER_ARM="$pdarm" HOME="$PDT/home" \
+                        PATH="$PDBIN:$PATH" TMPDIR="$PDT/tmp" RIPWIRE_HOME="$PDT/rwhome" RIPWIRE_LEGEND_STATE="$PDT/legend" \
+                        RIPWIRE_FIRST_EDIT=1 CLAUDE_CONFIG_DIR="$PDT/claudeconfig" bash "$pdh" ${pdmode:+"$pdmode"} 2>/dev/null )"; rc=$?
+                fi
+                spoke=0; [ -n "$out" ] && spoke=1
+                echo "RUN|$spoke|$pdname"
+                if printf '%s' "$out" | grep -q 'permissionDecision\|"decision"[[:space:]]*:'; then
+                    echo "BAD|$sid|$( printf '%s' "$out" | tr -d '\n' | cut -c1-160 )"
+                fi
+                [ "$rc" -eq 2 ] && echo "BAD|$sid|exit 2 blocks the call"
+                if [ "$pdname" = ripwire-claude-toolroute.sh ] && [ "$pdarm" = treatment ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
+                    [ "$pdi" -eq 1 ] && echo "SPOKE_GREP|$sid"
+                    [ "$pdi" -eq 2 ] && echo "SPOKE_COMPOUND|$sid"
+                fi
+                if [ "$pdname" = ripwire-nudge.sh ] && [ -z "$pdmode" ] && [ "$pdarm" = treatment ] && [ "$pdtn" = Edit ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
+                    echo "SPOKE_FIRSTEDIT|$sid"
+                fi
+                [ "$pdarm" = briefallow ] && [ "$pdtn" = Agent ] \
+                    && printf '%s' "$out" | jq -e '.hookSpecificOutput.updatedInput.prompt | length > 0' >/dev/null 2>&1 \
+                    && echo "SPOKE_BRIEFALLOW|$sid"
+            done <"$PDCASES"
+        done
+    done
+done >"$PDT/sweep.log"
+PDRUNS="$( grep -c '^RUN|' "$PDT/sweep.log" )"
+PDSPOKE="$( grep -c '^RUN|1|' "$PDT/sweep.log" )"
+PDBADN="$( grep -c '^BAD|' "$PDT/sweep.log" )"
+echo "  ($PDHOOKS hooks, $PDRUNS runs, $PDSPOKE of them printed something; log $PDT/sweep.log)"
+echo "  (runs that printed, per hook: $( grep '^RUN|1|' "$PDT/sweep.log" | cut -d'|' -f3 | sort | uniq -c | awk '{printf "%s %s; ", $2, $1}' ))"
+PDQUIET=""
+for pdh in "$ROOT"/hooks/*.sh; do
+    [ -x "$pdh" ] || continue
+    grep -q "^RUN|1|$( basename "$pdh" )\$" "$PDT/sweep.log" || PDQUIET="$PDQUIET $( basename "$pdh" )"
+done
+# A hook that never printed is SWEPT, not CLEARED: PD1 is silent about it. The prompt routers' and legend-seen's own
+# speaking paths are pinned decision-free in test/routehookcheck.sh and test/legendseenhookcheck.sh.
+[ -z "$PDQUIET" ] || echo "  (swept but printed nothing on these payloads, so PD1 does not speak for them:$PDQUIET)"
+if [ "$PDBADN" -eq 0 ]; then
+    ok "PD1 no-decision: none of $PDRUNS hook runs returned permissionDecision, a top-level decision, or exit 2"
+else
+    no "PD1 no-decision: $PDBADN of $PDRUNS hook runs took the permission decision away from the user:"
+    grep '^BAD|' "$PDT/sweep.log" | head -8 | sed 's/^BAD|/        /'
+fi
+if grep -q '^SPOKE_GREP|' "$PDT/sweep.log" && grep -q '^SPOKE_COMPOUND|' "$PDT/sweep.log"; then
+    ok "PD2 not vacuous: toolroute's treatment arm answered additionalContext on the recursive grep AND the compound Bash payload"
+else
+    no "PD2 vacuous: toolroute's treatment arm did not speak on $( grep -q '^SPOKE_GREP|' "$PDT/sweep.log" || printf 'the recursive grep ' )$( grep -q '^SPOKE_COMPOUND|' "$PDT/sweep.log" || printf 'the compound Bash ' )payload, so PD1 says nothing about it"
+fi
+if grep -q '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log"; then
+    ok "PD4 not vacuous: --agent-brief answered its updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported ($( grep -c '^SPOKE_BRIEFALLOW|' "$PDT/sweep.log" ) hook(s))"
+else
+    no "PD4 vacuous: no --agent-brief run answered an updatedInput with RIPWIRE_AGENT_BRIEF_DECISION=allow exported, so PD1 says nothing about the removed knob"
+fi
+if grep -q '^SPOKE_FIRSTEDIT|' "$PDT/sweep.log"; then
+    ok "PD5 not vacuous: the nudge's treatment arm answered additionalContext on the first source edit (§FIRSTEDIT)"
+else
+    no "PD5 vacuous: ripwire-nudge.sh's treatment arm said nothing on the first source edit, so PD1 says nothing about §FIRSTEDIT"
+fi
+PDJS="$( grep -l 'permissionDecision' "$ROOT"/hooks/opencode/*.js 2>/dev/null )"
+[ -z "$PDJS" ] && ok "PD3 opencode plugin: no hooks/opencode/*.js names permissionDecision" \
+    || no "PD3 opencode plugin: $PDJS names permissionDecision"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (16) §FIRSTEDIT — the before-the-first-edit check (lane FIRST-EDIT-HOOK, 2026-11-26)
+#
+# The one PreToolUse moment where the nudge speaks again: the first Edit/Write/MultiEdit of a session that targets
+# an EXISTING source file in a git work tree. Its additionalContext carries a compact edit-check of the symbol(s)
+# the edit touches (contract status, previewed against the pending bytes when the edit sits inside one definition;
+# the callers; the tests that reach them). The arms, every one of them through a fresh session id:
+#   FE1  the first Edit inside a fixture function names the symbol AND its caller AND the test that reaches it
+#   FE1b the edit that adds a parameter is PREVIEWED: status=contract-change before a byte is written
+#   FE2  a second edit in the same session says nothing; the rows say which call was the moment
+#   FE3  an edit to a non-source file says nothing and does not spend the session's one check (FE3b)
+#   FE4  a ripwire that never answers: the disclosed "skipped: timeout" line, exit 0, well inside the deadline+1 s
+#   FE5  the PRIMER arm does not gate the check (§FACTORIAL): primer control + a forced-on check speaks, and the row
+#        carries primer=control first_edit=forced-on. The hashed check-off counterfactual is (17)'s FX5.
+#   FE6  with the meter OFF and no force it is #779's default-off (silent); first_edit=1 in meter.conf turns it on;
+#        the env wins over the file (RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent, first_edit=forced-off)
+#   FE7  the Codex wrapper carries the same text
+#   FE8  bounded: the context is at most 1536 B; a Write of an existing file and a Write of a new one
+#   FE9  PLAIN FIRST: a preview that never answers (a ripwire whose --dry-run sleeps) still delivers the plain check
+#        (symbol + caller, "current tree vs HEAD") with the "preview did not finish" note, never the bare skip line
+# fe_run opts in (RIPWIRE_FIRST_EDIT=1) unless an arm overrides it; FE6 is the arm about the default.
+# The positive arms run the REAL binary with a generous deadline (RIPWIRE_FIRST_EDIT_MS=20000): they pin content,
+# FE4 pins the timeout. Without a built binary they are SKIPPED, never passed.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(16) §FIRSTEDIT: the before-the-first-edit check"
+FET="$TMP/fe"; mkdir -p "$FET/tmp" "$FET/slowbin"
+FEREPO="$FET/repo"; mkdir -p "$FEREPO/src" "$FEREPO/test"
+printf 'int addTwo( int a, int b )\n{\n    return a + b;\n}\n\nint useAdd( int x )\n{\n    return addTwo( x, 1 );\n}\n' >"$FEREPO/src/calc.c"
+printf 'int addTwo( int a, int b );\nint main( void )\n{\n    return addTwo( 1, 2 ) == 3 ? 0 : 1;\n}\n' >"$FEREPO/test/calc_test.c"
+printf '# notes\n' >"$FEREPO/README.md"
+git -C "$FEREPO" init -q
+git -C "$FEREPO" -c user.email=dev@x.com -c user.name=Dev add -A
+git -C "$FEREPO" -c user.email=dev@x.com -c user.name=Dev commit -qm init
+# The stub records its own pid, then becomes `sleep 30` under that same pid (exec), so FE4 can ask the kernel whether
+# THAT process outlived the hook — `kill -0 PID` — instead of matching command lines.
+printf '#!/bin/sh\necho $$ >>"$FE_STUB_PIDS"\nexec sleep 30\n' >"$FET/slowbin/ripwire"; chmod +x "$FET/slowbin/ripwire"
+FEREAL="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${FEREAL#/}" = "$FEREAL" ] && FEREAL="$ROOT/$FEREAL"
+fe_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+fe_payload()
+{
+    # fe_payload SID TOOL TOOL_INPUT_JSON -> one PreToolUse payload
+    jq -cn --arg sid "$1" --arg tn "$2" --argjson ti "$3" --arg cwd "$FEREPO" \
+        '{session_id:$sid, cwd:$cwd, hook_event_name:"PreToolUse", tool_name:$tn, tool_input:$ti}'
+}
+fe_run()
+{
+    # fe_run HOOKFILE PATHVAL LOG SID TOOL TOOL_INPUT_JSON [ENV=VAL...] -> stdout; sets FERC
+    local h="$1" p="$2" l="$3" sid="$4" tn="$5" ti="$6"; shift 6
+    FEOUT="$( fe_payload "$sid" "$tn" "$ti" | env RIPWIRE_METER_ARM=treatment RIPWIRE_FIRST_EDIT=1 RIPWIRE_FIRST_EDIT_MS=20000 "$@" \
+        RIPWIRE_METER_LOG="$l" PATH="$p" TMPDIR="$FET/tmp" bash "$h" )"; FERC=$?
+}
+fe_ctx() { printf '%s' "$FEOUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+FE_BODY='{"file_path":"'"$FEREPO"'/src/calc.c","old_string":"    return a + b;","new_string":"    return b + a;"}'
+FE_SIG='{"file_path":"'"$FEREPO"'/src/calc.c","old_string":"int addTwo( int a, int b )\n{","new_string":"int addTwo( int a, int b, int c )\n{"}'
+FE_README='{"file_path":"'"$FEREPO"'/README.md","old_string":"# notes","new_string":"# Notes"}'
+
+if [ -x "$FEREAL" ]; then
+    FEBIN="$FET/realbin"; mkdir -p "$FEBIN"; ln -sf "$FEREAL" "$FEBIN/ripwire"
+    FEPATH="$FEBIN:$PATH"
+    "$FEBIN/ripwire" "$FEREPO" --at=src/calc.c:3 >/dev/null 2>&1   # index once, so no arm below pays the cold parse
+
+    # FE1 — the first edit, inside addTwo's body
+    FEL1="$FET/fe1.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL1" fe1 Edit "$FE_BODY"; FECTX1="$( fe_ctx )"
+    echo "-- FE1 context --"; printf '%s\n' "$FECTX1" | head -c 900; echo
+    [ "$FERC" -eq 0 ] && printf '%s' "$FEOUT" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null 2>&1 \
+        && ok "FE1 first edit: exit 0, PreToolUse additionalContext" || no "FE1 first edit: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+    printf '%s' "$FECTX1" | grep -q 'addTwo' && printf '%s' "$FECTX1" | grep -q 'useAdd src/calc.c:6' \
+        && ok "FE1 first edit: names the symbol (addTwo) and its caller (useAdd src/calc.c:6)" \
+        || no "FE1 first edit: the context does not name addTwo and its caller useAdd src/calc.c:6"
+    printf '%s' "$FECTX1" | grep -q 'test/calc_test.c' \
+        && ok "FE1 first edit: names the test that reaches the symbol (test/calc_test.c)" \
+        || no "FE1 first edit: no test/calc_test.c in the tests line"
+    printf '%s' "$FEOUT" | grep -q 'permissionDecision\|"decision"' \
+        && no "FE1 first edit: carries a permission decision" || ok "FE1 first edit: no permission decision"
+
+    # FE1b — the signature edit is previewed against the pending bytes
+    fe_run "$HOOK" "$FEPATH" "$FET/fe1b.jsonl" fe1b Edit "$FE_SIG"; FECTX1B="$( fe_ctx )"
+    printf '%s' "$FECTX1B" | grep -q 'status=contract-change' && printf '%s' "$FECTX1B" | grep -q 'preview of this edit' \
+        && ok "FE1b preview: adding a parameter reads status=contract-change before the edit is applied" \
+        || no "FE1b preview: [$( printf '%s' "$FECTX1B" | head -c 300 )]"
+    git -C "$FEREPO" diff --quiet && ok "FE1b preview: the work tree is byte-identical afterwards (nothing written)" \
+        || no "FE1b preview: the hook changed the work tree"
+
+    # FE2 — the second edit of the same session
+    fe_run "$HOOK" "$FEPATH" "$FEL1" fe1 Edit "$FE_SIG"
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && ok "FE2 second edit: silent (once per session)" \
+        || no "FE2 second edit: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+    [ "$( meterrowget "$FEL1" 1 nudge )/$( meterrowget "$FEL1" 1 nudged )" = "first-edit/1" ] \
+        && [ "$( meterrowget "$FEL1" 2 nudge )/$( meterrowget "$FEL1" 2 nudged )" = "none/0" ] \
+        && ok "FE2 rows: the first edit reads nudge=first-edit nudged=1, the second nudge=none" \
+        || no "FE2 rows: [$( meterrowget "$FEL1" 1 nudge )/$( meterrowget "$FEL1" 1 nudged )] then [$( meterrowget "$FEL1" 2 nudge )/$( meterrowget "$FEL1" 2 nudged )]"
+
+    # FE3 — a non-source file first: nothing, and the session's one check is still unspent
+    FEL3="$FET/fe3.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL3" fe3 Edit "$FE_README"
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && [ "$( meterrowget "$FEL3" 1 nudge )" = "none" ] \
+        && ok "FE3 non-source file (README.md): silent, nudge=none" \
+        || no "FE3 non-source file: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] nudge=[$( meterrowget "$FEL3" 1 nudge )]"
+    fe_run "$HOOK" "$FEPATH" "$FEL3" fe3 Edit "$FE_BODY"
+    fe_ctx | grep -q 'addTwo' && ok "FE3b the source edit after it still gets the check (a non-source edit spends nothing)" \
+        || no "FE3b the source edit after a README edit got no check: [$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE5 — the primer arm does not gate the check
+    FEL5="$FET/fe5.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL5" fe5 Edit "$FE_BODY" RIPWIRE_METER_ARM=control
+    FE5ROW="$( meterrowget "$FEL5" 1 nudge )/$( meterrowget "$FEL5" 1 primer )/$( meterrowget "$FEL5" 1 first_edit )"
+    [ "$FERC" -eq 0 ] && fe_ctx | grep -q 'useAdd src/calc.c:6' && [ "$FE5ROW" = "first-edit/control/forced-on" ] \
+        && ok "FE5 primer control + forced-on check: speaks; row first-edit/primer=control/first_edit=forced-on" \
+        || no "FE5 primer control + forced-on check: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )] row=[$FE5ROW]"
+
+    # FE6 — the default and the switch. An empty RIPWIRE_FIRST_EDIT is the unset reading (`${…:-conf}`), and the
+    # gate's RIPWIRE_HOME holds no meter.conf; RIPWIRE_METER=0 is the meter-off state, where #779's default-off holds.
+    FEL6="$FET/fe6.jsonl"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_METER=0
+    FE6A="$FEOUT/$( meterrows "$FEL6" )"
+    mkdir -p "$FET/conf6"; printf 'first_edit=1\n' >"$FET/conf6/meter.conf"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6b Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_HOME="$FET/conf6"
+    FE6B="$( fe_ctx | grep -q 'addTwo' && echo 1 || echo 0 )/$( meterrowget "$FEL6" 1 nudge )/$( meterrowget "$FEL6" 1 first_edit )"
+    fe_run "$HOOK" "$FEPATH" "$FEL6" fe6c Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=0 RIPWIRE_HOME="$FET/conf6"
+    FE6C="$FEOUT/$( meterrowget "$FEL6" 2 nudge )/$( meterrowget "$FEL6" 2 first_edit )"
+    [ "$FE6A" = "/0" ] && ok "FE6a meter off, nothing forced: says nothing on the first edit and writes no row (#779's default-off)" \
+        || no "FE6a meter off: [$FE6A], want silent/0 rows"
+    [ "$FE6B" = "1/first-edit/forced-on" ] && ok "FE6b force: first_edit=1 in meter.conf turns the check on (first_edit=forced-on)" \
+        || no "FE6b force: [$FE6B], want 1/first-edit/forced-on"
+    [ "$FE6C" = "/none/forced-off" ] && ok "FE6c env wins: RIPWIRE_FIRST_EDIT=0 beside first_edit=1 is silent (first_edit=forced-off)" \
+        || no "FE6c env wins: [$FE6C], want silent/none/forced-off"
+
+    # FE7 — Codex parity through the wrapper
+    fe_run "$ROOT/hooks/ripwire-codex-nudge.sh" "$FEPATH" "$FET/fe7.jsonl" fe7 Edit "$FE_BODY"
+    [ "$FERC" -eq 0 ] && fe_ctx | grep -q 'useAdd src/calc.c:6' \
+        && ok "FE7 Codex wrapper: the same check reaches Codex's additionalContext" \
+        || no "FE7 Codex wrapper: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE8 — bounded bytes; Write of an existing file (first changed line) and of a new file
+    FEBYTES="$( printf '%s' "$FECTX1" | wc -c | tr -d ' ' )"
+    [ "$FEBYTES" -gt 0 ] && [ "$FEBYTES" -le 1536 ] && ok "FE8 bounded: the FE1 context is $FEBYTES B (cap 1536)" \
+        || no "FE8 bounded: the FE1 context is $FEBYTES B (want 1..1536)"
+    FEW="$( jq -cn --arg f "$FEREPO/src/calc.c" --arg c "$( sed 's/return addTwo( x, 1 );/return addTwo( x, 2 );/' "$FEREPO/src/calc.c" )" \
+        '{file_path:$f, content:($c + "\n")}' )"
+    fe_run "$HOOK" "$FEPATH" "$FET/fe8.jsonl" fe8 Write "$FEW"
+    fe_ctx | grep -q '^useAdd src/calc.c:6' && ok "FE8 Write of an existing file: checks the definition holding its first changed line (useAdd)" \
+        || no "FE8 Write of an existing file: [$( printf '%s' "$FEOUT" | head -c 300 )]"
+    fe_run "$HOOK" "$FEPATH" "$FET/fe8n.jsonl" fe8n Write '{"file_path":"'"$FEREPO"'/src/new.c","content":"int n( void ) { return 0; }\n"}'
+    [ "$FERC" -eq 0 ] && [ -z "$FEOUT" ] && ok "FE8 Write of a new file: silent (no existing definition to check)" \
+        || no "FE8 Write of a new file: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+
+    # FE9 — plain first. A wrapper that sleeps on --dry-run (the preview) and runs the real binary for everything else.
+    mkdir -p "$FET/slowpreview"
+    printf '#!/bin/sh\ncase " $* " in *" --dry-run "*) echo $$ >>"$FE_STUB_PIDS"; exec sleep 30 ;; esac\nexec "%s" "$@"\n' "$FEREAL" \
+        >"$FET/slowpreview/ripwire"; chmod +x "$FET/slowpreview/ripwire"
+    FE_STUB_PIDS="$FET/stub9.pids"; : >"$FE_STUB_PIDS"; FEL9="$FET/fe9.jsonl"
+    FE9T0="$( fe_ms )"
+    fe_run "$HOOK" "$FET/slowpreview:$PATH" "$FEL9" fe9 Edit "$FE_SIG" RIPWIRE_FIRST_EDIT_MS=2500 FE_STUB_PIDS="$FE_STUB_PIDS"
+    FE9MS=$(( $( fe_ms ) - FE9T0 )); FECTX9="$( fe_ctx )"
+    echo "  (FE9 wall time with a 2500 ms deadline and a preview that never answers: ${FE9MS} ms)"
+    [ -s "$FE_STUB_PIDS" ] && ok "FE9 not vacuous: the preview was attempted (the --dry-run stub ran)" \
+        || no "FE9 vacuous: the --dry-run stub never ran, so the plain-first path was not exercised"
+    [ "$FERC" -eq 0 ] && printf '%s' "$FECTX9" | grep -q 'addTwo src/calc.c:1 fn: current tree vs HEAD: status=unchanged' \
+        && printf '%s' "$FECTX9" | grep -q 'useAdd src/calc.c:6' && printf '%s' "$FECTX9" | grep -q 'preview did not finish within 2500 ms' \
+        && ! printf '%s' "$FECTX9" | grep -q 'skipped: timeout' \
+        && ok "FE9 plain first: a stalled preview still delivers the plain check (symbol, caller) with the 'preview did not finish' note" \
+        || no "FE9 plain first: exit=$FERC ctx=[$( printf '%s' "$FECTX9" | head -c 400 )]"
+    [ "$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )" = "first-edit-plain/1" ] && ok "FE9 row: nudge=first-edit-plain nudged=1" \
+        || no "FE9 row: [$( meterrowget "$FEL9" 1 nudge )/$( meterrowget "$FEL9" 1 nudged )]"
+    FE9BYTES="$( printf '%s' "$FECTX9" | wc -c | tr -d ' ' )"
+    [ "$FE9MS" -lt 3900 ] && [ "$FE9BYTES" -le 1536 ] && ok "FE9 bounded: back in ${FE9MS} ms (deadline 2500, bound 3900), ${FE9BYTES} B" \
+        || no "FE9 bounded: ${FE9MS} ms, ${FE9BYTES} B"
+    FE9LEFT=""
+    for fe9p in $( tr '\n' ' ' <"$FE_STUB_PIDS" 2>/dev/null ); do
+        if kill -0 "$fe9p" 2>/dev/null; then
+            case "$( ps -o stat= -p "$fe9p" 2>/dev/null )" in Z*|'') ;; *) FE9LEFT="$FE9LEFT $fe9p" ;; esac
+        fi
+    done
+    [ -z "$FE9LEFT" ] && ok "FE9 timeout: the stalled preview is gone when the hook returns" \
+        || { no "FE9 timeout: preview pid(s)$FE9LEFT outlived the hook"; kill $FE9LEFT 2>/dev/null; }
+else
+    echo "  SKIP  FE1-FE3, FE5-FE9: no built binary at $FEREAL (they need the real --at/--edit-check/--affected)"
+fi
+
+# FE4 — a ripwire that never answers. Runs with the stub, so it needs no build.
+FEL4="$FET/fe4.jsonl"
+FE4T0="$( fe_ms )"
+FE_STUB_PIDS="$FET/stub.pids"; : >"$FE_STUB_PIDS"
+fe_run "$HOOK" "$FET/slowbin:$PATH" "$FEL4" fe4 Edit "$FE_BODY" RIPWIRE_FIRST_EDIT_MS=400 FE_STUB_PIDS="$FE_STUB_PIDS"
+FE4T1="$( fe_ms )"; FE4MS=$(( FE4T1 - FE4T0 ))
+echo "  (FE4 wall time with a 400 ms deadline: ${FE4MS} ms)"
+[ "$FERC" -eq 0 ] && fe_ctx | grep -q 'skipped: timeout' \
+    && ok "FE4 timeout: exit 0 and the disclosed 'skipped: timeout' line" \
+    || no "FE4 timeout: exit=$FERC out=[$( printf '%s' "$FEOUT" | head -c 200 )]"
+[ "$FE4MS" -lt 1400 ] && ok "FE4 timeout: back in ${FE4MS} ms (deadline 400 ms, bound 1400 ms)" \
+    || no "FE4 timeout: took ${FE4MS} ms against a 400 ms deadline"
+[ "$( meterrowget "$FEL4" 1 nudge )" = "first-edit-timeout" ] && ok "FE4 row: nudge=first-edit-timeout" \
+    || no "FE4 row: nudge=[$( meterrowget "$FEL4" 1 nudge )]"
+# Not vacuous: the stub must have RUN (a pid recorded) for "no survivor" to mean anything. A zombie awaiting its reaper
+# answers kill -0 too, so a `Z` state counts as gone.
+FE4PIDS="$( tr '\n' ' ' <"$FE_STUB_PIDS" 2>/dev/null )"; FE4LEFT=""
+for fe4p in $FE4PIDS; do
+    if kill -0 "$fe4p" 2>/dev/null; then
+        case "$( ps -o stat= -p "$fe4p" 2>/dev/null )" in Z*|'') ;; *) FE4LEFT="$FE4LEFT $fe4p" ;; esac
+    fi
+done
+if [ -z "$FE4PIDS" ]; then
+    no "FE4 timeout: the stub never ran, so 'nothing left behind' would be vacuous"
+elif [ -z "$FE4LEFT" ]; then
+    ok "FE4 timeout: the stub it started (pid$( printf ' %s' $FE4PIDS )) is gone when the hook returns"
+else
+    no "FE4 timeout: stub pid(s)$FE4LEFT outlived the hook"
+    kill $FE4LEFT 2>/dev/null
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (17) §FACTORIAL — the primer and the first-edit check are two independent arms (owner ruling, 2026-11-26)
+#
+#   FX1  over 1,000 fixed UUID-shaped session ids, the assignment (`--arm-cells`) hits all four cells
+#   FX2  each cell is within 250 ± 60 of those 1,000 (± 60 is 4.4 binomial standard deviations at p = 0.25; the ids
+#        are fixed, so this is a deterministic fact about the two hashes, not a sampled one)
+#   FX3  the PRIMER assignment is byte-identical to #779's: 32 ids whose labels were recorded from #779's hook rows
+#        (golden string below) read the same `arm`, the same `primer`, and the same `--arm-cells` primer column
+#   FX4  forces win: RIPWIRE_FIRST_EDIT=1 on a hashed-off session speaks (forced-on); =0 on a hashed-on one is silent
+#        (forced-off, nudge=none)
+#   FX5  the hash decides while the meter is active: a hashed-on session speaks (first_edit=on); a hashed-off one is
+#        silent and records the counterfactual (first-edit-control, first_edit=off)
+#   FX6  meter off: the hashed-on session of FX5, with RIPWIRE_METER=0 and no force, says nothing
+#   FX7  both labels on every row the hook writes, in every mode it logs from
+#   FX8  bench/substitution_report.py prints the 2x2 table from a synthetic v4 log, keeps the primer comparison
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "(17) §FACTORIAL: primer x first-edit check"
+FXT="$TMP/fx"; mkdir -p "$FXT/tmp"
+python3 -c 'import uuid
+for i in range(1000): print(uuid.uuid5(uuid.NAMESPACE_URL, "ripwire-factorial-%d" % i))' >"$FXT/ids"
+bash "$HOOK" --arm-cells <"$FXT/ids" >"$FXT/cells" 2>/dev/null
+FXROWS="$( grep -c . "$FXT/cells" 2>/dev/null )"; [ -n "$FXROWS" ] || FXROWS=0
+fx_cell() { awk -F'\t' -v p="$1" -v c="$2" '$2 == p && $3 == c { n++ } END { print n + 0 }' "$FXT/cells"; }
+FXCT="$( fx_cell control off )"; FXCO="$( fx_cell control on )"; FXTT="$( fx_cell treatment off )"; FXTO="$( fx_cell treatment on )"
+echo "  (2x2 over $FXROWS ids: primer control/check off $FXCT, control/on $FXCO, treatment/off $FXTT, treatment/on $FXTO)"
+[ "$FXROWS" -eq 1000 ] && [ "$FXCT" -gt 0 ] && [ "$FXCO" -gt 0 ] && [ "$FXTT" -gt 0 ] && [ "$FXTO" -gt 0 ] \
+    && ok "FX1 cells: 1,000 fixed ids reach all four cells" \
+    || no "FX1 cells: $FXROWS rows; cells $FXCT/$FXCO/$FXTT/$FXTO"
+FX2BAD=""
+for fxn in "$FXCT" "$FXCO" "$FXTT" "$FXTO"; do
+    [ "$fxn" -ge 190 ] && [ "$fxn" -le 310 ] || FX2BAD="$FX2BAD $fxn"
+done
+[ "$FXROWS" -eq 1000 ] && [ -z "$FX2BAD" ] && ok "FX2 balance: every cell is within 250 ± 60 of 1,000 ($FXCT/$FXCO/$FXTT/$FXTO)" \
+    || no "FX2 balance: cell(s) outside 190..310:${FX2BAD:- (no table)}"
+
+# FX3 — the golden primer labels, recorded from #779's hook (0799eda28) on ids fxgold-0..fxgold-31, T=treatment C=control
+FXGOLD="TTTTTTCCTCCTTTTCTCCTTTTCTTTTTTTT"
+FXL3="$FXT/fx3.jsonl"; FX3ROWS=""; FX3CELL=""
+for fxi in $( seq 0 31 ); do
+    printf '{"session_id":"fxgold-%s","cwd":"%s","tool_name":"Grep","tool_input":{"pattern":"x"}}' "$fxi" "$REPO" \
+        | env -u RIPWIRE_METER_ARM RIPWIRE_METER_LOG="$FXL3" PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" bash "$HOOK" >/dev/null 2>&1
+    printf 'fxgold-%s\n' "$fxi"
+done >"$FXT/goldids"
+FX3ROWS="$( python3 -c 'import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+print("".join(("T" if r.get("arm") == "treatment" else "C") + ("" if r.get("primer") == r.get("arm") else "!") for r in rows))' "$FXL3" 2>/dev/null )"
+FX3CELL="$( bash "$HOOK" --arm-cells <"$FXT/goldids" 2>/dev/null | awk -F'\t' '{ printf "%s", ($2 == "treatment" ? "T" : "C") }' )"
+[ "$FX3ROWS" = "$FXGOLD" ] && [ "$FX3CELL" = "$FXGOLD" ] \
+    && ok "FX3 primer unchanged: 32 ids read #779's primer labels in arm, primer and --arm-cells ($FXGOLD)" \
+    || no "FX3 primer changed: rows [$FX3ROWS] cells [$FX3CELL], want [$FXGOLD]"
+
+# FX7 — both labels on every row, through the stub: SessionStart, Grep, Bash, a native edit of a non-source file
+FXL7="$FXT/fx7.jsonl"
+for fxp in '{"session_id":"fx7","cwd":"'"$REPO"'","source":"startup"}|--session-start' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}|' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git log -3"}}|' \
+           '{"session_id":"fx7","cwd":"'"$REPO"'","tool_name":"Edit","tool_input":{"file_path":"'"$REPO"'/notes.md","old_string":"a","new_string":"b"}}|' \
+           '{"session_id":"fx7b","cwd":"'"$REPO"'","tool_name":"Read","tool_input":{"file_path":"x"}}|'; do
+    printf '%s' "${fxp%|*}" | env RIPWIRE_METER_LOG="$FXL7" RIPWIRE_FIRST_EDIT=0 PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" \
+        bash "$HOOK" ${fxp##*|} >/dev/null 2>&1
+done
+printf '%s' '{"session_id":"fx7c","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}' \
+    | env RIPWIRE_METER_LOG="$FXL7" RIPWIRE_METER_ARM=control PATH="$WITH_RIPWIRE" TMPDIR="$FXT/tmp" bash "$HOOK" >/dev/null 2>&1
+FX7="$( python3 -c 'import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+bad = [r for r in rows if r.get("v") != 4 or r.get("primer") not in ("treatment", "control") or r.get("primer") != r.get("arm")
+       or r.get("first_edit") not in ("on", "off", "forced-on", "forced-off")]
+print("%d %d %s" % (len(rows), len(bad), ",".join(sorted({str(r.get("first_edit")) for r in rows}))))' "$FXL7" 2>/dev/null )"
+case "$FX7" in
+    "6 0 "*) ok "FX7 labels: all 6 rows (SessionStart, Grep, Bash, Edit, Read; two arms) are v4 with primer and first_edit (${FX7#6 0 })" ;;
+    *)       no "FX7 labels: rows/bad/labels = [$FX7], want 6 rows, 0 bad" ;;
+esac
+
+if [ -x "$FEREAL" ]; then
+    # Session ids from the assignment itself, a FRESH one per run: the once-per-session marker would otherwise silence a
+    # later arm for the wrong reason. fx_id CHECK N -> the Nth id the hash put in that check cell.
+    fx_id() { awk -F'\t' -v c="$1" -v n="$2" '$3 == c { k++; if (k == n) { print $1; exit } }' "$FXT/cells"; }
+    FXOFF="$( fx_id off 1 )"; FXON="$( fx_id on 1 )"; FXOFF2="$( fx_id off 2 )"; FXON2="$( fx_id on 2 )"; FXON3="$( fx_id on 3 )"
+    # FX4 — forces win
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx4a.jsonl" "$FXOFF" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=1
+    FX4A="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )/$( meterrowget "$FXT/fx4a.jsonl" 1 first_edit )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx4b.jsonl" "$FXON" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=0
+    FX4B="$FEOUT/$( meterrowget "$FXT/fx4b.jsonl" 1 nudge )/$( meterrowget "$FXT/fx4b.jsonl" 1 first_edit )"
+    [ "$FX4A" = "1/forced-on" ] && [ "$FX4B" = "/none/forced-off" ] \
+        && ok "FX4 forces win: =1 on a hashed-off session speaks (forced-on); =0 on a hashed-on one is silent (forced-off)" \
+        || no "FX4 forces: on-a-hashed-off [$FX4A], off-a-hashed-on [$FX4B]"
+    # FX5 — the hash decides while the meter is active (nothing forced)
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx5a.jsonl" "$FXON2" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX5A="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )/$( meterrowget "$FXT/fx5a.jsonl" 1 nudge )/$( meterrowget "$FXT/fx5a.jsonl" 1 first_edit )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx5b.jsonl" "$FXOFF2" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX5B="$FEOUT/$( meterrowget "$FXT/fx5b.jsonl" 1 nudge )/$( meterrowget "$FXT/fx5b.jsonl" 1 first_edit )"
+    [ "$FX5A" = "1/first-edit/on" ] && [ "$FX5B" = "/first-edit-control/off" ] \
+        && ok "FX5 hash: a hashed-on session speaks (first_edit=on); a hashed-off one is silent and logs first-edit-control" \
+        || no "FX5 hash: on [$FX5A], off [$FX5B]"
+    # FX6 — meter off: a hashed-on id, nothing forced, says nothing; then the SAME id with the meter on speaks, so the
+    # silence is the meter's doing (meter off spends no marker, so the second run is still the session's first edit).
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx6.jsonl" "$FXON3" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT= RIPWIRE_METER=0
+    FX6A="$FERC/$FEOUT/$( meterrows "$FXT/fx6.jsonl" )"
+    fe_run "$HOOK" "$FEPATH" "$FXT/fx6.jsonl" "$FXON3" Edit "$FE_BODY" RIPWIRE_FIRST_EDIT=
+    FX6B="$( fe_ctx | grep -q 'useAdd src/calc.c:6' && echo 1 || echo 0 )"
+    [ "$FX6A" = "0//0" ] && [ "$FX6B" = 1 ] \
+        && ok "FX6 meter off: a hashed-on session says nothing and writes nothing; the same id with the meter on speaks" \
+        || no "FX6 meter off: off-run [$FX6A] (want 0//0), on-run spoke=[$FX6B]"
+else
+    echo "  SKIP  FX4-FX6: no built binary at $FEREAL"
+fi
+
+# FX8 — the readout. Two sessions per cell, one forced session, one mixed-label session, one v3 row.
+FXL8="$FXT/fx8.jsonl"
+python3 - "$FXL8" <<'PY'
+import json, sys
+rows = []
+def add(sid, primer, check, fam, n):
+    for i in range(n):
+        rows.append({"v": 4, "seq": len(rows) + 1, "session": sid, "repo": "/x/r", "tag": "r", "tool": "Grep", "class": "grep",
+                     "family": fam, "nudged": 0, "nudge": "none", "post_nudge": 0, "post_sweep": 0, "arm": primer,
+                     "primer": primer, "first_edit": check, "detail": "x", "agent": "claude", "surface": "native", "target": ""})
+for p in ("control", "treatment"):
+    for c in ("off", "on"):
+        for k in range(2):
+            add("s-%s-%s-%d" % (p, c, k), p, c, "native", 3)
+            add("s-%s-%s-%d" % (p, c, k), p, c, "ripwire", 1)
+add("s-forced", "treatment", "forced-on", "native", 2)
+add("s-mixed", "control", "on", "native", 1)
+add("s-mixed", "control", "off", "native", 1)
+rows.append({"v": 3, "seq": 99, "session": "s-old", "arm": "treatment", "family": "native", "class": "grep", "tool": "Grep"})
+open(sys.argv[1], "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+python3 "$ROOT/bench/substitution_report.py" "$FXL8" >"$FXT/report8.out" 2>&1; FX8RC=$?
+grep -A8 '2x2' "$FXT/report8.out" | sed 's/^/    /'
+if [ "$FX8RC" -eq 0 ] \
+    && grep -qE '^ +primer control +2 +2 +4$' "$FXT/report8.out" && grep -qE '^ +primer treatment +2 +2 +4$' "$FXT/report8.out" \
+    && grep -qE '^ +total +4 +4 +8$' "$FXT/report8.out" && grep -q 'forced-on 1; dropped as mixed-label: 1' "$FXT/report8.out" \
+    && grep -q 'by arm' "$FXT/report8.out"; then
+    ok "FX8 readout: the 2x2 counts 2 sessions per cell, sets the forced and mixed sessions apart, keeps the primer block"
+else
+    no "FX8 readout: exit=$FX8RC; see $FXT/report8.out"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════

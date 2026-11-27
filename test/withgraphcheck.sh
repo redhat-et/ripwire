@@ -57,7 +57,18 @@ printf '%s' "$PACK_A" | grep -qF '<graph fmt="mermaid"' && no "--pack-task (no f
 
 # ── 2) WITH the flag: --for ──────────────────────────────────────────────────────────────────────────────
 FORG="$TMP/for_graph.xml"
-"$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph > "$FORG" 2>/dev/null
+# AF1-fix (2026-11-18): the flagless --for answer is ANSWER-FIRST and served in 12 KB PAGES (src/forpages.h). On src this answer's
+# <graph> starts past page 1's cut, so the block's arms read --page-bytes=0 — the whole answer in one call, row-identical to the
+# joined pages (forpagescheck P2) — and (Pg) holds the default page to present-or-disclosed-deferred. "Immediately before </ctx>"
+# reads "the last ROW block": an answer-first answer's trailing DOCUMENT legend (comments only) follows it inside the same answer.
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
+lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); sys.exit(0 if re.search(r"</graph>(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>\s*\Z",s,re.S) else 1)' "$1"; }
+"$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph --page-bytes=0 > "$FORG" 2>/dev/null
+"$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph > "$TMP/for_graph_page.xml" 2>/dev/null
+if grep -qF '<graph fmt="mermaid">' "$TMP/for_graph_page.xml"; then ok "(Pg) --for --with-graph: the default page carries <graph>"
+elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "graph" in n and " next=" in r else 1)' "$TMP/for_graph_page.xml"; then
+    ok "(Pg) --for --with-graph: the default page does not hold <graph> and says so: deferred= names it, next= reaches it"
+else no "(Pg) --for --with-graph: the default page neither carries <graph> nor names it in deferred=/continued= (a silent drop)"; fi
 
 if xmllint --noout "$FORG" 2>/dev/null; then ok "--for --with-graph: xmllint-clean (G4)"; else { no "--for --with-graph: NOT well-formed"; xmllint --noout "$FORG" 2>&1 | head -5; }; fi
 
@@ -65,7 +76,7 @@ grep -qF '<graph fmt="mermaid"><![CDATA[' "$FORG" && ok "--for --with-graph: <gr
     || no "--for --with-graph: <graph> block missing or malformed open tag"
 grep -qF ']]></graph>' "$FORG" && ok "--for --with-graph: CDATA closed (]]></graph>)" \
     || no "--for --with-graph: CDATA not closed"
-grep -qF '</graph></ctx>' "$FORG" && ok "--for --with-graph: <graph> sits immediately before </ctx>" \
+lastrow "$FORG" && ok "--for --with-graph: <graph> is the last row block before </ctx> (only the trailing legend after it)" \
     || no "--for --with-graph: <graph> is not the last child before </ctx>"
 
 MERM_FOR="$( perl -0777 -ne 'print $1 if /<graph fmt="mermaid"><!\[CDATA\[(.*?)\]\]><\/graph>/s' "$FORG" )"
@@ -93,7 +104,7 @@ xmllint --noout "$FORGA" 2>/dev/null && ok "--for --with-graph (auto shape): xml
     || no "--for --with-graph (auto shape): NOT well-formed"
 grep -qF '<graph fmt="mermaid"><![CDATA[' "$FORGA" && ok "--for --with-graph (auto shape): <graph> block present, CDATA opened" \
     || no "--for --with-graph (auto shape): <graph> block missing"
-grep -qF '</graph></ctx>' "$FORGA" && ok "--for --with-graph (auto shape): <graph> sits immediately before </ctx>" \
+lastrow "$FORGA" && ok "--for --with-graph (auto shape): <graph> is the last row block before </ctx> (only the trailing legend after it)" \
     || no "--for --with-graph (auto shape): <graph> is not the last child before </ctx>"
 
 # ── 3) WITH the flag: --pack-task ────────────────────────────────────────────────────────────────────────

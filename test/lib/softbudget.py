@@ -7,17 +7,76 @@
 import json, re
 
 
+# K-WRONGSYM / K-LEGEND: blocks appended after the ranked answer on their own allowance, outside est_tokens (the <syms> block, or its held
+# stub, each with the legend comment right before it). A soft-target reader leaves them out of the sections it reserves from T.
+# AF1 (2026-11-18): the default --for answer is answer-first, so the appended block may be followed by the trailing DOCUMENT legend
+# (comments only) before </ctx> — still the last ROW block.
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>…</sigx>) ride after the last row block, so they may sit
+# between an appended <syms> and </ctx> like the trailing legend does; they are priced (inside est_tokens) and are not stripped.
+APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>)", re.S )
+def strip_appended( t ):
+    """The answer text less its appended, unpriced blocks (APPENDED)."""
+    return APPENDED.sub( "", t )
+def strip_appended_bytes( b ):
+    """strip_appended on a bytes answer, byte-exact for the rest (surrogateescape keeps any non-UTF-8 byte as it was)."""
+    return strip_appended( b.decode( 'utf-8', 'surrogateescape' ) ).encode( 'utf-8', 'surrogateescape' )
+
+
+_TSYM_XML = re.compile( r' tsym="[^"]*"' )
+
+
+def _priced_tail( t ):
+    """TAIL-SYM-TERMS (2026-11-14): the tail as the soft refill PRICES it. A no-budget (reference) answer's rows may carry tsym=
+    (task-word names after sym=); a budgeted answer never does (src/verbs_for.h: no tsym= under --token-budget) and the reserve
+    is the pre-card walk (fileTailOldWalk), so the readers below measure a tail without tsym= ("tsym"/"tsym_why" in JSON)."""
+    if t.lstrip().startswith( "{" ):
+        try: d = json.loads( t )
+        except ValueError: return t
+        tl = d.get( "tail" )
+        if isinstance( tl, dict ) and "tsym" in tl:
+            tl.pop( "tsym", None ); tl.pop( "tsym_why", None )
+            return json.dumps( d, separators=( ",", ":" ), ensure_ascii=False )
+        return t
+    return _TSYM_XML.sub( "", t ) if " tsym=" in t else t
+
+
 def tail_size( t ):
-    """Bytes of the answer's tail: XML, the whole <tail>…</tail> element; JSON, the compact "tail" object.
+    """Bytes of the answer's tail: XML, the whole <tail>…</tail> element; JSON, the compact "tail" object (tsym= not counted:
+    _priced_tail).
 
     FIX1 R1: the refill reserves the tail at its HEAD-scoped size (the tail of the no-budget answer) when that is what binds,
     so maximality counts the tail at no less than the reference tail (an upper bound on the reserve: the check stays a bound).
     """
+    t = _priced_tail( t )
     if t.lstrip().startswith( "{" ):
         try: return len( json.dumps( json.loads( t ).get( "tail", {} ), separators=( ",", ":" ), ensure_ascii=False ).encode() )
         except ValueError: return 0
     m = re.search( r"<tail\b.*?</tail>", t, re.S )
     return len( m.group( 0 ).encode() ) if m else 0
+
+
+def old_walk_tail_size( t ):
+    """FOR-TAIL-WIDE fix 1 (review F1): bytes of the part of the answer's tail the old 40-row walk lists — the tail less its
+    trailing p_only= rows (the widened, path-only rows come last) and the p_only attribute / keys. The soft refill reserves the
+    tail at THIS size of the head-scoped tail (src/verbs_for.h, fileTailOldWalk), never at the widened rows. Its next= offset can
+    differ from the old walk's by a digit or two (inside the readers' row slack)."""
+    t = _priced_tail( t )
+    if t.lstrip().startswith( "{" ):
+        try: tl = dict( json.loads( t ).get( "tail", {} ) )
+        except ValueError: return 0
+        k = int( tl.pop( "p_only", 0 ) or 0 ); tl.pop( "p_only_why", None )
+        if k > 0:
+            for key in ( "files", "sym" ):
+                tl[ key ] = ( tl.get( key ) or [] )[ :-k ]
+        return len( json.dumps( tl, separators=( ",", ":" ), ensure_ascii=False ).encode() )
+    m = re.search( r"<tail\b.*?</tail>", t, re.S )
+    if not m:
+        return 0
+    el = m.group( 0 ); km = re.search( r' p_only="(\d+)"', el.split( ">", 1 )[ 0 ] )
+    if not km:
+        return len( el.encode() )
+    rows = re.findall( r"<t [^>]*/>", el ); k = int( km.group( 1 ) )
+    return len( el.encode() ) - len( km.group( 0 ) ) - sum( len( r.encode() ) for r in rows[ -k: ] )
 
 
 # ── FIX2 C1 (review rv-forbudget-soft-fix1; rule 4, CHECKLIST 1): the UPPER-bound twin of the relaxed maximality ──────────────
@@ -75,9 +134,12 @@ def json_charged_stanzas( t ):
     return sum( len( k.encode() ) + 4 + _jlen( v ) for k, v in d.items() if k not in JSON_UNCHARGED_KEYS )
 
 
-def upper_bound( answer, ref, T, k, total, u_floored ):
+def upper_bound( answer, ref, T, k, total, u_floored, ref_old=None ):
     """The upper-bound twin. Returns (ok, detail). Applies only to a cut (k < total) served past the rank floor (k > 4).
     `u_floored` is the reader's U including FIX1's tail floor (XML; ignored for JSON). A missing <sigs> is not ok.
+    `ref_old`: the same reference answer on the pre-TAIL-SYM-WIDE tail (RIPWIRE_TAIL_SYM_WIDE_ROWS=0), whose widened rows are the
+    p_only= suffix again, so the reserve's cap (the old walk's part) is read off it; without it, off `ref` (where a widened row
+    with sym= reads as an old-walk row: a smaller room, so a reader that cannot pass it may fail where the binary is right).
     Resolution (forbudget-soft fix-1 review, F1): the XML twin carries about 1.8-2.8 rows of slack (measured on the fornotes
     corpus), because at a cut the tail fills less than its share and that unused share is real headroom the answer does not
     show, so this reader cannot recover it. A 1-row over-serve is therefore NOT caught in XML; JSON, which states its tail,
@@ -87,11 +149,11 @@ def upper_bound( answer, ref, T, k, total, u_floored ):
     rows = rows_printed( answer )
     if rows is None:
         return False, "upper: no rows to measure (premise)"
-    st, rt = tail_size( answer ), tail_size( ref )
+    st, rt, ro = tail_size( answer ), tail_size( ref ), old_walk_tail_size( ref if ref_old is None else ref_old )   # ro: the reserve's cap (FOR-TAIL-WIDE F1)
     if answer.lstrip().startswith( "{" ):
-        room = T - min( json_charged_stanzas( answer ), min( st, rt ) )
+        room = T - min( json_charged_stanzas( answer ), min( st, ro ) )
     else:
-        room = T - ( u_floored - max( st, rt ) ) - min( st, rt )
+        room = T - ( u_floored - max( st, rt ) ) - min( st, ro )
     slack = tail_last_row( answer ) + SIGS_FRAME_BYTES
     ok = rows <= room + slack
     return ok, "upper: rows printed %d B %s room %d B + %d B slack (served tail %d, ref tail %d)" % (
@@ -110,7 +172,63 @@ def set_prefix( a, on, off ):
 def _row_lines( p ):
     return [ x for x in open( p, encoding='utf-8', errors='replace' ).read().split( "\n" ) if x ]
 
-if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows files, one p:l:n per line): exit 0 | 1
+def strip_selftest():
+    """CR 4486667657: a `<!-- syms:` quoted inside a body CDATA must not make strip_appended swallow body bytes up to the real block.
+    -> list of failure texts (empty: all hold)."""
+    body = '<b><![CDATA[x <!-- syms: quoted --> text <syms files="1"> more]]></b>'
+    real = '<!-- syms: legend --><syms files="1"><y p="a.py:1" n="n" by="name"/></syms>'
+    held = '<!-- ripwire for syms: held --><syms held="budget" next="--for=x"/>'
+    graph = '<graph fmt="mermaid"><![CDATA[g]]></graph>'
+    cases = [ ( "block", '<ctx>' + body + real + '</ctx>', '<ctx>' + body + '</ctx>' ),
+              ( "held stub", '<ctx>' + body + held + '</ctx>', '<ctx>' + body + '</ctx>' ),
+              ( "before <graph>", '<ctx>' + body + real + graph + '</ctx>', '<ctx>' + body + graph + '</ctx>' ),
+              ( "twin: no block", '<ctx>' + body + '</ctx>', '<ctx>' + body + '</ctx>' ) ]
+    bad = [ "%s: got %r" % ( name, strip_appended( src ) ) for name, src, want in cases if strip_appended( src ) != want ]
+    # the bytes form (estchargecheck's A9/A10 readers): the same strip, and a non-UTF-8 byte outside the block survives it untouched
+    raw = b'<ctx>\xff' + real.encode() + b'</ctx>'
+    return bad + ( [] if strip_appended_bytes( raw ) == b'<ctx>\xff</ctx>' else [ "bytes: got %r" % strip_appended_bytes( raw ) ] )
+
+
+if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows files, one p:l:n per line): exit 0 | 1;  python3 softbudget.py strip-selftest: exit 0 | 1
     import sys
+    if len( sys.argv ) == 2 and sys.argv[ 1 ] == "strip-selftest":
+        bad = strip_selftest()
+        print( "\n".join( bad ) )
+        sys.exit( 1 if bad else 0 )
     if len( sys.argv ) != 5 or sys.argv[ 1 ] != "setprefix": sys.exit( 2 )
     sys.exit( 0 if set_prefix( *( _row_lines( p ) for p in sys.argv[ 2:5 ] ) ) else 1 )
+
+
+# TOKEN-BUDGET-MONOTONE: the whole price a budget is compared with (budgetmonotonecheck, budgetpolicycheck).
+def whole_price( path ):
+  """A --for answer's whole price, as src/forbudgetfit.h charges it: the root's est_tokens plus the held blocks (kForHeldBlocks)
+  outside it, each with the legend comment right before it that names it (heldLegendAt); <doc_body> by its own est_tokens=,
+  the rest at 2.5 B/token. None without a root est_tokens."""
+  s = open( path, 'rb' ).read().decode( 'latin-1' )   # byte offsets, as the binary counts them
+  m = re.search( r'<ctx [^>]*?\best_tokens="(\d+)"', s )
+  if not m: return None
+  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "manifest_rows", "graph_verb", "reexports", "shortkey", "aliases" )
+  masked = re.sub( r'<!\[CDATA\[.*?\]\]>|<!--.*?-->', lambda x: ' ' * len( x.group( 0 ) ), s, flags = re.S )
+  def legend_at( at, name ):
+      # the block's own legend, the comment right before it that names it (forbudgetfit.h heldLegendAt): priced with the block
+      if not s[ :at ].endswith( "-->" ): return at
+      o = s.rfind( "<!-- ", 0, at )
+      if o < 0: return at
+      n = o + 5 + ( len( "ripwire for " ) if s[ o + 5: ].startswith( "ripwire for " ) else 0 )   # `<!-- NAME` or `<!-- ripwire for NAME`
+      return o if s[ n: ].startswith( name ) and s[ n + len( name ) ] in ": " else at
+  depth, heldp, open_at, open_tag, leg = 0, 0, None, None, 0
+  for t in re.finditer( r'<(/?)([A-Za-z_][\w-]*)([^>]*?)(/?)>', masked ):
+      close, name, attrs, selfc = t.groups()
+      if close:
+          depth -= 1
+          if depth == 1 and open_at is not None:
+              e = re.search( r'\best_tokens="(\d+)"', open_tag ) if name == "doc_body" else None
+              heldp += int( e.group( 1 ) ) + ( int( leg / 2.5 + 0.5 ) if leg else 0 ) if e and int( e.group( 1 ) ) > 0 else int( ( t.end() - open_at + leg ) / 2.5 + 0.5 )
+              open_at = None
+          continue
+      if depth == 1 and name in held:
+          leg = t.start() - legend_at( t.start(), name )
+          if selfc: heldp += int( ( t.end() - t.start() + leg ) / 2.5 + 0.5 )
+          else: open_at, open_tag = t.start(), t.group( 0 )
+      if not selfc: depth += 1
+  return int( m.group( 1 ) ) + heldp

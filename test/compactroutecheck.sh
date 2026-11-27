@@ -59,9 +59,14 @@ bodycount(){ python3 -c 'import re,sys; t=open(sys.argv[1]).read(); print(len(re
 
 # L1 (2026-09-19): the CLI default legend is compact; arm (3) reads the FULL legend's prose (concfull), and arm (6) greps
 # sigonly for bundle= which the compact legend spells inside its comment — both ask for the full legend.
-rw --for="$CONC"                  >"$TMP/conc"
+# AF1-fix (2026-11-18): the default --for answer is served in 12 KB PAGES (src/forpages.h), and on src this compact answer's
+# <hops> and <fold> start past page 1's cut (its 12 KB of <sigs>/<tail> rows come first). Every arm below is about the
+# ANSWER's content, so it reads --page-bytes=0, the whole answer in one call — row-identical to the joined pages
+# (forpagescheck P2). Arm (P) holds the DEFAULT page to present-or-disclosed-deferred for both sections.
+rw --for="$CONC"                  >"$TMP/concpage"
+rw --for="$CONC" --page-bytes=0   >"$TMP/conc"
 rw --for="$CONC" --legend=full    >"$TMP/concfull"
-rw --for="$CONC" --auto-bodies    >"$TMP/optout"
+rw --for="$CONC" --auto-bodies --page-bytes=0 >"$TMP/optout"
 rw --for="$CONC" --signatures-only --legend=full >"$TMP/sigonly"
 rw --for="$CONC" --no-route       >"$TMP/noroute"
 rw --for="$NAME"                  >"$TMP/name"
@@ -74,6 +79,17 @@ grep -q 'anchors: ' "$TMP/name" \
     && ok "(0b) the name-exact query does name an anchor" \
     || no "(0b) no anchors: clause on $NAME — arm 4 cannot observe the route it is about"
 
+# ── (P) the default PAGE: each section it does not hold is named on its root (deferred=/continued=) beside a next= ──────
+for SEC in hops fold; do
+    if grep -q "<$SEC " "$TMP/concpage"; then ok "(P) the default page carries <$SEC>"
+    elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if sys.argv[2] in n and " next=" in r else 1)' "$TMP/concpage" "$SEC"; then
+        ok "(P) the default page does not hold <$SEC> and says so: deferred= names it, next= reaches it"
+    else no "(P) the default page neither carries <$SEC> nor names it in deferred=/continued= (a silent drop)"; fi
+done
+grep -q 'bundle="compact" bodies="0" reason="compact-route"' "$TMP/concpage" \
+    && ok '(P) the default page keeps the whole answer'"'"'s bundle="compact" bodies="0" reason="compact-route" root disclosure' \
+    || no '(P) the default page lost the bundle= bodies= reason= root disclosure'
+
 # ── (1) the conceptual default is compact, and says so ──────────────────────────────────────────────────
 [ "$( bodycount "$TMP/conc" )" = "0" ] \
     && ok "(1) zero <b> body blocks on the conceptual route" \
@@ -84,13 +100,13 @@ grep -q '<bodies ' "$TMP/conc" \
 grep -q 'bundle="compact" bodies="0" reason="compact-route"' "$TMP/conc" \
     && ok '(1c) the root discloses bundle="compact" bodies="0" reason="compact-route"' \
     || no '(1c) missing the bundle="compact" bodies="0" reason="compact-route" disclosure (every removal is disclosed)'
-RIPWIRE_NO_BODY_FOLD=1 "$BIN" src --no-cache --for="$CONC" 2>/dev/null >"$TMP/concoff"
+RIPWIRE_NO_BODY_FOLD=1 "$BIN" src --no-cache --for="$CONC" --page-bytes=0 2>/dev/null >"$TMP/concoff"
 if [ "$( grep -o '<b t=' "$TMP/concoff" | wc -l | tr -d ' ' )" = "0" ] && grep -q '<fold ' "$TMP/conc"; then
     ok "(1e) fold-off twin: zero <b> in the whole answer; the default carries its bodies only inside <fold>"
 else
     no "(1e) RIPWIRE_NO_BODY_FOLD=1 still serves a body, or the default carries no <fold>"
 fi
-rw --for="$CONC_CUE" >"$TMP/conccue"
+rw --for="$CONC_CUE" --page-bytes=0 >"$TMP/conccue"
 n_cue="$( bodycount "$TMP/conccue" )"
 if grep -q '<sigs' "$TMP/conccue" && { { [ "$n_cue" = 1 ] && grep -q 'bundle="compact" bodies="1" reason="owner"' "$TMP/conccue"; } \
        || { [ "$n_cue" = 0 ] && grep -q 'bundle="compact" bodies="0" reason="compact-route"' "$TMP/conccue"; }; }; then
@@ -173,7 +189,7 @@ OB=$( bodycount "$TMP/optout" )
     || no "(7) --no-route went compact: the un-routed path's golden neutrality is broken"
 
 # ── (8) determinism + well-formedness ───────────────────────────────────────────────────────────────────
-for V in conc optout sigonly noroute name; do
+for V in conc concpage optout sigonly noroute name; do
     if command -v xmllint >/dev/null 2>&1; then
         xmllint --noout "$TMP/$V" 2>/dev/null \
             && ok "(8) $V is well-formed XML" \
@@ -181,7 +197,7 @@ for V in conc optout sigonly noroute name; do
     fi
 done
 rw --for="$CONC" >"$TMP/d2"; rw --for="$CONC" >"$TMP/d3"
-{ cmp -s "$TMP/conc" "$TMP/d2" && cmp -s "$TMP/conc" "$TMP/d3"; } \
+{ cmp -s "$TMP/concpage" "$TMP/d2" && cmp -s "$TMP/concpage" "$TMP/d3"; } \
     && ok "(8b) the compact bundle is byte-identical across 3 runs" \
     || no "(8b) the compact bundle is not deterministic"
 

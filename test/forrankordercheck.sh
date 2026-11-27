@@ -34,6 +34,23 @@
 # Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's readings
+# legitimately differ under them: <sigs shown= docs_dropped=> count the rows the ladder served BEFORE the rules print some as
+# <t p= sym= r=/> pointers (a pointer carries no <doc>), and (6)/(8) check those counts against the printed <d> rows. The rules are
+# pinned in forsiblingdemotecheck / fordecltwincheck / fordemoteallcheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py set_prefix: the head round-robin set-prefix arms (lane hrr)
@@ -197,6 +214,17 @@ FX_Q=( "geometry area of a shape" "call a native function from python" "parse th
 
 # ── (3) byte growth ≤ 4% against the registered sizes ─────────────────────────────────────────────────────
 growth_fail=0
+# FOLD C's tail page rows: sym=, sym= then tsym=, or tsym= alone (R-DEDUP's <syms> cut can empty a head file's sym= and keep tsym=,
+# CodeRabbit #678). Path-only rows (`<t p="…"/>`) are FOR-TAIL-WIDE's separate pattern below, so this one never matches them.
+export TAIL_PAGE_ROW_RE='<t p="[^"]*"(?: sym="[^"]*"(?: tsym="[^"]*")?| tsym="[^"]*")/>'
+# (3t) the pattern's own arm: four canned rows, one of each shape; page rows 3, path-only 1, every row counted exactly once
+pr_rows="$( python3 -c '
+import os, re
+s = "<t p=\x22a.py\x22 sym=\x22x\x22/><t p=\x22b.py\x22 sym=\x22x\x22 tsym=\x22y\x22/><t p=\x22c.py\x22 tsym=\x22y\x22/><t p=\x22d.py\x22/>"
+page = re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ); po = re.findall( r"<t p=\x22[^\x22]*\x22/>", s )
+print( len( page ), len( po ), sum( map( len, page + po ) ) == len( s ) )' )"
+if [ "$pr_rows" = "3 1 True" ]; then ok "(3t) tail page-row pattern: sym=, sym=+tsym= and tsym=-only rows counted once each, path-only apart (got $pr_rows)"
+else no "(3t) tail page-row pattern: want '3 1 True' (page rows, path-only, every byte once), got '$pr_rows'"; growth_fail=1; fi
 # body-fold (train 31; rule 4, by design — the FOLD C precedent): a compact answer now ends with <fold kind="bodies">, the top ranked
 # bodies appended after the unchanged answer (forbodyfoldcheck (F5) pins that nothing before it moved). The band reads the answer
 # WITHOUT those additions: the fold element, its legend clause, the hop-calls next= clause and the <sigs> continuation pair
@@ -211,6 +239,12 @@ import re, sys
 s = sys.stdin.read(); n = 0
 f = re.search( r"<fold .*?</fold>", s, re.S ); n += len( f.group( 0 ).encode() ) if f else 0
 c = re.search( r"; fold kind=bodies:.*?sigs_next= the signatures-only re-call", s, re.S ); n += len( c.group( 0 ).encode() ) if c else 0
+# doc-body (FOR-DOC-BODY, #561, 2026-11-06; fordocbodycheck owns it): a prose --for over a documents-heavy tree ends with a <doc_body>
+# element (the best sections of the first doc files, served source text) and its own legend comment — an addition by design, charged to
+# the document lens, not to the ranked rows this band guards (the fold precedent above); fixture/call 3510 and fixture/parse 3711
+# are the two bases it moves, by 2,263 B and 2,508 B (582 + 827 B of block, 1,681 B of legend)
+d = re.search( r"<doc_body .*?</doc_body>", s, re.S ); n += len( d.group( 0 ).encode() ) if d else 0
+d = re.search( r"<!-- ripwire for doc_body:.*?-->", s, re.S ); n += len( d.group( 0 ).encode() ) if d else 0
 h = re.search( r"; (h calls capped=1 next= the call listing every callee|a hop row.s cut calls listing \(capped=1\) carries next=, the call that lists every callee)", s ); n += len( h.group( 0 ).encode() ) if h else 0
 # FIX1 N5: only a RANKED hop row cut listing (an <h> without qword=); an owner row next= predates the fold and is not exempt
 n += sum( len( x.encode() ) for x in re.findall( r" next=\x22--callees=[^\x22]*\x22", "".join( c for h, c in re.findall( r"<h ([^>]*)><calls ([^>]*)>", s ) if " qword=" not in " " + h ) ) )
@@ -226,6 +260,9 @@ elif t:
     n += sum( len( x.encode() ) for x in re.findall( r" next=\x22--expand=[^\x22]*\x22", t.group( 0 ) ) )
 n += sum( len( x.group( 0 ).encode() ) for x in re.finditer( r" mem=\x22[^\x22]*\x22( mem_more=\x22\d+\x22)?", s ) )
 c = re.search( r"; (d mem=|mem= on an owner d row:)[^;]*?mem_more= (names cut|the member names not listed)", s ); n += len( c.group( 0 ).encode() ) if c else 0
+# K-WRONGSYM: the <syms> block (legend comment + rows) is a present-only, separately allowanced append after the ranked answer (outside est_tokens);
+# the band reads the answer without it, as it reads the body-fold additions above
+r = re.search( r"<!-- (ripwire for )?syms:(?:(?!-->).)*-->(<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)", s, re.S ); n += len( r.group( 0 ).encode() ) if r else 0
 print( n )'; }
 # exempt_ok N: in THIS shell (never inside a $( ), where no()'s fail=1 would be lost) — a non-number is a FAIL and counts 0
 exempt_ok(){ case "$1" in ''|*[!0-9]*) no "(3) fold_exempt could not read an answer (got '$1')"; growth_fail=1; return 1;; esac; return 0; }
@@ -239,22 +276,31 @@ for q in "${REPO_Q[@]}"; do
     now=$(( now - ex ))   # body-fold: the band reads the answer before its fold additions
     marker="$( printf '%s' "$out" | grep -o '<sigs[^>]*>' | head -1 )"
     # forbudget-soft (stop when complete; PROCESS rule 5's stair-step target): rows served past the 7.5 KB target are disclosed
-    # (<sigs past_target="K">: the last K rows) and are what the answer needs, so the band applies to the answer WITHOUT them —
+    # (<sigs past_target="K">: K rows, the lowest in score order) and are what the answer needs, so the band applies to the answer WITHOUT them —
     # every byte over 4% must be a disclosed past-target row, or a <hops> row past the old 1,000 B allowance (decision D-3:
     # the default serves every hop row), or — forbudget-soft round C, FOLD C (owner decision 2026-10-14) — a tail PAGE row
     # (`<t p= sym=/>`: page 0 of the --for file page now rides the answer), never anything else
     past="$( printf '%s' "$out" | python3 -c '
-import re, sys
+import os, re, sys
 s = sys.stdin.read(); m = re.search( r"<sigs\b([^>]*)>(.*?)</sigs>", s, re.S )
 k = re.search( r"past_target=\"([0-9]+)\"", m.group( 1 ) ) if m else None
 rows = sorted( ( int( re.search( r"\br=\"([0-9]+)\"", d.group( 1 ) ).group( 1 ) ), len( d.group( 0 ).encode() ) )
                for d in re.finditer( r"<d ([^>]*)>.*?</d>", m.group( 2 ) if m else "", re.S ) )
 past = sum( b for _, b in rows[ len( rows ) - int( k.group( 1 ) ): ] ) if k else 0
 h = re.search( r"<hops\b.*?</hops>", s, re.S )      # D-3: the compact <hops> is no longer cut at its 1,000 B allowance
-page = sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>", s ) )   # FOLD C: the tail page rows
+page = sum( len( t.encode() ) for t in re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ) )   # FOLD C: the tail page rows (TAIL_PAGE_ROW_RE)
+# TAIL-SYM-TERMS (2026-11-14): a page row may add tsym= (task-word names after sym=) and its present-only clause; tail bytes like the rows
+for pat in ( r"; tail tsym= up to \d+ more .*?not a lens rank", r"; t tsym= up to \d+ more file symbols named by a task word \(a name match\)" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 for pat, was in ( ( r"; tail: [^\]]*?budget-trimmed row\)", 391 ), ( r"; t p= file outside sigs \(weaker\)[^;]*?r= rank \(gap = trimmed\)", 57 ) ):
     lm = re.search( pat, s )                         # …and the growth of the clause that now defines them (full 391 B / compact 57 B before)
     page += max( 0, len( lm.group( 0 ).encode() ) - was ) if lm else 0
+# FOR-TAIL-WIDE: the tail walks the file page past row 40, so it prints path-only rows (`<t p=\"…\"/>`, no sym=), the tail p_only= count
+# and the walk clause (full or compact); like the sym= page rows above, none of it is answer body the band reads
+page += sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\"/>", s ) )
+page += sum( len( x.encode() ) for x in re.findall( r" p_only=\"[0-9]+\"", s ) )
+for pat in ( r"; tail walk: .*?p_only= counts them", r"; t page rows go on to file-page row 160.*?p_only= counts them" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 print( past + page + ( max( 0, len( h.group( 0 ).encode() ) - 1000 ) if h else 0 ) )' )"
     pct="$( python3 -c "print( '%+.2f' % ( ( $now - $past - $base ) * 100.0 / $base ) )" )"
     printf '    q%-2d %-28s %5d → %5d - past-target/hops %5d (%s%%)  %s\n' "$i" "'$q'" "$base" "$now" "$past" "$pct" "$marker"
@@ -456,6 +502,7 @@ for f in range( 2 ):
 PY
 docs_arm(){ python3 -c '
 import re, sys
+budgeted = len( sys.argv ) > 1   # a budgeted state may have shed every doc-less row (then no docs_dropped=: zero is the count)
 s = sys.stdin.read()
 m = re.search( r"<sigs([^>]*)>(.*?)</sigs>", s, re.S )
 if not m: print( "FAIL no <sigs>" ); sys.exit( 1 )
@@ -463,12 +510,15 @@ rows = re.findall( r"<d [^>]*\br=\"([0-9]+)\"[^>]*>(.*?)</d>", m.group( 2 ), re.
 nodoc = [ int( r ) for r, inner in rows if "<doc>" not in inner ]
 dd = re.search( r"docs_dropped=\"([0-9]+)\"", m.group( 1 ) )
 got = int( dd.group( 1 ) ) if dd else 0
-if got != len( nodoc ) or got == 0: print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
-if "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
+if got != len( nodoc ) or ( got == 0 and not budgeted ): print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
+# AF1 (2026-11-18): the DEFAULT answer is answer-first (its legend after the rows, inside the same page); a budgeted one keeps it
+# ahead of <sigs>. Either way the reading must ride a legend COMMENT of THIS answer, which is what is checked.
+leg = "".join( re.findall( r"<!--.*?-->", s, re.S ) )
+if got > 0 and "[docs_dropped=N:" not in leg: print( "FAIL docs_dropped= rides with no legend clause in this answer" ); sys.exit( 1 )
 sh = re.search( r"shown=\"([0-9]+)\"", m.group( 1 ) ); tt = re.search( r"total=\"([0-9]+)\"", m.group( 1 ) )
 shrunk = bool( sh and tt and sh.group( 1 ) == tt.group( 1 ) )
-if shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
-print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )'; }
+if not budgeted and shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
+print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )' "$@"; }
 if v="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache 2>/dev/null | docs_arm )"; then
     case "$v" in
         # head round-robin (lane hrr): the tag may also carry files_first= (the reorder's reading; forheadrrcheck)
@@ -483,13 +533,21 @@ if [ "$jd" = "16 16" ]; then ok "(8) JSON twin: docs_dropped=16 = the rows with 
 first_capped=""
 for tb in 3400 3200 3000 2800 2600 2400 2200 2000; do
     out="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache --token-budget=$tb 2>/dev/null )"
-    v="$( printf '%s' "$out" | docs_arm )" || { no "(8) --token-budget=$tb: $v"; continue; }
+    v="$( printf '%s' "$out" | docs_arm budgeted )" || { no "(8) --token-budget=$tb: $v"; continue; }
     if [ -z "$first_capped" ] && printf '%s' "$v" | grep -q 'capped="1"'; then first_capped="$tb $v"; fi
 done
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer runs the ladder's doc shrink; it sheds the unbudgeted answer, the
+# worst-ranked rows last of all — so the first capped state cuts the doc-less r>24 rows first (shown < 40) and docs_dropped=
+# falls by the doc-less rows it cut (the loop above holds the count in every state). The old "shrunk-not-dropped" first state
+# (shown == total, docs shrunk) is the ladder's, which a budget no longer switches to.
+# shown= is parsed and must be under 40 (CodeRabbit #665: the pattern [0-9]* also matched shown="40", a shrink with no row cut)
+fc_shown="$( printf '%s' "$first_capped" | sed -n 's/.*shown="\([0-9]*\)" total="40" capped="1".*/\1/p' )"
 case "$first_capped" in
-    *'shown="40" total="40" capped="1"'*) ok "(8) the ladder's first capped state is shrunk-not-dropped and says so: --token-budget=$first_capped" ;;
-    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the shrunk arm measured nothing" ;;
-    *) no "(8) first capped state is not shrunk-not-dropped: $first_capped" ;;
+    *'shown="'[0-9]*'" total="40" capped="1"'*) if [ -n "$fc_shown" ] && [ "$fc_shown" -lt 40 ]; then
+            ok "(8) the first capped state cuts the worst-ranked rows (shown=$fc_shown < 40) and keeps docs_dropped= honest: --token-budget=$first_capped"
+        else no "(8) the first capped state cut no row (shown=${fc_shown:-?} of 40): $first_capped"; fi ;;
+    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the capped arm measured nothing" ;;
+    *) no "(8) first capped state carries no shown= total=40 capped=1: $first_capped" ;;
 esac
 
 # ── (9) A CAPPED <sigs> NAMES THE CALL THAT SERVES IT UNCUT (knob-honesty-068; PROCESS rule 5) ───────────────────
@@ -526,11 +584,11 @@ ranks = [ int( r ) for r in re.findall( r"<d [^>]*\br=\"([0-9]+)\"", m.group( 2 
 no_ = re.search( r"\snext_offset=\"([0-9]+)\"", tag ); nb_ = re.search( r"\snext_budget_tokens=\"([0-9]+)\"", tag )
 out = { "capped": "capped=\"1\"" in tag, "shown": int( sh.group( 1 ) ) if sh else len( names ), "total": int( tt.group( 1 ) ) if tt else len( names ),
         "next": nx.group( 1 ).replace( "&apos;", chr( 39 ) ).replace( "&quot;", chr( 34 ) ).replace( "&amp;", "&" ) if nx else "",
-        "clause": "[sigs next=:" in s[ : s.find( "<sigs" ) ], "names": names,
+        "clause": "[sigs next=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "names": names,
         "next_offset": int( no_.group( 1 ) ) if no_ else None, "max_r": max( ranks ) if ranks else 0,
         "next_budget_tokens": int( nb_.group( 1 ) ) if nb_ else None,
         "past_target": int( re.search( r"past_target=\"([0-9]+)\"", tag ).group( 1 ) ) if re.search( r"past_target=\"([0-9]+)\"", tag ) else 0,
-        "offset_clause": "[sigs next_offset=:" in s[ : s.find( "<sigs" ) ], "budget_clause": "[sigs next_budget_tokens=:" in s[ : s.find( "<sigs" ) ] }
+        "offset_clause": "[sigs next_offset=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "budget_clause": "[sigs next_budget_tokens=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ) }
 root = re.search( r"<ctx[^>]*>", s ); r = root.group( 0 ) if root else ""
 for k in ( "est_tokens", "budget_tokens" ):
     v = re.search( r"\b%s=\"([0-9]+)\"" % k, r ); out[ k ] = int( v.group( 1 ) ) if v else None
@@ -563,7 +621,7 @@ case "$NX1" in
     "--for='gadget assembler' --signatures-only --token-budget="[0-9]*) ok "(9) the capped <sigs> names its call: next=\"$NX1\"" ;;
     *) no "(9) the capped <sigs> carries next='$NX1' (want --for='gadget assembler' --signatures-only --token-budget=N)" ;;
 esac
-if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it ahead of <sigs>"; else no "(9) <sigs next=> rides with no legend clause"; fi
+if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it in this answer's legend"; else no "(9) <sigs next=> rides with no legend clause in this answer"; fi
 # nothing dropped, so no resume index (the explicit cut below carries one)
 if [ "$( cfield "$C1" next_offset )" = null ] && [ "$( cfield "$C1" offset_clause )" = false ]; then
     ok "(9) the default's complete head carries no next_offset= (no row was dropped)"
@@ -600,10 +658,12 @@ NX3="$( cfield "$C3" next )"
   && [ "$( cfield "$C3" shown )" -lt "$( cfield "$C3" total )" ]; } \
     && ok "(9) --token-budget=1500: the soft target's cut ($( cfield "$C3" shown ) of $( cfield "$C3" total )) carries next= and its clause, no over_ceiling" \
     || no "(9) --token-budget=1500: $C3"
-# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause
-if [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" max_r )" ] && [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" shown )" ] \
-   && [ "$( cfield "$C3" offset_clause )" = true ]; then
-    ok "(9) next_offset=\"$( cfield "$C3" next_offset )\" is the resume index: the last printed row's rank (= shown, no pseudo slot here), defined"
+# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause.
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the unbudgeted answer and keeps ranks 1..shown (the worst ranks
+# go first), so its cut carries no next_offset= (whose clause says "no consumer yet"): next= serves the block uncut (below). The
+# arm asserts that shape: no next_offset= and no clause, the kept rows exactly ranks 1..shown.
+if [ "$( cfield "$C3" next_offset )" = null ] && [ "$( cfield "$C3" offset_clause )" = false ] && [ "$( cfield "$C3" max_r )" = "$( cfield "$C3" shown )" ]; then
+    ok "(9) the budget's cut keeps ranks 1..$( cfield "$C3" shown ) and carries no next_offset= (next= is its continuation)"
 else
     no "(9) next_offset='$( cfield "$C3" next_offset )' vs last printed r=$( cfield "$C3" max_r ), shown=$( cfield "$C3" shown ), clause=$( cfield "$C3" offset_clause )"
 fi
@@ -732,8 +792,9 @@ EOF
 chmod +x "$GSHIM/git"; : > "$GSHIM/calls.log"
 out="$( cd "$TMP" && PATH="$GSHIM:$PATH" "$BIN" fxcutgit --for="gadget assembler" --no-cache --token-budget=500 2>/dev/null )"
 st="$( grep -c 'status --porcelain' "$GSHIM/calls.log" | tr -d ' ' )"
-if ! printf '%s' "$out" | grep -q '<sigs [^>]*next_offset='; then
-    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no <sigs next_offset=>): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
+# TOKEN-BUDGET-MONOTONE: the budget's row cut is named by capped="1" with shown= below total= (no next_offset= on the XML cut)
+if ! printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -1 | python3 -c 'import re,sys; t=sys.stdin.read(); s=re.search(r"shown=\"(\d+)\"",t); n=re.search(r"total=\"(\d+)\"",t); sys.exit(0 if " capped=\"1\"" in t and s and n and int(s.group(1))<int(n.group(1)) else 1)'; then
+    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no capped <sigs> with shown < total): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
 elif [ "$st" = 1 ] && printf '%s' "$out" | grep -q ' at="'; then
     ok "(10c) a budgeted, cut --token-budget run reads the git stamp once (1 status --porcelain child), and at= rides the answer"
 else
@@ -755,7 +816,12 @@ c11check(){   # LABEL BUDGET WANT ROWS TOTAL HANDLE OVER
         no "(11) $label @$bt: shown/total/handle/over = ${*:-<no output>} — want >= $want rows, a continued cut, no over_ceiling="
     fi
 }
-c11check "CLI --for" 2160 16 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the CLI --for budget sheds the UNBUDGETED answer, whose header is its own posture's (2164 B)
+# plus the shed disclosure (shed=, budget_tokens=, the clause defining the steps taken: +664 B), so at 2160 it keeps 12 of U's
+# 195 B rows (est 2119; a 13th does not fit) where the hard ceiling's tighter posture kept 16. The floor moves to 12: fewer rows
+# than that at 2160 would mean the shed cut a row it had room for. (budgetmonotonecheck (b)/(d) hold the contract itself.)
+c11out="$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null )" || no "(11) CLI --for @2160: the run exited $?"
+c11check "CLI --for" 2160 12 $( c11row "$( printf '%s' "$c11out" | cut_arm )" )
 c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
 set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), d.get("sigs_total", len(d["sigs"])), "sigs_next" in d, bool(d.get("over_ceiling")))' 2>/dev/null )

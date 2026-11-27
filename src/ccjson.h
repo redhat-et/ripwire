@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 
 
 // ccjson.h — Wave-4 feature: --export=cc.json[:FILE]. Map the per-file metrics ripwire already
@@ -174,8 +175,7 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
     {
         std::vector<std::uint32_t> outs( adj[f].begin(), adj[f].end() );
-        std::sort( outs.begin(), outs.end() );
-        outs.erase( std::unique( outs.begin(), outs.end() ), outs.end() );
+        rw::sortutil::sortUnique( outs );
         m[f].fanOut = std::uint32_t( outs.size() );
         for( std::uint32_t to : outs )
         {

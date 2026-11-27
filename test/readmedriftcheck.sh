@@ -73,7 +73,8 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-README="$ROOT/README.md"
+README_MD="$ROOT/README.md"
+REFGUIDE="$ROOT/docs/REFERENCE_GUIDE.md"
 LINEAGE="$ROOT/docs/LINEAGE.md"
 fail=0
 
@@ -81,8 +82,32 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "readmedriftcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-[ -f "$README" ] || { echo "readmedriftcheck: missing $README"; exit 2; }
+[ -f "$README_MD" ] || { echo "readmedriftcheck: missing $README_MD"; exit 2; }
+[ -f "$REFGUIDE" ] || { echo "readmedriftcheck: missing $REFGUIDE — the reference guide is half of the advertised-prose surface (README-RESTRUCTURE 2026-11-17)"; exit 2; }
 [ -f "$LINEAGE" ] || { echo "readmedriftcheck: missing $LINEAGE — arm (E) has no ground truth to check against"; exit 2; }
+
+# ── THE ADVERTISED-PROSE SURFACE (README-RESTRUCTURE, 2026-11-17) ───────────────────────────────────
+# Until 0.7.0 the reference guide was a section of README.md, and every arm below read one file. The
+# 0.7.0 front-page restructure moved the guide to docs/REFERENCE_GUIDE.md so the README leads with what
+# the tool is, why it is better and how to start. The guide's numbers did not stop being ADVERTISED when
+# they moved: §6.3's `--json` allow-list (K), §12's vendored-grammar count (R) and the Evidence-basis
+# restatement of the lineage pair and the survey figure (E2b-E2e) are published prose either way.
+#
+# So `$README` is now that PAIR, concatenated into one scratch file, and the arms read it unchanged. This
+# is a WIDENING, not a weakening: before, a count could be taken out of the comparison by moving it from
+# README.md into the guide and no arm would notice; now neither file can hide one. Where a claim must be
+# on the FRONT PAGE specifically — the lineage <summary> (H1), the recency join (H2), the prompt count
+# (I1) — those arms read README.md by name and are deliberately left alone.
+SURFTMP="$( mktemp -d )"
+README="$SURFTMP/advertised_prose.md"
+cat "$README_MD" "$REFGUIDE" > "$README"
+# Presence guard: a concatenation that silently produced less than either input would make every arm
+# below vacuous (CONTRIBUTING.md §2, "green while inert").
+if [ "$( wc -c < "$README" )" -le "$( wc -c < "$README_MD" )" ]; then
+    echo "readmedriftcheck: the advertised-prose surface is no larger than README.md alone — the concatenation failed"
+    rm -rf "$SURFTMP"; exit 2
+fi
+trap 'rm -rf "$SURFTMP"' EXIT
 
 HELP="$( "$BIN" --help=all 2>&1 )"
 
@@ -125,7 +150,7 @@ else
 fi
 
 # ── (C) mutation control — a wrong count in a COPY must be caught ───────────────────────────────────
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$SURFTMP"' EXIT
 wrong=$(( derived + 7 ))
 sed -E "s/[0-9]+ long flags advertised/${wrong} long flags advertised/" "$README" > "$TMP/README_bad.md"
 bad_stated="$( grep -oE '[0-9]+ long flags advertised' "$TMP/README_bad.md" | head -1 | grep -oE '^[0-9]+' )"
@@ -837,17 +862,23 @@ fi
 
 DATES="docs/lineage-paper-dates.tsv"
 asof="$( grep -m1 -oE 'dates as of [0-9]{4}-[0-9]{2}-[0-9]{2}|as of [0-9]{4}-[0-9]{2}-[0-9]{2}' README.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 )"
-if [ ! -r "$DATES" ]; then
-    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
-elif [ -z "$asof" ]; then
-    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
-else
-    h2="$( ASOF="$asof" DATES="$DATES" python3 - <<'PYEOF'
+# 2026-11-26 (lane LINEAGE-REFRESH): the join reads arXiv ids from the WORK column — the first cell of a
+# §1/§2 table row — and nowhere else. It used to read every id anywhere above §3, which was exact only while
+# every id sat in a Work cell: once a row's lesson cites a follow-on (a replication, a contrary study) and
+# the cited-not-given paragraph names the papers read and declined, an all-text scan counts them as FOLDED
+# papers and the README's "N of the folded papers" overstates by every follow-on. And a publication date
+# LATER than the as-of date now fails instead of counting: (asof - date).days is negative, so it used to
+# land inside both the two-month and the thirty-day windows. H2b and H2c are the controls for both.
+cat > "$TMP/h2.py" <<'PYEOF'
 import os, re, sys, datetime
 asof = datetime.date.fromisoformat(os.environ["ASOF"])
-lin  = open("docs/LINEAGE.md").read().split("## 3. The tool field")[0]
-ids  = sorted(set(re.findall(r'arXiv:(\d{4}\.\d{4,5})', lin)))
-ids26 = [i for i in ids if i.startswith("26")]
+lin  = open(os.environ.get("LIN", "docs/LINEAGE.md")).read().split("## 3. The tool field")[0]
+ids  = set()
+for row in lin.splitlines():
+    if row.startswith("|"):
+        cells = row.split("|")
+        if len(cells) > 2: ids.update(re.findall(r'arXiv:(\d{4}\.\d{4,5})', cells[1]))
+ids26 = sorted(i for i in ids if i.startswith("26"))
 dates = {}
 for line in open(os.environ["DATES"]):
     if line.startswith("#") or not line.strip(): continue
@@ -855,13 +886,16 @@ for line in open(os.environ["DATES"]):
 missing = [i for i in ids26 if i not in dates]
 if missing:
     print("FAIL no publication date for %s in %s" % (",".join(missing), os.environ["DATES"])); sys.exit(0)
+future = [i for i in ids26 if dates[i] > asof]
+if future:
+    print("FAIL publication date after the as-of date %s for %s — move the README's as-of date forward" % (asof, ",".join(future))); sys.exit(0)
 n26  = len(ids26)
 n2mo = sum(1 for i in ids26 if (asof - dates[i]).days <= 61)
 n30  = sum(1 for i in ids26 if (asof - dates[i]).days <= 30)
 rd   = open("README.md").read()
 WORD = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,
         "eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,
-        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30}
+        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"zero":0,"none":0}
 # Only NUMBER tokens may fill the slot. A bare ([a-z]+) also matches the summary line
 # "...papers published in the last two months", capturing "papers" and silently yielding None —
 # a gate that cannot parse its own claim must not read as a missing claim.
@@ -882,10 +916,36 @@ for label, got, want in (("2026 papers", s26, n26), ("last two months", s2mo, n2
 print(("FAIL " + "; ".join(bad)) if bad else
       "OK derived %d from 2026, %d in the last two months, %d in the last thirty days (as of %s)" % (n26, n2mo, n30, asof))
 PYEOF
-)"
+if [ ! -r "$DATES" ]; then
+    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
+elif [ -z "$asof" ]; then
+    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
+else
+    h2="$( ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
     case "$h2" in
         OK*) ok "(H2) recency counts re-derive from LINEAGE + $DATES: ${h2#OK }" ;;
         *)   no "(H2) recency counts do not re-derive: ${h2#FAIL }" ;;
+    esac
+    # (H2b) SCOPE control. An undated 2026 id planted in PROSE above §3 must not move the verdict; the same id
+    #       planted in a §2 Work cell must turn it red (no date entry). Without the second half a green H2b
+    #       would prove only that the planted line was never read.
+    awk '/^## 3\. The tool field/ && !d { print "Planted prose: [arXiv:2612.99999](https://arxiv.org/abs/2612.99999)."; d = 1 } { print }' docs/LINEAGE.md > "$TMP/lin_prose.md"
+    awk '/^\| \*Lost in the Middle\*/ && !d { sub( /^\| /, "| [arXiv:2612.99999](https://arxiv.org/abs/2612.99999) " ); d = 1 } { print }' docs/LINEAGE.md > "$TMP/lin_cell.md"
+    h2p="$( LIN="$TMP/lin_prose.md" ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
+    h2c="$( LIN="$TMP/lin_cell.md"  ASOF="$asof" DATES="$DATES" python3 "$TMP/h2.py" )"
+    if [ "$h2p" = "$h2" ] && [ "${h2c#FAIL no publication date for 2612.99999}" != "$h2c" ]; then
+        ok "(H2b) scope control: a 2026 id planted in prose is not counted; the same id in a Work cell is caught"
+    else
+        no "(H2b) scope control failed — prose plant: '${h2p:0:80}' / Work-cell plant: '${h2c:0:80}'"
+    fi
+    # (H2c) FUTURE-DATE control: the newest dated id moved one day past the as-of date must turn H2 red.
+    newest="$( grep -v '^#' "$DATES" | sort -k2 | tail -1 | cut -f1 )"
+    nextday="$( python3 -c "import datetime,sys; print(datetime.date.fromisoformat(sys.argv[1]) + datetime.timedelta(days=1))" "$asof" )"
+    awk -v id="$newest" -v nd="$nextday" 'BEGIN { OFS = "\t" } $1 == id { $2 = nd } { print }' "$DATES" > "$TMP/dates_future.tsv"
+    h2f="$( ASOF="$asof" DATES="$TMP/dates_future.tsv" python3 "$TMP/h2.py" )"
+    case "$h2f" in
+        "FAIL publication date after the as-of date"*) ok "(H2c) future-date control: $newest dated $nextday (one day past $asof) is refused" ;;
+        *) no "(H2c) future-date control did not fire — $newest dated $nextday read as: ${h2f:0:120}" ;;
     esac
 fi
 
@@ -1055,7 +1115,7 @@ fi
 k_help="$( "$BIN" --help=--json 2>&1 | tr '\n' ' ' | tr -s ' ' )"
 k_allow="${k_help%%ALLOW-list*}"          # stop before the text that names the REFUSED verbs
 k_allow="${k_allow#*supported for}"       # start at the allow-list itself
-KTMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$KTMP"' EXIT
+KTMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$KTMP" "$SURFTMP"' EXIT
 printf '%s' "$k_allow" | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$KTMP/bin.txt"
 
 r_json="$( tr '\n' ' ' < "$README" | tr -s ' ' )"
@@ -1141,6 +1201,36 @@ else
         else
             no "(L3) mutation control: injecting a wrong cap count changed nothing the check can see — (L2) is vacuous"
         fi
+    fi
+fi
+
+# ── (R) the vendored-grammar count (README-GRAMMAR-COUNT, 2026-11-13). After proto landed README.md said 27 grammars in its
+# Languages section and 26 in a <summary> line. Every CURRENT-STATE spelling of the count must equal the binary's own grammar
+# table (--doctor's grammars row, expected=); a release note's count ("Kotlin and Dart bring it to 24") is history and is not
+# one of the spellings read. R0 counts the spellings (zero is a FAIL: the patterns no longer match the prose), R2 is (R1)'s
+# mutation control.
+r_tmp="$( mktemp -d )"
+r_doctor="$( PATH="$( cd "$( dirname "$BIN" )" && pwd ):$PATH" "$BIN" "$r_tmp" --doctor 2>/dev/null )"   # status: --doctor exits 1 on any red row; the grammars row's expected= is the verdict, and none FAILs (R0)
+r_expected="$( printf '%s' "$r_doctor" | grep -oE '<c n="grammars"[^>]*>' | sed -nE 's/.* expected="([0-9]+)".*/\1/p' )"
+rm -rf "$r_tmp"
+r_stated="$( grep -oE '<b>[0-9]+</b> vendored grammars|vendors [0-9]+ tree-sitter grammars|two of the [0-9]+ grammars' "$README" | grep -oE '[0-9]+' )"
+r_n="$( printf '%s\n' "$r_stated" | grep -c . )"
+if [ -z "$r_expected" ]; then
+    no "(R0) --doctor printed no grammars row with expected= — the grammar count cannot be derived"
+elif [ "$r_n" -lt 3 ]; then
+    no "(R0) found $r_n of the 3 current-state grammar-count spellings in README.md — the patterns no longer match its prose"
+else
+    ok "(R0) README.md spells the vendored-grammar count $r_n times; the binary's grammar table has $r_expected"
+    r_bad="$( printf '%s\n' "$r_stated" | grep -vxF "$r_expected" | tr '\n' ' ' )"
+    if [ -z "$r_bad" ]; then
+        ok "(R1) every current-state grammar count in README.md equals the binary's $r_expected"
+    else
+        no "(R1) README.md states grammar count(s) $r_bad where the binary's grammar table has $r_expected"
+    fi
+    if printf '%s\n' "$r_stated" "$(( r_expected + 1 ))" | grep -vxqF "$r_expected"; then
+        ok "(R2) mutation control: a fabricated count ($(( r_expected + 1 ))) is seen as disagreeing with $r_expected"
+    else
+        no "(R2) mutation control: a fabricated count is not seen — (R1) is vacuous"
     fi
 fi
 

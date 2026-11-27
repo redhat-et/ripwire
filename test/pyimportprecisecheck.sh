@@ -111,7 +111,8 @@ monotonic_check
 
 # #358 Python capture slice. Expectations below were read from pristine main, not from the new
 # query: ONE Include per statement (first clause), but bindings for EVERY named/aliased clause.
-# Aliased plain imports keep their whole written clause in --deps; cleaning it is a separate change.
+# An aliased first clause records its bare module (#478 gap 2): these pins read `a as aa` / `a as local` / `a.b as c`
+# until that fix, which moved them on purpose. The #478 gap 2 arms at the end of this gate say why.
 PC="$TMP/captures"; mkdir -p "$PC/pkg"
 cat >"$PC/main.py" <<'PY'
 import a, b
@@ -164,9 +165,9 @@ if python3 - "$TMP/pc.deps" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in root.findall('f')}
-want = ['a', 'a as aa', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
-        'b', 'pkg.mod', 'a', 'b', 'a as local']
-assert rows == {'main.py': want, 'typing.pyi': ['a as aa', 'pkg.mod'], 'broken.py': ['a']}, rows
+want = ['a', 'a', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
+        'b', 'pkg.mod', 'a', 'b', 'a']
+assert rows == {'main.py': want, 'typing.pyi': ['a', 'pkg.mod'], 'broken.py': ['a']}, rows
 PY
 then ok '#358: exact first-clause, alias, from, relative, wildcard, nested and .pyi targets; ERROR import stays out'
 else no '#358: Python target set/order differs from pristine main'
@@ -205,7 +206,7 @@ if python3 - "$TMP/pn.fresh" "$TMP/pn.bin" "$ROOT" <<'PY'
 import copy, pathlib, re, struct, sys, xml.etree.ElementTree as ET
 from collections import Counter
 
-# readFileRecord/writeBind in ingest_cache.h, lean cache v48 (train 42b: 46 -> 48, lane alias-import's appended LocalBindKind::ReExport (its placeholder 47), a TS/JS record no Python fixture writes, layout unchanged; train 40: 44 -> 46 for lane js-def-naming, its PLACEHOLDER 45: appended LocalBindKind::JsObjectLiteral, a JS/TS record no Python fixture writes, layout unchanged; train 37b: 43 -> 44, lane rust-degraded: FileHealth gains useBoundsBlanked, a sixth u32 (the walker below skips 6 * 4); train 36: 40 -> 43, #155 appends a `trailingLambda` u8 to every RawRef after `forwarded`, taken below; train 34: 39 -> 40 appended LocalBindKind::JsRebind only, a JS/TS record no Python fixture writes; train 33: 38 -> 39 moved the number only, above every live 38; lane l6-iface fix round 1: 37 -> 38 appended LocalBindKind::ImplBlock only;
+# readFileRecord/writeBind in ingest_cache.h, lean cache v55 (lane tangle-rule: 54 -> 55, a DEF record gains maxBlock10 u32 + cross u8 after nestArmCut, a record this lean fixture never holds, walked layout unchanged; lane qd-tangle, train ge2: 53 -> 54, a DEF record gains steer u8 + deepDispatch u32 + nestArmCut u8 after maxNest, a record this lean fixture never holds, walked layout unchanged; lane rust-self-chain, train 1117d2: 52 -> 53, LocalBindKind::RecvCall appended (readBind's kind bound moves), a Rust record no Python fixture writes, walked rows and layout unchanged; lane failure-default, TRAIN-1111h: 51 -> 52, the construct-hit tag table gains an appended failure-default tag value, walked rows and layout unchanged; lane qd-constructs: 50 -> 51, the record head gains a ninth family count and the record ends with the construct-hit family, both taken below; lane clones-persist: 49 -> 50, a DEF record ends with a clone-key presence u8 (+ the u64 key), a record this lean fixture never holds, layout of the walked records unchanged; lane warm-direct: 48 -> 49, the record head gains the eight family counts after FileHealth, taken below; train 42b: 46 -> 48, lane alias-import's appended LocalBindKind::ReExport (its placeholder 47), a TS/JS record no Python fixture writes, layout unchanged; train 40: 44 -> 46 for lane js-def-naming, its PLACEHOLDER 45: appended LocalBindKind::JsObjectLiteral, a JS/TS record no Python fixture writes, layout unchanged; train 37b: 43 -> 44, lane rust-degraded: FileHealth gains useBoundsBlanked, a sixth u32 (the walker below skips 6 * 4); train 36: 40 -> 43, #155 appends a `trailingLambda` u8 to every RawRef after `forwarded`, taken below; train 34: 39 -> 40 appended LocalBindKind::JsRebind only, a JS/TS record no Python fixture writes; train 33: 38 -> 39 moved the number only, above every live 38; lane l6-iface fix round 1: 37 -> 38 appended LocalBindKind::ImplBlock only;
 # lane l6-iface: 36 -> 37 appended LocalBindKind::DispatchType only, no
 # record layout change; train renumbers) (train 30: 34 -> 36 moved the number only, above three lanes'
 # 33/33/35; name-template-dispatch: 32 -> 35 appended RefRole::Pattern = 11 only; fcall-forward: a RawRef appends the `forwarded` u8 after memberFactory; call-result-typing: a bind record gains two u8 after isFromAssignment, resultIndex and unwrapDepth, which a
@@ -214,7 +215,7 @@ from collections import Counter
 # string searches: walk the counted arrays and require complete file coverage, clean parse health and exact EOF.
 blob = pathlib.Path(sys.argv[2]).read_bytes()
 endian = '<' if sys.byteorder == 'little' else '>'
-assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 48, 'update the cache walker for a new layout'
+assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 55, 'update the cache walker for a new layout'
 table, count = struct.unpack_from(endian + 'QI', blob, len(blob) - 24)
 assert count == 5 == struct.unpack_from(endian + 'I', blob, 21)[0], 'all five fixtures must be cached'
 assert table + count * 32 == len(blob) - 24, 'cache table bounds'
@@ -238,6 +239,7 @@ for i in range(count):
     take(4 * 8)  # content hash and size/mtime/ctime
     health = struct.unpack(endian + '6I', take(6 * 4))   # v44: + useBoundsBlanked (0: no Python file is re-parsed)
     assert health[0] == health[1] == health[5] == 0 and health[2] > 0, (path, 'fixture must parse cleanly', health)
+    take(9 * 4)  # v49: the head copy of the family counts (each family's own count follows below); v51: nine, + construct hits
     assert number('I') == 0, 'lean fixture must contain no definitions/dictionary'
     for _ in range(number('I')):  # RawRef: only its variable-length strings affect the walk
         take(5); string(); inherit = take(2)[0]; string(); take(1); string(); take(1)
@@ -259,6 +261,7 @@ for i in range(count):
         binds.append((string(), string(), string(), byte, lang, kind, assignment, spans))
     for _ in range(4):  # FFI aliases, route defs/uses, const-opens: absent in this Python fixture
         assert number('I') == 0, 'unexpected auxiliary fact'
+    take(number('I') * 9)  # v51: --quality-delta construct hits (startByte, line u32; tag u8), fixed size
     assert pos == end, (path, 'cache walker desynchronised')
     facts[path] = (incs, binds)
 
@@ -278,7 +281,7 @@ want = {
     'future.py': ([], []),
     'builtin_call.py': ([], []),
     'importlib_call.py': ([include('importlib')], [bind('importlib', 'importlib', 'module')]),
-    'dotted.py': ([include('a.b as c')], [bind('c', 'a.b', 'module')]),
+    'dotted.py': ([include('a.b')], [bind('c', 'a.b', 'module')]),
     # HISTORY (lane ind4b, fix 5 -> fix 6): the Import RawBind of an ALIASED from-import used to carry importedName '' (no marker); fix 5
     # records the member's own name for it, 'from:a' (kPythonFromMemberMark + a), so `from . import a as b` + `b.Base` can be read as the
     # submodule a. The change is on purpose, not erosion: the pin still asserts the exact value (a wrong or missing marker fails, see the
@@ -398,5 +401,209 @@ if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
 else
     skip '#358: pristine-main cache compatibility (set RIPWIRE_BASE_BIN)'
 fi
+
+# #478 gap 1: `from pkg import mod` depends on pkg/mod.py, not only on pkg/__init__.py. The from-import's ONE Include names the
+# package (`pkg`, `.`, `..`, `.sub2`), so the edge to the submodule a member names was lost — and with it Ce/Ca, cycles and the
+# importer tiers of every view on the file graph. The wide form (any `from pkg import mod`), with the bare `from . import x` as
+# one case of it. Each member file below has exactly ONE importer shape, so its afferent= is that shape's edge alone, and every
+# negative is a near miss: the alias's own name has a file (pkg/m.py), a class name has a case-folded namesake (pkg/someclass.py),
+# a stdlib member has a root namesake (path.py), and a member that is both pkg/dup.py and pkg/dup/__init__.py is ambiguous.
+PB="$TMP/pymember"; mkdir -p "$PB/pkg/sub" "$PB/pkg/dup" "$PB/rel/inner" "$PB/rel/sub2" "$PB/ns"
+printf 'class SomeClass:\n    pass\n' >"$PB/pkg/__init__.py"
+for m in mod aliased m ma someclass fn_mod dup; do printf 'def pym_%s():\n    return 1\n' "$m" >"$PB/pkg/$m.py"; done
+printf 'def helper():\n    return 1\n' >>"$PB/pkg/mod.py"
+printf 'def helper():\n    return 2\n' >>"$PB/pkg/ma.py"
+: >"$PB/pkg/sub/__init__.py"; : >"$PB/pkg/dup/__init__.py"
+: >"$PB/rel/__init__.py"; : >"$PB/rel/inner/__init__.py"; : >"$PB/rel/sub2/__init__.py"
+for f in rel/sib rel/up rel/sub2/leaf ns/b path; do printf 'def pym_leaf():\n    return 1\n' >"$PB/$f.py"; done
+printf 'from pkg import mod\n\n\ndef pym_use_wide():\n    return helper()\n' >"$PB/wide.py"
+printf 'from pkg import aliased as m\n' >"$PB/aliasm.py"
+printf 'from pkg import ma, sub\n' >"$PB/multi.py"
+printf 'from pkg import SomeClass\n' >"$PB/klass.py"
+printf 'from pkg import *\n' >"$PB/star.py"
+printf 'from os import path\n' >"$PB/ext.py"
+printf 'from pkg import dup\n' >"$PB/dupuser.py"
+printf 'def pym_fn():\n    from pkg import fn_mod\n    return fn_mod\n' >"$PB/fnimp.py"
+printf 'from . import sib\n' >"$PB/rel/user.py"
+printf 'from .. import up\n' >"$PB/rel/inner/deep.py"
+printf 'from .sub2 import leaf\n' >"$PB/rel/s2user.py"
+printf 'from . import b\n' >"$PB/ns/a.py"
+"$BIN" "$PB" --deps --no-cache >"$TMP/pb.deps" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pb.deps"; then
+    no "#478 gap 1: --deps on the member fixture did not run (rc=$rc)"
+else
+    if python3 - "$TMP/pb.deps" >"$TMP/pb.verdict" 2>&1 <<'PY'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+god = root.find('godfiles')
+assert god is not None and god.get('capped') == '0', 'godfiles absent or capped: every afferent row must be visible'
+aff = {f.get('p'): int(f.get('afferent')) for f in god.findall('f')}
+# base edges: the seven `from pkg import …` statements hit pkg/__init__.py, the two relative ones rel/__init__.py, `.sub2` its own.
+want = {'pkg/__init__.py': 7, 'rel/__init__.py': 2, 'rel/sub2/__init__.py': 1,
+        'pkg/mod.py': 1, 'pkg/aliased.py': 1, 'pkg/ma.py': 1, 'pkg/sub/__init__.py': 1, 'pkg/fn_mod.py': 1,
+        'rel/sib.py': 1, 'rel/up.py': 1, 'rel/sub2/leaf.py': 1, 'ns/b.py': 1}
+assert aff == want, ('afferent', {k: (aff.get(k), want.get(k)) for k in sorted(set(aff) | set(want)) if aff.get(k) != want.get(k)})
+cone = {f.get('p'): int(f.get('transitive')) for f in root.findall('f')}
+for p, n in {'wide.py': 3, 'multi.py': 4, 'klass.py': 2, 'star.py': 2, 'ext.py': 1, 'dupuser.py': 2, 'ns/a.py': 2,
+             'rel/user.py': 3, 'rel/inner/deep.py': 3, 'rel/s2user.py': 3, 'fnimp.py': 3, 'aliasm.py': 3}.items():
+    assert cone.get(p) == n, ('transitive', p, cone.get(p), n)
+PY
+    then ok '#478 gap 1: member edges for wide, aliased (from:aliased, not m), multi-clause, subpackage, function-level, `.`, `..`, `.sub2` and namespace-package from-imports; none for a class, `*`, stdlib, or an ambiguous member'
+    else no "#478 gap 1: member edges wrong: $( tail -1 "$TMP/pb.verdict" )"
+    fi
+fi
+# A member edge is a DEPENDENCY, not import evidence for a bare call (the Include::isValueUse rule): `from pkg import mod` makes no
+# name of mod visible bare, so wide.py's helper() — defined in both pkg/mod.py and pkg/ma.py — must stay declined, as on main.
+"$BIN" "$PB" --callees=pym_use_wide --no-cache --legend=compact >"$TMP/pb.callees" 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<callees [^>]*count="0"' "$TMP/pb.callees" && grep -q 'declined_calls="1"' "$TMP/pb.callees"; then
+    ok '#478 gap 1 rule 3: a member edge does not bind a bare call (wide.py helper() stays declined)'
+else
+    no "#478 gap 1 rule 3: the member edge changed call binding or the run failed (rc=$rc): $( sed 's/<!--[^>]*-->//' "$TMP/pb.callees" )"
+fi
+
+# #533 review: the importer each member edge resolves TO, not only the counts — `--impact=FILE` lists a file's importers, so a
+# swap of wide.py's pkg/mod.py edge with multi.py's pkg/ma.py edge (same afferent=, same cones) fails here.
+# imp ROOT... FILE: one root, or several for a multi-root workspace (FILE is then root-labeled, rb/pkg/mod.py). A run that fails
+# (rc != 0, or no <impact> answer) must never read as "no importers": an empty list is what the negative arms want. So it prints
+# IMPERR(...) in place of the list, which no arm accepts, and logs the call to $TMP/imp.err, which fails the gate at the end
+# (imp runs in a $( ) subshell, so it cannot set fail itself). #533 review (CodeRabbit, round 2).
+imp(){
+    local tgt="${!#}" out rc
+    echo "$tgt" >>"$TMP/imp.calls"
+    out="$( "$BIN" "${@:1:$#-1}" --impact="$tgt" --no-cache --legend=compact 2>/dev/null )"; rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -q '<impact ' <<<"$out"; then
+        printf 'imp %s: rc=%s, impact answer %s\n' "$tgt" "$rc" "$( grep -q '<impact ' <<<"$out" && echo present || echo absent )" >>"$TMP/imp.err"
+        printf 'IMPERR(rc=%s) ' "$rc"; return 0
+    fi
+    grep -oE '<f p="[^"]*"' <<<"$out" | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '
+}
+IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
+if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then
+    ok '#478 gap 1 targets: pkg/mod.py is imported by wide.py alone, pkg/ma.py by multi.py alone'
+else no "#478 gap 1 targets: pkg/mod.py <- [$IW], pkg/ma.py <- [$IM]"; fi
+# #533 review: the member lookup is confined to the package that resolved. Python reads `from pkg import m` as pkg's own m, so:
+#   - pkg resolved to <D>/__init__.py → only <D>/m.py or <D>/m/__init__.py; a different root's pkg/m.py is never the member
+#     (app/pkg/fromuser.py: `from pkg import helper` names app/pkg/__init__.py's def, NOT pkg/helper.py);
+#   - pkg resolved to a plain module (util.py beside a util/ directory) → the module wins at import time: no member edge;
+#   - the confined probe still finds the member it should (app/pkg/user2.py → app/pkg/real.py, with a pkg/real.py namesake).
+# And two shapes the member edge must survive: an import under `if TYPE_CHECKING:` and one inside try/except ImportError.
+PC="$TMP/pyconfine"; mkdir -p "$PC/app/pkg" "$PC/pkg" "$PC/util" "$PC/pkg2"
+printf 'def helper():\n    return 1\n' >"$PC/app/pkg/__init__.py"
+printf 'from pkg import helper\n' >"$PC/app/pkg/fromuser.py"
+printf 'from pkg import real\n' >"$PC/app/pkg/user2.py"
+: >"$PC/pkg/__init__.py"; : >"$PC/pkg2/__init__.py"
+for f in app/pkg/real pkg/helper pkg/real util util/x pkg2/tcmod pkg2/trymod; do printf 'def pyc_leaf():\n    return 1\n' >"$PC/$f.py"; done
+printf 'from util import x\n' >"$PC/utiluser.py"
+printf 'from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from pkg2 import tcmod\n' >"$PC/tc.py"
+printf 'try:\n    from pkg2 import trymod\nexcept ImportError:\n    trymod = None\n' >"$PC/tryimp.py"
+CH="$( imp "$PC" pkg/helper.py )"; CU="$( imp "$PC" util/x.py )"; CR="$( imp "$PC" app/pkg/real.py )"; CR2="$( imp "$PC" pkg/real.py )"
+if [ "$CH" = "" ] && [ "$CU" = "" ]; then
+    ok '#533 confine: no member edge from another root (pkg/helper.py) or through a plain module (util.py beside util/x.py)'
+else no "#533 confine: pkg/helper.py <- [$CH], util/x.py <- [$CU] (both must be empty)"; fi
+if [ "$CR" = "app/pkg/user2.py " ] && [ "$CR2" = "" ]; then
+    ok '#533 confine twin: the resolved package'"'"'s own member is found (app/pkg/real.py), its other-root namesake is not'
+else no "#533 confine twin: app/pkg/real.py <- [$CR], pkg/real.py <- [$CR2]"; fi
+# #533 review (round 2): a name that is BOTH bound in pkg/__init__.py and a sibling pkg/<name>.py still draws the member edge, and
+# the package edge stays. `from pkg3 import both` loads pkg3 (whose __init__ defines both()) and, in the usual case, that binding is
+# the package re-exporting its own submodule, so the dependency on pkg3/both.py is real; the edge is drawn by design, not by accident.
+mkdir -p "$PC/pkg3"
+printf 'def both():\n    return 1\n' >"$PC/pkg3/__init__.py"
+printf 'def pyc_both():\n    return 1\n' >"$PC/pkg3/both.py"
+printf 'from pkg3 import both\n' >"$PC/bothuser.py"
+CB="$( imp "$PC" pkg3/both.py )"; CBI="$( imp "$PC" pkg3/__init__.py )"
+if [ "$CB" = "bothuser.py " ] && [ "$CBI" = "bothuser.py " ]; then
+    ok '#533 init-and-sibling: a name both bound in pkg3/__init__.py and a file pkg3/both.py draws the member edge and keeps the package edge'
+else no "#533 init-and-sibling: pkg3/both.py <- [$CB], pkg3/__init__.py <- [$CBI] (both must be bothuser.py)"; fi
+CT="$( imp "$PC" pkg2/tcmod.py )"; CY="$( imp "$PC" pkg2/trymod.py )"
+if [ "$CT" = "tc.py " ] && [ "$CY" = "tryimp.py " ]; then
+    ok '#478 gap 1 shapes: a member import under `if TYPE_CHECKING:` and inside try/except ImportError keeps its edge'
+else no "#478 gap 1 shapes: pkg2/tcmod.py <- [$CT], pkg2/trymod.py <- [$CY]"; fi
+
+# #533 review (CodeRabbit, round 2): in a multi-root workspace the member probe is anchored at the PACKAGE's root, not the importer's.
+# pkgDir is the package's labeled dir (rb/pkg), so probing it with the importer's identity rejected root rb's own rb/pkg/mod.py as a
+# cross-root hit and fell back to the importer's disk directory, where root ra's same-path ra/rb/pkg/mod.py won: the real member
+# edge was lost and a false one drawn. Premise: the package edge itself resolves across the roots (ra/user.py → rb/pkg/__init__.py).
+MR="$TMP/pymultiroot"; mkdir -p "$MR/ra/rb/pkg" "$MR/rb/pkg"
+printf 'from ..rb.pkg import mod\n' >"$MR/ra/user.py"
+: >"$MR/rb/pkg/__init__.py"
+printf 'def pymr_member():\n    return 1\n' >"$MR/rb/pkg/mod.py"
+printf 'def pymr_decoy():\n    return 2\n' >"$MR/ra/rb/pkg/mod.py"
+MP="$( imp "$MR/ra" "$MR/rb" rb/pkg/__init__.py )"; MM="$( imp "$MR/ra" "$MR/rb" rb/pkg/mod.py )"; MD="$( imp "$MR/ra" "$MR/rb" ra/rb/pkg/mod.py )"
+if [ "$MP" != "ra/user.py " ]; then
+    no "#533 multi-root premise: the package edge did not resolve across roots (rb/pkg/__init__.py <- [$MP]), so the member arm saw nothing"
+elif [ "$MM" = "ra/user.py " ] && [ "$MD" = "" ]; then
+    ok '#533 multi-root: the member edge lands in the package'"'"'s root (rb/pkg/mod.py), not on the importer root'"'"'s same-path ra/rb/pkg/mod.py'
+else no "#533 multi-root: rb/pkg/mod.py <- [$MM] (want ra/user.py), ra/rb/pkg/mod.py <- [$MD] (want empty)"; fi
+
+# #478 gap 2: an aliased plain import records the MODULE as its Include target. tree-sitter-python's import_statement
+# carries name:(dotted_name|aliased_import), and the first-clause capture read the whole aliased_import span, so
+# `import pkg.mod as pm` recorded `pkg.mod as pm`: no resolver finds that module, and the file lost its edge in --deps,
+# --arch, cycles and the Rule 3 call narrow. Arms and fixture shapes ported from joyful-ii-V-I's pyaliasincludecheck
+# (46bfa131, lane/py-alias-include-target, written against the pre-#382 walk); the multi-clause and one-segment rows
+# are new. pkg/mod.py and other/mod.py both define pyai_helper, so a bare call to it binds only through the include.
+PA="$TMP/pyalias"; mkdir -p "$PA/pkg" "$PA/other"
+: >"$PA/pkg/__init__.py"; : >"$PA/other/__init__.py"
+printf 'def pyai_helper():\n    return 1\n' >"$PA/pkg/mod.py"
+printf 'def pyai_helper():\n    return 2\n' >"$PA/other/mod.py"
+printf 'def pyai_single():\n    return 3\n' >"$PA/single.py"
+printf 'import pkg.mod as pm\nimport os.path as osp\n\n\ndef pyai_caller_aliased():\n    return pyai_helper() + len( osp.sep )\n' >"$PA/aliased.py"
+printf 'import pkg.mod\n\n\ndef pyai_caller_plain():\n    return pyai_helper()\n' >"$PA/plain.py"
+printf 'from pkg.mod import pyai_helper as h\n\n\ndef pyai_caller_from():\n    return h()\n' >"$PA/fromimp.py"
+printf 'import pkg.mod as pm, os.path\n' >"$PA/multi.py"
+printf 'import single as s\n' >"$PA/onesegment.py"
+printf 'import as_x\n' >"$PA/asname.py"
+printf 'def as_x_fn():\n    return 4\n' >"$PA/as_x.py"
+"$BIN" "$PA" --deps --no-cache >"$TMP/pa.deps" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pa.deps"; then
+    no "#478 gap 2: --deps on the alias fixture did not run (rc=$rc)"
+else
+    if python3 - "$TMP/pa.deps" <<'PY'
+import sys, xml.etree.ElementTree as ET
+rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in ET.parse(sys.argv[1]).getroot().findall('f')}
+want = {'aliased.py': ['pkg.mod', 'os.path'], 'plain.py': ['pkg.mod'], 'fromimp.py': ['pkg.mod'],
+        'multi.py': ['pkg.mod'], 'onesegment.py': ['single'], 'asname.py': ['as_x']}
+got = {p: rows.get(p) for p in want}
+assert got == want, got
+assert not any(' as ' in t for ts in rows.values() for t in ts), rows
+PY
+    then ok '#478 gap 2: aliased, multi-clause and one-segment targets are the bare module; `import as_x` unchanged; no `… as …` row'
+    else no "#478 gap 2: alias targets wrong: $( grep -oE '<inc t="[^"]*"' "$TMP/pa.deps" | sort | uniq -c | tr '\n' ' ' )"
+    fi
+    # afferent counts edge occurrences: plain + fromimp (controls) + aliased + multi (the fix) = 4.
+    grep -q '<f p="pkg/mod.py" afferent="4"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: pkg/mod.py afferent="4" (plain + from-import + aliased + aliased-first multi-clause)' \
+        || no "#478 gap 2: pkg/mod.py afferent wrong: $( grep -oE '<f p="pkg/mod.py"[^>]*>' "$TMP/pa.deps" )"
+    grep -q '<f p="single.py" afferent="1"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: one-segment `import single as s` resolves (single.py afferent="1")' \
+        || no "#478 gap 2: single.py afferent wrong: $( grep -oE '<f p="single.py"[^>]*>' "$TMP/pa.deps" )"
+    # transitive= is the file's resolved cone: itself + pkg/mod.py = 2 (os.path is external). It read 1 while the
+    # aliased target resolved to nothing.
+    grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" | grep -q 'transitive="2"' \
+        && ok '#478 gap 2: aliased.py transitive="2" (itself + pkg/mod.py; os.path is external)' \
+        || no "#478 gap 2: aliased.py cone wrong: $( grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" )"
+fi
+"$BIN" "$PA" --callers=pkg/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.callers" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<callers ' "$TMP/pa.callers"; then
+    no "#478 gap 2: --callers did not run (rc=$rc)"
+else
+    grep -q 'n="pyai_caller_aliased" p="aliased.py:5"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3: aliased.py:pyai_caller_aliased binds pkg/mod.py:pyai_helper through the include' \
+        || no "#478 gap 2 rule 3: pyai_caller_aliased is not a caller of pkg/mod.py:pyai_helper: $( cat "$TMP/pa.callers" )"
+    grep -q 'n="pyai_caller_plain" p="plain.py:4"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3 control: plain.py:pyai_caller_plain binds pkg/mod.py:pyai_helper' \
+        || no "#478 gap 2 rule 3 control: pyai_caller_plain lost its edge: $( cat "$TMP/pa.callers" )"
+fi
+"$BIN" "$PA" --callers=other/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.other" 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<callers [^>]*count="0"' "$TMP/pa.other"; then
+    ok '#478 gap 2 rule 3 negative: the decoy other/mod.py:pyai_helper has no caller'
+else
+    no "#478 gap 2 rule 3 negative: decoy gained a caller or the run failed (rc=$rc): $( cat "$TMP/pa.other" )"
+fi
+
+# every imp call above ran and answered (see imp): one that did not is a FAIL even where its arm compared equal.
+NIMP="$( wc -l <"$TMP/imp.calls" 2>/dev/null | tr -d ' ' )"
+if [ "${NIMP:-0}" -eq 0 ]; then no "imp premise: no --impact call was counted (the importer arms saw nothing)"
+elif [ -s "$TMP/imp.err" ]; then while IFS= read -r l; do no "imp: --impact did not answer: $l"; done <"$TMP/imp.err"
+else ok "imp: all $NIMP --impact calls exited 0 with an <impact> answer"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

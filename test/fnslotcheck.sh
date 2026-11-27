@@ -11,6 +11,8 @@
 #   A4 [P] the callees side lists the slot call and its 3 targets;  A5 [G] count= stays 0 (never a proven call)
 #   B1 [P] a method value `f = b.opPlan` of the receiver, called through f in a closure: called_by=Operation
 #   N1 [G] `f = other.opPlan` (a parameter, not the receiver) makes no row for Remote.opPlan
+#   M1 [P] a METHOD EXPRESSION `fn := (*Replica).executeReadOnlyBatch` is a value row of Replica's method (GO-METHOD-EXPR);  M2 [G] never
+#          of Mirror's same-named method, and `(*p).m` on a parameter p makes no row
 #   N2 [G] a field named like a Go METHOD (`h.Close()` beside `(*File).Close`) is no slot call
 #   N3 [G] a map literal value is no field slot
 #   N4 [G] two same-named registrars in two packages: the bare call `Reg( ambiguous )` binds its OWN package's registrar (fix1 F-1:
@@ -126,6 +128,17 @@
 #
 # Usage: bash test/fnslotcheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -164,6 +177,10 @@ has   "B1 a method value of the receiver, called through the local in a closure"
 hasnt "N1b and no row binds it to the receiver's type either" "$o" 'bind="local/backend.go:19"'
 o="$( run --callers=Remote.opPlan )"
 hasnt "N1 a method value of a non-receiver parameter makes no row" "$o" '<vr '
+o="$( run --callers=Replica.executeReadOnlyBatch )"
+has   "M1 a method expression (*Replica).m stored in a local is a value row of Replica's method (GO-METHOD-EXPR)" "$o" 'in_id="dispatch" bind="local/mexpr.go:15" into="fn"'
+o="$( run --callers=Mirror.executeReadOnlyBatch )"
+hasnt "M2 never a same-named method of another type, nor (*p).m on a parameter p (its type is not read)" "$o" '<vr '
 o="$( run --callers=closeHook )"
 has   "N2a the stored value still prints" "$o" 'into="hooks.Close"'
 hasnt "N2 a field named like a Go method is no slot call" "$o" 'called_by='

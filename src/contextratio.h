@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -69,6 +70,7 @@
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "serialize.h"   // escapeXml, tokensForEmittedBytes, kBytesPerTokenBody — the one body-token rate
 #include "pageview.h"    // pageWindow + effectiveRowCap + pagingDisclosure — THE TRUNCATION VOCABULARY
+#include "infra/hashutil.h" // packPair — the sortable (unit, other) key
 #include "smallvec.h"          // rw::SmallVec — the small-vector the byName id-lists use in graph.h too
 
 #include <algorithm>
@@ -143,10 +145,7 @@ namespace detail
 
 // Pack a (unit, other) fact into one sortable u64. Sorting these is what makes the whole verb
 // deterministic: nothing downstream ever iterates a hash container.
-inline std::uint64_t packPair( std::uint32_t unit, std::uint32_t other ) noexcept
-{
-    return ( std::uint64_t( unit ) << 32 ) | std::uint64_t( other );
-}
+using hashutil::packPair;   // infra/hashutil.h: ( unit << 32 ) | other
 
 // The six raw fact streams ONE reference pass produces, before they are sorted, deduplicated and folded.
 // Named as a struct rather than six out-parameters so the pass and the fold agree on the set by type: a
@@ -198,8 +197,7 @@ inline void foldEntityPairs( const std::vector<std::uint64_t>& pairs, const Inge
             }
             ++scan;
         }
-        std::sort( entFiles.begin(), entFiles.end() );
-        entFiles.erase( std::unique( entFiles.begin(), entFiles.end() ), entFiles.end() );
+        rw::sortutil::sortUnique( entFiles );
         row.files = std::uint32_t( entFiles.size() );
         for( const std::uint32_t fileId : entFiles )
         {
@@ -412,8 +410,7 @@ inline Scan computeContextRatio( const IngestResult& ing )
     for( std::vector<std::uint64_t>* stream : { &facts.symEnt, &facts.fileEnt, &facts.symExt,
                                                 &facts.fileExt, &facts.symAmb, &facts.fileAmb } )
     {
-        std::sort( stream->begin(), stream->end() );
-        stream->erase( std::unique( stream->begin(), stream->end() ), stream->end() );
+        rw::sortutil::sortUnique( *stream );
     }
 
     detail::foldEntityPairs( facts.symEnt, ing, tokOfSym,

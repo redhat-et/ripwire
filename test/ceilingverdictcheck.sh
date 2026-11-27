@@ -64,6 +64,13 @@
 #   bash test/ceilingverdictcheck.sh build_base/ripwire # or RIPWIRE_BIN=… — both seams honored
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
@@ -91,7 +98,12 @@ FORGED="serialize the header $GUARD_NOTE"
 # arms (2b)/(3g) prove it by comparing the served rows), with no substring a marker sniff could match. Same LENGTH on
 # purpose: the default text tier and the continuation's budget are charged with the header, which echoes the task, so a
 # shorter twin would move docs_dropped= / next= for a reason that is not the marker.
-plainOf(){ printf '%s' "$1" | sed -E 's/[^A-Za-z0-9 ]/ /g'; }
+# TOKEN-BUDGET-MONOTONE (train 1111i): the twin keeps every code-shaped NAME a code-shaped name of the same length. The marker
+# word over_ceiling becomes ceiling_over (the same two words for the ranker, 12 B, absent from src/), and other identifiers (est_tokens, max_tokens) keep their
+# underscore: a code-shaped name in the task earns a <shortkey> block, and a budget now prices that held block on top of
+# est_tokens (forbudgetfit.h), so a twin that spelled it as two words served 2 rows more at budget 4000 (forged 26 vs plain 27
+# shown) for a reason that is not the marker. Still no substring a marker sniff matches (no over_ceiling anywhere).
+plainOf(){ printf '%s' "$1" | sed -E 's/over_ceiling/ceiling_over/g; s/[^A-Za-z0-9_ ]/ /g'; }
 PLAIN="$( plainOf "$FORGED" )"
 # --for --detail --max-tokens: the legend clause that defines the body-ceiling label (serialize.h kOverCeilingMaxTokensLegend)
 MT_NOTE='over_ceiling=1 says est_tokens exceeds max_tokens'
@@ -229,6 +241,9 @@ fi
 #     self-contradicting pair of numbers; forbudget-soft (rule 4): its plain twin must also be shape-identical (FORGE).
 fw_est="$( attr "$( rootOf "$TMP/for.100000.f" )" est_tokens )"
 fw_bud="$( attr "$( rootOf "$TMP/for.100000.f" )" budget_tokens )"
+# TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer byte for byte, so the root
+# names no budget_tokens= at all here (nothing was shed); the pair judged is est_tokens= against the budget asked
+fw_bud="${fw_bud:-100000}"
 if [ -z "$fw_est" ] || [ -z "$fw_bud" ]; then
     no "(2) the wide-budget forged run emitted no est_tokens=/budget_tokens= pair to judge (est='$fw_est' budget='$fw_bud')"
 elif [ "$fw_est" -ge "$fw_bud" ]; then

@@ -152,6 +152,17 @@ constexpr std::uint32_t kMinifiedWsPerMille    = 70;    // ws_freq < 0.070 ⇒ m
 // flagged, and the floor is disclosed in the verb's legend.
 constexpr std::size_t   kMinifiedMinBytes      = 256;
 
+// THE minified-suspect verdict on one file's recorded health: the leading sample's whitespace share under kMinifiedWsPerMille,
+// once the file holds kMinifiedMinBytes. --skipped's why="minified-suspect" (verbs_report.h classifySkipHealth) and --lint's
+// order (verbs_lint.h lintShippedFiles) both read it here, so the two can never disagree about which file is minified.
+// fileBytes == 0 (not measured) is never minified: the size floor is false at 0.
+inline bool isMinifiedHealth( const FileHealth& h ) noexcept
+{
+    const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
+    const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
+    return h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+}
+
 // Extensions that are NOT source or text, so their absence from the index is not a disclosure the reader
 // needs: an unindexed .png is a picture, not a language ripwire failed to read. This is the rule the
 // `unindexed=` header and the unsupported-extension rows apply, stated once here and named in the legend
@@ -267,6 +278,43 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
     return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
 }
 
+// M1 (tracked build dirs): the kCrawlSkipDirs names whose "this is build output" guess git can FALSIFY. bat's `build/`
+// holds the Cargo build script's real source (tracked), and the name prune removed it from every answer while a peer
+// indexed it. So a directory with one of these names that git TRACKS files under is crawled — its tracked files only
+// (ingest_crawl.h CrawlNamePrune) — and untracked it stays pruned: generated output is what the prune is for.
+// ONLY build/, measured: round 1 also lifted dist/ out/ target/, and on GA3 DEV (n=99) the only trees that moved were
+// axios's, whose TRACKED dist/ holds rollup bundles (dist/axios.js, dist/esm/axios.js, dist/node/axios.cjs,
+// dist/browser/axios.cjs) that took 28-36 of ~135 page-1 rows and cost one body. None of the house's shipped-code verdicts
+// flags them (26-34 bytes/line, far under kVendoredBundleLineBytes; normal whitespace, so not minified-suspect; no
+// vendoring segment), so tracking is not evidence of source there. out/ and target/ never occurred tracked in GA1 or GA3.
+// Deliberately NOT here either: vendor/, third_party/, node_modules/ (tracked vendored code is the noise those names exist
+// to drop) and captures/ (this repository tracks docs/captures/ and prunes it on purpose).
+inline constexpr std::string_view kTrackedBuildOutputDirs[] = { "build" };
+
+inline bool isTrackedBuildOutputName( std::string_view dirName ) noexcept
+{
+    return isOneOf( dirName, kTrackedBuildOutputDirs );
+}
+
+// The crawl of a MATERIALIZED COMMIT TREE (quality.h materializeCommitTree: a `git archive` of a commit extracted into a
+// temp directory with no `.git`) cannot ask git what it tracks — but every file in it IS tracked, by construction. Without
+// this the working tree indexes a tracked build/ while the HEAD snapshot of the same commit prunes it, so --quality-delta
+// reads every symbol under it as new (and merge-scout, the churn window and --dmm see none of them). Scoped on the
+// thread, as WantConstructHits below is: each materialized-tree ingest holds one for the duration of its ingest() call.
+inline thread_local bool tlCrawlTreeAllTracked = false;
+
+class CrawlTreeAllTracked
+{
+public:
+    CrawlTreeAllTracked() noexcept : prev_( tlCrawlTreeAllTracked ) { tlCrawlTreeAllTracked = true; }
+    ~CrawlTreeAllTracked() { tlCrawlTreeAllTracked = prev_; }
+    CrawlTreeAllTracked( const CrawlTreeAllTracked& )            = delete;
+    CrawlTreeAllTracked& operator=( const CrawlTreeAllTracked& ) = delete;
+
+private:
+    bool prev_;
+};
+
 // ── §SEC1: THE CRAWL BOUNDARY ────────────────────────────────────────────────────────────────────────────
 //
 // ONE RULE, STATED ONCE, FOR EVERY WALK THIS BINARY OWNS: a path a crawl collected must resolve, AFTER LINK
@@ -379,10 +427,47 @@ inline bool crawlPathStaysInRoot( const std::string& path, const std::string& ro
 template<std::size_t kSymbolBytes, std::size_t kIngestResultBytes> struct IngestLayoutStamp {};
 using IngestLayout = IngestLayoutStamp<sizeof( Symbol ), sizeof( IngestResult )>;
 
+// QD-CONSTRUCTS-AT-INGEST, lazy: does an ingest on THIS thread find --quality-delta's construct hits in its parse workers
+// (ingest_astquery.h collectConstructHits)? Only a run that will read them pays for them: a cold map or --deps runs no
+// construct pass, its cache records say "constructs absent", and the next --quality-delta treats such a record as a miss
+// and re-parses that file once, which writes the hits into the record. A hint, never a correctness input:
+// findQualityConstructs uses carried hits only when the ingest claims every file (IngestResult::constructHitsForFiles)
+// and re-parses otherwise, so an ingest that ran without the hint answers the same, only slower.
+inline thread_local bool tlIngestWantsConstructHits = false;
+
+// Scoped: main.cpp holds one for the whole --quality-delta / --quality-baseline run, so the working-tree ingest and the
+// verb's own re-ingests (the HEAD snapshot, both sides of A..B) all carry the hits.
+class WantConstructHits
+{
+public:
+    explicit WantConstructHits( bool on ) noexcept : prev_( tlIngestWantsConstructHits ) { tlIngestWantsConstructHits = prev_ || on; }
+    ~WantConstructHits() { tlIngestWantsConstructHits = prev_; }
+    WantConstructHits( const WantConstructHits& )            = delete;
+    WantConstructHits& operator=( const WantConstructHits& ) = delete;
+
+private:
+    bool prev_;
+};
+
+// The footprint this process's construct tables added when they were compiled (ingest_astquery.h warmConstructTables):
+// fixed bytes, one table per language, held to the end of the process, so a later ingest pays none of it again. The
+// --quality-delta=A..B projection counts them once instead of scaling them with the tree (memguard.h FIXED BYTES).
+std::uint64_t constructTablesFootprint() noexcept;
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},
                      bool respectGitignore = true, IngestLayout = {} );
+
+// M1: ingest() of a tree whose every file is vouched for — a materialized commit tree (all tracked, by construction), or
+// edit-preview's one file that came out of the main index — so a build-output-named directory in it is crawled, not
+// pruned by name (CrawlTreeAllTracked above). Every materialized-tree ingest goes through here, so none can forget it.
+inline IngestResult ingestTrackedTree( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
+                                       std::size_t maxFileBytes, bool captureValueUses = true )
+{
+    const CrawlTreeAllTracked tracked;
+    return ingest( rootDir, excludeSubstr, cacheFile, maxFileBytes, captureValueUses );
+}
 
 // ---- index-identity disclosure (the two functions behind --doctor's index-cache row) ----
 //
@@ -482,7 +567,7 @@ enum class AstWalk : std::uint8_t
     Pattern,
 
     // ---- --quality-delta's structural shapes (src/handlershape.h) ----
-    // The widened error-masking shapes (log-only, rethrow-only) and the placeholder shapes (stub, todo).
+    // The widened error-masking shapes (log-only, rethrow-only, failure-default) and the placeholder shapes (stub, todo).
     // A WALK for the reason the other two are: "every statement of this handler is a log call" and "the
     // caught name is never read below here" are questions about ALL of a node's children, which no
     // tree-sitter pattern can ask. Each hit's tag is the shape name; the group is per-FILE-language, so the
@@ -491,9 +576,10 @@ enum class AstWalk : std::uint8_t
 };
 
 // The tags an AstWalk::HandlerShapes group's rows carry: src/handlershape.h emits them, lintrules.h routes the
-// first two to the error-masking kind and the last two to the placeholder kind.
+// first three to the error-masking kind and the last two to the placeholder kind.
 inline constexpr std::string_view kShapeLogOnly     = "log-only";
 inline constexpr std::string_view kShapeRethrowOnly = "rethrow-only";
+inline constexpr std::string_view kShapeFailureDefault = "failure-default";   // error-masking's report-only facet (handlershape.h)
 inline constexpr std::string_view kShapeStub        = "stub";
 inline constexpr std::string_view kShapeTodo        = "todo";
 
@@ -606,6 +692,19 @@ private:
     AstRegexUndecidedReport state;
 };
 
+// The member-call near-miss counts of one pattern run (PATTERN-MEMBER-ZERO), summed across the parallel file walk
+// like ellipsisCappedOut: counted = calls the bare callee names as a member (unmatched_member=), capped = member
+// probes the ellipsis bound abandoned, so `counted` is a floor (unmatched_member_capped=), arrow = counted calls
+// spelled with `->` (unmatched_member_arrow=) and optchain = those spelled `?.` (unmatched_member_optchain=), which a
+// `$O.f` next= cannot match.
+struct MemberNearMissTally
+{
+    std::atomic<std::uint64_t> counted{ 0 };
+    std::atomic<std::uint64_t> capped{ 0 };
+    std::atomic<std::uint64_t> arrow{ 0 };
+    std::atomic<std::uint64_t> optchain{ 0 };
+};
+
 struct AstQueryGroup
 {
     const std::vector<AstQuerySpec>* specs         = nullptr;   // borrowed — the caller owns the spec table
@@ -627,6 +726,9 @@ struct AstQueryGroup
     // AstWalk::Pattern only, optional: calls only a QUALIFIED spelling of a pattern leaf would have matched
     // (pattern.h MatchStats::qualifiedUnmatchedCount) — never hits; the emitter discloses unmatched_qualified=.
     std::atomic<std::uint64_t>*       qualifiedUnmatchedOut = nullptr;
+    // AstWalk::Pattern only, optional: member calls (`obj.f(x)`) only the bare callee of a call pattern names
+    // (pattern.h MatchStats member counts, kMemberCallShapes) — never hits; disclosed as unmatched_member=.
+    MemberNearMissTally*              memberOut = nullptr;
 
     // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
     // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)
@@ -886,6 +988,12 @@ inline bool astQueryNestsTooDeep( std::string_view query )
 // local to the re-parsed substring.
 std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, std::uint32_t defStartLine, Lang lang );
 
+// ---- QD-TANGLE detail: the steering locals and deep regions a tangle row names (model.h TangleDetailFacts) ----
+// Re-parses the whole file `fileBytes` (its grammar from `path`'s extension, the crawl's .h → ObjC reroute included) and re-runs the
+// ingest walk on the node spanning [startByte, endByte) — Symbol::sigStartByte / endByte. Called only for the rows a --quality-delta
+// answer emits, never cached; `ok` is false when the file does not parse or no node spans the def.
+TangleDetailFacts tangleDetailOf( std::string_view fileBytes, std::string_view path, std::uint32_t startByte, std::uint32_t endByte );
+
 // ---- --whereis on other refs: where the TAGS PATH defines one name inside blobs the index never read ----
 // HEAD's rows take kind="def" from the index; a row on another ref comes from a git blob the index never saw. This
 // runs the index's own extraction on such a blob — the crawl's extension → grammar rule (with the .h → ObjC content
@@ -915,5 +1023,26 @@ struct BlobDefinitions
 // the process-global query cache BEFORE any worker starts — the single-writer rule ingest() itself follows — so a
 // long-lived server must call this under quality::headSnapshotIngestMutex, like every other ingest call site.
 std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name );
+
+// QD-TANGLE D4 (quality's best-since store): every callable definition of each blob with its tangle inputs (model.h TangleInputs),
+// by the same extraction as definitionLinesInBlobs plus the callables' cc_walk — so a history blob's inputs are the ones HEAD's
+// index would give the same bytes. `defs` is empty unless `status` is Parsed. Same pool, same single-writer rule.
+// QD-SHRINK-PAIR reads the same defs for their BODY: [bodyStart, endByte) is the span the clone pass tokenizes on a Symbol
+// ([sigEndByte, endByte), ingest_model.h's rule), so a base blob's body is the one HEAD's index would cut from the same bytes.
+struct BlobTangleDef
+{
+    std::string   scope;
+    std::string   name;
+    TangleInputs  in;
+    std::uint32_t bodyStart = 0;   // ingest_model.h rawDefBodyStart (Symbol::sigEndByte's value)
+    std::uint32_t endByte   = 0;
+};
+struct BlobTangleDefs
+{
+    std::vector<BlobTangleDef> defs;
+    Lang                       lang   = Lang::Unknown;
+    BlobDefsStatus             status = BlobDefsStatus::Failed;
+};
+std::vector<BlobTangleDefs> tangleInputsInBlobs( std::span<const BlobText> blobs );
 
 }   // namespace rw

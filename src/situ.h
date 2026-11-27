@@ -84,6 +84,7 @@ struct ChangedList
     std::vector<char> mask;          // parallel to ing.files, exactly the mask this function always built
     std::string       badItem;       // FIRST item resolving to no indexed file — empty = every item resolved
     std::size_t       itemCount = 0; // non-empty items parsed (0 = the list names no files at all)
+    std::vector<std::string> badItems;   // AF5: EVERY item resolving to no indexed file, list order (badItem is the first)
 };
 
 inline ChangedList changedMaskFromListChecked( const IngestResult& ing, std::string_view csv )
@@ -106,9 +107,13 @@ inline ChangedList changedMaskFromListChecked( const IngestResult& ing, std::str
             {
                 result.mask[f] = 1;
             }
-            else if( result.badItem.empty() )
+            else
             {
-                result.badItem = std::string( item );
+                if( result.badItem.empty() )
+                {
+                    result.badItem = std::string( item );
+                }
+                result.badItems.emplace_back( item );
             }
         }
         start = c + 1;
@@ -192,21 +197,33 @@ inline std::string fileListRefusalText( const IngestResult& ing, std::string_vie
         return prefix + name + "=" + std::string( csv ) + " names no files — it needs changed files, e.g. "
              + name + "=src/cli.h";
     }
-    if( list.badItem.empty() )
+    // AF5 (owner ruling 2026-11-21, "answer, never pass"): a list with at least one usable item ANSWERS for it and
+    // names the rest (changedListUnused below; --situ's `unused:` block, --test-gate's <unused> rows and its
+    // never-0 exit, situational_awareness's "unused" array). Only a list with NOTHING usable is refused here, and
+    // a longer one says that none of its items resolved.
+    if( list.badItem.empty() || list.badItems.size() < list.itemCount )
     {
         return {};
     }
+    const std::string noneResolved = affectedNoneResolvedClause( list.badItems.size() );
     if( list.badItem.find( ".." ) != std::string::npos )
     {
         // The found shape: a git ref range (A..B or A...B). The adjacent probe expands the range into the
         // FILES this verb actually takes; echoed verbatim, so both spellings paste back into a working command.
         return prefix + name + ": '" + list.badItem + "' matches no indexed file — " + name
              + " takes FILES (F1,F2), never a git ref range; to gate a COMMITTED range, expand it into its changed files: "
-             + name + "=\"$(git -C " + root + " diff --name-only " + list.badItem + " | paste -sd, -)\"";
+             + name + "=\"$(git -C " + root + " diff --name-only " + list.badItem + " | paste -sd, -)\"" + noneResolved;
     }
     return prefix + name + ": '" + list.badItem + "' matches no indexed file — FILES are path substrings over "
            "the indexed tree; files the ingest skipped are not searchable (the --skipped verb lists exactly which, with "
-           "reasons)" + nearestIndexedFileClause( ing, list.badItem );
+           "reasons)" + nearestIndexedFileClause( ing, list.badItem ) + noneResolved;
+}
+
+// AF5: the items of an ANSWERED list that resolved to no indexed file, classified for the answer to name
+// (testmap.h classifyUnusedItems — the one vocabulary --affected already prints). Empty when every item resolved.
+inline std::vector<UnusedItem> changedListUnused( const IngestResult& ing, const std::string& root, const ChangedList& list )
+{
+    return classifyUnusedItems( ing, root, list.badItems, ing.realPaths.empty() ? sarif::rootPrefixOf( root ) : std::string() );
 }
 
 // The CLI wrapper: prints the refusal and returns true when the list was refused (the caller exits 1).
@@ -390,11 +407,29 @@ inline std::string situShowingNote( std::size_t shown, std::size_t rowTotal, con
 // The three facts --situ's two context sections need about the caller's window, as ONE parameter rather
 // than three: writeSituation already sat at 6 parameters, over the bar, and three more would have been the
 // largest single params regression in the round that is about not letting a listing grow silently.
+// AF5: --situ's text twin of the <unused> rows — a header line, then one line per item; nothing when every item
+// resolved. Called by writeSituation for a single root, and ONCE above the per-root sections under multi-root.
+inline void writeSituUnusedBlock( std::FILE* out, std::span<const UnusedItem> unused )
+{
+    if( unused.empty() )
+    {
+        return;
+    }
+    rw::emitTo( out, "unused: {} listed item(s) not used — this report covers the other items only (not_indexed: a file under the root "
+                     "the index does not hold, --skipped says why; not_found: no indexed path, symbol or file — deleted, renamed or "
+                     "misspelled; near= the closest indexed path)\n", unused.size() );
+    for( const UnusedItem& u : unused )
+    {
+        rw::emitTo( out, "  unused item={} reason={}{}{}\n", u.item.c_str(), u.reason, u.near.empty() ? "" : " near=", u.near.c_str() );
+    }
+}
+
 struct SituPageArgs
 {
     int              limit    = 0;    // 0 = the verb's own default row caps (8 and 8)
     int              offset   = 0;
     std::string_view selector;        // the caller's own --situ spelling, echoed back in `next:`
+    std::span<const UnusedItem> unused;   // AF5: --situ=FILES items that resolved to nothing — named, never dropped
 };
 
 // The exact `--situ … --limit=N` that cuts nothing, built from the selector the caller was actually given so
@@ -558,8 +593,7 @@ inline SituSiblings lexicalSiblings( const IngestResult& ing, const std::vector<
     {
         consider( sk.path );
     }
-    std::sort( out.paths.begin(), out.paths.end() );
-    out.paths.erase( std::unique( out.paths.begin(), out.paths.end() ), out.paths.end() );
+    rw::sortutil::sortUnique( out.paths );
     // Review of #219: this used to be gated on a NON-EMPTY result, and the emitter suppressed an empty
     // block — so when the crawl's 500-row cut removed the only candidate, the report said nothing at all.
     // That is the silent zero non-negotiable #3 forbids: the cut is a property of the CANDIDATE LIST, not
@@ -1020,6 +1054,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     {
         rw::emitTo( out, "at: {}\n", situAtStamp.c_str() );
     }
+    // AF5: the --situ=FILES items this report could not use, before anything that answers for the rest — and
+    // before the early return below, so a report with nothing to analyze still names what it was not given.
+    writeSituUnusedBlock( out, page.unused );
     if( changedSyms.empty() )
     {
         // §L10b LOW tail: this one line used to fire for two DIFFERENT reasons under the same wording —
@@ -1151,17 +1188,22 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         "\"(n): a, b\" = n runner-less files sharing that evidence; ";
     static constexpr std::string_view kSituRunRootRel  = "a (run: …) is relative to root:\n";
     static constexpr std::string_view kSituRunAbsolute = "a (run: …) is absolute: this report spans several roots, so there is no one root to be relative to:\n";
+    // PATH-FOLD (testmap.h): the rows are rendered BEFORE the heading, because the heading owes its reader the fold's
+    // rule exactly when a line carries "(n folded):" — and says nothing about it otherwise, so an unfolded section is
+    // byte-identical to what it was.
+    static constexpr std::string_view kSituRowsFolded = "\"(n folded): d/{a,s/{b,c}}.py\" = d/a.py, d/s/b.py, d/s/c.py (braces nest; expand in order); ";
+    const TestRunnerIndex     situRunners( ing, root );
+    const rw::JoinedTestRows  situRows = testRowsList( situRunners, evidenceRowsOut( testRows, EvDialect::Text, situPathRel ),
+                                                       TestRowShape{ RowDialect::Text, {}, "        ", /*fold=*/true }, []( std::string_view s ) { return std::string( s ); } );
     const std::string situRowsHeading =
         tests.empty() ? std::string( ": (none transitively reach these files)\n" )
-                      : std::string( kSituRowsOrder )
+                      : std::string( kSituRowsOrder ) + std::string( situRows.folded ? kSituRowsFolded : std::string_view() )
                             + std::string( rw::runsAreRootRelative( ing, root ) ? kSituRunRootRel : kSituRunAbsolute );
     rw::emitTo( out, "  [2] tests to run ({}){}", tests.size(), situRowsHeading.c_str() );
     // §P11.4: this section says "tests to run" and named files that are not commands. The runner is appended
     // where one is DERIVABLE and omitted where it is not — see testmap.h; a guessed command is worse than none.
     // E1: runner-less rows with equal evidence are ONE `[hops=N] (n): a, b` line — testmap.h's seam, the multiset unchanged
-    const TestRunnerIndex situRunners( ing, root );
-    rw::emitRaw( out, testRowsJoined( situRunners, evidenceRowsOut( testRows, EvDialect::Text, situPathRel ), TestRowShape{ RowDialect::Text, {}, "        " },
-                                      []( std::string_view s ) { return std::string( s ); } ).c_str() );
+    rw::emitRaw( out, situRows.text.c_str() );
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
     // named above, however much of the change it exercises. Same number, same counter as --affected's
@@ -1425,8 +1467,7 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
             const std::size_t sl = p.find( '/' );
             mods.emplace_back( sl == std::string_view::npos ? std::string( "(root)" ) : std::string( p.substr( 0, sl ) ) );
         }
-        std::sort( mods.begin(), mods.end() );
-        mods.erase( std::unique( mods.begin(), mods.end() ), mods.end() );
+        rw::sortutil::sortUnique( mods );
         facts.modulesTouched = std::move( mods );
     }
     return facts;
@@ -1468,7 +1509,24 @@ struct TestGateResult
     // per-symbol claims), whose reports therefore carry none of it — a lane's claim set is not a git diff.
     SymbolChangeSet            changeSet;
     bool                       hasObligations  = false; // !tests.empty() || !untested.empty()
+    // AF5 (owner ruling 2026-11-21, "answer, never pass"): --test-gate=FILES items that resolved to no indexed
+    // file. Set by the CLI arm after the gate is computed; never part of hasObligations (exit 4 keeps its one
+    // meaning) — the arm exits 6 (partial, never 0) when it is non-empty and nothing gates.
+    std::vector<UnusedItem>    unused;
 };
+
+// --test-gate's exit code. AF5 (owner ruling 2026-11-21, "answer, never pass"): a list with an unusable item
+// answers for the rest but NEVER exits 0 — the gate did not see the whole change. Exit 4 keeps its one meaning
+// (an obligation gates; the report names the unused items beside it); otherwise 6, the --quality-delta code for
+// a partial verdict ("partial, never 0"), so a script never reads a partial gate as green.
+inline int testGateExitCode( const TestGateResult& r ) noexcept
+{
+    if( r.hasObligations )
+    {
+        return 4;
+    }
+    return r.unused.empty() ? 0 : 6;
+}
 
 // The lane-independent half of computeTestGate: what the test files transitively call. A pure function of
 // (ing, g), so a caller running the gate N times over N different change sets (--plan-lanes, N up to 16 on
@@ -1774,6 +1832,10 @@ inline constexpr const char* kTestGateLegend =
 // so a loop can continue — landed in the unconditional half above and re-inflated the zero-row case
 // (test/donelegendcheck.sh tg_empty, 1111 → 1428 B with the gauge sentence). It is a rule about the <u>
 // rows and belongs here, where the row contract already names the window; the empty-diff case pays nothing.
+// AF5 (owner ruling 2026-11-21): defined exactly when the root carries unused= (testmap.h kUnusedReasonsLegend follows it).
+inline constexpr std::string_view kTestGateUnusedLegend =
+    "unused=N: listed items this gate could not use, each an <unused item= reason=> row in list order; every count answers for the "
+    "other items only, and the exit is never 0 while N>0: 4 when an obligation gates, else 6 (partial). ";
 inline constexpr const char* kTestGateRowLegend =
     "The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT VERBATIM on every page "
     "(concatenate from one page only); offset=/limit= window the <u> rows alone, default 25 (raise with "
@@ -1854,20 +1916,25 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // on here. (It remains a legitimate CALLER row elsewhere — --callers/--impact/--for still carry
     // rw::modScopeLegend for their own t="modscope" rows; this document has none of those, only <u> rows.)
     const std::string tgRunFirst = runFirstField( r.testRows, testRows, /*json=*/false );   // hono-20/textual-20: the run-first head
-    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
+    // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
+    // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
+    // PATH-FOLD: rendered before the legend, which splices the fold's sentence exactly when a row carries pf=.
+    const TestRunnerIndex gateRunners( ing, root );
+    const JoinedTestRows  tgRows = testRowsList( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t", {}, /*fold=*/true }, ex );
+    const std::string tgUnused = unusedItemRowsXml( r.unused, ex );   // AF5: empty when every listed item resolved
+    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", std::string_view( kTestRowEvidenceLegend.data(), tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0 ),
                   runFirstLegend( !tgRunFirst.empty() ),   // exactly when the root carries run_first=
-                  runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) ),   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
+                  ( runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) )   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
+                    + std::string( tgRows.folded ? rw::kPathFoldLegendClause : std::string_view() ) ),
                   untestedModscopeLegend( r.untestedModscope > 0 ),   // F3: the full clause at N>0, a one-line definition at 0
                   testGateHunkShaped( r ) ? kTestGateGranularityLegend : "",   // the change-set narrowing, defined exactly when its attributes ride
                   ( std::string( rw::graphUnindexedLegend( rw::graphGaugeClauses( g ) ) )   // #66: exactly when the root carries the attribute
                     + ( r.declinedCalls > 0 ? rw::kDeclinedCallsTestGateLegend : "" )                               // exactly when it carries declined_calls=
                     + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) ).c_str(),   // the short form above makes no
                     // claim the standard-member gate's declines would contradict, so its clause stays off this budgeted legend
+                  tgUnused.empty() ? std::string() : ( std::string( kTestGateUnusedLegend ) + std::string( kUnusedReasonsLegend ) ),
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
-    // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
-    // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
-    const TestRunnerIndex gateRunners( ing, root );
     // shown_tests= / tests_capped= are DERIVED from the rows this document actually emits, not asserted.
     // tests_capped= was the string literal "0" — a disclosure that could never become "1", so if a <t> row
     // cap were ever added the attribute would keep saying nothing was cut while something was. It is kept
@@ -1878,7 +1945,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     rw::emitTo( out, "<test-gate changed=\"{}\" impacted=\"{}\" tests=\"{}\" untested=\"{}\" untested_modscope=\"{}\""
                        " shown_tests=\"{}\" tests_capped=\"{}\" shown_untested=\"{}\" untested_capped=\"{}\""
                        " script_gates_unmodelled=\"{}\" script_gates_registered=\"{}\" script_gates_mapped=\"{}\""
-                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}{}>",
+                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}{}{}>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                   shownTests, shownTests < testRows ? 1 : 0, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
@@ -1888,9 +1955,10 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
                   declinedCallsAttrXml( r.declinedCalls ).c_str(),   // callers the radius could not walk; absent at zero
+                  r.unused.empty() ? std::string() : std::format( " unused=\"{}\"", r.unused.size() ),   // AF5: absent at zero
                   testGateGranularityAttrXml( r ).c_str(),   // the symbol-granular change set; absent without hunk evidence
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str()  );   // P3 (L7)
-    rw::emitRaw( out, testRowsJoined( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t" }, ex ).c_str() );   // E1: <g> where no runner is derivable
+    rw::emitRaw( out, tgRows.text.c_str() );   // E1: <g> where no runner is derivable; PATH-FOLD: pf= where the listing folds
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
         rw::emitTo( out, "<t p=\"{}\" evidence=\"{}\" run=\"{}\"/>", ex( tgPathRel( gate.fileId ) ).c_str(), gate.evidence,
@@ -1904,6 +1972,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
         // <u sym= p= l= ccx=>, has carried the line since it was written. Same attribute, same position.
         rw::emitTo( out, "<u sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
     } );
+    rw::emitRaw( out, tgUnused.c_str() );   // AF5: the listed items this gate could not use, list order
     rw::emitRaw( out, "</test-gate>" );
 }
 
@@ -1949,7 +2018,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     rw::emitTo( out, "{{\"changed\":{},\"impacted\":{},\"tests\":{},\"untested\":{},\"untested_modscope\":{}"
                        ",\"shown_tests\":{},\"tests_capped\":{},\"shown_untested\":{},\"untested_capped\":{}"
                        ",\"script_gates_unmodelled\":{},\"script_gates_registered\":{},\"script_gates_mapped\":{}"
-                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{}{},\"at\":{}{}{}{},\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{}{},\"at\":{}{}{}{}{},\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                  shownTestsJ, shownTestsJ < testRows ? "true" : "false", shownRows,
                  shownRows < r.untested.size() ? "true" : "false",
@@ -1960,6 +2029,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
                  testGateGranularityJson( r ).c_str(),   // the XML twin's change_granularity= family, key-for-key
                  atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
                  declinedCallsKeyJson( r.declinedCalls ).c_str(),                // the XML twin's declined_calls=
+                 unusedItemsJsonField( r.unused, []( std::string_view v ) { return std::string( jsonStr( v ) ); } ).c_str(),   // AF5: the XML twin's <unused> rows
                  nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str()  );   // P3 (L7): the XML twin's next=
     const TestRunnerIndex gateRunners( ing, root );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };

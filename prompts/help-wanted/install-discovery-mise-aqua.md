@@ -14,6 +14,26 @@ decision as given. It gives you the code, a reproduction of today's gap, the des
 plan must still answer, and slices small enough to land one at a time. Claim the issue before you
 start.
 
+> **Status (2026-11-26): the direction is unsettled. Ask on #225 before you plan.** The record
+> disagrees with itself:
+>
+> - 2026-09-16: direction (1) agreed on #225, and @s0undt3ch's spec v2 accepted.
+> - 2026-09-19: PR #293 (embedded skills plus `ripwire skills install`) opened.
+> - 2026-10-07: on #293, the maintainers decided **not** to embed skills and hooks in the binary,
+>   because per-client install layouts change too often to track inside a release. A Packslip
+>   manifest, published from the release job, was to carry the skills for `mise` users instead;
+>   hooks and agent config stay with `skills/install.sh`. Nothing in the tree mentions Packslip yet.
+> - 2026-10-31: #293 closed. Its installer hardening landed in `skills/install.sh` through #482.
+> - 2026-11-01 and 2026-11-22: the #225 issue-body notes and a check-in still describe direction (1)
+>   and spec v2.
+>
+> `main` at `09995f4b` has no `skills install` subcommand. Symptoms 1 and 2 below were re-checked
+> there on an archive-shaped fixture (the clone-pointer line, and the Codex absolute `command =`);
+> re-check 3 and 4 in your S0 arms. Whichever direction stands, S0 (red arms on fixtures), S4 (doctor honesty about
+> launchers) and S5 (paths that survive an upgrade, including the Codex `command =`) are needed;
+> S1 to S3 exist only under direction (1). The cache-directory issue, #303, is separate and has its
+> own open PR (#532, `RIPWIRE_CACHE_DIR`); do not touch the cache directory here.
+
 Work in a git worktree, not the main checkout. Never edit the tree while a build is running. Do not
 install mise or aqua to do this work: the reproduction below builds fake layouts with a copy of your
 own binary.
@@ -80,6 +100,17 @@ binary; it picks the version from the config for the **current directory**. aqua
 current directory upward and can **install a package on first use**. Both then run the real binary, so
 `selfExecutablePath` sees the versioned target. mise can also put the install directory itself on PATH
 (`mise activate`), with no shim. Confirm on your own machine how your tool behaves, and record it.
+
+---
+
+## Orient with ripwire first
+
+Before you open files, run `./build/ripwire . --for="wrapPrintSkillsLine skills install discovery
+doctor binary-path launcher"` and read what it ranks first; `./build/ripwire . --uses=kAgentTargets`
+lists every reader of the agent table, and `--callers=selfExecutablePath` the code that trusts the
+binary's own location. Before you write a new helper or gate arm, run
+`./build/ripwire . --exemplar="<what you are writing>"`. Before you call it done, run
+`./build/ripwire . --quality-delta --legend=compact`, then `./build/ripwire . --test-gate`.
 
 ---
 
@@ -285,26 +316,22 @@ directories); keep the line's shape; and assert the probe order against cases (a
   **which** skills an agent sees; #225 is about **how** they reach it. Not a duplicate, but they meet in
   `skills install`: router-only exposure would be one of its modes. Do not let the embedded format
   freeze today's flat list of skills. #49, now closed, is the context-budget background for both.
-- **#44, the native Windows port, and the `src/infra/os.h` restructuring.** #44 edits the same
-  functions: case (b) of `wrapPrintSkillsLine`, `wrapCommandToken`, `resolveExecutable` and the link step
-  of `skills/install.sh`. A maintainer refactor (branch `lane/os-header`) moves `selfExecutablePath`'s
-  platform switch into `rw::os::exepath` and adds `test/osswitchcheck.sh`, which refuses OS tests and
-  raw POSIX calls outside that header. **Sequencing:**
-  - Write the gates first. Shell fixtures do not conflict.
-  - Keep the C++ small and table-shaped, so a rebase over those changes is cheap.
-  - Take the binary's location from the `executablePath` that `runWrap` already receives, not from a new
-    platform call. Once `os.h` lands, any system call goes through `rw::os::`.
-  - Windows destinations are out of scope, but do not make them harder.
+- **#44 (the native Windows port, merged) and `src/infra/os.h` (on `main`).** `selfExecutablePath`'s
+  platform switch is `rw::os::exepath` now, and `test/osswitchcheck.sh` refuses OS tests and raw POSIX
+  calls outside that header. Any system call you add goes through `rw::os::`, and environment reads
+  use its helpers (`HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` are listed
+  in its header comment), never raw `getenv`. Take the binary's location from the `executablePath`
+  that `runWrap` already receives, not from a new platform call. Windows destinations are out of
+  scope, but do not make them harder.
 - **#146, #68 and #69: live verification of the published wiring** on Cursor, Windsurf, Gemini CLI,
   opencode and aider (#146), openclaw (#68) and Hermes (#69). `scripts/verify-agent-integration.sh`
   parses the skills line, so a new line **shape** breaks it; in the worst case its flag extraction comes
   back empty and reads as "no skills line". #146's claim P, that a desktop app may not inherit the shell
   PATH, is evidence for question 6. #68 has a claimant mid-run, so change the line shape only in the PR
   that updates every parser. None of the three is a duplicate.
-- **#224** (a doctor row for cross-translation-unit layout drift) and **#233** also edit
-  `src/verbs_doctor.h`, and #224 grows the named row set in `test/doctorcheck.sh`. Expect small merges.
-  **#240** (merged 2026-09-16) ended Intel macOS binaries and changed `scripts/install.sh`, `release.yml`,
-  `INSTALL.md` and `test/releaseinstallcheck.sh`; start from a `main` that includes it.
+- **#224** (the doctor's layout row) and **#233** have merged, so `src/verbs_doctor.h` and
+  `test/doctorcheck.sh`'s named row set already include them; read the current row list before adding
+  one.
 
 ---
 
@@ -325,7 +352,7 @@ directories); keep the line's shape; and assert the probe order against cases (a
    no longer calls a launcher STALE. Row (F) still fails a genuinely stale copy.
 7. `INSTALL.md` says what package-manager users run and what they must re-run after an upgrade, and
    nothing the gates do not prove.
-8. Gates green in the foreground: `test/wrapverbscheck.sh`, `test/skillinstallcheck.sh`,
+8. **Done means** gates green in the foreground: `test/wrapverbscheck.sh`, `test/skillinstallcheck.sh`,
    `test/hookcheck.sh`, `test/hermesinstallcheck.sh`, `test/claudeconfigdircheck.sh`,
    `test/doctorcheck.sh`, `test/codexdoctorcheck.sh`, `test/selfcontainedcheck.sh`,
    `test/releaseinstallcheck.sh`, `test/legendcoveragecheck.sh` (if a legend changed),
@@ -408,5 +435,5 @@ it is stating honestly what survives an upgrade.
 ---
 
 **Write the plan: your answers to the eight questions, the slices in the order you will land them, the
-fixture layouts and arms in red-first order, and how you will sequence around #44, #230 and the `os.h`
-restructuring. Post it on #225, then STOP for a maintainer's go-ahead.**
+fixture layouts and arms in red-first order, which direction #225 confirmed and on what date, and how
+you will sequence around #230. Post it on #225, then STOP for a maintainer's go-ahead.**

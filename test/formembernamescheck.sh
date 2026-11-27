@@ -26,21 +26,45 @@
 #   D1 [P] two TaskWorker classes (amb): neither row carries mem=; the unique TaskQueue beside them does
 #   E1 [P] the cap: LedgerBook's 30 members print 8 names and mem_more="22"
 #   F1 [G] byte identity with RIPWIRE_NO_MEMBER_NAMES=1: name-exact --for, --expand, the map, the --limit=40 file page, --json,
-#          --signatures-only, --token-budget=3000 — and none of them carries mem=
+#          --signatures-only — and none of them carries mem=; F1t: --token-budget that fits is the unbudgeted answer byte for byte
 #   G1 [P] the ledger: est_tokens(on) > est_tokens(off) by the names' bytes at the markup rate (within 2 tokens); the <d> rows
 #          (n, p, l, r) are the handle-off rows, one for one (a name never costs a row)
 #   G2 [G] prefix identity: the answer minus mem=/mem_more= and the clause, est_tokens masked, equals the handle-off answer
 #   L1 [P] the clause defines mem= and mem_more= in both dialects when a row carries mem=; L2 [G] absent when none does
 #   X1 [G] determinism   X2 [G] xmllint well-formed   X3 [G] no "--" inside the legend comment
+#   O1 [P] #595 (soarkit's two-file Rust repro, generated below): the printed mem= order is the order a reader derives from the
+#          live clause's own keys, in both dialects. Widget's zulu/alpha sit in its own file at lines 7-8, yankee in another file
+#          at line 3, no name holds a question word: a clause that stops at "then line" derives yankee first (red on f45e418f1,
+#          which prints zulu,alpha,yankee), and one that leaves keys out derives nothing. Premise: >= 1 listed pair whose
+#          other-file member has the earlier line (the case where the file key decides), FAIL on zero.
+#   O2 negative: the same owner with every member in its own file — the order the clause derives is the line order, and the
+#          printed order is it. [G] full (its "then line" already decided a one-file list); [P] compact, whose old clause named
+#          no tie-break at all ("question words first, names only"). Premise: >= 2 names listed, all in the owner's file.
+#   O3 [optional, RIPWIRE_PRE595_BIN=<pre-#595 binary, e.g. f45e418f1>] O1/O2's answers equal that binary's once the mem=
+#          clause and est_tokens (which prices the clause) are masked: only the legend moved. Its own variable: I1's
+#          RIPWIRE_BASE_BIN is the pre-member-names binary, against which a names-on answer differs by design.
 #   I1 [optional, RIPWIRE_BASE_BIN=<pre-change binary>] RIPWIRE_NO_MEMBER_NAMES=1 equals the base binary on every probe
 #
 # Usage:  bash test/formembernamescheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/formembernamescheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_MEMBER_NAMES RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP
+# LP1 re-pin (rule 4): three fixture files were renamed so their BASENAMES carry none of their question's words — compiler.js ->
+# tpl_emit.js ("template compiler"), ledger.py -> acct.py ("ledger book ... entries"), book.rs / driver.rs -> model.rs / ops.rs
+# ("book driver"). The arms need owners whose members are NOT shown as rows; that held only while a file's name was no ranking
+# signal. Once --for scores the basename (lexical.h kForBasenameFieldW) every member of compiler.js / ledger.py / book.rs scored
+# on it and ranked as a row, and A1/A4/C1/C2/E1/G1/L1 went vacuous ("every member is shown as a row"). The gate runs the
+# DEFAULT ranking (no RIPWIRE_BASENAME_W pin); the member-name rules and every assertion are unchanged.
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "formembernamescheck: BIN=$BIN"
@@ -152,6 +176,47 @@ elif cmd == "clause":         # FILE : the clause rides and defines mem= and mem
     if not m: fail("no mem= clause in the legend")
     if "mem=" not in m.group(0) or "mem_more=" not in m.group(0): fail(f"clause {m.group(0)!r} does not define both")
     if "--" in legend(t): fail("a legend comment holds --")
+elif cmd == "order":          # FILE OWNER OWNERPATH MODE QUESTION NAME@PATH:LINE... : mem= prints the order the clause's keys derive
+    t = load(args[0]); r = row(t, args[1], args[2]); mode, q = args[3], args[4]
+    pos = {}
+    for spec in args[5:]:
+        n, _, pl = spec.partition("@"); pth, _, ln = pl.rpartition(":"); pos[n] = (pth, int(ln))
+    got = r.get("mem", "").split(",") if r.get("mem") else []
+    if set(got) - set(pos): fail(f"{args[1]} lists {sorted(set(got) - set(pos))}, which the arm has no position for")
+    same = [n for n in got if pos[n][0] == args[2]]
+    if mode == "split":       # premise: a listed (owner's-file, other-file) pair where the other-file member has the earlier line
+        prem = sum(1 for a in same for b in got if pos[b][0] != args[2] and pos[b][1] < pos[a][1])
+        if prem == 0: fail(f"premise: 0 pairs where the file key decides (mem={got}): vacuous")
+    else:                     # premise: >= 2 names, every one in the owner's file
+        prem = len(same)
+        if prem < 2 or len(same) != len(got): fail(f"premise: {prem} names in the owner's file of {len(got)} listed (want >= 2, all)")
+    m = CLAUSE.search(legend(t))
+    if not m: fail("no mem= clause in the legend")
+    paren = re.search(r'\(([^)]*)\)', m.group(0))
+    if not paren: fail(f"the clause states no order: {m.group(0)!r}")
+    keys = []
+    for tok in paren.group(1).split(","):
+        w = " ".join(re.sub(r"\b(first|then|next|own|the)\b", " ", tok.lower()).split())
+        k = {"question words": "qw", "owner's file": "file", "path": "path", "line": "line", "name": "name"}.get(w)
+        if k: keys.append(k)
+    qw = set(re.findall(r"[a-z0-9]+", q.lower()))
+    def over(n):
+        return len({x.lower() for x in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", n)} & qw)
+    def key(n):
+        v = {"qw": -over(n), "file": pos[n][0] != args[2], "path": pos[n][0], "line": pos[n][1], "name": n}
+        return tuple(v[k] for k in keys)
+    want = sorted(got, key=key)
+    tied = [(a, b) for a, b in zip(want, want[1:]) if key(a) == key(b)]
+    if tied: fail(f"the clause's keys {keys} leave {tied} unordered: the printed order cannot be derived from it ({m.group(0)!r})")
+    if want != got: fail(f"printed {got}, the clause's keys {keys} derive {want} ({m.group(0)!r})")
+    if mode == "single" and got != sorted(got, key=lambda n: pos[n][1]): fail(f"single-file order {got} is not the line order")
+    print(f"premise={prem} keys={'/'.join(keys)} mem={','.join(got)}")
+elif cmd == "legendonly":     # HEAD BASE : equal once the mem= clause and est_tokens are masked (only the legend moved)
+    mask = lambda t: re.sub(r' est_tokens="\d+"', '', CLAUSE.sub('', t))
+    a, b = load(args[0]), load(args[1])
+    if not re.search(r' mem="', a): fail("no mem= on the answer: vacuous")
+    if mask(a) != mask(b): fail("the answers differ outside the mem= clause and est_tokens")
+    print(f"{len(a.encode()) - len(b.encode()):+d} B, all in the clause")
 else:
     fail("unknown command " + cmd)
 PY
@@ -174,11 +239,11 @@ run cap_non  "$FIX/cap"  RIPWIRE_NO_MEMBER_NAMES=1 -- --for="$Q_CAP"
 run cap_off2 "$FIX/cap"  RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP"
 
 echo "=== A: exactly the direct members ==="
-arm "A1 JS TemplateCompiler"  exact "$TMP/js_off.xml"  TemplateCompiler src/compiler.js constructor compileBlock compileSuper emitLine flushOutput
+arm "A1 JS TemplateCompiler"  exact "$TMP/js_off.xml"  TemplateCompiler src/tpl_emit.js constructor compileBlock compileSuper emitLine flushOutput
 arm "A2 Python JobScheduler"  exact "$TMP/py_off.xml"  JobScheduler sched/scheduler.py __init__ submit assign drain
 arm "A3 C++ DependencyScan"   exact "$TMP/cpp_off.xml" DependencyScan scan/depscan.h@8 RecomputeDirty RecomputeOutputDirty LoadDepfile Reset Width
-arm "A4 Rust BookDriver (impl in driver.rs)" exact "$TMP/rs_off.xml" BookDriver src/book.rs load execute_build build_dir_for source_dir theme_dir
-arm "A4 Rust trait Renderer"  exact "$TMP/rs_off.xml"  Renderer src/book.rs supports
+arm "A4 Rust BookDriver (impl in ops.rs)" exact "$TMP/rs_off.xml" BookDriver src/model.rs load execute_build build_dir_for source_dir theme_dir
+arm "A4 Rust trait Renderer"  exact "$TMP/rs_off.xml"  Renderer src/model.rs supports
 
 echo "=== B: a nested closure is not a member ==="
 arm "B1 blockVisitor/wrap_job never listed (JS)" never "$TMP/js_off.xml" blockVisitor wrap_job helperClosure
@@ -210,12 +275,17 @@ fpair(){   # TAG ROOT ARGS... : head == RIPWIRE_NO_MEMBER_NAMES=1, and no mem=
     if grep -q ' mem="' "$TMP/f_$tag.xml"; then no "F1 $tag carries mem="; else ok "F1 $tag identical, no mem= ($( wc -c <"$TMP/f_$tag.xml" | tr -d ' ' ) B)"; fi
 }
 fpair name-exact "$FIX/js"  --for=TemplateCompiler
-fpair expand     "$FIX/js"  --expand=src/compiler.js:TemplateCompiler
+fpair expand     "$FIX/js"  --expand=src/tpl_emit.js:TemplateCompiler
 fpair map        "$FIX/cap"
 fpair filepage   "$FIX/cap" --for="$Q_CAP" --limit=40
 fpair json       "$FIX/cap" --for="$Q_CAP" --json
 fpair sigsonly   "$FIX/cap" --for="$Q_CAP" --signatures-only
-fpair budget     "$FIX/cap" --for="$Q_CAP" --token-budget=3000
+# F1t TOKEN-BUDGET-MONOTONE (2026-11-14): --token-budget no longer switches the compact route off (it was in F1's list: the
+# budget answer had no mem= because the budget re-decided the posture). It trims the answer asked without it, so a budget
+# that fits returns that answer byte for byte, mem= included (test/budgetmonotonecheck.sh (a)).
+run f_budget_off "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP"
+run f_budget     "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP" --token-budget=100000
+if [ -s "$TMP/f_budget.xml" ] && cmp -s "$TMP/f_budget.xml" "$TMP/f_budget_off.xml"; then ok "F1t --token-budget=100000 is the unbudgeted answer byte for byte ($( grep -c ' mem="' "$TMP/f_budget.xml" ) line(s) with mem=)"; else no "F1t the budgeted answer differs from the unbudgeted one (or is empty)"; fi
 
 echo "=== G: the ledger ==="
 run cap_noff "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 RIPWIRE_NO_MEMBER_NAMES=1 -- --for="$Q_CAP"
@@ -230,6 +300,34 @@ echo "=== L: the legend ==="
 arm "L1 compact clause defines mem= mem_more=" clause "$TMP/js_off.xml"
 arm "L1 full clause defines mem= mem_more="    clause "$TMP/js_full.xml"
 arm "L2 no mem=, no clause (fold-sliced cap)"  nomem "$TMP/cap_on.xml"
+
+echo "=== O: #595, the order the clause states is the order printed (soarkit's repro) ==="
+# soarkit's two-file tree from #595, verbatim; the single-file twin appends other.rs's impl to owner.rs (yankee at line 11)
+mkdir -p "$TMP/o_split/src" "$TMP/o_single/src"
+printf '%s\n' '//! Widget owner.' 'pub struct Widget {' '    pub data: u32,' '}' '' 'impl Widget {' '    pub fn zulu(&self) -> u32 { 1 }' '    pub fn alpha(&self) -> u32 { 2 }' >"$TMP/o_split/src/owner.rs"
+printf '%s\n' '//! Widget methods in another file.' 'impl Widget {' '    pub fn yankee(&self) -> u32 { 3 }' '}' >"$TMP/o_split/src/other.rs"
+{ cat "$TMP/o_split/src/owner.rs"; tail -n +2 "$TMP/o_split/src/other.rs"; } >"$TMP/o_single/src/owner.rs"
+Q_O="How does the widget data work?"
+for d in split single; do
+    run "o_${d}_c" "$TMP/o_$d" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_O"
+    run "o_${d}_f" "$TMP/o_$d" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_O" --legend=full
+done
+O_SPLIT=( zulu@src/owner.rs:7 alpha@src/owner.rs:8 yankee@src/other.rs:3 )
+O_SINGLE=( zulu@src/owner.rs:7 alpha@src/owner.rs:8 yankee@src/owner.rs:11 )
+arm "O1 two files, compact clause derives the printed order" order "$TMP/o_split_c.xml"  Widget src/owner.rs split  "$Q_O" "${O_SPLIT[@]}"
+arm "O1 two files, full clause derives the printed order"    order "$TMP/o_split_f.xml"  Widget src/owner.rs split  "$Q_O" "${O_SPLIT[@]}"
+arm "O2 one file (negative), compact: line order"            order "$TMP/o_single_c.xml" Widget src/owner.rs single "$Q_O" "${O_SINGLE[@]}"
+arm "O2 one file (negative), full: line order"               order "$TMP/o_single_f.xml" Widget src/owner.rs single "$Q_O" "${O_SINGLE[@]}"
+if [ -n "${RIPWIRE_PRE595_BIN:-}" ]; then
+    for v in split_c split_f single_c single_f; do
+        d="${v%_*}"; lg=(); [ "${v##*_}" = f ] && lg=( --legend=full )
+        if ( cd "$TMP/o_$d" || exit 1; RIPWIRE_NO_BODY_FOLD=1 "$RIPWIRE_PRE595_BIN" "$TMP/o_$d" --for="$Q_O" ${lg[@]+"${lg[@]}"} --cache="$TMP/o3b.$v" >"$TMP/o3b.$v.xml" 2>/dev/null ); then
+            arm "O3 $v: only the legend moved vs the pre-#595 binary" legendonly "$TMP/o_$v.xml" "$TMP/o3b.$v.xml"
+        else
+            no "O3 $v: the pre-#595 binary exited non-zero"
+        fi
+    done
+fi
 
 echo "=== X: determinism, well-formedness ==="
 run js_off_b "$FIX/js" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_JS"

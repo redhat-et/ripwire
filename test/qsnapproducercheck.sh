@@ -183,7 +183,9 @@ def parse(path, sha):
     if shaAt < 16:
         print("fnv1a64(sha) not found in the header"); sys.exit(3)
     cur = shaAt + 8
-    for recBytes in (12, 12, 12, 12, 12, 12, 12, 12, 16, 8):   # ccx loc nest params defs mask maskReport placeholder | bodyHash | cloneGroups
+    for recBytes in (12, 12, 12, 12, 12, 12, 12, 12, 12, 16, 16, 16, 16, 0, 16, 0, 136, 8):   # ccx loc nest params defs mask maskReport failureDefault (v31) placeholder | bodyHash | moveCid (v28) | bodyCid (v30) | tangle (v36) + its known byte | tangleCap (v40) + its known byte | moveSketch key+128 B (v29) | cloneGroups
+        if recBytes == 0:
+            cur += 1; continue   # v36 / v40: the tangle and tangleCap maps' known byte (a u8, no count)
         n = struct.unpack_from("<I", body, cur)[0]; cur += 4 + n * recBytes
     deadAt = cur
     n = struct.unpack_from("<I", body, cur)[0]
@@ -270,7 +272,7 @@ else
 
     cp "$TMP/f1.bin" "$QF"
     run >"$TMP/f1_out" 2>"$TMP/f1_err"; rc1=$?
-    { ! grep -q 'kind="dead-code"' "$TMP/f_cold" && grep -q 'kind="dead-code"' "$TMP/f1_out"; } \
+    { [ "$rc1" = 2 ] && ! grep -q 'kind="dead-code"' "$TMP/f_cold" && grep -q 'kind="dead-code"' "$TMP/f1_out"; } \
         && ok "(F1) control: the forged dead set, producer kept, IS served — a dead-code row the cold run lacks (exit $rcf -> $rc1)" \
         || no "(F1) control did not fire (cold exit $rcf, forged exit $rc1) — the forgery cannot show a stale set is harmful"
 

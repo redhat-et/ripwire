@@ -393,5 +393,196 @@ QN="$( "$BIN" "$QF" --pattern='use_plain($X)' --no-cache 2>/dev/null )"
 printf '%s' "$QN" | grep -q 'unmatched_qualified' \
     && no "a pattern with no qualified near miss carries unmatched_qualified" || ok "no near miss, no attribute and no reading (0 B)"
 
+# -- 7b) a MEMBER spelling of the callee is counted too (PATTERN-MEMBER-ZERO, audit-verify 2026-11-11) ----------------
+# textual `post_message($X)` answered hits="0" while `$O.post_message($X)` found 173: Python attribute calls, JS/TS
+# member calls, Rust/Go/C++ field and selector calls carry a member callee the bare identifier never matches, and
+# nothing said so. They are still not hits; the root counts them as unmatched_member=N and next= spells the pattern
+# that matches them. Per grammar through pattern.h's kMemberCallShapes.
+MF="$TMP/memberfix"; mkdir -p "$MF"
+cat >"$MF/w.py" <<'PY'
+def post_message(m):
+    return m
+
+class Widget:
+    def a(self, m):
+        return self.post_message(m)
+
+    def b(self, m):
+        self.app.post_message(m)
+        return post_message(m)
+
+    def c(self, post_message):
+        return log(self.post_message)
+PY
+cat >"$MF/w.ts" <<'TS'
+export function emit(x: number): number { return x }
+export class Bus {
+  fire(x: number): number { return this.emit(x) + emit(x) }
+  fire2(o: Bus, x: number): number { return o.emit(x) }
+  emit(x: number): number { return x }
+}
+TS
+cat >"$MF/w.rs" <<'RS'
+struct S { v: Vec<u32> }
+fn push(x: u32) -> u32 { x }
+fn grow(s: &mut S, x: u32) { s.v.push(x); push(x); }
+RS
+cat >"$MF/w.go" <<'GO'
+package w
+
+type Q struct{}
+
+func (q Q) Push(x int) int { return x }
+func Push(x int) int { return x }
+func use(q Q) int { return q.Push(1) + Push(2) }
+GO
+# PREMISE: count the member-call sites in the fixture by text and FAIL on zero, so the arms below cannot pass vacuously.
+memberSites="$( grep -cE '\.(post_message|emit|push|Push)\(' "$MF"/w.py "$MF"/w.ts "$MF"/w.rs "$MF"/w.go | awk -F: '{ n += $2 } END { print n + 0 }' )"
+[ "${memberSites:-0}" -gt 0 ] && ok "member premise: the fixture carries $memberSites member-call sites (py 2, ts 2, rs 1, go 1)" \
+    || no "member premise: the fixture carries no member-call site — the unmatched_member arms below would be vacuous"
+mroot(){ "$BIN" "$MF" --no-cache --pattern="$1" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }   # status: the arms below read the output; a failed run prints nothing, which they fail on
+MP="$( mroot 'post_message($X)' )"
+printf '%s' "$MP" | grep -q ' hits="1"' && printf '%s' "$MP" | grep -q ' unmatched_member="2"' \
+    && ok "post_message(\$X): hits=\"1\" (the bare call) and unmatched_member=\"2\" (self.post_message, self.app.post_message)" \
+    || no "post_message(\$X) should read hits=\"1\" unmatched_member=\"2\" (a bare-name ARGUMENT self.post_message is not a call): $MP"
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= pins read the raw ' (was &apos;): nextverb.h appendNextValueXml leaves ' raw in a "-delimited attribute
+printf '%s' "$MP" | grep -qF " next=\"--pattern='\$O.post_message(\$X)'\"" \
+    && ok "unmatched_member= rides with next=\"--pattern='\$O.post_message(\$X)'\"" || no "unmatched_member= should carry the receiver spelling as next=: $MP"
+MPN="$( mroot '$O.post_message($X)' )"
+printf '%s' "$MPN" | grep -q ' hits="2"' \
+    && ok "pasting next= matches exactly the counted calls: \$O.post_message(\$X) hits=\"2\"" || no "\$O.post_message(\$X) should hit the 2 member calls: $MPN"
+UQDOC="$( "$BIN" "$MF" --no-cache --pattern='post_message($X)' 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+printf '%s' "$UQDOC" | grep -qE '<!-- unmatched_qualified=N: [^>]*unmatched_member=N: ' \
+    && ok "the same document defines unmatched_member= (kPatternQualifiedLegend)" || no "unmatched_member= rides with no reading"
+for pc in 'emit($X)|1|2' 'push($X)|1|1' 'Push($X)|1|1'; do
+    pq="${pc%%|*}"; rest="${pc#*|}"; ph="${rest%%|*}"; pm="${rest#*|}"
+    PR="$( mroot "$pq" )"
+    printf '%s' "$PR" | grep -q " hits=\"$ph\"" && printf '%s' "$PR" | grep -q " unmatched_member=\"$pm\"" \
+        && ok "$pq: hits=\"$ph\" unmatched_member=\"$pm\" (per grammar through the call-shape table)" \
+        || no "$pq should read hits=\"$ph\" unmatched_member=\"$pm\": $PR"
+done
+# the relaxation is the CALLEE only: an argument spelled as a member is not a near miss of a bare argument
+MA="$( mroot 'log(post_message)' )"
+printf '%s' "$MA" | grep -q 'unmatched_member' \
+    && no "an ARGUMENT member (log(self.post_message)) was counted as a member near miss of log(post_message): $MA" \
+    || { [ -n "$MA" ] && ok "only the callee is relaxed: log(self.post_message) is no near miss of log(post_message)" \
+         || no "premise: log(post_message) printed no <pattern> header (the call failed or printed nothing)"; }
+QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+printf '%s' "$QN2" | grep -q 'unmatched_member' \
+    && no "a fixture with no member call carries unmatched_member: $QN2" \
+    || { [ -n "$QN2" ] && ok "no member near miss, no unmatched_member= (the qualified fixture)" \
+         || no "premise: ping(\$X) printed no <pattern> header (the call failed or printed nothing)"; }
+# -- 7c) the member near miss stays exact (CR #624 review 5869575117) ------------------------------------------------
+# Three ways the 7b count or its next= misled: (1) a C/C++ pointer call `p->f(x)` is counted, but next= spelled
+# `$O.f($X)`, which never matches it; (2) a pattern already holding $O, $RECV and $RW_RECEIVER got $RW_RECEIVER as
+# the receiver too, so next= bound it twice and missed the counted call; (3) a member call longer than the ellipsis
+# bound was abandoned and the abandon rolled back, so unmatched_member= read as a total while it was a floor.
+MX="$TMP/memberexact"; mkdir -p "$MX/mixed" "$MX/arrow" "$MX/recv" "$MX/long" "$MX/short"
+printf 'struct W { void f(int); };\nvoid g(W* p, W o) { p->f(1); p->f(2); o.f(3); }\n' >"$MX/mixed/a.cpp"
+printf 'struct W { void f(int); };\nvoid g(W* p) { p->f(1); p->f(2); }\n' >"$MX/arrow/a.cpp"
+printf 'def h(o):\n    o.f(1, 2, 3)\n' >"$MX/recv/b.py"
+printf 'def h(o):\n    o.foo(%s)\n' "$( seq -s, 0 399 )" >"$MX/long/c.py"
+printf 'def h(o):\n    o.foo(%s)\n' "$( seq -s, 0 9 )" >"$MX/short/c.py"
+# PREMISE: the fixtures carry the shapes the arms are about, counted by text; zero FAILS (no vacuous pass).
+arrowSites="$( grep -o -- '->f(' "$MX/mixed/a.cpp" "$MX/arrow/a.cpp" | wc -l | tr -d ' ' )"
+longSites="$( grep -c 'o\.foo(' "$MX/long/c.py" "$MX/short/c.py" | awk -F: '{ n += $2 } END { print n + 0 }' )"
+[ "${arrowSites:-0}" -ge 4 ] && [ "${longSites:-0}" -eq 2 ] && grep -q 'o\.f(1, 2, 3)' "$MX/recv/b.py" \
+    && ok "member-exact premise: $arrowSites arrow call sites, $longSites long/short member calls, one 3-argument member call" \
+    || no "member-exact premise: the fixtures lost their shapes (arrow=${arrowSites:-0} long=${longSites:-0}) — the arms below would be vacuous"
+xroot(){ "$BIN" "$1" --no-cache --pattern="$2" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }   # status: the arms below read the output; a failed run prints nothing, which they fail on
+# (1) arrow: mixed spellings disclose the arrow count and keep the dot next=; an all-arrow corpus gets the arrow next=
+XM="$( xroot "$MX/mixed" 'f($X)' )"
+printf '%s' "$XM" | grep -q ' unmatched_member="3"' && printf '%s' "$XM" | grep -q ' unmatched_member_arrow="2"' \
+    && printf '%s' "$XM" | grep -qF "next=\"--pattern='\$O.f(\$X)'\"" \
+    && ok "mixed . and ->: unmatched_member=\"3\" unmatched_member_arrow=\"2\", next= keeps the dot spelling" \
+    || no "mixed . and -> should read unmatched_member=\"3\" unmatched_member_arrow=\"2\" with the dot next=: $XM"
+XA="$( xroot "$MX/arrow" 'f($X)' )"
+printf '%s' "$XA" | grep -qF "next=\"--pattern='\$O-&gt;f(\$X)'\"" \
+    && ok "all-arrow corpus: next= spells \$O->f(\$X)" || no "an all-arrow corpus should get next='\$O->f(\$X)': $XA"
+XAN="$( xroot "$MX/arrow" '$O->f($X)' )"
+printf '%s' "$XAN" | grep -q ' hits="2"' \
+    && ok "pasting the arrow next= hits exactly the 2 counted calls" || no "\$O->f(\$X) should hit the 2 arrow calls: $XAN"
+# control: a dot-only corpus carries no arrow attribute (7b's fixture)
+MDOT="$( mroot 'post_message($X)' )"
+printf '%s' "$MDOT" | grep -q 'unmatched_member_arrow' \
+    && no "a dot-only corpus carries unmatched_member_arrow" \
+    || { printf '%s' "$MDOT" | grep -q ' unmatched_member="' && ok "control: no arrow call, no unmatched_member_arrow= (unmatched_member= present)" \
+         || no "premise: the dot-only corpus printed no unmatched_member= (the call failed or the near miss vanished): $MDOT"; }
+# (2) receivers exhausted: next= takes a receiver the pattern does not spell, and pasting it hits the counted call
+XR="$( xroot "$MX/recv" 'f($O, $RECV, $RW_RECEIVER)' )"
+XRN="$( printf '%s' "$XR" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
+printf '%s' "$XR" | grep -q ' unmatched_member="1"' && [ -n "$XRN" ] \
+    && [ "$( xroot "$MX/recv" "$XRN" | grep -c ' hits="1"' )" = 1 ] \
+    && ok "receivers \$O \$RECV \$RW_RECEIVER taken: next='$XRN' is free and hits the 1 counted call" \
+    || no "with \$O \$RECV \$RW_RECEIVER in the pattern, next= should take a free receiver that hits the counted call: next='$XRN' root=$XR"
+# (3) the ellipsis bound: the long member call is a floor, disclosed; the short one is counted with no floor flag
+XL="$( xroot "$MX/long" 'foo(...)' )"
+printf '%s' "$XL" | grep -q ' unmatched_member_capped="1"' \
+    && ok "a member call past the ellipsis bound labels unmatched_member= a floor (unmatched_member_capped=\"1\")" \
+    || no "UNDISCLOSED: a member call the ellipsis bound skipped left no floor label: $XL"
+printf '%s' "$XL" | grep -q ' ellipsis_capped="0"' \
+    && ok "the member probe's abandon stays out of ellipsis_capped= (the exact answer's fact)" || no "ellipsis_capped= should stay 0 for a member-only abandon: $XL"
+XS="$( xroot "$MX/short" 'foo(...)' )"
+printf '%s' "$XS" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XS" | grep -q 'unmatched_member_capped' \
+    && ok "control: a member call under the bound is counted (unmatched_member=\"1\") with no floor flag" \
+    || no "a member call under the bound should read unmatched_member=\"1\" with no unmatched_member_capped: $XS"
+# -- 7d) optional chaining in next= (PATTERN-OPTCHAIN-NEXT, CodeRabbit #633 4557724153) -----------------------------
+# `o?.f(x)` counted toward unmatched_member= while next= spelled `$O.f($X)`, which matches no `?.` call (hits=0 on
+# main cd04d477e). An all-`?.` corpus now gets `$O?.f($X)`; a mixed one keeps the dot and says how many are `?.`.
+mkdir -p "$MX/oc" "$MX/ocmix"
+printf 'function g(o) {\n  o?.f(1);\n  o?.f(2);\n  return 0;\n}\n' >"$MX/oc/a.js"
+printf 'function g(o, p) {\n  o?.f(1);\n  p.f(2);\n  return 0;\n}\n' >"$MX/ocmix/a.ts"
+ocSites="$( cat "$MX/oc/a.js" "$MX/ocmix/a.ts" | grep -o '?\.f(' | wc -l | tr -d ' ' )"
+if [ "${ocSites:-0}" -eq 3 ]; then ok "optchain premise: $ocSites \`?.f(\` call sites"; else no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"; fi
+XO="$( xroot "$MX/oc" 'f($X)' )"
+XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
+printf '%s' "$XO" | grep -q ' unmatched_member="2" unmatched_member_optchain="2"' && [ "$XON" = '$O?.f($X)' ] \
+    && [ "$( xroot "$MX/oc" "$XON" | grep -c ' hits="2"' )" = 1 ] \
+    && ok "all-?. corpus: unmatched_member_optchain=\"2\", next='\$O?.f(\$X)' hits exactly the 2 counted calls" \
+    || no "an all-?. corpus should read unmatched_member_optchain=\"2\" with next='\$O?.f(\$X)' hitting 2: next='$XON' root=$XO"
+XOM="$( xroot "$MX/ocmix" 'f($X)' )"
+printf '%s' "$XOM" | grep -q ' unmatched_member="2" unmatched_member_optchain="1"' \
+    && printf '%s' "$XOM" | grep -qF "next=\"--pattern='\$O.f(\$X)'\"" \
+    && ok "mixed . and ?.: unmatched_member_optchain=\"1\" of 2, next= keeps the dot spelling" \
+    || no "mixed . and ?. should read unmatched_member=\"2\" unmatched_member_optchain=\"1\" with the dot next=: $XOM"
+printf '%s' "$XM" | grep -q 'unmatched_member_optchain' \
+    && no "the C++ dot/arrow corpus carries unmatched_member_optchain: $XM" || ok "control: a C++ corpus carries no unmatched_member_optchain="
+# -- 7f) next= picks an operator the counted calls use (CodeRabbit 4570578110) ---------------------------------------
+# C++ `p->f(1)` beside JS `o?.f(1)` and no dot call: neither all-arrow nor all-?., so next= fell back to `$O.f($X)`, which matches
+# neither (hits=0 on 1c920292f). With no dot call it now takes the arrow (fixed priority -> then ?.), and pasted it hits.
+mkdir -p "$MX/arrowoc"
+printf 'struct P { int f(int); };\nint g(P* p) { return p->f(1); }\n' >"$MX/arrowoc/a.cpp"
+printf 'function h(o) {\n  return o?.f(1);\n}\n' >"$MX/arrowoc/b.js"
+XAO="$( xroot "$MX/arrowoc" 'f($X)' )"
+XAON="$( printf '%s' "$XAO" | sed -n 's/.* next="--pattern='\''\(.*\)'\''".*/\1/p' | sed 's/&gt;/>/g' )"
+if printf '%s' "$XAO" | grep -q ' unmatched_member="2" unmatched_member_arrow="1" unmatched_member_optchain="1"'; then
+    ok "arrow+optchain premise: 2 counted member calls, 1 -> and 1 ?., no dot call"
+    if [ "$XAON" = '$O->f($X)' ] && [ "$( xroot "$MX/arrowoc" "$XAON" | grep -c ' hits="1"' )" = 1 ]; then ok "arrow+optchain: next='\$O->f(\$X)' (an operator the calls use) hits the arrow call"
+    else no "arrow+optchain: next='$XAON' should be '\$O->f(\$X)' and hit 1 call: $( xroot "$MX/arrowoc" "${XAON:-f}" | head -c 300 )"; fi
+else no "arrow+optchain premise: want unmatched_member=2 arrow=1 optchain=1: $XAO"; fi
+# -- 7e) next= stays inside the pattern limits (PATTERN-NEXT-LIMITS, CodeRabbit #633 4557724172) -------------------
+# next= adds a receiver metavariable: a 32-metavariable pattern gave a 33-metavariable continuation that refuses when
+# pasted, and a pattern a few bytes under the 4096-byte limit gave one over it (both on main cd04d477e).
+mkdir -p "$MX/lim32" "$MX/limbytes"
+args32="$( i=0; while [ $i -lt 32 ]; do printf '%s%s' "$( [ $i -gt 0 ] && printf ', ' )" "$i"; i=$(( i + 1 )); done )"
+pat32="f($( i=0; while [ $i -lt 32 ]; do printf '%s$M%d' "$( [ $i -gt 0 ] && printf ', ' )" "$i"; i=$(( i + 1 )); done ))"
+printf 'def h(o):\n    o.f(%s)\n' "$args32" >"$MX/lim32/a.py"
+nm="$( printf '%s' "$pat32" | grep -o '\$M[0-9]*' | sort -u | wc -l | tr -d ' ' )"
+if [ "$nm" -eq 32 ]; then ok "next-limits premise: the pattern spells $nm distinct metavariables (the limit)"; else no "next-limits premise: $nm metavariables, expected 32"; fi
+X32="$( xroot "$MX/lim32" "$pat32" )"
+X32N="$( printf '%s' "$X32" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
+printf '%s' "$X32" | grep -q ' unmatched_member="1"' && [ -n "$X32N" ] && [ "$( xroot "$MX/lim32" "$X32N" | grep -c ' hits="1"' )" = 1 ] \
+    && ok "at the metavariable limit next= takes an anonymous receiver and pasting it hits the 1 counted call ('${X32N%%(*}(…)')" \
+    || no "at the metavariable limit next= should compile and hit the counted call: next='$X32N' root=$( printf '%s' "$X32" | head -c 300 )"
+padlen=$(( 4095 - 9 ))   # f( $X , "" ) is 9 bytes
+pad="$( awk -v n=$padlen 'BEGIN { while( n-- > 0 ) printf "a" }' )"
+patB="f(\$X, \"$pad\")"
+printf 'def h(o):\n    o.f(1, "%s")\n' "$pad" >"$MX/limbytes/a.py"
+if [ "${#patB}" -eq 4095 ]; then ok "next-limits premise: a ${#patB}-byte pattern (the limit is 4096)"; else no "next-limits premise: the pattern is ${#patB} bytes, expected 4095"; fi
+XB="$( xroot "$MX/limbytes" "$patB" )"
+printf '%s' "$XB" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XB" | grep -q ' next=' \
+    && ok "a continuation past the 4096-byte limit is not offered (unmatched_member=\"1\" rides, no next=)" \
+    || no "a 4095-byte pattern should keep unmatched_member=\"1\" and offer no next= over the byte limit: $( printf '%s' "$XB" | grep -o ' unmatched_member="[0-9]*"\| next="[^"]\{0,40\}' | tr '\n' ' ' )"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

@@ -38,7 +38,7 @@
 #   B6 [P] workspace member crates each with src/main.rs: implicit bin row from member Cargo.toml (cargows/crate-a)
 #   B7 [P] an omitted [[bin]] path follows Cargo inference (package bin src/main.rs, named bin src/bin/NAME.rs); a [[bin]] inside a multi-line string is no entry (cargoinf)
 #   N1 [G] a non-manifest .cfg (config.cfg, same text): no <ep>
-#   N2 [G] no <ep>, byte-identical to RIPWIRE_NO_EP_MANIFEST=1: --json, --token-budget=3000, --signatures-only
+#   N2 [G] no <ep>, byte-identical to RIPWIRE_NO_EP_MANIFEST=1: --json, --signatures-only; --token-budget=3000 is the unbudgeted answer
 #   N3 [G] prefix identity: the answer minus <ep> and its clause, est_tokens masked, equals RIPWIRE_NO_EP_MANIFEST=1
 #   R1 [P] (CodeRabbit 4381174525) the groups register rows <sigs> EMITS: --pack-budget-bytes=1 leaves only Fmt in <sigs> (shown=1), so only x.report rides (Other / Lonely were dropped)
 #   R2 [P] every head row that a group registers dropped (load_other alone shown): no <ep> and no clause   R3 [G] --pack-budget-bytes=300 drops only reload_reports (no target): all three groups stay
@@ -57,6 +57,9 @@
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_EP_MANIFEST
@@ -379,18 +382,30 @@ if good mbin && has "$MBIN" "any(g['e']==[{'n':'cli','target':'bin/cli','externa
 # N1
 okrun "$TMP/neg" && grep -q 'n="Fmt"' "$TMP/neg" && [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep> (Fmt shown)" "N1 config.cfg produced rows: $NEG"
 # N2
-for v in --json --token-budget=3000 --signatures-only; do
+for v in --json --signatures-only; do
     run "$FX/cfg" "$TMP/n2on" "$Q" "$v"; RIPWIRE_NO_EP_MANIFEST=1 run "$FX/cfg" "$TMP/n2off" "$Q" "$v"
     if okrun "$TMP/n2on" && okrun "$TMP/n2off" && cmp -s "$TMP/n2on" "$TMP/n2off" && ! grep -q '<ep ' "$TMP/n2on"; then ok "N2 $v: no <ep>, byte-identical to off"; else no "N2 $v differs or carries <ep>"; fi
 done
+# TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the answer's posture (it used to drop <ep> with
+# the rest of the default's enrichment); a budget the answer fits returns the unbudgeted answer byte for byte, <ep> as it is there
+run "$FX/cfg" "$TMP/n2tb" "$Q" --token-budget=3000
+if okrun "$TMP/n2tb" && cmp -s "$TMP/n2tb" "$TMP/cfg"; then ok "N2 --token-budget=3000: the unbudgeted answer byte for byte"; else no "N2 --token-budget=3000 is not the unbudgeted answer"; fi
 # N3 prefix identity (compact legend)
 python3 - "$TMP/cfg" "$TMP/cfgoff" <<'PY'; verdict $? "N3 answer minus <ep> and its clause equals RIPWIRE_NO_EP_MANIFEST=1 (est_tokens masked)" "N3 prefix identity broken"
 import re, sys
 a = open(sys.argv[1]).read(); b = open(sys.argv[2]).read()
 a = re.sub(r"<ep [^>]*>.*?</ep>", "", a, flags=re.S)
 a = re.sub(r"; ep p= l= group=:.*?groups_total= if cut", "", a, flags=re.S)
+# K-WRONGSYM: <syms> lists the shown files' symbols that NO WORD OF THE ANSWER names (src/forfilesyms.h), and the <ep> block names
+# some (used_in=load_other), so the answer without it lists one row more. Both sides are read less the <syms> block and its legend
+# comment (the rest is the prefix identity); the off side must carry the row the on side lost, or the strip proves nothing.
+# AF1 (2026-11-18): answer-first — the last row block is followed only by the trailing document legend (comments) before </ctx>
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)', re.S)
+sa, sb = syms.search(a), syms.search(b)
+twin = sa is not None and sb is not None and 'n="load_other"' in sb.group(0) and 'n="load_other"' not in sa.group(0)
+a, b = syms.sub('', a), syms.sub('', b)
 m = lambda s: re.sub(r'est_tokens="\d+"', 'est_tokens="N"', s)
-sys.exit(0 if m(a) == m(b) and a != open(sys.argv[1]).read() else 1)
+sys.exit(0 if twin and m(a) == m(b) and a != open(sys.argv[1]).read() else 1)
 PY
 # R1-R3: the manifest is picked from the rows <sigs> emitted, not from the head it was asked to render
 Q2='--for=load other group consumer'

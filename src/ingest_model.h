@@ -101,6 +101,13 @@ inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
     return d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
+// A RawDef's body start — its Symbol's sigEndByte: the body field's start, or endByte for a bodyless def and for an alias row (whose
+// bodyByte transports its target's start). QD-SHRINK-PAIR's base bodies (ingest_astquery.h tangleInputsInBlobs) cut the same span.
+inline std::uint32_t rawDefBodyStart( const RawDef& d ) noexcept
+{
+    return ( d.bodyByte > d.startByte && !rawDefIsAliasRow( d ) ) ? d.bodyByte : d.endByte;
+}
+
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: objc decl-def collapse" );
@@ -395,9 +402,11 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
                } );
 
     result.symbols.reserve( rawDefs.size() );
+    result.cloneKeys.resize( rawDefs.size() );   // CLONES-PERSIST: aligned 1:1 with result.symbols
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const RawDef& d = rawDefs[ i ];
+        result.cloneKeys[ i ] = d.cloneKey;
         Symbol s;
         s.id     = i;
         s.kind   = d.kind;
@@ -405,12 +414,18 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.fileId = d.fileId;
         s.line   = d.line;
         s.sigStartByte = d.startByte;
-        s.sigEndByte   = ( d.bodyByte > d.startByte ) ? d.bodyByte : d.endByte;
+        s.sigEndByte   = rawDefBodyStart( d );   // an alias row's whole declaration is its signature (no body)
         s.endByte      = d.endByte;
         s.cx           = d.cx;
         s.ccx          = d.ccx;
         s.loc          = d.loc;      // Q4: physical line span
-        s.locals       = d.locals;   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang)
+        s.locals       = std::uint16_t( d.locals > 65535u ? 65535u : d.locals );   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang); u16 saturating (model.h)
+        s.steer        = d.steer;    // QD-TANGLE steering locals (model.h Symbol::steer; 0 where langfacts.h steerDecl is None and at 50 lines or fewer)
+        s.dispatchShare = tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut );   // QD-TANGLE (model.h)
+        if( d.maxBlock10 != kTangleNoCap )   // QD-TANGLE BLOCK FACTS: the side table, ascending id like aliasTargets
+        {
+            result.tangleBlocks.push_back( TangleBlockFacts{ s.id, std::uint16_t( std::min( d.maxBlock10, kTangleBlockMax10 ) ), d.cross, 0 } );
+        }
         s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.paramsMin    = std::uint8_t( d.paramsMin < 15 ? d.paramsMin : 15 );   // B2.2: fewest arguments a call can pass (0 = no bound); a 4-bit field — saturating LOWERS it, which only keeps candidates
@@ -421,6 +436,14 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.testScope    = ( d.testScope != 0 ) ? 1 : 0;       // L8: an in-file test convention encloses this def
         s.internalLinkage = ( d.internalLinkage != 0 ) ? 1 : 0;   // C/C++ anonymous-namespace or namespace-scope `static` def (model.h)
         s.scopeRootsStd   = ( d.scopeRootsStd   != 0 ) ? 1 : 0;   // #150: this def's full enclosing-namespace chain roots at std (model.h)
+        s.rankFlags       = std::uint8_t( d.rankFlags & 0x0Fu );  // DOCS-UNITS-FIX: kRankFlag* (model.h), set by the doc post-pass
+        // RANK-PROTO: a schema definition (.proto: langfacts.h generatedSchema) is no lexical document. --for reaches it through
+        // the generated-name rung, --defs/--whereis/--expand and a file-qualified ask, never by competing with code for slots or
+        // shifting the code's IDF. Set here, not at the parse, because the cache record never holds rankFlags (ingest_cache.h).
+        if( langFacts( d.lang ).generatedSchema )
+        {
+            s.rankFlags |= kRankFlagNotLexRanked;
+        }
         s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
         s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
         s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
@@ -438,7 +461,6 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         // whole declaration as its signature and no body, and the target start goes to the side table (model.h AliasTarget)
         if( rawDefIsAliasRow( d ) )
         {
-            s.sigEndByte = d.endByte;
             result.aliasTargets.push_back( AliasTarget{ s.id, d.bodyByte } );
         }
         if( d.kind == SymKind::ModuleScope )
@@ -617,7 +639,7 @@ inline void markExtentSuspects( IngestResult& result, const std::vector<RawDef>&
         ENSURES( spanOfDef.size() == fileBits.size(), "one classified bit per def we handed the classifier" );
         for( std::size_t defIndex = 0; defIndex < spanOfDef.size(); ++defIndex )
         {
-            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = fileBits[ defIndex ];
+            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = std::uint8_t( fileBits[ defIndex ] & 0x0Fu );   // four reason bits (extentsuspect.h)
         }
     }
 }
@@ -862,9 +884,9 @@ inline void expandElixirImplementationReferences( IngestResult& result )
             clone.fromSymbol = node;
             const std::string& scope = result.symbols[ node ].scope;
             if( clone.recv == RecvKind::None && clone.role != RefRole::Import && clone.role != RefRole::Extends ) { clone.qualifier = scope; }
-            else if( clone.recv == RecvKind::ElixirSelfModule && !primary.empty() && clone.qualifier.starts_with( primary ) )
+            else if( clone.recv == RecvKind::ElixirSelfModule && !primary.empty() && clone.qualifier.str().starts_with( primary ) )
             {
-                clone.qualifier.replace( 0, primary.size(), scope );
+                clone.qualifier = std::string( clone.qualifier ).replace( 0, primary.size(), scope );
             }
             if( node == original.fromSymbol ) { ref = std::move( clone ); }
             else { expanded.emplace_back( refIndex, std::move( clone ) ); }
@@ -886,7 +908,7 @@ inline void expandElixirImplementationReferences( IngestResult& result )
     result.references = std::move( merged );
 }
 
-// rawRefs is consumed here (never read again) → MOVE its 5 strings into each Reference instead of copying.
+// rawRefs is consumed here (never read again) → MOVE its strings and its cold block into each Reference instead of copying.
 inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, const std::vector<std::uint32_t>& refOrder, const DefSpanIndex& spanIndex )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: emit refs" );
@@ -901,29 +923,26 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.fileId      = r.fileId;
         ref.line        = r.line;        // ABS-3: 1-based use-site line for --uses p="file:line"
         ref.lang        = r.lang;
-        ref.calleeName  = std::move( r.name );
-        ref.qualifier   = std::move( r.qualifier );
+        ref.calleeName  = r.name;
+        ref.qualifier   = r.qualifier;
         ref.role        = r.role;        // ABS-3 use-site role (call/read/write/import/extends)
         ref.isInherit   = r.isInherit;
         ref.isDocLink   = r.isDocLink;
         ref.isCompose   = r.isCompose;   // S5-E: HAS-A member-variable type edge — NEVER enters call graph
         ref.recv        = r.recv;        // P2-D receiver shape (this/self/var) for one-hop narrowing
-        ref.recvVar     = std::move( r.recvVar );
+        ref.recvVar     = r.recvVar;
         ref.argCount    = r.argCount;        // B2.2: call-site positional arg count (when countable)
         ref.argCountKnown = r.argCountKnown; // B2.2: whether argCount is reliable (no spread/splat)
         ref.viaArrow    = r.viaArrow;    // a call written `->`; a compose ref's smart-pointer pointee (arm p)
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
-        ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
-        ref.memberPath  = std::move( r.memberPath );    // FE-B: the members between that root and the callee
-        ref.memberCtor  = std::move( r.memberCtor );    // FE-B: the class a constructed receiver names
-        ref.memberVia   = std::move( r.memberVia );     // FE-B on #373: the method a Ruby typed receiver was built by
+        ref.memberRoot  = r.memberRoot;    // FE-A: its receiver chain's root identifier
         ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)
         ref.baseBind    = r.baseBind;                   // lane lego-transitive fix 1: an inherit ref's same-file base binding
-        ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
-        ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
+        ref.litAt       = r.litAt;                      // MEM-R1a: a registrar Value ref's object literal (regindex.h)
+        ref.takeColdFrom( r );   // fieldName, composeRel (S5-E), memberPath, memberCtor, memberVia (FE-B): one block, moved whole
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         // #60: the module-scope owner owns EXACTLY the references it was minted for — the call/macro
         // population of pincensus.h isResolvableCallReference. A module-level `import`/`read`/`type`
@@ -946,10 +965,10 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
 // declarator is not a value use), so the pass is a no-op there; every other ref keeps its position and order.
 inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<RawDef>& fieldDefs )
 {
-    HashMap<std::uint64_t, char> defSite;
+    HashSet<std::uint64_t>       defSite;
     for( const RawDef& d : fieldDefs )
     {
-        defSite.try_emplace( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte, 1 );
+        defSite.insert( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte );
     }
     if( defSite.empty() )
     {
@@ -962,6 +981,61 @@ inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<Ra
                    } );
 }
 
+// BIND-SORT: the order emitBindings emits bindings in, as row indices. A RawBind is 88 B with three strings, so sort a
+// (fileId, startByte) key beside a uint32 INDEX instead of the rows (orderReferences' posture). The packed key decides
+// almost every compare in one u64 test; equal keys fall to the rest of the total order, and a row equal on every
+// compared field keeps its input order (the index), so the order is deterministic and is the old comparator's order
+// wherever that order was defined.
+inline std::vector<std::uint32_t> orderBindings( const std::vector<RawBind>& rawBinds )
+{
+    const auto lessBindTail = []( const RawBind& a, const RawBind& b ) noexcept
+    {
+        if( a.var != b.var )
+        {
+            return a.var < b.var;
+        }
+        // L3: a decl can emit BOTH a Rule-2 type record and a fn record at one (file, byte, var) —
+        // kind+typeName make the order strict, so the merged-across-threads sort is a total order.
+        if( a.kind != b.kind )
+        {
+            return a.kind < b.kind;
+        }
+        if( a.typeName != b.typeName ) { return a.typeName < b.typeName; }
+        if( a.resultIndex != b.resultIndex ) { return a.resultIndex < b.resultIndex; }   // ReturnType: one record per position
+        if( a.unwrapDepth != b.unwrapDepth ) { return a.unwrapDepth < b.unwrapDepth; }
+        return a.importedName < b.importedName;
+    };
+    struct KeyedBind
+    {
+        std::uint64_t key;     // fileId << 32 | startByte: the first two fields of the order
+        std::uint32_t index;   // the row in rawBinds
+    };
+    ASSUME( rawBinds.size() <= UINT32_MAX, "a bind index is a uint32, as a reference's is (orderReferences)" );
+    std::vector<KeyedBind> keyed( rawBinds.size() );
+    for( std::uint32_t bindIndex = 0; bindIndex < keyed.size(); ++bindIndex )
+    {
+        keyed[ bindIndex ] = { hashutil::packPair( rawBinds[ bindIndex ].fileId, rawBinds[ bindIndex ].startByte ), bindIndex };
+    }
+    std::sort( keyed.begin(), keyed.end(),
+               [ &rawBinds, &lessBindTail ]( const KeyedBind& a, const KeyedBind& b ) noexcept
+               {
+                   if( a.key != b.key )
+                   {
+                       return a.key < b.key;
+                   }
+                   const RawBind& ra = rawBinds[ a.index ];
+                   const RawBind& rb = rawBinds[ b.index ];
+                   if( lessBindTail( ra, rb ) )
+                   {
+                       return true;
+                   }
+                   return !lessBindTail( rb, ra ) && a.index < b.index;
+               } );
+    std::vector<std::uint32_t> bindOrder( keyed.size() );
+    std::ranges::transform( keyed, bindOrder.begin(), &KeyedBind::index );
+    return bindOrder;
+}
+
 // P2-D Rule 2: attribute each local var→type binding to its enclosing def (same containment scan as refs),
 // in deterministic (file, byte, var) order. A binding whose position is file-scope (kNoNode) is kept too —
 // buildGraph keys on (fromSymbol, var), so a file-scope binding only ever matches a file-scope recvVar call.
@@ -969,37 +1043,13 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: sort+emit binds" );
 
-    std::sort( rawBinds.begin(), rawBinds.end(),
-               []( const RawBind& a, const RawBind& b ) noexcept
-               {
-                   if( a.fileId != b.fileId )
-                   {
-                       return a.fileId < b.fileId;
-                   }
-                   if( a.startByte != b.startByte )
-                   {
-                       return a.startByte < b.startByte;
-                   }
-                   if( a.var != b.var )
-                   {
-                       return a.var < b.var;
-                   }
-                   // L3: a decl can emit BOTH a Rule-2 type record and a fn record at one (file, byte, var) —
-                   // kind+typeName make the order strict, so the merged-across-threads sort is a total order.
-                   if( a.kind != b.kind )
-                   {
-                       return a.kind < b.kind;
-                   }
-                   if( a.typeName != b.typeName ) { return a.typeName < b.typeName; }
-                   if( a.resultIndex != b.resultIndex ) { return a.resultIndex < b.resultIndex; }   // ReturnType: one record per position
-                   if( a.unwrapDepth != b.unwrapDepth ) { return a.unwrapDepth < b.unwrapDepth; }
-                   return a.importedName < b.importedName;
-               } );
+    const std::vector<std::uint32_t> bindOrder = orderBindings( rawBinds );
     result.bindings.resize( rawBinds.size() );
     DefSweep bindSweep{ spanIndex.spans, spanIndex.fileSpanStart };
     std::size_t outBindIndex = 0;
-    for( RawBind& rb : rawBinds )   // rawBinds consumed here → move its 2 strings into the Binding
+    for( const std::uint32_t bindIndex : bindOrder )   // rawBinds consumed here; the three texts are pool ids (MEM-B1), copied as 4 B each
     {
+        RawBind& rb = rawBinds[ bindIndex ];
         Binding& b = result.bindings[ outBindIndex++ ];
         b.fileId     = rb.fileId;
         b.kind       = rb.kind;
@@ -1009,16 +1059,129 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
         b.startByte  = rb.startByte;   // the declaration a VarDecl and its typed record share (Rule 2 lexical lookup)
         b.spanStart  = rb.spanStart;   // shadow fix round: the declaring block's span rides through
         b.spanEnd    = rb.spanEnd;
-        b.var        = std::move( rb.var );
-        b.typeName   = std::move( rb.typeName );
-        b.importedName = std::move( rb.importedName );
+        b.var        = rb.var;
+        b.typeName   = rb.typeName;
+        b.importedName = rb.importedName;
         // findOwnedDef, not find: a file-scope binding must keep fromSymbol == kNoNode (see DefSweep).
         b.fromSymbol = bindSweep.findOwnedDef( rb.fileId, rb.startByte );
     }
 }
 
+// RUST-MACRO-PATH: a macro invoked by the alias a `use … as` binds (`use crate::__define_rejection as define_rejection;` then
+// `define_rejection! { … }`) names the macro the path ends in: the reference is renamed to that item and carries the path as its
+// written qualifier, so graph.h binds it exactly as it binds `crate::__define_rejection!` (the path must prove the macro: an
+// outside crate's `use serde_json::json as sj;` stays external), and --uses lists it under the macro's own name. In scope: a
+// file-level `use`, or one in the invoking function. Two renames of one alias in scope that disagree (cfg alternatives) rename
+// nothing. After emitBindings, from per-file facts only: a warm run renames what a cold run does, and no cache record changes.
+// CodeRabbit #633: Rust keeps macros apart from functions and types, so `use crate::things::helper as m;` imports no macro unless
+// `helper` is one, and `m!()` then names whatever macro `m` is. A rename survives only when nothing in the tree says otherwise: no Rust
+// macro of the alias's name in the alias's own file (a local `macro_rules! m` is what `m!()` names), and the imported name is an in-tree
+// Rust macro or names no in-tree Rust item at all (an outside crate's item: graph.h's path proof decides, and it binds only a macro).
+// A renamed in-tree function or type with no macro of its name keeps the reference as written. One pass over the symbols, against the
+// sorted names the renames ask about.
+inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<std::uint32_t>& renames )
+{
+    std::vector<std::string_view> asked;
+    asked.reserve( renames.size() * 2 );
+    for( const std::uint32_t i : renames )
+    {
+        asked.push_back( result.bindings[ i ].typeName );
+        asked.push_back( result.bindings[ i ].var );
+    }
+    sortutil::sortUnique( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
+    std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
+    using FileMacro = std::pair<std::uint32_t, std::string_view>;   // (fileId, name) of an asked-about Rust macro
+    std::vector<FileMacro> fileMacros;
+    for( const Symbol& s : result.symbols )
+    {
+        if( !langFacts( s.lang ).bangMacros )
+        {
+            continue;
+        }
+        const auto at = std::ranges::lower_bound( asked, std::string_view( s.name ), sortutil::svLess );
+        if( at == asked.end() || *at != s.name )
+        {
+            continue;
+        }
+        const std::size_t slot = std::size_t( at - asked.begin() );
+        ( s.kind == SymKind::Macro ? macroNamed : itemNamed )[ slot ] = 1;
+        if( s.kind == SymKind::Macro )
+        {
+            fileMacros.emplace_back( s.fileId, *at );
+        }
+    }
+    const auto fileThenSvLess = []( const FileMacro& a, const FileMacro& b ) noexcept
+    {
+        return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
+    };
+    std::ranges::sort( fileMacros, fileThenSvLess );
+    const auto slotOf = [ & ]( std::string_view name ) { return std::size_t( std::ranges::lower_bound( asked, name, sortutil::svLess ) - asked.begin() ); };
+    std::erase_if( renames, [ & ]( std::uint32_t i )
+    {
+        const Binding&         b      = result.bindings[ i ];
+        const std::size_t      source = slotOf( b.typeName );
+        const bool             local  = std::ranges::binary_search( fileMacros, FileMacro( b.fileId, b.var ), fileThenSvLess );
+        return local || ( macroNamed[ source ] == 0 && itemNamed[ source ] != 0 );
+    } );
+}
+
+inline void retargetRustMacroAliases( IngestResult& result )
+{
+    std::vector<std::uint32_t> renames;   // indices of Rust `use … as` bindings whose alias differs from the item it names
+    for( std::uint32_t i = 0; i < result.bindings.size(); ++i )
+    {
+        const Binding& b = result.bindings[ i ];
+        if( b.kind == LocalBindKind::TypeImport && b.var != b.typeName && !b.typeName.empty() && b.var != "*" && std::string_view( b.importedName ).find( "::" ) != std::string_view::npos )
+        {
+            renames.push_back( i );   // bindings are sorted by file: so is this list (a Rust file's, as the reference read below is)
+        }
+    }
+    if( renames.empty() )
+    {
+        return;
+    }
+    keepMacroNamespaceRenames( result, renames );
+    if( renames.empty() )
+    {
+        return;
+    }
+    for( Reference& r : result.references )
+    {
+        if( !langFacts( r.lang ).bangMacros || r.role != RefRole::Macro || !std::string_view( r.qualifier ).empty() )
+        {
+            continue;
+        }
+        const auto first = std::ranges::lower_bound( renames, r.fileId, {}, [ & ]( std::uint32_t i ) { return result.bindings[ i ].fileId; } );
+        const Binding* pick = nullptr;
+        bool           clash = false;
+        for( auto at = first; at != renames.end() && result.bindings[ *at ].fileId == r.fileId; ++at )
+        {
+            const Binding& b = result.bindings[ *at ];
+            if( b.var != std::string_view( r.calleeName ) || ( b.fromSymbol != kNoNode && b.fromSymbol != r.fromSymbol ) )
+            {
+                continue;
+            }
+            clash = clash || ( pick != nullptr && pick->importedName != b.importedName );
+            pick  = pick == nullptr ? &b : pick;
+        }
+        if( pick == nullptr || clash )
+        {
+            continue;
+        }
+        const std::string_view path   = pick->importedName;
+        const std::string_view module = path.substr( 0, path.rfind( "::" ) );
+        const std::size_t      sep    = module.rfind( "::" );
+        r.calleeName = pick->typeName;
+        r.qualifier  = sep == std::string_view::npos ? module : module.substr( sep + 2 );
+        if( sep != std::string_view::npos )
+        {
+            r.setFieldName( std::string( module ) );   // the whole written qualifier, as a path macro's (model.h rustWrittenQualifierOf)
+        }
+    }
+}
+
 // A4-R5: FFI binding aliases in a deterministic total order (fileId, kind, aliasName, targetScope,
-// targetName) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
+// targetName, lowConf) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
 inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>& rawFfis )
 {
     std::sort( rawFfis.begin(), rawFfis.end(),
@@ -1040,7 +1203,11 @@ inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>&
                    {
                        return a.targetScope < b.targetScope;
                    }
-                   return a.targetName < b.targetName;
+                   if( a.targetName != b.targetName )
+                   {
+                       return a.targetName < b.targetName;
+                   }
+                   return a.lowConf < b.lowConf;   // DET-INCLUDES: every field is in the key, so std::sort's tie order never shows
                } );
     result.bindingAliases = std::move( rawFfis );
 }
@@ -1064,7 +1231,11 @@ inline void emitRouteDefs( IngestResult& result, std::vector<RouteDef>& rawRoute
                    {
                        return a.method < b.method;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return a.handlerName < b.handlerName;   // DET-INCLUDES: two registrations of one route on one line
                } );
     result.routeDefs = std::move( rawRouteDefs );
 }
@@ -1087,7 +1258,11 @@ inline void emitRouteUses( IngestResult& result, std::vector<RawRouteUse>& rawRo
                    {
                        return a.startByte < b.startByte;
                    }
-                   return a.path < b.path;
+                   if( a.path != b.path )
+                   {
+                       return a.path < b.path;
+                   }
+                   return std::tie( a.line, a.method ) < std::tie( b.line, b.method );   // DET-INCLUDES: every field in the key
                } );
     result.routeUses.resize( rawRouteUses.size() );
     DefSweep routeSweep{ spanIndex.spans, spanIndex.fileSpanStart };

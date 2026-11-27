@@ -124,3 +124,40 @@ router's four rows point at orient, the corpus's 12 rows carry the mechanical re
 `compact-legend` intent names orient.
 
 Net: 17 skill directories (16 routable + the router; `ripwire-opt-remarks` stays contributor-gated at install).
+
+## 2026-11-18 — short SKILL.md bodies, everything else in on-demand reference files (lane P3; 17 dirs unchanged)
+
+No skill was added, removed or renamed, and every description is byte-identical. Each `SKILL.md` body was cut
+to its skill's core recipe (total 261,872 → 52,931 B, median 9,478 → 3,072 B, max 41,668 → 3,787 B; the router
+4,544 B), and everything else moved VERBATIM into flat reference files beside it (5 → 46 files), each named in a
+"read only the one you need" table at the foot of the body. A conservation check found no old line lost except
+two stale router statements corrected in passing (quality-delta covers 12 kinds, not 10; exit 2 means pre-existing
+code got worse). Blind raters given only the skill text scored 32 of 33 pre-registered tasks with both the old and
+the new bodies (one reference open in 33), so the cut shows no loss, not a gain. A proposal to delist five
+skills from the listing and reach them through the router (arm L) measured in band but is an owner call and was
+NOT landed.
+
+## 2026-11-26 — shorter bodies against Anthropic's current skill guidance (17 dirs unchanged)
+
+No skill was added, removed or renamed. The guidance used: platform.claude.com Agent Skills overview and best practices
+(no date shown on either page, read 2026-11-26) and the engineering post on equipping agents with skills (published
+2025-10-16). Routing is decided by the name and description alone, and the description is always loaded. The body is
+loaded on trigger and should stay under 500 lines. References are loaded on demand, should sit one level deep, and need
+a contents list over 100 lines. Descriptions are written in third person and name both what the skill does and when to
+use it.
+
+- **Bodies 47,243 → 40,466 B (−14.3%), every skill shorter.** Routing lines no longer end in "unsure → router", since
+  the router is already in the listing. Shared trust boilerplate is cut to the per-skill caveat. Recipes and reference
+  tables are terser. Every phrase a gate pins is kept.
+- **Descriptions 5,461 → 5,339 B.** These were already at their measured optimum from the 2026-09-07 budget round.
+  A draft at −505 characters cost 16 of 214 lexical rows, so only the cuts that cost nothing were kept. Navigate and
+  find-bug no longer open in second person, and the router's description is 52 B shorter.
+- **References 319,868 → 323,655 B.** The 13 references over 100 lines gained a `Contents:` line.
+  `ripwire-navigate/blast-radius.md` no longer says the CLI defaults to the full legend.
+- **Routing, before → after** (`bench/skillrater/results/2026-11-26/README.md`): lexical `bm25-desc` hit@1 147 → 147
+  of 214, judged 100 → 100 of 160. Blind raters, Haiku 208 and 207 → 208 of 214, Sonnet 204 and 208 → 207 of 214. No
+  rater fired on any of the 68 negatives after the change.
+- Fixed in passing: the router said quality-delta covers 12 kinds, and the binary says 13.
+- The mcp skill names its tools in the qualified `ripwire:<verb>` form the guidance asks for. Descriptions with no second
+  person and no cross-skill pointers were measured and rejected: Sonnet fired on 2 negatives per run, and Haiku's
+  pass^2 fell 207 → 205. The cross-skill pointers stay.

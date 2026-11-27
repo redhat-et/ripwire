@@ -27,6 +27,12 @@
 #   (e) CENSUS: the two cache-dir writers route their temp through the shared helper (source).
 #   (e2) CENSUS: the three stream writers close their stream as a standalone statement after releaseFd(),
 #       never inside || / && after the write; a mutation control shows the scan flags the short-circuit form.
+#   (e3) CENSUS: saveCache's STREAMED write path (C1 SAVE-STREAM, #622: the blob goes out through a 4 MiB
+#       window) still writes only into the exclusive temp — createExclTempFile (O_CREAT|O_EXCL|O_NOFOLLOW,
+#       pinned here and by sidecarsymlinkcheck f6), its released fd fdopen'd as the stream, the temp renamed
+#       into place by ExclTempFile::commit (os::rename), and no other open of any name in the function. Each
+#       premise is counted and a count of 0 fails; a mutation control (a plain fopen("w") of the final name)
+#       must be flagged by the same scan.
 #   (f) PROBE: a small program compiled against src/pathguard.h alone drives the product primitives directly —
 #       openExclNoFollow refuses an existing symlink, dangling symlink and regular file at the exact name it is
 #       given (EEXIST, nothing followed, nothing changed), and createExclTempFile yields a fresh regular file of
@@ -173,16 +179,19 @@ census_writer docpass   src/ingest_docpass.h 'inline void publishDocBridgeBlob('
 # path — fclose is its own statement, never an operand of || or && where a failed fwrite would short-circuit past
 # it. A mutation control re-checks the pre-fix saveCache spelling and must be flagged.
 fclose_shortcircuit_lines(){ awk -v sig="$2" 'index($0,sig){f=1} f{print} f&&/^}$/{exit}' "$1" | grep -E 'fclose' | grep -E '\|\||&&'; }
+# The premise is any std::fclose( call in the body, code only (saveCache's streamed writer closes through
+# std::fclose( std::exchange( fp, nullptr ) ), the other two through std::fclose( fp )); 0 found fails.
 stream_close_row(){
-    local label="$1" file="$2" sig="$3" body bad
+    local label="$1" file="$2" sig="$3" body bad nClose
     body="$( awk -v sig="$sig" 'index($0,sig){f=1} f{print} f&&/^}$/{exit}' "$ROOT/$file" )"
-    if [ -z "$body" ] || ! printf '%s' "$body" | grep -q 'std::fclose( fp )'; then
-        no "($label e2) could not find $sig with an fclose in $file — census void"
+    nClose="$( printf '%s\n' "$body" | sed 's://.*$::' | grep -cE 'std::fclose\(' )"
+    if [ -z "$body" ] || [ "${nClose:-0}" -lt 1 ]; then
+        no "($label e2) could not find $sig with an fclose in $file (fclose calls=${nClose:-0}) — census void"
         return
     fi
     bad="$( fclose_shortcircuit_lines "$ROOT/$file" "$sig" )"
     if [ -z "$bad" ]; then
-        ok "($label e2) $sig closes its stream as a standalone statement (no fclose inside || / &&)"
+        ok "($label e2) $sig closes its stream as a standalone statement (fclose calls=$nClose, none inside || / &&)"
     else
         no "($label e2) $sig can skip fclose after a failed write: $( printf '%s' "$bad" | head -2 | tr '\n' ';' )"
     fi
@@ -196,6 +205,52 @@ if [ -n "$( fclose_shortcircuit_lines "$TMP/fclose_mutant.h" 'inline void mutant
 else
     no "(e2) mutation control: the short-circuit spelling was not flagged — the census cannot fail"
 fi
+
+# (e3) CENSUS: saveCache's streamed write path keeps the temp-file safety. #622 (C1 SAVE-STREAM) rewrote the writer to
+# stream the blob through a window and close through std::exchange, so the shape (e2) once pinned moved; this row pins
+# the property itself on the code that runs now. Comments are stripped before every count (the body's comments name
+# fopen and rename(tmp,dir) in prose). The verdict function prints OK/BAD with every count, so the mutation control
+# below runs the SAME scan without touching `fail`.
+savecache_temp_verdict(){
+    local file="$1" sig="$2" body nExcl nRel nFd nCommit nOther
+    body="$( awk -v sig="$sig" 'index($0,sig){f=1} f{print} f&&/^}$/{exit}' "$file" | sed 's://.*$::' )"
+    [ -n "$body" ] || { echo "BAD could not isolate $sig"; return; }
+    nExcl="$(   printf '%s\n' "$body" | grep -cE 'pathguard::createExclTempFile\(' )"
+    nRel="$(    printf '%s\n' "$body" | grep -cE '\.releaseFd\(\)' )"
+    nFd="$(     printf '%s\n' "$body" | grep -cE 'fdopen\( *rawFd' )"
+    nCommit="$( printf '%s\n' "$body" | grep -cE '\.commit\( *path *\)' )"
+    # any other way to open a file by name: fopen/freopen, an fstream, a raw open(2)/openat(2)/creat(2) (fdopen does not match:
+    # a letter precedes "open(")
+    nOther="$(  printf '%s\n' "$body" | grep -cE '(^|[^A-Za-z_])(std::|::|os::)?((f|fre)?open|openat|creat)\(|std::(o|i)?fstream|O_TRUNC' )"
+    local counts="createExclTempFile=$nExcl releaseFd=$nRel fdopen(rawFd)=$nFd commit(path)=$nCommit other-opens=$nOther"
+    if [ "$nExcl" -ge 1 ] && [ "$nRel" -ge 1 ] && [ "$nFd" -ge 1 ] && [ "$nCommit" -ge 1 ] && [ "$nOther" = 0 ]; then
+        echo "OK $counts"
+    else
+        echo "BAD $counts"
+    fi
+}
+v="$( savecache_temp_verdict "$ROOT/src/ingest_cache.h" 'inline void saveCache(' )"
+case "$v" in
+    OK*) ok "(savecache e3) saveCache streams into the exclusive temp and renames it into place, no other open (${v#OK })" ;;
+    *)   no "(savecache e3) saveCache's write path lost its temp-file safety (${v#BAD })" ;;
+esac
+# the primitives the row leans on: the temp create is O_EXCL|O_NOFOLLOW (never O_TRUNC), and commit() is a rename
+OEN="$( awk 'index($0,"inline int openExclNoFollow("){f=1} f{print} f&&/^}$/{exit}' "$ROOT/src/pathguard.h" | sed 's://.*$::' )"
+nOX="$( printf '%s\n' "$OEN" | grep -cE 'O_CREAT *\| *O_EXCL *\| *O_NOFOLLOW' )"; nOT="$( printf '%s\n' "$OEN" | grep -c 'O_TRUNC' )"
+CMT="$( awk 'index($0,"bool commit( const std::string& finalPath )"){f=1} f{print} f&&/^    }$/{exit}' "$ROOT/src/pathguard.h" | sed 's://.*$::' )"
+nRN="$( printf '%s\n' "$CMT" | grep -cE 'os::rename\( *path_' )"
+if [ "$nOX" -ge 1 ] && [ "$nOT" = 0 ] && [ "$nRN" -ge 1 ]; then
+    ok "(e3) pathguard: openExclNoFollow opens O_CREAT|O_EXCL|O_NOFOLLOW without O_TRUNC ($nOX), ExclTempFile::commit renames the temp ($nRN)"
+else
+    no "(e3) pathguard: expected openExclNoFollow O_CREAT|O_EXCL|O_NOFOLLOW (found $nOX, O_TRUNC $nOT) and commit() os::rename( path_ (found $nRN)"
+fi
+# mutation control: the pre-round-5 shape, a plain fopen("w") of the final name, must be flagged by the same scan
+printf 'inline void saveCache( const std::string& path )\n{\n    std::FILE* fp = std::fopen( path.c_str(), "w" );\n    std::fwrite( w.b.data(), 1, w.b.size(), fp );\n    std::fclose( fp );\n}\n' > "$TMP/savecache_mutant.h"
+mv_="$( savecache_temp_verdict "$TMP/savecache_mutant.h" 'inline void saveCache(' )"
+case "$mv_" in
+    BAD*) ok "(e3) mutation control: a plain fopen(\"w\") of the final name is flagged (${mv_#BAD })" ;;
+    *)    no "(e3) mutation control: the fopen(\"w\") mutant was not flagged — the census cannot fail (${mv_#OK })" ;;
+esac
 
 # ── (f) PROBE: the product primitives, driven directly through a program compiled against pathguard.h ──────
 CXX="${CXX:-c++}"
@@ -298,8 +353,8 @@ if "$CXX" "$CXXSTD" -O1 -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" 
     "$PR/probe" "$PR/work" > "$PR/out.txt" 2>&1
     PROBE_RC=$?
     PROBE_ROWS="$( grep -c '^PROBE-' "$PR/out.txt" )"
-    [ "$PROBE_ROWS" -eq 9 ] \
-        && ok "(f) presence: the probe reported all 9 rows" \
+    [ "$PROBE_ROWS" -eq 9 ] && [ "$PROBE_RC" -eq 0 ] \
+        && ok "(f) presence: the probe reported all 9 rows and exited 0" \
         || no "(f) the probe reported $PROBE_ROWS of 9 rows (rc=$PROBE_RC): $( head -c 300 "$PR/out.txt" )"
     while IFS= read -r prow; do
         case "$prow" in

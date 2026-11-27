@@ -19,9 +19,13 @@ assert files == {'core.clj', 'browser.cljs', 'shared.cljc', 'tasks.bb'}, files
 rows = list(t.iter('s'))
 names = {s.get('n').split('/')[0] for s in rows}
 expected = {'sample.core', 'sample.browser', 'sample.shared', 'sample.tasks', 'answer', 'cached',
-            'square', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
+            'square', 'cube', 'doto', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
             'run', 'render', 'shared', 'task', 'quoted-holder', 'route', 'spaced', 'commented',
-            'gap-call', 'comment-call', 'comment-holder', 'join', 'qualified-join', 'documented'}
+            'gap-call', 'comment-call', 'comment-holder', 'join', 'qualified-join', 'documented',
+            'nested-quote', 'nested-discard', 'nested-comment', 'comment-not-head', 'comment-x',
+            'comment-x-holder', 'before-discard', 'after-discard', 'quoted-macro', 'a', 'b',
+            'syntax-quote-hole', 'live-hole-control', 'plain-call', 'meta-call', 'tag-call', 'stacked-meta-call',
+            'quoted-meta', 'special-form-metadata', 'metadata-not-call'}
 assert names == expected, (names, expected)
 by = {s.get('n').split('/')[0]: s for s in rows}
 for name, kind in {'answer':'var', 'cached':'var', 'square':'fn', 'unless':'macro',
@@ -44,12 +48,52 @@ for name in ('spaced', 'commented', 'gap-call', 'comment-call'):
     assert 'square' in calls(name), (name, calls(name))
 assert 'square' not in calls('quoted-holder'), calls('quoted-holder')
 assert 'square' not in calls('comment-holder'), calls('comment-holder')
+# Arm 1 (#548): metadata before a list head does not hide the call; a quoted metadata call stays
+# inert, metadata on a non-call records nothing, and a metadata-prefixed special form stays excluded.
+# `doto` has an in-tree def (core.clj), so a special form leaking past the gate would resolve and fail here;
+# mutant check 2026-11-21 (lane land-715): with the specialForms test removed this arm goes red on ('doto').
+for name in ('plain-call', 'meta-call', 'tag-call', 'stacked-meta-call'):
+    assert calls(name) == {'square'}, (name, calls(name))
+assert calls('quoted-meta') == set(), calls('quoted-meta')
+assert calls('special-form-metadata') == set(), calls('special-form-metadata')
+assert calls('metadata-not-call') == set(), calls('metadata-not-call')
+print('PASS metadata-prefixed calls extracted; quoted metadata and special forms stay inert')
+# Slice 8a: nested inert forms drop their calls; a live sibling proves the holder is still captured.
+for name in ('nested-quote', 'nested-discard', 'nested-comment', 'quoted-macro'):
+    assert calls(name) == {'secret'}, (name, calls(name))
+assert by['quoted-macro'].get('t') == 'macro', by['quoted-macro'].attrib
+print('PASS nested quote/discard/comment and quote inside defmacro keep only the live sibling')
+# Only the exact list head comment is inert: a later symbol and comment-x leave square live.
+assert calls('comment-not-head') == {'square'}, calls('comment-not-head')
+assert calls('comment-x-holder') == {'comment-x', 'square'}, calls('comment-x-holder')
+for name in ('before-discard', 'after-discard'):
+    assert calls(name) == {'square'}, (name, calls(name))
+assert 'discarded-value' not in names, names
+print('PASS comment head near misses and discard of one def preserve neighbouring captures')
+# KNOWN GAP (#449 follow-up: Clojure syntax-quote live holes, separate from slice 8a).
+# In `(a ~(b)), b should be a call, but today's filter makes the whole syntax-quote inert.
+# A future unquoting_lit / unquote_splicing_lit Live arm flips this assertion to {'b'};
+# retain a as inert, and retain this fixture and arm when the gap moves. This migration does not fix it.
+assert calls('live-hole-control') == {'b'}, calls('live-hole-control')
+assert calls('syntax-quote-hole') == set(), ('known gap moved: flip this arm to {"b"}', calls('syntax-quote-hole'))
+print('PASS known syntax-quote/unquote gap: b is currently inert; future live-hole follow-up flips this arm')
 # KNOWN GAP (shared resolver, not Clojure): a qualifier that names no definition still reaches the
 # bare-name ladder, so str/join binds the in-tree join. The maintainers' shared refusal flips this arm.
 # When it goes red, assert 'join' not in these calls; retain the fixture and the arm.
 assert 'join' in calls('qualified-join'), ('known gap moved: flip this arm to "not in"', calls('qualified-join'))
 print('PASS known shared resolver gap: str/join currently binds the in-tree join')
 print('PASS Clojure definitions, kinds, calls, quote/discard negatives, and four extensions')
+PY
+
+"$BIN" "$TMP/fix" --callers=square --no-cache >"$TMP/callers-square.xml"
+python3 - "$TMP/callers-square.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+names = {s.get('n').split('/')[0] for s in ET.parse(sys.argv[1]).iter('s')}
+for name in ('plain-call', 'meta-call', 'tag-call', 'stacked-meta-call'):
+    assert name in names, (name, names)
+for name in ('quoted-meta', 'special-form-metadata'):
+    assert name not in names, (name, names)
+print('PASS --callers=square names the metadata-prefixed callers and not the inert forms')
 PY
 
 "$BIN" "$TMP/fix" --metrics --no-cache >"$TMP/metrics.xml"
@@ -111,5 +155,5 @@ calls = {c.get('n').split('/')[0] for c in rows[0].iter('c')}
 assert 'square' in calls and 'secret' not in calls, calls
 PY
 PATH="$(cd "$(dirname "$BIN")" && pwd):$PATH" "$BIN" "$TMP/fix" --doctor >"$TMP/doctor.xml"
-rg -q '<c n="grammars" ok="1" loaded="26" expected="26"' "$TMP/doctor.xml"
+rg -q '<c n="grammars" ok="1" loaded="27" expected="27"' "$TMP/doctor.xml"
 echo 'clojurecheck: ALL PASS'

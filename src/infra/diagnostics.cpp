@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <mutex>
+#include <string_view>
 #include <utility>
 
 namespace Diagnostics
@@ -131,7 +133,90 @@ RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcep
     std::fflush( stderr );
 }
 
+// adoptNotices' sites, as "FILE:LINE" — the location a notice prints. Fixed storage, no allocation: read and written only
+// on the cold notice path, and a site past the capacity (or longer than a slot) is not adopted, so it may print twice.
+struct AdoptedSites
+{
+    static constexpr std::size_t kCapacity  = 64;    // sites a base child's notices adopt; past it a site may print twice (stderr only)
+    static constexpr std::size_t kSlotBytes = 256;   // one site's FILE:LINE; a longer one is not adopted (stderr only)
+    std::mutex                   mutex;
+    char                         sites[ kCapacity ][ kSlotBytes ] = {};
+    std::size_t                  count = 0;
+};
+AdoptedSites& adoptedSites() noexcept
+{
+    static AdoptedSites adopted;
+    return adopted;
+}
+
+// noexcept, and the mutex lock may throw std::system_error and the key's formatting std::format_error or std::bad_alloc: a site
+// that cannot be checked reads as not adopted, so its notice prints (stderr only, the kCapacity overflow's outcome),
+// instead of the throw reaching std::terminate.
+bool siteAdopted( const char* file, int line ) noexcept
+{
+    try
+    {
+        AdoptedSites&                     adopted = adoptedSites();
+        const std::lock_guard<std::mutex> lock( adopted.mutex );
+        if( adopted.count == 0 )
+        {
+            return false;
+        }
+        char              key[ AdoptedSites::kSlotBytes ];
+        const std::size_t keyBytes = rw::formatTo( key, sizeof( key ), "{}:{}", orEmpty( file ), line );
+        if( keyBytes >= sizeof( key ) )
+        {
+            return false;
+        }
+        for( std::size_t siteIndex = 0; siteIndex < adopted.count; ++siteIndex )
+        {
+            if( std::strcmp( adopted.sites[ siteIndex ], key ) == 0 )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    catch( ... )
+    {
+        return false;
+    }
+}
+
 } // namespace
+
+void ConsoleLog::adoptNotices( const char* stderrText ) noexcept
+{
+    // a notice line: "[math degraded] DESC  (FILE:LINE, FUNCTION — logged once per site)" or "[validate] … (same tail)".
+    // FUNCTION is a pretty-printed signature, which holds no two-space run, so the location starts after the LAST "  (".
+    constexpr std::string_view kTail = " — logged once per site)";
+    std::string_view           text( stderrText == nullptr ? "" : stderrText );
+    AdoptedSites&              adopted = adoptedSites();
+    while( !text.empty() )
+    {
+        const std::size_t      eol  = text.find( '\n' );
+        const std::string_view line = text.substr( 0, eol );
+        text.remove_prefix( eol == std::string_view::npos ? text.size() : eol + 1 );
+        if( !( line.starts_with( "[math degraded] " ) || line.starts_with( "[validate] " ) ) || !line.ends_with( kTail ) )
+        {
+            continue;
+        }
+        const std::size_t open = line.rfind( "  (" );
+        const std::size_t comma = open == std::string_view::npos ? std::string_view::npos : line.find( ", ", open );
+        if( comma == std::string_view::npos )
+        {
+            continue;
+        }
+        const std::string_view            site = line.substr( open + 3, comma - open - 3 );
+        const std::lock_guard<std::mutex> lock( adopted.mutex );
+        if( adopted.count < AdoptedSites::kCapacity && site.size() < AdoptedSites::kSlotBytes )
+        {
+            std::memcpy( adopted.sites[ adopted.count ], site.data(), site.size() );
+            adopted.sites[ adopted.count ][ site.size() ] = '\0';
+            ++adopted.count;
+        }
+    }
+}
 
 RW_COLD_NOINLINE
 void ConsoleLog::handleAssert( CheckKind kind, const char* expr, const char* file, int line, const char* function,
@@ -192,6 +277,10 @@ void ConsoleLog::handleValidateFailed( const char* expr, const char* file, int l
     const bool  hasDescription = description != nullptr && description[ 0 ] != '\0';
     const char* separator      = hasDescription ? " — " : "";
     const char* text           = hasDescription ? description : "";
+    if( siteAdopted( file, line ) )
+    {
+        return;   // the child that ran an earlier phase of this run already printed it (adoptNotices)
+    }
     writeNotice( "[validate] {} is false{}{}  ({}:{}, {} — logged once per site)\n",
                  orEmpty( expr ), separator, text, orEmpty( file ), line, orEmpty( function ) );
 }
@@ -202,6 +291,10 @@ void ConsoleLog::handleDegraded( const char* file, int line, const char* functio
     // DISCLOSE's debug trace. One-line notice, no trap — the caller clamps/falls back and continues. The
     // "[math degraded]" prefix and every message are kept byte-identical: 11 gates grep for the prefix
     // (test/*.sh on 3bf884e2) and test/sidecarsymlinkcheck.sh pins message text. Retiring the prefix is its own change.
+    if( siteAdopted( file, line ) )
+    {
+        return;   // the child that ran an earlier phase of this run already printed it (adoptNotices)
+    }
     writeNotice( "[math degraded] {}  ({}:{}, {} — logged once per site)\n", orEmpty( description ), orEmpty( file ), line, orEmpty( function ) );
 }
 

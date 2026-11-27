@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse + SessionStart hook.
+# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse + SessionStart hook, and (mode `--subagent-start`) the
+# SubagentStart routing note for the Explore and Plan subagents; that mode is documented where it is defined, as is
+# `--agent-brief`, a probe arm no installer registers.
 #
 # READ §RETIRED FIRST. As of 2026-09-02 the PreToolUse path SAYS NOTHING: a randomized A/B measured
 # both nudge tiers inert and the registered consequence was applied. What survives on that path is the
@@ -7,6 +9,10 @@
 # the retired advice would have landed on. The SessionStart primer still speaks, and is still the one
 # thing the control arm does not get. The design record below describes a mechanism that is GONE; it
 # is kept because a measured negative whose reasoning is deleted gets rebuilt by the next person.
+#
+# ONE OPT-IN EXCEPTION, 2026-11-26: §FIRSTEDIT (near the end of the file), off unless `first_edit=1`. Then the first
+# source edit of a treatment session gets the computed edit-check of the symbol it touches — an answer, not a tip —
+# under a hard deadline; control records the moment and stays silent. Every other PreToolUse call still says nothing.
 #
 # The original two-jobs description follows. Historically: two jobs in one script, the ADVISORY-ONLY
 # nudge (below) and the SUBSTITUTION METER (see the §METER block further down).
@@ -38,8 +44,8 @@
 # escalation below is untouched and still escalates on a same-class run of literal greps.
 #
 # Design posture (non-negotiable — do not "improve" this into a blocker):
-#   - NEVER blocks, denies, or rewrites the tool call. Always permissionDecision "allow" when it
-#     speaks at all; never "deny"/"ask"; never "updatedInput". Any internal failure (missing jq,
+#   - NEVER blocks, denies, approves, or rewrites the tool call: no permissionDecision of any value
+#     ("allow" skips the user's permission prompt), never "updatedInput". Any internal failure (missing jq,
 #     malformed JSON, no git, no ripwire) degrades to silent allow — exit 0, no stdout.
 #   - Fires at MOST once per session per pattern (Grep, Bash-grep, git-diff, git-log, and git-show-stat
 #     are separate patterns), via a marker file under $TMPDIR keyed by session_id (falls back to PPID
@@ -52,8 +58,8 @@
 # Contract (verified against https://code.claude.com/docs/en/hooks, 2026-07-13): PreToolUse JSON
 # arrives on stdin with at least {session_id, cwd, tool_name, tool_input}. Advisory feedback that does
 # NOT block the call = exit 0 + this JSON on stdout:
-#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
-#    "additionalContext":"..."}}
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}
+# with no permissionDecision: "allow" would skip the user's permission prompt (test/hookcheck.sh (15)).
 #
 # Usage (wired by the installer, not meant to be run by hand):
 #   printf '%s' "$PRETOOLUSE_JSON" | hooks/ripwire-nudge.sh
@@ -146,7 +152,7 @@ set -u
 # THE CONTRACT (all four are gated in test/hookcheck.sh, arms S1-S14):
 #   - At most ONE escalation per CLASS per session — the same dedup posture as the base nudges, with
 #     its own marker, so an escalated grep sweep never re-fires and never silences a read sweep.
-#   - Advisory only. Same posture as everything else here: permissionDecision "allow", never deny,
+#   - Advisory only. Same posture as everything else here: no permissionDecision, never deny,
 #     never a rewrite, and any internal failure degrades to silence.
 #   - The escalation is RECORDED — `nudge":"sweep<N>"` on the row it fired on, and `post_sweep` on
 #     every row after it in that session. Without those two fields the efficacy question cannot be
@@ -261,6 +267,13 @@ sweep_on=1
 sweep_n=3
 dedup_cooldown=20
 dedup_cap=3
+# §FIRSTEDIT (2026-11-26): the before-the-first-edit check, with its OWN arm (§FACTORIAL, owner ruling 11-26): while the
+# meter is active an unforced session is hashed on|off independently of the primer arm; `first_edit=1|0` /
+# RIPWIRE_FIRST_EDIT force it (forced-on|forced-off); with the meter off and no force it is off. RIPWIRE_FIRST_EDIT_MS /
+# `first_edit_ms` is its hard deadline.
+firstedit_force=""
+firstedit_label="off"
+firstedit_ms=2000
 # ---- meter_dest — WHERE the log goes. Sets `_mhome` (the config directory) and `meter_file`, and
 #      applies the §FIXTURE guard. `_mexplicit` is the guard's whole input: it records whether the
 #      caller NAMED a destination (RIPWIRE_METER_LOG / RIPWIRE_HOME) or the path was merely INFERRED
@@ -375,6 +388,73 @@ meter_auto_arm()
     fi
 }
 
+# firstedit_resolve CONF_ON CONF_MS — §FIRSTEDIT's switch and deadline from the env, else meter.conf's values. Called
+# from meter_init, so it is resolved even when the LOG is unavailable, like the sweep switch: it decides what the
+# agent is told, not what is counted.
+firstedit_resolve()
+{
+    # A deadline that is not a plain positive integer of at most 6 digits reads as the shipped 2000 ms; `10#` keeps a leading zero from reading as octal. A FORCE is an explicit yes or no; an empty
+    # value or a typo forces nothing, and then firstedit_assign decides.
+    case "${RIPWIRE_FIRST_EDIT:-$1}" in
+        1|on|yes|true)  firstedit_force="on" ;;
+        0|off|no|false) firstedit_force="off" ;;
+        *)              firstedit_force="" ;;
+    esac
+    _fems="${RIPWIRE_FIRST_EDIT_MS:-$2}"
+    case "$_fems" in
+        ''|*[!0-9]*) firstedit_ms=2000 ;;
+        *)           if [ "${#_fems}" -le 6 ] && [ "$(( 10#$_fems ))" -gt 0 ]; then firstedit_ms="$(( 10#$_fems ))"; else firstedit_ms=2000; fi ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §FACTORIAL — THE PRIMER AND THE FIRST-EDIT CHECK ARE TWO INDEPENDENT ARMS (owner ruling, 2026-11-26)
+#
+# Two levers, two assignments, four cells: neither, primer only, check only, both. The PRIMER arm is `meter_auto_arm`,
+# untouched byte for byte (cksum of the session id, mod 100, < 50 = control), so every session id lands where it
+# always landed and the primer history stays comparable. The CHECK arm is `firstedit_hash`: 32-bit FNV-1a over the
+# salted string "ripwire-first-edit/v1:" + session id, mod 100, < 50 = off. A different hash FAMILY, not just a
+# different salt, on purpose: cksum is a CRC, and a CRC is linear, so CRC(salt || id) and CRC(id) differ by a
+# length-dependent XOR constant and would NOT be independent; FNV's multiply breaks that. Pure bash, no fork.
+#
+# WHEN THE HASH DECIDES. Only while the meter is ACTIVE (counting on, with a log to write to): a split nobody records
+# is not an experiment, so with the meter off and no force the check is off, exactly #779's default. A force wins over
+# the hash in either state: `first_edit=1|0` in meter.conf or RIPWIRE_FIRST_EDIT=1|0 (env over file), logged as
+# forced-on / forced-off so a readout can drop forced sessions from the randomized comparison. The primer arm's own
+# forcing (`arm=treatment|control`) does not touch the check arm, and the check arm does not touch the primer.
+#
+# EVERY ROW CARRIES BOTH LABELS (schema v4): `primer` (= `arm`, kept for the history) and `first_edit`
+# (on|off|forced-on|forced-off). bench/substitution_report.py prints the 2x2 table, and the old primer-only comparison
+# stays computable as primer treatment vs control pooled over the check arm. `--arm-cells` (below) prints the hash
+# assignment for a list of session ids, which is how test/hookcheck.sh (17) checks the four cells and their balance.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# firstedit_hash SESSION — sets _feh to the 32-bit FNV-1a of "ripwire-first-edit/v1:SESSION" (bytes, C locale)
+firstedit_hash()
+{
+    local LC_ALL=C s="ripwire-first-edit/v1:$1" i=0 c h=2166136261
+    while [ "$i" -lt "${#s}" ]
+    do
+        printf -v c '%d' "'${s:i:1}"
+        h=$(( ( ( h ^ ( c & 255 ) ) * 16777619 ) & 4294967295 ))
+        i=$(( i + 1 ))
+    done
+    _feh="$h"
+}
+# firstedit_assign — the check arm for this session: a force, else the hash while the meter is active, else off
+firstedit_assign()
+{
+    if [ -n "$firstedit_force" ]
+    then
+        firstedit_label="forced-$firstedit_force"
+    elif [ "$meter_enabled" = "1" ]
+    then
+        firstedit_hash "$session"
+        if [ "$(( _feh % 100 ))" -lt 50 ]; then firstedit_label="off"; else firstedit_label="on"; fi
+    else
+        firstedit_label="off"
+    fi
+}
+
 meter_init()
 {
     meter_dest
@@ -384,6 +464,7 @@ meter_init()
     _conf_sweepn=""
     _conf_cooldown=""
     _conf_cap=""
+    _conf_firstedit=""; _conf_firstedit_ms=""
     if [ -n "$_mhome" ] && [ -f "$_mhome/meter.conf" ]
     then
         # `|| [ -n "$_ck" ]` keeps a final line that has no newline (read returns 1 on it but has filled the
@@ -399,6 +480,8 @@ meter_init()
                 sweep_n)        _conf_sweepn="$_cv" ;;
                 dedup_cooldown) _conf_cooldown="$_cv" ;;
                 dedup_cap)      _conf_cap="$_cv" ;;
+                first_edit)     _conf_firstedit="$_cv" ;;
+                first_edit_ms)  _conf_firstedit_ms="$_cv" ;;
             esac
         done < "$_mhome/meter.conf"
     fi
@@ -430,6 +513,7 @@ meter_init()
         0)           dedup_cap=3 ;;
         *)           dedup_cap="${RIPWIRE_DEDUP_CAP:-$_conf_cap}" ;;
     esac
+    firstedit_resolve "$_conf_firstedit" "$_conf_firstedit_ms"
 
     # THE ARM IS RESOLVED BEFORE THE LOG IS, and that ordering is the fix for a bug this file shipped
     # with (2026-08-12, found by the E1 lane driving the arm for real). The arm is not a property of
@@ -453,12 +537,13 @@ meter_init()
         *)          meter_arm="treatment" ;;
     esac
 
-    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
+    [ -n "$meter_file" ] || { firstedit_assign; return 0; }   # no HOME and no explicit log path — nothing to write to
 
     case "${RIPWIRE_METER:-$_conf_enabled}" in
         0|off|no|false) meter_enabled=0 ;;
         *)              meter_enabled=1 ;;
     esac
+    firstedit_assign
 }
 
 # ---- JSON string escape for the no-jq fallback. Control characters are DELETED rather than escaped:
@@ -507,10 +592,11 @@ meter_log()
             --arg nudge "$_mreason" --argjson post_nudge "$meter_post" \
             --argjson post_sweep "$meter_postsweep" --arg arm "$meter_arm" \
             --arg detail "$_mdetail" --arg agent "$meter_agent" --arg surface "$msurface" --arg target "$mtarget" \
-            '{v:3,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,detail:($detail|.[0:200]),agent:$agent,surface:$surface,target:($target|.[0:200])}' \
+            --arg first_edit "$firstedit_label" \
+            '{v:4,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,primer:$arm,first_edit:$first_edit,detail:($detail|.[0:200]),agent:$agent,surface:$surface,target:($target|.[0:200])}' \
             2>/dev/null )" || _mrow=""
     else
-        _mrow="{\"v\":3,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\",\"agent\":\"$( meter_esc "$meter_agent" )\",\"surface\":\"$( meter_esc "$msurface" )\",\"target\":\"$( meter_esc "$mtarget" )\"}"
+        _mrow="{\"v\":4,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"primer\":\"$meter_arm\",\"first_edit\":\"$firstedit_label\",\"detail\":\"$( meter_esc "$_mdetail" )\",\"agent\":\"$( meter_esc "$meter_agent" )\",\"surface\":\"$( meter_esc "$msurface" )\",\"target\":\"$( meter_esc "$mtarget" )\"}"
     fi
     [ -n "$_mrow" ] || return 0
     { printf '%s\n' "$_mrow" >>"$meter_file"; } 2>/dev/null || true
@@ -1135,6 +1221,153 @@ meter_family()
     esac
 }
 
+# ---- SubagentStart mode (`--subagent-start`): a routing note for the subagents that never see CLAUDE.md ----
+# (lane HK2, 2026-11-21, owner rulings 145 and 148.) Claude Code's built-in Explore and Plan subagents do not load
+# CLAUDE.md (code.claude.com/docs/en/sub-agents), so the use-when block a user pasted there — and the SessionStart
+# primer below, which fires for the main session only — never reaches the agent that does the codebase search. This
+# mode puts three commands into that subagent's context at spawn: which call ranks files for a task, which prints one
+# symbol, which names the tests for a change.
+#
+# WHO GETS IT, AND WHY NOT EVERYONE. Only agent_type Explore and Plan. Every other type (general-purpose, a custom
+# agent) loads CLAUDE.md, so for it the note repeats routing the context already holds: the paste block (about 3.2 KB)
+# states these three commands, and AR1 counted that block present in 81 of 83 subagent transcripts of one session.
+# A note there is a pure duplicate, paid on every turn of every subagent. RIPWIRE_SUBAGENT_ROUTE=all widens it to every
+# type (an operator whose CLAUDE.md does not carry the block); =0|off silences it; any other value reads as off, so a
+# typo neither widens the note nor keeps it. The web-fetch agent also skips CLAUDE.md and is left out on purpose: it
+# has no codebase question to route.
+#
+# A FLOOR, NOT THE LEVER. This is ambient context, and lane RO1's stored analogue says ambient context moves little:
+# with the CLAUDE.md protocol in context and a silent brief, 13 of 215 implementer lanes (6%) made ripwire their first
+# source action, against 34-39% when the brief itself carried the routing. It is built because Explore and Plan get
+# nothing at all today. What an orchestrator can do about it is in `ripwire wrap claude`: paste the brief block.
+#
+# THE TEXT IS STATEMENTS, NOT ORDERS. The hooks reference asks for additionalContext written as facts; the note says
+# what each command answers and when it comes ("before opening files"), and leaves the choice to the subagent. It is a
+# constant: nothing from the payload reaches it (not the cwd, not the agent type), and no ripwire process is spawned
+# to produce it, so the same input gives the same bytes. test/subagentroutecheck.sh (L) runs the three commands it
+# names against the real binary, which is what keeps a constant from drifting off the verb catalog.
+#
+# HOW THIS DIFFERS FROM hooks/ripwire-subagent-primer.sh (lane AR1). That hook is the opt-in instrument of a registered
+# A/B: ~660 B, two numbered steps, every agent type, its own log. This one is registered by the plain --hook install,
+# is under 400 B, and speaks only where CLAUDE.md does not. With BOTH registered, an Explore or Plan subagent receives
+# both texts.
+#
+# EVERY ELIGIBLE SUBAGENT GETS IT, WHATEVER THE METER ARM (owner ruling 155, 2026-11-21: "note for all"). The
+# SessionStart primer below is silent in the meter's control arm, and an unconfigured install hashes about half of
+# all sessions into that arm; applied here, that rule left about half of Explore and Plan subagents with no routing at
+# all. This mode therefore never reads the arm. The primer's own rule is unchanged.
+#
+# WRITES NOTHING BY DEFAULT: no meter row (a new row class would change the session counts every existing readout is
+# built on), no marker file. RIPWIRE_SUBAGENT_ROUTE_LOG=FILE appends one row per decision — agent_type, decision,
+# bytes — and never the text; it is how a probe proves the hook fired.
+#
+# Contract (code.claude.com/docs/en/hooks, read 2026-11-21): SubagentStart JSON on stdin carries the common fields plus
+# {agent_id, agent_type}; context = exit 0 plus {"hookSpecificOutput":{"hookEventName":"SubagentStart",
+# "additionalContext":"..."}}. Every path exits 0. Whether that context reaches the SUBAGENT's own context on a given
+# client version is what scripts/hk2_probe.sh in the lane's results measures; it is not asserted here.
+# ---- Arm-cells mode (`--arm-cells`): the §FACTORIAL hash assignment for a list of session ids. NOT installed by anything ----
+# One session id per stdin line; one `ID<TAB>PRIMER<TAB>CHECK` line out, PRIMER from meter_auto_arm (treatment|control),
+# CHECK from firstedit_hash (on|off). It reads no config and no env: this is the ASSIGNMENT, before any force or meter
+# state, which is what test/hookcheck.sh (17) needs to check four cells, their balance and the unchanged primer split.
+# Tabs and control characters in an id are dropped and it is cut at 200 bytes, like a meter row's detail.
+if [ "${1:-}" = "--arm-cells" ]
+then
+    while IFS= read -r _acid || [ -n "$_acid" ]
+    do
+        _acid="$( printf '%s' "$_acid" | tr -d '\000-\037' | cut -c1-200 )"
+        [ -n "$_acid" ] || continue
+        firstedit_hash "$_acid"
+        if [ "$(( _feh % 100 ))" -lt 50 ]; then _acfe="off"; else _acfe="on"; fi
+        printf '%s\t%s\t%s\n' "$_acid" "$( meter_auto_arm "$_acid" )" "$_acfe"
+    done
+    exit 0
+fi
+
+if [ "${1:-}" = "--subagent-start" ]
+then
+    command -v jq >/dev/null 2>&1 || exit 0
+    input="$( cat )" || exit 0
+    [ "$( printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null )" = "SubagentStart" ] || exit 0
+    agentType="$( printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null )"
+    dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
+    [ -n "$dir" ] || dir="$PWD"
+
+    # routeLog DECISION BYTES — one row, only where the operator named a file. The agent type is the one payload field
+    # that is written anywhere, and only here: control characters removed, 64 B at most.
+    routeLog()
+    {
+        [ -n "${RIPWIRE_SUBAGENT_ROUTE_LOG:-}" ] || return 0
+        printf '%s\t%s\t%s\n' "$( printf '%s' "$agentType" | tr -d '\000-\037' | cut -c1-64 )" "$1" "$2" \
+            >>"$RIPWIRE_SUBAGENT_ROUTE_LOG" 2>/dev/null || true
+    }
+
+    case "${RIPWIRE_SUBAGENT_ROUTE-default}" in
+        default|'') routeAll=0 ;;
+        all)        routeAll=1 ;;
+        *)          routeLog skip-off 0; exit 0 ;;
+    esac
+    if [ "$routeAll" -eq 0 ]
+    then
+        case "$agentType" in
+            Explore|Plan) ;;
+            *) routeLog skip-agent-type 0; exit 0 ;;
+        esac
+    fi
+
+    meter_set_repo "$dir"     # for what it clears: git's inherited repository-selection variables. The arm is not read.
+
+    command -v ripwire >/dev/null 2>&1 || { routeLog skip-no-ripwire 0; exit 0; }
+    # `true`, not only exit 0 — the #327 shape, as in the SessionStart mode below. meter_set_repo cleared git's
+    # inherited repository-selection variables, so this answers for the payload's cwd.
+    insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || { routeLog skip-not-git 0; exit 0; }
+    [ "$insideWorkTree" = true ] || { routeLog skip-not-git 0; exit 0; }
+
+    note='ripwire is on PATH and maps this codebase. `ripwire <dir> --for="<task>"` ranks the files and symbols a task touches: it is the call that comes before opening files. Read all its ranges in one turn of parallel Reads. `ripwire <dir> --expand=SYM --legend=compact` prints one symbol'"'"'s body with its callees'"'"' signatures. `ripwire <dir> --test-gate --legend=compact` names the tests to run for a change.'
+    out="$( jq -cn --arg m "$note" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$m}}' 2>/dev/null )" \
+        || { routeLog skip-jq-failed 0; exit 0; }
+    [ -n "$out" ] || { routeLog skip-jq-failed 0; exit 0; }
+    routeLog delivered "$( printf '%s' "$note" | wc -c | tr -d ' ' )"
+    printf '%s\n' "$out"
+    exit 0
+fi
+
+# ---- Agent-brief mode (`--agent-brief`): NOT INSTALLED BY ANYTHING. A probe arm, opt-in by hand (lane HK2) ----
+# A PreToolUse hook on the Agent/Task tool that returns `updatedInput` with the three-moment brief block appended to
+# the spawn prompt. Lane RO1 measured that routing in the BRIEF is what a subagent acts on (first source action
+# ripwire in 34-39% of routed lanes against 5% unrouted) and that ambient context is not (6% with CLAUDE.md alone),
+# so a hook that writes into the brief would make the working lever automatic. The hooks reference documents
+# `updatedInput` for PreToolUse as modifying "the tool's input parameters"; it does not say it applies to an Agent
+# call, and that is UNVERIFIED. skills/install.sh does not register this mode and must not until
+# scripts/hk2_probe.sh (in the lane's results) shows the appended block in the subagent's first user message.
+#
+# WHAT IT RETURNS. The whole tool_input, with `prompt` = the original prompt, a blank line, the block. `updatedInput`
+# REPLACES the input, so every other field is passed through unchanged. Never a permissionDecision: a hook that
+# answers "allow" approves every subagent launch, which no ripwire hook does (test/hookcheck.sh (15) arm briefallow).
+# SILENT when the prompt already names ripwire (the orchestrator briefed it, or a re-run): the block is added once.
+# The block is a constant, the same bytes `ripwire wrap claude` prints for an orchestrator to paste by hand
+# (kSubagentBriefBlock in src/wrap.h; test/subagentroutecheck.sh (M) compares the two). Same gates as the mode above:
+# jq, ripwire on PATH, a git work tree; like it, it does not read the meter arm (ruling 155). Every path exits 0, so
+# it can never block a spawn.
+if [ "${1:-}" = "--agent-brief" ]
+then
+    command -v jq >/dev/null 2>&1 || exit 0
+    input="$( cat )" || exit 0
+    printf '%s' "$input" | jq -e '.hook_event_name == "PreToolUse" and (.tool_name == "Agent" or .tool_name == "Task")
+        and (.tool_input.prompt | type == "string") and (.tool_input.prompt | test("ripwire") | not)' >/dev/null 2>&1 || exit 0
+    dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
+    [ -n "$dir" ] || dir="$PWD"
+
+    meter_set_repo "$dir"
+    command -v ripwire >/dev/null 2>&1 || exit 0
+    insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
+    [ "$insideWorkTree" = true ] || exit 0
+
+    brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
+    printf '%s' "$input" | jq -c --arg b "$brief" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}}' 2>/dev/null || true
+    exit 0
+fi
+
 # ---- SessionStart mode (`--session-start`): inject the use-when blurb ONCE at session start ----
 # The PreToolUse nudges above are reactive — they only speak after the agent has already reached for a
 # default. This is the proactive half: a binary on PATH is invisible until the context says when to
@@ -1142,6 +1375,76 @@ meter_family()
 # `ripwire wrap <the running agent>` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
 # src/wrap.h (the single source of truth the wrap gate diffs across agents). If wrap refuses — e.g. a
 # CRITICAL skill-scan finding — the fence is absent, the blurb is empty, and this degrades to silence.
+# claudeMdHoldsBlurb DIR BLURB: true when a memory file Claude Code loads at session start already holds BLURB word for word,
+# so the primer would only repeat it. The files: the user-level one, the managed-policy ones, and CLAUDE.md, .claude/CLAUDE.md and
+# CLAUDE.local.md in DIR and each parent below `/`. Matched against what Claude Code injects: carriage returns ignored, HTML
+# comments removed (it strips them; a block inside one is not delivered). EXACT, not a heading grep: a stale or edited block is
+# not this version's text, so the primer still sends the current one. Kept CONSERVATIVE where loading is not modelled: an @import
+# is not followed, and claudeMdSettingsMayDrop (below) keeps the primer whenever a settings file may stop these files loading.
+# A file over 4 MiB is not matched: Claude Code skips such a file and loads none of it (https://code.claude.com/docs/en/memory,
+# "as long as the file is 4 MiB or smaller"), so its block is never delivered. test/hookcheck.sh (3i6) pins each case.
+# Cost: per file that exists, one `$(< FILE)` and, for a memory file, one `wc -c` (BSD and GNU wc answer -c on a regular file from
+# its size, not by reading). bash 3.2's `read -d ''` takes one syscall per byte (9 s for 4 MiB); `$(<)` reads in blocks.
+claudeMdRead() # FILE -> the caller's `text` (trailing newlines dropped); false when FILE is not a readable regular file
+{
+    [ -f "$1" ] && [ -r "$1" ] || return 1
+    text="$( < "$1" )"
+    return 0
+}
+# claudeMdSettingsMayDrop SETTINGS...: true when a readable settings file may keep a memory file from loading, so a match
+# cannot be trusted. Two keys (https://code.claude.com/docs/en/memory): claudeMdExcludes, which skips files by path or glob,
+# and the instruction mode pluginConfigs["cc-plugin-agents-md@builtin" or "agents-md@builtin"].options.instructionFiles, whose
+# `managed-only` value drops the project, local and user CLAUDE.md files. Any instructionFiles value except the default
+# "claude-md-or-agents-md", and any mention this text match cannot read as that default, counts. Files read: user, project,
+# local, and managed-settings.json plus managed-settings.d/*.json. Out of the hook's sight, so not honoured: a --settings file,
+# an MDM profile, server-managed settings.
+claudeMdSettingsMayDrop()
+{
+    local f text dflt='"instructionFiles"[[:space:]]*:[[:space:]]*"claude-md-or-agents-md"'
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *claudeMdExcludes* ]] && return 0
+        while [[ "$text" =~ $dflt ]]
+        do
+            text="${text/"${BASH_REMATCH[0]}"/}"
+        done
+        [[ "$text" == *instructionFiles* ]] && return 0
+    done
+    return 1
+}
+claudeMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text rest size cfg="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
+    local -a files=( "$cfg/CLAUDE.md" "/Library/Application Support/ClaudeCode/CLAUDE.md" "/etc/claude-code/CLAUDE.md" )
+    local -a settings=( "$cfg/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json"
+                        "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json
+                        "/etc/claude-code/managed-settings.json" "/etc/claude-code/managed-settings.d/"*.json )
+    while [ -n "$d" ]
+    do
+        files+=( "$d/CLAUDE.md" "$d/.claude/CLAUDE.md" "$d/CLAUDE.local.md" )
+        settings+=( "$d/.claude/settings.json" "$d/.claude/settings.local.json" )
+        d="${d%/*}"
+    done
+    claudeMdSettingsMayDrop "${settings[@]}" && return 1
+    for f in "${files[@]}"
+    do
+        [ -f "$f" ] || continue
+        size="$( wc -c < "$f" 2>/dev/null )"
+        [ -n "$size" ] && [ "$(( size ))" -le 4194304 ] || continue   # over 4 MiB, or unknown: Claude Code may load none of it
+        claudeMdRead "$f" || continue
+        [[ "$text" == *$'\r'* ]] && text="${text//$'\r'/}"   # only when present: bash 3.2 takes seconds on a MiB-sized text
+        while [[ "$text" == *"<!--"* ]]
+        do
+            rest="${text#*"<!--"}"
+            text="${text%%"<!--"*}"
+            [[ "$rest" == *"-->"* ]] && text+="${rest#*"-->"}"   # an unclosed comment runs to the end of the file
+        done
+        [[ "$text" == *"$want"* ]] && return 0
+    done
+    return 1
+}
+
 if [ "${1:-}" = "--session-start" ]
 then
     input="$( cat )"
@@ -1193,6 +1496,9 @@ then
     [ -n "$blurb" ] || [ "$meter_agent" = claude ] || blurb=$( ripwire wrap claude 2>/dev/null \
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
+    # HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND this hook installed, the same ~3.9 KB arrived
+    # twice on every request. Only for Claude, whose memory files are the ones checked; Codex's AGENTS.md is not.
+    [ "$meter_agent" = claude ] && claudeMdHoldsBlurb "$dir" "$blurb" && exit 0
 
     if command -v jq >/dev/null 2>&1
     then
@@ -1744,14 +2050,326 @@ then
     esac
 fi
 
-meter_log "$mclass" "$( meter_family "$mclass" )" "$nudged" "$nudge" "$mdetail"
-# ---- §RETIRED (2026-09-02): the PreToolUse path ENDS here. It writes one meter row and exits 0 with
-#      an EMPTY stdout, unconditionally, on every tool call it observes. The one-time tips and the
-#      sweep escalation that used to be built below are gone — see §RETIRED at the top of this file
-#      for the readout that retired them and for what stayed. The SessionStart primer (above, and
-#      still arm-differentiated) is the only thing this hook says to an agent now.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §FIRSTEDIT — THE BEFORE-THE-FIRST-EDIT CHECK (lane FIRST-EDIT-HOOK, 2026-11-26)
 #
-#      This is a CONTRACT, not an incidental property, and test/hookcheck.sh asserts it directly: a
-#      PreToolUse invocation of this hook produces no stdout. An advisory hook that is measured to be
-#      inert and keeps talking anyway is just tokens.
+# WHAT IT IS. The one PreToolUse moment at which this hook speaks again after §RETIRED. On the FIRST Edit, Write or
+# MultiEdit of a session whose target is an EXISTING source file inside a git work tree, it runs ripwire's own
+# post-edit check BEFORE the edit lands and returns it as additionalContext: for the definition(s) the edit touches,
+# the contract status vs HEAD, the 1-hop callers (any call site provably incompatible flagged), and the tests that
+# reach them (--affected). When the edit is an Edit whose old_string sits inside ONE definition, the status is a
+# PREVIEW of the pending bytes (`--edit-check --edit-payload --dry-run`: the definition with old_string replaced,
+# spliced in memory, nothing written), so "adds a parameter" reads contract-change before a byte changes. Otherwise
+# (a Write, a MultiEdit, an edit that crosses a definition, or a preview the binary refuses) it is the current tree.
+#
+# WHY THIS AND NOT THE RETIRED TIPS. Those were verb names at the moment a default was chosen, and the A/B measured
+# them inert. This is the answer itself, computed, at the one moment two papers put the leverage: Patel et al.,
+# "PAUSE" (arXiv 2610.29870), steering before the first source-code edit without a search, and Varun, "Before the
+# First Edit?" (arXiv 2610.35992), measuring when guidance actually arrives relative to it. PAUSE's intervention is a
+# Planner model call; this one is a deterministic tool answer and spends no model call. The registered readout for
+# it does not exist yet; until it does, this is a hypothesis with a switch, like §SWEEP was.
+#
+# WHAT IT CANNOT SEE. Only the structured editors (Edit/Write/MultiEdit). A first change made through the shell
+# (`sed -i`, `cat > f`, a script) reaches this hook as a Bash call and gets no check; Varun's audit names the same
+# blind spot ("shell-first file writes") for its own harness. NotebookEdit is not a source file here.
+#
+# THE ARM AND THE METER (§FACTORIAL above). The CHECK has its own arm, independent of the primer's: a session whose
+# check arm is on (hashed on, or forced on) speaks; a hashed-off one is silent and records the same moment as
+# `first-edit-control`, so eligibility is measurable in both check arms; forced-off, and a meter that is off, do
+# nothing. The primer arm no longer gates it. The row's `nudge`: `first-edit` (nudged=1, the check delivered),
+# `first-edit-plain` (nudged=1: the deadline fell inside the preview, so the current-tree check went out with a note),
+# `first-edit-timeout` (the skip line delivered), `first-edit-nosym` (the edit sits inside no indexed definition, or
+# the binary answered nothing: silent), `first-edit-control`. `post_nudge`/`post_sweep` are NOT touched: they stay
+# the retired tiers' counterfactual markers.
+#
+# DEFAULT: RANDOMIZED WHILE THE METER IS ACTIVE, OFF OTHERWISE (owner ruling 2026-11-26: ship #779 off, then split
+# 2x2). With counting on, about half of the unforced sessions get the check, independently of the primer, so the
+# primer A/B stays a clean comparison pooled over the check arm. `first_edit=1|0` / RIPWIRE_FIRST_EDIT force it.
+#
+# THE BOUNDS. Time: one hard deadline over the whole check (default 2000 ms; Codex registers this hook with a 3 s
+# timeout), enforced by one non-polling watchdog that kills the check's process group. The plain check (current tree)
+# is finished and saved BEFORE the slow preview starts, so a deadline inside the preview still delivers it, with a
+# "preview did not finish" note; only a deadline before the plain check is done gives the one "skipped: timeout" line.
+# Either way the edit proceeds untouched. Bytes: at most 2 definitions, 5 callers each, 3 tests, and a
+# 1536 B ceiling on the whole text (a cut is disclosed). Calls: one `git rev-parse`, then inside the deadline at most
+# 4 --at, 2 plain --edit-check, 1 --affected, then up to 2 previews. Once per session (an atomic mkdir marker); an edit to a
+# non-source file, a missing file or a new file spends nothing. Never a permissionDecision (test/hookcheck.sh (15)).
+# The switch: `first_edit=1` in meter.conf or RIPWIRE_FIRST_EDIT=1 (default off); the deadline: RIPWIRE_FIRST_EDIT_MS /
+# `first_edit_ms`. Gated in test/hookcheck.sh (16), arms FE1-FE9, and PD5.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+fe_ctx=""
+firstedit_eligible()
+{
+    case "$tool_name" in Edit|Write|MultiEdit) ;; *) return 1 ;; esac
+    command -v jq >/dev/null 2>&1 || return 1
+    fe_file="$mtarget"
+    [ -n "$fe_file" ] || return 1
+    case "$fe_file" in /*) ;; *) fe_file="$dir/$fe_file" ;; esac
+    [ -f "$fe_file" ] || return 1
+    case "${fe_file##*/}" in
+        *.c|*.h|*.cc|*.cpp|*.cxx|*.c++|*.hpp|*.hh|*.hxx|*.h++|*.inl|*.ipp|*.m|*.mm|*.metal|*.cu|*.cuh) ;;
+        *.py|*.pyi|*.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.mts|*.cts|*.java|*.rb|*.sh|*.bash|*.go|*.rs|*.swift|*.cs) ;;
+        *) return 1 ;;
+    esac
+    fe_dir="$( cd "${fe_file%/*}" 2>/dev/null && pwd -P )" || return 1
+    fe_root="$( git -C "$fe_dir" rev-parse --show-toplevel 2>/dev/null )" || return 1
+    [ -n "$fe_root" ] || return 1
+    case "$fe_dir/" in "$fe_root"/*) ;; *) return 1 ;; esac
+    fe_file="$fe_dir/${fe_file##*/}"
+    fe_rel="${fe_file#"$fe_root"/}"
+    return 0
+}
+# firstedit_attr TAG NAME -> the attribute's value, XML entities decoded; empty when absent
+firstedit_attr()
+{
+    # `^` as well as a space: a row cut at its tag name (`<s ` removed) starts with its first attribute.
+    local re="(^|[[:space:]])$2=\"([^\"]*)\"" v
+    [[ "$1" =~ $re ]] || return 0
+    v="${BASH_REMATCH[2]}"
+    v="${v//&lt;/<}"; v="${v//&gt;/>}"; v="${v//&quot;/\"}"; v="${v//&apos;/\'}"; v="${v//&amp;/&}"
+    printf '%s' "$v"
+}
+# firstedit_symline TARGET SYMNAME [PAYLOAD] — one edit-check as one line on stdout. With PAYLOAD: the --dry-run preview
+# of the pending bytes, and status 1 (nothing printed) when the binary refuses it; without: the current tree vs HEAD.
+firstedit_symline()
+{
+    local x mode="current tree vs HEAD" root rest row line cs="" k=0
+    if [ -n "${3:-}" ]
+    then
+        x="$( ripwire "$fe_root" --edit-check="$1" --edit-payload="$3" --dry-run --limit=5 --legend=compact 2>/dev/null )" || return 1
+        mode="preview of this edit"
+    else
+        x="$( ripwire "$fe_root" --edit-check="$1" --limit=5 --legend=compact 2>&1 )" || {
+            printf '%s: edit-check refused: %s\n' "$2" "$( printf '%s' "$x" | head -n1 | cut -c1-160 )"; return 0; }
+    fi
+    # Anchored on the ROOT element, never on the legend comment before it: that comment spells `<c n= p= …>` itself, and
+    # the <overwrite> CDATA (the current span, which the agent is editing anyway) can hold any text, `-->` included.
+    # Root first, THEN the overwrite cut: the legend spells `<overwrite l= end= …>` too.
+    [[ "$x" == *"<edit-check "* ]] || { [ -z "${3:-}" ]; return; }
+    x="${x#*<edit-check }"
+    x="${x%%<overwrite*}"
+    root="${x%%>*}"
+    line="$2 $( firstedit_attr "$root" p ) $( firstedit_attr "$root" t ): $mode: status=$( firstedit_attr "$root" status )"
+    [ -n "$( firstedit_attr "$root" params_now )" ] \
+        && line="$line params $( firstedit_attr "$root" params_was )->$( firstedit_attr "$root" params_now )"
+    [ "$( firstedit_attr "$root" public_was )" != "$( firstedit_attr "$root" public_now )" ] \
+        && line="$line public $( firstedit_attr "$root" public_was )->$( firstedit_attr "$root" public_now )"
+    line="$line; callers=$( firstedit_attr "$root" callers ) incompatible=$( firstedit_attr "$root" incompatible )"
+    rest="$x"
+    while [[ "$rest" == *"<c "* ]] && [ "$k" -lt 5 ]
+    do
+        rest="${rest#*<c }"; row="${rest%%>*}"; k=$(( k + 1 ))
+        cs="$cs${cs:+, }$( firstedit_attr "$row" n ) $( firstedit_attr "$row" p )"
+        [ "$( firstedit_attr "$row" incompatible )" = 1 ] && cs="$cs INCOMPATIBLE sites_l=$( firstedit_attr "$row" sites_l )"
+    done
+    [ -n "$cs" ] && line="$line: $cs"
+    [ "$k" -gt 0 ] && [ "$( firstedit_attr "$root" callers )" != "$k" ] && line="$line ($k shown; the rest: --edit-check=$1)"
+    printf '%s\n' "$line"
+}
+# firstedit_locate DIR — the definitions the edit touches (at most 2): fills fe_syms[] and fe_pays[] (the preview
+# payload file for that definition, or empty) and fe_targets (FILE:SYM,...). Status 1 when the ranges cannot be read.
+firstedit_locate()
+{
+    local d="$1" s e ln at row n l el seen="" k=0 tries=0
+    fe_syms=(); fe_pays=(); fe_targets=""
+    # `max` with 1: an old_string at byte 0 leaves an EMPTY prefix, and jq splits "" into [] (length 0), not [""].
+    jq -r --rawfile c "$fe_file" '
+        def loc($o): if ($o | type) != "string" or $o == "" then empty
+            else ($c | split($o)) as $p | if ($p | length) < 2 then empty
+            else ([($p[0] | split("\n") | length), 1] | max) as $s | "\($s) \($s + ($o | split("\n") | length) - 1)" end end;
+        if .tool_name == "Write" then
+            ((.tool_input.content // "") | tostring) as $n | ($c | split("\n")) as $a | ($n | split("\n")) as $b
+            | (([range(0; ([($a | length), ($b | length)] | max))] | map(select($a[.] != $b[.])) | first) // empty) + 1
+            | "\(.) \(.)"
+        elif .tool_name == "MultiEdit" then (.tool_input.edits // [])[:4][] | loc(.old_string)
+        else loc(.tool_input.old_string) end' "$d/in.json" >"$d/ranges" 2>/dev/null || return 1
+    while read -r s e
+    do
+        for ln in "$s" "$e"
+        do
+            [ "$tries" -lt 4 ] || break
+            tries=$(( tries + 1 ))
+            at="$( ripwire "$fe_root" --at="$fe_rel:$ln" --legend=compact 2>/dev/null )" || { [ "$s" = "$e" ] && break; continue; }
+            [[ "$at" == *"<at "* ]] || continue
+            at="${at#*<at }"                                  # past the legend, which spells `<s n= t= l= el=>` itself
+            [[ "$at" == *"<s "* ]] || continue
+            row="${at##*<s }"; row="${row%%>*}"
+            n="$( firstedit_attr "$row" n )"; l="$( firstedit_attr "$row" l )"; el="$( firstedit_attr "$row" el )"
+            [ -n "$n" ] || continue
+            case " $seen " in *" $n@$l "*) break ;; esac
+            seen="$seen $n@$l"
+            fe_syms[$k]="$n"; fe_pays[$k]=""
+            if [ "$tool_name" = Edit ] && [ -n "$l" ] && [ -n "$el" ] && [ "$s" -ge "$l" ] && [ "$e" -le "$el" ]
+            then
+                sed -n "${l},${el}p" "$fe_file" >"$d/span$k" 2>/dev/null
+                jq -j --rawfile sp "$d/span$k" '.tool_input as $t | ($sp | split($t.old_string)) as $p
+                    | if ($p | length) < 2 then error("absent") elif $t.replace_all == true then $p | join($t.new_string)
+                      else $p[0] + $t.new_string + ($p[1:] | join($t.old_string)) end' "$d/in.json" >"$d/payload$k" 2>/dev/null \
+                    && [ -s "$d/payload$k" ] && fe_pays[$k]="$d/payload$k"
+            fi
+            fe_targets="$fe_targets${fe_targets:+,}$fe_rel:$n"
+            k=$(( k + 1 ))
+            break
+        done
+        [ "$k" -lt 2 ] && [ "$tries" -lt 4 ] || break
+    done <"$d/ranges"
+    return 0
+}
+# firstedit_tests — the "tests to run" line for fe_targets (--affected), or nothing when the binary answered nothing
+firstedit_tests()
+{
+    local tx tr tn ts="" te row k=0 t sg
+    tx="$( ripwire "$fe_root" --affected="$fe_targets" --legend=compact 2>/dev/null )"
+    [[ "$tx" == *"<affected "* ]] || return 0
+    tx="${tx#*<affected }"                                # past the legend, which spells `<test p= …>` itself
+    tr="${tx%%>*}"
+    tn="$( firstedit_attr "$tr" tests )"; sg="$( firstedit_attr "$tr" script_gates_unmodelled )"
+    te="$tx"
+    while [[ "$te" == *"<test "* ]] && [ "$k" -lt 3 ]
+    do
+        te="${te#*<test }"; row="${te%%>*}"; k=$(( k + 1 ))
+        ts="$ts${ts:+, }$( firstedit_attr "$row" p )"
+    done
+    t="tests to run (tests=$tn, a floor"
+    [ -n "$sg" ] && [ "$sg" != 0 ] && t="$t; $sg script gates unmodelled"
+    if [ -n "$ts" ]
+    then
+        t="$t): $ts"
+        [ "$k" != "$tn" ] && t="$t ($k shown; the rest: --affected=$fe_targets)"
+    else
+        t="$t): none found, which is not none exist"
+    fi
+    printf '%s\n' "$t"
+}
+# firstedit_render CAP LINE... — the header, the non-empty LINEs, the follow-up; cut at CAP bytes, the cut disclosed
+firstedit_render()
+{
+    local cap="$1" out l tail; shift
+    out="ripwire before-first-edit check for $fe_rel (once per session, read-only, nothing was written):"
+    for l in "$@"
+    do
+        [ -n "$l" ] && out="$out"$'\n'"$l"
+    done
+    out="$out"$'\n'"after the edit: ripwire $fe_root --edit-check=${fe_targets%%,*} --legend=compact"
+    if [ "${#out}" -gt "$cap" ]
+    then
+        tail="[cut at the $cap B ceiling; the full answer: --edit-check=${fe_targets%%,*}]"
+        out="${out:0:$(( cap - ${#tail} - 1 ))}"
+        out="${out%$'\n'*}"$'\n'"$tail"
+    fi
+    printf '%s' "$out"
+}
+# firstedit_compute DIR — the whole check; runs in the background under the deadline. PLAIN FIRST: the current-tree
+# answer (every definition's plain edit-check, then the tests) is renamed into DIR/ctx.plain BEFORE the preview starts,
+# because the preview re-derives the call graph and can take far longer (15.36 s measured on src/graph.h); a deadline
+# that falls inside the preview still delivers the plain answer. Then each definition with a payload is previewed, and
+# DIR/ctx + DIR/done are written last. The plain render is cut at 1360 B so the run's timeout note still fits in 1536.
+firstedit_compute()
+{
+    local d="$1" i=0 tests pl
+    local -a plain fin
+    export LC_ALL=C
+    firstedit_locate "$d" && [ "${#fe_syms[@]}" -gt 0 ] || { : >"$d/done"; return 0; }
+    while [ "$i" -lt "${#fe_syms[@]}" ]
+    do
+        plain[$i]="$( firstedit_symline "$fe_rel:${fe_syms[$i]}" "${fe_syms[$i]}" )"
+        i=$(( i + 1 ))
+    done
+    tests="$( firstedit_tests )"
+    firstedit_render 1360 "${plain[@]}" "$tests" >"$d/ctx.tmp" && mv "$d/ctx.tmp" "$d/ctx.plain"
+    i=0
+    while [ "$i" -lt "${#fe_syms[@]}" ]
+    do
+        fin[$i]="${plain[$i]}"
+        if [ -n "${fe_pays[$i]}" ]
+        then
+            if pl="$( firstedit_symline "$fe_rel:${fe_syms[$i]}" "${fe_syms[$i]}" "${fe_pays[$i]}" )" && [ -n "$pl" ]
+            then
+                fin[$i]="$pl"
+            else
+                fin[$i]="${plain[$i]/: current tree vs HEAD:/: current tree vs HEAD (the preview was refused):}"
+            fi
+        fi
+        i=$(( i + 1 ))
+    done
+    firstedit_render 1536 "${fin[@]}" "$tests" >"$d/ctx"
+    : >"$d/done"
+    return 0
+}
+# firstedit_run — the check under ONE non-polling watchdog. `set -m` gives each background job its own process group
+# (pgid = the job's pid), so a single `kill -- -PGID` reaches the check's subshell and every ripwire and git it started,
+# with no process-table walk and no loop. The watchdog is one `sleep` then one kill; it lives in its own group too, and
+# is killed as a group the moment the check returns. The caller runs this with stderr closed, which keeps bash's
+# job-control notices ("Terminated") out of the hook's stderr.
+firstedit_run()
+{
+    local tmp pid wd secs
+    tmp="$( mktemp -d "${TMPDIR:-/tmp}/ripwire-firstedit.XXXXXX" 2>/dev/null )" || { nudge="first-edit-nosym"; return 0; }
+    printf '%s' "$input" >"$tmp/in.json"
+    secs="$( printf '%d.%03d' "$(( firstedit_ms / 1000 ))" "$(( firstedit_ms % 1000 ))" )"
+    set -m
+    # `set +m` first inside each job: with job control on, the job's own commands would each get a NEW group and step
+    # outside the one kill below; off, every ripwire and git the check starts stays in the job's group.
+    ( set +m; firstedit_compute "$tmp" ) >/dev/null 2>&1 </dev/null &
+    pid=$!
+    ( set +m; sleep "$secs"; : >"$tmp/timeout"; kill -TERM -- "-$pid" ) >/dev/null 2>&1 </dev/null &
+    wd=$!
+    set +m
+    wait "$pid"
+    kill -TERM -- "-$wd"
+    wait "$wd"
+    if [ -e "$tmp/done" ]
+    then
+        [ -s "$tmp/ctx" ] && fe_ctx="$(<"$tmp/ctx")"
+        if [ -n "$fe_ctx" ]; then nudge="first-edit"; nudged=1; else nudge="first-edit-nosym"; fi
+    elif [ -e "$tmp/timeout" ] && [ -s "$tmp/ctx.plain" ]
+    then
+        # The deadline fell inside the preview: the plain answer was already complete, so it is delivered, and said to be.
+        fe_ctx="$(<"$tmp/ctx.plain")"$'\n'"preview did not finish within $firstedit_ms ms (RIPWIRE_FIRST_EDIT_MS): each status above is the current tree vs HEAD, not the pending edit."
+        nudge="first-edit-plain"; nudged=1
+    elif [ -e "$tmp/timeout" ]
+    then
+        fe_ctx="ripwire before-first-edit check for $fe_rel: skipped: timeout (no answer within $firstedit_ms ms, RIPWIRE_FIRST_EDIT_MS; nothing was checked and the edit is untouched). After the edit: ripwire $fe_root --edit-check=SYM --legend=compact"
+        nudge="first-edit-timeout"
+    else
+        nudge="first-edit-nosym"
+    fi
+    rm -rf "$tmp" 2>/dev/null
+    return 0
+}
+# §FACTORIAL: the CHECK arm decides, never the primer arm. on/forced-on run the check; a hashed `off` (only reached
+# while the meter is active) records the same moment as `first-edit-control`, the counterfactual; forced-off and a
+# meter that is off do nothing at all.
+fe_go=0
+case "$firstedit_label" in
+    on|forced-on) fe_go=1 ;;
+    off)          [ "$meter_enabled" = "1" ] && fe_go=2 ;;
+esac
+if [ "$mclass" = native-edit ] && [ "$nudge_ok" = "1" ] && [ "$fe_go" != 0 ] && firstedit_eligible
+then
+    # mkdir is the atomic test-and-set: two edits of one session racing here cannot both win.
+    if mkdir "${TMPDIR:-/tmp}/ripwire-nudge.${session}.first-edit" 2>/dev/null
+    then
+        if [ "$fe_go" = 2 ]
+        then
+            nudge="first-edit-control"
+        else
+            firstedit_run 2>/dev/null
+        fi
+    fi
+fi
+
+meter_log "$mclass" "$( meter_family "$mclass" )" "$nudged" "$nudge" "$mdetail"
+# ---- §RETIRED (2026-09-02): the PreToolUse path ENDS here. It writes one meter row and exits 0. Its stdout is EMPTY on
+#      every tool call it observes but ONE, and that one only in a session whose CHECK arm is on (§FACTORIAL): the first
+#      source edit, which carries the §FIRSTEDIT check above. The one-time tips and the sweep escalation that used to be built below are gone — see §RETIRED at
+#      the top of this file for the readout that retired them and for what stayed.
+#
+#      This is a CONTRACT, not an incidental property, and test/hookcheck.sh asserts both halves: every other PreToolUse
+#      invocation of this hook produces no stdout, and (16) pins the one that does. An advisory hook that is measured to
+#      be inert and keeps talking anyway is just tokens.
+if [ -n "$fe_ctx" ]
+then
+    jq -cn --arg m "$fe_ctx" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m}}' 2>/dev/null || true
+fi
 exit 0

@@ -82,6 +82,7 @@ compare_warm_cold(){
             head -2 "$TMP/warm.$label.$v.err" "$TMP/cold.$label.$v.err" 2>/dev/null
             continue
         fi
+        [ -s "$warm" ] || no "zero-evidence premise (relinkcheck.sh:85): the file the next arm judges is empty, so its verdict proves nothing"
         if cmp -s "$warm" "$cold"; then
             ok "[$label/$v] warm(--cache) BYTE-IDENTICAL to cold(--no-cache)"
         else

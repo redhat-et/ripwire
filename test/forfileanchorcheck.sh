@@ -57,6 +57,13 @@
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_FILE_PAGE RIPWIRE_NO_MENTION
@@ -319,8 +326,25 @@ e = s.find(">", b) + 1
 print(e - a if a >= 0 and b >= 0 else 0)
 PY
 }
-run m3 --for="pkg/big package" > "$T/m3a.xml"
-run m3 --for="pkg/big pkg/big2" > "$T/m3b.xml"
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h), so this 16 KB file-anchor page
+# straddles the answer page's cut. M3/Y4 are about the file page's OWN bound inside the ANSWER, so they read --page-bytes=0 —
+# the whole answer, row-identical to the joined pages (forpagescheck P2/P11); (M3p) holds the DEFAULT answer page to
+# present-or-disclosed-deferred for the section it cuts.
+run m3 --for="pkg/big package" --page-bytes=0 > "$T/m3a.xml"
+run m3 --for="pkg/big pkg/big2" --page-bytes=0 > "$T/m3b.xml"
+run m3 --for="pkg/big package" > "$T/m3a.page.xml"
+if python3 - "$T/m3a.page.xml" "$T/m3a.xml" <<'PY'
+import re, sys
+d, w = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+r = re.match(r"<ctx\b[^>]*>", d).group(0)
+names = " ".join(re.findall(r'\s(?:deferred|continued)="([^"]*)"', r)).split()
+# every top-level element name of the whole answer is on the page whole, or named on the page's root beside next=
+tops = set(re.findall(r"<(named-[a-z]+)\b", w))
+missing = [n for n in tops if ("</%s>" % n not in d and "<%s " % n not in d) and n not in names]
+sys.exit(1 if not tops or missing or (names and " next=" not in r) else 0)
+PY
+then ok "(M3p) the default answer page holds each named-* section or names it in deferred=/continued= beside next="
+else no "(M3p) the default answer page cut a named-* section with no deferred=/continued= naming it (a silent drop)"; fi
 pa="$( pagebytes "$T/m3a.xml" )"; pb="$( pagebytes "$T/m3b.xml" )"
 if [ "$pa" -gt 0 ] && [ "$pa" -le 16640 ] && [ "$pb" -gt 0 ] && [ "$pb" -le 16640 ] && grep -qE '<named-dir p="pkg/big" files="7" shown="[0-9]+" capped="1" bytes_capped="1">' "$T/m3a.xml" \
    && has "$T/m3b.xml" '<named-cut total="2" shown="1" bytes_capped="1"/>'; then
@@ -353,7 +377,7 @@ f3="$( grep -o '<named-file p="[^"]*"' "$T/y3.xml" | head -1 )"; f3p="$( grep -o
 if [ "$f3" = '<named-file p="crate/src/mw/mod.rs"' ] && [ "$f3p" = '<named-file p="pkg/ware/index.ts"' ] && has "$T/y3.xml" 'files="8" shown="6" capped="1"'; then
     ok "Y3 the module root (mod.rs, index.ts) is the directory's first page, not the last by path order"
 else no "Y3 module root not first: $f3 / $f3p"; fi
-run y4 --for="pkg/big dup.py" > "$T/y4.xml"
+run y4 --for="pkg/big dup.py" --page-bytes=0 > "$T/y4.xml"   # AF1-fix: the whole answer (see M3)
 py4="$( pagebytes "$T/y4.xml" )"
 if has "$T/y4.xml" 'bytes_capped="1"' && ! has "$T/y4.xml" '<named-files n="dup.py"' && has "$T/y4.xml" '<named-cut total="2" shown="1" bytes_capped="1"/>' && [ "$py4" -gt 0 ] && [ "$py4" -le 16640 ]; then
     ok "Y4 a listing after a full directory obeys the 16 KB bound and says so ($py4 B)"

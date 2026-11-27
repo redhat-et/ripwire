@@ -50,9 +50,16 @@ echo "testrowruncheck: BIN=$BIN"
 # Every site that prints a tests_to_run row. The list is the CONTRACT: a site added to src/ and not added
 # here fails, which is the only way a family gate stays a family gate. forpage.h (forbudget-soft round C) renders the --for
 # answer's FILE tail rows (`<t p=… sym=…/>`, moved there from serialize.h, already excluded): file rows, not tests_to_run.
+# foronesidereach.h (ONE-SIDE-REACH) rewrites a --for answer's demoted <sigs>/<callers> rows as the same `<t p= sym= r=/>`
+# FILE tail pointers (pointerText): file rows naming a file and a symbol, never a tests_to_run row, so it is excluded like forpage.h.
+# forsiblingdemote.h (SIBLING-DEMOTE) prints a --for answer's deep same-file <sigs> <d> rows as the same `<t p= sym= r=/>` FILE tail
+# pointers (pointerAnswer): excluded for the same reason. Both print through forfilesyms.h tailPointerText (the one tail-pointer
+# writer, filesyms_detail), which is excluded with them: a FILE tail pointer, never a tests_to_run row.
+# forrowlines.h (FMT2 ROWLINES) serves a --for answer's <sigs>/<tail> rows as text lines and, to prove each line, rebuilds the
+# `<t p= sym=/>` pointer row it stands for (parsePointerLine): the same FILE row read back, never a tests_to_run row — excluded too.
 EXPECTED_SITES="src/verbs_change.h src/situ.h src/prcontext.h src/packtask.h src/handoff.h src/flipimpact.h src/mcpverbs.h src/mcpedit.h"
 FOUND_SITES="$( cd "$ROOT" && grep -lE 'testRows(Rendered|Joined|List)\(|"<(t|test) p=\\"|\{\\"test\\":|\{\\"p\\":\\"%s\\"%s\}' src/*.h src/*.cpp 2>/dev/null \
-                | grep -vE 'src/(serialize|testmap|forpage)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
+                | grep -vE 'src/(serialize|testmap|forpage|foronesidereach|forsiblingdemote|forfilesyms|forrowlines)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
 WANT_SITES="$( printf '%s\n' $EXPECTED_SITES | sort | tr '\n' ' ' | sed 's/ $//' )"
 [ "$FOUND_SITES" = "$WANT_SITES" ] \
     && ok "(0) the tests_to_run row emitters are exactly the census this gate drives" \
@@ -212,7 +219,18 @@ rows_disclosed "(3) --test-gate json" "$( json_tests "$( rw --test-gate --json )
 # ── ARM 4 — --pr-context (prcontext.h) ─────────────────────────────────────────────────────────────────
 rows_disclosed "(4) --pr-context" "$( rw --pr-context )" "$XROW" "$XHAS" "$XUNK"
 # ── ARM 5 — --pack-task, both dialects (packtask.h) ────────────────────────────────────────────────────
-rows_disclosed "(5) --pack-task xml"  "$( rw --pack-task="change compute and wrapper" )"        "$XROW" "$XHAS" "$XUNK"
+# PB1 (2026-11-19): the bundle's XML arm reads the <tests> ELEMENT, not the whole document. `<t p="…"/>` is
+# also the shape of a row in --for's file-grain tail, which --pack-task now carries: those three rows carry
+# neither run= nor run_unknown= because they are not test rows at all, and XROW matched them document-wide.
+# The same collision, and the same fix, as test/testrowpaths.py's reader — the short tag is read only inside
+# the element that declares what it means. A document with no <tests> element is passed through whole.
+tests_block(){ python3 -c "
+import sys
+d = sys.stdin.read()
+i, j = d.find( '<tests' ), d.find( '</tests>' )
+sys.stdout.write( d[ i : j + len( '</tests>' ) ] if i != -1 and j > i else d )
+"; }
+rows_disclosed "(5) --pack-task xml"  "$( rw --pack-task="change compute and wrapper" | tests_block )" "$XROW" "$XHAS" "$XUNK"
 rows_disclosed "(5) --pack-task json" "$( json_tests "$( rw --pack-task="change compute and wrapper" --json )" )" "$JROW" "$JHAS" "$JUNK"
 # ── ARM 6 — --handoff (handoff.h) — the row family lens 2 L2 found carrying NO run= at all ─────────────
 rows_disclosed "(6) --handoff" "$( rw --handoff )" "$XROW" "$XHAS" "$XUNK"

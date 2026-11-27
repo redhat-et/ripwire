@@ -106,6 +106,13 @@ inline constexpr std::string_view kForCompactBodyFoldLegend =
     "; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; "
     "slice/skip p= n= l=; slice members= of=: a big class's ctor, question-word members; skip bytes= next=; "
     "a skip makes sigs next= it, sigs_next= the signatures-only re-call";
+// SIZE-1: the member-slice reading of each clause, present-only on a <slice members=> row (runForLens erases it from a legend
+// whose fold printed none). Spelled exactly as the clauses carry it.
+inline constexpr std::string_view kForBodyFoldMembersClause =
+    "slice members= of=: a class too big for the rest, its constructor and question-word members; ";
+inline constexpr std::string_view kForCompactBodyFoldMembersClause = "slice members= of=: a big class's ctor, question-word members; ";
+static_assert( kForBodyFoldLegend.contains( kForBodyFoldMembersClause ) && kForCompactBodyFoldLegend.contains( kForCompactBodyFoldMembersClause ),
+               "the member-slice clauses are spelled as the fold legends carry them" );
 // WRAPPER-FOLLOW: present-only beside a <b follow_of=> (BodyFoldRender::follows > 0), after the fold clause. No "--".
 inline constexpr std::string_view kForFoldFollowLegend =
     "; b follow_of=W: the body of the one call W makes, W a thin wrapper served just before it (a function whose text holds one call "
@@ -171,13 +178,6 @@ inline bool isConstructorName( std::string_view member, std::string_view cls ) n
 {
     return member == cls || std::ranges::binary_search( kFoldCtorNames, member, rw::sortutil::svLess );
 }
-// does `text` (a member's name, or its body) carry one of `words` as a subtoken
-inline bool holdsWord( std::string_view text, const std::vector<std::string>& words )
-{
-    std::vector<std::string> toks;
-    subtokens( text, toks );
-    return std::ranges::any_of( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
-}
 // One body through packBodies (the --expand body shape, no callee rows: the empty CSR has no out-edge for any id), unwrapped from
 // its <bodies> envelope: the legend comments packBodies writes ahead of the envelope (an extent-suspect body's reading) stay in
 // front of the <b>. nullopt when the buffer failed or the span rendered nothing.
@@ -193,7 +193,8 @@ inline std::string skipRow( const BodyFoldInputs& in, NodeId id, std::string& es
     const std::string path       = in.rootArg.empty() ? std::string( in.ing.files[s.fileId] )
                                                       : std::string( rw::sarif::rootRelativeUri( in.ing.files[s.fileId], rootPrefix ) );
     std::vector<char> esc;
-    escapedNext = std::string( escapeXml( nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ), esc ) );
+    escapedNext.clear();
+    appendNextValueXml( escapedNext, nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ) );   // the one next= escaper
     std::string x = "<skip p=\"";
     x += escapeXml( path, esc );
     x += "\" n=\"";
@@ -265,7 +266,7 @@ inline std::vector<NodeId> slicePicks( const IngestResult& ing, const std::vecto
     std::ranges::copy_if( members, std::back_inserter( chosen ), [ & ]( NodeId m )
     {
         const Symbol& ms = ing.symbols[m];
-        return !isConstructorName( ms.name, cls ) && ( holdsWord( ms.name, words ) || holdsWord( bodyOf( ms ), words ) );
+        return !isConstructorName( ms.name, cls ) && ( holdsSubtokenWord( ms.name, words ) || holdsSubtokenWord( bodyOf( ms ), words ) );
     } );
     return chosen;
 }

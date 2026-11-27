@@ -48,6 +48,8 @@
 #       fenced `curl curl …` line scans in bounded time (the regex was quadratic: >60 s); (f3) an abandoned match
 #       fails CLOSED — a CRITICAL SCAN-INCOMPLETE:regex-abandoned finding at exit 2, never a clean exit 0 and never an
 #       abort inside wrap's noexcept scan.
+#       (f4) #353 flow: the document binding pass and the curl destination proof finish inside a 20 s time limit on
+#       hostile shapes (50,000 assignments, 40,000 destination words, a 3,000-fold expansion) and prove no host there.
 #   (g) THE STACK BOUND — std::regex compiles by recursion, and a 20,000-byte literal --regex died with SIGBUS in a
 #       512 KiB grep worker. A pattern over kRegexMaxPatternBytes (2,048) or nesting groups deeper than
 #       kRegexMaxGroupDepth (64) is refused by name; exactly at each limit it still compiles.
@@ -278,8 +280,8 @@ fi
 # per-file match budget — round 5's second cause, whose (b2) note pointed at regexbombcheck (6) — was removed in the
 # PR #397 review; a stopped scan has one cause again.) What changes here is only the MECHANISM that catches `(a|a)+z`:
 # a match-time catch -> a static refusal. ROUND 6 re-vehicles the real-engine leg: the wrapped alternation forms it
-# used to ride are refused at admission since M2-d/M2-e, so the leg rides `a*a*a*a*a*b` — the multi-quantifier
-# residual the screen ADMITS, which is what makes it the real-engine vehicle.
+# used to ride are refused at admission since M2-d/M2-e, so the leg rides a pattern the screen still admits —
+# see the vehicle note at FIVESTAR below for why it is `(a*){20}b` and not the `a*a*a*a*a*b` round 6 chose.
 LINKS_LIBCXX=0
 if command -v otool >/dev/null 2>&1 && otool -L "$BIN" 2>/dev/null | grep -q 'libc++'; then LINKS_LIBCXX=1; fi
 if command -v ldd >/dev/null 2>&1 && ldd "$BIN" 2>/dev/null | grep -q 'libc++\.so'; then LINKS_LIBCXX=1; fi
@@ -313,15 +315,22 @@ closedStatically "--arch TO (a|a)+z"           '(a|a)+z' --arch="$TMP/arch_alt.t
 closedStatically "--match #match? (a|a)+z"     '(a|a)+z' "--match=$MATCH_ALT"
 closedStatically "--regex (a|a)+z"             '(a|a)+z' --regex='(a|a)+z'
 
-# The REAL-ENGINE leg of (b2), re-vehicled (round 6, PR #397 review). The arm used to prove what a REAL engine does
-# with a pattern the screen LETS THROUGH; the wrapped-alternation forms that used to ride it are refused at
-# admission since M2-d/M2-e, so the vehicle is now `a*a*a*a*a*b` — the multi-quantifier residual the screen admits
-# BY CONSTRUCTION (docs/LIMITS.md, regex-screen-multiquantifier). What abandons below is the ENGINE and not the
-# screen, which is the whole point of the leg. libc++'s engine throws error_complexity on bait.md's 4000-a line
-# (--no-prefilter: the line must reach the engine, and the required-literal prefilter would rule it out); libstdc++
-# has no budget and would backtrack without end, so the no-switch leg runs where the engine has a budget, and the
-# fault-switch leg carries the refuse-don't-silence contract on every flavour.
-FIVESTAR='a*a*a*a*a*b'
+# The REAL-ENGINE leg of (b2), re-vehicled TWICE. The arm used to prove what a REAL engine does with a pattern the
+# screen LETS THROUGH; the wrapped-alternation forms that first rode it are refused at admission since M2-d/M2-e,
+# so round 6 moved it to `a*a*a*a*a*b` — then the multi-quantifier residual, ADMITTED by the screen by
+# construction (docs/LIMITS.md, regex-screen-multiquantifier). THIS SPEC CLOSES THAT RESIDUAL, so that vehicle is
+# now refused at admission too and the leg went red — correctly: a vehicle is only a vehicle while the screen
+# admits it, and the arm's guarantee (the ENGINE abandons, and the verb refuses rather than report a floor) must
+# not be lost with it. `(a*){20}b` is the replacement, and it is admitted for a NON-accidental reason: it is one
+# bounded repeat of a group containing one unbounded quantifier, which neither the nested arm (the OUTER `{20}` is
+# bounded), nor the alternation arm (no top-level '|'), nor multi-quantifier clause 1 (one quantified atom in the
+# scope) nor clause 2 (no unproven alternation) refuses. Its cost is the counted repetition of an inner star over
+# a 4000-byte line — the same real-engine abandonment the leg exists to exercise.
+# libc++'s engine throws error_complexity on bait.md's 4000-a line (--no-prefilter: the line must reach the
+# engine, and the required-literal prefilter would rule it out); libstdc++ has no budget and would backtrack
+# without end, so the no-switch leg runs where the engine has a budget, and the fault-switch leg carries the
+# refuse-don't-silence contract on every flavour.
+FIVESTAR='(a*){20}b'
 if [ "$LINKS_LIBCXX" -eq 1 ]; then
     rc="$( capRun 30 "$TMP/r5.out" "$TMP/r5.err" "$FIX" --no-cache --no-prefilter "--regex=$FIVESTAR" )"
     abandonedContract "(b2)" "--regex $FIVESTAR (real libc++ engine)" "$rc" "$TMP/r5.out" "$TMP/r5.err" "$FIVESTAR"
@@ -693,6 +702,36 @@ else no "(f2) the 200,000-byte curl-run line: exit $rc (TIMEOUT means the scan i
 rc="$( capRun 20 "$TMP/f2h.out" "$TMP/f2h.err" --scan-skill="$SK/dos_hit.md" )"
 if [ "$rc" = 2 ] && grep -q 'rule="EXFILTRATE:net-exfil"' "$TMP/f2h.out"; then ok "(f2) the same line ending in \$SECRET is still caught as net-exfil (exit 2), bounded"
 else no "(f2) the long net-exfil line: exit $rc, finding $( grep -o 'rule="[^"]*"' "$TMP/f2h.out" | head -1 )"; fi
+# (f4) #353 flow: the document signal pass and the curl destination proof finish inside a 20 s time limit (a limit, not
+# a proof of linear scaling). Three hostile shapes, each a bare CRITICAL row (no dest=, owner= or why=: nothing is
+# proved): 50,000 assignments on one line before a `$U` curl (the doc-wide signal pass cuts it; a $VAR destination is
+# never resolved), a curl line with 40,000 `$V` destination words, and one with 40,000 LITERAL http://127.0.0.1/ words
+# (past kFlowMaxDestinations; without that cap the row would prove 127.0.0.1 and grade WARN local-dest). The CRITICAL row
+# must be the curl on line 4 (the fence puts the assignment line on line 3), and no net-exfil row may grade WARN. A
+# control, flow_literal_ok, is the same literal shape with 16 words (at the cap): it must prove dest="127.0.0.1", so the
+# capped arm does reach the proof.
+python3 - "$SK" <<'PY2'
+import sys
+sk = sys.argv[1]
+fence = lambda body: "# probe\n```bash\n" + body + "\n```\n"
+open(f"{sk}/flow_sites.md", "w").write(fence("U=https://api.github.com; " * 50000 + "\n" + 'curl "$U/user" -H "Authorization: Bearer $GITHUB_TOKEN"'))
+open(f"{sk}/flow_dests.md", "w").write(fence('V=https://api.github.com\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" ' + "$V " * 40000))
+literal = lambda n: fence('L=1\ncurl -H "Authorization: Bearer $GITHUB_TOKEN" ' + "http://127.0.0.1/ " * n)
+open(f"{sk}/flow_literal.md", "w").write(literal(40000))
+open(f"{sk}/flow_literal_ok.md", "w").write(literal(16))
+PY2
+for flowCase in flow_sites flow_dests flow_literal; do
+    rc="$( capRun 20 "$TMP/$flowCase.out" "$TMP/$flowCase.err" --scan-skill="$SK/$flowCase.md" )"
+    if [ "$rc" = 2 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="critical"/>' "$TMP/$flowCase.out" \
+       && ! grep -qE 'rule="EXFILTRATE:net-exfil" [^>]*(dest|owner|why)=' "$TMP/$flowCase.out" \
+       && ! grep -qE 'rule="EXFILTRATE:net-exfil" sev="warn"' "$TMP/$flowCase.out"; then
+        ok "(f4) #353 flow, $flowCase: a bare CRITICAL row (no dest=, owner=, why=) inside the 20 s limit"
+    else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = over the 20 s limit), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
+done
+rc="$( capRun 20 "$TMP/flow_literal_ok.out" "$TMP/flow_literal_ok.err" --scan-skill="$SK/flow_literal_ok.md" )"
+if [ "$rc" = 1 ] && grep -qE '<f p="[^"]*:4" rule="EXFILTRATE:net-exfil" sev="warn" why="local-dest" dest="127.0.0.1"/>' "$TMP/flow_literal_ok.out"; then
+    ok "(f4) #353 flow, flow_literal_ok: 16 literal local URLs (at the cap) prove dest=\"127.0.0.1\", WARN local-dest: the capped arm reaches the proof"
+else no "(f4) #353 flow, flow_literal_ok: exit $rc (want 1), $( grep -o '<f [^>]*>' "$TMP/flow_literal_ok.out" | head -1 | cut -c1-200 )"; fi
 printf '# probe\n\nplain prose line\n' >"$SK/clean.md"
 if [ "$FAULTS" -eq 1 ]; then
     rc="$( RIPWIRE_FAULT_REGEX_MATCH=1 capRun 20 "$TMP/f3.out" "$TMP/f3.err" --scan-skill="$SK/clean.md" )"

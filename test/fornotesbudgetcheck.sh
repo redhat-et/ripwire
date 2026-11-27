@@ -199,6 +199,14 @@
 # quietly, and do not "fix" it by trimming the legend without deciding that the trim is what you want.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py: the soft-target readers, shared helpers (CHECKLIST 32)
@@ -307,6 +315,12 @@ def read( path ):
             r = g( 'r' )
             rows.append( ( int( r ) if r.isdigit() else 10**9, g( 'p' ) + ":" + g( 'l' ) + ":" + g( 'n' ), len( x.group( 0 ).encode() ) + elided,
                            1 if '<note ' in x.group( 0 ) else 0 ) )
+        # B26 DEMOTE-ALL: a budgeted answer is demoted too; a SIBLING-DEMOTE / DECL-TWIN pointer <t p= sym= r=/> holds its rank, so it
+        # is a served row here as the JSON twin's pointer object is (priced at its printed bytes; a noted row is never pointed: K6)
+        for x in re.finditer( r'<t ([^>]*\br="\d+"[^>]*)/>', inner ):
+            a = x.group( 1 )
+            g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, "?" ] )[ 1 ]
+            rows.append( ( int( g( 'r' ) ), g( 'p' ) + ":*:" + g( 'sym' ), len( x.group( 0 ).encode() ), 0 ) )
         t = re.search( r'\btotal="(\d+)"', m.group( 1 ) ); total = int( t.group( 1 ) ) if t else len( rows )
         nxt = re.search( r'\bnext="[^"]+"', m.group( 1 ) ) is not None
         rt = root.group( 0 )
@@ -333,8 +347,9 @@ a = read( sys.argv[ 1 ] )
 if a is None: sys.exit( 3 )
 N = int( sys.argv[ 2 ] ); X = int( N * 2.36 * 0.90 )
 # the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
-import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size
-U = sections_u( open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read() )
+import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size, strip_appended
+# K-LEGEND: the <syms> block / held stub rides on its own allowance, outside est_tokens: never reserved from T
+U = sections_u( strip_appended( open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read() ) )
 if len( sys.argv ) > 4:
     _at = open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read(); _rt = open( sys.argv[ 4 ], encoding='utf-8', errors='replace' ).read()
     U += max( 0, tail_size( _rt ) - tail_size( _at ) )
@@ -353,6 +368,15 @@ if len( sys.argv ) > 4:
     # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve (rows over-served)
     from softbudget import upper_bound
     upper = upper_bound( _at, _rt, X, k, a[ 'total' ], U )[ 0 ]
+    if not _at.lstrip().startswith( '{' ) and a[ 'bt' ] is not None:
+        # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the UNBUDGETED answer and prices all of it (est_tokens, the
+        # header and every section included), not the rows against T = N x 2.36 x 0.9: it fits when est_tokens <= N or the rows are
+        # at the rank 1..4 floor, and a row cut is maximal when the next ranked row (REF's, at the markup rate) would cross N.
+        # (At 1200 on this fixture: 4 rows, est 1645 — the floor; the old reader called it a cut "a whole row short of T".)
+        e = int( a[ 'est' ] ) if a[ 'est' ].isdigit() else 10**9
+        fits = fits and ( e <= N or k <= 4 )
+        maximal = not cut or k >= len( ref[ 'rows' ] ) or k <= 4 or e + int( ref[ 'rows' ][ k ][ 2 ] / 2.5 + 0.5 ) > N
+        upper = True
 mine = [ x[ 1 ] for x in a[ 'rows' ] ]
 rp = len( sys.argv ) > 4 and k > 0 and mine == [ x[ 1 ] for x in ref[ 'rows' ] ][ :k ]
 if rp and len( sys.argv ) > 5 and sys.argv[ 5 ]:
@@ -376,7 +400,12 @@ sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import se
 rd = lambda p: [ x for x in open( p ).read().split( "\n" ) if x ] if p and os.path.exists( p ) else None
 cur, on, off = rd( sys.argv[ 1 ] ), rd( sys.argv[ 2 ] ), rd( sys.argv[ 3 ] )
 prv = rd( sys.argv[ 4 ] ) if len( sys.argv ) > 4 and sys.argv[ 4 ] else []
-ok = cur is not None and on is not None and off is not None and prv is not None and set_prefix( cur, on, off ) and cur[ :len( prv ) ] == prv
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML dialects (argv[5] = xml|compact) shed the no-budget answer, so their rows are its display
+# ranks r=1..K — an ORDER prefix of `on`, the round-robin's order included (they kept score order: a SET prefix). --json keeps
+# its row target, so it stays a set prefix.
+pre = ( cur == on[ :len( cur ) ] ) if cur is not None and on is not None and len( sys.argv ) > 5 and sys.argv[ 5 ] in ( "xml", "compact" ) \
+      else ( cur is not None and on is not None and off is not None and set_prefix( cur, on, off ) )
+ok = bool( cur ) and prv is not None and pre and cur[ :len( prv ) ] == prv
 sys.exit( 0 if ok else 1 )
 PY
 field(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"; }   # field LINE KEY: one key= of a soft line
@@ -384,11 +413,16 @@ isnum(){ case "${1:-}" in ''|*[!0-9]*) return 1;; esac; return 0; }
 
 # The no-budget answers, one per dialect the arms below read: the REF each cut's maximality and rank prefix are measured
 # against, and the DH arm's subject.
-"$BIN" "$CORPUS" --for="$TASK"                  > "$TMP/def.xml"     2>/dev/null
-"$BIN" "$CORPUS" --for="$TASK" --legend=compact > "$TMP/def.compact" 2>/dev/null
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); this 40-row, note-heavy head is split
+# by page 1's cut (continued="sigs"). The no-budget references and (DH) are about the ANSWER, so the XML/compact ones read
+# --page-bytes=0 — the whole answer in one call, row-identical to the joined pages (forpagescheck P2/P11); (DP) below holds the
+# DEFAULT page to present-or-disclosed-deferred. --json is never paged.
+"$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                  > "$TMP/def.xml"     2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK" --legend=compact --page-bytes=0 > "$TMP/def.compact" 2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK"                                 > "$TMP/def.page"    2>/dev/null
 "$BIN" "$CORPUS" --for="$TASK" --json           > "$TMP/def.json"    2>/dev/null
-RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK"                  > "$TMP/def_so.xml"     2>/dev/null   # lane hrr: the RP twin's references
-RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --legend=compact > "$TMP/def_so.compact" 2>/dev/null
+RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                  > "$TMP/def_so.xml"     2>/dev/null   # lane hrr: the RP twin's references
+RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --legend=compact --page-bytes=0 > "$TMP/def_so.compact" 2>/dev/null
 RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --json           > "$TMP/def_so.json"    2>/dev/null
 for dialect in xml compact json; do
   soft "$TMP/def_so.$dialect" 0 "$TMP/def_so_$dialect.rows" >/dev/null || no "the RIPWIRE_NO_HEAD_RR=1 no-budget answer ($dialect) has no <sigs> block — the RP twin lacks its reference"
@@ -414,6 +448,10 @@ for dialect in xml json; do
     no "(DH) default ($dialect): rows=$dr total=$dt notes=$dn over=$dov past_target='$pt' — the default must ship the whole head with every note, past the target disclosed, unlabelled"
   fi
 done
+# (DP) AF1-fix: the DEFAULT page holds the whole <sigs> head, or its root says the head goes on (continued="sigs") beside a next=
+if python3 -c 'import re,sys; d=open(sys.argv[1]).read(); r=re.match(r"<ctx\b[^>]*>",d); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if ("</sigs>" in d and "sigs" not in n) or ("sigs" in n and " next=" in r) else 1)' "$TMP/def.page"; then
+    ok "(DP) the default page carries the whole head or names <sigs> in continued=/deferred= beside next="
+else no "(DP) the default page cut the head with no continued=/deferred= naming <sigs> (a silent drop)"; fi
 
 # ── arm 1: notes are CHARGED against the budget, in BOTH dialects ─────────────────────────────────
 # REPLACED — forbudget-soft (rule 4). Was: "est_tokens <= --token-budget" in XML and JSON at 1200/1640/3000 (the whole
@@ -454,7 +492,9 @@ done
 for tb in 1200 1640 3000; do
   xr="$( grep -c . "$TMP/n_${tb}_xml.rows" 2>/dev/null )"; jr="$( grep -c . "$TMP/n_${tb}_json.rows" 2>/dev/null )"
   if ! isnum "$xr" || ! isnum "$jr" || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows (xml='$xr' json='$jr') — the comparison has no denominator"; continue; fi
-  if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then
+  # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML budget prices the whole unbudgeted answer (header, tail, hops included) while --json
+  # keeps its row target over the rows, so XML may buy FEWER rows (1640: 4 vs 9 — XML at its floor, est 1645); never more.
+  if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge 4 ]; then
     ok "budget=$tb: XML $xr rows vs JSON $jr rows — the two dialects agree on what fits"
   else
     no "budget=$tb: XML $xr rows vs JSON $jr rows — the dialects disagree on what the same budget buys"
@@ -576,7 +616,7 @@ while [ "$tb" -le 2000 ]; do
     case "$sl" in *" over=0 "*) ;; *)
       lblFail=$(( lblFail + 1 ))
       [ -z "$lblFirst" ] && lblFirst="budget=$tb ($dialect) $sl" ;; esac
-    if ! python3 "$TMP/rph.py" "$cur" "$TMP/def_$dialect.rows" "$TMP/def_so_$dialect.rows" "$prv"; then
+    if ! python3 "$TMP/rph.py" "$cur" "$TMP/def_$dialect.rows" "$TMP/def_so_$dialect.rows" "${prv:-}" "$dialect"; then
       rphFail=$(( rphFail + 1 ))
       [ -z "$rphFirst" ] && rphFirst="budget=$tb ($dialect): the rows are not a SET prefix of the no-budget rows, or rows(N=$(( tb - 10 ))) are not an order prefix of them — $sl"
     fi
@@ -602,7 +642,7 @@ if [ "$lblFail" -eq 0 ]; then ok "(NOLBL) sweep 700..2000 step 10 x 3 dialects (
 else no "(NOLBL) sweep 700..2000 step 10 x 3 dialects: $lblFail run(s) labelled a soft target over_ceiling= — first: $lblFirst"; fi
 if [ "$rpFail" -eq 0 ]; then ok "(RP) [RIPWIRE_NO_HEAD_RR=1 twin] sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a rank prefix of the no-budget rows, monotone in N"
 else no "(RP) [RIPWIRE_NO_HEAD_RR=1 twin] sweep 700..2000 step 10 x 3 dialects: $rpFail run(s) broke the rank prefix — first: $rpFirst"; fi
-if [ "$rphFail" -eq 0 ]; then ok "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a SET prefix of the no-budget rows (score ranks 1..K), monotone in N"
+if [ "$rphFail" -eq 0 ]; then ok "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a display-rank prefix (XML) / SET prefix (--json) of the no-budget rows, monotone in N"
 else no "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects: $rphFail run(s) broke the set prefix — first: $rphFirst"; fi
 if [ "$cfFail" -eq 0 ]; then ok "(CF) sweep 700..2000 step 10: the default and --legend=compact dialects serve the same rows on all $sweepRungs rungs"
 else no "(CF) sweep 700..2000 step 10: $cfFail rung(s) where the legend changed the rows — first: $cfFirst"; fi
@@ -631,7 +671,7 @@ case "$bare" in *"<note "*) no "a tree with no .ripwire_notes still emitted a <n
 # 1200 7/18 (JSON 7/17), 1640 10/25 (10/24), 3000 19/40 (18/40). RED on base (d4325a8c): 7 rows default vs 6 full (CF), each a
 # cut short of T (ST). The NOTES twins are green on both binaries — W3-N2 held before the soft target and holds after it.
 "$BIN" "$CORPUS" --for="$TASK" --token-budget=900 --legend=full > "$TMP/b_900.full" 2>/dev/null
-"$BIN" "$CORPUS" --for="$TASK"                                  > "$TMP/b_def.xml"  2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                   > "$TMP/b_def.xml"  2>/dev/null   # AF1-fix: the whole answer
 "$BIN" "$CORPUS" --for="$TASK" --json                           > "$TMP/b_def.json" 2>/dev/null
 printf '%s' "$bare" > "$TMP/b_900.xml"
 for posture in xml full; do

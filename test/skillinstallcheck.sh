@@ -136,7 +136,9 @@ legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.
 
 # ---- 3) ROUTE INTEGRITY: every ripwire-<name> a skill references must be a shipped skill ----
 # Catches a routing header / body that points at a deleted or misspelled skill (the phantom-route bug).
-have_dir(){ [ -d "$SK/$1" ]; }
+# A shipped Claude Code subagent (skills/agents/<name>.md, lane LC1: ripwire-locator) is a real route target too; a
+# misspelled or deleted one still has no file and still reds here.
+have_dir(){ [ -d "$SK/$1" ] || [ -f "$SK/agents/$1.md" ]; }
 badrefs=0; seen=""
 while IFS= read -r ref; do
     case " $seen " in *" $ref "*) continue;; esac
@@ -175,6 +177,7 @@ UNROUTED="
 --version        # meta (version/build info, not an agent moment)
 --sarif          # CI code-scanning output format (--lint modifier, upload-sarif consumes it), not an agent moment
 --pin-census     # resolver-precision census harness (bench/scip_pin_precision.py), not an agent moment
+--deadline-ms    # the prompt hooks' --help-task budget (hooks/ripwire-*-route.sh pass it, issue #594), not an agent moment
 "
 # L5: --anchor / --cochange-boost / --stable / --most-important-last / --no-auto-order dropped
 # from --help entirely (RIPWIRE_DEV=1-gated experiments, or hidden --order= aliases) — they no longer
@@ -736,9 +739,9 @@ done
     && ok "(M) hook commands registered from a path with a space run when the shell executes them as written" \
     || no "(M) $mRun of the three hook commands registered from a path with a space cannot be executed by sh"
 mN="$( jq '[ (.hooks | to_entries[] | .value[] | .hooks[]? | select(.command | test("ripwire-(nudge|claude-route)[.]sh"))) ] | length' "$mSet" 2>/dev/null )"
-[ "$mN" = "3" ] \
-    && ok "(M) re-running with a quoted command recognises the existing entries (3 ripwire entries, not doubled)" \
-    || no "(M) after two runs from a path with a space there are ${mN:-?} ripwire hook entries (expected 3: nudge, session-start, router)"
+[ "$mN" = "4" ] \
+    && ok "(M) re-running with a quoted command recognises the existing entries (4 ripwire entries, not doubled)" \
+    || no "(M) after two runs from a path with a space there are ${mN:-?} ripwire hook entries (expected 4: nudge, session-start, subagent-start, router)"
 N_HOME="${HD:?}/N/home"; rm -rf "${HD:?}/N"; mkdir -p "$N_HOME"
 HOME="$N_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1
 nCmd="$( jq -r '.hooks.PreToolUse[0].hooks[0].command' "$N_HOME/.claude/settings.json" 2>/dev/null )"
@@ -936,9 +939,15 @@ if [ -z "$STRIP" ]; then
 else
     for _h in home home2; do ( cd "$S" && env HOME="$S/$_h" sh -c "$STRIP" ) >"$S/strip-$_h.out" 2>&1; done
     cntAfter="$( countRw "$S/home/.claude/settings.json" ),$( countRw "$S/home/.codex/hooks.json" ),$( countRw "$S/home2/.claude/settings.json" ),$( countRw "$S/home2/.codex/hooks.json" )"
-    { [ "$cntBefore" = "3,3,3,3" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
+    # The "before" snapshot is a PRECONDITION, not the claim: 8 Claude entries (PreToolUse nudge + SessionStart
+    # primer + SubagentStart routing note (lane HK2, 2026-11-21: 7 before it) + UserPromptSubmit router, plus the
+    # legend-seen hook's four) and 6 Codex ones (its three advisory
+    # entries plus three legend-seen). It was 3,3,3,3 until owner ruling 111 (2026-11-20) made the legend-seen
+    # hook part of a --hook install. The CLAIM is "after", and it is unchanged: INSTALL.md's documented strip is a
+    # regex over /hooks/ripwire-*.sh, so it already removes the new hook's entries too, quoted space path included.
+    { [ "$cntBefore" = "8,6,8,6" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
         && ok "(R) the documented hook strip removes ripwire's entries from Claude and Codex configs, space path and ordinary path alike" \
-        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 3,3,3,3 then 0,0,0,0)"
+        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 8,6,8,6 then 0,0,0,0)"
     otherKept="$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.claude/settings.json" 2>/dev/null ),$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.codex/hooks.json" 2>/dev/null )"
     [ "$otherKept" = "1,1" ] \
         && ok "(R) the same strip keeps a user's own hook (quoted, with spaces) in both files" \

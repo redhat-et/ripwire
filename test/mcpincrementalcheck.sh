@@ -40,6 +40,10 @@
 # NEVER edits test/fixture itself — every mutation happens on a scratch COPY in a mktemp dir.
 
 set -u
+# MR1 (src/mcpverbs.h forTaskText): MCP `for` serves its <sigs>/<tail> rows as text lines in one CDATA too (the CLI's ROWLINES +
+# RANKSEQ, lossless; test/mcpforrowscheck.sh pins it). This gate reads those rows as elements for another rule, so the line form is
+# off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -172,13 +176,20 @@ equiv() {
 import sys, json, re
 w, c = [ json.loads( l ) for l in sys.stdin.read().splitlines()[:2] ]
 A = re.compile( r"\s([\w:.-]+)=\"([^\"]*)\"" )
+# The span runs from <sigs> through </tail> and so takes in the act line (BR1/BR1B, foractline.h): <act read=.../> sits between
+# </sigs> and <tail> on any answer whose top rows all carry e=, and is absent otherwise (arm 2 here). Optional in the pattern,
+# compared like every other byte of the span: a warm answer that drops or changes it is a DIFF.
 def rows( t ):
-    m = re.search( r"<sigs\b[^>]*>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
-ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c )
+    m = re.search( r"<sigs\b[^>]*>.*?</sigs>(?:<act\b[^>]*/>)?<tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
+ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c ); wr = re.search( r"<ctx\b[^>]*>", w )
 if not ab or "legend=\"ref\"" not in ab.group( 0 ): print( "NOREF" ); sys.exit()
-wa = { k: v for k, v in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) }
+# ref-posture-disclosure: the root facts are read where the READER finds them, on the warm answer'"'"'s own <ctx> root. This arm
+# used to read them off <about>, which is where the posture had moved them; <about> is now the legend pointer and nothing else,
+# and a fact found on it is a failure (PTR), not a match.
+if [ k for k, _ in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) ]: print( "PTR: <about> carries facts" ); sys.exit()
+wa = { k: v for k, v in A.findall( wr.group( 0 ) ) if k != "task" } if wr else None
 ca = { k: v for k, v in A.findall( rt.group( 0 ) ) if k != "task" } if rt else None
-print( "SAME" if rows( w ) is not None and rows( w ) == rows( c ) and wa == ca else "DIFF" )
+print( "SAME" if rows( w ) is not None and rows( w ) == rows( c ) and wa is not None and wa == ca else "DIFF" )
 ' 2>&1 )"
     case "$tw" in
         SAME) ok "$what (default legend posture twin): warm legend=\"ref\" answer has the cold answer's rows and root facts";;
@@ -248,11 +259,22 @@ if [ ! -f "$VICTIM" ]; then
 else
     GONE_SYM="$( grep -oE '^def [a-z_]+' "$VICTIM" | head -1 | sed 's/^def //' )"
     [ -n "$GONE_SYM" ] || GONE_SYM="app.py"
+    # 2026-11-06 (FOR-DOC-BODY, #561): the ask is "no row of the index still defines GONE_SYM", so the arm reads
+    # the ROW spelling (n="SYM" / p="app.py"; the MCP text is still JSON-escaped, so the quote is \"), not the
+    # bare word: the fixture's notes.md prose names `area_of_triangle` and --for now serves that prose (doc body),
+    # correctly, cold and warm alike (the byte-identity arm below pins warm == cold). Positive twin: the
+    # pre-delete text (arm 1's WTEXT) carries the defining row, so the absence read cannot pass on a spelling
+    # the answer never uses.
+    ROW_N='n=\"'"$GONE_SYM"'\"'; ROW_P='p=\"app.py\"'
+    case "$WTEXT" in
+        *"$ROW_N"*) ok "arm 2 (twin): before the delete the answer carries a row defining '$GONE_SYM'";;
+        *)          no "arm 2 (twin): the pre-delete answer has no $ROW_N row — the absence read below would be vacuous";;
+    esac
     rm -f "$VICTIM"
     warm_for 12 "$TASK"
     case "$WTEXT" in
-        *"$GONE_SYM"*) no "arm 2: '$GONE_SYM' still appears after app.py was deleted — the removal was not spliced out";;
-        *)             ok "arm 2: '$GONE_SYM' is gone from the index after its file was deleted";;
+        *"$ROW_N"*|*"$ROW_P"*) no "arm 2: a row for '$GONE_SYM' / app.py still appears after app.py was deleted — the removal was not spliced out";;
+        *)                     ok "arm 2: '$GONE_SYM' is gone from the index after its file was deleted";;
     esac
     case "$WREINGEST" in
         0) ok "arm 2: _reingest=0 — a pure DELETE re-extracts nothing (the work is re-resolution, not parsing)";;
@@ -342,7 +364,7 @@ b = open(p, "rb").read()
 open(p, "wb").write(b.replace(b"perimeterEdited", b"perimeterRaceA"))
 PY
 warm_for 15 "$TASK"      # forces a rebuild → rewrites the cache blob under $WARMTMP
-BLOB="$( find "$WARMTMP" -name 'ripwire-mcp-*.cache' 2>/dev/null | sort | head -1 )"
+BLOB="$( find "$WARMTMP" -name 'ripwire-*-rich*.bin' 2>/dev/null | sort | head -1 )"
 python3 - "$GEO" <<'PY'
 import sys
 p = sys.argv[1]

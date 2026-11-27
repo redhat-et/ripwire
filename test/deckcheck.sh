@@ -126,7 +126,12 @@ for metaFlag in $( grep -oE -- "$TOKEN_RE"'=[A-Z][A-Z0-9_]*' "$TMP/help.txt" | c
       | awk -v f="$metaFlag" 'NF { print f"\t"$0 }' >>"$TMP/enumpairs.txt"
 done
 sort -u "$TMP/enumpairs.txt" >"$TMP/enumvals.txt"
-cut -f1 "$TMP/enumvals.txt" | uniq -c | awk '$1 >= 2 { print $2 }' | sort -u >"$TMP/enumflags.txt"
+cut -f1 "$TMP/enumvals.txt" | uniq -c | awk '$1 >= 2 { print $2 }' | sort -u >"$TMP/enumflags.all.txt"
+# An OPEN set is not an enum: a flag whose --help header lists an UPPERCASE alternative beside its literals
+# (`--legend-dict[=core|KEY]`: KEY is any schema key) takes values --help cannot enumerate, so its literals are
+# examples, not the permitted set (lane LS1: `--legend-dict=seen` beside `=core` made it look closed).
+grep -oE -- "$TOKEN_RE"'\[?=([a-z][a-z0-9.-]*\|)+[A-Z]' "$TMP/help.txt" | sed -E 's/\[?=.*//' | sort -u >"$TMP/openflags.txt"
+grep -vxF -f "$TMP/openflags.txt" "$TMP/enumflags.all.txt" >"$TMP/enumflags.txt" || true
 enumFlagCount=$( wc -l <"$TMP/enumflags.txt" | tr -d ' ' )
 
 # ── the allowlist: TOKEN<TAB>reason, blank/# lines are comments; every entry must carry a reason ────

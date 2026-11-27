@@ -6,7 +6,7 @@
 #
 #   TRIGGER  CLI --for (XML, compact and full legends) on the name-exact route whose body candidates are ONE function (every
 #            candidate a function or method of the same name and scope), in the DEFAULT regime.
-#   WHAT     <callers of= shown= total= capped= [d2= d2_shown=] next="--impact=OF"> after the tail, before <bodies>: the
+#   WHAT     <callers of= shown= total= capped= [d2= shown_d2= d2_capped=] next="--impact=OF"> after the tail, before <bodies>: the
 #            callers verb's 1-hop rows <s t= n= [sc=] p=file:line [via="name"] [sites_at=]>, then d="2" rows (callers of the
 #            shown callers, at most 4); 16 first-hop rows at most, the rest counted (total=, capped="1").
 #   NOT      a struct, a variable, a conceptual question, --json, --signatures-only, --detail=1, --token-budget=N and
@@ -26,6 +26,11 @@
 #   F1 [P] fix round 1 (rv-mf1-nx B1/B2): no block on a C++ overload set, a method overload set, two same-named statics, a function
 #          beside a same-named struct; [G] a declared-and-defined function (recall control) keeps its block, total= = --callers
 #   B3 [P] a d="2" row carries via="name" when its own callers row does (Python driver(c): c.submit(None))
+#   V1 [P] D2-VIA-INHERIT (rv-rra-delta (3)), Rust, Python, TS and C++: (a) a d=2 row reached only through a via="name" first-hop
+#          row carries via="name" though its own edge is proven; (b) a d=2 row with one proven path (and one by-name) stays unhedged;
+#          (c) [G] a d=2 row whose own edge into a proven first-hop row is by name keeps via="name"; (d) Python: a row with a proven edge
+#          into the by-name hop and a by-name edge into the proven hop (no all-proven path) carries via="name"; (e) Python, fix round 1
+#          (rv-d2-via S1): the only proven path runs through a first-hop row the 16-row cap hides (shown=16 total=17) — stays unhedged
 #   Q1 [P] train 33 (MF1-NX x QUALNAME-1): every first-hop row's n= and p= equal the callers verb's own row; a member caller
 #          folds its owner into n= (n="Client.submit", no sc=)
 #   R1 [P] UPWARD-2HOP: an error-shaped task ("dependency cycle error") on the ranked route whose r=1 row is a narrow-funnel function
@@ -48,6 +53,13 @@
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_CALLER_HOP
@@ -93,12 +105,12 @@ run "$FC" --for=start_server >"$TMP/p1"
 H1="$( hop "$TMP/p1" )"
 if [ -s "$TMP/p1" ] && grep -q 'route="name-exact(' "$TMP/p1"; then ok "(P1pre) --for=start_server routes name-exact"; else no "(P1pre) --for=start_server did not route name-exact — the fixture proves nothing"; fi
 case "$H1" in
-    *'n="connect_client" p="client.c:3" sites_at="client.c:5"'*'next="--impact=start_server"'*|*'next="--impact=start_server"'*'n="connect_client" p="client.c:3" sites_at="client.c:5"'*) ok "(P1a) connect_client is a caller row with its call site" ;;
-    *) no "(P1a) no connect_client caller row with sites_at=client.c:5: [$H1]" ;;
+    *'n="connect_client" p="client.c:3" sites_at="5"'*'next="--impact=start_server"'*|*'next="--impact=start_server"'*'n="connect_client" p="client.c:3" sites_at="5"'*) ok "(P1a) connect_client is a caller row with its call site" ;;
+    *) no "(P1a) no connect_client caller row p=client.c:3 with sites_at=5: [$H1]" ;;
 esac
-printf '%s' "$H1" | grep -q 'n="run_client" p="client.c:8" sites_at="client.c:13"'; verdict $? "(P1b) run_client is a caller row" "(P1b) no run_client caller row: [$H1]"
+printf '%s' "$H1" | grep -q 'n="run_client" p="client.c:8" sites_at="13"'; verdict $? "(P1b) run_client is a caller row" "(P1b) no run_client caller row: [$H1]"
 printf '%s' "$H1" | grep -q '<s t="fn" n="main" p="main.c:3" d="2"/>'; verdict $? "(P1c) main is the d=2 row" "(P1c) main is not a d=2 row: [$H1]"
-printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" d2_shown="1" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
+printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" shown_d2="1" d2_capped="0" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
 ! printf '%s' "$H1" | grep -q 'n="listen_socket"'; verdict $? "(P1e) no callee in the caller rows" "(P1e) a CALLEE (listen_socket) rode as a caller"
 # placement: after the tail, before the bodies
 python3 - "$TMP/p1" <<'PY'
@@ -117,7 +129,7 @@ n2="$( printf '%s' "$H2" | grep -o '<s ' | wc -l | tr -d ' ' )"
 # ── P3: entity identity — a same-named method of ANOTHER class is a different function ─────────────────────────────────────
 run "$FX" --for=Repaint >"$TMP/p3"
 H3="$( hop "$TMP/p3" )"
-printf '%s' "$H3" | grep -q '<callers of="Canvas::Repaint" shown="1" total="1"' && printf '%s' "$H3" | grep -q 'n="RefreshCanvas" p="canvas.cc:10" sites_at="canvas.cc:12"'; verdict $? "(P3a) a C++ method (Canvas::Repaint): its caller RefreshCanvas rides, of= qualified" "(P3a) Canvas::Repaint's hop: [$H3]"
+printf '%s' "$H3" | grep -q '<callers of="Canvas::Repaint" shown="1" total="1"' && printf '%s' "$H3" | grep -q 'n="RefreshCanvas" p="canvas.cc:10" sites_at="12"'; verdict $? "(P3a) a C++ method (Canvas::Repaint): its caller RefreshCanvas rides, of= qualified" "(P3a) Canvas::Repaint's hop: [$H3]"
 run "$FX" --for=Draw >"$TMP/p3d"
 if grep -q 'route="name-exact(Draw)' "$TMP/p3d" && [ "$( grep -o '<b t="method"' "$TMP/p3d" | wc -l | tr -d ' ' )" = "2" ]; then
     ! grep -q '<callers ' "$TMP/p3d"; verdict $? "(P3b) two same-named methods of two classes are not ONE function: no hop" "(P3b) --for=Draw bodies Widget::Draw AND Gadget::Draw (two functions) yet a hop rode"
@@ -127,7 +139,7 @@ fi
 # ── P8: the by-name hedge, as the callers verb decides it ──────────────────────────────────────────────────────────────────────
 run "test/forcallerhopfix/py" --for=handle_job >"$TMP/p8"
 H8="$( hop "$TMP/p8" )"
-printf '%s' "$H8" | grep -q 'n="dispatch_jobs" p="worker.py:6" via="name" sites_at="worker.py:8"'; verdict $? "(P8) a receiver-unproven caller carries via=\"name\"" "(P8) the by-name caller row: [$H8]"
+printf '%s' "$H8" | grep -q 'n="dispatch_jobs" p="worker.py:6" via="name" sites_at="8"'; verdict $? "(P8) a receiver-unproven caller carries via=\"name\"" "(P8) the by-name caller row: [$H8]"
 
 # ── P4: legend coverage, both dialects ───────────────────────────────────────────────────────────────────────────────────────
 run "$FC" --for=start_server --legend=full >"$TMP/p4f"
@@ -172,11 +184,15 @@ run "$FC" --for="how does the client start the server and listen on a socket" >"
 if [ -s "$TMP/n1c" ] && ! grep -q '<callers ' "$TMP/n1c"; then ok "(N1c) no hop on a conceptual question"; else no "(N1c) a hop rode on a conceptual question"; fi
 
 # ── N2: postures that never carry it ─────────────────────────────────────────────────────────────────────────────────────────
-for extra in --json --signatures-only --detail=1 --token-budget=3000; do
+for extra in --json --signatures-only --detail=1; do
     run "$FC" --for=start_server "$extra" >"$TMP/n2.on"
     RIPWIRE_NO_CALLER_HOP=1 run "$FC" --for=start_server "$extra" >"$TMP/n2.off"
     if [ -s "$TMP/n2.on" ] && cmp -s "$TMP/n2.on" "$TMP/n2.off" && ! grep -q '<callers \|"callers"' "$TMP/n2.on"; then ok "(N2) $extra: no hop, byte-identical"; else no "(N2) $extra: a hop rode or bytes moved"; fi
 done
+# (N2t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the posture (it used to drop the hop with it); a
+# budget the answer fits returns the unbudgeted answer byte for byte, the hop as it is there
+run "$FC" --for=start_server --token-budget=3000 >"$TMP/n2t.on" || no "(N2t) the budgeted run exited $?"; run "$FC" --for=start_server >"$TMP/n2t.off" || no "(N2t) the unbudgeted run exited $?"
+if [ -s "$TMP/n2t.on" ] && cmp -s "$TMP/n2t.on" "$TMP/n2t.off"; then ok "(N2t) --token-budget=3000: the unbudgeted answer byte for byte"; else no "(N2t) --token-budget=3000 is not the unbudgeted answer"; fi
 
 # ── FIX ROUND 1 (rv-mf1-nx B1-B3): exact or no row — the block fires only when the callers verb's own resolution of the name is
 #    ONE function (one def group, one kind). [P] arms are RED on df6952a7 (they printed a block the verb's rows contradict) ──────────────
@@ -233,6 +249,47 @@ else
     no "(B3c-pre) the first-hop row n=\"Client.submit\" p=\"m.py:7\" is missing — the negative would pass vacuously: [$H3b]"
 fi
 
+# ── V1: D2-VIA-INHERIT — a d=2 row inherits a by-name first hop (src/forcallerhop.h callerHopSecondNameOnly) ──────────────────
+# Per language: the first-hop rows' hedges are the premise (name_hop via="name", proven_hop and the relay method unhedged), then
+# the three d=2 shapes. Every row is matched whole, so a respelled or missing row fails instead of passing a negative vacuously.
+FV="test/forcallerhopfix/d2inherit"
+v1(){   # lang, --for subject, then "row|want" pairs: want = via (must carry via="name") or bare (must not); "@2" after it = a d="2" row
+    local lang="$1" subj="$2"; shift 2
+    run "$FV/$lang" --for="$subj" >"$TMP/v1.$lang"; local rc=$?
+    [ "$rc" -eq 0 ] && [ -s "$TMP/v1.$lang" ] || { no "(V1-pre) $lang: --for=$subj failed (rc=$rc) or printed nothing"; return; }
+    local H; H="$( hop "$TMP/v1.$lang" )"
+    [ -n "$H" ] || { no "(V1-pre) $lang: no <callers> block for --for=$subj"; return; }
+    local pair row want got depth rowre
+    for pair in "$@"; do
+        row="${pair%|*}"; want="${pair##*|}"; depth=1
+        case "$want" in *@2) depth=2; want="${want%@2}" ;; esac
+        rowre="$( printf '%s' "$row" | sed 's/[][\.*^$/]/\\&/g' )"   # the row name is a literal: Svc.relay must not match SvcXrelay
+        got="$( printf '%s' "$H" | grep -o "<s [^>]*n=\"$rowre\"[^>]*/>" )"
+        if [ -z "$got" ]; then no "(V1-pre) $lang: row n=\"$row\" missing: [$H]"; continue; fi
+        if [ "$depth" = 2 ]; then case "$got" in *' d="2"'*) ;; *) no "(V1) $lang: $row is not a d=2 row: [$got]"; continue ;; esac
+        else case "$got" in *' d="'*) no "(V1) $lang: $row is not a first-hop row: [$got]"; continue ;; esac; fi
+        case "$want:$got" in
+            via:*' via="name"'*)  ok "(V1) $lang: $row (d=$depth) carries via=\"name\"" ;;
+            bare:*' via='*)       no "(V1) $lang: $row is hedged but has a proven path: [$got]" ;;
+            bare:*)               ok "(V1) $lang: $row (d=$depth) is unhedged (a proven path)" ;;
+            *)                    no "(V1) $lang: $row has no via=\"name\": [$got]" ;;
+        esac
+    done
+}
+v1 py post_entry 'name_hop|via' 'proven_hop|bare' 'Svc.relay|bare' 'only_by_name|via@2' 'both_paths|bare@2' 'by_name_edge|via@2' 'crossed|via@2'
+v1 rs post_entry 'name_hop|via' 'proven_hop|bare' 'Svc::relay|bare' 'only_by_name|via@2' 'both_paths|bare@2' 'by_name_edge|via@2'
+v1 ts postEntry 'nameHop|via' 'provenHop|bare' 'Svc.relay|bare' 'onlyByName|via@2' 'bothPaths|bare@2' 'byNameEdge|via@2'
+v1 cpp PostEntry 'NameHop|via' 'ProvenHop|bare' 'Svc::Relay|bare' 'OnlyByName|via@2' 'BothPaths|bare@2' 'ByNameEdge|via@2'
+# (e) the cap: h01 is by name and shown, zz_hidden is proven and ranked 17th (hidden); reach_both calls both, so its proven path
+# runs through the hidden row. The premise lines fail when the fixture stops capping (the bare arm would then pass vacuously).
+v1 pycap post_entry 'h01|via' 'reach_both|bare@2'
+H1e="$( hop "$TMP/v1.pycap" )"
+case "$H1e" in
+    *' shown="16" total="17" '*) ok "(V1e-pre) the first hop is capped (shown=16 of total=17)" ;;
+    *) no "(V1e-pre) the first hop is not capped at 16 of 17: [${H1e%%>*}>]" ;;
+esac
+printf '%s' "$H1e" | grep -q 'n="zz_hidden"'; [ $? -ne 0 ]; verdict $? "(V1e-pre) zz_hidden (the proven first hop) is hidden by the cap" "(V1e-pre) zz_hidden is shown — the path no longer runs through a hidden row"
+
 # ── Q1 (train 33, MF1-NX x QUALNAME-1): a hop row names a caller exactly as the callers verb does ───────────────────────────────
 # Every first-hop <s> of the block has the identical n= and p= in `--callers=<of=>`'s own rows, and a member whose owner the index
 # defines folds sc= into n= (serialize.h sigRowHead's rule). [P] on the composed head before forcallerhop.h used qualifiedMemberName.
@@ -255,10 +312,40 @@ for q in "b3:test/forcallerhopfix/d2via:Ledger::post_entry" "p1:$FC:start_server
     run "$dir" --callers="$of" >"$TMP/q1.$f"
     out="$( parity "$TMP/$f" "$TMP/q1.$f" )"; verdict $? "(Q1) $f: every first-hop row's n= and p= equal --callers=$of's own row" "(Q1) $f: a hop row differs from --callers=$of: $out"
 done
-printf '%s' "$H3b" | grep -q '<s t="fn" n="Client.submit" p="m.py:7" sites_at="m.py:8"/>'; verdict $? "(Q1b) a member caller folds its owner into n= and prints no sc=" "(Q1b) the Client.submit hop row is not n=\"Client.submit\" without sc=: [$H3b]"
+printf '%s' "$H3b" | grep -q '<s t="fn" n="Client.submit" p="m.py:7" sites_at="8"/>'; verdict $? "(Q1b) a member caller folds its owner into n= and prints no sc=" "(Q1b) the Client.submit hop row is not n=\"Client.submit\" without sc=: [$H3b]"
 
 # ── R: UPWARD-2HOP, the ranked seed (forcallerhop.h forRankedCallerHopTargets; [P] arms RED on the train-40 binary 5163ffbdb) ──
 FR="test/forcallerhopfix/rank"
+# ── V2: the inherited-hedge rule rides in all six legend clauses (named, ranked, subject x compact, full) ───────────────────────────
+# Each answer must carry its element (so the arm cannot pass on an answer without the hop), and the clause that defines it must say the rule.
+RULE='via=name if every path has a by-name hop'
+v2(){   # label, file, element prefix, clause head
+    local label="$1" f="$2" el="$3" head="$4"
+    grep -q "$el" "$f" || { no "(V2-pre) $label: no $el element in the answer"; return; }
+    python3 - "$f" "$head" "$RULE" <<'PY'
+import re, sys
+t = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+legend = " ".join(re.findall(r'<!--(.*?)-->', t, re.S))
+i = legend.find(sys.argv[2])
+sys.exit(0 if i >= 0 and sys.argv[3] in legend[i:] else 1)
+PY
+    verdict $? "(V2) $label: the clause carries the inherited-hedge rule" "(V2) $label: the legend clause '$head' does not say '$RULE'"
+}
+mkdir -p "$TMP/v2subj"
+printf 'def prepare_setup_platform(x):\n    return x\n\n\ndef caller_a(y):\n    return prepare_setup_platform(y)\n\n\ndef caller_b(y):\n    return prepare_setup_platform(y + 1)\n' >"$TMP/v2subj/m.py"
+for i in 1 2 3 4 5 6; do printf 'def zznope_%s(a):\n    return a\n' "$i" >"$TMP/v2subj/z$i.py"; done
+for lg in compact full; do
+    run "$FC" --for=start_server --legend=$lg >"$TMP/v2n.$lg"
+    v2 "named, $lg" "$TMP/v2n.$lg" '<callers of="start_server"' '; callers of=:'
+    run "$FR" --for="dependency cycle error" --legend=$lg >"$TMP/v2r.$lg"
+    v2 "ranked, $lg" "$TMP/v2r.$lg" '<callers by="rank"' '; callers by=rank of=:'
+    run "$TMP/v2subj" --for="prepare_setup_platform zznope sturdy" --legend=$lg >"$TMP/v2s.$lg"
+    v2 "subject, $lg" "$TMP/v2s.$lg" '<callers by="subject"' '; callers by=subject of=:'
+done
+# the arm is red when the clause lacks the rule: the same answer with the rule struck out
+sed "s/$RULE/(rule struck)/g" "$TMP/v2n.full" >"$TMP/v2x.full"
+if ( v2 "negative control" "$TMP/v2x.full" '<callers of="start_server"' '; callers of=:' ) 2>&1 | grep -q '^  FAIL  (V2) negative control'; then ok "(V2n) the legend arm goes red on an answer whose clause lost the rule"; else no "(V2n) the legend arm stayed green on a clause without the rule"; fi
+
 [ -f "$FR/graph.c" ] || { no "(R-pre) fixture $FR missing"; }
 run "$FR" --for="dependency cycle error" >"$TMP/r1"
 run "$FR" --for="dependency cycle error" --legend=full >"$TMP/r1f"
@@ -309,11 +396,14 @@ PY
 done
 r8on="$( est "$TMP/r7on.compact" )"; r8off="$( est "$TMP/r7off.compact" )"
 if [ -n "$r8on" ] && [ -n "$r8off" ] && [ "$r8on" -gt "$r8off" ]; then ok "(R8) est_tokens prices the ranked hop ($r8off -> $r8on)"; else no "(R8) est_tokens did not grow with the ranked hop (on=[$r8on] off=[$r8off])"; fi
-for extra in --json --signatures-only --token-budget=3000; do
+for extra in --json --signatures-only; do
     run "$FR" --for="dependency cycle error" "$extra" >"$TMP/r9.on"
     RIPWIRE_NO_CALLER_HOP=1 run "$FR" --for="dependency cycle error" "$extra" >"$TMP/r9.off"
     if [ -s "$TMP/r9.on" ] && cmp -s "$TMP/r9.on" "$TMP/r9.off"; then ok "(R9) [G] $extra: no ranked hop, byte-identical to the hop-off answer"; else no "(R9) $extra: the ranked hop changed the answer"; fi
 done
+# (R9t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer (ranked hop included) byte for byte
+run "$FR" --for="dependency cycle error" --token-budget=3000 >"$TMP/r9t.on" || no "(R9t) the budgeted run exited $?"; run "$FR" --for="dependency cycle error" >"$TMP/r9t.off" || no "(R9t) the unbudgeted run exited $?"
+if [ -s "$TMP/r9t.on" ] && cmp -s "$TMP/r9t.on" "$TMP/r9t.off"; then ok "(R9t) [G] --token-budget=3000: the unbudgeted answer byte for byte"; else no "(R9t) --token-budget=3000 is not the unbudgeted answer"; fi
 run "$FR" --callers=verify_dag >"$TMP/r10"
 python3 - "$TMP/r1" "$TMP/r10" <<'PY'
 import re, sys
@@ -401,7 +491,7 @@ verdict $? "(X3) no -- inside a legend comment" "(X3) a legend comment holds --"
 run "$FC" --for=start_server >"$TMP/x2"
 cmp -s "$TMP/p1" "$TMP/x2"; verdict $? "(X1) deterministic" "(X1) two runs differ"
 if command -v xmllint >/dev/null 2>&1; then
-    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
+    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3 v1.py v1.rs v1.ts v1.cpp v1.pycap; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
 else
     printf '  SKIP  (X2) xmllint not installed\n'
 fi

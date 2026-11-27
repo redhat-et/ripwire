@@ -20,6 +20,9 @@
 #                 bodies, as --expand does, so on EACH side crlf-for must equal tree-for byte for byte once est_tokens= (which
 #                 prices those bodies) is masked and, INSIDE the fold only, the CR bytes and a skip's bytes= (the source span's
 #                 size) are dropped — the same narrowing crlf-expand gets, applied to the same body text and nowhere else.
+#                 The same holds for the <doc_body> element (FOR-DOC-BODY, 2026-11-06): it serves a doc file's best sections as
+#                 verbatim source text, so a CRLF copy carries the CR bytes in the sections and in its bytes= count; inside
+#                 <doc_body> only, those two are dropped, and everything outside it stays strict.
 #   R0 rc floor   every Linux-side *.rc must be 0. A verb that fails the same way on both platforms (rc != 0 on
 #                 both, same error bytes) would otherwise pass R1 vacuously.
 # Usage: bash scripts/ci-xplat-diff.sh <linux outputs dir> <windows outputs dir>
@@ -76,12 +79,12 @@ for side in "$LIN" "$WIN"; do
     done
 done
 nx() { tr -d '\r' <"$1" | sed -E 's/ (reason|est_tokens)="[^"]*"//g'; }
-# the --for answer: est_tokens= masked everywhere; inside <fold>…</fold> only, CR bytes and skip bytes= dropped
+# the --for answer: est_tokens= masked everywhere; inside <fold>…</fold> and <doc_body>…</doc_body> only, CR bytes and bytes= dropped
 nf() { python3 -c 'import re, sys
 t = open( sys.argv[1], "rb" ).read().decode( "utf-8", "replace" )
 t = re.sub( r" est_tokens=\"[^\"]*\"", "", t )
 fold = lambda m: re.sub( r" bytes=\"[^\"]*\"", "", m.group( 0 ).replace( "\r", "" ) )
-sys.stdout.write( re.sub( r"<fold .*?</fold>", fold, t, flags = re.S ) )' "$1"; }
+sys.stdout.write( re.sub( r"<(fold|doc_body) .*?</\1>", fold, t, flags = re.S ) )' "$1"; }
 # normalise for|expand FILE -> the file through nf or nx; fails on a missing or empty input
 normalise() {
     [ -s "$2" ] || return 1

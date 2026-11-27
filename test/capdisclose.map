@@ -1,0 +1,232 @@
+# test/capdisclose.map -- CAP-DISCLOSE-LINT (B43): how each answer-path cap constant discloses that it fired.
+# Read by test/lib/capdisclose.py (its docstring is the contract); gated by test/capdisclosemapcheck.sh.
+# Columns (TAB-separated): kName  CLASS  [awaits:#N]
+#   sink:a,b        every function with a cap site of kName mentions a or b -- removing that disclosure reds the gate
+#   legend          a static_assert ties kName to the legend sentence that states the cap
+#   none:<reason>   not an answer cut
+#   pending:<id> r  a cut whose function names no disclosure identifier: baselined, printed as INFO, to audit
+#   awaits:#N       the constant is on an unmerged lane (absent = INFO, present = checked)
+# How the rows were made (2026-11-12): `capdisclose.py . /dev/null --draft` proposed every row from the identifiers present
+# at EVERY cap site's function (capped / more / cut / shown / floor / truncated / DISCLOSE ...). A sink row therefore holds
+# the disclosure that is there today in place; it does not prove that identifier reports THIS cap -- a reviewer who reads a
+# function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
+# by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
+# A new cap constant on the answer path needs a row here in the same commit.
+kAnswerPageBytesDefault	none:the default page stop the answer-first ORDER rules read (AF2 G, KB1 insertKeyBodies: a key body is added only when the answer block ends inside it): a block moves or is added, every row is still emitted once (answerFirst's size ENSURES; forkeybodycheck K3n); the page cut itself is disclosed by page= pages= withheld_bytes= next= (forpages.h)
+kBlockBytes	legend
+kImportSpecDepth	sink:atDepthCap
+kMaxSitesPerTok	legend
+kRareWordSites	legend
+kReaderCallerReaders	sink:readersMore
+kAliasHopChains	sink:cut,shown
+kAliasHopMemberNames	sink:cut,shown
+kAliasHopSigBytes	sink:cut,truncateUtf8WithEllipsis
+kCMakeMaxCallLines	pending:#565 a read bound on one CMake call: past 16 lines the call still names its target (its first argument), but an IMPORTED / ALIAS keyword there is unseen and the row prints; stated in docs/LIMITS.md, no attribute says it fired
+kCallPathSeeds	none:K4 keep-guard seed window: which seeds the guard tries, no answer row is cut (LARGE-PARTIAL Stage 0 audit)
+kCloneKeyTokenBits	none:a saturating key field width, re-verified: a wider key changes no row (Stage 0 audit)
+kDeadExportedRowsShown	sink:shown,walkSkipped
+kDispatchArmMaxRows	none:a tangle shape test, not a cut: a dispatch arm of at most 40 lines reads alone, so its depth is exempt from the score; no row or answer is cut (QD-TANGLE, train ge2)
+kEvidenceCap	pending:B43 disclosed elsewhere: pageTailOf emits shown= capped= for every pageWindow (verbs_navigate.h); the cap is used through a window, so the lint finds no cap site to tie
+kForBareFlagMaxSites	none:a shape test, not a cut: a bare kebab token with more source sites is prose, so no <lit shape="flag"> is claimed (WHOLE-TOKEN; read by hand at train 1111c)
+kForBodyFoldBudgetBytes	sink:cut,firstCutNext
+kForBodyFoldRows	none:the scope of an additive fold: rows past it are printed unfolded, none dropped (Stage 0 audit)
+kForBodySlotMaxBytes	legend
+kForBudgetRowFloor	none:a keep floor, not a cut: the best-ranked <sigs> rows it keeps are never shed; an answer still over --token-budget at the floor prices more than the budget names (est_tokens= above it), and --max-tokens says over_ceiling= (TOKEN-BUDGET-MONOTONE; read by hand at train 1111i)
+kForCallerHopDepth2Rows	sink:firstShown,secondShown
+kForCallerHopRows	sink:firstShown,secondShown
+kForDeclRowsCap	sink:shown
+kForDeclSubjectTries	pending:B43 SILENT CUT, follow-up card: 0 fires
+kForDetailFloorShareDivisor	none:a budget floor split; the cut it sizes is disclosed at the serializer (serialize.h budget cut) (Stage 0 audit)
+kForDispatchCtorRows	sink:shown,isFloor
+kForDispatchHopRows	sink:shown,isFloor
+kForDispatchHeldRows	sink:heldShown
+kForDispatchHeldText	sink:cut
+kForDocBodyBytes	sink:unserved
+kForDocBodyFiles	sink:shown,shownSigIds
+kForDocBodyTriggerDocs	sink:shown,shownSigIds
+kForDocBodyTriggerRows	sink:shown,shownSigIds
+kForDottedLoaderNamedMax	sink:loadersFloor
+kForDottedStringRows	sink:shown,shownRows
+kForDottedTemplateFillsListed	sink:firstShown,firstShownOf
+kForFilePageCallerFiles	pending:B43 disclosed elsewhere: the by_total= string literal (the lint cannot see it; a named bool would make it a sink)
+kForFilePageDefRows	pending:B43 disclosed elsewhere: in the callee appendFileOpenTag
+kForFilePageDirFiles	pending:B43 disclosed elsewhere: the render discloses; this lift site only scopes the rank
+kForFilePageListFiles	sink:total
+kForFilePageMaxAnchors	pending:B43 disclosed elsewhere: the render discloses; this lift site only scopes the rank
+kForFilePageMaxBytes	sink:bytesCut,shown
+kForFilePageNextDepth	none:the depth inside a printed next= follow-up, not a cut of this answer (Stage 0 audit)
+kForFilePageTopBytes	sink:shownLines,shownBytes
+kForFilePageTopLines	sink:shownLines,shownBytes
+kForFileSymsBindPerHead	pending:B43 disclosed elsewhere: counted in bind_total= (static_assert at forfilesyms.h:174 is not the lint's == N shape); a reviewer confirms
+kForFileSymsFiles	sink:shownAt,ShownFiles
+kForFileSymsHeadRows	pending:B43 disclosed elsewhere: the legend states it (static_assert at forfilesyms.h:161 is not the lint's == N shape); a reviewer confirms
+kForFileSymsInitHeadRows	legend
+kForFileSymsInitSpan	sink:InitWindowCut,pastWindow
+kForFileSymsRowsPerRule	sink:cut
+kForFlagDefaultMaxBytes	pending:B43 disclosed elsewhere: truncateUtf8WithEllipsis marks the cut value (forliteral.h); the lint finds no cap site to tie
+kForFlagOwnerMaxLines	none:the owner-match window of a shape test, not a row cut (Stage 0 audit)
+kForFlagWriteHits	sink:floor
+kForFlagWriteRows	sink:writesFloor,floor
+kForLiteralArmLines	legend
+kForLiteralBodies	sink:cut,shownRowCount
+kForLiteralBodyCapBytes	sink:cut,shownRowCount
+kForLiteralCandidates	pending:B43 disclosed elsewhere: the answer sites disclose through lit_capped; the prefetch-plan sites are work
+kForLiteralContextLines	sink:cut,shownRowCount
+kForLiteralExcerptAfter	none:excerpt context lines around a printed row, not a cut (Stage 0 audit)
+kForLiteralExcerptBefore	none:excerpt context lines around a printed row, not a cut (Stage 0 audit)
+kForLiteralFileMaxSegments	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForLiteralKeyLead	sink:truncateUtf8WithEllipsis
+kForLiteralMessageContent	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForLiteralMessageTries	pending:B43 SILENT CUT, follow-up card: fired 4 of 140; 0 of 4 changed when lifted
+kForLiteralMessageWords	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForLiteralTierFiles	sink:floor
+kForLiteralWholeBodyLines	sink:cut,shownRowCount
+kForLiteralWholeContent	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForOwnerHopRows	sink:capCut,firstCapCut
+kForPageSpliceReserve	sink:forCut,shownIds
+kForPageSymNameCount	pending:B43 disclosed elsewhere: n= (the tail callers are unverified)
+kForPageUnionSymbolCap	none:part of the definition of the page score, not a cut of rows (Stage 0 audit)
+kForRankedHopHeadRows	legend
+kForRankedHopMaxCallers	legend
+kForRankedMessageWords	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForRegCallBytes	legend
+kForRegCallLines	legend
+kForRegIdentBytes	none:a shape threshold of the identifier test, not a cut (Stage 0 audit)
+kForRegLineHits	sink:cut,shownRowCount
+kForSelfHookCandidateRows	pending:B43 SILENT CUT, follow-up card: 0 fires
+kForSelfHookMethodRows	sink:shown,partial
+kForSelfHookSiteRows	sink:skipped
+kForTableAnchors	sink:cutLegend
+kForTableByteCap	sink:cutLegend
+kForTableElementBytes	sink:cutLegend
+kForTableMaxAnchor	none:a shape threshold of the table test, not a cut (Stage 0 audit)
+kForTableOpenerLines	pending:B43 SILENT CUT (audit unsure), follow-up card: 0 fires
+kForTableReaderFiles	sink:floor
+kForTableReaderRows	sink:shown,floor
+kForTableSiblingLines	pending:B43 SILENT CUT (audit unsure), follow-up card: 0 fires
+kForThinCoveragePct	none:a threshold the legend states (coverage= on a THIN answer), not a cut (Stage 0 audit)
+kForUnusedDirFiles	sink:dirTotal
+kForUnusedExtraFiles	sink:miss
+kForUnusedMaxBytes	pending:B43 disclosed elsewhere: only the literal <unused_cut bytes_capped>
+kForUnusedRowsPerFile	sink:shownRows,graphCountFloorAttrXml
+kForUnusedSitesShown	pending:B43 disclosed elsewhere: the row totals are its counts
+kForVerbatimMaxSites	none:a shape test, not a cut: a cue-less whole text with more confirmed string sites is no single message, so no <lit shape="message"> is claimed (MSG-VERBATIM; read by hand at train 1111c)
+kFpGram	none:the k-gram width of a fingerprint (a parameter, not a cut; read by hand after #615 moved it)
+kGraphSubjectAttempts	pending:B43 SILENT CUT, follow-up card: 0 fires
+kGraphSubjectSlotCands	pending:B43 SILENT CUT, follow-up card: 0 fires
+kGrepHitRefsMax	pending:B43 SILENT CUT, follow-up card: 0 fires in 140 large-repo calls
+kImportSpecMaxStates	sink:cutDepth
+kJsonEnvelopeDigitsMax	none:a byte reservation for the JSON envelope, not a cut (Stage 0 audit)
+kKeep	none:parse-cache eviction count: a work bound, the bytes are unchanged (Stage 0 audit)
+kLineStartReach	none:the snap window of a line-start search, not a cut (Stage 0 audit)
+kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
+kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
+kMacroArgNestingDepth	sink:discloseMacroArgNesting
+kManifestFileRows	sink:capped
+kManifestLineMax	sink:cut
+kManifestRowsPerFile	sink:capped
+kMatchMaxHits	sink:hitsCapped
+kMaxLinesUp	none:shape windows (two locals share the name), not a cut (Stage 0 audit)
+kOneSideMaxEndpointDefs	none:a rule gate deciding whether the one-side rule applies, not a cut (Stage 0 audit)
+kOneSideRootPathMaxHops	none:a classification threshold, not a cut (Stage 0 audit)
+kOwnerNearRows	none:the K3 window; the demotion it bounds is disclosed (Stage 0 audit)
+kPathDeclinedLastCands	none:a precision gate on a declined path, not a cut (Stage 0 audit)
+kPathFromReachMaxNodes	sink:floorScore
+kPathRouteCandsCeiling	none:saturating, and disclosed by the literal route_cands_capped=1 the lint cannot see (fired once in 140 large-repo calls, cpython-02) (Stage 0 audit)
+kPathRouteHedgeNameHops	none:a threshold disclosed by route_hedged= (Stage 0 audit)
+kPathRouteRefuseCandsThreshold	none:a threshold disclosed by route_hedged= (Stage 0 audit)
+kPathRouteRefuseNameHops	none:a threshold disclosed by route_hedged= (Stage 0 audit)
+kReaderCallerFanIn	sink:hub
+kReaderCallerRows	sink:more
+kReexportDefCap	pending:B43 SILENT CUT, follow-up card: 0 fires
+kReexportNameCap	pending:B43 SILENT CUT, follow-up card: fired 32 of 140 large-repo calls; 0 of 14 changed when lifted to 1000
+kReexportRowCap	legend
+kReexportSpellingCap	sink:capped
+kReexportUseCap	pending:B43 SILENT CUT, follow-up card: 0 fires
+kRowFeaturesMaxHops	none:a dev-only TSV dump (RIPWIRE_ROW_FEATURES), never an answer (Stage 0 audit)
+kRowFeaturesMaxPath	sink:DISCLOSE
+kRunTraceRelevantLinesCap	sink:isCapped
+kSameDirHeadRank	none:TL1 M2's ORDER key (foranswerfirst.h headRowDirs): the directories of sigs rows r <= 5 lead the tail past row 24; a permutation, every row emitted once (answerFirst ENSURES; foranswerfirstcheck SD2)
+kShortKeyBodyBytes	legend
+kShortKeyRows	legend
+kShown	sink:truncated,selfExecutablePath
+kSigxKeepRank	none:SIGX (forsigx.h): rows past this rank MOVE their attributes and text to <sigx> after the rows, verbatim; nothing is cut (forsigxcheck S1 rebuilds the unmoved answer byte for byte)
+kSketchHashes	none:the minhash sketch width, not a cut (Stage 0 audit)
+kSteerStmts	none:the steering-local distance, not a cut: a read 10+ statements after its write counts as steered; it names which locals the tangle row lists in locals=, none dropped (QD-TANGLE, train ge2)
+kSupport	none:a minimum-commits threshold, not a cut (Stage 0 audit)
+kType3MaxBucket	pending:B43 SILENT CUT by design (quadratic bucket), follow-up card: fires on every clones run
+kType3MaxTokensForLcs	pending:B43 SILENT CUT, follow-up card: fired on 6 of 7 large repos; type3 total +0.15% lifted, shown rows unchanged
+# LARGE-PARTIAL-1 (2026-11-14): the lint scope now also reads src/crossref.h, src/ingest*.h, src/search.h and src/binstale.h;
+# the rows below are the caps it then found (sink rows as --draft proposed them, the rest classified by hand).
+kBaseScopeScanCap	sink:cut
+kBinaryProbe	none:the binary sniff window: a classification of a blob, not a cut of rows
+kBinarySniffCap	none:the binary sniff window: a classification of a file, not a cut of rows
+kCacheHeaderBytes	sink:DISCLOSE,Truncated
+kCapPerThread	sink:bit_floor
+kDiffTreeSlices	none:how many diff-tree processes share the pairs (LARGE-PARTIAL-1), a work split; every pair is diffed
+kExtendChainCap	sink:cut
+kGrepLiftCodeFloor	pending:B43 grep lift floor, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepLiftRowCap	pending:B43 grep lift row cap, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepMatchedLineMaxBytes	sink:cut
+kGrepRefSitesScanned	pending:B43 grep ref-site scan bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepTierFileBudget	pending:B43 disclosed elsewhere: tier_budget= / tier_partial= on the grep root (Stage 0 row 10)
+kGrepHeldFilesListed	sink:heldFiles
+kGuardTailRows	none:AF2 G's ORDER guard (foranswerfirst.h promoteGuarded): a promoted section moves ahead of <tail> only while tail row 24 still ends inside the default page; it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
+kGuardTailRowsBody	none:ruling 120's BODY-class ORDER guard (foranswerfirst.h promoteGuarded pass 2): a kPromotableBody section moves ahead of <tail> only while tail row 12 still ends inside the default page and nothing the page already delivers behind </tail> loses it (postPageOneFloors); it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
+kCallersPromoteMaxCount	none:P-CALLERS-PROMOTE's ORDER bound (foranswerfirst.h smallSubjectCallers / rowBlockOrder): a subject --callers <graph_verb> with defs="1" and count <= 8 moves ahead of <tail>; it reorders, every row is still emitted once (answerFirst's size ENSURES; foranswerfirstcheck CP1/CP2)
+kHeadDefLineAbove	none:a shape window of the whereis def-line test, not a cut
+kHealthWsSampleBytes	none:a sample size for the file-health whitespace heuristic, not a cut
+kHeldAskedHitsMax	pending:B43 grep held-row bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxAffixSet	pending:B43 search affix-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxAstQueryNesting	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxEditDistance	none:the did-you-mean edit-distance threshold, a suggestion and never an answer row
+kMaxParseWorkers	none:the ceiling of the RIPWIRE_PARSE_THREADS knob (parse-pool worker count); the merge orders every family, so the answer does not depend on it (snapdeterminismcheck), and no row is cut
+kMaxExactLen	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxExactSet	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxGitWorkers	sink:DISCLOSE
+kMaxImportContainerDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxJsonNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxKotlinStringNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxMdBlockDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxPendingParsedFiles	sink:notePartialExtract,DISCLOSE
+kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
+kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
+kMaxRestDepth	sink:noteCapped
+kMaxShellNest	sink:cut
+kMaxRestName	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxRestUnits	sink:noteCapped
+kMaxRoleBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxSkipRowsPerClass	pending:B43 disclosed elsewhere: the --skipped rows and grep unindexed_candidates_capped= state the row cap
+kMaxTrackedFiles	sink:truncated
+kMaxUnguardedSkips	none:an ASSUME bound on the shell skip trio's call graph (skipBrace -> skipQuote -> skipParen), not a cut: no frame past it is ever reached, and the nesting cut itself is kMaxShellNest's (shell_cut=)
+kMaxWorktreePaths	sink:DISCLOSE
+kMaxYamlNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kRadixThreshold	none:an algorithm switch (radix vs comparison sort), the bytes are identical
+kRubyMatcherChainLinks	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kScanCap	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kShingleTokens	none:the stray-content shingle width, part of the sketch definition
+kSideDepthStd	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kSideDepthUses	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kSketchSize	none:the stray-content sketch width, part of the sketch definition
+kTailSymTermEvidence	none:an evidence threshold, not a cut: a name with fewer distinct task words (name + path) is never added to tsym=, which is additive beside sym= (nothing shown is dropped); the clause says tsym= is a name match (TSYM-WRONG-DECOYS; read by hand at train 1111k)
+kTailSymTermFileMatches	none:an evidence threshold, not a cut: a file with more same-word names adds no tsym= (the word is the file's topic), sym= unchanged and nothing shown is dropped (TSYM-WRONG-DECOYS; read by hand at train 1111k)
+kTailSymTermNames	legend
+kTailTermMaxWords	none:an input bound (tailTermMask's 64 bits): a --for task's words past 64 do not match tsym= names; tsym= is additive, so no answer row is cut (read by hand at train 1111k)
+kUnreachableMaxHits	pending:B43 not audited yet (LARGE-PARTIAL-1 scope widening)
+kVerdictCount	none:an enum count, not a bound
+kVrDottedFlowMaxBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrDottedStringMaxBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrMaxDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrTextCap	sink:cut
+kWhereisParseMaxBlobs	pending:B43 disclosed elsewhere: <unparsed blobs= rows= next=> on the whereis answer
+kWhereisTextPreviewCapBytes	sink:cutAttr,shownCount
+kWhereisTextWholeMaxBytes	none:the whole-line threshold of the t= preview; the cut itself is disclosed by t_bytes= and <t_cut>
+kKeyBodyMax	legend
+kRoutedCarriedPageFloorBytes	none:RL1 a RESERVE, not a cut (verbs_forroute.h runForVerbRoute): the least of the page a carried --for page keeps when the routed verb's rows are windowed to make room; the cuts it leads to are the verb's own window (shown= total= has_more= next_offset=, root next=) and forpages.h's page (page= pages= continued= deferred= next=), each disclosed where it falls and proved lossless by forroutepagecheck (L1)/(L2)
+kRoutedFitTries	none:RL1 a bound on how often the routed verb is re-rendered with a smaller row limit (fitRoutedVerb); when it is spent the question is NOT ROUTED and the --for answer is served byte for byte, so no row is cut by it
+kMcpCarriedFilePageFirstLimit	none:MR1 the FIRST row limit a routed MCP answer renders its carried file page at (mcpFittedFilePage), an upper start the fit scales DOWN by measured bytes; the cut it leads to is the file page's own window (has_more="1" next_offset=K, `for` limit=L offset=K), disclosed on the page root and proved lossless by mcpforroutepagecheck (L2)
+kActRows	legend
+kTinyRows	sink:shown
+kEdgeCap	sink:shown
+kSpreadEdgeMax	none:a shape test, not a cut: a named symbol with more cross-file edges than this, a caller among them, gets the full page; under it every edge is listed (shown=total) (THETA6-FINISH)

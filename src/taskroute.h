@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "infra/tablelookup.h" // isOneOf
 #include "infra/jsonesc.h"   // shSingleQuote — the repository's canonical POSIX argv quoting
 #include "model.h"           // IngestResult
 #include "queryshape.h"      // detail::lowerAscii — the one ASCII lowercaser (K50)
@@ -61,19 +62,31 @@ struct TaskRouteResult
     std::vector<RouteChoice> choices;
     int                      score  = 0;
     int                      margin = 0;
+    // HELP-TASK-ROUTE (b): a recommend whose command takes, as a whole flag value, a name resolved only after `of`
+    // (resolvedOnlyViaOfCue). The status stays recommend; the document's confidence= reads low, not high.
+    bool                     weakOfSlot = false;
 };
+
+// Does `command` take `name` as a WHOLE flag value (`--expand='commands'`), the shape commandWithValue builds? A --for
+// command whose task text merely CONTAINS the name is not standing on it.
+inline bool commandTakesName( std::string_view command, std::string_view name )
+{
+    const std::string quoted = "='" + std::string( name ) + "'";
+    for( std::size_t at = command.find( quoted ); at != std::string_view::npos; at = command.find( quoted, at + 1 ) )
+    {
+        const std::size_t after = at + quoted.size();
+        if( after == command.size() || command[after] == ' ' )
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 // K50: ONE ASCII lowercaser for the tree's task-text readers. This file used to spell its own loop (`for( const unsigned char c :
 // text )`, an implicit sign change on every byte >= 0x80 that aborted the sanitizer build on a non-ASCII prompt), and the fix for it
 // made that loop byte-identical to queryshape.h's, which --quality-delta flagged as a clone of the reused helper. It is that one now.
 using queryshape::detail::lowerAscii;
-
-// "is this word one of these?" — the shape four tables' predicates were each writing out by hand, which is
-// how a five-line any_of becomes a duplication finding against its own neighbours.
-inline bool isOneOf( std::string_view word, const std::string_view* table, std::size_t count ) noexcept
-{
-    return std::any_of( table, table + count, [word]( const std::string_view t ) { return t == word; } );
-}
 
 inline bool wordByte( char c ) noexcept
 {
@@ -277,10 +290,15 @@ inline bool cueOccurrenceIsIntentGate( std::string_view lowerTask, std::size_t b
     return lowerTask.substr( from, end - from ) == "how";   // "how does" IS the gate
 }
 
-// True when the word immediately before `pos` is a symbol-slot cue. `lowerTask` is the lowercased task,
-// so the comparison is a plain equality. Opening quotes and backticks between the cue and the name are
-// stepped over — they are themselves symbol evidence, never separators.
-inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) noexcept
+// The word immediately before `pos` and where it begins. Opening quotes and backticks between that word and
+// the name are stepped over — they are themselves symbol evidence, never separators.
+struct WordBefore
+{
+    std::string_view word;
+    std::size_t      begin = 0;
+};
+
+inline WordBefore wordBefore( std::string_view lowerTask, std::size_t pos ) noexcept
 {
     std::size_t end = pos;
     while( end > 0 && ( lowerTask[end - 1] == ' ' || lowerTask[end - 1] == '`'
@@ -293,12 +311,19 @@ inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) n
     {
         --begin;
     }
-    const std::string_view word = lowerTask.substr( begin, end - begin );
-    if( !isOneOf( word, std::begin( kWeakSymbolCues ), std::size( kWeakSymbolCues ) ) )
+    return { lowerTask.substr( begin, end - begin ), begin };
+}
+
+// True when the word immediately before `pos` is a symbol-slot cue. `lowerTask` is the lowercased task,
+// so the comparison is a plain equality.
+inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) noexcept
+{
+    const WordBefore before = wordBefore( lowerTask, pos );
+    if( !isOneOf( before.word, kWeakSymbolCues ) )
     {
         return false;
     }
-    return !cueOccurrenceIsIntentGate( lowerTask, begin, word );
+    return !cueOccurrenceIsIntentGate( lowerTask, before.begin, before.word );
 }
 
 // A WEAK reading needs the name to be backed by a CODE definition. A t="sec" row is a markdown heading or
@@ -323,7 +348,7 @@ inline bool weakSymbolCandidate( std::string_view name ) noexcept
     {
         return false;
     }
-    return !isOneOf( name, std::begin( kWeakSymbolStopWords ), std::size( kWeakSymbolStopWords ) );
+    return !isOneOf( name, kWeakSymbolStopWords );
 }
 
 // The first word-bounded occurrence of an all-lowercase `name` that sits in a symbol slot, or npos when
@@ -414,7 +439,7 @@ inline bool identifierMentionShape( std::string_view task, std::size_t pos, std:
     // this round's own noise prompts used as report/notification prose. Extend here, narrowly, rather
     // than in kWeakSymbolStopWords (a different tier's already-audited list).
     static constexpr std::string_view kShapelessCollisionWords[] = { "lane", "report", "split", "summary" };
-    return !isOneOf( lowered, std::begin( kShapelessCollisionWords ), std::size( kShapelessCollisionWords ) );
+    return !isOneOf( lowered, kShapelessCollisionWords );
 }
 
 // Where, and how strongly, one indexed name is mentioned in the task. Identifier shape
@@ -471,6 +496,44 @@ inline SymbolMention symbolMention( std::string_view task, std::string_view lowe
         return {};
     }
     return { true, false, pos };
+}
+
+// HELP-TASK-ROUTE (b), audit-verify 2026-11-11: `of` is the one cue in kWeakSymbolCues that is also the commonest
+// preposition in English, so it puts a PLURAL COMMON NOUN in a symbol slot as readily as a name. nushell `how does
+// nushell evaluate a pipeline of commands` resolved `commands` (a module there) through `of` alone and recommended
+// --expand='commands' at confidence="high". The route may stand — the name IS indexed — but the evidence for it is
+// one preposition, so the confidence may not read high. True when the task resolved exactly one all-lowercase
+// (weak-tier) name and EVERY symbol-slot occurrence of it sits after `of`; a second, stronger cue anywhere clears it.
+inline bool resolvedOnlyViaOfCue( std::string_view lowerTask, const std::vector<std::string>& resolved ) noexcept
+{
+    if( resolved.size() != 1 )
+    {
+        return false;
+    }
+    const std::string_view name = resolved[0];
+    const bool weakTier = std::none_of( name.begin(), name.end(), []( const char ch )
+    {
+        const unsigned char c = static_cast<unsigned char>( ch );
+        return std::isupper( c ) || c == '_' || c == ':' || c == '.' || c == '$';   // symbolMention's hasMark set
+    } );
+    if( !weakTier )
+    {
+        return false;
+    }
+    bool sawOf = false;
+    for( std::size_t pos = boundedFind( lowerTask, name ); pos != std::string_view::npos; pos = boundedFind( lowerTask, name, pos + 1 ) )
+    {
+        if( !precededBySymbolCue( lowerTask, pos ) )
+        {
+            continue;
+        }
+        if( wordBefore( lowerTask, pos ).word != "of" )
+        {
+            return false;   // another cue names it too: that is real slot evidence
+        }
+        sawOf = true;
+    }
+    return sawOf;
 }
 
 inline std::vector<std::string> resolveTaskSymbols( std::string_view task, const IngestResult& ing )
@@ -741,7 +804,7 @@ inline std::string slotCandidate( std::string_view task, std::string_view lowerT
             {
                 break;
             }
-            if( !isOneOf( lowerAscii( token ), std::begin( kSlotFillers ), std::size( kSlotFillers ) ) )
+            if( !isOneOf( lowerAscii( token ), kSlotFillers ) )
             {
                 if( accept( token ) )
                 {
@@ -1281,7 +1344,7 @@ inline bool saysSinceWhen( std::string_view lowerTask ) noexcept
             continue;
         }
         if( std::isdigit( static_cast<unsigned char>( word.front() ) ) != 0
-         || isOneOf( word, std::begin( kCalendarWords ), std::size( kCalendarWords ) ) )
+         || isOneOf( word, kCalendarWords ) )
         {
             return true;
         }
@@ -1621,8 +1684,8 @@ inline std::optional<RouteChoice> directTaskChoice( const RouteContext& ctx )
 // compact-legend intent, whose ANSWER is the flag. Gate: test/taskroutecheck.sh R-LEG still runs every generated command.
 //
 // So the wrapper that applied the posture (classify) is gone: callers ask classifyRoutes, the router itself.
-inline TaskRouteResult classifyRoutes( std::string_view task, const std::string& root, const IngestResult& ing, bool git, bool dirty,
-                                       const RouterCaps& caps )
+inline TaskRouteResult classifyRoutesUncapped( std::string_view task, const std::string& root, const IngestResult& ing, bool git, bool dirty,
+                                               const RouterCaps& caps )
 {
     TaskRouteResult result;
     result.facts.git = git;
@@ -1745,6 +1808,18 @@ inline TaskRouteResult classifyRoutes( std::string_view task, const std::string&
         result.choices.push_back( std::move( candidates[0] ) );
         result.choices.push_back( std::move( candidates[1] ) );
     }
+    return result;
+}
+
+// The router plus the one confidence cap that reads its FINAL choice (HELP-TASK-ROUTE (b)): whichever card won, a
+// recommend whose command stands on a name met only after `of` is flagged, never re-routed.
+inline TaskRouteResult classifyRoutes( std::string_view task, const std::string& root, const IngestResult& ing, bool git, bool dirty,
+                                       const RouterCaps& caps )
+{
+    TaskRouteResult result = classifyRoutesUncapped( task, root, ing, git, dirty, caps );
+    result.weakOfSlot = result.status == RouteStatus::Recommend && !result.choices.empty()
+                        && resolvedOnlyViaOfCue( lowerAscii( task ), result.facts.resolvedSymbols )
+                        && commandTakesName( result.choices[0].command, result.facts.resolvedSymbols[0] );
     return result;
 }
 

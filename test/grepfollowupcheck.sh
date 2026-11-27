@@ -7,7 +7,7 @@
 #         match), and a <suggest> element follows INSIDE <grep> carrying
 #           near= the nearest indexed symbol name (the ONE didyoumean.h suggester — same machinery as
 #                 every SYM-verb's "did you mean", see test/didyoumeancheck.sh)
-#           next= a ready-to-paste conceptual fallback (--for="PATTERN") for word-like patterns —
+#           next= a ready-to-paste conceptual fallback (--for='PATTERN', bare for one word) for word-like patterns —
 #                 the grep→for conversion the mine shows never happens unprompted.
 #         The legend labels both as SUGGESTIONS, never as matches (G4 honesty grammar).
 #         Scope: literal --grep only (a zero-hit --regex pattern is not a near-miss identifier, and
@@ -69,7 +69,9 @@ grep -qE '<grep pattern="perimeterr"( root="[^"]*")? files="0" hits="0"' "$TMP/t
     && ok "(1a) hits=\"0\" stays an honest none-found (presence guard)" \
     || no "(1a) zero-hit header missing or reshaped"
 
-grep -q '<suggest near="perimeter" next="--for=&quot;perimeterr&quot;"/>' "$TMP/typo.xml" \
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= was --for=&quot;PAT&quot;, which a shell pasting the raw answer reads as a
+# literal entity; it is now nextFlag's spelling through the one next= escaper (nextverb.h): bare for one word, '…' with a space
+grep -q '<suggest near="perimeter" next="--for=perimeterr"/>' "$TMP/typo.xml" \
     && ok "(1b) [red] <suggest> carries near= (did-you-mean) AND next= (--for fallback)" \
     || no "(1b) [red] no/wrong <suggest> element: $( grep -o '<suggest[^>]*>' "$TMP/typo.xml" | head -1 )"
 
@@ -80,7 +82,7 @@ grep -q 'SUGGESTIONS, never matches' "$TMP/typo.xml" \
 
 # (2) [red] a word-like phrase with no near-miss: near= absent, next= still offered
 "$BIN" "$FIX" --no-cache --grep='total area computation' >"$TMP/phrase.xml" 2>/dev/null
-grep -q '<suggest next="--for=&quot;total area computation&quot;"/>' "$TMP/phrase.xml" \
+grep -q "<suggest next=\"--for='total area computation'\"/>" "$TMP/phrase.xml" \
     && ok "(2) [red] word-like phrase: next= --for fallback offered, no forced near=" \
     || no "(2) [red] phrase suggestion missing/wrong: $( grep -o '<suggest[^>]*>' "$TMP/phrase.xml" | head -1 )"
 

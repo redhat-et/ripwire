@@ -58,8 +58,10 @@ top3(){ tr '<' '\n' < "$1" | grep -E '^cand r="[123]" ' | grep -c "$2"; }
 
 # ── (a) stem variants: the plural is the ONLY route to the class name ───────────────────────────
 Q_A="splits modules cleanly"
-run env RIPWIRE_QSTEM=1 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_on.xml" 2>/dev/null
-run env RIPWIRE_QSTEM=0 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_off.xml" 2>/dev/null
+# (a) isolates the STEM lever: the noise files' basenames (modules.js, results.js) carry query-A words by construction, so the
+# basename field the code lens now scores by default (lexical.h kForBasenameFieldW, LP1) is pinned off on both sides
+run env RIPWIRE_QSTEM=1 RIPWIRE_BASENAME_W=0 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_on.xml" 2>/dev/null
+run env RIPWIRE_QSTEM=0 RIPWIRE_BASENAME_W=0 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_off.xml" 2>/dev/null
 [ "$(top3 "$TMP/a_on.xml" SplitChunksPlugin)" -ge 1 ] \
     && ok "(a) QSTEM=1: 'splits' stem-reaches SplitChunksPlugin into candidates top-3" \
     || no "(a) QSTEM=1: SplitChunksPlugin not in top-3 for '$Q_A'"

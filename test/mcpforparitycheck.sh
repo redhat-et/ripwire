@@ -34,6 +34,14 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
+# SIBLING-DEMOTE / DECL-TWIN run in every dialect (DEMOTE-ALL-DIALECTS, fordemoteall.h): the pools are read off the ranked entries
+# (rows and the pointers printed in their place, rows.py below), so the gate reads the answers as shipped. fordemoteallcheck pins
+# MCP's <sigs> byte-equal to the CLI's where the two answers carry the same guard inputs.
+unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -59,7 +67,9 @@ fi
 ok "shared cap read from source: kForLensDefaultTopN=$CAP"
 
 # ── the two dialects, and the two facts read off each ────────────────────────────────────────────────────
-# The served set is (file, line, name) per <d> row inside <sigs> — NOT id=, which the emitter omits whenever
+# The served set is (file, rank, name) per ranked entry inside <sigs> — a <d> row, or a <t p= sym= r=/> demote pointer printed in its
+# place (DEMOTE-ALL-DIALECTS: which rows print as pointers follows each dialect's own guards — the CLI's <h> hop rows keep their callees
+# as rows, MCP's answer has none — so the pool is read off the entries, not their spelling) — NOT id=, which the emitter omits whenever
 # it would equal the bare name, so an id-keyed comparison silently undercounts the scope-less rows (measured
 # while writing this gate: 24 of 29 CLI rows on one task). RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — the file is the row's own p=.
 cat > "$TMP/rows.py" <<'PY'
@@ -68,12 +78,12 @@ s = sys.stdin.read()
 m = re.search( r'<sigs[^>]*>(.*?)</sigs>', s, re.S )
 body = m.group( 1 ) if m else ''
 out = []
-for d in re.finditer( r'<d ([^>]*)>', body ):
-    a = d.group( 1 )
+for d in re.finditer( r'<d ([^>]*)>|<t ([^>]* r="[0-9]+"[^>]*)>', body ):   # a row, or a demote pointer in its place (DEMOTE-ALL-DIALECTS)
+    a = d.group( 1 ) or d.group( 2 )
     p = re.search( r'\bp="([^"]*)"', a )
-    n = re.search( r'\bn="([^"]*)"', a )
-    l = re.search( r'\bl="([^"]*)"', a )
-    out.append( ( p.group( 1 ) if p else "?" ) + ":" + ( l.group( 1 ) if l else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
+    n = re.search( r'\b(?:n|sym)="([^"]*)"', a )
+    r = re.search( r'\br="([^"]*)"', a )
+    out.append( ( p.group( 1 ) if p else "?" ) + ":" + ( r.group( 1 ) if r else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
 print( "\n".join( sorted( out ) ) )
 PY
 cat > "$TMP/mcptext.py" <<'PY'
@@ -197,38 +207,53 @@ mcp_for_budget(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params"
 # forbudget-soft (rule 4): the soft target's bytes per token (read from source: a missing constant FAILS every rung) and the
 # uncut reference (a wide target serves the MCP rows uncut) the ST maximality reads the next row's bytes from.
 TBPT="$( python3 -c "import re,sys; s=open(sys.argv[1]).read(); g=lambda k:float(re.search(r'inline constexpr double '+k+r' *= *([0-9.]+);',s).group(1)); print(g('kMinBytesPerToken')*g('kBudgetHeadroom'))" src/serialize.h 2>/dev/null )"
-mcp_for_budget "$INERT_Q" 100000 >"$TMP/mcp_ref.xml"
+# ST-RANK (lane fx1-two-reds, 2026-11-21): the reference is read with the two demote rules OFF. Under budget_tokens SIBLING-DEMOTE and
+# DECL-TWIN run AFTER the ladder has cut the rows (fordemoteall.h: the rows stay a rank prefix, priced as rows), so the next unit past
+# a cut is the next RANK at its ROW cost. The demoted reference prints those ranks as <t r=> pointers with no row cost, and the
+# rows-only reading skipped them: on the merged src/ at budget_tokens=1600 the cut is ranks 1..11 + rank 12 (demoted to a pointer),
+# and ST compared rank 15 (120 B) where the ladder's next unit is rank 13 (a 367 B row that first fits at budget_tokens=1621).
+RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1 mcp_for_budget "$INERT_Q" 100000 >"$TMP/mcp_ref.xml"
 cat > "$TMP/mcpst.py" <<'PY'
 # mcpst.py REF N BYTES_PER_TOKEN < answer: "OK|BAD ST ..." — the rows' charge (bytes inside <sigs> plus the zero cx=/ccx=/in=
 # the lean spelling elides: the ladder's entryCost) fits T or is the 1..4 floor; a cut is maximal and carries next_budget_tokens > N
 import re, sys
-def rows( s ):
+def rows( s, lean = False ):
     m = re.search( r'<sigs\b([^>]*)>(.*?)</sigs>', s, re.S )
     if not m: return None
     out = []; elided = 0
+    ptrs = [ int( p ) for p in re.findall( r'<t [^>]*\br="(\d+)"', m.group( 2 ) ) ]   # ranks served as DEMOTE pointers in place of a row
     for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', m.group( 2 ), re.S ):
-        a = d.group( 1 ) or d.group( 2 ); r = re.search( r'\br="(\d+)"', a ); pr = len( d.group( 0 ).encode() )
+        a = d.group( 1 ) or d.group( 2 ); r = re.search( r'\br="(\d+)"', a ); row = d.group( 0 )
+        # lean: the row as the ladder serves it past a cut — no <doc>, no e= (the uncut reference keeps both; it never cuts)
+        row = re.sub( r' e="\d+"', '', re.sub( r'<doc>.*?</doc>', '', row, flags = re.S ) ) if lean else row; pr = len( row.encode() )
         c = pr + sum( n for k, n in ( ( "cx", 7 ), ( "ccx", 8 ), ( "in", 7 ) ) if not re.search( r'\b' + k + r'="', a ) )
         elided += c - pr; out.append( ( int( r.group( 1 ) ) if r else 10**9, c ) )
     out.sort()
-    return m.group( 1 ), [ c for _, c in out ], len( m.group( 2 ).encode() ) + elided
+    return m.group( 1 ), out, len( m.group( 2 ).encode() ) + elided, ptrs
 try: n, bpt = int( sys.argv[ 2 ] ), float( sys.argv[ 3 ] )
 except ValueError: print( "BAD premise: no numeric budget / bytes-per-token constant" ); sys.exit( 0 )
 ans = sys.stdin.read()
-a, ref = rows( ans ), rows( open( sys.argv[ 1 ] ).read() )
+a, ref = rows( ans ), rows( open( sys.argv[ 1 ] ).read(), lean = True )
 # round C (forbudget-soft, owner decision 2026-10-14: RESERVE SECTIONS FIRST; rule 4): the sections served before the tail
 # (<hdr> rows, <lego>, <compose>, <routes>) are reserved first and the rows past the cut fill what they leave of T — the
 # maximality bound is T less those sections' bytes (U, read off the answer); the tail rides on top on this twin
 after = ans.split( '</sigs>', 1 )[ 1 ] if '</sigs>' in ans else ''
 U = len( after.split( '<tail', 1 )[ 0 ].encode() ) + sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', ans.split( '<sigs', 1 )[ 0 ] ) )
 if a is None or ref is None or not ref[ 1 ]: print( "BAD premise: no <sigs> rows (answer or uncut reference)" ); sys.exit( 0 )
-T = int( n * bpt ); attrs, ar, charged = a; k = len( ar ); bad = []
+T = int( n * bpt ); attrs, ar, charged, ptrs = a; k = len( ar ); bad = []
+# ST-RANK: the next unit past the cut is the lowest rank the answer serves neither as a row nor as a pointer, at its row cost in the
+# undemoted reference (a rank prefix: the first rank past the last served one), read lean: a row past the cut ships without its
+# <doc> and e= (measured on this corpus: ranks 11-15 at budget_tokens=1800 are exactly the reference rows less both), so the
+# uncut row's doc bytes no longer hide an under-fill (an under-fill mutant of 200 B passed the uncut reading at every rung)
+served = { r for r, _ in ar } | set( ptrs ); cost = dict( ref[ 1 ] ); nxt = 1
+while nxt in served: nxt += 1
 if not ( charged <= T or k <= 4 ): bad.append( "rows charged %d B > T=%d with %d rows (floor 4)" % ( charged, T, k ) )
-if k < len( ref[ 1 ] ):
-    if charged + ref[ 1 ][ k ] <= T - U - 160: bad.append( "cut at %d with the next row (%d B) fitting T less the sections (U=%d)" % ( k, ref[ 1 ][ k ], U ) )
+if nxt in cost:
+    if charged + cost[ nxt ] <= T - U - 160: bad.append( "cut at %d rows + %d pointers with the next rank (r=%d, %d B) fitting T less the sections (U=%d)" % ( k, len( ptrs ), nxt, cost[ nxt ], U ) )
     nb = re.search( r'\bnext_budget_tokens="([0-9]+)"', attrs )
     if not ( 'capped="1"' in attrs and nb and int( nb.group( 1 ) ) > n ): bad.append( "NX: a cut without capped + next_budget_tokens > %d" % n )
-print( "%s ST rows=%d/%d charged=%d T=%d U=%d%s" % ( "BAD" if bad else "OK", k, len( ref[ 1 ] ), charged, T, U, ( ": " + "; ".join( bad ) ) if bad else "" ) )
+print( "%s ST rows=%d/%d ptrs=%d next_r=%s charged=%d T=%d U=%d%s" % ( "BAD" if bad else "OK", k, len( ref[ 1 ] ), len( ptrs ), nxt if nxt in cost else "-", charged, T, U,
+                                                                     ( ": " + "; ".join( bad ) ) if bad else "" ) )
 PY
 for tb in 900 1200 1600 2000 6000; do
     b="$( mcp_for_budget "$INERT_Q" "$tb" )"

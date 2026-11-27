@@ -335,7 +335,12 @@ then
     exit 0
 fi
 
-route="$( ripwire "$cwd" --help-task="$prompt" 2>/dev/null )" || exit 0
+# Issue #594 (@WingedGuardian): a cold index outlived the harness's hook timeout, was killed, saved no cache, and timed
+# out every prompt after it. --deadline-ms answers in time or abstains by the deadline while the binary itself finishes
+# the index in the background (src/helpdeadline.h); it is passed only to a binary whose --help lists it, so an older one
+# runs exactly as before. skills/install.sh registers THIS hook with a 6 s timeout (Claude's is 8 s): 4000 ms plus
+# the binary's up-to-1 s handoff to the background child leaves the rest of this hook about 1 s.
+route="$( ripwire "$cwd" --help-task="$prompt" $( ripwire --help 2>/dev/null | grep -q -- '--deadline-ms=' && echo --deadline-ms=4000 ) 2>/dev/null )" || exit 0
 # The root's ATTRIBUTE, not a byte prefix: since the compact legend became the CLI default (L1) the root reads
 # <task-route schema="ripwire.help-task/v1" status=…>, and an older binary still prints status= first. Both match.
 status=abstain
@@ -349,7 +354,9 @@ if meter_home; then
     [ -n "$session" ] || session="prompt:$promptHash"
     sessionHash="$( hash_text "$session" )"
     intent="$( printf '%s' "$route" | sed -n 's/.*<choice intent="\([^"]*\)".*/\1/p' | head -1 )"
-    recommended="$( printf '%s' "$route" | grep -oE -- '--[a-z0-9-]+' | head -1 )"
+    # The first flag AFTER the root's open tag: an abstain's root carries next="--for=…" (HELP-TASK-ROUTE (a)), which is a
+    # follow-up, not a recommendation, so an abstain row keeps recommended="" as before.
+    recommended="$( printf '%s' "${route#*<task-route*>}" | grep -oE -- '--[a-z0-9-]+' | head -1 )"
     now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
     jq -cn --arg at "$now" --arg status "$status" --arg intent "$intent" --arg hash "$promptHash" \
         --arg sessionHash "$sessionHash" --arg recommended "$recommended" --argjson bytes "$promptBytes" \

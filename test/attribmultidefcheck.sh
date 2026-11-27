@@ -24,7 +24,8 @@
 #     impact <rf> rollup row: the union of its symbols' tokens, the strongest mark per K. Above 16 groups the table
 #     lists the groups the page's rows name and the root says defs_listed=N; there a row prints its K, K~s and K~t tokens
 #     and ONE bare ~n when it also has by-name ties (a row tied by name alone prints no of_def: its via="name" hedges it).
-#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def;
+#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def
+#     (--impact alone names its one group as a single <def ix="1"/> row and still no of_def: test/impactsoledefcheck.sh);
 #     its rows that are one arm of a split call carry prov="split" (the map's per-edge vocabulary), whatever defs= is.
 #   * --path: a to= with several definitions carries no to_p= unless a proven hop bound it (unreached, or the hop into
 #     it is a split arm or by name: dropped); a from= with several definitions carries no from_p= when unreached.
@@ -56,6 +57,13 @@
 # must not be over-attributed); it is red on such a binary only where it needs a hedge that binary cannot print; [C] control
 # — holds on every binary.
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -116,8 +124,12 @@ if form == 'xml':
     defs = re.findall(r'<def\s[^>]*?/?>', body)
     for d in defs:
         a = attrs(d)
+        if a.get('ix', '?') in table:   # VERB-DEF-ROWS: a later row of a listed ix is one of its tied declarations, not a group
+            print('MEMBER\t%s\t%s\t%s\t%s' % (a.get('ix', '?'), a.get('p', '?'), a.get('bodyless', '0'), a.get('sc', '')))
+            continue
         table[a.get('ix', '?')] = a.get('p', '?')
         print('DEF\t%s\t%s\t%s\t%s' % (a.get('ix', '?'), a.get('p', '?'), a.get('bodyless', '0'), a.get('sc', '')))
+    defs = list(table)
     print('ROOT\tok\tdefs=%s\tgroups=%d\tto_p=%s\tfrom_p=%s\tcount=%s\tdefs_listed=%s\tnext_offset=%s' % (
           root.get('defs', root.get('to_defs', '?')), len(defs), root.get('to_p', '-'), root.get('from_p', '-'),
           root.get('count', root.get('reaches', root.get('callers', '?'))), root.get('defs_listed', '-'), root.get('next_offset', '-')))
@@ -136,8 +148,12 @@ else:
     table = {}
     for d in tab:
         p = d.get('p') or ('%s:%s' % (d.get('file', '?'), d.get('line', '?')))
+        if str(d.get('ix')) in table:   # VERB-DEF-ROWS: a tied declaration's own entry, not a group
+            print('MEMBER\t%s\t%s\t%s\t%s' % (d.get('ix'), p, d.get('bodyless', 0), d.get('sc', d.get('scope', ''))))
+            continue
         table[str(d.get('ix'))] = p
         print('DEF\t%s\t%s\t%s\t%s' % (d.get('ix'), p, d.get('bodyless', 0), d.get('sc', d.get('scope', ''))))
+    tab = list(table)
     print('ROOT\tok\tdefs=%s\tgroups=%d\tto_p=%s\tfrom_p=%s\tcount=%s\tdefs_listed=%s\tnext_offset=%s' % (
           j.get('defs', j.get('to_defs', '?')), len(tab), j.get('to_p', '-'), j.get('from_p', '-'),
           j.get('count', j.get('reaches', '?')), j.get('defs_listed', '-'), j.get('next_offset', '-')))
@@ -202,6 +218,27 @@ plain(){
        && { [ -n "$allow" ] || ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows"; } \
        && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — no <def> table, no of_def$( [ -n "$allow" ] || printf ', no prov' ) ($( nrows "$tag" ) rows)"
     else no "[$cls] $tag: a one-group answer grew attribution: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
+# plainSole CLASS TAG [MEMBERS] : a one-group --impact or --callers answer (IMPACT-SOLE-DEF; VERB-DEF-ROWS) — exactly ONE group row
+# (plus MEMBERS tied-declaration rows of the same ix, default 0), no of_def and no prov="split" on any row
+members(){ grep -c '^MEMBER' "$DIR/$1.rows"; }
+plainSole(){
+    local cls="$1" tag="$2" want="${3:-0}"
+    if [ "$( groups "$tag" )" = 1 ] && [ "$( members "$tag" )" = "$want" ] && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — one group row + $want declaration row(s), no of_def, no prov ($( nrows "$tag" ) rows)"
+    else no "[$cls] $tag: a one-group answer: groups=$( groups "$tag" ) (want 1), declaration rows=$( members "$tag" ) (want $want), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
+# untiedSole CLASS TAG : RE-PIN 2026-11-18 (lane bx1-verbfix, BX1 FIX 7; gate test/verbfixcheck.sh). The untied declaration a
+# one-group answer used to drop while defs= still counted it (the tmux/ninja prototype shape) is now listed as a bodyless <def>
+# row of its own, ix=2; it stays out of the attribution: one attributed group, still no of_def and no prov on any row.
+untiedSole(){
+    local cls="$1" tag="$2"
+    if [ "$( groups "$tag" )" = 2 ] && [ "$( awk -F'\t' '$1=="DEF" && $2=="2" { print $4; exit }' "$DIR/$tag.rows" )" = 1 ] \
+       && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one attributed group + the untied declaration listed (ix=2 bodyless=1), no of_def, no prov"
+    else no "[$cls] $tag: want one attributed group + an ix=2 bodyless row: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
 }
 # rowset CLASS TAG COUNT NAMES : attribution adds attributes and never removes a row — the root count and the sorted row-name
 # multiset equal the base binary's (pinned from base d4325a8c)
@@ -312,13 +349,15 @@ if ans b_norm cpp callers s xml -- --callers=Normalize; then
         "[N] b_norm: <def> rows=$( groups b_norm ), want 2"
     hedged P b_norm ManifestParser::ParseDefault "util.cc:9 util.cc:12"
 fi
-if ans b_rp cpp callers s xml -- --callers=ReadPath; then plain N b_rp; fi
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans b_rp cpp callers s xml -- --callers=ReadPath; then plainSole N b_rp 1; fi   # ReadPath: a declaration + its definition
 # UsesPiece is declared in piece_user.cc with no #include that ties it to parser.cc's definition: the identity rule answers
 # Unproven (may declare it, cannot prove it), and no row ties to that declaration (DrivePiece's call binds the definition), so
-# the declaration is silent and the answer stays one group — the tmux/ninja prototype shape (a variadic or template-qualified
+# the declaration was silent and the answer stayed one group — the tmux/ninja prototype shape; BX1 FIX 7 lists it (untiedSole) (a variadic or template-qualified
 # declarator is Unproven the same way). A FOREIGN declaration (c_tal, c_hlp below: provably another function) is always listed.
-if ans b_up cpp callers s xml -- --callers=UsesPiece; then plain N b_up; fi
-if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plain N b_q; fi
+if ans b_up cpp callers s xml -- --callers=UsesPiece; then untiedSole N b_up; fi   # RE-PIN BX1 FIX 7: listed, not silent
+if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plainSole N b_q; fi
 # Q1 (orchestrator ruling): the split-arm hedge rides single-definition answers too (by-design byte change on them)
 if ans b_one cpp callees s xml -- --callees=PutInt; then
     plain N b_one split
@@ -382,14 +421,16 @@ if ans c_hlp c callers s xml -- --callers=helper; then
     defbody N c_hlp helper_a.c:2 0
     invariant N c_hlp
 fi
-if ans c_lost c callers s xml -- --callers=lost; then plain N c_lost; fi          # C prototype + definition: one group
-if ans c_pick ts callers s xml -- --callers=pick; then plain N c_pick; fi         # TS overload signatures + implementation
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans c_lost c callers s xml -- --callers=lost; then plainSole N c_lost 1; fi          # C prototype + definition: one group
+if ans c_pick ts callers s xml -- --callers=pick; then plainSole N c_pick 2; fi         # TS overload signatures + implementation
 # langfacts-fold (train 29) pins, green on the build before the fold and after it: the TS overload-signature rule names TypeScript
 # alone (src/defattrib.h). A TS method overload set is one group; a TS abstract / ambient member is a contract, a group of its
 # own; and the same bodyless shape in Java, Go and Rust is never folded (a Java or Go interface method is its own group; a Rust
 # trait requirement is no definition at all).
 if ans lf_stash lf callers s xml -- --callers=stash; then
-    plain N lf_stash; [ "$( rootf lf_stash defs )" = 3 ]; say $? "[N] lf_stash: a TS class method's three overload declarations are ONE group (defs=3, no table)" \
+    plainSole N lf_stash 2; [ "$( rootf lf_stash defs )" = 3 ]; say $? "[N] lf_stash: a TS class method's three overload declarations are ONE group (defs=3: one group row + two declaration rows)" \
         "[N] lf_stash: defs=$( rootf lf_stash defs ), want 3"
 fi
 for c in measure:box.ts:7:box.ts:8 ring:box.ts:9:box.ts:10 doIt:Doer.java:2:Doer.java:3 Foo:fooer.go:4:fooer.go:7; do
@@ -401,7 +442,9 @@ for c in measure:box.ts:7:box.ts:8 ring:box.ts:9:box.ts:10 doIt:Doer.java:2:Doer
         defbody N "$tg" "$p2:$l2" 0
     fi
 done
-if ans lf_baz lf callers s xml -- --callers=baz; then plain N lf_baz; fi   # a Rust trait requirement is no definition: one def, one group
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans lf_baz lf callers s xml -- --callers=baz; then plainSole N lf_baz; fi   # a Rust trait requirement is no definition: one def, one group
 if ( cd "$FIX/cpp" && "$BIN" . --no-cache --for=empty ) >"$DIR/c_for.out" 2>/dev/null; then
     # QUALNAME-1: a member's scope folds into n= (no sc=): each definition is its own Owner::empty row
     n_d="$( grep -oE '<d [^>]*n="(EvalString|StringPiece)::empty"[^>]*>' "$DIR/c_for.out" | grep -vc 'sc="' )"
@@ -430,7 +473,10 @@ if ans d_impj cpp - reach json -- --impact=empty --json; then
     expect P d_impj DrivePiece "$SP"
 fi
 if mcp d_mcp cpp s impact '"symbol":"empty"'; then expect P d_mcp DriveEval "$EV"; fi
-if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plain N d_one; fi
+# RE-PIN 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF; gate test/impactsoledefcheck.sh): a one-group --impact answer names the
+# ONE definition it measured as a single <def ix="1"/> row (the radius of a change holds the file the change is made in). The arm
+# keeps what it was for — no of_def and no prov on any row of a one-group answer — and pins the table at exactly one row.
+if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plainSole N d_one; fi
 
 # ── (E) --path endpoints ──────────────────────────────────────────────────────────────────────────────────────────────
 echo "(E) C++ --path endpoints"
@@ -533,8 +579,9 @@ if ans f_objc objc callers s xml -- --callers=area; then
 fi
 if ans f_py1 py callers s xml -- --callers=draw_widget; then
     # a single definition with no caller: the root, no rows — read the table count only
-    [ "$( groups f_py1 )" = 0 ]; say $? "[N] f_py1: single definition, no <def> table" \
-        "[N] f_py1: <def> rows on a single definition"
+    # RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS): a single --callers definition is named by ONE <def> row, no member row
+    { [ "$( groups f_py1 )" = 1 ] && [ "$( members f_py1 )" = 0 ]; }; say $? "[N] f_py1: single definition, one <def> row" \
+        "[N] f_py1: groups=$( groups f_py1 ) declaration rows=$( members f_py1 ) on a single definition (want 1 and 0)"
 fi
 
 # ── (H) the definition-table cap: 20 same-named definitions, 12 callers — the table lists what the page names ─────────
@@ -632,10 +679,12 @@ fi
 if ans j_u2i u2 impact s xml -- --impact=scan_tok; then
     [ "$( groups j_u2i )" = 3 ]; say $? "[P] j_u2i: impact lists the three groups" "[P] j_u2i: <def> rows=$( groups j_u2i ), want 3"
 fi
-# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so the answer stays plain
+# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so no row carries of_def (BX1 FIX 7: it is still listed)
 mkdir -p "$DIR/u1/prog1" "$DIR/u1/prog2"; cp "$FIX/u2/prog1/util.c" "$DIR/u1/prog1/"; cp "$FIX/u2/prog2/main.c" "$DIR/u1/prog2/"
 FIXSAVE="$FIX"; FIX="$DIR"
-if ans j_u1 u1 callers s xml -- --callers=scan_tok; then plain C j_u1; fi
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans j_u1 u1 callers s xml -- --callers=scan_tok; then untiedSole C j_u1; fi   # RE-PIN BX1 FIX 7: listed, not silent
 FIX="$FIXSAVE"
 
 # ── (I) Q1 on --for: a body's <calls> row (and a hop's) whose edge is a resolver split arm carries prov="split", defined in the
@@ -688,7 +737,9 @@ d = open( sys.argv[ 1 ], encoding="utf-8", errors="replace" ).read()
 m = re.search( r"<bodies [^>]*pick=\"name\"[^>]*>(.*?)</bodies>", d, re.S )
 if not m: print( "none" ); sys.exit( 0 )
 rows = re.findall( r"<c n=\"Normalize\"[^>]*>", m.group( 1 ) )
-legend = d.split( "<sigs", 1 )[ 0 ]
+# AF1 (2026-11-18): the default --for answer is answer-first — its document legend trails the rows, inside the same answer. The
+# reading must ride a legend COMMENT of this answer (CDATA masked), wherever it sits; ahead of <sigs> was the legend-first shape.
+legend = "".join( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", d, flags = re.S ), re.S ) )
 print( len( rows ), sum( "prov=\"split\"" in r for r in rows ), int( "c prov=split" in legend or "prov=\"split\" on a <c> row" in legend ) )
 ' "$DIR/s_slot.out" )"
 if [ "$s_rc" -ne 0 ] || [ "$s_counts" = none ] || [ -z "$s_counts" ]; then
@@ -697,8 +748,8 @@ else
     read -r s_all s_split s_leg <<<"$s_counts"
     if [ "$s_all" -ge 1 ] && [ "$s_split" = "$s_all" ]; then ok "[S] the body slot labels its $s_all Normalize split-arm row(s) prov=\"split\""
     else no "[S] the body slot's Normalize rows: $s_split of $s_all carry prov=\"split\""; fi
-    if [ "$s_leg" = 1 ]; then ok "[S] the header defines the split reading the slot's rows use"
-    else no "[S] no split reading in the header of an answer that labels a split arm"; fi
+    if [ "$s_leg" = 1 ]; then ok "[S] the answer's legend defines the split reading the slot's rows use"
+    else no "[S] no split reading in the legend of an answer that labels a split arm"; fi
 fi
 
 # [S] MCP twin (CR pre-pass A): the MCP for tool's slot body labels the same two rows, and defines the reading once beside
@@ -720,16 +771,33 @@ else
     if [ "$m_all" -ge 1 ] && [ "$m_split" = "$m_all" ] && [ "$m_def" = 1 ]; then ok "[S] MCP for: the slot's $m_all Normalize rows carry prov=\"split\", the reading defined once"
     else no "[S] MCP for: $m_split of $m_all rows carry prov=\"split\", the reading defined $m_def time(s) (want all, once)"; fi
 fi
-# [S2] (CR pre-pass A): a spent soft target serves the hops cut marker and no row carries prov="split", so the present-only
-# split reading leaves the header with them (the lane cleared it on the spent-ceiling switch forbudget-soft retired); at 500
-# the hop row rides and so does the reading (the control).
+# [S2] (CR pre-pass A): the present-only split reading rides exactly when a split row does. TOKEN-BUDGET-MONOTONE (rule 4): a
+# budget sheds the unbudgeted answer, hops before rows, so a spent target (100) serves the hops cut marker while the split rows
+# outside <hops> (the answer's own rows) still ride, and the reading with them (it used to leave with the hops: no split row, no
+# reading); 500 is the control.
+# Train 1111i: on this fixture all of U's split rows ride <tail> and <hops>, and every budget under U's price (compact 1600 /
+# full 2716 est_tokens, measured on the composed binary) sheds both, so 100..1500 serve one shed answer with no split row. The
+# reading now leaves the legend with the last of them (forbudgetfit.h splitReadingShed; before, it rode rowless at 100 and 500,
+# which this arm caught). The control moves to 3000, a budget U fits whole: U's own rows and reading, byte for byte.
+# 0.7.0 cut (25b5a9eb7): U grew on this fixture — <hops> total 3 -> 6, shown 1 -> 4 — so its price is now compact 2167 /
+# full 3363 est_tokens (main 785143c89: 1644 / 2772), and 3000 no longer fits the full form whole: it shed the hops and
+# every split row with them, the very case @100 is for. The control moves to 4000, and stops trusting the number: its
+# premise (the unbudgeted U costs no more than the control budget) is measured first, and the control answer must be the
+# unbudgeted answer byte for byte, as this comment always said it was.
+S2_CONTROL=4000
 for lg in compact full; do
-    for n in 100 500; do
+    ( cd "$FIX/cpp" && "$BIN" . --no-cache --for="how does ManifestParser ParseDefault work" --legend=$lg ) >"$DIR/s2_u_$lg.out" 2>/dev/null
+    s2u="$( grep -oE 'est_tokens="[0-9]+"' "$DIR/s2_u_$lg.out" | head -1 | tr -dc '0-9' )"
+    if [ -z "$s2u" ] || [ "$s2u" -gt "$S2_CONTROL" ]; then no "[S2] $lg control premise: the unbudgeted answer costs est_tokens=${s2u:-<none>}, over the $S2_CONTROL control budget — move S2_CONTROL"
+    else ok "[S2] $lg control premise: the unbudgeted answer costs est_tokens=$s2u, within the $S2_CONTROL control budget"; fi
+    for n in 100 $S2_CONTROL; do
         ( cd "$FIX/cpp" && "$BIN" . --no-cache --for="how does ManifestParser ParseDefault work" --token-budget=$n --legend=$lg ) >"$DIR/s2_${n}_$lg.out" 2>/dev/null; s2_rc=$?
         s2="$( python3 -c '
 import re, sys
 d = open( sys.argv[ 1 ], encoding="utf-8", errors="replace" ).read()
-head = d.split( "<sigs", 1 )[ 0 ]
+# AF1-fix (2026-11-18): a budget keeps the default posture, ANSWER-FIRST under --legend=compact, so the legend is every comment of the
+# answer (CDATA masked) wherever it sits; ahead of <sigs> was the legend-first shape (--legend=full still is).
+head = "".join( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", d, flags = re.S ), re.S ) )
 clause = int( "c prov=split" in head or "prov=\"split\" on a <c> row" in head )
 rows = len( re.findall( r"<c [^>]*prov=\"split\"", d ) )
 marker = int( bool( re.search( r"<hops shown=\"0\"[^>]*capped=\"1\"", d ) ) )
@@ -737,11 +805,13 @@ print( rows, clause, marker )' "$DIR/s2_${n}_$lg.out" )"
         read -r r2 c2 k2 <<<"$s2"
         if [ "$s2_rc" -ne 0 ] || [ -z "$s2" ]; then no "[S2] $lg @$n: no answer (rc=$s2_rc)"
         elif [ "$n" = 100 ]; then
-            if [ "$k2" = 1 ] && [ "$r2" = 0 ] && [ "$c2" = 0 ]; then ok "[S2] $lg @100: the hops cut marker, no split row, no split reading"
-            else no "[S2] $lg @100: marker=$k2 split rows=$r2 split reading=$c2 (want 1 0 0)"; fi
+            if [ "$k2" = 1 ] && { { [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; } || { [ "$r2" = 0 ] && [ "$c2" = 0 ]; }; }; then ok "[S2] $lg @100: the hops cut marker; $r2 split row(s) left and the reading rides exactly with them ($c2)"
+            else no "[S2] $lg @100: marker=$k2 split rows=$r2 split reading=$c2 (want the marker, and the reading exactly when a split row rides)"; fi
         else
-            if [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; then ok "[S2] $lg @500 control: $r2 split row(s) and the reading ride"
-            else no "[S2] $lg @500 control: split rows=$r2 reading=$c2 (want >=1 and 1)"; fi
+            if [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; then ok "[S2] $lg @$n control: $r2 split row(s) and the reading ride"
+            else no "[S2] $lg @$n control: split rows=$r2 reading=$c2 (want >=1 and 1)"; fi
+            if cmp -s "$DIR/s2_${n}_$lg.out" "$DIR/s2_u_$lg.out"; then ok "[S2] $lg @$n control: byte-identical to the unbudgeted answer"
+            else no "[S2] $lg @$n control: differs from the unbudgeted answer (a budget U fits whole must not move a byte)"; fi
         fi
     done
 done

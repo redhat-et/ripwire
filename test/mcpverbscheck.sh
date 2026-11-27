@@ -34,6 +34,10 @@
 # Does NOT edit regression.sh.
 
 set -u
+# MR1 (src/mcpverbs.h forTaskText): MCP `for` serves its <sigs>/<tail> rows as text lines in one CDATA too (the CLI's ROWLINES +
+# RANKSEQ, lossless; test/mcpforrowscheck.sh pins it). This gate reads those rows as elements for another rule, so the line form is
+# off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"

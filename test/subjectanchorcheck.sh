@@ -3,9 +3,14 @@
 #   A1-A5  per language, a plain word beside an exact symbol stops being an anchor: the route prints dropped:, <callers> is back
 #   B      a route DECLINED for a word routes on the symbol
 #   C      a prose tail keeps the conceptual answer, byte for byte, and <callers by="subject"> rides on top
+#   SC     SUBJECT-CALLERS-NATURAL: a sentence naming one function and asking what depends on it gets its callers; the route and
+#          the rest are unchanged; no dependents cue (a lead, "defined", "reaches") reads as before; nor does a cue in another sense
+#          (callee shape, "API calls", "used to", negated) or a sentence naming two functions
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
 #   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
+#   FH     FRAME-HIGH-CONFIDENCE: high needs the anchor (or its file) at the head of the ranked rows; another head reads low and route=
+#          names it (CLI and MCP); a file subject and a conceptual route are unchanged
 #   F      FIX ROUND: F6 a declined route flips only where the body AND the callers print (one function, resolved anchor, body fits),
 #          F2 a namesake in ANY directory keeps the map, F1 the MCP `for` verb never trades its map, F4 a plain word never vouches
 #          for a spelled name, F10 an angle-bracketed owner is a name
@@ -13,6 +18,13 @@
 #          budgeted or candidates call never flips
 # Usage: bash test/subjectanchorcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/subjectanchorcheck.sh
 set -u
+# θ5 (src/forpages.h): this gate reads the FULL page-1 legend of a default --for answer (or pins its bytes/rows); the default's
+# core legend is pinned by test/corelegendcheck.sh, so the full legend is switched back on here.
+export RIPWIRE_NO_CORE_LEGEND=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -22,7 +34,9 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "subjectanchorcheck: BIN=$BIN"
-ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
+# --page-bytes=12000: the default page SPELLED, so page 1 never ends early (RT2 ES ends a default page 1 right after a
+# proven <callers by="subject"> block, which would read here as "the rest of the answer displaced"; forverbroutecheck owns ES)
+ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null ) </dev/null; }
 route(){ printf '%s' "$1" | python3 -c 'import re,sys; b=sys.stdin.read(); m=re.search(r"route=\"([^\"]*)\"",b); print(m.group(1) if m else "@@NONE")'; }
 has(){ case "$1" in *"$2"*) ok "$3";; *) no "$3 (missing: $2)";; esac; }
 hasnt(){ case "$1" in *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
@@ -148,6 +162,7 @@ hasnt "$A" 'by="subject"' "N2 test-only: a symbol only in tests lifts no callers
 A="$( ask "$PY" 'where is prepare_setup_platform new' )"
 has "$( route "$A" )" 'dropped: new(1-defs)' "N3 question: a plain-word anchor goes on a question too"
 A="$( ask "$PY" 'where prepare_setup_platform zznope sturdy' )"; hasnt "$A" 'by="subject"' "N3 question lead: no callers lifted"
+has "$A" '<ctx ' "N3 question lead: an answer printed (twin)"
 A="$( ask "$PY" 'path from first_caller to prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N4 graph form: no reading"
 hasnt "$A" 'by="subject"' "N4 graph form: no subject callers"
 A="$( ask "$PY" 'first_caller + prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N5 join of two symbols: no reading"
@@ -158,6 +173,85 @@ hasnt "$A" 'by="subject"' "N7 prose past the plain-word bound: no reading"
 A="$( ask "$PY" 'prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N8 bare symbol: nothing to drop"
 printf 'def lonely_function(x):\n    return x\n' > "$PY/app/lonely.py"
 A="$( ask "$PY" 'lonely_function zznope sturdy' )"; hasnt "$A" 'by="subject"' "N9 no callers: no element, never a bare total=0"
+# ── SUBJECT-CALLERS-NATURAL: a sentence that names ONE function and frames it gets that function's callers, route unchanged ──
+# the task frame (question leads, "I need to", change/add/affected/breaks/depends/calls/defined) is not counted as plain words
+nat(){ # $1 root $2 subject $3 caller row $4 label: callers ride, no flip, and the answer minus the block equals the no-hop answer
+    local A; A="$( ask "$1" "$2" )"
+    has "$A" '<callers by="subject"' "SC $4: callers ride by subject"
+    has "$( blk "$A" )" "$3" "SC $4: the caller row"
+    hasnt "$( route "$A" )" 'dropped:' "SC $4: the route is not flipped"
+    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null </dev/null )" <<'X'
+import re,sys
+a,b=sys.argv[1:3]
+m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
+a=re.sub(r'<callers by="subject".*?</callers>','',a,flags=re.S)
+ca=re.sub(r'<!--.*?-->','',m(a),flags=re.S); cb=re.sub(r'<!--.*?-->','',m(b),flags=re.S)
+sys.exit(0 if ca==cb and cb.strip() else 1)
+X
+    then ok "SC $4: the rest of the answer is byte-identical"; else no "SC $4: the block displaced something (or no answer)"; fi
+}
+NAT="$TMP/nat"; mkdir -p "$NAT/app"
+cat > "$NAT/app/setup.py" <<'X'
+def prepare_setup_platform(hass, name):
+    return name
+
+def first_caller(hass):
+    return prepare_setup_platform(hass, "a")
+X
+nat "$NAT" 'I want to add a new parameter to prepare_setup_platform; what is affected?' first_caller "py I want to add"
+nat "$NAT" 'I need to change how prepare_setup_platform works; what depends on it?' first_caller "py I need to change"
+nat "$NAT" 'Where is prepare_setup_platform defined and who calls it?' first_caller "py where defined, who calls"
+nat "$NAT" 'what calls prepare_setup_platform and would need updating if its signature grew?' first_caller "py what calls"
+# neighbour shapes: another language, the name not after the lead, a qualified spelling
+TSN="$TMP/tsn"; mkdir -p "$TSN/src"
+cat > "$TSN/src/transformer.ts" <<'X'
+export function transformNodes(nodes: number[]): number[] { return nodes; }
+export function runTransforms(n: number[]) { return transformNodes(n); }
+X
+nat "$TSN" 'adding an argument to transformNodes: which ones break?' runTransforms "ts name mid-sentence"
+nat "$GO" 'If I change proxy.NewProxier, what breaks?' createProxier "go qualified, conditional frame"
+nat "$GO" 'I want to pass a new parameter into proxy.NewProxier from the config; what needs to change?' createProxier "go prepositions are frame"
+nat "$TSN" 'adding an argument between emit and transformNodes: which functions are in the way?' runTransforms "ts between is frame"
+# no dependents cue: a sentence that does not ask who uses the function reads as before (a lead, defined, a value question)
+for q in 'how does prepare_setup_platform work?' 'where is prepare_setup_platform defined?' 'how prepare_setup_platform reaches first_caller' 'default prepare_setup_platform and first_caller for Go and Rust buffers'; do
+    A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC no cue ($q): no callers"; has "$A" '<ctx ' "SC no cue ($q): an answer printed (twin)"
+done
+# negative twins: plain words past the bound still refuse, a frame word never counts toward a name, no function no block
+A="$( ask "$NAT" 'I want prepare_setup_platform to log retry timing metrics somewhere useful please' )"
+hasnt "$A" 'by="subject"' "SC prose past the bound (frame aside): no callers"; has "$A" '<ctx ' "SC prose past the bound: an answer printed (twin)"
+A="$( ask "$NAT" 'I need to change how it works; what depends on it?' )"
+hasnt "$A" 'by="subject"' "SC frame words only, no name: no callers"; has "$A" '<ctx ' "SC frame words only: an answer printed (twin)"
+# SCN-FIX1 pins. Each cue alone (deleting it from the table turns its arm red), a capitalised cue on a non-descriptive sentence (the
+# table is read case-folded), and the plain-word bound from both sides (4 fires, 5 does not; the CodeRabbit cue-past-the-bound case)
+nat "$NAT" 'Adding a new keyword argument to prepare_setup_platform: what would I need to fix?' first_caller "py capitalised cue (Adding)"
+nat "$NAT" 'who uses prepare_setup_platform?' first_caller "py uses alone"
+nat "$NAT" 'where is prepare_setup_platform used today?' first_caller "py used alone"
+nat "$NAT" 'what depends on prepare_setup_platform today?' first_caller "py depends alone"
+nat "$NAT" 'what is affected if prepare_setup_platform gains a flag?' first_caller "py affected alone"
+nat "$NAT" 'if I modify prepare_setup_platform, what else?' first_caller "py modify alone"
+nat "$NAT" 'which code would need updating if prepare_setup_platform grows an argument?' first_caller "py updating alone"
+nat "$NAT" 'what broke after prepare_setup_platform moved?' first_caller "py broke alone"
+nat "$NAT" 'I need to change prepare_setup_platform to log retry timing metrics; what depends on it?' first_caller "py cue, 4 plain words (the bound)"
+A="$( ask "$NAT" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )"
+hasnt "$A" 'by="subject"' "SC cue, 5 plain words (past the bound): no callers"; has "$A" '<ctx ' "SC cue past the bound: an answer printed (twin)"
+# the cues added by SCN-FIX1, each with a twin in a sense that is not "who depends on it" (the function's own action)
+nat "$NAT" 'who invokes prepare_setup_platform?' first_caller "py invokes"
+nat "$NAT" 'who references prepare_setup_platform?' first_caller "py references"
+nat "$NAT" 'what would I have to touch to rename prepare_setup_platform?' first_caller "py rename"
+nat "$NAT" 'which tests exercise prepare_setup_platform?' first_caller "py tests exercise (plain callers)"
+nat "$NAT" 'who is using prepare_setup_platform?' first_caller "py is using"
+# no block: the callee shape (what the function itself does), a noun or purpose sense, a negated mention, two named functions
+printf 'def other_helper(hass):\n    return hass\n' > "$NAT/app/other.py"
+for q in 'what does prepare_setup_platform depend on?' 'what state does prepare_setup_platform modify?' \
+         'which functions does prepare_setup_platform use internally and what do they update?' 'where does prepare_setup_platform make API calls?' \
+         'what is prepare_setup_platform used to do, compared with captures?' 'I changed nothing in prepare_setup_platform; where is the 404 fallback decided?' \
+         'When prepare_setup_platform changes, who calls other_helper?' 'what does prepare_setup_platform invoke?' \
+         'which config keys does prepare_setup_platform reference?' 'how does prepare_setup_platform rename the field?' \
+         'which code paths does prepare_setup_platform exercise?' 'how would I build a platform using prepare_setup_platform here?'; do
+    A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC not a dependents sense ($q): no callers"; has "$A" '<ctx ' "SC not a dependents sense ($q): an answer printed (twin)"
+done
+A="$( ask "$GO" 'I want to pass a new parameter into proxy.NewProxier from createProxier; what needs to change?' )"
+hasnt "$A" 'by="subject"' "SC go two names in a sentence: no callers (no guess)"; has "$A" '<ctx ' "SC go two names: an answer printed (twin)"
 # two exact symbols: no ONE anchor, so no flip: the whole subject's route stands (both names anchored, and the word with them)
 A="$( ask "$PY" 'first_caller second_caller new' )"; R="$( route "$A" )"
 has "$R" 'first_caller(' "T two exact: first anchored"; has "$R" 'second_caller(' "T two exact: second anchored"; hasnt "$R" 'dropped:' "T two exact: nothing dropped (no set flip)"
@@ -183,6 +277,94 @@ A="$( ask "$PY" 'zznope sturdy words' )"; hasnt "$A" "$NOSRC" "H conceptual rout
 printf 'def plain_src(x):\n    return x\n' > "$PY/app/some_mod.py"
 A="$( ask "$PY" 'app/some_mod.py' )"; hasnt "$A" "$NOSRC" "H a source FILE subject is a source anchor"
 A="$( ask "$CX" 'src/registry.cpp' )"; hasnt "$A" "$NOSRC" "H a source FILE subject, cpp"
+# the MCP `for` verb, one tools/call (F1, FH)
+mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
+import json,subprocess,sys
+b,repo,q=sys.argv[1:4]
+req=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":repo,"task":q}}})+"\n"
+p=subprocess.run([b,"--mcp"],input=req.encode(),capture_output=True,timeout=300,cwd=repo)
+for l in p.stdout.decode('utf8','replace').splitlines():
+    try:d=json.loads(l)
+    except Exception:continue
+    if d.get("id")==1:
+        print("".join(x.get("text","") for x in d["result"]["content"]))
+X
+) ; }
+mkdir -p "$TMP/mcphome"
+# ── FRAME-HIGH-CONFIDENCE: high needs the anchor at the head of the ranked rows (src/subjectanchor.h routeAnchorHeadsRows) ──
+NOHEAD='anchor is not the ranked head'
+FH="$TMP/fh"; mkdir -p "$FH/pkg/futures" "$FH/ui" "$FH/cc"
+printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FH/pkg/futures/thread.py"
+printf 'class Icon:\n    def where(self, x):\n        return x\n' > "$FH/ui/dnd.py"
+printf 'def where(x):\n    return x\n\ndef on(x):\n    return x\n' > "$FH/ui/other.py"
+printf 'def icon_helper(x):\n    return x\n' > "$FH/ui/IconTools.py"
+# (a) the anchor heads the rows: high, no clause
+A="$( ask "$FH" 'where ThreadPoolExecutor is defined' )"
+has "$( route "$A" )" 'name-exact(ThreadPoolExecutor)' "FH(a) the route is name-exact on the anchor"
+if [ "$( conf "$A" )" = high ]; then ok "FH(a) anchor heads: high"; else no "FH(a) anchor heads: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(a) anchor heads: no clause"
+# (b) the anchor is present but another symbol heads (a plain word's namesake): not high, and route= says which row heads. A question lead
+# (`where`, ld-cpython-01's shape) no longer ranks beside a source syntax anchor (WH-WORD-GUARD, test/anchorhonestycheck.sh): its twin heads.
+# The namesake here is a route stopword that still ranks (`on`): a word that anchors would make its own file an anchor file
+A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined on' )"; R="$( route "$A" )"
+has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(b) the route is name-exact on the dotted anchor"
+if [ "$( conf "$A" )" = low ]; then ok "FH(b) another head: low"; else no "FH(b) another head: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is on in ui/other.py)" "FH(b) route= names the row that heads"
+A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+if [ "$( conf "$A" )" = high ]; then ok "FH(b) WH-WORD-GUARD twin: where ranks no longer, the anchor heads, high"; else no "FH(b) WH-WORD-GUARD twin: $( conf "$A" )"; fi
+hasnt "$A" "$NOHEAD" "FH(b) WH-WORD-GUARD twin: no clause"
+M="$( mcpfor "$FH" 'where pkg.futures.ThreadPoolExecutor is defined on' )"
+if [ "$( conf "$M" )" = low ]; then ok "FH(b) MCP twin: low"; else no "FH(b) MCP twin: $( conf "$M" )"; fi; has "$( route "$M" )" "$NOHEAD" "FH(b) MCP twin: the clause"
+# (b) sibling: C++, a qualified anchor beside a plain word that is a function elsewhere
+printf 'namespace app { struct WidgetBox { int size() const { return 1; } }; }\n' > "$FH/cc/widget.h"
+printf 'int where( int x ) { return x; }\n' > "$FH/cc/util.cpp"
+A="$( ask "$FH" 'where app::WidgetBox is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(app::WidgetBox)' "FH(b) C++ sibling: name-exact on the qualified anchor"
+if [ "$( conf "$A" )" = low ]; then ok "FH(b) C++ sibling: the free function where heads, low"; else no "FH(b) C++ sibling: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in cc/util.cpp)" "FH(b) C++ sibling: route= names the head"
+# a FILE subject anchors its file: a row in it heads, high stays (mf1-htop-03's shape)
+A="$( ask "$FH" 'IconTools.py' )"; has "$( route "$A" )" 'name-exact(IconTools.py)' "FH file subject: name-exact"
+if [ "$( conf "$A" )" = high ]; then ok "FH file subject: its own row heads, high"; else no "FH file subject: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH file subject: no clause"
+# (c) no anchor (a conceptual route): unchanged, no clause; the positive twin says the fixture can read high there
+A="$( ask "$FH" 'thread pool submit work' )"; R="$( route "$A" )"
+case "$R" in subtoken+body*) ok "FH(c) conceptual route";; *) no "FH(c) not conceptual: $R";; esac
+if [ "$( conf "$A" )" = high ]; then ok "FH(c) no anchor: high as before"; else no "FH(c) no anchor: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(c) no anchor: no clause"
+# (d) CR 4498011610: code above docs moves a Markdown head below the code rows, so the head the clause and the confidence read is the row printed as r=1
+r1(){ printf '%s' "$1" | python3 -c 'import re,sys; t=re.sub(r"<!--.*?-->","",sys.stdin.read(),flags=re.S); r=[d for d in re.findall(r"<d [^>]*>",t) if " r=\"1\"" in d]; print(("%s|%s" % (re.search(r" n=\"([^\"]*)\"",r[0]).group(1),re.search(r" p=\"([^\"]*)\"",r[0]).group(1))) if r else "@@NONE")'; }
+FD="$TMP/fhd"; mkdir -p "$FD/pkg/futures" "$FD/docs" "$FD/ui"
+printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FD/pkg/futures/thread.py"
+printf 'class Gadget:\n    def run(self):\n        return 1\n' > "$FD/ui/gadget.py"
+# the Markdown namesake is a route stopword that still ranks (`with`); a question lead (`where`) ranks no longer beside a source syntax
+# anchor (WH-WORD-GUARD), so it cannot score the Markdown rows first here
+printf '# with\n\n## with\n\nwith is with\n' > "$FD/docs/where.md"
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is defined with' )"; R="$( route "$A" )"
+has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(d) the route is name-exact on the dotted anchor"
+has "$A" 'docs_after_code=' "FH(d) premise: the Markdown rows scored first and the reorder moved them below the code"
+if [ "$( r1 "$A" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) the anchor is the row printed as r=1"; else no "FH(d) r=1 is $( r1 "$A" )"; fi
+hasnt "$R" "$NOHEAD" "FH(d) the printed head is the anchor: no clause naming a row that is not r=1"
+M="$( mcpfor "$FD" 'where pkg.futures.ThreadPoolExecutor is defined with' )"
+if [ "$( r1 "$M" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) MCP twin: the anchor is r=1"; else no "FH(d) MCP twin: r=1 is $( r1 "$M" )"; fi; hasnt "$( route "$M" )" "$NOHEAD" "FH(d) MCP twin: no clause"
+# twin: a question about docs keeps score order, the Markdown row IS r=1, and the clause names it
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is documented with' )"; R="$( route "$A" )"
+has "$R" "$NOHEAD (r=1 is with in docs/where.md)" "FH(d) twin: a docs question keeps the Markdown head, and the clause names that row"
+if [ "$( r1 "$A" )" = 'with|docs/where.md' ]; then ok "FH(d) twin: the named row is the printed r=1"; else no "FH(d) twin: r=1 is $( r1 "$A" )"; fi
+# (e) CR 4498011593: a dotted word that spells a symbol (`FooBar.py` = the method py of FooBar) is not a file subject because a file of that
+# spelling exists; its tests/FooBar.py is no anchor file, so the plain word's function heading the rows reads low
+FS="$TMP/fhs"; mkdir -p "$FS/src" "$FS/tests"
+printf 'class FooBar:\n    def py(self):\n        return 1\n' > "$FS/src/foo.py"
+printf 'def where(x):\n    return x\n' > "$FS/tests/FooBar.py"
+A="$( ask "$FS" 'where FooBar.py is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(FooBar.py)' "FH(e) the route is name-exact on the spelled symbol"
+if [ "$( conf "$A" )" = low ]; then ok "FH(e) a symbol spelling is not a file subject: the namesake file's row heads, low"; else no "FH(e) symbol spelling: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in tests/FooBar.py)" "FH(e) route= names the row that heads"
+# (f) CR nitpick on subjectanchorcheck: a file subject matches whole path segments, so IconTools.py is not notIconTools.py
+FB="$TMP/fhb"; mkdir -p "$FB/ui"
+printf 'def quiet_one(x):\n    return x\n' > "$FB/ui/IconTools.py"
+printf 'def where(x):\n    return x\n' > "$FB/ui/notIconTools.py"
+A="$( ask "$FB" 'where IconTools.py is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(IconTools.py)' "FH(f) the route is name-exact on the file subject"
+if [ "$( conf "$A" )" = low ]; then ok "FH(f) a row of notIconTools.py is not IconTools.py's: low"; else no "FH(f) path boundary: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in ui/notIconTools.py)" "FH(f) route= names the decoy row"
+
 # two exact on a route declined for a word: no ONE anchor, the map stands, the function's callers on top
 for i in 1 2 3 4 5; do printf 'struct W%s { int fresh2( int a ) { return a; } };\n' "$i" > "$CX/src/w$i.cpp"; done
 printf 'struct UrlThing { int a; };\nint segmentMaker( int a ) { return a; }\nint segUser() { return segmentMaker( 1 ); }\n' > "$CX/src/seg.cpp"
@@ -201,7 +383,12 @@ A="$( ask "$VN" 'BundledThing fresh parameter' )"; R="$( route "$A" )"
 has "$R" 'declined' "V .github first in path order: the declined route stands, the map is not given up"
 hasnt "$R" 'dropped:' "V .github first: no flip"
 has "$( blk "$A" )" 'bundledUser' "V .github first: the source def's callers ride on top, or the map stands"
-A="$( ask "$VN" 'BundledThing parameter' )"; has "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: no map to lose, and the CI anchor says so"
+# two words, already name-exact at base: the identifier has a source definition beside its CI copy, so the anchor is the source one
+# (ANCHOR-HONESTY R1b: a non-source tie never beats a source definition) and no false "no source definition" note fires
+A="$( ask "$VN" 'BundledThing parameter' )"
+hasnt "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: the source definition backs the anchor, no false note"
+has "$( route "$A" )" 'BundledThing(src/thing.ts)' "V two words: the anchor names the source file, not the CI copy"
+case "$A" in *'<b t="fn" l="1" p="src/thing.ts" n="BundledThing">'*) ok "V two words: the source body prints";; *) no "V two words: no source body";; esac
 A="$( ask "$VN" 'VendorOnlyThing' )"; if [ "$( conf "$A" )" = low ]; then ok "V vendored anchor: confidence low"; else no "V vendored anchor: $( conf "$A" )"; fi
 A="$( ask "$VN" 'VendorOnlyThing zznope sturdy' )"; hasnt "$A" 'by="subject"' "V vendored only: lifts nothing"
 
@@ -214,7 +401,7 @@ printf 'export function fresh(a: number) { return a; }\n' > "$FX/src/fresh.ts"
 A="$( ask "$FX" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
 has "$R" 'name-exact(SoloThing)' "F6 one function, body fits: the declined route flips to the symbol"
 has "$R" 'dropped:' "F6 flip: dropped words named"
-has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "F6 flip: the body is printed"
+has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "F6 flip: the body is printed"
 has "$( blk "$A" )" 'soloUser' "F6 flip: the callers are printed"
 hasnt "$A" 'body omitted' "F6 flip: no body omitted for budget"
 # F2: the class, not a path list. A namesake under ANY directory makes the name two functions: the map stays.
@@ -256,18 +443,6 @@ hasnt "$R" 'dropped:' "F3 a large qualified definition: no flip"
 hasnt "$A" 'body omitted (over budget)' "F3 a large qualified definition: the answer never claims a body it omits"
 has "$( blk "$A" )" 'callBig' "F3 a large qualified definition: its callers ride on the map"
 # F1: the MCP `for` verb serves signatures only, so it never trades a map for the symbol
-mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
-import json,subprocess,sys
-b,repo,q=sys.argv[1:4]
-req=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":repo,"task":q}}})+"\n"
-p=subprocess.run([b,"--mcp"],input=req.encode(),capture_output=True,timeout=300,cwd=repo)
-for l in p.stdout.decode('utf8','replace').splitlines():
-    try:d=json.loads(l)
-    except Exception:continue
-    if d.get("id")==1:
-        print("".join(x.get("text","") for x in d["result"]["content"]))
-X
-) ; }
 mkdir -p "$TMP/mcphome"
 M="$( mcpfor "$FX" 'SoloThing fresh parameter' )"; R="$( route "$M" )"
 hasnt "$R" 'dropped:' "F1 MCP: a declined route keeps its map"
@@ -406,7 +581,7 @@ WC="$( wfx ctl )"; printf 'export function SoloThing(a: number) { return a + 41;
 for q in "${WQ[@]}"; do
     A="$( ask "$WC" "$q" )"
     has "$( route "$A" )" 'name-exact(SoloThing)' "W control [$q]: flips to the symbol"
-    has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "W control [$q]: the body prints"
+    has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "W control [$q]: the body prints"
     has "$( blk "$A" )" 'soloUser' "W control [$q]: the callers print"
 done
 # MF2: the outcome, not a flag list. Every mode that prints no body, or no callers, keeps the map; the same call in the default mode flips.
@@ -416,7 +591,10 @@ A="$( mode --json )"
 case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json flipped to a signature row with no body";; *) ok "MF2 --json: no flip";; esac
 case "$A" in *'dropped:'*) no "MF2 --json names dropped words";; *) ok "MF2 --json: nothing dropped";; esac
 A="$( mode --detail=1 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=1: no flip (bodies, no callers hop)"
-A="$( mode --token-budget=2000 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --token-budget: no flip"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a --for budget no longer re-decides the route; the answer is the unbudgeted one (here it fits
+# 2000 whole, byte for byte), shed only past the target — so the budget keeps the default mode's flip, body and callers.
+U0="$( mode )" || no "MF2: the unbudgeted run exited $?"; A="$( mode --token-budget=2000 )" || no "MF2: the budgeted run exited $?"; has "$( route "$A" )" 'dropped:' "MF2 --token-budget: the default mode's route (flips)"
+if [ "$A" = "$U0" ]; then ok "MF2 --token-budget=2000: the unbudgeted answer byte for byte (it fits)"; else no "MF2 --token-budget=2000: differs from the unbudgeted answer"; fi
 # the file page (--limit/--offset) prints file rows, no body and no callers; an explicit --pack-budget-bytes is a body ceiling the
 # single-anchor allowance never sees (CodeRabbit #502). Each keeps the map; each arm reads a route first, so an empty answer is red.
 for fl in --limit=5 --offset=1 '--limit=5 --offset=0' --pack-budget-bytes=4000; do

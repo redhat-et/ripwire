@@ -16,7 +16,7 @@
 // dependencyDialect already groups languages by exactly that. Dependency RESOLUTION stays in
 // src/resolve.h and is untouched by this round.
 //
-// WHAT IS STILL IN C++, AND WHY IT CANNOT LEAVE. Tags-pass predicates never run here (stated in
+// WHAT IS STILL IN C++, AND WHY IT CANNOT LEAVE. Tags-pass predicates did not run before #355 here (stated in
 // queries/python/tags.scm, pinned by test/matchgrammarcheck.sh, and the reason `using namespace ns;` is
 // gated in ingest.cpp rather than excluded by a query). So every gate that needs to READ TEXT stays in
 // C++: which preprocessor directive a captured `preproc_call` argument belongs to, whether a callee is
@@ -186,7 +186,7 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
 //       gives all of them the same `source:` string, which is the whole capture; every other export_statement
 //       has no `source:` and is not matched by the query at all.
 //   call_expression — the CommonJS `require('x')` and the dynamic `import('x')`. A query cannot say "the
-//       callee's TEXT is require" (tags-pass predicates never run), so the three guards that keep an ordinary
+//       callee's TEXT is require" (tags-pass predicates did not run before #355), so the three guards that keep an ordinary
 //       call out of the dependency graph stay C++: jsModuleLoadTarget (src/ingest_relations.h), UNCHANGED by
 //       this round and shared with captureJsImportFacts, reads the callee text, the argument count and the
 //       string. The query only says where a candidate call is; the guards say whether it is a module load.
@@ -228,8 +228,44 @@ ImportSpec normaliseGoImport( TSNode declaration, std::string_view src )
     return out;
 }
 
+// ── DepDialect::Python ───────────────────────────────────────────────────────────────────────────────
+// The capture is an import_from_statement's `module_name:` (`pkg.mod`, `.`, `..rel`), or the FIRST `name:` of an
+// import_statement, which tree-sitter-python types as dotted_name OR aliased_import. For `import a.b as c` that span
+// reads `a.b as c`, a module no resolver can find, so the file lost its edge in --deps, --arch, cycles and the Rule 3
+// narrow (#478 gap 2). The Include target is the aliased_import's own `name:`; the alias `c` is the binds channel's
+// business (pythonImportBindOf below), not the dependency record's. Every other spelling is returned as captured,
+// byte for byte. A multi-clause `import a, b` still records only its first clause (the query's anchor), a disclosed floor.
+ImportSpec normalisePythonImport( TSNode directive, std::string_view raw, std::string_view src )
+{
+    if( kindIs( ts_node_type( directive ), "import_statement" ) )
+    {
+        const TSNode first = fieldChild( directive, NodeField::Name );
+        if( !ts_node_is_null( first ) && kindIs( ts_node_type( first ), "aliased_import" ) )
+        {
+            return { std::string( nodeTextOf( fieldChild( first, NodeField::Name ), src ) ) };
+        }
+    }
+    return { std::string( raw ) };
+}
+
+// ── DepDialect::CSharp ───────────────────────────────────────────────────────────────────────────────
+// Preserve the walk's target selection, including its known alias gap: with the pinned grammar,
+// `using X = Foo.Bar` has no `type` field, so the first matching child is X. Fixing that or emitting
+// alias bindings belongs to 2b, after the shared binds channel (2a). Namespaces remain deferred in resolve.h.
+ImportSpec normaliseCSharpImport( TSNode directive, std::string_view src )
+{
+    // Grammar-bump insurance: never taken on the pinned grammar (an alias directive has no `type` field), no arm pins it.
+    if( const TSNode aliasType = fieldChild( directive, NodeField::Type ); !ts_node_is_null( aliasType ) )
+    {
+        return { importSpecifierText( aliasType, src ) };
+    }
+    // One cursor scan, including comment-heavy directives (childwalkscalecheck B16).
+    const TSNode c = firstChildOfKind( directive, /*namedOnly=*/true, { "qualified_name", "identifier", "generic_name", "alias_qualified_name" } );
+    return { ts_node_is_null( c ) ? std::string {} : importSpecifierText( c, src ) };
+}
+
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
-// CFamily, Web, Go and Python are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
+// CFamily, Web, Go, Python and CSharp have moved over so far; every other arm returns an empty ImportSpec,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
 // `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
 // other dialect still to do — the same "one language at a time" landing the issue asks for.
@@ -240,7 +276,8 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
         case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
         case DepDialect::Web:     return normaliseWebImport( directive, raw, src );
         case DepDialect::Go:      return normaliseGoImport( directive, src );
-        case DepDialect::Python:  return { std::string( raw ) };   // preserve the first plain clause's written alias
+        case DepDialect::Python:  return normalisePythonImport( directive, raw, src );
+        case DepDialect::CSharp:  return normaliseCSharpImport( directive, src );
         default:                  return {};   // no other language captures @import.path yet
     }
 }
@@ -256,6 +293,7 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
         case DepDialect::Web:
         case DepDialect::Go:
         case DepDialect::Python:
+        case DepDialect::CSharp:
             return true;
         default:
             return false;
@@ -267,14 +305,14 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
 // specifier sits in the call's `arguments`.
 TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
 {
-    if( dialect == DepDialect::Go )
+    if( dialect == DepDialect::Go || dialect == DepDialect::CSharp )
     {
-        return pathNode;   // the Go capture IS the whole import_declaration
+        return pathNode;   // these captures ARE whole directives
     }
-    const TSNode parent = ts_node_parent( pathNode );
+    const TSNode parent = parentOf( pathNode );
     const bool hasParent = !ts_node_is_null( parent );
     ASSUME( hasParent, "a captured specifier is a string or path token, never the file root" );
-    const TSNode directive = kindIs( ts_node_type( parent ), "arguments" ) ? ts_node_parent( parent ) : parent;
+    const TSNode directive = kindIs( ts_node_type( parent ), "arguments" ) ? parentOf( parent ) : parent;
     const bool hasDirective = !ts_node_is_null( directive );
     ENSURES( hasDirective, "an `arguments` list always belongs to a call" );
     return directive;
@@ -303,8 +341,8 @@ struct CapturedImportBind
 inline bool pythonImportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
 {
     const bool   hasAlias = !ts_node_is_null( aliasNode );
-    const TSNode clause   = hasAlias ? ts_node_parent( namesNode ) : namesNode;
-    out.directive         = ts_node_parent( clause );
+    const TSNode clause   = hasAlias ? parentOf( namesNode ) : namesNode;
+    out.directive         = parentOf( clause );
     const bool   isFrom   = kindIs( ts_node_type( out.directive ), "import_from_statement" );
     const TSNode first    = fieldChild( out.directive, isFrom ? NodeField::ModuleName : NodeField::Name );
     if( nodeTextOf( first, src ).empty() )
@@ -332,10 +370,10 @@ inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_v
 {
     static constexpr std::string_view kStar = "*";
     const bool star      = kindIs( ts_node_type( namesNode ), "string" );
-    const bool namespc   = !star && kindIs( ts_node_type( ts_node_parent( namesNode ) ), "namespace_export" );
-    out.directive        = star ? ts_node_parent( namesNode )
-                         : namespc ? ts_node_parent( ts_node_parent( namesNode ) )
-                                   : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
+    const bool namespc   = !star && kindIs( ts_node_type( parentOf( namesNode ) ), "namespace_export" );
+    out.directive        = star ? parentOf( namesNode )
+                         : namespc ? parentOf( parentOf( namesNode ) )
+                                   : parentOf( parentOf( parentOf( namesNode ) ) );
     if( ts_node_is_null( out.directive ) || !kindIs( ts_node_type( out.directive ), "export_statement" )   // a capture the query did not
         || ( !star && !kindIs( ts_node_type( namesNode ), "identifier" ) ) )                                // shape this way is refused
     {
@@ -375,9 +413,9 @@ void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t f
     b.lang         = lang;
     b.kind         = c.kind;
     b.var.assign( c.bound );
-    b.typeName     = std::move( c.target );
-    b.importedName = std::move( c.importedName );
-    binds.push_back( std::move( b ) );
+    b.typeName     = c.target;
+    b.importedName = c.importedName;
+    binds.push_back( b );
 }
 
 // One captured `@import.path` → the Include record plus its ABS-3 import-role use-site ref, which is
@@ -442,7 +480,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
         r.startByte = ts_node_start_byte( directive );   // the DIRECTIVE, never its enclosing #if
         r.line      = ts_node_start_point( directive ).row + 1;
         r.role      = RefRole::Import;
-        r.name      = std::move( name );
+        r.name      = name;
         refs.push_back( std::move( r ) );
     }
     includes.push_back( { fileId, spec.isAngle, spec.lazyInClosure && reach.insideFn, false, ts_node_start_byte( directive ), false, spec.text } );

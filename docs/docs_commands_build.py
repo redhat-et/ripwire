@@ -673,19 +673,18 @@ def render_recall_pattern( captures, name ):
     w( '   an answer buried mid-file arrives at a small `--max-tokens`, and — while the served document' )
     w( '   SET stays fixed — a larger ceiling returns a strict superset of it; the `[sections: S of R' )
     w( '   selected (N in doc) … lines="…"; dropped_by_budget=D]` note names the ranges you actually got' )
-    w( '   and what the ceiling cost. A HEADLESS dump has no sections to rank, so it is cut front-first' )
-    w( '   and carries no such note.' )
+    w( '   and what the ceiling cost. A HEADLESS dump has no sections to rank, so a cut serves the best' )
+    w( '   query-term WINDOW of its share (the head when no window beats it) and carries no such note: its' )
+    w( '   separator line says `[truncated: K of N bytes; served bytes LO-HI, best query-term window]`' )
+    w( '   instead, LO-HI indexing the text recall served.' )
     w( '' )
     w( '   That per-document guarantee is not global: dump SEVERAL headed documents into the same' )
     w( '   scratch dir and a larger ceiling can admit another one, which re-divides the shared budget' )
     w( '   and can shrink an already-served document\'s own slice — `share_bytes=` in the header' )
     w( '   discloses exactly that redivision when it happens.' )
     w( '' )
-    w( '   Measured on a 73811-byte, 2001-line dump whose answer sat at line 1748: the headed copy' )
-    w( '   served exactly that answer at `--max-tokens=1000` (`lines="1748-1752"`, est_tokens=194),' )
-    w( '   while the headless copy of the same content withheld it at 1000, 2000, 4000, 8000 and 16000' )
-    w( '   and produced it only at 40000 — by which point the front-first cut had emitted the whole' )
-    w( '   file.' )
+    w( '   Measured on a 176077-byte, 2001-line headless dump whose answer sat at line 1748: the window' )
+    w( '   cut printed that answer at `--max-tokens=1000`, `2000`, `4000`, `8000`, `16000` and `40000`.' )
     w( '' )
     if sample:
         w( '**Try it**' )
@@ -701,6 +700,21 @@ def render_recall_pattern( captures, name ):
         w( '```' )
         w( '' )
     return out
+
+
+def recall_default_note( entry, sample ):
+    """The recorded --recall sample predates the current default when it served MORE documents than the
+    help text's own "default N" allows and named no --top-k: say so under it instead of leaving the
+    header's shown= beside a default it contradicts. Derived from the help text and the sample, so the
+    next capture taken with the current binary retires it with no edit."""
+    declared = re.search( r'default (\d+), not the general --top-k', entry[ 'text' ] )
+    shown    = re.search( r'\bshown=(\d+)', '\n'.join( sample[ 'body' ] ) )
+    if entry[ 'spec' ] != '--recall=TASK' or '--top-k' in sample[ 'cmd' ] or not declared or not shown:
+        return []
+    if int( shown.group( 1 ) ) <= int( declared.group( 1 ) ):
+        return []
+    return [ '_This recorded run served %s documents, from before the default became %s; a run with the current default serves at most %s._'
+             % ( shown.group( 1 ), declared.group( 1 ), declared.group( 1 ) ), '' ]
 
 
 def recall_pattern_if_due( spec, captures, name ):
@@ -801,6 +815,7 @@ def render( name, preamble, sections, captures, capturePath ):
                     w( line )
                 w( '```' )
                 w( '' )
+                out.extend( recall_default_note( entry, sample ) )
 
             shapers = shaped_by( entry, sections )
             if shapers:

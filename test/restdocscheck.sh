@@ -7,6 +7,10 @@
 #
 # Usage: test/restdocscheck.sh [BIN]    (BIN falls back to RIPWIRE_BIN, then build/ripwire)
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -462,5 +466,25 @@ j3="$( jfor "$JC" "how does frob widget work" full )"; rj3=$?
 arm "J3 nor does an index with no doc unit (no doc row to move)" sh -c '[ "$1" = 0 ] && case "$2" in *"<tail"*) case "$2" in *"$3"*) exit 1;; esac; exit 0;; esac; exit 1' _ "$rj3" "$j3" "$JCLAUSE"
 j4="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"'"$JX"'","task":"how does frob widget work"}}}' | "$BIN" --mcp 2>/dev/null | tail -1 )"; rj4=$?
 arm "J4 the MCP for twin carries the same clause" sh -c '[ "$1" = 0 ] && case "$2" in *"$3"*) exit 0;; esac; exit 1' _ "$rj4" "$j4" "$JCLAUSE"
+echo "K. G1: a blank or whitespace-only reST line is read without an unsigned wrap (ingest_rest.h isAdornmentLine, adornmentLength)"
+# `find_last_not_of( " \t" ) + 1` on a line with no other byte is npos + 1: a Release build reads the wrap as 0 and gets the right
+# answer, -fsanitize=integer aborts the run (llvm-project's docs killed the G1 build that way). K1 pins the answer on every build;
+# K2 is the sanitizer arm, only observable under asan/ripwire — the same probe as abicheck.sh's G1 wrap arm.
+KX="$TMP/kx"; mkdir -p "$KX/docs"
+# The reach: an adornment line (a transition) followed by a text line makes titleAt test the NEXT line as an overline title's
+# underline — an empty line and a whitespace-only one are both all-blank there (that is the llvm docs shape).
+printf 'Blank Lines\n===========\n\nprose qqblankword\n\n----------\nnot an overlined title\n\nmore prose\n\n~~~~~~~~~~\nnor this one\n   \n\nNext Title\n----------\n  \nend prose\n' >"$KX/docs/blank.rst"
+k1="$( LSAN_OPTIONS="${LSAN_OPTIONS:-suppressions=$ROOT/lsan_suppressions.txt}" "$BIN" "$KX" --no-cache 2>"$TMP/k.err" </dev/null )"; rk1=$?
+arm "K1 both titles around the blank and whitespace-only lines are units (Next Title scoped under Blank Lines)" \
+    sh -c '[ "$1" = 0 ] && case "$2" in *"n=\"Blank Lines\""*"n=\"Next Title\" sc=\"Blank Lines\""*) exit 0;; esac; exit 1' _ "$rk1" "$k1"
+KSAN=0; KINT=0
+ASAN_OPTIONS=help=1 "$BIN" --version 2>&1 | grep -q 'AddressSanitizer' && KSAN=1
+command -v nm >/dev/null 2>&1 && nm "$BIN" 2>/dev/null | grep -q '__ubsan_handle_implicit_conversion' && KINT=1
+if [ "$KSAN" = 1 ] && [ "$KINT" = 1 ]; then
+    arm "K2 G1: rc=0 and no sanitizer report over the blank lines ($( grep -m1 -oE '[^/]*\.h:[0-9]*:[0-9]*: runtime error: [^(]*' "$TMP/k.err" || echo 'no sanitizer line' ))" \
+        sh -c '[ "$1" = 0 ] && ! grep -qE "runtime error:|ERROR: (Address|Leak)Sanitizer|SUMMARY: [A-Za-z]+Sanitizer" "$2"' _ "$rk1" "$TMP/k.err"
+else
+    printf '  SKIP  K2 G1 wrap arm (needs an AddressSanitizer build with -fsanitize=integer: the wrap is only observable there — run with asan/ripwire)\n'
+fi
 
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }

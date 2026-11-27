@@ -74,9 +74,9 @@
 #   (S5) LIVE — the six converted emitters, exercised at a ~600-byte corpus path, must be xmllint-clean.
 #        A static gate proves the shape; this proves the fix. (test/det-gate.sh and test/xmlwellformed.sh
 #        carry the same width fixture for the determinism and G4 halves — see §B15.)
-#   (S6) THE COUNTS ARE ASSERTED — mentions / calls / string-interpolating sites / rows / width-form sites
-#        are pinned next to the table and re-derived every run, so no figure in this file is printed without
-#        being checked. The header's own count had already rotted by one before this arm existed.
+#   (S6) THE ENUMERATION IS LIVE — mentions / calls / string-interpolating sites / rows are re-derived every run,
+#        printed, and held to a floor and to sites <= calls, rows <= sites; width-form sites are
+#        0. Until 2026-11-12 the counts were pinned exactly, which re-pinned arithmetic (S1)/(S2) already check.
 #
 # Usage:  test/fixedbufsweep.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fixedbufsweep.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
@@ -99,7 +99,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 # ── (S1)+(S2)+(S3)+(S4): the static sweep ───────────────────────────────────────────────────────────────
 python3 - "$ROOT" <<'PY'
-import os, re, subprocess, sys
+import bisect, os, re, subprocess, sys
 
 ROOT = sys.argv[1]
 bad  = 0
@@ -130,8 +130,8 @@ TABLE = {
     # ForConfidence struct it fills — the MCP `for` twin serves confidence=/margin_pct= from the same
     # derivation now instead of omitting the routing gauge. The buffer, the format and the bound are
     # unchanged; only the file is.
-    ( "src/lexical.h", "attrBuf" ):  ( 1, "safe", "attrBuf[48]: ' confidence=\"%s\" margin_pct=\"%d\"' where %s is the two-value literal high|low and %d is a 0..100 percent — worst case ' confidence=\"high\" margin_pct=\"100\"' = 34 B against 47 usable + NUL, 13 B of margin. No user text can reach either interpoland." ),
-    ( "src/packtask.h", "tag" ):       ( 2, "safe", "tag[112], two sites: '<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"%s></bodies>' — %zu is a vector size (20 digits at absolute most), %d is 0|1, %s is the literal ' compress=\"1\"' or empty. Worst case 40 fixed + 20 + 1 + 13 = 74 B against 111 usable. The render-failed marker '<bodies shown=\"0\" total=\"%zu\" render_failed=\"1\"></bodies>' is 54 fixed + 20 = 74 B. Escaper irrelevant: no interpoland carries text." ),
+    ( "src/lexical.h", "attrBuf" ):  ( 2, "safe", "attrBuf[48] x2: ' confidence=\"%s\" margin_pct=\"%d\"' where %s is the two-value literal high|low and %d is a 0..100 percent — worst case ' confidence=\"high\" margin_pct=\"100\"' = 34 B against 47 usable + NUL, 13 B of margin; then (lane ROUTING) ' file_gap_pct=\"%d\"' over a 20..100 percent, worst case 20 B, appended to the string before the buffer is reused. No user text can reach any interpoland." ),
+    ( "src/packtask.h", "tag" ):       ( 1, "safe", "tag[144], ONE site (PB1, 2026-11-19: it was two; the render-failed branch is the survivor and gained a capped= field, widening the buffer 112 -> 144): '<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"%s></bodies>' — %zu is a vector size (20 digits at absolute most), %d is 0|1, %s is the literal ' compress=\"1\"' or empty. Worst case 40 fixed + 20 + 1 + 13 = 74 B against 111 usable. The render-failed marker '<bodies shown=\"0\" total=\"%zu\" render_failed=\"1\"></bodies>' is 54 fixed + 20 = 74 B. Escaper irrelevant: no interpoland carries text." ),
     ( "src/serialize.h", "open" ): ( 5, "safe", "open[112]: '<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>' — two sizes, a 0|1, and the same fixed compress literal. Worst case 33 fixed + 40 + 1 + 13 = 87 B against 111 usable. Same all-numeric/fixed-vocab class as its packtask.h sibling. lane/cutfix-bodies (2026-09-23) added two open[96]: the cut non-lens '<sigs shown=\"{}\" total=\"{}\" capped=\"1\">' (packSignatures) and the cut '<outline shown=\"{}\" total=\"{}\" capped=\"1\">' (packOutline) — 36 and 39 B of literal plus two std::size_t at 20 digits = 79 B worst case against 95 usable, all-numeric. Train 18 re-derived this row on the merged tree (4 on main, -1 for lane A's packSignatures open[80] now built by sigsOpenTag's nb[96], +2 for lane B's cuts = 5: the <sigs>, <bodies>, two <hops> and <outline> open tags)." ),
     # ── src/arch.h ───────────────────────────────────────────────────────────────────────────────────────
     ( "src/arch.h", "hex" ):           ( 1, "not-markup", "hex[17] in archWriteBaseline: '{:016x}' of ONE uint64 violation hash and no string argument — exactly 16 lowercase digits + NUL = 17 B, so it cannot truncate. Appended to the .ripwire_arch_baseline sidecar's bytes, which go to that file through pathguard::writeAllAndClose; never emitted as a document." ),
@@ -151,6 +151,7 @@ TABLE = {
     # NUMERIC_ONLY, for the arch.h `hex` reason: they have no pre-conversion printf format to derive a class from (the
     # reporters wrote through std::cerr until 2026-09-16, when they began formatting first so a notice is ONE write).
     ( "src/infra/diagnostics.cpp", "notice" ): ( 1, "not-markup", "notice[4096] in writeNotice: every reporter's whole notice — the assert, panic and thread-violation banners and the one-line degraded notice — interpolating the caller's expression text, file name, __PRETTY_FUNCTION__ and description, none escaped and none needing it, because the bytes go to stderr in one stdio call. A longer notice is cut by markTruncated and the cut is stated on the notice's own last line (test/diagnoticecheck.sh arm L)." ),
+    ( "src/infra/diagnostics.cpp", "key" ): ( 1, "not-markup", "key[256] (AdoptedSites::kSlotBytes) in siteAdopted (QD-BASE-CHILD): '{}:{}' of a __FILE__ literal and an int line, the lookup key for the once-per-site notices the base child already printed. Compared with strcmp against the adopted table and never emitted; a key that would not fit returns false before any compare (formatTo's count is checked against sizeof), so a cut key can never match a site." ),
     ( "src/infra/diagnostics.cpp", "marker" ): ( 1, "not-markup", "marker[96] in markTruncated: ' ... [notice truncated: kept {} of {} bytes]\\n' of TWO std::size_t (bytes kept, full length) and no string argument — 42 literal B + two 20-digit counts + NUL = 83 B against 96, so it cannot truncate; formatted twice through one lambda (sized with the largest K first, then the real K), which is one call site. Copied over the tail of notice[] on stderr; never a document." ),
     # Not markup: the cache-refusal detail goes to STDERR (noteCacheReject, lane windows-334), never into a document.
     ( "src/ingest_cache.h", "detail" ): ( 1, "not-markup", "detail[256] in noteCacheReject: ' (blob {} {}, this binary {}: {})' of one of the literals \"format\"/\"parser\", TWO std::uint32_t (<= 10 digits each) and one of six fixed cacheRejectCause literals (the longest 144 B) — at most 195 B + NUL, so it cannot truncate. Appended to a stderr cache notice, never a document." ),
@@ -166,7 +167,6 @@ TABLE = {
     ( "src/lexical.h", "db" ): ( 1, "safe", "db[200] in deriveForConfidence (T14, 2026-09-20, docs/research/adaptive-short-query.md): the homonym-pool decline clause appended to confidence='s note, ' [{} symbols share this exact name; the drop above is tie-break order among them, not relevance, so confidence stays low even though margin_pct is nonzero]', ONE interpoland (cut.positiveHits, a std::size_t: 20 digits worst case) — 153 B of literal + 20 digits = 173 B against 199 usable + NUL: 26 B of margin (widened from an as-written 176 whose margin was 2 B, per the house rule against tight margins). No string interpolation at all — positiveHits is a count, never caller text — so no escaper can sit on either side of the buffer." ),
     ( "src/verbs_for.h", "nb" ): ( 16, "safe",       "nb[160] x2: the mention/doc-mention/siblift/expand header notes. Every %s is the plural '' or 's'; everything else is %u. T14 (2026-09-20): +2 sites, the homonym-pool decline branch's own note in emitCandidates (nb[208], '<!-- adaptive: declined - {} symbols share this exact name; ... top-{} -->', two interpolands: ac.positiveHits a std::size_t at 20 digits worst case, topK an int at 11 digits worst case incl. sign — 138 B literal + 31 digits = 169 B against 207 usable + NUL, 38 B margin) and runForLens's twin (nb[200], the bracketed non-XML-comment spelling, 132 B literal + 31 digits = 163 B against 199 usable + NUL, 36 B margin). Neither interpoland is caller text; both are counts." ),
     ( "src/verbs_navigate.h", "pab" ): ( 1, "safe", "pab[kPageDisclosureCap = 224] in runVerify's pageTailOf (2026-09-24, cut-fix correctness: --verify emits the cap half only, never the paging quintet): ' shown=\"{}\" capped=\"{}\"' — one std::size_t (20 digits at absolute most) and a 0|1, no string: 20 B of literal + 21 = 41 B against 223 usable + NUL. No caller text reaches it, so no escaper can sit on either side of the buffer. A TABLE row and not NUMERIC_ONLY for arch.h hex[17]'s reason: the site is new, with no pre-conversion format to derive a class from." ),
-    ( "src/verbs_report.h", "exemptAttr" ): ( 1, "safe",       "exemptAttr[40]: ' exempt=\"%s\"' with groupExemptKind's fixed vocabulary (longest 'fixture' = 7 B, total 19 B)." ),
     ( "src/verbs_report.h", "hdr" ):    ( 1, "safe",       "hdr[768]: writeSkippedHeader's <skipped ...> root for runSkipped (§L1). 237 B of literal + FOURTEEN integer counters at 20 B worst case = 280 B, + ignore_mode's closed label (12 B, 'root-ignored'), + skippedHealthRootAttrs' three absent-at-zero integer counts under fixed names (' extent_suspect_files=\"N\"' 44 B + ' macro_blanked_files=\"N\"' 43 B + ' use_bounds_blanked_files=\"N\"' 48 B worst case), + nestAttr (the bounded buffer rowed above, 36 B worst case), + escAttr (§SEC1, its twin, 36 B worst case), + the compile-time literal ' rows_capped=\"1\"' or '' (16 B) = 752 B against 767 usable. No path, no name, nothing user-supplied reaches this buffer — every emitted path goes through escapeXml straight into the writer, outside it." ),
     ( "src/verbs_report.h", "nestAttr" ): ( 1, "safe",  "nestAttr[48]: ' nest_refused=\"%llu\"' — #157: one integer count of every pre-parse nesting guard's refusals (json/yaml/markdown/kotlin, not Kotlin alone), no string: 16 B of literal + 20 B worst-case digits = 36 B against 47 usable + NUL. Written only when the count is non-zero, and passed into runSkipped's hdr as a string_view of that bounded buffer." ),
     ( "src/verbs_report.h", "escAttr" ): ( 1, "safe",   "escAttr[48]: ' escaped_root=\"%llu\"' (§SEC1) — one integer count of the files the crawl refused because a symlink left the root, no string: 16 B of literal + 20 B worst-case digits = 36 B against 47 usable + NUL. nestAttr's exact twin above, same conditional write, same string_view hand-off into runSkipped's hdr. The PATHS of the refused files never touch this buffer — they go through escapeXml into the writer on the <f why=\"escaped-root\"/> rows, outside it." ),
@@ -184,13 +184,12 @@ TABLE = {
     ( "src/prcontext.h", "tail" ):     ( 1, "latent",     "tail[320]: truncated=\"%s\" is ESCAPE-THEN-SNPRINTF in shape, but the value is bounded — kPrTrims[].dropped is a const table (longest 48 B) plus ';budget-floor-exceeded' (22 B) plus ';est-unmeasured' (15 B), none of which escapes, and the last two CAN co-occur (a small --max-tokens puts even the unmeasured empty-body envelope over budget). Worst case 88 lit + 90 digits + 85 label = 263 B + NUL against 320: 56 B of margin. WAS tail[256] at 248 B — SEVEN bytes — and the review of #214 spent 15 of them on est-unmeasured, which is the 'one more attribute crosses it' this row used to warn about; the buffer moved in the same commit as the label. formatTo was never the thing saving it: it truncates silently and its return is not read here, so an overrun drops the closing quote of truncated=\" and ships a malformed root (a G4 breach with no diagnostic). A sixth trim level or one more label needs this recomputed again." ),
     # ── src/quality.h ────────────────────────────────────────────────────────────────────────────────────
     ( "src/quality.h", "tail" ):       ( 2, "not-markup", "tail[96] in shaKeyedCachePath: the qsnap/qheadsnap cache FILENAME; family + two hex digests + %016llx, all fixed-width. tail[64] in rootKeyedCachePath: the lean/rich + mcp cache FILENAME, a literal prefix (<= 12) + the 16-hex root key + the build-tagged suffix ('-rich-c<u32>p<u32>.bin', <= 32) — at most 60 B, and an EXPECTS states the bound. Neither is emitted." ),
-    ( "src/packtask.h", "bodylessAttr" ): ( 2, "safe", "bodylessAttr[40], TWO call sites, same shape: line 1253 in restatePackTaskBodiesWrapper (issue #60, integration/train-12); line 1758 in the bare-wrapper placeholder branch (t14-cleanup #6) — the section-dropped <bodies> tag that never calls packBodies, so it could not reuse serialize.h's emitter and needed its own copy of the same attribute. Both format ' bodyless=\"{}\"' — 12 B of literal (' bodyless=\"' 11 + '\"' 1) and ONE interpoland, a std::size_t: 20 digits at absolute most, so 32 B against 39 usable + NUL, 7 B of margin. No string interpolation at all — the count is a count, never caller text — so no escaper can sit on either side of the buffer. It is a TABLE row and not NUMERIC_ONLY for arch.h hex[17]'s reason: a buffer that never existed before the std::print conversion has no pre-conversion format to derive a class from. THE ORIGINAL BUFFER WAS DECLARED [32] WHEN IT ARRIVED, which is 1 B short of its own worst case (32 B of text needs 33 with the NUL); formatTo truncates rather than overruns, so the failure mode was a dropped closing quote and a document that stops being well-formed, not a memory breach. Widened to 40 in the same commit as that row; the second site was declared [160]/[40] correctly from the start." ),
+    ( "src/packtask.h", "bodylessAttr" ): ( 1, "safe", "bodylessAttr[40], ONE call site (PB1, 2026-11-19: it was two). The surviving site is the <bodies> open-tag restate (issue #60, integration/train-12). The second site, the bare-wrapper placeholder branch (t14-cleanup #6), is gone: PB1 emits that no-candidate tag as a fixed literal with no bodyless= at all, because a bundle with no body CANDIDATE has no bodyless owner to count. It formats ' bodyless=\"{}\"' — 12 B of literal (' bodyless=\"' 11 + '\"' 1) and ONE interpoland, a std::size_t: 20 digits at absolute most, so 32 B against 39 usable + NUL, 7 B of margin. No string interpolation at all — the count is a count, never caller text — so no escaper can sit on either side of the buffer. It is a TABLE row and not NUMERIC_ONLY for arch.h hex[17]'s reason: a buffer that never existed before the std::print conversion has no pre-conversion format to derive a class from. THE ORIGINAL BUFFER WAS DECLARED [32] WHEN IT ARRIVED, which is 1 B short of its own worst case (32 B of text needs 33 with the NUL); formatTo truncates rather than overruns, so the failure mode was a dropped closing quote and a document that stops being well-formed, not a memory breach. Widened to 40 in the same commit as that row; the second site was declared [160]/[40] correctly from the start." ),
     # ── src/serialize.h ──────────────────────────────────────────────────────────────────────────────────
     ( "src/serialize.h", "bodylessAttr" ): ( 1, "safe", "bodylessAttr[40] in packBodies (issue #60, integration/train-12): the exact twin of the packtask.h row above — same format, same 12 B of literal, one std::size_t (bodylessCount), 32 B against 39 usable + NUL, 7 B of margin, no string interpoland. Same [32]-on-arrival correction, widened in the same commit." ),
-    ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
-    ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
+    ( "src/serialize.h", "attr" ):     ( 1, "safe",       "attr[352]: the per-symbol --metrics run (rowMetricsAttrs). Widest 26 lit + 4x10 digits + 11 role + the BoundedAttrRun (<=255 since TANGLE-RULE; was <=191) = 332 B. GE-SERIALIZE round 2 (2026-11-22): was x2 with ambs(<=35) + kbuf(<=23) folded into the same buffer (326 B worst case, never truncated), now written as their own attributes beside it." ),
     ( "src/serialize.h", "tail" ):     ( 3, "safe",       "tail[192] x3: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B. The third (lane/lean-answers-068, sigRowTail's zero-elision branch) prints cxAttr/ccxAttr/inAttr pre-formatted, each omitted at 0 — never wider than the second." ),
-    ( "src/serialize.h", "hdr" ): ( 14, "safe",       "hdr[64] x2 (packBodies/packOutline) (14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
+    ( "src/serialize.h", "hdr" ): ( 15, "safe",       "hdr[64] x2 (packBodies/packOutline) (15: the tracked-build crawl fix — writeJsonMapHeader's `\"untracked_build\":{},` formatTo into the EXISTING hdr[256], one unsigned long long and no string argument, 19 B of literal + 20 digits + NUL = 40 B, the `\"escaped_root\":{},` twin beside it; 14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
     ( "src/serialize.h", "db" ):       ( 1, "safe",       "db[64 + kPageDisclosureCap]: <deps files=...> plus pageDisclosure's own capped buffer, sized against that cap by construction." ),
     ( "src/serialize.h", "hb" ): ( 4, "latent",     "hb[176]: <health .../> (4: arch-honest — the same line without ccd/acd/nccd/shape when no measured file is left: two integers, 64 B at most; masked_files= is appended through the writer, outside the buffer); shape= is a fixed vocabulary but acd/nccd are %.1f/%.2f on DOUBLES, formally unbounded. Realistic worst case 66 lit + 60 digits + 24 float + 10 shape = 160 B, ~16 B of margin. Truncation drops the '/>' and orphans the element." ),
     ( "src/serialize.h", "fit" ):      ( 1, "safe",       "fit[160]: the JSON max_tokens/fit_bytes twin; the %s is the literal ',\"over_ceiling\":true'." ),
@@ -218,7 +217,6 @@ TABLE = {
 # A NEW row here still fails the gate until someone adds it, which is the point. When you add one, say which
 # set it belongs in and why: a string argument makes it a TABLE row, with real prose.
 NUMERIC_ONLY = {
-    ( "src/serialize.h", "p" ): 2,
     ( "src/degradedscan.h", "hit.errRatio" ): 1,
     ( "src/dmm.h", "value" ): 1,
     ( "src/editcheck.h", "callersOpen" ): 1,
@@ -246,9 +244,8 @@ NUMERIC_ONLY = {
     ( "src/mcpverbs.h", "d" ): 1,
     ( "src/mcpverbs.h", "deg" ): 1,
     ( "src/naminglens.h", "idfBuf" ): 1,
-    ( "src/packtask.h", "b" ): 10,
+    ( "src/packtask.h", "b" ): 11,   # PB1 2026-11-19: +1, the ledger's "kept N of M, K as next=" bodies line
     ( "src/packtask.h", "callersAttr" ): 1,
-    ( "src/packtask.h", "farAttr" ): 1,
     ( "src/pageview.h", "buf" ): 6,
     ( "src/partition.h", "b" ): 1,
     ( "src/partition.h", "nb" ): 1,
@@ -257,11 +254,9 @@ NUMERIC_ONLY = {
     ( "src/quality.h", "hex" ): 6,  # cli-perf-068: blobShardHex and ackMapKey now share hex16 (one buffer for two)
     ( "src/quality.h", "name" ): 1,
     ( "src/recall.h", "scoreText" ): 1,
-    ( "src/serialize.h", "...)" ): 1,
     ( "src/serialize.h", "callsHdr" ): 2,
     ( "src/serialize.h", "cb" ): 1,
     ( "src/serialize.h", "ccxAttr" ): 1,   # lane/lean-answers-068: sigRowTail's zero elision, " ccx=\"{}\"" of one count (<= 17 B of 23)
-    ( "src/serialize.h", "changedAttr" ): 1,
     ( "src/serialize.h", "eAttr" ): 1,  # lane/for-spine-span-068 (2026-10-04): writeSigHeadWithEnd's ' e="{}"' — 5 B literal + one
                                         #   std::uint32_t (10 digits) = 15 B against 23 usable + NUL. A count, no %s, nothing escaped.
     ( "src/serialize.h", "cxAttr" ): 1,    # lane/lean-answers-068: the same, " cx=\"{}\"" (<= 16 B of 23)
@@ -292,12 +287,9 @@ NUMERIC_ONLY = {
                                       #   digits = 35 B). A count, no %s, nothing escaped.
                                       #   lane/hrr (2026-10-18): +1 in the same nb[96] — ' files_first="{}"' (15 B + 20
                                       #   digits = 35 B), the head round-robin's moved count. A count, no %s, nothing escaped.
-    ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
-    ( "src/serialize.h", "rootsAttr" ): 1,
     ( "src/serialize.h", "sh" ): 1,
-    ( "src/serialize.h", "skippedAttr" ): 1,
     ( "src/serialize.h", "vb" ): 1,
     ( "src/testmap.h", "buf" ): 6,
     ( "src/verbs_report.h", "buf" ): 2,
@@ -318,8 +310,46 @@ NUMERIC_ONLY = {
 STRLIT = re.compile( r'"(?:[^"\\]|\\.)*"' )
 CONV   = re.compile( r'%%|%[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|j|z|t|L)?(?P<conv>[diouxXeEfgGaAcsp])' )
 
+# ── which matches are CALLS: a call written inside a comment or a string literal is prose, not a call site,
+#    so rewording it must not move a row (CR721 r2; such lines still count in `mentions`). r2 decided that
+#    by "`//` earlier on the line", which skipped a REAL call after a block comment holding a URL
+#    (CR721 r3). So the file is lexed once into its comment and literal spans -- `//`, `/* */` across lines,
+#    "..." and '...' with escapes, R"d(...)d" raw strings -- and a match counts only when it starts in code.
+#    A pp-number (`200'000`, `0x6162'7365`, `0x1.a'bp0`, `0x1p-4`) is consumed whole -- periods and an exponent's
+#    sign included (CR721 r4) -- so a digit separator never opens a char literal.
+CALL    = re.compile( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(" )
+NONCODE = re.compile( r'(?P<lit>(?:\b(?:u8|[uUL])?R"(?P<d>[^()\\\s"]{0,16})\(.*?\)(?P=d)")'
+                      r'|"(?:[^"\\\n]|\\.)*"?|\'(?:[^\'\\\n]|\\.)*\'?)'
+                      r'|(?P<cmt>//[^\n]*|/\*.*?(?:\*/|\Z))'
+                      r'|\d(?:[eEpP][+-]|[\w.\'])*|[A-Za-z_]\w*', re.S )
+def code_calls( src ):
+    spans  = [ t.span() for t in NONCODE.finditer( src ) if t.group( "lit" ) is not None or t.group( "cmt" ) is not None ]
+    starts = [ a for a, _ in spans ]
+    for m in CALL.finditer( src ):
+        k = bisect.bisect_right( starts, m.start() ) - 1
+        if k >= 0 and m.start() < spans[k][1]: continue
+        yield m
+
+# control arm: the r3 false negative must count, and the comment/literal-only rows must stay dropped.
+CONTROL = [ ( 1, '/* https://example.org */ rw::formatTo(buf, "[REDACTED]", value);' ),
+            ( 1, 'const char* u = "http://x"; rw::formatTo(buf, "{}", u);' ),
+            ( 1, 'n = 200\'000; snprintf(buf, sizeof buf, "%d", n);' ),
+            ( 1, 'auto n = 0x1.a\'bp0; rw::formatTo(buf, "{}", value);' ),
+            ( 0, '// rw::formatTo(buf, "{}", value);' ),
+            ( 0, 'x = 1;  // see formatTo( buf ) below' ),
+            ( 0, '/* snprintf(buf, n, "%s", s) */' ),
+            ( 0, '/* a block comment\n   naming rw::formatTo( buf, ... ) on its second line */' ),
+            ( 0, 'puts( "call formatTo( buf ) yourself" );' ) ]
+missed = [ ( n, s ) for n, s in CONTROL if sum( 1 for _ in code_calls( s ) ) != n ]
+if missed:
+    for n, s in missed:
+        no_( "(S1) control: %r must count %d call(s) -- the comment/literal lexer misjudges it" % ( s, n ) )
+else:
+    ok_( "(S1) control: a call after a closed /* */ or a \"//\" in a literal counts; %d comment/literal-only lines count 0"
+         % sum( 1 for n, _ in CONTROL if n == 0 ) )
+
 # ── re-derive every snprintf call in src/, balanced-paren, so a call broken across lines is one call ─────
-files = subprocess.run( [ "git", "ls-files", "src/" ], cwd = ROOT, capture_output = True, text = True ).stdout.split()
+files =subprocess.run( [ "git", "ls-files", "src/" ], cwd = ROOT, capture_output = True, text = True ).stdout.split()
 found    = {}
 formsAt  = {}
 mentions = 0
@@ -328,7 +358,7 @@ for rel in files:
     if rel == "src/infra/emit.h": continue   # defines the primitives; its buf is a parameter, not a call site
     src = open( os.path.join( ROOT, rel ), "rb" ).read().decode( "utf-8", errors = "replace" )
     mentions += sum( 1 for L in src.split( "\n" ) if ( "snprintf" in L or "formatTo" in L ) )
-    for m in re.finditer( r"(?:rw::)?formatTo(?:Runtime)?\s*\(|snprintf\s*\(", src ):
+    for m in code_calls( src ):
         j = m.end() - 1
         depth = 0;  instr = False;  inchr = False;  esc = False
         while j < len( src ):
@@ -627,6 +657,14 @@ if not bad:
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
 EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr)
+#            2026-11-21 (GE-SERIALIZE): -5 calls/-5 sites/-5 rows (precAttr, rootsAttr, changedAttr, skippedAttr, fitAttr): the map
+#            header's coverage attributes are composed on std::string in renderMapCoverageAttrs / mapFitAttrs (serialize.h), no fixed buffer left.
+#            2026-11-12 (B43 PINNED-SELF-COUNTS): EXPECTED above is now HISTORY, not a pin -- it drifted on #619 (and on every
+#            lane that added one site) while (S1)/(S2) already held the member set both ways: every derived site is a TABLE
+#            row with its multiplicity, and no row is stale. An exact count on top of that only re-pins arithmetic. What (S1)/(S2)
+#            cannot see is the enumerator going BLIND (a regex that matches nothing passes both vacuously), so (S6) is a FLOOR
+#            below every count this file has ever recorded, plus the order invariants and widthforms == 0 (a claim, not a count).
+FLOOR = { "mentions": 150, "calls": 100, "sites": 100, "rows": 40 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
@@ -646,16 +684,25 @@ EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthfor
 #            snprintf CALL and no new fixed buffer entered src/ in this round beyond the one Phase 5 site already rowed.
 # 2026-09-03 (round 4 merge): +1 call/+1 mention — quality.h ack-ledger lockfile name "ripwire-sidecar-%016llx.lock" into a sized buffer, bounded hex (re-read, not just counted)
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
-drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
-if drift:
-    no_( "(S6) the pinned enumeration has drifted: %s — re-derive the TABLE against the new population, then "
-         "set EXPECTED in test/fixedbufsweep.sh to { %s }. Do not update the number without re-reading the "
-         "sites it counts: that is how this gate's own header rotted."
-         % ( ", ".join( "%s pinned %d, source has %d" % ( k, a, b ) for k, ( a, b ) in sorted( drift.items() ) ),
-             ", ".join( '"%s": %d' % ( k, derived[k] ) for k in sorted( derived ) ) ) )
+short    = { k: ( FLOOR[k], derived[k] ) for k in FLOOR if derived[k] < FLOOR[k] }
+# sites <= calls and rows <= sites hold by construction. calls <= mentions does NOT: a mention is a matching LINE and
+# two calls can share one (CodeRabbit #626 4548924327), so that pair is not an invariant and is not checked.
+ORDER    = ( ( "sites", "calls" ), ( "rows", "sites" ) )
+def order_violations( d ):
+    return [ "%s %d > %s %d" % ( a, d[a], b, d[b] ) for a, b in ORDER if d[a] > d[b] ]
+if order_violations( { "mentions": 200, "calls": 251, "sites": 251, "rows": 109 } ) or not order_violations( { "mentions": 9, "calls": 5, "sites": 6, "rows": 1 } ):
+    no_( "(S6) control: two calls on one mention line must pass the order check and sites > calls must fail it" )
+order    = order_violations( derived )
+if short or order or widths:
+    no_( "(S6) the enumeration looks blind or inconsistent: %s%s%s -- the sweep's regexes no longer see src/'s format "
+         "calls; fix the matcher before trusting (S1)/(S2)"
+         % ( ", ".join( "%s %d below the floor %d" % ( k, b, a ) for k, ( a, b ) in sorted( short.items() ) ),
+             ( "; " if short and order else "" ) + "; ".join( order ),
+             ( "; " if ( short or order ) else "" ) + ( "%d width/precision-form site(s), expected 0" % len( widths ) if widths else "" ) ) )
 else:
-    ok_( "(S6) the enumeration is ASSERTED and holds: %d mentions, %d calls, %d fixed-buffer sites "
-         "(%d via a width/precision form), %d table rows" % ( mentions, calls, sites, len( widths ), len( found ) ) )
+    ok_( "(S6) the enumeration is live: %d mentions >= %d, %d calls >= %d, %d fixed-buffer sites >= %d (0 via a width/precision "
+         "form), %d table rows >= %d; (S1)/(S2) hold the member set" % ( mentions, FLOOR["mentions"], calls, FLOOR["calls"],
+         sites, FLOOR["sites"], len( found ), FLOOR["rows"] ) )
 
 # (S1b) nothing is allowed to be classified 'breaching'
 breaching = [ k for k, v in TABLE.items() if v[1] == "breaching" ]

@@ -1,4 +1,5 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "memstats.h" // M0 MEM-STATS: rw::memstats::mib — the RIPWIRE_STATS family table's capacity in MiB
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
@@ -15,6 +16,8 @@
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
+#include "warmsnap_graph.h"        // the warm snapshot: the crawl replayed, the resolved graph loaded instead of rebuilt
+#include "lsp_langmap.h"          // task E: the --lsp client languageId→tag alias map — after model.h (langFromTag) and docparse.h (its read helper)
 #include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
@@ -54,6 +57,7 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
@@ -69,15 +73,18 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "pattern.h"               // R2: the pattern surface's compiler + disclosures (the matcher runs inside the ingest walk)
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "forpage.h"               // forWidenNext — the ONE spelling of the --for widening page
+#include "helpdeadline.h"          // --help-task --deadline-ms: answer in time or abstain while a detached child warms the index (#594)
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
 #include "gitstamp.h"
+#include "gitstampcache.h"   // C1-STAMP: the record behind a served --for's six small git answers
 #include "githarden.h"      // harvest 2026-09-09: the git-config trust boundary — one call in main(), before any thread              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
 #include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
+#include "qdbestsince.h"           // D4: quality::tangleBestSince — the --quality-delta ratchet's history reader
 #include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
 #include "layout.h"                // --layout=STRUCT — computed field offsets + tripwires + mirror drift
@@ -186,7 +193,7 @@ using rw::quality::deadCodeEligibleKind;
 // DIFFERENT versions (parserVerFor), so a single shared file forced a full re-parse + full rewrite on
 // every class switch (measured: plain-map-after --for 0.81 s vs 0.16 s warm). Suffixing the filename
 // with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
-// (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
+// (The MCP server shares the rich file: mcpindex.h mcpCachePath, ONE-PARSE.)
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
@@ -363,6 +370,39 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
     return out;
 }
 
+// PG1: a FILE:LINE:NAME token names ONE definition — the row it was pasted from (p="path:line" plus that row's n=). The shared resolver
+// reads LINE as a locator and drops it (graph.h splitQualifiedSpec), so the token resolved to EVERY same-named definition in that file:
+// following gson's `--expand=toString` unserved_next= chain re-served $Gson$Types.java's three toString bodies at each hop that named
+// one of them, and reached 19 of 33 definitions (CL1 READOUT §18). When exactly one match starts on LINE, the token keeps that one and
+// drops its same-file namesakes; matches in other files (a declaration's widened definitions) stay, and no match on LINE leaves the
+// list as the resolver gave it.
+inline std::vector<rw::NodeId> narrowToSelectorLine( const rw::IngestResult& ing, std::string_view selector, std::vector<rw::NodeId> matches )
+{
+    const std::size_t nameColon = selector.rfind( ':' );
+    if( matches.size() < 2 || nameColon == std::string_view::npos )
+    {
+        return matches;
+    }
+    const std::string_view located   = selector.substr( 0, nameColon );
+    const std::size_t      lineColon = located.rfind( ':' );
+    std::uint32_t          line      = 0;
+    if( lineColon == std::string_view::npos || lineColon + 1 == located.size()
+        || std::from_chars( located.data() + lineColon + 1, located.data() + located.size(), line ).ptr != located.data() + located.size() )
+    {
+        return matches;   // no `:LINE` before the name: a file:name or a canonical id, resolved as it was
+    }
+    const auto startsOnLine = [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].line == line; };
+    const auto at           = std::ranges::find_if( matches, startsOnLine );
+    if( at == matches.end() || std::any_of( at + 1, matches.end(), [ & ]( rw::NodeId id ) { return id != *at && startsOnLine( id ); } ) )
+    {
+        return matches;   // nothing, or two definitions, start on LINE: the line does not pick one
+    }
+    const rw::NodeId    keep = *at;
+    const std::uint32_t file = ing.symbols[keep].fileId;
+    std::erase_if( matches, [ & ]( rw::NodeId id ) { return id != keep && id < ing.symbols.size() && ing.symbols[id].fileId == file; } );
+    return matches;
+}
+
 // S3: how old is a cached clone, in whole days, from the cache DIR's mtime (no network call — the dir's
 // mtime is bumped by the clone itself and untouched by a read-only map, so it approximates "when we last
 // fetched"). Clamped to >= 0 so a clock skew (mtime in the future) never prints a negative age.
@@ -390,11 +430,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ripwire-remote-<hex>. Reuse if the dir
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : urlOrPath )
-    {
-        h = rw::hashutil::fnv1aAbsorb( h, c );
-    }
+    const std::uint64_t h = rw::hashutil::fnv1a64( urlOrPath, rw::hashutil::kFnv1aLegacySeed64 );   // stored: names the clone dir
     char tail[ 48 ];
     rw::formatTo( tail, sizeof( tail ), "/ripwire-remote-{:016x}", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
@@ -530,6 +566,9 @@ struct MainDispatch
     const GrepScanPhases*                 grepPhases = nullptr;   // §P4.1: prefetched grep scan (nullptr ⇒ compute inline)
     bool                                   valueUses  = false;     // card A1: the captureValueUses this run's ingest actually used, so the
                                                                     //   pre-apply preview re-parses its one spliced file the SAME way
+    int                                    pageRowCap = -1;        // PG1: the row cap the output ceiling chose for a --grep page (0 = every
+                                                                    //   row, --page-bytes=0); -1 = the verb's own default (runGrepServed)
+    std::size_t*                           pageRowsOut = nullptr;  // PG1: where --grep reports the rows its page window held (the longer list)
 };
 
 }   // namespace — part 1: the shared preamble helpers + the verb-dispatch context
@@ -545,11 +584,15 @@ struct MainDispatch
 #include "verbs_doctor.h"
 #include "verbs_lint.h"
 #include "verbs_for.h"
+#include "mappages.h"   // CL1: the flagless map, paged under the output ceiling (runDefaultMapPaged)
+#include "forlegendentries.h"   // LS1: verbs_for.h's --for legend clauses as legend-dictionary entries (legenddict::kForDocEntries)
 #include "verbs_navigate.h"
 #include "verbs_quality.h"
 #include "verbs_change.h"
 #include "verbs_report.h"
 #include "verbs_grep.h"
+#include "memceiling.h"          // the memory guard's allocator line (on by default; RIPWIRE_MEM_BUDGET_MB overrides it)
+#include "verbs_forroute.h"       // RT1: a --for question naming its symbol, answered by the verb it asks for (routed, disclosed)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -1650,6 +1693,135 @@ inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vect
     return u;
 }
 
+// expand-lean-k64's posture (runDefaultMap's leanEligible): a run whose root may name unserved definitions — no exact-name default,
+// and no caller-chosen map, payload or serialization (--top-k, --signatures, --pack-top-n, --query, --adaptive, --max-tokens, --json).
+inline bool expandLeanPostureOf( const rw::Config& cfg, bool exactNameExpandDefault ) noexcept
+{
+    return !exactNameExpandDefault && !cfg.topKExplicit && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
+        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json;
+}
+
+// PG1: whether expandOffsetCut may cut this page — the default size (not an explicit --pack-budget-bytes, --for, or --page-bytes=0:
+// `sizedByCaller`), the lean posture above, an --expand without --outline, and bodies that rendered.
+inline bool expandCutAllowed( const rw::Config& cfg, bool sizedByCaller, bool leanPosture, bool bodiesRendered ) noexcept
+{
+    return !sizedByCaller && leanPosture && cfg.outline.empty() && bodiesRendered;
+}
+
+// PG1: where a many-definition --expand page is cut so the chain can continue by offset — the index (in request order) of the first
+// requested definition this render did NOT serve, when more than kMaxUnservedSelectors went unserved (fewer: 0, the selector list in
+// unserved_next= names them all and stays the continuation). 0 also when the first definition itself went unserved (no prefix to
+// serve: the selector list is kept, disclosed by unserved_listed=). Every definition before the cut was served by this render.
+inline std::size_t expandOffsetCut( const rw::IngestResult& ing, const std::vector<rw::NodeId>& requested, const rw::EmittedBodies& record, bool mayCut )
+{
+    if( !mayCut )
+    {
+        return 0;   // an explicit size, the whole answer, an outline, a --top-k/--json posture, or no rendered bodies: never cut here
+    }
+    std::vector<rw::NodeId> served;
+    served.reserve( record.kept.size() );
+    for( const rw::EmittedBody& b : record.kept )
+    {
+        served.push_back( b.id );
+    }
+    std::sort( served.begin(), served.end() );
+    const auto  isUnserved = [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].kind != rw::SymKind::ModuleScope && !std::binary_search( served.begin(), served.end(), id ); };
+    const auto  first      = std::ranges::find_if( requested, isUnserved );
+    const auto  unserved   = std::size_t( std::ranges::count_if( requested, isUnserved ) );
+    return unserved > kMaxUnservedSelectors && first != requested.end() ? std::size_t( first - requested.begin() ) : 0;
+}
+
+// PG1: the root's unserved attributes when the page served a prefix (expandOffsetCut): unserved_total= the definitions after it, and
+// unserved_next= the same --expand tokens with --offset=K, K counted over the whole request (the earlier pages' offset included), plus
+// the crawl-scope flags, so the pasted call resolves the same list. That call serves the next prefix, or names its last <= 16 by
+// selector, so the chain serves every definition once.
+inline UnservedDefs unservedByOffset( const rw::IngestResult& ing, const std::vector<rw::NodeId>& rest, const rw::Config& cfg, std::size_t prefixEnd )
+{
+    const std::size_t nextOffset = std::size_t( std::max( cfg.pageOffset, 0 ) ) + prefixEnd;
+    UnservedDefs u;
+    u.unserved  = std::size_t( std::ranges::count_if( rest, [ & ]( rw::NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].kind != rw::SymKind::ModuleScope; } ) );
+    u.requested = u.unserved;
+    std::string tokens;
+    for( const std::string& tok : cfg.expand )
+    {
+        tokens += ( tokens.empty() ? "" : "," ) + tok;
+    }
+    u.attrs = " unserved_total=\"" + std::to_string( u.unserved ) + "\""
+            + rw::nextAttrXml( rw::nextFlag( "--expand=", tokens ) + " --offset=" + std::to_string( nextOffset ) + crawlScopeFlags( cfg ), "unserved_next" );
+    return u;
+}
+
+// PG1: `--expand=… --offset=K` continues a many-definition --expand (the offset form of unserved_next=, unservedByOffset): the first K
+// definitions the tokens resolve to, in resolution order, were served by the pages before this one, so they are dropped from the
+// request. false (after one stderr line) when K is at or past the last definition: there is nothing left to serve.
+inline bool skipExpandOffset( const rw::Config& cfg, std::vector<rw::NodeId>& nodes )
+{
+    if( cfg.expand.empty() || !cfg.forTask.empty() || cfg.pageOffset <= 0 )
+    {
+        return true;
+    }
+    const std::size_t k = std::size_t( cfg.pageOffset );
+    if( k >= nodes.size() )
+    {
+        rw::emitTo( stderr, "ripwire: --offset={} is past the {} definitions --expand names: nothing is left to serve\n", k, nodes.size() );
+        return false;
+    }
+    nodes.erase( nodes.begin(), nodes.begin() + std::ptrdiff_t( k ) );
+    return true;
+}
+
+// CL1 + PG1: how an --expand's <bodies> section is fitted to its page. Lifted out of runDefaultMap, whose cognitive complexity the
+// two decisions had pushed past its value on main; the packBodies call and its streams stay there, in the caller's `renderAt`.
+//   budget:    the body budget of the LAST render. It is the charged one, so every later packBodies of the run must reuse it.
+//   prefixEnd: PG1, > 0 when the page serves only the request's first prefixEnd definitions (the request is cut to them);
+//   rest:      the definitions past that cut, continued by --offset (unservedByOffset names them). Empty when prefixEnd is 0.
+struct ExpandBodiesFit
+{
+    std::size_t             budget    = 0;
+    std::size_t             prefixEnd = 0;
+    std::vector<rw::NodeId> rest;
+};
+
+// `renderAt( budget )` re-renders the <bodies> section of `nodes` at that budget, refills `record`, and returns the section. Nothing is
+// rendered when `nodes` is empty. `nodes` is the request the caller's render reads, so a PG1 cut shrinks it in place before the
+// re-render. CL1 (outputceiling.h): packBodies charges only body TEXT against the budget, so 33 short bodies whose <b> tags carry
+// ~1.3 KB of sibs=/inc= each printed 51,406 characters under a 16,000 B budget (GA1 DEV gson, --expand=toString). On a bare --expand
+// the render is re-run at a proportionally smaller budget until the section fits kExpandCeilingBodiesBytes; what no longer fits is
+// named by the root's unserved_next= (or a body's lines=/next=), so nothing is dropped silently. An explicit --pack-budget-bytes is the
+// caller's size and is rendered as asked.
+template< class RenderAt >
+ExpandBodiesFit fitExpandBodies( const rw::IngestResult& ing, const rw::Config& cfg, bool leanPosture, std::vector<rw::NodeId>& nodes,
+                                 const rw::EmittedBodies& record, RenderAt&& renderAt )
+{
+    // LT1: --page-bytes=0 is the whole answer — no body budget at all (SIZE_MAX: the unlimited budget packBodies already maps 0 to),
+    // and no refit below.
+    ExpandBodiesFit fit;
+    fit.budget = rw::wholeAnswerAsked( cfg ) ? SIZE_MAX : cfg.packBudgetBytes;
+    if( nodes.empty() )
+    {
+        return fit;
+    }
+    const rw::ChargedSection* bodies        = &renderAt( fit.budget );
+    const bool                sizedByCaller = cfg.packBudgetExplicit || !cfg.forTask.empty() || rw::wholeAnswerAsked( cfg );
+    for( int refit = 0; !sizedByCaller && refit < 6 && bodies->xml.size() > rw::kExpandCeilingBodiesBytes && fit.budget > rw::kExpandCeilingFloorBytes; ++refit )
+    {
+        fit.budget = std::max( rw::kExpandCeilingFloorBytes, fit.budget * rw::kExpandCeilingBodiesBytes / bodies->xml.size() * 9 / 10 );
+        bodies     = &renderAt( fit.budget );
+    }
+    // PG1: past kMaxUnservedSelectors, unserved_next='s selector list cannot name every unserved definition (CL1 §18: 14 of gson's
+    // 33 toString bodies were reached by no hop). The page is then re-rendered as the PREFIX of the request that this render
+    // already served whole-walk (the budget walks the request in order, so the same budget serves that prefix exactly), and the
+    // rest is one offset call away — expandOffsetCut above. Only on the default posture: an explicit size is the caller's.
+    fit.prefixEnd = expandOffsetCut( ing, nodes, record, expandCutAllowed( cfg, sizedByCaller, leanPosture, bodies->isRendered ) );
+    if( fit.prefixEnd > 0 )
+    {
+        fit.rest.assign( nodes.begin() + std::ptrdiff_t( fit.prefixEnd ), nodes.end() );
+        nodes.resize( fit.prefixEnd );
+        renderAt( fit.budget );
+    }
+    return fit;
+}
+
 // ── ONE PRICE FOR BOTH SERVING CANDIDATES (CodeRabbit, PR #215, second round on this comparison) ─────
 // THE DEFECT was not a missing addend, it was two counters. The bundle candidate was priced to the byte
 // (envelope, root attributes, the unproven residue, the map, the rendered <bodies>, the closing tag) by the
@@ -1899,7 +2071,7 @@ int runDefaultMap( const MainDispatch& d )
     }
     else
     {
-        rank = rw::takeRank( rankGraph( g ), rankDisclosure );
+        rank = rw::takeRank( rw::warmsnap::defaultRank( g ), rankDisclosure );   // the stored rank when the warm snapshot served this graph, else rankGraph( g )
     }
 
     // HITS: surface hubs (entrypoints/orchestrators) or authorities (core APIs) instead of the default
@@ -2259,7 +2431,7 @@ int runDefaultMap( const MainDispatch& d )
         const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
         htmlColor.atStamp  = htmlProv.atStamp;
         htmlColor.rootName = htmlProv.rootName;
-        htmlColor.version  = kRipwireVersion;
+        htmlColor.version  = kRipwireVersionLabel;
         writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg, /*codeFirstRows=*/isDefaultMapScope );   // R-R
         if( htmlOut != stdout )
         {
@@ -2302,7 +2474,7 @@ int runDefaultMap( const MainDispatch& d )
             // they mean there. On a bare name it is byte-identical to the resolveAllByName it replaces.
             const ExpandToken         et              = parseExpandToken( tok, "--expand" );
             std::size_t               tokUnprovenDefs = 0;
-            const std::vector<NodeId> matches         = resolveAllByNameQualified( ing, et.selector, &tokUnprovenDefs );
+            const std::vector<NodeId> matches         = narrowToSelectorLine( ing, et.selector, resolveAllByNameQualified( ing, et.selector, &tokUnprovenDefs ) );
             ctxUnprovenDefs += tokUnprovenDefs;
             if( matches.empty() )
             {
@@ -2332,6 +2504,10 @@ int runDefaultMap( const MainDispatch& d )
         {
             return 1; // refusal + empty stdout — nothing has been printed yet
         }
+    }
+    if( !skipExpandOffset( cfg, expandNodes ) )
+    {
+        return 1;   // PG1: an --offset past the last definition: refused on stderr, nothing printed
     }
 
     // V1 (routing note ugrep RN2, 2026-08-15): an EXACT-NAME --expand — one token that resolved to exactly
@@ -2376,7 +2552,7 @@ int runDefaultMap( const MainDispatch& d )
             }
 
             std::size_t               nmUnprovenDefs = 0;
-            const std::vector<NodeId> matches        = resolveAllByNameQualified( ing, nm, &nmUnprovenDefs );
+            const std::vector<NodeId> matches        = narrowToSelectorLine( ing, nm, resolveAllByNameQualified( ing, nm, &nmUnprovenDefs ) );   // PG1
             ctxUnprovenDefs += nmUnprovenDefs;   // H1: onto the <ctx> root --expand shares
             if( matches.empty() )
             {
@@ -2439,6 +2615,8 @@ int runDefaultMap( const MainDispatch& d )
             { packSource( f, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); },
             rw::kBytesPerTokenBody );
     }
+    // The --expand line ranges as every packBodies / estimateExpandBodyTokens call below takes them: null when no token named a range.
+    const HashMap<NodeId, LineRange>* expandRangesPtr = expandRanges.empty() ? nullptr : &expandRanges;
     // &calleeOrder (lane/cutfix-bodies): each body's <calls> listing is cut at 16 rows, and with no query in scope it
     // kept the sixteen LOWEST node ids — an arbitrary cut, however honestly disclosed. It is now ordered FEWEST
     // SAME-NAMED DEFINITIONS FIRST (serialize.h calleeNameSpecificity: why that and not the map's PageRank, with the
@@ -2446,15 +2624,24 @@ int runDefaultMap( const MainDispatch& d )
     // charged render and the emitted one cannot differ.
     const std::vector<float> calleeOrder = expandNodes.empty() ? std::vector<float>{} : rw::calleeNameSpecificity( ing );
     EmittedBodies            expandRecord;   // expand-lean-k64: which requested bodies the render above actually emitted
-    if( !expandNodes.empty() )
+    // expand-lean-k64's posture (leanEligible below): the runs whose root names unserved definitions — and so the only ones PG1 may cut.
+    const bool expandLeanPosture = expandLeanPostureOf( cfg, exactNameExpandDefault );
+    // CL1 + PG1 (fitExpandBodies): the render below is re-run until the <bodies> section fits its page, and a many-definition request
+    // may be cut to the prefix it served — expandNodes then holds that prefix and expandRest the definitions continued by --offset.
+    const auto renderBodiesAt = [ & ]( std::size_t budget ) -> const rw::ChargedSection&
     {
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
-              packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/&expandRecord,
-                          /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
-            rw::kBytesPerTokenBody );
-    }
+        { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
+          packBodies( f, ing, expandNodes, budget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+                      expandRangesPtr, d.notesPtr, /*outEmitted=*/&expandRecord,
+                      /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
+        rw::kBytesPerTokenBody );
+        return bodiesSection;
+    };
+    ExpandBodiesFit           expandFit       = fitExpandBodies( ing, cfg, expandLeanPosture, expandNodes, expandRecord, renderBodiesAt );
+    const std::size_t         expandBudget    = expandFit.budget;      // the charged render's budget: the emissions below reuse it
+    const std::size_t         expandPrefixEnd = expandFit.prefixEnd;   // PG1: > 0 when this page serves that prefix of the request only
+    const std::vector<NodeId> expandRest      = std::move( expandFit.rest );
     std::vector<NodeId> outlineShown;   // expand-lean-k64: the outlines the render below emitted
     if( !outlineNodes.empty() )
     {
@@ -2475,26 +2662,21 @@ int runDefaultMap( const MainDispatch& d )
     // posture rides a map there).
     std::string ctxLeanAttr = exactNameExpandDefault ? std::string( " topk_default=\"0\"" ) : std::string();
     std::string ctxUnservedAttr;
-    const bool  leanEligible = !exactNameExpandDefault && !cfg.topKExplicit && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
-        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json
+    const bool  leanEligible = expandLeanPosture
         && ( ( !cfg.expand.empty() && cfg.outline.empty() && !expandNodes.empty() && bodiesSection.isRendered )
              || ( cfg.outline.size() == 1 && cfg.expand.empty() && !outlineNodes.empty() && outlineSection.isRendered ) );
     if( leanEligible )
     {
-        std::vector<NodeId> served;
-        if( cfg.expand.empty() )
+        // What the render served: an --outline's shown outlines, or an --expand's kept bodies. leanEligible admits one verb only, and
+        // the other's list is then empty (no outline rendered beside an --expand; no body beside an --outline), so both are appended.
+        std::vector<NodeId> served = outlineShown;
+        for( const EmittedBody& b : expandRecord.kept )
         {
-            served = outlineShown;
+            served.push_back( b.id );
         }
-        else
-        {
-            for( const EmittedBody& b : expandRecord.kept )
-            {
-                served.push_back( b.id );
-            }
-        }
-        const UnservedDefs un = unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
-                                                cfg.expand.empty() ? "--outline" : "--expand", mapRootArg );
+        const UnservedDefs un = expandPrefixEnd > 0 ? unservedByOffset( ing, expandRest, cfg, expandPrefixEnd )
+                                                    : unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
+                                                                      cfg.expand.empty() ? "--outline" : "--expand", mapRootArg );
         if( un.requested > 0 )
         {
             mapTopK      = 0;
@@ -2508,8 +2690,8 @@ int runDefaultMap( const MainDispatch& d )
     // charge entirely, which is the defect this whole item is about.
     const std::size_t payloadTokens = sigsSection.tokens + srcSection.tokens + outlineSection.tokens
         + ( ( !expandNodes.empty() && !bodiesSection.isRendered )
-                ? estimateExpandBodyTokens( ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress,
-                                            expandRanges.empty() ? nullptr : &expandRanges )
+                ? estimateExpandBodyTokens( ing, expandNodes, expandBudget, g.outOff, g.outTargets, cfg.compress,
+                                            expandRangesPtr )
                 : bodiesSection.tokens )
         + ( ctxUnprovenBytes > 0 ? rw::tokensForEmittedBytes( ctxUnprovenBytes, rw::kBytesPerTokenDefault ) : 0 );   // H1: charged at the markup rate
     // A requested section whose chargeSection degraded (its sink cleared isRendered) streams uncharged, or is priced by the
@@ -2597,7 +2779,9 @@ int runDefaultMap( const MainDispatch& d )
     const bool expandAllModuleScope = !expandNodes.empty()
         && std::all_of( expandNodes.begin(), expandNodes.end(),
                         [ & ]( rw::NodeId n ) { return n < ing.symbols.size() && ing.symbols[ n ].kind == rw::SymKind::ModuleScope; } );
-    if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered, expandAllModuleScope ) )
+    // PG1: a page cut to a prefix (expandPrefixEnd) stays a bundle: the whole-file form names no unserved definitions, and its files
+    // would also carry same-named definitions past the cut that the offset chain serves later.
+    if( expandPrefixEnd == 0 && expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered, expandAllModuleScope ) )
     {
         // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
         // + the pre-rendered <bodies> + "</ctx>". Rendering-and-measuring beats arithmetic here: the map's
@@ -2636,7 +2820,7 @@ int runDefaultMap( const MainDispatch& d )
         // the full dialect's own comparison would serve the file, the default's bundle root carries next= naming the call
         // that serves it; its bytes are priced into the bundle before the choice (it rides only if the bundle wins).
         std::string wholeFileNext;
-        if( cfg.legend == "compact" && !cfg.json && chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, cfg.packBudgetBytes ).serveWholeFile )
+        if( cfg.legend == "compact" && !cfg.json && chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, expandBudget ).serveWholeFile )
         {
             std::string expandArg;
             for( const std::string& e : cfg.expand )
@@ -2666,7 +2850,7 @@ int runDefaultMap( const MainDispatch& d )
             bundleDoc.compactDeltaBytes = deltaOf( bundleRoot + ctxUnprovenLegend + bodiesSection.xml + mapText + "</ctx>" );
             fileDoc.compactDeltaBytes   = deltaOf( fileRoot + ctxUnprovenLegend + std::string( kExpandWholeFileLegend ) + wholeFile.xml + "</ctx>" );
         }
-        ExpandServeChoice choice = chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, cfg.packBudgetBytes );
+        ExpandServeChoice choice = chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, expandBudget );
         serveWholeFile = choice.serveWholeFile;
         ctxOpenStr     = std::move( choice.ctxOpen );
         if( !serveWholeFile && !wholeFileNext.empty() )
@@ -2832,8 +3016,8 @@ int runDefaultMap( const MainDispatch& d )
         // not as the literal source token, for that same reason (the count is a naive grep over this file).
         if( !expandNodes.empty() && noteAppliesToBundle )   // !serveWholeFile is this whole branch's precondition (see the if above)
         {
-            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                                                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+                                                           expandRangesPtr, d.notesPtr, /*outEmitted=*/nullptr,
                                                            /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );
             bodiesEmittedEarly = true;
         }
@@ -2906,8 +3090,8 @@ int runDefaultMap( const MainDispatch& d )
     }
     if( !expandNodes.empty() && !serveWholeFile && !bodiesEmittedEarly )   // #289: already served ahead of the map below
     {
-        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                                                       expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+                                                       expandRangesPtr, d.notesPtr, /*outEmitted=*/nullptr,
                                                        /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }
     if( !outlineNodes.empty() )
@@ -3129,6 +3313,59 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     return prec;
 }
 
+// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only), or --whereis
+// (WHEREIS-NO-GRAPH: the ingest and git, test/whereisnographcheck.sh), and nothing
+// that runs between the graph build and dispatch reads the graph: --pin-census writes g.pinCensus; --metrics, --for and
+// --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
+// those keeps the build, so a combination answers exactly as before. Everything else that outranks the three is a verb
+// row above them in the precedence table, so it would have been the winner.
+// The graph for a run with a warm snapshot armed: the stored one when every guard in warmsnap.h holds, else a build whose
+// outcome becomes the next run's stored one.
+static rw::Graph graphFromWarmSnapshot( rw::warmsnap::Session& snap, const rw::IngestResult& ing )
+{
+    if( std::optional<rw::Graph> stored = rw::warmsnap::readGraph( snap, ing ) )
+    {
+        rw::memstats::mark( "graph-end" );   // the same reading a build ends on, so a stats consumer always finds its line
+        return std::move( *stored );
+    }
+    return rw::warmsnap::buildGraphRecorded( snap, ing );
+}
+
+// Write what this run learned, and — under RIPWIRE_SNAPSHOT_STATS — say which stages it did not repeat. stderr only,
+// env-gated, and its own variable: RIPWIRE_CACHE_STATS consumers compare that stream between cached and uncached runs.
+static void finishWarmSnapshot( rw::warmsnap::Session& snap )
+{
+    if( !snap.on() )
+    {
+        return;
+    }
+    rw::warmsnap::saveSnapshot( snap );
+    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the file's bytes and this run's sections are not read again: give them back
+    std::string().swap( snap.file );
+    std::string().swap( snap.treeOut );
+    std::string().swap( snap.modelOut );
+    std::string().swap( snap.graphOut );
+    if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
+    {
+        // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={}\n",
+                    snap.treeReplayed ? "replayed" : "walked", snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built",
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ],
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ] );
+    }
+}
+
+bool graphUnreadByWinner( const rw::Config& c, const char* winner )
+{
+    // WHEREIS-NO-GRAPH: --whereis joins them — runCrossRef's arm reads d.ing (seed, def sites, near-miss), the redaction
+    // tally and the repo's refs (crossref::computeWhereis), never d.g. Its MCP twin answers from getIndex(), not from here.
+    const bool archWins = winner != nullptr
+                          && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 || std::strcmp( winner, "--whereis" ) == 0 );
+    const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
+                                    || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
+    return archWins && !modifierReadsGraph;
+}
+
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
 {
     if( prec.ignored.empty() )
@@ -3240,6 +3477,7 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
 inline constexpr std::string_view kJsonVerbs[] =
 {
     "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics", "--defs",
+    "--flags",        // the gate rows, Bash env reads (form/colon/default) included — a CI contract check's input
     "--plan-lanes",   // JSON-NATIVE: emits JSON with or without the flag, and says so (the redundancy note in main)
 };
 
@@ -3548,17 +3786,9 @@ inline bool isJsonShapeModifier( std::string_view flag ) noexcept
     return std::ranges::find( kJsonShapeModifiers, flag ) != std::end( kJsonShapeModifiers );
 }
 
-int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+// The --help-task document for one decided route — the classifier's answer, or the deadline's abstention (#594).
+std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRouteResult& route )
 {
-    const std::string stamp = rw::gitstamp::stampAt( root );
-    const bool        git   = !stamp.empty();
-    const bool        dirty = stamp.ends_with( "+dirty" );
-    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
-    // asserted here: the router composes the directory scope only on a binary that has the row for it.
-    rw::taskroute::RouterCaps caps;
-    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
-    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
-
     std::vector<char> esc;
     const auto ex = [&]( std::string_view s ) { return std::string( rw::escapeXml( s, esc ) ); };
     // THE LEGEND. Until 2026-09-13 this document had none in the default dialect: every attribute a reader
@@ -3566,7 +3796,10 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     // place any of them was explained. One line, every attribute, no flag spelled (a literal double hyphen
     // is ill-formed inside an XML comment — G4).
     std::string out = "<!-- ripwire help-task: one task in, ONE safe command out, or an honest abstention. "
-                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other; "
+                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other, except that a "
+                      "recommend standing on a plain word the task names only after of reads confidence=low; an abstain "
+                      "names its next step: next= the ranked search over the same task text, or reason=system-event "
+                      "when the text is a harness report rather than a task; "
                       "score= is the winning card's evidence total and margin= its lead over the runner-up "
                       "(100/100 on a structural route, one the shipped parser itself accepts). <facts> is the "
                       "repository evidence the decision read: git= dirty= a git repo and an uncommitted diff, "
@@ -3581,9 +3814,18 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     out += "<task-route status=\"";
     out += rw::taskroute::statusName( route.status );
     out += "\" confidence=\"";
-    out += route.status == rw::taskroute::RouteStatus::Recommend ? "high" :
+    out += route.status == rw::taskroute::RouteStatus::Recommend ? ( route.weakOfSlot ? "low" : "high" ) :
            route.status == rw::taskroute::RouteStatus::Ambiguous ? "low" : "none";
-    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\">";
+    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\"";
+    // HELP-TASK-ROUTE (a), audit-verify 2026-11-11: an abstain used to end the document with nothing to do next (hono `how
+    // does hono route a request to a handler`: status="abstain", no next step). The ranked --for search answers ANY task
+    // text, so it is always an honest next step; a harness event is not a task, and says so instead.
+    if( route.status == rw::taskroute::RouteStatus::Abstain )
+    {
+        out += rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) ? std::string( " reason=\"system-event\"" )
+                                                                  : rw::nextAttrXml( rw::nextFlag( "--for=", cfg.helpTask ) );
+    }
+    out += ">";
     out += "<facts git=\"" + std::to_string( int( route.facts.git ) ) + "\" dirty=\"" + std::to_string( int( route.facts.dirty ) );
     out += "\" trace=\"" + std::to_string( int( route.facts.trace ) ) + "\" resolved_symbols=\"";
     out += std::to_string( route.facts.resolvedSymbols.size() ) + "\"/>";
@@ -3595,13 +3837,26 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (as of
         // 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
         // long task is pasted in full rather than truncated or dropped.
-        const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
-                                                   std::size( rw::taskroute::kForShapedIntents ) );
+        const bool widens = rw::isOneOf( choice.id, rw::taskroute::kForShapedIntents );
         out += rw::nextAttrXml( widens ? rw::forWidenNext( cfg.helpTask ) : std::string() );
         out += "><run>" + ex( choice.command ) + "</run></choice>";
     }
     out += "</task-route>\n";
-    std::fputs( out.c_str(), stdout );
+    return out;
+}
+
+int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+{
+    const std::string stamp = rw::gitstamp::stampAt( root );
+    const bool        git   = !stamp.empty();
+    const bool        dirty = stamp.ends_with( "+dirty" );
+    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
+    // asserted here: the router composes the directory scope only on a binary that has the row for it.
+    rw::taskroute::RouterCaps caps;
+    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
+    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
+    rw::helpdeadline::noteIndexedFiles( ing.files.size() );   // the warm-done meter row's files= (a no-op off the deadline child)
+    std::fputs( renderHelpTask( cfg, route ).c_str(), stdout );
     return 0;
 }
 
@@ -3746,10 +4001,16 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
     // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
     const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
-    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
+    // RULING 101: the post-check ran with the allocator ceiling suspended (the write was already committed, so a
+    // refusal there could report nothing). The receipt always carries `memory_ceiling`, in every state; this line
+    // names only the case a reader has to act on — the check actually PASSED the limit and ran unbounded.
+    const bool ceilingPassed = outcome.resultJson.find( rw::mcpedit::kCeilingKey ) != std::string::npos
+                            && outcome.resultJson.find( "the check PASSED the" ) != std::string::npos;
+    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}{}; next: {}\n",
                   cfg.noPostCheck        ? " (post-check skipped)"
                   : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
                                          : ", edit_check, tests_to_run",
+                  ceilingPassed ? " — the post-check passed the memory ceiling and ran unbounded, see memory_ceiling" : "",
                   outcome.next.c_str() );
     return 0;
 }
@@ -3901,6 +4162,13 @@ static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( con
         walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root, noCache = cfg.noCache ]() { return rw::quality::gitHistoryWalk( rootArg, noCache ); } ) );
     }
     return walks;
+}
+
+// C1-STAMP: the run whose at= stamp and history key may come from the STAMP record and whose status probe starts early —
+// a one-shot --for over one root (dispatchMainBody; gitstamp.h, gitstampcache.h).
+static bool isOneShotStampedFor( const rw::Config& cfg, bool multiRoot, const char* winner )
+{
+    return !multiRoot && cfg.roots.size() == 1 && cfg.helpTask.empty() && winner != nullptr && std::string_view( winner ) == "--for";
 }
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
@@ -4081,6 +4349,198 @@ static_assert( rw::kCompactRepriceDensestBytesPerToken == rw::kMinBytesPerToken,
 // The captured run's answer, compacted and written — or, when the dialect cannot shape it, passed through (the DEFAULT
 // posture) or refused (an ASKED --legend=compact). `rc` is the run's own exit code, returned unchanged on every path that
 // emits the answer.
+// --legend-have='s VERSION HANDSHAKE. It lives here and not in cli.h because cli.h is included early enough that
+// pulling legenddict.h into it shifts declaration order and breaks unrelated headers.
+//
+// WHY A HANDSHAKE AT ALL. --legend=ref is refused on the CLI, and the reason is right: a CLI run is one answer with no
+// session that was served anything, so its ref row would name definitions the reader never received. It would also make
+// output depend on whether an earlier RUN happened, which is not reproducible, and determinism is a contract here.
+// Naming the dictionary version turns both problems into one argv-only fact: the caller states what it holds, the answer
+// depends on nothing but its arguments, and a reader holding a DIFFERENT dictionary is refused instead of being handed a
+// pointer it cannot resolve.
+static bool checkLegendHandshake( const rw::Config& cfg )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return true;   // asserts nothing: not an input to check, so VALIDATE has nothing to say about it
+    }
+    // argv is EXTERNAL INPUT, so the list goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
+    // EVERY value must be a tier of this binary (BAND K (tiers), K2(d)): one stale value beside a valid one refuses the
+    // whole call, the same all-or-nothing as the empty-value ruling — honouring the valid one would leave the stale
+    // tier's lines in the reader's context under a meaning this binary no longer has.
+    rw::legenddict::HoldingRefusal refusal;
+    const bool                     everyValueIsATier = rw::legenddict::resolveHolding( cfg.legendHave, refusal ).has_value();
+    if( VALIDATE( everyValueIsATier, "--legend-have= names only legend tiers THIS binary holds" ) )
+    {
+        // A17 (lane s1-small, test/legendhavecheck.sh (S)): a prose/markdown/JSON/text surface never reaches
+        // applyCliRefPosture, so it answered exit 0, stdout unchanged, stderr EMPTY — the silence C4 there exists to
+        // prevent (lane A4: --situ, 33 of 33). Same line, naming the surface; stdout is untouched.
+        if( const char* surface = rw::legendNonXmlReadSurface( cfg ); surface != nullptr )
+        {
+            rw::emitTo( stderr, "ripwire: --legend-have=: not-applicable — {} answers with no XML legend the legend dictionary reduces, "
+                                "so it is served whole; nothing was saved\n",
+                        surface );
+        }
+        return true;
+    }
+    // THE REMEDY NAMES THE CHEAPEST TIER AND ITS REAL SIZE. It used to prescribe the whole dictionary, a ~130 KB read to
+    // repair a handshake whose point is not re-reading definitions. The sizes are computed here, not written.
+    rw::emitTo( stderr, "ripwire: --legend-have={} does not match this binary's legend dictionary or any tier of it — a ref answer would "
+                        "leave out definitions you do not hold, so nothing is served{}. Read the core again: `ripwire --legend-dict=core` "
+                        "({} B, {} definitions) and pass the have= on its line 1; `ripwire --legend-dict=KEY` is the core plus one verb's "
+                        "pack. The whole dictionary is dictv={} ({} B)\n",
+                refusal.unknown.empty() ? std::string_view( "(an empty list item)" ) : std::string_view( refusal.unknown ),
+                refusal.recognised.empty() ? std::string() : " (the rest of the list named: " + refusal.recognised + ")",
+                rw::legenddict::coreTierText().size(), rw::legenddict::kCoreTierEntryCount,
+                std::string_view( rw::legenddict::dictionaryVersion() ), rw::legenddict::fullDictionaryText().size() );
+    return false;
+}
+
+// The ref stage, applied to a finished COMPACT answer when the caller named the tiers it holds. The session is served
+// EXACTLY those tiers' lines (resolveHolding) and nothing else, so the MCP transform does the rest unchanged: an entry
+// the caller holds is dropped, an entry it does not hold stays in THIS answer, in the trailing comment. Until lane
+// dict-core-packs this was session.serveAll() — every definition dropped whatever the reader held, which was honest only
+// because the one holding a caller could name was the entire dictionary.
+static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return;
+    }
+    rw::legenddict::HoldingRefusal        refusal;
+    std::optional<rw::legenddict::Holding> holding = rw::legenddict::resolveHolding( cfg.legendHave, refusal );
+    if( !holding )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
+                  "applyCliRefPosture: the holding checkLegendHandshake accepted no longer resolves — inline legend kept" );
+        return;
+    }
+    // AN ANSWER SERVED INLINE SAYS SO (BAND K (tiers), control C4). Both outcomes below are correct — the inline answer
+    // is a superset — but the caller passed the flag believing bytes were saved, and exit 0 with an unchanged answer and
+    // an empty stderr is the silence the empty-value ruling exists to prevent. Stdout is untouched: one line on stderr
+    // names WHICH of the two it was, which is also what lets the gate count them apart.
+    switch( rw::legenddict::applyRefPosture( doc, holding->session, holding->label ) )
+    {
+        case rw::legenddict::RefOutcome::Ref:
+            break;
+        case rw::legenddict::RefOutcome::NotApplicable:
+            DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
+                      "applyCliRefPosture: --legend-have= on an answer the legend dictionary cannot reduce — inline legend kept" );
+            rw::emitRaw( stderr, "ripwire: --legend-have=: not-applicable — this answer's legend is not one the legend dictionary reduces, so it "
+                                 "is served whole with every definition in it; nothing was saved\n" );
+            break;
+        case rw::legenddict::RefOutcome::InlineKept:
+            rw::emitRaw( stderr, "ripwire: --legend-have=: inline-kept — with the definitions you do not hold the reduced answer would not be "
+                                 "shorter, so it is served whole; nothing was saved\n" );
+            break;
+    }
+}
+
+// LS1: --legend-seen=FILE, applied to a finished answer in the default posture (legendseen.h). FILE is EXTERNAL INPUT and
+// is distrusted whole on any doubt — missing, unreadable, not a regular file, over the size cap, or a line that is no
+// entry hash — and then the answer is served whole, said on stderr: a stale or corrupt holding costs bytes, never a
+// reading and never the call. Read with a plain stream, not docparse::readWholeFile, which would register FILE as a
+// dependency of the warm snapshot and invalidate it every time the caller appends to FILE.
+static std::optional<rw::legendseen::Holding> loadLegendSeen( const rw::Config& cfg )
+{
+    const std::string path( cfg.legendSeen );
+    std::error_code   ec;
+    const bool        regular = std::filesystem::is_regular_file( path, ec ) && !ec;
+    const auto        size    = regular ? std::filesystem::file_size( path, ec ) : std::uintmax_t( 0 );
+    const auto        degrade = [ & ]( std::string_view why )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the whole answer is a correct superset of the reduced one: only the cost stays",
+                  "loadLegendSeen: FILE untrusted — every definition is served inline" );
+        rw::emitTo( stderr, "ripwire: --legend-seen={}: {} — every definition is served inline, nothing was left out\n", path, why );
+        return std::optional<rw::legendseen::Holding>();
+    };
+    if( !VALIDATE( regular && !ec, "--legend-seen= names a readable regular file" ) )
+    {
+        return degrade( "not a readable regular file" );
+    }
+    if( !VALIDATE( size <= rw::legendseen::kMaxFileBytes, "--legend-seen= FILE is within the size cap" ) )
+    {
+        return degrade( "larger than 4 MiB, which is no holding one call at a time writes" );
+    }
+    rw::OwnedFile fp = rw::openOwnedFile( path.c_str(), "rb" );
+    std::string   bytes;
+    char          buf[ 65536 ];
+    for( std::size_t got; fp && ( got = std::fread( buf, 1, sizeof( buf ), fp.file ) ) > 0 && bytes.size() <= rw::legendseen::kMaxFileBytes; )
+    {
+        bytes.append( buf, got );
+    }
+    if( !VALIDATE( fp && std::ferror( fp.file ) == 0 && bytes.size() <= rw::legendseen::kMaxFileBytes, "--legend-seen= FILE reads whole" ) )
+    {
+        return degrade( "could not be read whole" );
+    }
+    rw::legendseen::Holding held = rw::legendseen::parseHolding( bytes );
+    if( !VALIDATE( held.badLine == 0, "--legend-seen= FILE holds only entry hashes, blank lines and # comments" ) )
+    {
+        return degrade( "line " + std::to_string( held.badLine ) + " is not a legend-entry hash (16 lowercase hex, as ripwire --legend-dict=seen "
+                        "prints), so the file is not trusted" );
+    }
+    return held;
+}
+
+static void applyCliSeenPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( !cfg.legendSeenGiven || doc.empty() )
+    {
+        return;
+    }
+    const std::optional<rw::legendseen::Holding> held = loadLegendSeen( cfg );
+    if( held )
+    {
+        (void)rw::legendseen::applySeenPosture( doc, *held );   // Unchanged/NotApplicable: the answer IS the default one
+    }
+}
+
+// ITEM D: the prose-free DEFAULT, applied to a finished compact answer. Runs when nobody asked for a posture, or when
+// --legend=dict named this one; an asked --legend=compact clears legendProseOff and is the registered opt-out (D3).
+static void applyCliDictPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( !cfg.legendProseOff )
+    {
+        return;
+    }
+    if( rw::legenddict::applyDictPosture( doc ) == rw::legenddict::RefOutcome::NotApplicable )
+    {
+        // A shape the dictionary cannot reduce. The answer is served UNCHANGED and complete — with its prose legend,
+        // exactly as 0.6.x served it — so this is a cost note, never a wrong or a shortened answer.
+        DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the prose-free one: only the cost stays",
+                  "applyCliDictPosture: the default posture on an answer the legend dictionary cannot reduce — inline legend kept" );
+    }
+}
+
+// The ONE place a captured answer reaches stdout, with the write CHECKED. An unchecked fwrite/fflush here exits 0 with
+// no answer written when stdout cannot take it (`> /dev/full`, a closed pipe): dispatch already returned 0 having written
+// only into the capture, so the failure is invisible to the caller. A missing answer reported as success is the one
+// outcome this tool must never produce, so the replay decides the exit code.
+static int emitCapturedDoc( const std::string& doc, int rc )
+{
+    const bool written = std::fwrite( doc.data(), 1, doc.size(), stdout ) == doc.size();
+    const bool flushed = std::fflush( stdout ) == 0;
+    if( written && flushed && std::ferror( stdout ) == 0 )
+    {
+        return rc;
+    }
+    // THE ONE CALLER WHOSE STDOUT LEGITIMATELY HAS NO READER: #594's detached help-task child. The parent
+    // abstained and answered already, then exited, so the child's stdout is a closed pipe BY DESIGN — it goes
+    // on running only to warm the index, and nothing is waiting for its bytes. Failing it here turns an
+    // expected condition into a non-zero rc in the child's own status file, which is exactly what
+    // test/helptaskdeadlinecheck.sh caught: `state=finished rc=1` where the design says 0. Confirmed by
+    // experiment -- with this write check unconditional that gate failed, and with it bypassed it passed.
+    // Every other caller keeps the check: a user's `> /dev/full` or closed pipe must not exit 0 with no
+    // answer, which is the defect the check exists for.
+    if( rw::helpdeadline::childSession().active )
+    {
+        return rc;
+    }
+    std::fputs( "ripwire: could not write the answer to stdout — it is incomplete or absent; the exit code says so rather "
+                "than reporting a success that did not happen\n", stderr );
+    return rc != 0 ? rc : 1;
+}
+
 static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc )
 {
     EXPECTS( cfg.legend == "compact", "only a compact-posture run is captured" );
@@ -4088,12 +4548,7 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    const auto emitCaptured = [&doc, rc]()
-    {
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
-        std::fflush( stdout );
-        return rc;
-    };
+    const auto emitCaptured = [&doc, rc]() { return emitCapturedDoc( doc, rc ); };
     // the DEFAULT posture shapes what it can and leaves the rest exactly as it was emitted (cfg.legendDefaulted);
     // only an ASKED --legend=compact refuses an answer the dialect cannot shape
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
@@ -4103,14 +4558,25 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:
+            // ORDER MATTERS: applyRefPosture reads the answer as the INLINE posture serves it, which for these verbs
+            // means the compact dialect is already applied. Calling it before applyCompactDialect read the pre-compact
+            // document and returned NotApplicable on every verb (measured 2026-11-16: four covered verbs, all no-ops).
+            applyCliRefPosture( cfg, doc );
+            // AFTER the ref stage, and the two never both fire: --legend-have= conflicts with an asked posture at
+            // intake, and a defaulted run that passed the handshake has already taken the ref posture, which moved the
+            // root attributes this one promises not to touch. applyDictPosture then finds no legend left to drop and
+            // leaves the ref answer alone, so the order is safe either way rather than merely untested.
+            applyCliDictPosture( cfg, doc );
+            applyCliSeenPosture( cfg, doc );   // LS1: refused beside either posture above, so at most one of the three reduces
             return emitCaptured();
         case rw::CompactOutcome::NotXml:
             if( cfg.legendDefaulted )
             {
                 return emitCaptured();
             }
-            std::fputs( "ripwire: --legend=compact applies to the XML verbs only — this run's output carries no XML legend to compact "
-                        "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n", stderr );
+            rw::emitTo( stderr, "ripwire: --legend={} applies to the XML verbs only — this run's output carries no XML legend to compact "
+                                "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n",
+                        cfg.legendSpelled.empty() ? cfg.legend : cfg.legendSpelled );
             return 1;
         case rw::CompactOutcome::UnknownRoot:
             if( cfg.legendDefaulted )
@@ -4148,10 +4614,50 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
+// abstention (which prints without running the verb) both ask.
+static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
+{
+    return cfg.legend == "compact" && !nativeCompactLegendVerb( cfg ) && !certainlyNonXmlAnswer( cfg, argv );
+}
+
+// #594: the abstention --deadline-ms prints when the index is not ready in time — the classifier's own Abstain shape with
+// the facts it can read without an index (git/dirty from the stamp, the trace shape from the text; resolved_symbols=0,
+// since nothing was resolved), in the dialect the run would have printed it in.
+static std::string deadlineAbstainDoc( const rw::Config& cfg, const std::string& root )
+{
+    const std::string              stamp = rw::gitstamp::stampAt( root );
+    rw::taskroute::TaskRouteResult route;
+    route.facts.git   = !stamp.empty();
+    route.facts.dirty = stamp.ends_with( "+dirty" );
+    route.facts.trace = !rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) && rw::taskroute::looksLikeTrace( rw::taskroute::lowerAscii( cfg.helpTask ) );
+    return renderHelpTask( cfg, route );
+}
+
+static void emitDeadlineAbstain( const rw::Config& cfg, char** argv, std::string& doc )
+{
+    if( compactCaptures( cfg, argv ) )
+    {
+        (void)finishCompactCapture( cfg, doc, 0 );
+        return;
+    }
+    std::fputs( doc.c_str(), stdout );
+    std::fflush( stdout );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
-    if( cfg.legend != "compact" || nativeCompactLegendVerb( cfg ) || certainlyNonXmlAnswer( cfg, argv ) )
+    // --legend-have= on a verb that emits the compact dialect NATIVELY (--for) needs a capture of its own, and it must
+    // NOT be the compact one. Measured 2026-11-16: routing a --for bundle through applyCompactDialect moves it by 290 B
+    // (31,457 -> 31,167), which is exactly why nativeCompactLegendVerb excludes it. Reusing that capture to reach the ref
+    // stage would have silently rewritten the answer on the way. So this path captures and applies the ref stage ALONE,
+    // leaving the compact path byte-identical to a run without the flag.
+    const bool refOnlyCapture = !cfg.legendHave.empty() && !compactCaptures( cfg, argv );
+    // LS1: --legend-seen= on a NATIVE-compact verb (--for above all: its answer-first page carries the largest legend) takes
+    // the same own capture, for the same reason — the compact path would rewrite the answer on the way.
+    const bool seenOnlyCapture = cfg.legendSeenGiven && !compactCaptures( cfg, argv );
+    if( !compactCaptures( cfg, argv ) && !refOnlyCapture && !seenOnlyCapture )
     {
         return dispatchMain( cfg, argv );
     }
@@ -4164,7 +4670,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         std::fputs( "ripwire: compact legend: could not open a capture buffer — emitting the full legend instead\n", stderr );
         return dispatchMain( cfg, argv );
     }
-    const int savedStdout = rw::os::dup( STDOUT_FILENO );
+    const int savedStdout = rw::os::dup_cloexec( STDOUT_FILENO );   // never inherited: a lingering git child would hold stdout open
     if( savedStdout < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "the full legend is a correct superset of the compact one, and stderr says so: only the cost grows",
@@ -4187,7 +4693,13 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         doc.append( buf, got );
     }
     std::fclose( capture );
-    return finishCompactCapture( cfg, doc, rc );
+    if( refOnlyCapture || seenOnlyCapture )
+    {
+        applyCliRefPosture( cfg, doc );
+        applyCliSeenPosture( cfg, doc );   // refused beside --legend-have=, so at most one of the two reduces
+        return emitCapturedDoc( doc, rc );
+    }
+    return finishCompactCapture( cfg, doc, rc );   // the ref stage runs INSIDE it, after the compact dialect
 }
 
 // #350 layer 3: the memory guard's limit, resolved ONCE, before any thread exists — the flag, else RIPWIRE_MAX_MEMORY,
@@ -4212,6 +4724,126 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+// The memory guard's allocator line (memceiling.h, on by default): installed straight after the guard, before any thread. Its
+// ceiling is the guard's hard limit (65% of RAM, --max-memory, RIPWIRE_MAX_MEMORY) unless RIPWIRE_MEM_BUDGET_MB names one for
+// this line alone (0 = off). A value that is not a whole MiB count of 0 or at least 64 refuses the run (exit 1), as
+// RIPWIRE_MAX_MEMORY does. Servers do not arm it (its refusal ends the process); nor can a build whose operator new is not
+// replaced. Either is said on stderr only when RIPWIRE_MEM_BUDGET_MB asked for the line explicitly.
+static bool installMemoryCeiling( const rw::Config& cfg )
+{
+    const rw::memceiling::Setting s = rw::memceiling::readSetting();
+    if( !VALIDATE( s.parse != rw::memceiling::Parse::Invalid, "RIPWIRE_MEM_BUDGET_MB is 0 or a whole number of MiB, at least 64" ) )
+    {
+        DISCLOSE( Diagnostics::answerRefused, "main: an unparseable RIPWIRE_MEM_BUDGET_MB refuses the run (exit 1, stderr names it)" );
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs 0 (off) or a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
+                    rw::memceiling::kFloorMiB, std::getenv( "RIPWIRE_MEM_BUDGET_MB" ) );
+        return false;
+    }
+    if( s.parse == rw::memceiling::Parse::Off )
+    {
+        return true;
+    }
+#if defined( RIPWIRE_MEM_CEILING_HOOK )
+    constexpr bool kHookLinked = true;
+#else
+    constexpr bool kHookLinked = false;
+#endif
+    if( cfg.mcp || cfg.lsp || !kHookLinked )
+    {
+        if( s.parse == rw::memceiling::Parse::Armed )
+        {
+            rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
+                        !kHookLinked ? "this build does not replace operator new (a sanitizer or RIPWIRE_ALLOC_COUNT build)"
+                                     : "a server must survive a refused request, and the ceiling's refusal ends the process" );
+        }
+        return true;
+    }
+    if( s.parse == rw::memceiling::Parse::Armed )
+    {
+        rw::memceiling::arm( s.mib * rw::memceiling::kMiB, "RIPWIRE_MEM_BUDGET_MB=" + std::to_string( s.mib ) );
+        return true;
+    }
+    const rw::memguard::Limits& l = rw::memguard::limits();   // 0 = the machine's memory is unknown: no footprint cap, so none here
+    const std::string spelled = rw::memguard::limitSpelling( l.hardBytes );
+    rw::memceiling::arm( l.hardBytes, l.source == rw::memguard::Source::Flag  ? "--max-memory=" + spelled
+                                    : l.source == rw::memguard::Source::Env   ? "RIPWIRE_MAX_MEMORY=" + spelled
+                                                                              : "the default 65% of RAM, " + spelled );
+    return true;
+}
+
+// r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
+// ripwire://legend-dict/full serves, one TIER of it, or a view (legenddict.h). Like --version, answered wherever it
+// stands and nothing else runs. Returns the exit code, or -1 when no --legend-dict was asked.
+// EVERY occurrence is read before anything is printed. Answering at the FIRST one made acceptance depend on
+// ORDER: `--legend-dict=roster --legend-dict=bad` printed the roster and exited 0, while the same two flags the
+// other way round exited 1 — one command line, two verdicts, and a typo silently honoured. argv is external
+// input, so each occurrence is checked with VALIDATE.
+static int answerLegendDict( int argc, char** argv )
+{
+    using namespace rw;
+    // lane dict-core-packs: the forms are `roster`, `tiers`, `index`, `core`, or a schema KEY (the core plus that verb's
+    // pack). Any other value refuses — and so do two DIFFERENT forms on one command line.
+    bool             wantFull = false;
+    std::string_view wantForm;
+    bool             formsDiffer = false;
+    for( int i = 1; i < argc; ++i )
+    {
+        const std::string_view a = argv[ i ];
+        if( a == "--legend-dict" ) { wantFull = true; continue; }
+        if( a.starts_with( "--legend-dict=" ) )
+        {
+            const std::string_view v = a.substr( 14 );
+            if( !VALIDATE( std::ranges::contains( legenddict::kDictForms, v ) || legenddict::isSchemaKey( v ),
+                           "--legend-dict= names a form it takes: roster, tiers, index, seen, core or a schema key" ) )
+            {
+                rw::emitTo( stderr, "ripwire: --legend-dict= takes core (the {}-definition core tier), a schema KEY such as callers (the core plus "
+                                    "that verb's pack; --legend-dict=tiers lists them), roster, tiers, index or seen (the entry hashes of the answers "
+                                    "on stdin) — got '{}'; bare --legend-dict prints the whole dictionary\n", legenddict::kCoreTierEntryCount, v );
+                return 1;
+            }
+            formsDiffer = formsDiffer || ( !wantForm.empty() && wantForm != v );
+            wantForm    = v;
+        }
+    }
+    // Two forms asked is a question with two answers, not a preference: refused rather than quietly served one.
+    if( formsDiffer || ( wantFull && !wantForm.empty() ) )
+    {
+        rw::emitRaw( stderr, "ripwire: --legend-dict prints the dictionary and --legend-dict=FORM one view of it (core, a schema KEY, roster, "
+                             "tiers, index) — pass one, not both\n" );
+        return 1;
+    }
+    if( wantForm == "seen" )
+    {
+        // LS1: the hashes of the entries the answers on stdin carry — the lines --legend-seen=FILE takes. stdin is what the
+        // caller RECEIVED; reading it whole is the point (a comment cut short is not counted, legendseen.h receivedComments).
+        std::string received;
+        char        buf[ 65536 ];
+        for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), stdin ) ) > 0; ) { received.append( buf, got ); }
+        if( std::ferror( stdin ) != 0 )
+        {
+            rw::emitRaw( stderr, "ripwire: --legend-dict=seen could not read stdin — pipe the answers you received into it, e.g. "
+                                 "ripwire . --callers=main | ripwire --legend-dict=seen >>seen.txt\n" );
+            return 1;
+        }
+        rw::emitRaw( stdout, legendseen::seenHashesText( received ).c_str() );
+        return 0;
+    }
+    if( wantFull || !wantForm.empty() )
+    {
+        const std::string text = wantFull              ? legenddict::fullDictionaryText()
+                               : wantForm == "roster" ? legenddict::rosterText()
+                               : wantForm == "tiers"  ? legenddict::tiersText()
+                               : wantForm == "index"  ? legenddict::indexText()
+                               : wantForm == "core"   ? legenddict::coreTierText()
+                                                      : legenddict::packTierText( wantForm );
+        rw::emitRaw( stdout, text.c_str() );
+        return 0;
+    }
+    return -1;
+}
+
+static int finishMainRun( const rw::Config& cfg, char** argv );
+
 int main( int argc, char** argv )
 {
     using namespace rw;
@@ -4223,39 +4855,9 @@ int main( int argc, char** argv )
         return runWrap( argc, argv, selfExecutablePath( argv[0] ) );
     }
 
-    // r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
-    // ripwire://legend-dict/full serves, or `=roster`, the completeness attributes it defines (legenddict.h). Like
-    // --version, answered wherever it stands and nothing else runs.
-    // EVERY occurrence is read before anything is printed. Answering at the FIRST one made acceptance depend on
-    // ORDER: `--legend-dict=roster --legend-dict=bad` printed the roster and exited 0, while the same two flags the
-    // other way round exited 1 — one command line, two verdicts, and a typo silently honoured. argv is external
-    // input, so each occurrence is checked with VALIDATE.
-    bool wantFull = false, wantRoster = false;
-    for( int i = 1; i < argc; ++i )
+    if( const int dictRc = answerLegendDict( argc, argv ); dictRc >= 0 )
     {
-        const std::string_view a = argv[ i ];
-        if( a == "--legend-dict" ) { wantFull = true; continue; }
-        if( a.starts_with( "--legend-dict=" ) )
-        {
-            const std::string_view v = a.substr( 14 );
-            if( !VALIDATE( v == "roster", "--legend-dict= names the one form it takes" ) )
-            {
-                rw::emitTo( stderr, "ripwire: --legend-dict= takes roster — got '{}'; bare --legend-dict prints the dictionary\n", v );
-                return 1;
-            }
-            wantRoster = true;
-        }
-    }
-    // Both forms asked is a question with two answers, not a preference: refused rather than quietly served one.
-    if( wantFull && wantRoster )
-    {
-        rw::emitRaw( stderr, "ripwire: --legend-dict prints the dictionary and --legend-dict=roster the attributes it defines — pass one, not both\n" );
-        return 1;
-    }
-    if( wantFull || wantRoster )
-    {
-        rw::emitRaw( stdout, wantRoster ? legenddict::rosterText().c_str() : legenddict::fullDictionaryText().c_str() );
-        return 0;
+        return dictRc;
     }
 
     const Config cfg = parseArgs( argc, argv );
@@ -4263,14 +4865,51 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+    if( !checkLegendHandshake( cfg ) )
+    {
+        return 1;   // the refusal is on stderr, and it names both dictionary versions
+    }
     if( !installMemoryGuard( cfg ) )
     {
         return 1;   // the refusal is on stderr
+    }
+    if( !installMemoryCeiling( cfg ) )
+    {
+        return 1;   // the refusal is on stderr
+    }
+    if( cfg.noCache )
+    {
+        rw::quality::skipCacheDirSweepForProcess();   // --no-cache never evicts another root's blob (quality.h, before any thread)
     }
     // harvest 2026-09-09: a hook-form core.fsmonitor in a crawl root's own .git/config is a command git would run on
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
+    // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
+    // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
+    // keeps writing in a detached child after a help-task abstention.
+    const char* const answeringVerb = scanReportVerbPrecedence( cfg ).winner;
+    if( cfg.helpTaskDeadlineMs > 0 && cfg.roots.size() == 1 && !isGitUrl( cfg.roots[0] ) && answeringVerb != nullptr
+        && std::string_view( answeringVerb ) == "--help-task" )
+    {
+        const std::string deadlineRoot( cfg.roots[0] );
+        const auto        prepare = [&cfg, &deadlineRoot]() { return deadlineAbstainDoc( cfg, deadlineRoot ); };
+        const auto        emit    = [&cfg, argv]( std::string& doc ) { emitDeadlineAbstain( cfg, argv, doc ); };
+        if( const std::optional<int> answered = rw::helpdeadline::superviseHelpTask( deadlineRoot, cfg.helpTaskDeadlineMs, prepare, emit ) )
+        {
+            return *answered;
+        }
+    }
+    const int rc = finishMainRun( cfg, argv );
+    rw::helpdeadline::finishChild( rc );
+    return rc;
+}
+
+// Everything main() does after the fork seam: the verb, then the memory guard's backstop and peak disclosure.
+static int finishMainRun( const rw::Config& cfg, char** argv )
+{
+    using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
@@ -4357,6 +4996,210 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
+// LT1: --page-bytes=0 (cli.h wholeAnswerAsked) on a verb that writes its answer straight to stdout — the bare map, --expand,
+// --lint. The answer is captured whole, --for's own over-ceiling stderr line (verbs_for.h noteWholeAnswerOverCeiling) is printed
+// BEFORE it, at the size the posture delivers, then the bytes are written unchanged. A capture that cannot be taken serves the
+// answer straight through, with no line: the answer is never cut or withheld for the sake of the line.
+template <class Run>
+static int serveWholeAnswer( const rw::Config& cfg, Run&& run )
+{
+    std::optional<StdoutCaptured> cap;
+    int                           rc = 0;
+    {
+        StdoutCapture out( true );
+        if( !out.active() )
+        {
+            return run();
+        }
+        rc  = run();
+        cap = out.finish();
+    }
+    if( !cap || !cap->restored )
+    {
+        return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+    }
+    if( !cap->failed )
+    {
+        noteWholeAnswerOverCeiling( cfg, cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( cap->bytes, compactLegendHint( cfg, cap->bytes ) )
+                                                                 : cap->bytes.size() );
+    }
+    std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+    return rc;
+}
+
+// --lint under --page-bytes=0: the whole answer through serveWholeAnswer; every other lint-family run as runLint serves it.
+static std::optional<int> runLintServed( const MainDispatch& d )
+{
+    if( !rw::wholeAnswerAsked( d.cfg ) || !rw::lintPagedVerbAsked( d.cfg ) )
+    {
+        return runLint( d );
+    }
+    std::optional<int> handled;
+    const int           rc = serveWholeAnswer( d.cfg, [ & ] { handled = runLint( d ); return handled.value_or( 0 ); } );
+    return handled ? std::optional<int>( rc ) : std::nullopt;
+}
+
+// The bytes an answer captured from stdout delivers: what the compact dialect will write for it (the legend it adds after the
+// cut included), else the bytes themselves — the size the output ceiling is checked against (the map pager's own pricing).
+static std::size_t deliveredAnswerBytes( const rw::Config& cfg, const std::string& doc )
+{
+    return cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( doc, compactLegendHint( cfg, doc ) ) : doc.size();
+}
+
+// PG1 (outputceiling.h): --clones under the output ceiling, when it is the verb that answers (§B11.4's winner; any other run is
+// runMaintenanceViews' as before). --page-bytes=0: every clone group through serveWholeAnswer. An explicit --limit=N: the caller's
+// page. Otherwise the verb's own page is rendered into a capture and priced as delivered; over the ceiling it is re-rendered with a
+// row budget (cfg.pageRowBytes, verbs_report.h cloneRowsWindow), lowered in proportion until the page fits or holds one row — a clone
+// group is the unit, never cut. A page that fits is byte-identical; the cut one says next="--clones --offset=K".
+static std::optional<int> runMaintenanceViewsServed( const MainDispatch& d )
+{
+    const VerbPrecedence prec = scanReportVerbPrecedence( d.cfg );
+    if( !d.cfg.clones || prec.winner == nullptr || std::strcmp( prec.winner, "--clones" ) != 0 || !d.cfg.forTask.empty() )
+    {
+        return runMaintenanceViews( d );
+    }
+    if( rw::wholeAnswerAsked( d.cfg ) )
+    {
+        return serveWholeAnswer( d.cfg, [ & ] { return emitClonesReport( d.cfg, d.ing ); } );
+    }
+    if( d.cfg.pageLimit > 0 )
+    {
+        return emitClonesReport( d.cfg, d.ing );
+    }
+    rw::Config page = d.cfg;
+    for( int fit = 0;; ++fit )
+    {
+        std::optional<StdoutCaptured> cap;
+        int                           rc = 0;
+        {
+            StdoutCapture out( true );
+            if( !out.active() )
+            {
+                return emitClonesReport( page, d.ing );
+            }
+            rc  = emitClonesReport( page, d.ing );
+            cap = out.finish();
+        }
+        if( !cap || !cap->restored )
+        {
+            return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+        }
+        const std::size_t bytes = deliveredAnswerBytes( page, cap->bytes );
+        const bool        oneRow = cap->bytes.find( "<group " ) == cap->bytes.rfind( "<group " );   // a group is never cut: nothing smaller to try
+        if( rc != 0 || cap->failed || bytes <= rw::kOutputCeilingChars || oneRow || fit == 8 )
+        {
+            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+            return rc;
+        }
+        // the first cut budgets the rows at the ceiling less a tenth; each later one in proportion to how far over the page still was
+        const std::size_t rowsBudget = fit == 0 ? rw::kOutputCeilingChars * 9 / 10 : page.pageRowBytes;
+        page.pageRowBytes = std::max<std::size_t>( 1, fit == 0 ? rowsBudget : rowsBudget * ( rw::kOutputCeilingChars * 19 / 20 ) / bytes );
+    }
+}
+
+
+// PG1 (outputceiling.h): --grep/--regex under the output ceiling. MEASURED on GA1 DEV (CL1 census, base 36a95d732): a default
+// page printed up to 29,224 characters (bat, --grep=bat: 100 in-index rows plus 100 unindexed rows), over the 24,000 ceiling.
+// A default page (no --limit, no --pack-top-n) is rendered into a capture with the verb's own row cap; over the ceiling, the
+// cap is lowered in proportion and the page re-rendered until it fits (both lists obey the one cap, so they shrink together;
+// a one-row page always ends the loop). The cut is the verb's own window — shown=/capped=/has_more=/next_offset= and
+// next="--grep=… --offset=K" — and the next page is fitted the same way, so the chain walks every match once, in the verb's
+// order (source before tests before docs). A page that fits is byte-identical. --page-bytes=0 (cli.h wholeAnswerAsked): every
+// row of both lists, with the one stderr line. A capture that cannot be taken serves the default page straight through.
+static std::optional<int> runGrepServed( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.grep.empty() )
+    {
+        return std::nullopt;
+    }
+    if( rw::wholeAnswerAsked( cfg ) && rw::rowPagedVerbAsked( cfg ) )
+    {
+        MainDispatch whole = d;
+        whole.pageRowCap   = 0;
+        return serveWholeAnswer( cfg, [ & ] { return emitGrepReport( whole ); } );
+    }
+    if( cfg.pageLimit > 0 || cfg.packTopN > 0 )
+    {
+        return runGrep( d );   // the caller sized the page
+    }
+    MainDispatch page = d;
+    std::size_t  rows = 0;
+    page.pageRowsOut  = &rows;
+    for( ;; )
+    {
+        std::optional<StdoutCaptured> cap;
+        int                           rc = 0;
+        {
+            StdoutCapture out( true );
+            if( !out.active() )
+            {
+                return emitGrepReport( page );
+            }
+            rc  = emitGrepReport( page );
+            cap = out.finish();
+        }
+        if( !cap || !cap->restored )
+        {
+            return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+        }
+        const std::size_t bytes = deliveredAnswerBytes( cfg, cap->bytes );
+        if( rc != 0 || cap->failed || bytes <= rw::kOutputCeilingChars || rows <= 1 )
+        {
+            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+            return rc;
+        }
+        // proportional, at 9/10 of the ceiling (the legend and root do not shrink with the rows), and always at least one row fewer
+        page.pageRowCap = int( std::max<std::size_t>( 1, std::min( rows - 1, rows * ( rw::kOutputCeilingChars * 9 / 10 ) / bytes ) ) );
+    }
+}
+
+// CL1 (mappages.h, outputceiling.h): the bare map, served in pages when it is over the output ceiling. The map is rendered whole
+// into a capture and cut there, so a map that fits is byte-identical and every page windows one document. --page-bytes=N sets
+// the page size (0: the whole map, one call); --page-bytes=N:K asks for page K. A capture that cannot be taken serves the map
+// straight through, whole — the pre-ceiling behaviour, never a short answer.
+static int runDefaultMapPaged( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( rw::wholeAnswerAsked( cfg ) )
+    {
+        return serveWholeAnswer( cfg, [ & ] { return runDefaultMap( d ); } );   // LT1: the whole map / --expand, one line when over the ceiling
+    }
+    const std::size_t pageBytes = cfg.pageBytesSpec.empty() ? rw::kOutputCeilingChars : cfg.forPageBytes;
+    if( !rw::mapPageEligible( cfg ) || pageBytes == 0 )
+    {
+        return runDefaultMap( d );
+    }
+    std::optional<StdoutCaptured> cap;
+    int                           rc = 0;
+    {
+        StdoutCapture out( true );
+        if( !out.active() )
+        {
+            return runDefaultMap( d );
+        }
+        rc  = runDefaultMap( d );
+        cap = out.finish();
+    }
+    if( !cap || !cap->restored )
+    {
+        return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+    }
+    std::string doc = std::move( cap->bytes );
+    const rw::mappages::PageResult res = cap->failed || rc != 0 ? rw::mappages::PageResult{}
+                                                                 : rw::mappages::pageMap( doc, pageBytes, cfg.forPage, crawlScopeFlags( cfg ).substr( crawlScopeFlags( cfg ).empty() ? 0 : 1 ),
+                                                                                          cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( doc, compactLegendHint( cfg, doc ) )
+                                                                                                                  : doc.size() );
+    if( res.outcome == rw::mappages::Outcome::PastLast || ( res.outcome == rw::mappages::Outcome::Whole && cfg.forPage > 1 ) )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: this map has {} page{} at that size — the root's next= names each one\n",
+                    pageBytes, cfg.forPage, res.pages, res.pages == 1 ? "" : "s" );
+        return 1;
+    }
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return rc;
+}
+
 static int dispatchMainBody( const rw::Config& cfg, char** argv )
 {
     using namespace rw;
@@ -4387,7 +5230,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                 // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
                 rw::emitTo( stderr, "ripwire: --json is not yet supported for {} — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics, --defs, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
+                              "--metrics, --defs, --flags, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
             }
             return 1;
         }
@@ -4462,6 +5305,17 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // §B11.4's table is SCANNED here and printed further down, because X9(c) below needs the winner too. The
     // scan is pure; nothing is emitted by this line.
     const VerbPrecedence verbPrec = scanReportVerbPrecedence( cfg );
+    // CL1: cli.h accepts --page-bytes without --for only on a flag set that can be the bare map; a report verb that wins the
+    // dispatch would answer instead and the flag would be read by nothing, so that run refuses rather than ignoring it.
+    // LT1: --lint is the one report verb it shapes (--page-bytes=0, the whole answer; cli.h wholeOnlyConflict refuses the rest).
+    const bool lintAnswers = verbPrec.winner != nullptr && ( ( std::strcmp( verbPrec.winner, "--lint" ) == 0 && rw::lintPagedVerbAsked( cfg ) )
+                                                             || ( ( std::strcmp( verbPrec.winner, "--grep" ) == 0 || std::strcmp( verbPrec.winner, "--clones" ) == 0 )
+                                                                  && rw::rowPagedVerbAsked( cfg ) ) );   // PG1: --grep/--clones take --page-bytes=0 too
+    if( !cfg.pageBytesSpec.empty() && cfg.forTask.empty() && verbPrec.winner != nullptr && !lintAnswers )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer, the bare map, --lint, --expand, --grep or --clones only — {} answers this run\n", verbPrec.winner );
+        return 1;
+    }
 
     // X9(c): mode flags have a hidden precedence when more than one is given at once — the earlier-checked
     // one silently wins and the rest are ignored outright, with no signal to the caller that anything was
@@ -4527,7 +5381,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // refused in validateConfig, so this block's position relative to the --mcp branch below is inert.
     if( cfg.lsp )
     {
-        return lsp::runLsp( std::string( cfg.rootPath ) );
+        return lsp::runLsp( std::string( cfg.rootPath ), cfg.lspLangMap );
     }
 
     if( cfg.mcp )
@@ -5277,7 +6131,10 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return rc;
     }
 
+    // QD-CONSTRUCTS-AT-INGEST: only a quality-delta run has its ingests find the construct hits (ingest.h WantConstructHits)
+    const WantConstructHits wantConstructHits( cfg.qualityDelta || cfg.qualityBaseline );
     // #387: --quality-delta=A..B indexes its two commits itself and never reads the working tree's index.
+    offerBaseChildArgv( argv );   // QD-BASE-CHILD: the range form may re-run this command line (less --refetch) for its base phase
     if( std::optional<int> handled = runQualityDeltaRangeBeforeIngest( cfg, verbPrec.winner, root, ws ) )
     {
         return *handled;
@@ -5293,6 +6150,14 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
+    // C1-STAMP: a one-shot --for over one git root asks six small git questions and one big one. The record answers the six
+    // while the files they depend on read the same (gitstampcache.h), and `git status` starts here, beside the snapshot load,
+    // to be joined where stampAt consumes it (gitstamp.h DirtyPrefetch). Both are declared before the walks, so the walks
+    // join first, the probe next, and the record is written last, once every answer of this run is in.
+    const bool                 isStampedFor = isOneShotStampedFor( cfg, multiRoot, verbPrec.winner );
+    rw::gitstampcache::Session gitStampSession;
+    gitStampSession.arm( root, isStampedFor && !cfg.noCache );
+    const rw::gitstamp::DirtyPrefetch dirtyPrefetch( root, isStampedFor && rw::gitstamp::writesStayOutsideWorkTree( root, cfg.cacheFile ) );
     std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
     // Declared after the futures, so it runs before they join: FileGraphStopped unwinds this function, and a join here would
     // hold the refusal until the log ends (the same wait the refusals below abandon; memguardcheck B21b).
@@ -5302,6 +6167,13 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
     } abandonWalksOnUnwind;
     IngestResult ing;
+    // The warm snapshot (warmsnap.h) serves the one ingest a single-root run makes. Not armed for a multi-root merge (each
+    // root has its own blob and the graph is the merge's), under --scip or --pin-census (the graph then holds an overlay or
+    // a census this file does not store), under --max-memory (the guard watches the crawl and the parse a load would skip:
+    // a run asked to stop at a limit must do the work the limit is about), or when RIPWIRE_NO_WARMSNAP is set.
+    rw::warmsnap::Session warmSnap;
+    warmSnap.ignoreTests = cfg.ignoreTests;   // the view applyIgnoreTests gives the graph below: keyed, never shared (warmsnap.h viewKeyOf)
+    const bool warmSnapArmed = !multiRoot && cfg.scipIndex.empty() && cfg.pinCensus.empty() && cfg.maxMemoryBytes == 0 && std::getenv( "RIPWIRE_NO_WARMSNAP" ) == nullptr;
     if( multiRoot )
     {
         // Multi-root ingest: ONE existing per-root cache blob per root (the exact
@@ -5342,6 +6214,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             autoCache = defaultCachePath( root, needsValueUses );
             cacheArg  = autoCache;
         }
+        const rw::warmsnap::Armed armed( warmSnapArmed ? &warmSnap : nullptr );
         ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses,
                       /*excludeLabel=*/{}, /*respectGitignore=*/!cfg.noIgnore );
     }
@@ -5400,6 +6273,55 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             "        references/callees = {} ({} B)\n"
             "        includes/targets   = {} ({} B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
+        // M0 MEM-STATS (mem-audit-fable-1111): every model family's size, capacity and row bytes (capacity x sizeof — the
+        // reserved row storage, not the strings it points at), then the bindings by LocalBindKind (model.h, by enumerator
+        // value) with how many of each sit inside a definition — what buildGraph's per-kind side tables are sized by
+        const auto family = [ & ]( std::string_view name, const auto& v )
+        {
+            using Row = typename std::decay_t<decltype( v )>::value_type;
+            rw::emitTo( stderr, "[mem] family {} size={} cap={} row_b={} cap_mib={:.1f}\n", name, v.size(), v.capacity(), sizeof( Row ),
+                        rw::memstats::mib( v.capacity() * sizeof( Row ) ) );
+        };
+        family( "files", ing.files );
+        family( "fileHealth", ing.fileHealth );
+        family( "symbols", ing.symbols );
+        family( "fields", ing.fields );
+        family( "aliasTargets", ing.aliasTargets );
+        family( "fnLocalScopes", ing.fnLocalScopes );
+        family( "tangleBlocks", ing.tangleBlocks );
+        family( "cloneKeys", ing.cloneKeys );
+        family( "references", ing.references );
+        family( "includes", ing.includes );
+        family( "constOpens", ing.constOpens );
+        family( "constructHits", ing.constructHits );
+        family( "bindings", ing.bindings );
+        family( "bindingAliases", ing.bindingAliases );
+        family( "routeDefs", ing.routeDefs );
+        family( "routeUses", ing.routeUses );
+        family( "lexTokenHashes", ing.lexTokenHashes );
+        family( "lexTokenTfs", ing.lexTokenTfs );
+        std::array<std::size_t, kLocalBindKindCount> kindAll {};
+        std::array<std::size_t, kLocalBindKindCount> kindScoped {};
+        for( const Binding& b : ing.bindings )
+        {
+            const std::size_t kind = std::size_t( b.kind );
+            if( kind < kLocalBindKindCount )
+            {
+                ++kindAll[ kind ];
+                kindScoped[ kind ] += b.fromSymbol != kNoNode ? 1u : 0u;
+            }
+        }
+        std::string kinds;
+        for( std::size_t kind = 0; kind < kLocalBindKindCount; ++kind )
+        {
+            if( kindAll[ kind ] != 0 )
+            {
+                kinds += std::format( " {}={}/{}", kind, kindAll[ kind ], kindScoped[ kind ] );
+            }
+        }
+        rw::emitTo( stderr, "[mem] bindings by kind (kind=all/in-a-def):{}\n", kinds );
+        const std::size_t coldBlocks = std::size_t( std::count_if( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.hasColdBlock(); } ) );
+        rw::emitTo( stderr, "[mem] textpool ids={} reference cold blocks={} ({} B each)\n", RefNames::pool().idCount(), coldBlocks, sizeof( RefColdText ) );
     }
     // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to buildGraph as an optional
     // parameter. An unreadable/corrupt/mismatched index yields an EMPTY overlay (one DISCLOSE + stderr note) and
@@ -5420,11 +6342,16 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
+    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), and --whereis from
+    // the ingest and git (WHEREIS-NO-GRAPH), so when one of them is the dispatch WINNER (§B11.4's own scan, not cfg.deps:
+    // `--deps --callers` still answers --deps, but a graph verb that outranks it would not) and no modifier reads the graph
+    // before dispatch, the build is skipped and `g` stays empty.
+    const bool graphUnread = graphUnreadByWinner( cfg, verbPrec.winner );
     const Graph       g               = [ & ]
     {
         try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
         {
-            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            Graph built = graphUnread ? Graph{} : warmSnap.on() ? graphFromWarmSnapshot( warmSnap, ing ) : buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
             joinGrepScanPrefetch( grepPhaseWorker );
             return built;
         }
@@ -5434,10 +6361,11 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             throw;
         }
     }();
-    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
+    finishWarmSnapshot( warmSnap );
+    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch/--whereis, the ingest) and the verbs
     {
-        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
-        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build" ) );
+        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (a verb that reads no graph: after the ingest) — exit 5, one stderr line" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( graphUnread ? "ingest" : "graph build" ) );
         rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
@@ -5573,7 +6501,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             if( !commits.empty() )
             {
                 // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level).
-                std::vector<HashMap<std::uint32_t, char>> partners( ing.files.size() );
+                std::vector<HashSet<std::uint32_t>> partners( ing.files.size() );
                 for( const std::vector<std::uint32_t>& c : commits )
                 {
                     for( std::size_t i = 0; i < c.size(); ++i )
@@ -5581,7 +6509,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                         for( std::size_t j = i + 1; j < c.size(); ++j )
                         {
                             const std::uint32_t a = c[i], b = c[j];
-                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a][b] = 1; partners[b][a] = 1; }
+                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a].insert( b ); partners[b].insert( a ); }
                         }
                     }
                 }
@@ -5645,6 +6573,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
     // "after the graph" share; the verbs' own scopes nest inside it).
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
+    // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
+    // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
+    if( std::optional<int> handled = runForVerbRoute( dsp ) )
+    {
+        return *handled;
+    }
     if( std::optional<int> handled = runForLens( dsp ) )
     {
         return *handled;
@@ -5682,7 +6616,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runMaintenanceViews( dsp ) )
+    if( std::optional<int> handled = runMaintenanceViewsServed( dsp ) )
     {
         return *handled;
     }
@@ -5887,12 +6821,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runGrep( dsp ) )
+    if( std::optional<int> handled = runGrepServed( dsp ) )
     {
         return *handled;
     }
 
-    if( std::optional<int> handled = runLint( dsp ) )
+    if( std::optional<int> handled = runLintServed( dsp ) )
     {
         return *handled;
     }
@@ -5902,7 +6836,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    return runDefaultMap( dsp );
+    return runDefaultMapPaged( dsp );
 }
 
 // A stopped file-graph fold, or an adjacency past its edge limit, FAILED a build (fileGraphStop.h): no store was returned,

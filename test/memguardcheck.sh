@@ -612,8 +612,11 @@ for f in range( 160 ):
     open( os.path.join( root, "z", "big%03d.c" % f ), "w" ).write(
         "".join( "int z%d_%d(int x){ return x>0 ? z%d_%d(x-1)+%d : %d; }\n" % ( f, k, f, ( k + 1 ) % 1500, k, k ) for k in range( 1500 ) ) )
 PY2
-b8real(){ # rc out err: a real line fired. A hard line, or on a slow host the time-gated parse stop, which discloses itself
-    { [ "$1" = 5 ] && grep -Eq '^ripwire: memory limit reached during the (ingest|graph build)' "$3" && [ ! -s "$2" ]; } \
+# Since the allocator line (memceiling.h, lane M2, on by default at the same limit) a real line includes its refusal: it reads
+# inside the ingest, so on this fixture it usually fires before the phase line. B8s/B8bs below turn it off
+# (RIPWIRE_MEM_BUDGET_MB=0) so the phase line itself is still asserted exactly.
+b8real(){ # rc out err: a real line fired. A hard line, the allocator line, or on a slow host the time-gated parse stop, which discloses itself
+    { [ "$1" = 5 ] && grep -Eq '^ripwire: (memory limit reached during the (ingest|graph build)|refused by the memory ceiling \(--max-memory=64M\))' "$3" && [ ! -s "$2" ]; } \
         || { [ "$1" = 0 ] && grep -q 'memory_stop=' "$2"; }
 }
 b8why(){ printf 'rc=%s memory_stop=%s stdout=%sB stderr: %s' "$1" "$( grep -oE 'memory_stop=[a-z]+' "$2" | head -1 | cut -d= -f2 )" "$( wc -c < "$2" | tr -d ' ' )" "$( grep '^ripwire:' "$3" | head -c 200 )"; }
@@ -636,17 +639,18 @@ fi
 # (B8s, B8bs) the STRICT twins of the two arms above (PROCESS rule 4: a loosened arm keeps its old form). The macOS route
 #      (largealloc.cpp) is what made B8/B8b accept a time-gated soft stop; with RIPWIRE_TEST_LARGEALLOC=off the allocator is
 #      the base one on every OS (the variable is read only by that file), so the old assertion must hold exactly: exit 5,
-#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host.
+#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host. The allocator
+#      line is off here (RIPWIRE_MEM_BUDGET_MB=0): with it on, it fires first and the phase line would go unasserted.
 b8strict(){ # rc out err
     [ "$1" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$3" && [ ! -s "$2" ]
 }
-RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
+RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
 if b8strict "$rc" "$TMP/b8s.out" "$TMP/b8s.err"; then
     ok "(B8s) with the large-block route off: a real footprint over --max-memory=64M exits 5 with the ingest line"
 else
     no "(B8s) $( b8why "$rc" "$TMP/b8s.out" "$TMP/b8s.err" )"
 fi
-RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
+RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
 if b8strict "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err"; then
     ok "(B8bs) with the route off, crawl:999999999 still exits 5 with the ingest line"
 else
@@ -975,8 +979,13 @@ git -C "$QR" init -q && git -C "$QR" add -A && git -C "$QR" -c user.name=t -c us
 printf 'int a_extra( int x ) { return a_00( x ) + a_01( x ); }\n' >"$QR/a/extra.c"
 git -C "$QR" add -A && git -C "$QR" -c user.name=t -c user.email=t@example.com commit -qm target
 mkdir -p "$TMP/qrtmp"
-qr_run(){ ( cd "$QR" && TMPDIR="$TMP/qrtmp" RIPWIRE_CACHE_STATS=1 RIPWIRE_TEST_MEMGUARD="$1" "$BIN" . --quality-delta=HEAD~1..HEAD >"$TMP/b22.out" 2>"$TMP/b22.err" ); }
-( cd "$QR" && TMPDIR="$TMP/qrtmp" "$BIN" . --quality-delta=HEAD~1..HEAD >"$TMP/b22ref.out" 2>/dev/null ); refRc=$?
+# QD-PAIR-BASE-CACHE: the base side is cached by sha under $TMPDIR/ripwire. These arms pin the base-MISS ladder (the base is
+# ingested, graphed, scored and released here), so every run first removes the qbase blobs the previous run wrote; the
+# base-HIT ladder is pinned by (B22h)/(B23h) below.
+qr_dropbase(){ find "$TMP/qrtmp" -type f -name 'ripwire-qbase-*' -exec rm -f {} + 2>/dev/null; return 0; }
+qr_hit(){ ( cd "$QR" && TMPDIR="$TMP/qrtmp" RIPWIRE_CACHE_STATS=1 RIPWIRE_TEST_MEMGUARD="$1" "$BIN" . --quality-delta=HEAD~1..HEAD >"$TMP/b22.out" 2>"$TMP/b22.err" ); }
+qr_run(){ qr_dropbase; qr_hit "$1"; }
+qr_dropbase; ( cd "$QR" && TMPDIR="$TMP/qrtmp" "$BIN" . --quality-delta=HEAD~1..HEAD >"$TMP/b22ref.out" 2>/dev/null ); refRc=$?
 for want in "1|ingest of the base commit|1" "2|graph of the base commit|1" "3|snapshot of the base commit|1" \
             "4|base commit's snapshot, with its index released|1" "5|ingest of the target commit|2" "6|graph of the target commit|2"; do
     n="${want%%|*}"; rest="${want#*|}"; phase="${rest%|*}"; ingests="${rest##*|}"
@@ -1017,6 +1026,50 @@ for trip in parse:3 crawl:20; do
         no "(B23) $trip rc=$rc (want $want) gating=$gt rows-outside-the-diff=$outside ingests=$( grep -c '^ripwire: cache-stats ' "$TMP/b22.err" ) stderr: $( grep '^ripwire: [^c]' "$TMP/b22.err" | head -c 250 )"
     fi
 done
+# (B22h) QD-PAIR-BASE-CACHE: on a base-cache HIT there is no base ingest, graph or snapshot to read after, so the range form's
+#       readings are: after the cached base is in hand (hard:1, the "released" reading, no ingest yet), after the target's
+#       ingest (hard:2) and its graph (hard:3); hard:4 is past them and must change nothing. Every stop is still exit 5,
+#       no stdout, one line. Premise: the unseamed run before the arms wrote exactly one qbase blob, and the arms read it
+#       (a missing blob would make this a miss ladder again — counted, and zero FAILS).
+qr_dropbase; qr_hit ""; hitRefRc=$?
+hitblobs="$( find "$TMP/qrtmp" -type f -name 'ripwire-qbase-*' | grep -vc '\.tmp\.' )"
+if [ "$hitblobs" = 1 ] && [ "$hitRefRc" = "$refRc" ] && cmp -s "$TMP/b22.out" "$TMP/b22ref.out"; then
+    ok "(B22h) premise: the unseamed run wrote one qbase blob and answers as the miss run did"
+    for want in "1|base commit's snapshot, with its index released|0" "2|ingest of the target commit|1" "3|graph of the target commit|1"; do
+        n="${want%%|*}"; rest="${want#*|}"; phase="${rest%|*}"; ingests="${rest##*|}"
+        qr_hit "hard:$n"; rc=$?
+        got="$( grep -c '^ripwire: cache-stats ' "$TMP/b22.err" )"
+        if [ "$rc" = 5 ] && [ ! -s "$TMP/b22.out" ] && grep -q "^ripwire: memory limit reached during the $phase (limit " "$TMP/b22.err" \
+           && [ "$( grep -c '^ripwire: [^c]' "$TMP/b22.err" )" = 1 ] && [ "$got" = "$ingests" ]; then
+            ok "(B22h) base-cache hit: hard:$n stops the range form after the $phase (exit 5, one line, $got ingest(s))"
+        else
+            no "(B22h) hard:$n rc=$rc stdout=$( wc -c <"$TMP/b22.out" | tr -d ' ' )B ingests=$got (want $ingests) stderr: $( grep '^ripwire: [^c]' "$TMP/b22.err" | head -c 250 )"
+        fi
+    done
+    qr_hit "hard:4"; rc=$?
+    if [ "$rc" = "$refRc" ] && cmp -s "$TMP/b22.out" "$TMP/b22ref.out" && [ "$( grep -c '^ripwire: cache-stats ' "$TMP/b22.err" )" = 1 ]; then
+        ok "(B22h) base-cache hit: hard:4, past its three readings, answers byte-identically to the miss run (rc=$rc, one ingest)"
+    else
+        no "(B22h) hard:4 rc=$rc (want $refRc) ingests=$( grep -c '^ripwire: cache-stats ' "$TMP/b22.err" ) or its answer differs from the unseamed run"
+    fi
+    # (B23h) a guard stop in the TARGET's full tree on a base-cache hit still degrades to the changed files, naming the target's stop
+    for trip in parse:3 crawl:20; do
+        qr_hit "$trip"; rc=$?
+        gt="$( sed -n 's/.*<quality-delta [^>]* gating="\([0-9]*\)".*/\1/p' "$TMP/b22.out" | head -n 1 )"
+        want=6; [ -n "$gt" ] && [ "$gt" -gt 0 ] && want=2
+        outside="$( grep -o ' p="[^"]*"' "$TMP/b22.out" | grep -vc ' p="a/extra\.c:' )"
+        if [ -n "$gt" ] && [ "$rc" = "$want" ] && grep -q '<quality-delta [^>]* ingest_scope="changed-files"' "$TMP/b22.out" \
+           && grep -q "<quality-delta [^>]* memory_stop=\"${trip%%:*}\"" "$TMP/b22.out" && [ "$outside" = 0 ] \
+           && [ "$( grep -c '^ripwire: memory limit ' "$TMP/b22.err" )" = 1 ] \
+           && grep -q "^ripwire: memory limit .*stopped the ${trip%%:*} of the target commit" "$TMP/b22.err"; then
+            ok "(B23h) base-cache hit: $trip cuts the target's ingest: the changed files answer (exit $rc, degraded header naming the target's stop)"
+        else
+            no "(B23h) $trip rc=$rc (want $want) gating=$gt rows-outside-the-diff=$outside stderr: $( grep '^ripwire: [^c]' "$TMP/b22.err" | head -c 250 )"
+        fi
+    done
+else
+    no "(B22h) premise: qbase blobs after the unseamed run=$hitblobs (want 1), rc=$hitRefRc (want $refRc), or its answer differs from the miss run"
+fi
 # (B23 twin, rule 4) the refusal still holds when even the changed files are cut: crawl:1 trips every ingest at its first
 #       crawl entry, so the target's changed-file ingest (a/, a/extra.c) is cut too — exit 5, no stdout, ONE line naming
 #       the stop, that the verb cannot answer from a partial index, and that the changed files were tried.
@@ -1113,7 +1166,9 @@ b12="" b12env="" b12lad=( 2500 4000 6000 9000 14000 ) b12i=3 b12lo=0 b12hi=4 b12
 LC_ALL=C grep -q -a '__asan_init' "$BIN" 2>/dev/null && b12lad=( 5000 8000 12000 18000 28000 )
 for attempt in 1 2 3 4 5 6 7 8; do
     mkeg12 "${b12lad[$b12i]}"
-    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG12" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
+    # RIPWIRE_MEM_BUDGET_MB=0: this arm is the parse line's cut rule. The allocator line (memceiling.h, on by default at the same
+    # limit) refuses the moment the trees in flight pass the limit, before any file completes, so it would decide the run instead.
+    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG12" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
     hdr="$( grep -oE '<!-- files=[^>]*-->' "$TMP/b12.out" | head -1 )"
     parsed="$( printf '%s' "$hdr" | grep -oE 'memory_parsed=[0-9]+' | grep -oE '[0-9]+' )"
     b12trail="$b12trail [${b12lad[$b12i]} elems: rc=$rc parsed=${parsed:--}]"
