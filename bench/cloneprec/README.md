@@ -230,4 +230,197 @@ anticipated, and A's result is reported as it came out rather than being replace
 
 ## Results
 
-(appended after the runs; nothing above the addendum line is written with a result in view)
+All runs: plain dev builds, `--no-cache`, one ripwire process at a time, `--quality-kinds=duplication,`
+`new-clone-of-reused-helper`. Every range reported `stale_tree="1"` and `churn="unavailable"` on all 40 of
+population A - the working tree is not either compared ref, and the churn input the short-horizon kind
+needs was not available. Neither affects the clone kinds, and both are disclosed here rather than omitted.
+
+### Part 1, population A - the gating population is EMPTY, so gating precision is UNDEFINED
+
+Over the 40 frozen first-parent merge ranges, on the tip binary `2ad2b6254`:
+
+| | count |
+| --- | --- |
+| ranges replayed | 40 |
+| ranges emitting at least one clone row | 17 |
+| clone rows emitted | 68 |
+| ... `sev="minor"` (demoted, non-gating) | 50 |
+| ... `origin="new-symbol"` (never gating, `src/quality.h` `rowGates`) | 18 |
+| **gating clone rows, population P** | **0** |
+
+`50 + 18 = 68`: every emitted row is accounted for, and the two classes partition the rows.
+Cross-check: the document root's own `gating=` count agreed with the per-row rule on **40 of 40** ranges,
+so the zero is the tool's own verdict and not a parsing artifact. All 40 runs exited 0, which is what
+`--quality-delta` returns when nothing gates, so the exit statuses agree with the row counts too.
+
+**The pre-registered precision is therefore UNDEFINED on population A, not low and not high.** A ratio
+with a zero denominator is not a small number. Reporting "0% precision", or quietly substituting the
+non-gating rows, would both be wrong: the non-gating rows are the population the published demotion
+figures already describe.
+
+**Why A could not carry the quantity**, diagnosed afterwards and reported as a property of the population
+rather than as an excuse: a clone group gates only when **some** member existed at the baseline
+(`rowGates` = `!isMinor && !isNewSymbol` for these kinds), and a first-parent merge range on this repo is
+dominated by new code. The clearest single case is `f7cfcec7a`, which emitted **12 duplication rows, all
+`origin="new-symbol"`**, over one family of seven new Python fixture generators in
+`test/lib/tanglecapfixtures.py`.
+
+**Ungradeable cells: all 0 of them, because there were no cells.** No row was dropped, no row was
+excluded, and no row was graded. The three shapes the pre-registration expected to resist grading
+(members gone at the tip, vendored code, genuinely borderline pairs) never arose, because nothing reached
+the grader. The salted draw was never performed: with `|P| = 0` there is nothing to draw from, and
+`draw_sample.py` reports `|P| = 0` rather than inventing a sample.
+
+### Part 2, population A - rows per underlying duplication, and why #809 is inert here
+
+The pre-registered metric is defined on **gating** clone rows, because `mergeOverlappingCloneRows` acts
+only on those (`src/quality.h`: `if( row.cloneGroupIndex == 0 || !rowGates( row ) ) continue;`). With
+`|P| = 0` it is **UNDEFINED on all three binaries**, and the three binaries agree exactly:
+
+| binary | clone rows | minor | new-symbol | gating | rows per duplication (gating, pre-registered) |
+| --- | --- | --- | --- | --- | --- |
+| today, tip `2ad2b6254` | 68 | 50 | 18 | 0 | UNDEFINED |
+| #809 parent `f18bba967` | 68 | 50 | 18 | 0 | UNDEFINED |
+| #809 head `455b7f6d7` | 68 | 50 | 18 | 0 | UNDEFINED |
+
+**This is the outcome the pre-registration declared in advance as legitimate**, and it is reported as
+declared: the shape #809 fixes does not occur in the *gating* population of this corpus, so on these 40
+real ranges #809 changes nothing that can be measured, and its fixture arm is the only evidence that the
+mechanism works. The metric's value here is as a regression guard, not as a win.
+
+**The post-hoc all-rows metric, which is where the inflation actually is.** Counting components over
+**all** 68 clone rows rather than only the gating ones:
+
+| binary | clone rows | underlying duplications (components) | **rows per underlying duplication (ALL rows, post-hoc)** |
+| --- | --- | --- | --- |
+| today, tip `2ad2b6254` | 68 | 27 | **2.5185** |
+| #809 parent `f18bba967` | 68 | 27 | **2.5185** |
+| #809 head `455b7f6d7` | 68 | 27 | **2.5185** |
+
+Worst single range: **12 rows for 1 underlying duplication** (`f7cfcec7a`). So the inflation #809 was
+written to remove **is real and is present in this corpus at 2.52 rows per duplication** - and it sits
+entirely in the population #809 does not act on, because every one of those 68 rows is minor or
+new-symbol. That is a statement about #809's *scope*, not its correctness: #809 does what it says, the
+gate arm b2 pins it, and this corpus simply contains none of the gating overlaps it merges.
+
+**What this does NOT say.** It does not say #809 should be widened to non-gating rows - that is a product
+decision about what a reader should see, it would change what `--quality-delta` prints by default, and
+this lane does not make it. It is flagged for the owner, not acted on.
+
+### Part 1, population B - |P| = 4, every row graded, 1 TRUE
+
+Population B is the 80 frozen non-merge commits. It has a gating population, and it is small:
+
+| | count |
+| --- | --- |
+| ranges replayed | 80 |
+| ranges emitting at least one clone row | 5 |
+| clone rows emitted | 8 |
+| ... `sev="minor"` | 1 |
+| ... `origin="new-symbol"` | 3 |
+| **gating clone rows, population P_B** | **4** |
+| underlying duplications among them | **3** |
+
+`|P_B| = 4 <= 30`, so the pre-registered rule applies: **the whole population is graded, there is no
+sample, and there is no sampling error** - only the adjudication's own uncertainty. The salt was
+therefore never used. Root `gating=` agreed with the per-row rule on **80 of 80** ranges. Three ranges
+exited 2, which is what `--quality-delta` returns when a row gates, and that matches the three ranges
+that carry gating rows.
+
+Verdicts, with the evidence for each, are in `bench/cloneprec/verdicts_B.tsv`.
+**GRADED BY THIS LANE, which is not independent** - the lane that produced the rows judged them. Each
+verdict records the bodies it was based on at the commit the row was emitted for, so any line can be
+overturned by a different reader without re-running anything.
+
+| unit | TRUE | FALSE | CHRONIC | BORDERLINE | ungradeable | precision | Wilson 95% |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| per gating **row** | 1 | 3 | 0 | 0 | 0 | **1 of 4** | 4.6% - 69.9% |
+| per underlying **duplication** | 1 | 2 | 0 | 0 | 0 | **1 of 3** | 6.1% - 79.2% |
+
+**Nothing was ungradeable.** All three pairs' bodies were readable at their commits, none was vendored,
+and none came out borderline. The count is 0 and it is reported rather than left implied.
+
+The one TRUE is `rw::findByField | namingconsistency::groupFor` - and it is the best case the kind can
+have: `src/infra/tablelookup.h` exists *because* `--quality-delta` found an earlier instance of this very
+shape, as its own comment records ("a two-instance dedup turned out to be a three-instance one").
+`groupFor` matches two fields where `findByField` matches one, so the fix is a predicate overload rather
+than a drop-in call, but the duplication is real and actionable.
+
+The three FALSE rows are two distinct shapes:
+- `rw::refuseFlagValue | printStrayFilterNoMatch`: two *different* diagnostics, each one `rw::emitTo(
+  stderr, <a different format literal>, ... )`. The only shared code is the house output helper, so there
+  is nothing to extract - the common factor **is** `emitTo`. It carries `idiom="call-sequence"` and still
+  gates.
+- `RedactCounts::total | ledger::sumInput`, counted twice because it is reported under both kinds: the
+  accumulator idiom over different data (a `std::array` of `SecretKind` tallies vs a `vector<Entry>`'s
+  `inputTokens`), and one member lives in a **test fixture**, `test/estcalibfix/ledger.cpp`.
+
+**Interval honesty.** At n=4 and n=3 the intervals span most of the unit interval and **cannot** separate
+"mostly true" from "mostly noise". The point estimate is reported with its interval and no claim is made
+that a 25% is distinguishable from a 50%. What the measurement *does* establish, which needs no
+interval, is the **size** of the population: 4 gating clone rows across 80 landed non-merge commits, and
+0 across 40 landed merges.
+
+### Part 2, population B, and the corrected metric
+
+My own metric definition was wrong, and measuring it is what showed that. Union-by-shared-member
+conflates two different shapes:
+
+- **two clone GROUPS that overlap** (an exact group and a near group sharing a member) - this is what PR
+  #809 merges, and `test/clonededupcheck.sh` arm (b2) pins it;
+- **one group reported under BOTH kinds** - which #809 deliberately keeps as two rows. Arm (b) of its own
+  gate asserts exactly that: "new binary reports 'new-clone-of-reused-helper' (consumer #2 fires - dedup
+  kept BOTH consumers)".
+
+So the pre-registered target of 1.0 is unreachable *and should be*, while one duplication legitimately
+produces one row per kind. The metric is therefore reported **per kind** (components computed within each
+kind) as well as kind-mixed, and the per-kind figure is the one that can be read as a defect rate:
+
+| population | rows | per-kind duplications | **rows/dup (per kind)** | kind-mixed duplications | rows/dup (kind-mixed) |
+| --- | --- | --- | --- | --- | --- |
+| A, gating (all three binaries) | 0 | 0 | UNDEFINED | 0 | UNDEFINED |
+| A, all clone rows (all three binaries) | 68 | 38 | **1.7895** | 27 | 2.5185 |
+| B, gating (all three binaries) | 4 | 4 | **1.0000** | 3 | 1.3333 |
+| B, all clone rows (all three binaries) | 8 | 6 | **1.3333** | 5 | 1.6000 |
+
+**#809's effect on real code, measured where it stands: none, on either population.** Every figure above
+is identical on `2ad2b6254` (today), `f18bba967` (#809's parent) and `455b7f6d7` (#809's head). The
+gating population it acts on already emits exactly one row per duplication per kind (1.0000), so there is
+nothing for it to merge in 120 replayed real changes.
+
+**The mechanism works; this corpus just does not contain its shape.** Proven rather than assumed, through
+`RIPWIRE_BIN` so the binary under test is not the checkout's own:
+
+- `test/clonededupcheck.sh` on **#809's head binary: ALL PASS**, 15 arms, including the mutation-test arm
+  that proves the assertions are not vacuous.
+- The same gate (head's checkout) on **#809's parent binary: 4 arms FAIL** - "(b2) expected one gating
+  reused-helper report for the exact/near overlap", "(b2) expected the displayed symbol list to select
+  all findings in the overlap", "(b2) expected exactly one clone row after removing reuse evidence",
+  "(b2) expected a separate gating calcChain/calcNear pair and a three-member reused-helper row".
+- On the fixture, the parent binary emits **4 gating rows** (`calc|calcDup` and `calc|calcNear` under both
+  kinds) for **one** underlying duplication family: 2.0 per kind, 4.0 kind-mixed. #809's head reports one
+  gating reused-helper row for the overlap. So **2.0 -> 1.0 per kind on the fixture, 1.0 -> 1.0 on real
+  code.**
+
+**Where the inflation a reader actually sees lives.** On population A the document carries **1.79 rows
+per duplication per kind** (2.52 kind-mixed), and the worst single range emits **12 rows for one
+underlying duplication** - seven new Python fixture generators in `test/lib/tanglecapfixtures.py` at
+`f7cfcec7a`. Every one of those 68 rows is minor or new-symbol, so **#809 does not act on any of them.**
+That is a statement about its scope, not its correctness.
+
+**Not acted on, flagged for the owner.** Whether the merge should extend to non-gating rows is a product
+decision about what `--quality-delta` prints by default. This lane did not make it and changed no
+default, bar, cap or threshold.
+
+### What was tempted and refused
+
+- `kMinCloneTokens` sits next to the rows that came out FALSE (36, 31 and 41 tokens). Raising it would
+  have turned a 1-of-4 into a better-looking number. `src/quality.h` already records that this was
+  measured and **refuted** - the canonical true positive is 59 tokens while the noise ran 22 to 127 - so
+  a floor above 22 costs true positives before it clears noise. Untouched.
+- The 80-token idiom ceiling and the `one-statement` / `call-sequence` / operand-path conditions would
+  each have demoted the `emitTo` pair. Untouched: a demotion rule tuned to a lane's own sample is how a
+  measurement lane turns into a number-flattering lane.
+- Population A's emptiness was a standing invitation to go looking for a corpus that yields gating rows.
+  The pre-registration forbade it, A is reported as it came out, and B was declared in writing before it
+  was run.

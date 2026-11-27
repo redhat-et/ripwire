@@ -1,0 +1,27 @@
+# cloneprec — adjudication of population B's WHOLE gating population, 2026-11-27.
+#
+# |P_B| = 4 gating clone rows, which is <= the pre-registered n=30, so every row is graded and there is
+# NO sample and no sampling error — only the adjudication's own uncertainty.
+#
+# GRADED BY THE MEASURING LANE. This is not an independent adjudication: the lane that produced these
+# rows also judged them. Each verdict below carries the evidence that produced it, at the commit the row
+# was emitted for, so a different reader can overturn any line without re-running anything. The
+# independence gap is an owner call (README.md Part 1), and this lane does not close it.
+#
+# Rubric, fixed before the rows were read (README.md Part 1):
+#   TRUE  — the members share domain meaning, not merely shape; a reader told "these are copies" agrees.
+#   FALSE — the members operate on different data or belong to different domains; the resemblance is
+#           structural only.
+#   CHRONIC — the duplication is real but predates the change (counted separately, scored as neither).
+#   BORDERLINE — reported as its own count, never silently resolved to either side.
+#
+# verdict	commit	kind	pair	tokens	evidence
+FALSE	d69e62841	duplication	src/cli.h::rw::refuseFlagValue | src/verbs_change.h::printStrayFilterNoMatch	36	Both bodies are ONE rw::emitTo( stderr, <a different format literal>, <different args> ). refuseFlagValue prints "{} needs {} — got '{}', e.g. {}" for a flag value; printStrayFilterNoMatch prints a three-line --stray-content diagnostic. Two unrelated diagnostics whose only shared code is the house output helper itself. There is no helper to extract: the common factor IS rw::emitTo. Carries idiom="call-sequence" and still gates.
+FALSE	91fce8eab	duplication	src/redact.h::RedactCounts::total | test/estcalibfix/ledger.cpp::ledger::sumInput	31	The accumulator idiom, over different data and different containers. total() sums a std::array<uint32_t, kCount> SecretKind tally held as a member; sumInput() sums e.inputTokens over a const std::vector<Entry>& parameter. One is a const member function in src/, the other a free function in a TEST FIXTURE (test/estcalibfix/). No maintainer extracts a shared helper between a redaction tally and a calibration fixture's ledger.
+FALSE	91fce8eab	new-clone-of-reused-helper	src/redact.h::RedactCounts::total | test/estcalibfix/ledger.cpp::ledger::sumInput	-	THE SAME UNDERLYING PAIR as the row above, reported a second time under the other kind. Same evidence, same verdict. This is the row-inflation PR #809 merges, inside the gating population: 2 rows, 1 duplication.
+TRUE	75ed8d3ac	duplication	src/infra/tablelookup.h::rw::findByField | src/namingconsistency.h::namingconsistency::groupFor	41	Both are the linear-find-a-row-by-field-match concept, and this repo has already DECIDED that concept deserves a shared helper: src/infra/tablelookup.h exists for it, and its own comment records that --quality-delta is what found the third instance ("a two-instance dedup turned out to be a three-instance one"). groupFor matches TWO fields (g.lang == lang && g.kind == kind), so it cannot call the one-field findByField as written — the fix is a predicate-taking overload, not a drop-in call. Real duplication, actionable, correctly gating.
+#
+# TOTALS, both units reported because they differ and the difference is the point:
+#   per ROW:                   TRUE 1, FALSE 3, CHRONIC 0, BORDERLINE 0, ungradeable 0  of 4
+#   per UNDERLYING DUPLICATION: TRUE 1, FALSE 2, CHRONIC 0, BORDERLINE 0, ungradeable 0  of 3
+# Nothing was dropped and nothing was ungradeable: all three bodies were readable at their commits.
