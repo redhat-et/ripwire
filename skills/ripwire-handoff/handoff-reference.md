@@ -1,5 +1,7 @@
 # ripwire-handoff — reference: handoff-reference (read on demand; the recipe is in SKILL.md)
 
+Contents: 1. Task-relevant symbols · 2. Expand the key symbols · 3. Design rationale · 4. Maintenance risk, scoped to the subsystem · Calibration — what's fact vs framing here · Stamp the commit you measured at — at="<sha>[+dirty]" · Output · Mid-task session handoff — --handoff
+
 # Handoff with ripwire
 
 > Nearest neighbours:

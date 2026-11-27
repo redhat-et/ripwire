@@ -51,10 +51,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 480 | 165 | 303 | **177** |
+| 482 | 166 | 303 | **179** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 480 + 10 is the 490 constants this generator parses out of `src/`.
+are not counted as caps, and 482 + 10 is the 492 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **148 of 480 caps are classified
-(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 332 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 482 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 334 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -810,6 +810,14 @@ Discloses: **none**
 | `kMaxProbeCommits` | `40000` | INDEXING | walk bound — past it, misses are "unknown", never "never" |
 | `kMinNameLen` | `4` | BOUNDARY | — |
 
+### `src/gitrootfacts.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kGitDiscoveryMaxLevels` | `64` | — | — |
+
 ### `src/gitstampcache.h`
 
 Discloses: **none**
@@ -1002,6 +1010,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kExtendChainCap` | `16` | INDEXING | factory-of-a-factory links the receiver rule follows (nunjucks: 2); past it, no class |
+| `kMaxChainSegments` | `16` | — | — |
 | `kMaxQualifierHops` | `32` | INDEXING | `a::b::c::…` past 32 segments is not written C++ |
 
 ### `src/ingest_parsepool.h`

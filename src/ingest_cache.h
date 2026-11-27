@@ -400,7 +400,23 @@ constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signa
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 342;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 350;          // bump on any grammar/.scm/extraction change
+                                                      // 350 = 2026-11-26 (train m5-1126-5, the landing renumber of two PLACEHOLDERS): ONE number above BOTH lanes' bumps past main's
+                                                      //   342 (rich 343): lane rust-turbofish-callers' 344 (#769, rich 345) and lane objcxx-std-qualified's 348 (#778, rich 349).
+                                                      //   Rich file tag 351. kCacheVersion stays 57 (lane asserted-signal). Both lane notes are kept below as HISTORY; the tags they
+                                                      //   name are the tags of those placeholder numbers, never shipped.
+                                                      // --- history: lane objcxx-std-qualified carried 348 (placeholder) ---
+                                                      // 348 = 2026-11-26 (lane objcxx-std-qualified, PLACEHOLDER: drafts #769 holds 344 and the RESOLVER lane may
+                                                      //   take 346, so the landing train renumbers; rich file tag 349): an ObjC++ (.mm, Lang::ObjC) call written
+                                                      //   `std::X()` now carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore), so a v342
+                                                      //   blob holds the same ref UNQUALIFIED — an extraction change. kCacheVersion stays 55.
+                                                      // --- history: lane rust-turbofish-callers carried 344 (placeholder) ---
+                                                      // 344 = 2026-11-26 (lane rust-turbofish-callers, PLACEHOLDER: the train renumbers; above main's 342 and its
+                                                      //   rich 343; rich file tag 345): a Rust turbofish on a path function or a method (`W::f::<T>(x)`,
+                                                      //   `w.m::<T>(y)`, queries/rust/tags.scm) is captured as a call, and a `macro_rules!` transcriber's
+                                                      //   `f::<T>(` is read as a call of `f` (ingest_names.h readCallPath). A v342 blob holds no reference
+                                                      //   for those sites. No record shape changes; kCacheVersion unchanged.
+                                                      // --- history: 342 ---
                                                       // 342 = 2026-11-22 (IN9, the 0.7.0 train merged with origin/main b576a95e3). ONE number above BOTH
                                                       //   sides: the train's 340 (rich 341) and main's 337 (#715, rich 338). Rich file tag 343. kCacheVersion
                                                       //   stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers.

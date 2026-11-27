@@ -1,5 +1,7 @@
 # ripwire-change-check — reference: pr-context (read on demand; the recipe is in SKILL.md)
 
+Contents: The one-shot bundle — --pr-context[=BASEREF] · 1. Situational awareness on the diff · 2. Hotspot risk · 3. Lint delta · 4. Missing-test seam check · 5. The diff's structural footprint · 6. Read the numbers on what you touched · 7. Docs-sync check · 8. Run the test gate
+
 # Change check with ripwire
 
 > Routing:

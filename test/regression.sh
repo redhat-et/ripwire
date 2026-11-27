@@ -507,6 +507,7 @@ for _g in \
     editcheckcheck \
     editcheckdeclcheck \
     editchecknotecheck \
+    editcheckstampcheck \
     edithandlehintcheck \
     editpayloadbinarycheck \
     editplancheck \
@@ -871,6 +872,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    norepogitcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
@@ -1085,6 +1087,7 @@ for _g in \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
+    rustturbofishcheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1130,6 +1133,7 @@ for _g in \
     skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
+    skillshapecheck \
     skilltruthcheck \
     skipclassifycheck \
     skippedcheck \
@@ -1147,6 +1151,7 @@ for _g in \
     statgatecheck \
     stdmembergatecheck \
     stdqualcheck \
+    straynographcheck \
     strkerncheck \
     structlayoutcheck \
     subagentprimercheck \

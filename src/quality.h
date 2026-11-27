@@ -3138,6 +3138,10 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
 // exists, but a --since window matched zero commits". popen failure degrades to false.
 inline bool gitRepoHasHistory( const std::string& root )
 {
+    if( gitRootProvablyNoRepo( root ) )
+    {
+        return false;   // git cannot find a repository from here, so it is not asked (gitrootfacts.h; re-read every call, never stale)
+    }
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " rev-parse --verify --quiet HEAD 2>/dev/null";
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
@@ -3328,7 +3332,13 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 57;   // MUST equal ingest.cpp's kCacheVersion (gated); 57 = lane asserted-signal (Python assert statement refs; above main's 55), 55 = lane tangle-rule (def record block facts maxBlock10 + cross), 54 = lane qd-tangle (def record steering-locals byte), 53 = lane rust-self-chain (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 342;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 350;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 350 = 2026-11-26 (train m5-1126-5): ONE number above #769's placeholder 344 (rich 345; Rust turbofish calls) and
+                                                          //   #778's placeholder 348 (rich 349; ObjC++ std::-qualified calls). Rich file tag 351.
+                                                          // --- history: lane objcxx-std-qualified carried 348 (placeholder) ---
+                                                          // 348 = 2026-11-26 (lane objcxx-std-qualified, PLACEHOLDER above drafts #769's 344 and the
+                                                          //   RESOLVER lane's possible 346; rich file tag 349): ObjC++ `std::X()` carries its std-rooted qualifier.
+                                                          // --- history: 342 ---
                                                           // 342 = 2026-11-22 (IN9): the 0.7.0 train (340, rich 341) merged with origin/main b576a95e3 (337, #715,
                                                           //   rich 338) — ONE number above both. Rich file tag 343. Both histories below.
                                                           // --- history: the 0.7.0 train carried 340 ---

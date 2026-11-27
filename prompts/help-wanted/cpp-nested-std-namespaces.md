@@ -1,5 +1,13 @@
 # Resolve nested `std::` calls by their whole qualifier chain
 
+> **Solved (2026-11-26).** A `std::`-qualified call now binds only a definition inside namespace `std`, judged by its
+> whole qualifier chain (`std::ranges::move`, `std::chrono::duration_cast`), in [#331](https://github.com/redhat-et/ripwire/pull/331)
+> (train 18, a maintainer lane), closing [#150](https://github.com/redhat-et/ripwire/issues/150). The `test/stdqualcheck.sh` §11 arms this kit calls
+> `KNOWN GAP` are flipped; that block now opens "Was a KNOWN GAP section". This kit stays as a worked example; the
+> optional ObjC++ part (step 5 below) is still open: tree-sitter-objc leaves `std::` in an ERROR node, so
+> `bridge.mm`'s `std::unreachable()` still binds `Cursor::unreachable`, pinned by the §7 `FLOOR` arm at
+> `test/stdqualcheck.sh:182`, with no issue tracking it yet.
+
 You are fixing how ripwire resolves C++ calls into **nested standard-library namespaces**:
 `std::ranges::move`, `std::chrono::duration_cast`, `std::filesystem::exists`. Today such a call can
 bind to an in-repo definition it has nothing to do with, at full confidence, with no `amb=` to warn
@@ -60,7 +68,7 @@ every ranking computed over those edges.
   `enclosingScopeOf( … )`.
 - `src/model.h` `struct Reference`, and `src/ingest_cache.h` `RawRef` with `writeRef` / `readRef`: the
   cached record a new per-reference field would join.
-- `test/stdqualcheck.sh` with `test/stdqualfix/`: #134's gate. §7 pins the ObjC++ floor. **§11 is this
+- `test/stdqualcheck.sh` with `test/stdqualfix/`: #134's gate. §7 is the ObjC++ arm (a floor until 2026-11-26). **§11 is this
   task:** three `KNOWN GAP` arms (K1 to K3), their census twins, a header arm, and three `CONTROL` arms.
   Its corpus is written into `$TMP` at run time; read the section comment before adding C++ under
   `test/`.
@@ -117,9 +125,10 @@ One shape that works. The choices inside it are yours, and the PR should argue t
    the definition win. Find out whether extraction already tells a prototype from a definition before
    you add a flag. If you keep the edge and disclose it instead, argue that and rewrite K3 to assert the
    disclosure.
-5. **ObjC++, if feasible.** tree-sitter-objc leaves an ERROR node spelling `std::` beside a bare call.
-   Recovering the qualifier means reading that sibling's text. Keep it bounded, and never invent a
-   qualifier from an unrelated error. If you do it, §7's `FLOOR` arm flips; if you don't, disclose it.
+5. **ObjC++ — done (lane objcxx-std-qualified, 2026-11-26).** tree-sitter-objc leaves an ERROR node
+   spelling `std::` beside a bare call; `ingest_names.h` `objcxxStdQualifierBefore` reads the std-rooted
+   chain back, bounded, and only when the nearest `::` lies inside error recovery. §7's former `FLOOR` arm
+   is now a real arm, and §16 covers the spellings plus ObjC++, Metal and CUDA controls.
 
 The non-negotiables from `CLAUDE.md`:
 

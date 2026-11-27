@@ -529,6 +529,12 @@ struct LangFacts
     {
         return std::ranges::any_of( assertionCalls, [ & ]( const AssertionCall& a ) { return a.matches( callee, written ); } );
     }
+
+    /// Objective-C++ (.mm, Lang::ObjC): tree-sitter-objc has no qualified_identifier, so `std::X()` arrives as error recovery beside a
+    /// bare call. ingest_sidecap.h qualifyPathReference reads the std-rooted chain back lexically (ingest_names.h
+    /// objcxxStdQualifierBefore), and the call takes the same keepStdQualifiedCandidates guard a .cpp/.cu/.metal call does. A grammar
+    /// with real qualified names (C++) answers from the tree instead and leaves this false.
+    bool lexicalStdQualifier = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -601,7 +607,8 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily,
+      .lexicalStdQualifier = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,

@@ -34,6 +34,19 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
+#   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
+#   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57
+#   (lane asserted-signal) and kQSnapCacheScheme is unchanged: the extraction key moves, and the snapshot blob shape does not.
+#   Hash 0a151a98c9…87783b12.
+# 2026-11-26, lane objcxx-std-qualified (on origin/main f7cfcec7a): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 348 (PLACEHOLDER above drafts #769's 344 and the RESOLVER lane's possible 346, rich 349): an
+#   ObjC++ (.mm) call written `std::X()` carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore). kCacheVersion
+#   55 and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 7cacf91040…caef25.
+# 2026-11-26, lane rust-turbofish-callers (on main 5f4b50415): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 344 (PLACEHOLDER, rich 345): a Rust turbofish on a path function or a method is a call
+#   (queries/rust/tags.scm), and a transcriber's `f::<T>(` is read as a call (ingest_names.h readCallPath). kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 366b3fa9c3…9030201c.
 # 2026-11-26, lane asserted-signal (stacked on #770, 790ff59b5): RE-PINNED with UPDATE_GOLDEN=1. kCacheVersion and
 #   kIngestCacheVersionMirror 54 -> 57 (the M5's ingest slot): queries/python/tags.scm records the `assert` statement as a call
 #   reference named `assert`, so a v54 .py blob lacks those references. No record shape change; kParserVer 342 and
