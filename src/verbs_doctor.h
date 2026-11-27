@@ -515,8 +515,10 @@ inline DoctorIndexCache doctorIndexCacheRow( const rw::Config& cfg, std::vector<
     const rw::CacheIdentity id = rw::cacheIdentity();
     DoctorIndexCache    out;
     out.attrs  = "cache_version=\"" + std::to_string( id.cacheVersion ) + "\"";
-    out.attrs += " parser_ver_lean=\"" + std::to_string( id.parserVerLean ) + "\"";
-    out.attrs += " parser_ver_rich=\"" + std::to_string( id.parserVerRich ) + "\"";
+    // ONE-PARSE (kCacheVersion 56): one blob family, so the two class fields now name the same artifact and the same stamp.
+    // They are kept by name: --doctor's row is read by scripts that predate the change.
+    out.attrs += " parser_ver_lean=\"" + std::to_string( id.parserVer ) + "\"";
+    out.attrs += " parser_ver_rich=\"" + std::to_string( id.parserVer ) + "\"";
     out.attrs += " artifact_arch=\"" + std::to_string( id.artifactArch ) + "\"";
     // WHICH VERBS consume the rich artifact — the membership this row's lean=/rich= verdicts are about.
     // Answers "will my verbs get the persisted-stats path", which no output could answer before: the eval
@@ -535,16 +537,13 @@ inline DoctorIndexCache doctorIndexCacheRow( const rw::Config& cfg, std::vector<
     }
     else
     {
-        namedPath = named ? std::string( cfg.cacheFile )
-                          : defaultCachePath( std::string( cfg.rootPath ), /*captureValueUses=*/false );
-        // The two families share ONE path only when the user named it: an auto run has a per-family blob.
-        const std::string richPath = named ? namedPath
-                                           : defaultCachePath( std::string( cfg.rootPath ), /*captureValueUses=*/true );
+        namedPath = named ? std::string( cfg.cacheFile ) : defaultCachePath( std::string( cfg.rootPath ) );
+        // ONE-PARSE: both verb classes read this one blob, named or automatic, so the lean and rich fields agree.
         out.attrs  += named ? " source=\"cache-flag\"" : " source=\"auto\"";
         out.attrs  += " lean_path=\"" + std::string( rw::escapeXml( namedPath, esc ) ) + "\"";
-        out.attrs  += " rich_path=\"" + std::string( rw::escapeXml( richPath, esc ) ) + "\"";
-        leanVerdict = rw::cacheArtifactVerdict( namedPath, /*captureValueUses=*/false );
-        richVerdict = rw::cacheArtifactVerdict( richPath, /*captureValueUses=*/true );
+        out.attrs  += " rich_path=\"" + std::string( rw::escapeXml( namedPath, esc ) ) + "\"";
+        leanVerdict = rw::cacheArtifactVerdict( namedPath );
+        richVerdict = leanVerdict;
         // ok="0" ONLY for an artifact the user NAMED and this binary cannot read: a stated expectation not
         // met. A missing AUTO blob is a first run on a cold machine — the ordinary, correct, self-healing
         // miss — and failing there would report every fresh checkout as sick.

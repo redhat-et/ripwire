@@ -4,7 +4,8 @@
 // compiled here, instrumented, and linked with the grammar objects. It replaces src/ingest.cpp in these targets and
 // is never linked beside it.
 //
-//   ingestrecord — readFileRecord over one record's bytes (first byte: lean or rich family). This is what a
+//   ingestrecord — readFileRecord over one record's bytes (first byte: ignored — it chose the lean or rich family before
+//                  format 56 made them one; kept so the seed corpus still frames). This is what a
 //                  checksum-valid blob reaches: the record digest is over the same bytes, so the harness skips it.
 //   ingestframe  — openCacheFrame over a whole blob: the harness stamps the real magic/version/parserVer/arch into
 //                  the header and rebuilds the table checksum, so the fuzzer reaches the offset-table arithmetic.
@@ -30,19 +31,19 @@ namespace rwfuzz
 int ingestrecord( const std::uint8_t* data, std::size_t size )
 {
     std::string_view in( reinterpret_cast<const char*>( data ), size );
-    const bool       rich = ( takeByte( in ) & 1 ) != 0;
+    takeByte( in );   // the seed corpus' family byte (one family since format 56)
     rw::ByteR        r{ in.data(), in.data() + in.size() };
     std::vector<std::uint64_t> dict;
     std::string                rel;
     rw::FileFacts              facts;
-    noteAccepted( rw::readFileRecord( r, rich, dict, rel, facts ) );
+    noteAccepted( rw::readFileRecord( r, dict, rel, facts ) );
     return 0;
 }
 
 int ingestframe( const std::uint8_t* data, std::size_t size )
 {
     std::string_view in( reinterpret_cast<const char*>( data ), size );
-    const bool       rich = ( takeByte( in ) & 1 ) != 0;
+    takeByte( in );   // the seed corpus' family byte (one family since format 56)
     std::string      blob( in );
     if( blob.size() < rw::kCacheHeaderBytes + rw::kCacheTrailerBytes )
     {
@@ -50,7 +51,7 @@ int ingestframe( const std::uint8_t* data, std::size_t size )
     }
     const std::uint32_t magic     = rw::kCacheMagic;
     const std::uint32_t version   = rw::kCacheVersion;
-    const std::uint32_t parserVer = rw::parserVerFor( rich );
+    const std::uint32_t parserVer = rw::kParserVer;
     std::memcpy( blob.data() + 0, &magic, 4 );
     std::memcpy( blob.data() + 4, &version, 4 );
     std::memcpy( blob.data() + 8, &parserVer, 4 );
@@ -71,7 +72,7 @@ int ingestframe( const std::uint8_t* data, std::size_t size )
         const std::uint64_t tableSum = rw::blobChecksum( hdrTable );
         std::memcpy( blob.data() + trailerAt + 16, &tableSum, 8 );
     }
-    const rw::CacheFrame frame = rw::openCacheFrame( writeScratch( "ingest.cache", blob ), rich );
+    const rw::CacheFrame frame = rw::openCacheFrame( writeScratch( "ingest.cache", blob ) );
     noteAccepted( frame.ok );
     return 0;
 }
