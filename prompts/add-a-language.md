@@ -10,6 +10,11 @@ from memory would send you to the wrong files. **Every path below is one that co
 
 Work in a git worktree, not the main checkout. Run gates in the foreground.
 
+Orient before you open files. `./build/ripwire . --for="register a new language: Lang enum, extension table, tags.scm"`
+ranks the registration sites; `./build/ripwire . --grep='Lang::Clojure'` lists every arm the most recent
+full language (Clojure, with call edges and keyword heads) had to touch. `CONTRIBUTING.md` §3, "Where
+language-specific code lives", is the rule this prompt applies.
+
 ---
 
 ## STEP 0 — the measurement that decides whether to start
@@ -67,6 +72,9 @@ common: twenty languages each carrying a private copy of the same idea is twenty
   vocabulary**: `@name`, `@definition.{function,method,class,struct,interface,var,constant,macro,module,type,field}`,
   `@reference.{call,import,implementation,type}`. Do not invent a language-named capture
   (`@definition.LANG`, `@LANG.head`); every consumer downstream has to learn a new name for it.
+- `src/langfacts.h` — one `kLangFacts` row: the per-language facts (receiver rules, comment markers), one
+  column each. A missing row, or a missing `Must<T>` column, is a compile error. Add a column rather than a
+  new `l == Lang::X || …` compare in a shared file; `test/langidentitycheck.sh` counts those and may only fall.
 - The exhaustive `switch( Lang )` tables (`langTag`, `isCodeLang`, `dependencyCapable`, …) — the compiler
   lists every one you missed (`-Werror=switch`). A row each, no logic.
 - Then the arms the compiler cannot see: `grep` for a recently added language (`Lang::Elixir`) and read
@@ -88,15 +96,17 @@ common: twenty languages each carrying a private copy of the same idea is twenty
   `(str/join …)` laddered to every `join` in the corpus mints edges that are not real (the PR #81 decision:
   the ladder gave one Elixir function 55 callers where 3 were real). **Known gap:** today only Elixir, Rust and
   C++ `std::` calls have such a rule; a language that newly sets `Reference::qualifier` still falls through to
-  the bare-name ladder when no `qualifier::name` definition exists (CONTRIBUTING.md, "Refuse, don't guess", slice 6a).
+  the bare-name ladder when no `qualifier::name` definition exists — #349's Clojure `str/join` binds an in-tree
+  `join` this way (CONTRIBUTING.md, "Refuse, don't guess", slices 6a and 6b).
   Do not add a guard for your language alone: pin the wrong edge as a known-gap arm and say so in your PR.
 
-**A known gap, so you are not surprised by it:** the tags pass does not evaluate `#eq?`/`#any-of?`
-predicates yet (see the notes in `queries/javascript/tags.scm`). A language whose definitions are *a call
-with a keyword head* — Elixir `def`, or a Lisp-style grammar (e.g. Clojure's `defn`, if added) — therefore has to keep that keyword list in C++ for
-now. That is one reason `src/ingest_elixir.h` exists (it also holds arity, params, attribute and alias logic); it is **not a template to copy**. If you hit this, keep
-the list a small `constexpr` table in one place, and say in the PR that it belongs in `tags.scm` once
-predicates run. Maintainers will move it; you are not asked to build the mechanism.
+**Keyword heads are data.** Since #355 (closed 2026-11-18) the tags pass evaluates the string predicates
+`#eq?`, `#not-eq?`, `#any-of?` and `#not-any-of?` (`src/infra/tspredicates.h`; never `#match?`). A
+language whose definitions are *a call with a keyword head* — Elixir `def`, Clojure `defn` — keeps that
+keyword list in its `tags.scm` as an `#any-of?` list, as `queries/elixir/tags.scm` does on `@_keyword`;
+C++ that needs the same list reads it back from the compiled query (`predicateStrings`) instead of
+keeping a copy. `test/tagspredicatecheck.sh` holds these rules. `src/ingest_elixir.h` still holds
+Elixir's arity, params, attribute and alias logic; it is **not a template to copy**.
 
 If the shared mechanism you need does not exist, say so in the PR. We would rather add it with you than
 see the pattern forked.
@@ -112,8 +122,9 @@ Two constants must move **in the same commit**:
     src/ingest_cache.h    kParserVer
     src/quality.h         kIngestParserVerMirror     MUST equal it (gated)
 
-Miss the mirror and `qextractionkeycheck` fails reporting a version mismatch that reads like a
-totally unrelated bug. Bump on **any** grammar, `.scm`, or extraction change — the cache is keyed on
+Miss the mirror and the build stops on a `static_assert` in `src/ingest_cache.h`;
+`qextractionkeycheck` checks the same pair, and its version-mismatch report reads like a totally
+unrelated bug. Bump on **any** grammar, `.scm`, or extraction change — the cache is keyed on
 it, and a stale cache serving old symbols for new code is the worst failure this tool has.
 
 **Do not take the next integer blindly.** Parallel pull requests each need their own number, and the
@@ -128,8 +139,10 @@ Then regenerate `test/qschemetrip.hash` and update `test/printf_parity.manifest`
 Only if LANG has a resolvable import spelling. `src/resolve.h` (the extension→`IncludeLang` map and
 the resolver arm), `src/ingest_relations.h`, and `dependencyCapable()` in `src/lintrules.h`.
 
-**Six things read `dependencyCapable()`** — the one people miss is the co-change pair filter in
-`src/gitmine.h`. Grep for every caller before you change it.
+`dependencyCapable()` is read directly and through derived helpers (`dependencyCapableMask`,
+`dependencyCapableLangTags`, and `dependencyPairCapable` — the co-change pair filter in `src/gitmine.h`,
+the one people miss). Run `./build/ripwire . --uses=dependencyCapable` and
+`./build/ripwire . --impact=dependencyCapable` before you change it.
 
 Resolve through the **corpus's own index**, never a name→path guess. A specifier that two files
 answer must degrade to *neither*, not to the first one found.
@@ -220,3 +233,7 @@ build across that produces objects that disagree about `sizeof(Symbol)`. `CONTRI
 
 In the PR, state: **the parse rate from STEP 0**, the corpus you measured on, and the blind spots you
 disclosed. Those three are what the review is actually about — the grammar is the easy part.
+
+**Write the plan — the STEP 0 corpus and how you will measure its parse rate, then the files each step
+touches — then STOP for my go-ahead.** If the parse rate decides against a grammar, the plan says so
+and ends there.

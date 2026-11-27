@@ -42,8 +42,22 @@ Two public examples:
     still-ambiguous receiver-typed call.
   - With a memo, warm `--grep` took 9.2 s.
 
+Two more since this kit was written (2026-09-11), both found on the big rungs:
+
+- **A name-keyed walk with no visited set (`3cdeca39c`, 2026-11-18).** A plain map of llvm-project
+  grew resident memory at ~5 GB/s, one process reaching 149.7 GB, in `derivesFromName`: a depth-12
+  breadth-first walk whose frontier grew as the product of class-name fan-outs. Bounded, the same map
+  climbed again in the element-of-alias recursion over `typeAliasTargets`. Both now walk each name
+  once (`NamesakeWalk`, `AliasNameWalk`); `test/namewalkcheck.sh` holds a generated fan-out fixture
+  under a 1 GiB RSS ceiling with exact `RIPWIRE_STATS` work counts. **Memory is a dimension too** —
+  measure peak RSS beside CPU.
+- **A linear find per candidate (`00ee964d1`, 2026-11-12).** On vscode warm `--deps`, a name holding
+  thousands of function-local definitions made the REACH-SPLIT set-aside search quadratic (+11.6%
+  instructions); a per-symbol stamp made it one load.
+
 The project rule that came out of this is **one llvm-sized run per performance round.** This kit
-climbs past llvm, to the trees where the next such defect is waiting.
+climbs past llvm, to the trees where the next such defect is waiting. Status (2026-11-26): #151 is open
+with no claim.
 
 ---
 
@@ -66,6 +80,9 @@ climbs past llvm, to the trees where the next such defect is waiting.
   binary. It prints its per-scope report on **stderr** at exit, so stdout stays byte-comparable.
 - **`bench/perfgate.sh`** runs in ledger mode. It records medians into `bench/PROFILE.md` and never
   fails on a budget.
+- **`--max-memory=N`** (default 65% of the machine, env `RIPWIRE_MAX_MEMORY`) is the allocator-level
+  guard: a run that would pass it stops with **exit 5** instead of taking the host down. On a big rung,
+  an exit 5 is a finding, not a harness failure — record which verb and where.
 - **`--doctor`** states the environment, the cache state, and what the tool believes about the tree.
 - **`--skipped`** lists what the crawl did not index.
 - **`docs/LIMITS.md`** is the cap register. A cap that binds only at scale changes *what* you are
@@ -76,6 +93,13 @@ climbs past llvm, to the trees where the next such defect is waiting.
     re-descends from the root, and it is reached from `bindsVisitNode`, `qualifierOf` and
     `enclosingScopeOf`.
   - The floors of warm map, `--for` and `--grep` are the serial resolve loop and file opens (#127).
+
+---
+
+**Orient first.** Before reading code for a suspect, run
+`./build/ripwire . --for="<the phase or function the profile named>"` and `--callers=<it>`; for a
+suspect walk, `--grep=ts_node_child` or `--grep=ts_node_parent` lists the indexed loops with their
+enclosing symbol. Before writing a new scaling arm, `--exemplar="a scaling isolation pair with a ratio verdict"`.
 
 ---
 
@@ -102,8 +126,9 @@ Every number in your report follows these rules, or is labelled as not following
    - Before and after every warm series, run `--doctor`, `du -sh` the cache directory it names, and
      read stderr for eviction lines.
    - A warm number measured across an eviction is a cold number in disguise.
-3. **CPU, not wall.**
-   - Use `/usr/bin/time -p`, and report user+sys as CPU.
+3. **CPU, not wall, plus peak memory.**
+   - Use `/usr/bin/time -p`, and report user+sys as CPU. Record peak RSS too (`/usr/bin/time -l` on
+     macOS, `-v` on GNU time).
    - Report wall separately; it moves with I/O and with other load.
    - CPU sums threads, so say which phases run in parallel.
    - CPU is robust to load, not immune to it: frequency scaling, SMT and cache contention still move
@@ -237,6 +262,12 @@ once:
 8. **A clean ladder is a result.** If nothing bends, publish the ladder anyway: which verbs, which
    rungs, which per-unit costs. "Checked, linear, do not re-fund" saves the next person a week.
 
+**Done means** either the clean ladder (8), or a fix whose isolation pair is red on the pre-change
+binary and green after in the scaling gate it extends (`test/childwalkscalecheck.sh`,
+`test/namewalkcheck.sh` or a new `test/*check.sh` in `test/regression.sh`), with byte-identity shown,
+then `./build/ripwire . --quality-delta --legend=compact` clean, `--test-gate` run, and
+`python3 test/pargates.py . ./build/ripwire -j 6` green.
+
 ---
 
 ## Known traps
@@ -268,7 +299,7 @@ Host: <CPU model, cores, RAM, OS>   load during runs: <min–max>   build: plain
 Corpora:
 | corpus | commit | files | size | clone | notes |
 Ladder (CPU = user+sys, interleaved, median / min / n):
-| corpus | verb | cold CPU | warm CPU | wall | per-unit cost | stdout sha256 |
+| corpus | verb | cold CPU | warm CPU | wall | peak RSS | per-unit cost | stdout sha256 |
 Instrument checks: cache du before/after · eviction lines on stderr · placebo C−A · pgrep empty
 Profile (rung where it bends): <function — samples — % of busy — attributed caller>
 Suspect: <function, file> grows with <dimension>

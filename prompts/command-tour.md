@@ -50,12 +50,13 @@ One of these, chosen for the audience, stated in one line with the reason:
 
 ## Step 4 — file the drift findings
 
-For every verb, three sources should agree: **`--help`**, **its `docs/COMMANDS.md` entry**, and
-**what it actually did just now**. Where they disagree, that is a **doc-drift finding** — file it,
-do not silently paper over it in the tour.
+For every verb, three sources should agree: **`--help`** (the one-line summary, and
+`--help=--FLAG` for its full text), **its `docs/COMMANDS.md` entry**, and **what it actually did just
+now**. Where they disagree, that is a **doc-drift finding** — file it, do not silently paper over it
+in the tour.
 
-- `--help` is authoritative. `docs/COMMANDS.md` is generated from it, so a disagreement between
-  those two means the document needs regenerating:
+- `--help` is authoritative. `docs/COMMANDS.md` is generated from `--help=all`, so a disagreement
+  between those two means the document needs regenerating:
   `python3 docs/docs_commands_build.py --bin build/ripwire`, with `--check` as the drift comparison
   that `test/docscommandscheck.sh` runs.
 - Live behavior disagreeing with `--help` is a **code or help-text bug**, and it is the highest

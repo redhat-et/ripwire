@@ -1,9 +1,9 @@
 # Carry the member-macro re-parse past its first bounds, and let every verb see the repaired tree
 
-> **Prerequisite: PR #135 must be merged.** This prompt builds on `src/macroreparse.h`,
-> `src/extentsuspect.h`, `test/macroreparsecheck.sh` and `test/extentcheck.sh`, which that PR adds.
-> If `git log --oneline -1 -- src/macroreparse.h` prints nothing on your base, stop here: the code this
-> prompt describes has not landed.
+> **Status (2026-11-26).** PR #135 is merged (`7e0ca070e`, 2026-09-11), so `src/macroreparse.h`,
+> `src/extentsuspect.h`, `test/macroreparsecheck.sh` and `test/extentcheck.sh` are on main. Every gap
+> below is still open: `astQueryGrouped` and `--slice` still parse the first tree. #156 is promised
+> to @Ankit-cs once their #153 PR (#531) lands — ask on #156 before you start.
 
 You are extending a **parse repair** for C, C++ and Objective-C files that function-like macros knock
 off course. tree-sitter reads a semicolon-less macro invocation as the last member of a struct as a
@@ -17,6 +17,10 @@ first round. That includes proving a gap has no producer and writing that down i
 
 Work in a git worktree, not the main checkout. Run gates in the foreground. Read `CLAUDE.md` and
 `CONTRIBUTING.md` §3 before writing C++.
+
+**Orient first.** Run `./build/ripwire . --for="member macro re-parse adoption astQueryGrouped slice first parse"`
+and `./build/ripwire . --callers=measureHealthAdoptingMemberMacroReparse` before opening files. Before
+you write the shared helper, `--exemplar="parse a file and adopt the macro-blanked re-parse"`.
 
 ---
 
@@ -46,7 +50,10 @@ Work in a git worktree, not the main checkout. Run gates in the foreground. Read
   the start of a member) and, under "WHY THESE BOUNDS", the measurements that set each bound.
 - `src/ingest_sidecap.h`: `measureHealthAdoptingMemberMacroReparse`, where ingest runs the scan, blanks
   the invocations, re-parses, and adopts on strictly fewer error bytes; `appendBlankedMacroUses`, which
-  keeps each blanked invocation as a `role=type` use so `--uses` does not change.
+  keeps each blanked invocation as a `role=type` use so `--uses` does not change. It has two callers
+  today: `runParseWorker` (`src/ingest_parsepool.h`) and, since 2026-10-10 (`fb6cec403`),
+  `tagsDefinitionsOfBlob` (`src/ingest_astquery.h`), the in-memory blob pass. The second is the
+  pattern STEP 1 generalizes: it parses, then adopts "as the worker does".
 - `src/extentsuspect.h`: the detector's four rules (`name`, `head`, `scope`, `error`) and the
   `--hotspots` exclusion.
 - Disclosure surfaces: `extent_suspect=` on map, `--for`, `--expand` and `--json` rows;
@@ -97,8 +104,8 @@ class with real producers; for a class with none, record the zero and leave its 
 
 This gap is certain, whatever STEP 0 finds.
 
-- Factor the parse-and-maybe-adopt sequence into one helper that ingest and the self-parsing verbs all
-  call, so there is one adoption rule and one place it can drift.
+- Factor the parse-and-maybe-adopt sequence into one helper that ingest, the blob pass and the
+  self-parsing verbs all call, so there is one adoption rule and one place it can drift.
 - **Offsets are the contract.** Blanking keeps every byte offset and newline, so a node from the adopted
   tree indexes the original bytes. Every verb must read captures from the **original** bytes, never
   from the blanked copy, or a capture overlapping a blanked span reads as spaces.
@@ -182,7 +189,10 @@ attribute that is emitted.
 5. Cold CPU on the measured corpus: 5 alternating runs of base and change, as #135 measured it.
 6. `python3 test/pargates.py . ./build/ripwire -j 6` green; two cold runs byte-identical; `xmllint
    --noout` clean; `LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <corpus> >/dev/null`
-   clean; `./build/ripwire . --quality-delta --legend=compact` clean.
+   clean; `./build/ripwire . --quality-delta --legend=compact` clean, then `./build/ripwire . --test-gate`.
+
+**Done means** criteria 2 and 4: the new route arms in `test/macroreparsecheck.sh`, red on the base
+binary and green on yours, with `test/extentcheck.sh` still green.
 
 ---
 
@@ -201,7 +211,7 @@ parse depend on crawl order and worker assignment. The output stays deterministi
 changes on another. Test with a corpus whose file order you permute.
 
 **Version bumps collide.** Other open lanes bump `kParserVer` too. Two bumps can merge without a textual
-conflict. Take the next free value when you land and re-pin on the merged tree.
+conflict. The maintainers assign the number in the PR; re-pin on the merged tree.
 
 **Licensed corpora.** memgraph is BSL: publish counts from it, never its code. Fixtures are written
 fresh.

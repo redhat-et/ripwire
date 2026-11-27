@@ -1,5 +1,11 @@
 # Kotlin scope functions: stop `.run { }` binding to Java methods it never calls
 
+> **Solved (2026-11-26).** A Kotlin call to `let`, `run`, `with`, `apply` or `also` with a trailing lambda no longer
+> binds a same-named Java method, in [#438](https://github.com/redhat-et/ripwire/pull/438) by @llvm-x86, closing [#155](https://github.com/redhat-et/ripwire/issues/155).
+> `test/kotlincheck.sh` §15 and `test/falseedgecheck.sh` arm (J) prove it. This kit stays as a worked example; the
+> floors that PR states stay disclosed rather than closed: a parenthesised lambda (`s.let({ … })`) keeps its Java
+> edge (pinned at `test/kotlincheck.sh:1268`), and a qualified `kotlin.run { }` can still bind an in-tree Kotlin `run`.
+
 You are removing a class of **false call edges** that Kotlin's scope functions — `let`, `run`,
 `with`, `apply`, `also` — create wherever Kotlin and Java share a tree. The fix needs one new fact
 from the syntax tree, one committed name table, and a resolver rule that is careful about what it

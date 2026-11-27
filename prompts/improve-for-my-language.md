@@ -84,8 +84,8 @@ finding:
 - **Siblings** — LANGUAGE is one member of a family. If you know another language has the same
   construct, name it; a fix that lands on one and not its siblings is the dominant defect class here.
 
-Then open the issue (see the top of this file). Paste the report as-is; do not summarise it into an
-impression.
+Show me the report and stop. Open the issue (see the top of this file) only after I approve it; paste
+the report as-is, and do not summarise it into an impression.
 
 ## Honesty rules
 
@@ -100,6 +100,10 @@ impression.
 
 Everything below assumes a checkout of ripwire itself with `./build/ripwire` built. If that is not
 you, you are done at Step 3.
+
+Orient per finding before you plan it: `./build/ripwire . --for="<the finding, in words>"` ranks the
+extraction or resolver code it lands in; for a language with no entry yet, `prompts/add-a-language.md`
+is the path.
 
 Each report item becomes a plan item carrying:
 
