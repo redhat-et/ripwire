@@ -22,6 +22,7 @@
 #   (R)  refusals: --brief with --for, --brief-bytes without --brief, --brief-bytes=100 each exit non-zero with no brief;
 #        an unwritable TMPDIR (no buffer for the --for page) exits non-zero with stdout EMPTY, no leaked --for page.
 #   (C)  MCP: tools/list advertises `brief`; a call answers a <brief> root; bytes=100 is refused.
+#   (S)  schema="ripwire.brief/v1" and a legend naming every attribute the page carries; --legend=full differs only in it.
 #   (L)  the shared --brief= row: beside --plan-lanes, --brief=FILE is still the lane file (a lane plan with one lane per
 #        line, no <brief> root); the subagent brief takes --brief= only without --plan-lanes.
 #   (X)  round-2 detectors, one synthetic fixture each (autoconf-only C, a Go module, a Cargo workspace): the project's own
@@ -205,9 +206,50 @@ for args in "--brief=x --for=y" "--brief-bytes=2048" "--brief=x --brief-bytes=10
     [ "$rc" != 0 ] && ! printf '%s' "$out" | grep -q '<brief' && nr=$(( nr + 1 )) || no "(R) '$args' rc=$rc"
 done
 if [ "$nr" = 3 ]; then ok "(R) 3 misuse forms refused, no brief printed"; else no "(R) $nr of 3 misuse forms refused"; fi
-# an unwritable TMPDIR leaves no buffer for the --for page: refused before --for runs, so stdout stays EMPTY (no leaked --for page)
+# an unwritable TMPDIR leaves no buffer for the --for page: refused before --for runs, so stdout stays EMPTY (no leaked --for page).
+# Darwin's std::tmpfile honours TMPDIR, so the refusal is reachable there. glibc's std::tmpfile ignores TMPDIR (it opens under
+# P_tmpdir, /tmp), so on Linux the buffer still opens: there the arm asserts the other half of the contract, that stdout carries
+# exactly one brief page and no leaked --for page.
 out=$( cd "$TMP/cmake" && TMPDIR="$TMP/no-such-dir" "$BIN" . --no-cache --brief="add a retry" 2>/dev/null ); rc=$?
-if [ "$rc" != 0 ] && [ -z "$out" ]; then ok "(R) no temp buffer: refused, stdout empty"; else no "(R) no temp buffer: rc=$rc, $( printf '%s' "$out" | wc -c | tr -d ' ' ) B on stdout"; fi
+nb=$( printf '%s' "$out" | wc -c | tr -d ' ' )
+if [ "$( uname -s )" = Darwin ]; then
+    if [ "$rc" != 0 ] && [ -z "$out" ]; then ok "(R) no temp buffer: refused, stdout empty"; else no "(R) no temp buffer: rc=$rc, $nb B on stdout"; fi
+else
+    nbrief=$( printf '%s\n' "$out" | grep -c '<brief[ >]' ); nfor=$( printf '%s\n' "$out" | grep -c '<ctx[ >]' )
+    if [ "$rc" = 0 ] && [ "$nbrief" = 1 ] && [ "$nfor" = 0 ]; then ok "(R) no temp buffer (glibc tmpfile ignores TMPDIR): one brief page, no leaked --for page ($nb B)"
+    else no "(R) no temp buffer (glibc): rc=$rc, $nb B, <brief> x$nbrief, <ctx> (--for root) x$nfor (want rc=0, 1, 0)"; fi
+fi
+
+# ─── (S) schema and legend: the page explains itself in both dialects ──────────────────────────────────────────────────────
+# The default (compact) page carries schema="ripwire.brief/v1" and a legend that names every attribute the page carries
+# (present-only: an absent attribute's term is not printed); --legend=full is the same page with the worded legend.
+brief "$TMP/cmake" > "$TMP/s.def"; brief "$TMP/cmake" --legend=full > "$TMP/s.full"; brief "$TMP/cmake" --brief-bytes=512 > "$TMP/s.cut"
+sres=$( python3 - "$TMP/s.def" "$TMP/s.full" "$TMP/s.cut" <<'PY'
+import re, sys
+CORE = { "p", "n", "t", "id", "l", "k", "c" }
+def parts( path ):
+    d = open( path, encoding = "utf-8" ).read()
+    leg = " ".join( re.findall( r"<!--(.*?)-->", d, re.S ) )
+    body = re.sub( r"<!--.*?-->", "", re.sub( r"<!\[CDATA\[.*?\]\]>", "", d, flags = re.S ), flags = re.S )
+    attrs = { a for a in re.findall( r"\s([\w:.-]+)=\"", body ) if a not in CORE }
+    return d, leg, body, attrs
+bad = []; seen = 0
+for path in sys.argv[ 1: ]:
+    d, leg, body, attrs = parts( path )
+    seen += len( attrs )
+    if 'schema="ripwire.brief/v1"' not in d: bad.append( path + ": no schema=" )
+    miss = sorted( a for a in attrs if not re.search( r"(?<![\w:.-])" + re.escape( a ) + r"\s*=", leg ) )
+    if miss: bad.append( path + ": undefined " + ",".join( miss ) )
+dd, dl, db, da = parts( sys.argv[ 1 ] ); fd, fl, fb, fa = parts( sys.argv[ 2 ] ); cd, cl, cb, ca = parts( sys.argv[ 3 ] )
+if db != fb: bad.append( "full and compact differ outside the legend" )
+if not len( dl ) < len( fl ): bad.append( "compact legend not shorter than full" )
+if "dropped" in ca and "dropped=" not in cl: bad.append( "cut page: dropped= undefined" )
+if "dropped" not in da and "dropped=" in dl: bad.append( "uncut page names dropped= (present-only)" )
+if "dropped" not in ca: bad.append( "premise: the 512-B page dropped nothing" )
+print( "OK %d" % seen if not bad and seen > 0 else "BAD " + "; ".join( bad ) + " (attrs seen %d)" % seen )
+PY
+)
+case "$sres" in OK*) ok "(S) schema= and a legend naming every attribute (${sres#OK } seen), present-only dropped=, full = compact outside the legend" ;; *) no "(S) $sres" ;; esac
 
 # ─── (L) --plan-lanes --brief=FILE keeps its meaning ───────────────────────────────────────────────────────────────
 printf 'add a retry to the client\nrename the parser entry\n' > "$TMP/lanes.txt"

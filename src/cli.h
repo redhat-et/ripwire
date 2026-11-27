@@ -6614,6 +6614,12 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             c.ok = false;
             return c;
         }
+        if( c.json || c.columnar || c.candidates )
+        {
+            rw::emitRaw( stderr, "ripwire: --brief prints one XML page to paste into a subagent's prompt — it has no --json, --columnar or --format=candidates form\n" );
+            c.ok = false;
+            return c;
+        }
         c.forTask = c.brief;
     }
     else if( c.briefBytes != 0 )

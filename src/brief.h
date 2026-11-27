@@ -63,10 +63,55 @@ struct ClassCaps
     int         entries;
     std::size_t imports;         // the primary file's imports shown on the edges' <i> line
 };
+// ── the legend: the reading notes plus a definition of every attribute the page can carry ──────────────────────────────────
+// The default (compact) dialect is native: the root carries schema="ripwire.brief/v1" and the one comment spells the schema id, so the
+// --legend=compact layer leaves the page alone (compactlegend.h). --legend=full swaps in the worded comment after the fit; bytes= and the
+// fit stay the default dialect's, so the two dialects differ only in that comment (compactlegendcheck (U)).
+inline constexpr std::string_view kSchemaAttr = " schema=\"ripwire.brief/v1\"";
+inline constexpr std::string_view kLegend =   // every term present: the fit charges this size, the page prints compactLegend's present-only subset
+    "<!-- ripwire brief schema=ripwire.brief/v1: paths root-relative; path:l-e lines; (skip) do not read; Read act ranges in one turn. "
+    "task= task_cut=1 at= root= files= langs= size_class=: task, cut, commit, base, corpus. bytes= budget= dropped= over=1: size, cap, "
+    "shed, still over. confidence= build_source= history=1: --for's, <build> source, co-change mined. act_shipped= read= s= f= "
+    "ambiguous=: act ranges, edge symbol, import, like candidates -->";
+inline constexpr std::string_view kLegendFull =
+    "<!-- ripwire brief: one page to paste into a fresh code-editing subagent's prompt. Paths are root-relative; path:l-e is a line "
+    "range; (skip) marks a directory not to read; Read the act ranges in one turn. schema= names this answer's schema. task= echoes "
+    "the task (task_cut=1: the echo was cut). at= is the commit the page was read at; root= the directory every path is relative to. "
+    "files= counts the indexed files, langs= lists their languages by file count, size_class= picks the class cap. bytes= is the "
+    "page's size in the default dialect, budget= its cap; dropped= lists the sections shed to fit, in drop order; over=1: the fixed "
+    "sections alone outgrow the budget. confidence= is --for's confidence in its pick. build_source= says where the <build> lines "
+    "were quoted from (manifest, docs+manifest, none). history=1: co-change was mined from git history (0: too little history). "
+    "<task act_shipped=> counts the act ranges --for shipped; <act read=> lists the ranges to Read. <e s=> names an edge's symbol; "
+    "<i f=> the imported name. <like ambiguous=> counts the exemplar candidates. -->";
+static_assert( kLegend.size() < kLegendFull.size(), "the compact legend is the shorter one" );
+
+// The compact legend for one page: a term rides iff the page carries its attribute (task_cut=, dropped=, over=, <e s=>, <i f=>,
+// ambiguous= are present-only). With every term present it is kLegend, the size the fit charges, so a page never outgrows its fit.
+struct LegendTerms
+{
+    bool taskCut = true, dropped = true, over = true, edgeSymbol = true, importName = true, ambiguous = true;
+};
+inline std::string compactLegend( const LegendTerms& t )
+{
+    const auto on = []( bool b, std::string_view s ) { return b ? s : std::string_view(); };
+    std::string out = "<!-- ripwire brief schema=ripwire.brief/v1: paths root-relative; path:l-e lines; (skip) do not read; Read act ranges in one turn. task= ";
+    out.append( on( t.taskCut, "task_cut=1 " ) ).append( "at= root= files= langs= size_class=: task, " ).append( on( t.taskCut, "cut, " ) );
+    out.append( "commit, base, corpus. bytes= budget=" ).append( on( t.dropped, " dropped=" ) ).append( on( t.over, " over=1" ) ).append( ": size, cap" );
+    out.append( on( t.dropped, ", shed" ) ).append( on( t.over, ", still over" ) );
+    out.append( ". confidence= build_source= history=1: --for's, <build> source, co-change mined. act_shipped= read=" );
+    out.append( on( t.edgeSymbol, " s=" ) ).append( on( t.importName, " f=" ) ).append( on( t.ambiguous, " ambiguous=" ) ).append( ": act ranges" );
+    out.append( on( t.edgeSymbol, ", edge symbol" ) ).append( on( t.importName, ", import" ) ).append( on( t.ambiguous, ", like candidates" ) ).append( " -->" );
+    return out;
+}
+// Each class cap is the content room it was measured at plus the bytes the attribute definitions and schema= added over the
+// 104-B reading-notes comment every brief carried before them: the fit of every class is unchanged by the legend. --brief-bytes
+// is a cap the caller names, so it is held as given.
+inline constexpr std::size_t kReadingNotesBytes = 104;
+inline constexpr std::size_t kLegendDefsBytes   = kLegend.size() + kSchemaAttr.size() - kReadingNotesBytes;
 inline constexpr std::array<ClassCaps, 3> kClassCaps = { {
-    { "small", 1000, 2560, 12, 3, 6 },
-    { "medium", 10000, 4096, 12, 4, 8 },
-    { "large", 0, 6144, 20, 5, 8 },
+    { "small", 1000, 2560 + kLegendDefsBytes, 12, 3, 6 },
+    { "medium", 10000, 4096 + kLegendDefsBytes, 12, 4, 8 },
+    { "large", 0, 6144 + kLegendDefsBytes, 20, 5, 8 },
 } };
 inline constexpr std::size_t kMinBudgetBytes  = 512;
 inline constexpr std::size_t kHardCapBytes    = 8192;
@@ -111,6 +156,7 @@ struct BriefInputs
     std::string_view    forPage;       // the finished --for page 1 for `task`
     std::size_t         budgetBytes = 0;   // 0: the size class decides
     bool                noCache     = false;   // --no-cache: the history walk's cut prefix is neither read nor stored
+    bool                fullLegend  = false;   // --legend=full: the worded legend comment (the fit and bytes= stay the default dialect's)
 };
 
 namespace detail
@@ -327,7 +373,7 @@ struct Corpus
             firstSym[f] = std::min( firstSym[f], firstSym[f + 1] );
         }
     }
-    std::optional<std::uint32_t> file( std::string_view path ) const
+    std::optional<std::uint32_t> indexedId( std::string_view path ) const
     {
         const auto it = fileOf.find( path );
         return it == fileOf.end() ? std::nullopt : std::optional<std::uint32_t>( it->second );
@@ -2384,7 +2430,7 @@ inline std::vector<std::uint32_t> packageEntryFiles( const Corpus& c )
         const std::string_view tail = std::string_view( stem ).substr( stem.find( '/' ) == std::string::npos ? 0 : stem.find( '/' ) + 1 );
         for( const std::string& cand : { std::string( v ), stem + ".ts", stem + ".js", "src/" + std::string( tail ) + ".ts", "src/" + std::string( tail ) + ".js" } )
         {
-            if( const std::optional<std::uint32_t> f = c.file( cand ); f && std::find( out.begin(), out.end(), *f ) == out.end() )
+            if( const std::optional<std::uint32_t> f = c.indexedId( cand ); f && std::find( out.begin(), out.end(), *f ) == out.end() )
             {
                 out.push_back( *f );
                 break;
@@ -2492,7 +2538,7 @@ inline EntryReach entryReach( const Corpus& c, const FileAdjacency& adj, const s
     }
     for( const std::string& f : files )
     {
-        if( const std::optional<std::uint32_t> id = c.file( f ) )
+        if( const std::optional<std::uint32_t> id = c.indexedId( f ) )
         {
             allIds.push_back( *id );
             if( std::find( primary.begin(), primary.end(), f ) != primary.end() )
@@ -2834,7 +2880,7 @@ struct EdgeSet
 inline std::vector<std::uint32_t> mostUsedSymbols( const Corpus& c, std::string_view rel, std::size_t cap )
 {
     std::vector<std::pair<int, std::uint32_t>> used;
-    const std::optional<std::uint32_t>         id = c.file( rel );
+    const std::optional<std::uint32_t>         id = c.indexedId( rel );
     const sparseCsr<float>&                    in = c.g.inEdges;
     for( std::uint32_t s = id ? c.firstSym[*id] : 0; id && in.rows() >= c.ing.symbols.size() && s < c.firstSym[*id + 1]; ++s )
     {
@@ -2870,7 +2916,7 @@ inline std::vector<std::uint32_t> actSymbols( const Corpus& c, const ForCore& co
     }
     for( const Range& a : core.act )
     {
-        const std::optional<std::uint32_t> f = c.file( a.path );
+        const std::optional<std::uint32_t> f = c.indexedId( a.path );
         const std::optional<std::uint32_t> s = f ? c.symbolAt( *f, a.lo ) : std::nullopt;
         if( s && std::find( syms.begin(), syms.end(), *s ) == syms.end() )
         {
@@ -3031,7 +3077,7 @@ inline std::vector<std::string> goImportDirs( const Corpus& c, std::string_view 
 inline std::vector<std::string> primaryUsers( const Corpus& c, const FileAdjacency& adj, std::string_view primary )
 {
     std::vector<std::string_view> users;
-    const std::optional<std::uint32_t> id  = c.file( primary );
+    const std::optional<std::uint32_t> id  = c.indexedId( primary );
     const std::string_view             dir = dirName( primary );
     if( primary.ends_with( ".go" ) )
     {
@@ -3085,7 +3131,7 @@ inline std::vector<std::string> primaryUsers( const Corpus& c, const FileAdjacen
 inline EdgeSet primaryImports( const Corpus& c, const FileAdjacency& adj, const std::vector<std::string>& named, const std::vector<std::string>& files, std::size_t shown )
 {
     const std::string_view             primary = named.empty() ? ( files.empty() ? std::string_view() : std::string_view( files.front() ) ) : std::string_view( named.front() );
-    const std::optional<std::uint32_t> id      = c.file( primary );
+    const std::optional<std::uint32_t> id      = c.indexedId( primary );
     EdgeSet                            set{ std::string( primary ), {}, {} };
     if( !id || adj.size() != c.rel.size() )
     {
@@ -3952,7 +3998,7 @@ inline std::string body( const Sections& s, std::span<const bool> dropped )
 
 inline std::string langsOf( const Corpus& c )
 {
-    std::array<int, 64> perLang{};
+    std::array<int, kLangCount> perLang{};
     std::vector<std::uint8_t> seen( c.rel.size(), 0 );
     for( const Symbol& s : c.ing.symbols )
     {
@@ -3982,8 +4028,6 @@ inline std::string langsOf( const Corpus& c )
 
 }   // namespace detail
 
-inline constexpr std::string_view kLegend = "<!-- brief: paths root-relative; path:l-e = lines; (skip) = do not read; Read act ranges in one turn -->";
-static_assert( kLegend.size() <= 120, "one legend comment of at most 120 B for the whole brief" );
 
 // The brief for `in.task`, from the finished --for page and the built graph. Named steps 1-8, then the size fit.
 inline std::string composeBrief( const BriefInputs& in )
@@ -4058,7 +4102,7 @@ inline std::string composeBrief( const BriefInputs& in )
                                                                   ? "docs+manifest" : "manifest";
     const auto root = [ & ]( std::size_t bytes, const std::string& dropped, bool over )
     {
-        return "<brief task=\"" + xml( task ) + "\"" + ( taskCut ? " task_cut=\"1\"" : "" ) + " root=\".\" at=\"" + xml( core.at ) + "\" files=\""
+        return "<brief" + std::string( kSchemaAttr ) + " task=\"" + xml( task ) + "\"" + ( taskCut ? " task_cut=\"1\"" : "" ) + " root=\".\" at=\"" + xml( core.at ) + "\" files=\""
                + std::to_string( c.rel.size() ) + "\" langs=\"" + langsOf( c ) + "\" size_class=\"" + caps.name + "\" bytes=\"" + std::to_string( bytes ) + "\" budget=\""
                + std::to_string( budget ) + "\" confidence=\"" + xml( core.confidence ) + "\" build_source=\"" + buildSource + "\" history=\"" + ( history ? "1" : "0" ) + "\""
                + ( dropped.empty() ? "" : " dropped=\"" + dropped + "\"" ) + ( over ? " over=\"1\"" : "" ) + ">";
@@ -4085,12 +4129,18 @@ inline std::string composeBrief( const BriefInputs& in )
     }
     const bool  over = total( budget ) > budget;
     std::string doc  = body( s, dropped ) + "</brief>";
+    // bytes= is the default dialect's page: the present-only compact legend is what it counts, whichever dialect prints
+    const std::string compact = compactLegend( LegendTerms{ .taskCut = taskCut, .dropped = !droppedNames.empty(), .over = over,
+                                                            .edgeSymbol = doc.find( "<e s=\"" ) != std::string::npos,
+                                                            .importName = doc.find( "<i f=\"" ) != std::string::npos,
+                                                            .ambiguous  = doc.find( " ambiguous=\"" ) != std::string::npos } );
+    ASSUME( compact.size() <= kLegend.size(), "the present-only legend is never larger than the one the fit charged" );
     std::size_t bytes = 0;
     for( int pass = 0; pass < 3; ++pass )   // bytes= counts itself: converge on the digit count
     {
-        bytes = root( bytes, droppedNames, over ).size() + kLegend.size() + doc.size();
+        bytes = root( bytes, droppedNames, over ).size() + compact.size() + doc.size();
     }
-    return root( bytes, droppedNames, over ) + std::string( kLegend ) + doc;
+    return root( bytes, droppedNames, over ) + ( in.fullLegend ? std::string( kLegendFull ) : compact ) + doc;
 }
 
 }   // namespace rw::brief
