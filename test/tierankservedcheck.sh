@@ -58,7 +58,10 @@ echo "tierankservedcheck: BIN=$BIN  $( "$BIN" --version 2>&1 | head -1 )"
 TMP="$( mktemp -d )" && [ -n "$TMP" ] && [ -d "$TMP" ] || { echo "tierankservedcheck: mktemp -d failed"; exit 2; }
 trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; return 0; }
+# A PASS line that could not be WRITTEN must not read as a pass: with no accumulator here, a failed printf loses the
+# line and the gate still exits 0 (test/gateexitcheck.sh arm G1). Same shape as every other rule in this file — a
+# success path that is silent passes in states nobody considered — and the spelling is snapdeterminismcheck.sh's.
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # FMT2 (src/forrowlines.h): the default answer serves its tail rows as text lines in one CDATA. This gate reads tsym= as
