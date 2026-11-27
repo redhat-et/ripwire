@@ -2377,23 +2377,17 @@ inline void noteWholeNameSpelling( HashMap<std::string, NameAnchor>& names, cons
     }
 }
 
-// Does `span`, lowercased, spell `lowerKey`? The index's ONE key test: a routeLower'd word against a name or a name
-// subtoken compared in place (lexindex.h lexTokenEqualsLowered: the same ASCII fold routeLower and subtokens apply).
-inline bool spellsLowerKey( std::string_view span, std::string_view lowerKey ) noexcept
-{
-    return span.size() == lowerKey.size() && lexTokenEqualsLowered( span.data(), span.size(), lowerKey.data() );
-}
-
 // one symbol's whole name enters the index — and, for an Elixir callable indexed as `name/N`, its arity-less
 // spelling too: the source spells it `name`, and so does a query, so a plain word naming an Elixir function
 // is a whole-name hit (the route fires, the anchor names its defining file) rather than a carrier-only miss
 // (PR #81 review item 5). Each arity is a further definition of that spelling; extraDefs counts them.
 // Only a spelling that is one of `keys` enters: the index holds the entries its readers probe (buildLowerNameIndex).
+// The key test is strkern::lowerFoldedEquals, the A-Z fold routeLower applies, compared in place.
 inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s, std::span<const std::string> keys )
 {
     const auto noteIfKey = [ & ]( std::string_view spelling )
     {
-        if( std::ranges::any_of( keys, [ spelling ]( const std::string& key ) { return spellsLowerKey( spelling, key ); } ) )
+        if( std::ranges::any_of( keys, [ spelling ]( const std::string& key ) { return strkern::lowerFoldedEquals( spelling, key ); } ) )
         {
             noteWholeNameSpelling( names, s, spelling );
         }
@@ -2425,7 +2419,7 @@ inline void countNameCarriers( HashMap<std::string, NameAnchor>& names, std::str
         const std::string_view tok = name.substr( tokStartByte, tokEndByte - tokStartByte );
         for( std::size_t k = 0; k < keys.size(); ++k )
         {
-            carried[ k ] = carried[ k ] != 0 || spellsLowerKey( tok, keys[ k ] ) ? 1 : 0;
+            carried[ k ] = carried[ k ] != 0 || strkern::lowerFoldedEquals( tok, keys[ k ] ) ? 1 : 0;
         }
     } );
     for( std::size_t k = 0; k < keys.size(); ++k )
