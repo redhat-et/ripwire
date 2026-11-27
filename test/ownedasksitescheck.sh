@@ -21,7 +21,9 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; return 0; }
+# A lost PASS line must not be silent: without the accumulator a failed write leaves the gate exiting 0
+# with one of its own findings missing from its output (test/gateexitcheck.sh arm G1).
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "BIN=$BIN $( "$BIN" --version 2>&1 | head -1 )"

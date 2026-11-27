@@ -10998,6 +10998,53 @@ inline std::string_view canonicalCallQualifier( const Reference& r, const CallSc
     return inCallerBody || !callerScopesMayDeclare( r, named, at ) ? named.scope : std::string_view( r.qualifier );
 }
 
+// ── buildGraph's setup phases, extracted ───────────────────────────────────────────────────────────────────────────
+// buildGraph was one 4,043-line function reached by 79 symbols with NO indexed test in its production radius
+// (--impact=buildGraph: radius_tested=0, one test). It is being cut along the phase boundaries it already declared
+// for itself with PROFILE_SCOPE_DESCRIBE, one phase at a time, each cut proved to move ZERO bytes of output
+// (test/lib/extractparity.sh, over a C++, a mixed-language and two Rust corpora). The phase names and their
+// PROFILE_SCOPE strings are unchanged, so a profile taken before and after a cut names the same phases.
+// These are leaves: each reads the IngestResult and tables already final, and writes one named output. Nothing here
+// closes over the resolve loop's state (144 top-level declarations, 33 of them lambdas), which is why they go first.
+
+// buildGraph/1a. S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once so the
+// resolution locality tie-break and serialize's `id=` attribute share one definition. Deterministic.
+inline void fillCanonIdsAndLocalityKeys( Graph& g, const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
+    g.canonId.resize( ing.symbols.size() );
+    g.localityKey.resize( ing.symbols.size() );
+    for( const Symbol& s : ing.symbols )
+    {
+        g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        if( s.scope.empty() )   // scoped: localityKeyOf is canonicalId verbatim, so Graph::localityKeyAt reads canonId (G1b)
+        {
+            g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );
+        }
+    }
+}
+
+// buildGraph/1b. A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it
+// as the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The vector
+// stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
+inline void fillJniBindLabels( Graph& g, const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1b: JNI name decode (per symbol)" );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
+        {
+            continue;
+        }
+        std::string readable = decodeJniName( s.name );
+        if( readable.empty() )
+        {
+            continue;
+        }
+        g.bindLabel.add( s.id, std::move( readable ) );   // G1d: sparse, one row per JNI export
+    }
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11015,41 +11062,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // exactly the two-derivations-of-one-number defect M15 fixed for the gauge pair.
     for( const UnindexedExt& ue : ing.crawlSkips.unindexedExts ) { g.unindexedFiles += ue.files; }
 
-    // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
-    // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
-    g.canonId.resize( N );
-    g.localityKey.resize( N );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
-            if( s.scope.empty() )   // scoped: localityKeyOf is canonicalId verbatim, so Graph::localityKeyAt reads canonId (G1b)
-            {
-                g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );
-            }
-        }
-    }
-
-    // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
-    // the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The
-    // vector stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1b: JNI name decode (per symbol)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
-            {
-                continue;
-            }
-            std::string readable = decodeJniName( s.name );
-            if( readable.empty() )
-            {
-                continue;
-            }
-            g.bindLabel.add( s.id, std::move( readable ) );   // G1d: sparse, one row per JNI export
-        }
-    }
+    fillCanonIdsAndLocalityKeys( g, ing );   // buildGraph/1a
+    fillJniBindLabels( g, ing );             // buildGraph/1b
 
     // ── Multi-root workspace: name-based resolution NEVER crosses roots. Every
     // name-tier candidate below (qualified canonical, Rule 1/2, the name-based-fallback byName fill, inheritance, doc
