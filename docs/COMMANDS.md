@@ -40,7 +40,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **understand a codebase cold** — [`--top-k`](#--top-kn) · [`--no-inventory`](#--no-inventory) · [`--max-tokens`](#--max-tokensn) · [`--token-budget`](#--token-budgetnkmg) · [`--help-task`](#--help-tasktask) · [`--deadline-ms`](#--deadline-msn) · [`--for`](#--fortask) · [`--sections`](#--sectionslegocompose) · [`--signatures-only`](#--signatures-only) · [`--auto-bodies`](#--auto-bodies) · [`--no-route`](#--no-route) · [`--adaptive`](#--adaptive) · [`--no-mention-boost`](#--no-mention-boost) · [`--no-doc-mention`](#--no-doc-mention) · [`--lego`](#--legotype) · [`--exemplar`](#--exemplartaskkind) · [`--recall`](#--recalltask) · [`--tree`](#--tree) · [`--html`](#--htmlfile) · [`--color-by`](#--color-bymode) · [`--order`](#--ordermode) · [`--no-stable`](#--no-stable)
 
-**navigate / answer a question** — [`--around`](#--aroundsym) · [`--callers`](#--callerssym) · [`--callees`](#--calleessym) · [`--uses`](#--usessym) · [`--graph-query`](#--graph-queryexpr) · [`--external-surface`](#--external-surface) · [`--path`](#--pathsrcdst) · [`--defs`](#--defsnamename) · [`--connect`](#--connectabc) · [`--impact`](#--impactsym) · [`--verify`](#--verifyclaim) · [`--mentions`](#--mentionssym) · [`--affected`](#--affectedf1f2sym) · [`--exercises`](#--exercisestestfile) · [`--situ`](#--situf1f2) · [`--handoff`](#--handoff) · [`--test-gate`](#--test-gatef1f2) · [`--grep`](#--grepstr----regexpat) · [`--grep-context`](#--grep-contextn----grep-beforen----grep-aftern) · [`--and`](#--andstr) · [`--not`](#--notstr) · [`--grep-scope`](#--grep-scopelinefile) · [`--grep-in`](#--grep-incodeany) · [`--handles`](#--handles) · [`--match`](#--matchquery) · [`--pattern`](#--patternpat) · [`--query`](#--queryterms)
+**navigate / answer a question** — [`--around`](#--aroundsym) · [`--callers`](#--callerssym) · [`--callees`](#--calleessym) · [`--uses`](#--usessym) · [`--graph-query`](#--graph-queryexpr) · [`--external-surface`](#--external-surface) · [`--path`](#--pathsrcdst) · [`--defs`](#--defsnamename) · [`--connect`](#--connectabc) · [`--impact`](#--impactsym) · [`--verify`](#--verifyclaim) · [`--mentions`](#--mentionssym) · [`--affected`](#--affectedf1f2sym) · [`--exercises`](#--exercisestestfile) · [`--situ`](#--situf1f2) · [`--handoff`](#--handofftask) · [`--test-gate`](#--test-gatef1f2) · [`--grep`](#--grepstr----regexpat) · [`--grep-context`](#--grep-contextn----grep-beforen----grep-aftern) · [`--and`](#--andstr) · [`--not`](#--notstr) · [`--grep-scope`](#--grep-scopelinefile) · [`--grep-in`](#--grep-incodeany) · [`--handles`](#--handles) · [`--match`](#--matchquery) · [`--pattern`](#--patternpat) · [`--query`](#--queryterms)
 
 **zoom the detail ladder** — [`--detail`](#--detailn) · [`--pack-signatures`](#--pack-signatures) · [`--outline`](#--outlineab) · [`--expand`](#--expandab) · [`--compress`](#--compress) · [`--pack-top-n`](#--pack-top-nn) · [`--no-redact`](#--no-redact)
 
@@ -1192,11 +1192,11 @@ at: f284faded
 
 - only a list with NO usable item refuses (exit 1)
 
-### `--handoff`
+### `--handoff[=TASK]`
 
 **Answers:** brief the next session — verified disk truth first, labelled guesses second continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols, blast radius, tests-to-run) + <heuristic> labeled suggestions (co-change partners, committed notes, plan/design doc pointers via a branch+commit-subject query).
 
-Empty diff is fine — the packet still carries branch/sha + heuristics. Composes with --token-budget=N (drops heuristic rows tail-first, disclosed as withheld= in the header; verified rows are never dropped). Single-root only.
+Empty diff is fine — the packet still carries branch/sha + heuristics. Composes with --token-budget=N (drops heuristic rows tail-first, disclosed as withheld= in the header; verified rows are never dropped). Single-root only. --handoff=TASK: the packet, read on the task's richer index (a heuristic count or doc s= can differ slightly from a bare --handoff), then the --brief=TASK page for the next session's task (entries by reach, build/test commands quoted from manifests, act ranges, where-else, convention pointers), class-capped as --brief is (--brief-bytes=N sizes it). Refused beside another task flag. RIPWIRE_HANDOFF_TASK=0 drops the task: the answer is the bare --handoff packet.
 
 **Try it**
 
@@ -3623,7 +3623,7 @@ add the CLI parse arm and help text for the new filter
 write regression tests for the new filter
 ```
 
-**Shaped by:** `--brief-bytes`, `--legend`, `--json`
+**Shaped by:** `--handoff`, `--brief-bytes`, `--legend`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -4258,7 +4258,7 @@ add the CLI parse arm and help text for the new filter
 write regression tests for the new filter
 ```
 
-**Shaped by:** `--plan-lanes`, `--brief-bytes`
+**Shaped by:** `--handoff`, `--plan-lanes`, `--brief-bytes`
 
 **Caveats (stated by the binary):**
 
@@ -4278,6 +4278,8 @@ _A byte-capped brief for a fresh subagent: --brief-bytes=N (512..8192) replaces 
 $ ./build/ripwire . --brief="add a --since filter to the doc-drift verb" --brief-bytes=2048
 ... [1 more line(s); run it to see the whole thing]
 ```
+
+**Shaped by:** `--handoff`
 
 ### `--partition=N`
 
@@ -5469,7 +5471,7 @@ what is the weather in Paris	none	neg
 
 **Answers:** this catalog, one line per flag  (--help=--FLAG, --help=SECTION, or --help=all)
 
-**Shaped by:** `--deadline-ms`, `--html`, `--color-by`, `--around`, `--callers`, `--callees`, `--affected`, `--expand`
+**Shaped by:** `--deadline-ms`, `--html`, `--color-by`, `--around`, `--callers`, `--callees`, `--affected`, `--handoff`
 
 ### `-v, --version`
 

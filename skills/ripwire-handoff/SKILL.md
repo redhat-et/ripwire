@@ -20,7 +20,8 @@ source. `SUBSYSTEM` = the area in plain words ("ingest pipeline").
 **An interrupted WORKING SESSION** (not a subsystem summary)? One call: `ripwire <dir> --handoff --legend=compact` —
 a `<verified>` section (branch, HEAD sha with `+dirty`, changed files and their symbols, blast radius, tests to
 run) that is disk truth, and a `<heuristic>` section (co-change partners, notes, design-doc pointers) labelled as
-suggestion. Paste it to the next agent as-is. Single-root.
+suggestion. Paste it to the next agent as-is. Single-root. Know the next session's task? `--handoff="TASK"` prints the
+packet (read on the task's index, so a heuristic score can differ slightly), then that task's `--brief` page.
 
 **A fresh code-editing subagent** (a task, not a subsystem)? One call: `ripwire <dir> --brief="TASK" --legend=compact` — one 3.5/5/7 KB page
 (layout with `(skip)` dirs, build/test commands quoted from manifests, entries, the task's act ranges, edges, where-else,

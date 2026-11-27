@@ -659,6 +659,7 @@ for _g in \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
+    handofftaskcheck \
     handoffwindowcheck \
     hasacheck \
     hashsetcheck \
