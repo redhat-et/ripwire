@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+# tinyshapecheck.sh — THETA6, the named-location tiny shape (src/fortinyshape.h; ON by default since THETA6-FLIP, owner 11-24;
+# RIPWIRE_TINY_SHAPE=0 turns it off, src/fortinyshapeswitch.h). "knob ON" below = the default (RIPWIRE_TINY_SHAPE unset); "knob OFF" =
+# RIPWIRE_TINY_SHAPE=0.
+#
+#   (I)  KNOB OFF IS THE BASE: under RIPWIRE_TINY_SHAPE=0 no answer carries shape="tiny"; with BASE_BIN= given (a binary from before
+#        the shape, run with no RIPWIRE_TINY_SHAPE*), the knob-off answer is BASE_BIN's answer byte for byte on 3 questions (the
+#        named-location one, the call-path one, the low-confidence one)
+#   (D)  ON BY DEFAULT: with RIPWIRE_TINY_SHAPE unset the named-location question IS tiny, and RIPWIRE_TINY_SHAPE=1 is the default
+#        answer byte for byte
+#   (T)  KNOB ON, A NAMED LOCATION: a backticked symbol that resolves, confidence="high", no relational cue -> shape="tiny", <= 2048 B,
+#        the act line, >= 1 sigs line "P:L-E N" whose N is the symbol, the tiny clause, one <more next=>, no <bodies>/<tail>/<fold>/
+#        <hops>, no page= / pages= (one page: no continuation token to break), xmllint clean, no newline outside CDATA
+#   (M)  ESCALATION IN ONE CALL: the <more next=> call, run with the knob ON, returns the knob-OFF default answer byte for byte
+#   (R)  A RELATIONAL QUESTION STAYS FULL: a call-path question naming the same symbol (RT3 keeps it on --for) is the knob-off answer
+#   (L)  A LOW-CONFIDENCE QUESTION STAYS FULL: confidence="low" with a code-shaped span -> the knob-off answer; non-vacuous: under
+#        RIPWIRE_TINY_SHAPE_FORCE=1 (the detector skipped) the same call IS tiny, so only the detector kept it full
+#   (P)  PAGING, ROW-FORM AND BUDGET CONTRACTS: under the knob, an explicit --page-bytes=N:2, --page-bytes=0, --rows=elements and
+#        --max-tokens=N, --pack-budget-bytes=N are the knob-off answers byte for byte (a budgeted --for stands the tiny shape aside, so the budget shapes
+#        the answer it always shaped) (every call here must exit 0 with output: run() FAILs a call that does not)
+#   (V)  --version says tiny=on by default (and under RIPWIRE_TINY_SHAPE=1, and under _FORCE even with =0), tiny=off under =0
+#   (X)  MUTATION CONTROL: the (T) checker reds the knob-off (full) answer of the same question, so (T) can fail
+#   (G)  A CALLER IN ANOTHER FILE IS NAMED (lanes THETA6-GUARD, THETA6-FINISH): a named symbol with a 1-hop caller in ANOTHER
+#        non-test file is tiny and its <edges> line says "called by <that file>:L <caller>"; non-vacuous: the knob-off answer's
+#        <callers> holds such a caller (counted, FAIL on 0)
+#   (G7) TOO SPREAD TO NAME: a named symbol with more other-file callers than the edges line lists in full (kSpreadEdgeMax 6) stays
+#        the full answer; non-vacuous: the knob-off <callers> shows >= 7 such callers (counted, FAIL on fewer) and the call IS tiny
+#        under force
+#   (E)  THE EDGES LINE (θ6b): a named symbol whose body calls a function in another non-test file is tiny and its <edges> line says
+#        "calls <file>:L <callee>"; non-vacuous: the knob-off body's <calls> holds >= 1 <c p=> in another file (counted, FAIL on 0)
+#   (E0) NO CROSS-FILE EDGE, NO LINE: a named symbol whose body's only callee is in its own file is tiny with no <edges>;
+#        non-vacuous: the knob-off body's <calls> holds >= 1 same-file <c> (counted, FAIL on 0) and none in another file
+#   (E4) THE CAP: a body calling 5 functions in 5 other files lists the first 4 and says "(+1 more)", shown="4" total="5";
+#        non-vacuous: the knob-off <calls> holds >= 5 other-file <c> (counted, FAIL on fewer)
+#   (N)  EXACT EDGES FIRST (θ6e): a body whose first call is a name-only match (via="name") and whose second is exact lists the exact
+#        one first; non-vacuous: the knob-off <calls> holds a via="name" other-file <c> before an exact other-file <c> (FAIL if not)
+#   (B)  G13: "How does `X` work?" (a breadth word) stays the full answer; non-vacuous: confidence="high" and tiny under force
+#   (C)  CAPS: a question that is one ALL-CAPS constant stays the full answer; non-vacuous: confidence="high" and tiny under force
+#   (G0) A TEST-FILE CALLER DOES NOT TRIP IT: a symbol whose only other-file callers are test files is tiny (the knob-off <callers>
+#        holds >= 1 test-file caller and 0 other non-test-file callers, counted, FAIL on 0)
+#   (F)  A CUT CALLERS BLOCK IS A FLOOR (CodeRabbit on #742): a symbol whose <callers> block is cut (d2_capped="1") and has
+#        cross-file edges is tiny and its <edges> carries floor="1"; non-vacuous: the knob-off <callers> is cut (FAIL if not)
+#   (F0) A CUT BLOCK WITH NO EDGE TO NAME STAYS FULL: the callers are all in the named file, the block is cut -> the full answer;
+#        non-vacuous: the knob-off <callers> is cut, confidence="high", and the call IS tiny under force
+#   (Q)  AN EDGE THE LINE CANNOT CARRY STAYS FULL: a caller in a directory named with "]]>" -> the full answer; non-vacuous: the
+#        knob-off <callers> holds that caller (FAIL on 0) and confidence="high"
+#   (U)  TOTAL HONESTY (THETA6-FLIP): the tiny <sigs shown=K total=T> has K <= T and T = the full page's <sigs total=>, else its ranked rows
+#   (K)  AN UNSUMMARIZED BLOCK STAYS FULL (THETA6-FLIP): a page whose top-level blocks fall outside kSummarizedBlocks (here a literal
+#        <ld> row) is the full answer; non-vacuous: confidence="high" and tiny under force
+#   (O)  A SAVED NOTE STAYS FULL (THETA6-FLIP): a named symbol with a --note-add note is the full answer, which serves the note;
+#        non-vacuous: the knob-off page carries the <note> and the call is tiny under force
+#   (A)  THE NAMED FILE ANCHORS THE EDGES (CodeRabbit on #742): the top sigs row is another definition (a case twin in another file)
+#        that outranks the named one; the edges line names the caller in the TOP row's file and none in the named row's file;
+#        non-vacuous: the knob-off top row is not the named symbol, the named row is in another file, and the knob-off <callers>
+#        holds >= 1 caller in each of the two files (counted, FAIL on 0)
+#   (W)  THE CONTINUATION KEEPS THE ROW FORM (CodeRabbit on #742): under RIPWIRE_NO_ROWLINES=1 an explicit --rows=lines is tiny and
+#        its <more next=> call (same environment) returns the knob-off --rows=lines answer byte for byte; non-vacuous: the knob-off
+#        answer without --rows= is in elements there (its <sigs> holds <d> rows), and the --rows=lines one is in lines
+#   (Y)  THE CONTINUATION KEEPS A SPELLED LEGEND (CodeRabbit on #742): --legend=compact is tiny and its <more next=> returns the
+#        knob-off --legend=compact answer byte for byte; non-vacuous: that answer differs from the knob-off default one
+#   (Z)  THE QUESTION-SITES BLOCK RIDES THE TINY ANSWER (CodeRabbit on #742): under RIPWIRE_THETA11=1 the tiny answer carries the
+#        knob-off answer's <!-- qs: block; non-vacuous: the knob-off answer has it and the default (θ11 unset) answer does not
+#   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
+#        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # (O) builds a git repo: no inherited GIT_DIR/agent homes (gitenvhermeticcheck (D))
+BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "tinyshapecheck: python3 required"; exit 2; }
+command -v xmllint >/dev/null 2>&1 || { echo "tinyshapecheck: xmllint required"; exit 2; }
+WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+echo "tinyshapecheck: BIN=$BIN${BASE_BIN:+ BASE_BIN=$BASE_BIN}"
+unset RIPWIRE_TINY_SHAPE RIPWIRE_TINY_SHAPE_FORCE
+export HOME="$WORK/home" TMPDIR="$WORK/tmp/"; mkdir -p "$HOME" "$TMPDIR"
+
+F="$WORK/fx"; mkdir -p "$F/pkg" "$F/ev"
+printf 'def frobnicate_cache(widgets):\n    """Flush every widget in the cache."""\n    for w in widgets:\n        w.flush()\n    return len(widgets)\n\n\ndef warm_cache(widgets):\n    for w in widgets:\n        w.load()\n' >"$F/pkg/cache.py"
+printf 'from pkg.cache import frobnicate_cache, warm_cache\n\n\ndef render_page(widgets):\n    warm_cache(widgets)\n    return [w.draw() for w in widgets]\n\n\ndef refresh(widgets):\n    frobnicate_cache(widgets)\n    return render_page(widgets)\n' >"$F/pkg/render.py"
+printf 'def page_title(name):\n    return name.title()\n\n\ndef page_slug(name):\n    return name.lower().replace(" ", "-")\n' >"$F/pkg/util.py"
+printf 'def fmt_line(row):\n    """Format one report row."""\n    return str(row).strip()\n\n\ndef fmt_all(rows):\n    return [fmt_line(r) for r in rows]\n' >"$F/pkg/fmt.py"
+printf 'from pkg.fmt import fmt_line\n\n\ndef build_report(rows):\n    """Build the report lines."""\n    out = [fmt_line(r) for r in rows]\n    return out\n' >"$F/pkg/report.py"
+mkdir -p "$F/pkg/tests" "$F/shapes"
+printf 'from pkg.util import page_title\n\n\ndef test_page_title():\n    assert page_title("a b") == "A B"\n' >"$F/pkg/tests/test_util.py"
+printf 'def notify_hub(x):\n    return x\n' >"$F/pkg/hub.py"
+for i in 1 2 3 4 5; do
+    printf 'def stage_%d(x):\n    return x + %d\n' "$i" "$i" >"$F/pkg/st$i.py"
+done
+printf 'from pkg.st1 import stage_1\nfrom pkg.st2 import stage_2\nfrom pkg.st3 import stage_3\nfrom pkg.st4 import stage_4\nfrom pkg.st5 import stage_5\n\n\ndef fan_out(x):\n    """Run every stage."""\n    return stage_1(x) + stage_2(x) + stage_3(x) + stage_4(x) + stage_5(x)\n' >"$F/pkg/fan.py"
+# (N): execute_step is reached by name only (untyped receiver) and ranks above log_line (12 callers), so the page lists it first
+printf 'class Worker:\n    def execute_step(self):\n        return 1\n' >"$F/pkg/aworker.py"
+for i in $( seq 1 12 ); do
+    printf 'def use_worker_%d(w):\n    return w.execute_step()\n' "$i" >"$F/pkg/wu$i.py"
+done
+printf 'def log_line(x):\n    return x\n' >"$F/pkg/zhelpers.py"
+printf 'from pkg.zhelpers import log_line\n\n\ndef run_job(job):\n    """Run one job and log it."""\n    r = job.execute_step()\n    log_line(job)\n    return r\n' >"$F/pkg/job.py"
+printf 'MAX_ROWS_PER_PAGE = 10\n' >"$F/pkg/config.py"
+# (F): deep_leaf <- mid_hop (another file) <- 6 second-hop callers, more than the block shows; (F0): the same chain in one file
+printf 'def deep_leaf(x):\n    return x\n' >"$F/pkg/leaf.py"
+printf 'from pkg.leaf import deep_leaf\n\n\ndef mid_hop(x):\n    return deep_leaf(x)\n' >"$F/pkg/mid.py"
+for i in $( seq 1 6 ); do
+    printf 'from pkg.mid import mid_hop\n\n\ndef top_caller_%d(x):\n    return mid_hop(x)\n' "$i" >"$F/pkg/top$i.py"
+done
+{ printf 'def solo_leaf(x):\n    return x\n\n\ndef solo_mid(x):\n    return solo_leaf(x)\n'
+  for i in $( seq 1 6 ); do printf '\n\ndef solo_caller_%d(x):\n    return solo_mid(x)\n' "$i"; done; } >"$F/pkg/solo.py"
+# (Q): a caller in a directory whose name holds the CDATA terminator
+printf 'def quote_leaf(x):\n    return x\n' >"$F/pkg/quote.py"
+mkdir -p "$F/pkg/q]]>d"; printf 'from pkg.quote import quote_leaf\n\n\ndef quote_user(x):\n    return quote_leaf(x)\n' >"$F/pkg/q]]>d/quser.py"
+for i in $( seq 1 8 ); do
+    printf 'from pkg.hub import notify_hub\n\n\ndef call_hub_%d(x):\n    return notify_hub(x)\n' "$i" >"$F/pkg/hubc$i.py"
+done
+for i in $( seq 1 12 ); do
+    printf 'def area_of_shape(x):\n    return x * %d\n' "$i" >"$F/shapes/s$i.py"
+done
+for i in $( seq 1 40 ); do
+    printf 'def on_event_%d(event):\n    """Handle the event and dispatch it."""\n    return dispatch_event(event, %d)\n\n\ndef dispatch_event(event, n):\n    return n\n' "$i" "$i" >"$F/ev/h$i.py"
+done
+
+BIN="$BIN" BASE="${BASE_BIN:-}" F="$F" W="$WORK" python3 - <<'PY'
+import os, re, shlex, subprocess, sys
+BIN, BASE, F, W = os.environ["BIN"], os.environ["BASE"], os.environ["F"], os.environ["W"]
+bad = 0
+def ok(m): print("  ok   " + m)
+def no(m):
+    global bad; bad += 1; print("  FAIL " + m)
+def run(b, args, knob=None, root=None, extra=None):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE") and k != "RIPWIRE_NO_ROWLINES"}
+    env.update(extra or {})
+    if knob == "force": env["RIPWIRE_TINY_SHAPE_FORCE"] = "1"
+    elif knob is not None: env["RIPWIRE_TINY_SHAPE"] = knob
+    p = subprocess.run([b, root or F, "--no-cache"] + args, cwd=root or F, env=env, capture_output=True)
+    if p.returncode != 0 or not p.stdout:   # a failed call must not compare equal to another failed call (CodeRabbit on #742)
+        no("ripwire %s (knob %s) exited %d with %d B of output: %s" % (" ".join(args), knob, p.returncode, len(p.stdout), p.stderr.decode("utf-8", "replace").strip()[:300]))
+    return p.stdout.decode("utf-8", "replace")
+def xml_ok(t):
+    p = subprocess.run(["xmllint", "--noout", "-"], input=t.encode(), capture_output=True); return p.returncode == 0
+def outside_cdata_newline(t):
+    return "\n" in re.sub(r"<!\[CDATA\[.*?\]\]>", "", t, flags=re.S).rstrip("\n")
+
+NAMED = "Where is `page_slug` defined?"
+PATHQ = "the call path from `refresh` to `frobnicate_cache`"
+LOWQ  = "how is an event handled and dispatched by `dispatch_event`"
+Q = [NAMED, PATHQ, LOWQ]
+off = {q: run(BIN, ["--for=" + q], "0") for q in Q}
+on  = {q: run(BIN, ["--for=" + q]) for q in Q}
+
+# (I)
+if any('shape="tiny"' in off[q] for q in Q): no("(I) a knob-off answer carries shape=\"tiny\"")
+else: ok("(I) no knob-off answer carries shape=\"tiny\" (%d questions)" % len(Q))
+if BASE:
+    same = sum(run(BASE, ["--for=" + q]) == off[q] for q in Q)
+    (ok if same == len(Q) else no)("(I) knob-off == BASE_BIN byte for byte on %d/%d questions" % (same, len(Q)))
+else:
+    print("  skip (I) BASE_BIN not given: the byte-for-byte base comparison is not run")
+
+# (D)
+explicit = run(BIN, ["--for=" + NAMED], "1")
+(ok if 'shape="tiny"' in on[NAMED].split(">", 1)[0] and explicit == on[NAMED] else no)("(D) the default answer is tiny, and RIPWIRE_TINY_SHAPE=1 is it byte for byte")
+
+# (T)
+def tiny_problems(t, sym):
+    p = []
+    if 'shape="tiny"' not in t.split(">", 1)[0]: p.append("no shape=tiny on the root")
+    if len(t.encode()) > 2048: p.append("%d B > 2048" % len(t.encode()))
+    if not re.search(r'<act read="[^"]+"/>', t): p.append("no act line")
+    m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]></sigs>", t, re.S)
+    lines = m.group(1).split("\n") if m else []
+    if not lines or not all(re.fullmatch(r"\S+:\d+(-\d+)? \S+", l) for l in lines): p.append("sigs lines are not P:L-E N")
+    if not any(l.split(" ")[1].split(".")[-1].split("::")[-1] == sym for l in lines): p.append("no line names " + sym)
+    if t.count("<more next=") != 1: p.append("not exactly one <more next=>")
+    if "<!-- tiny shape" not in t: p.append("no tiny clause")
+    for el in ("<bodies", "<tail", "<fold", "<hops", " page=\"", " pages=\""):
+        if el in t: p.append("carries " + el.strip())
+    if not xml_ok(t): p.append("xmllint")
+    if outside_cdata_newline(t): p.append("newline outside CDATA")
+    return p
+pr = tiny_problems(on[NAMED], "page_slug")
+(no if pr else ok)("(T) named location is tiny (%d B)%s" % (len(on[NAMED].encode()), ": " + "; ".join(pr) if pr else ""))
+# (X)
+(ok if tiny_problems(off[NAMED], "page_slug") else no)("(X) the (T) checker reds the full (knob-off) answer")
+
+# (M)
+m = re.search(r'<more next="([^"]+)"/>', on[NAMED])
+if not m: no("(M) no more next=")
+else:
+    call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+    (ok if run(BIN, call) == off[NAMED] else no)("(M) the more next= call (knob ON) returns the knob-off default answer byte for byte")
+
+# (R)
+if 'shape="tiny"' in run(BIN, ["--for=" + PATHQ], "force") and on[PATHQ] == off[PATHQ] and 'confidence="high"' in off[PATHQ]:
+    ok("(R) the call-path question (high confidence, tiny under force) stays the full answer")
+else: no("(R) the call-path question: on==off %s, high %s" % (on[PATHQ] == off[PATHQ], 'confidence="high"' in off[PATHQ]))
+
+# (L)
+forced = run(BIN, ["--for=" + LOWQ], "force")
+if 'confidence="low"' in off[LOWQ] and 'shape="tiny"' in forced and on[LOWQ] == off[LOWQ]:
+    ok("(L) the low-confidence question stays the full answer (and is tiny under force: only the detector kept it full)")
+else: no("(L) low %s, forced tiny %s, on==off %s" % ('confidence="low"' in off[LOWQ], 'shape="tiny"' in forced, on[LOWQ] == off[LOWQ]))
+
+# (P)
+for pb in ("--page-bytes=400:2", "--page-bytes=0", "--rows=elements", "--max-tokens=400", "--pack-budget-bytes=64"):
+    a = run(BIN, ["--for=" + NAMED, pb]); b = run(BIN, ["--for=" + NAMED, pb], "0")
+    (ok if a == b and 'shape="tiny"' not in a else no)("(P) %s under the knob is the knob-off answer" % pb)
+
+# (V)
+def version(**kv):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RIPWIRE_TINY_SHAPE")}; env.update(kv)
+    return subprocess.run([BIN, "--version"], env=env, capture_output=True, text=True).stdout
+v_def, v_one, v_off, v_force = version(), version(RIPWIRE_TINY_SHAPE="1"), version(RIPWIRE_TINY_SHAPE="0"), version(RIPWIRE_TINY_SHAPE="0", RIPWIRE_TINY_SHAPE_FORCE="1")
+good = all(", tiny=on, " in v for v in (v_def, v_one, v_force)) and ", tiny=off, " in v_off
+(ok if good else no)("(V) --version tiny=on by default, under =1 and under _FORCE; tiny=off under RIPWIRE_TINY_SHAPE=0")
+
+# (G) / (G0): the spread guard, against what the knob-off answer's <callers> block holds
+def callers_files(t):
+    m = re.search(r"<callers [^>]*>(.*?)</callers>", t, re.S)
+    rows = re.findall(r"<s ([^>]*?)/?>", m.group(1)) if m else []
+    out = []
+    for a in rows:
+        a = dict(re.findall(r'(\w+)="([^"]*)"', a))
+        if a.get("d") != "2" and "p" in a: out.append(a["p"].rsplit(":", 1)[0])
+    return out
+SPREADQ = "Where is `frobnicate_cache` defined?"
+TESTQ = "Where is `page_title` defined?"
+s_off, s_on = run(BIN, ["--for=" + SPREADQ], "0"), run(BIN, ["--for=" + SPREADQ])
+xf = [f for f in callers_files(s_off) if f != "pkg/cache.py" and "/tests/" not in f]
+def edges_text(t):
+    m = re.search(r'<edges shown="\d+" total="\d+"><!\[CDATA\[(.*?)\]\]></edges>', t)
+    return m.group(1) if m else None
+if not xf: no("(G) vacuous: the knob-off answer has 0 other-file callers of frobnicate_cache")
+else:
+    e = edges_text(s_on)
+    good = 'shape="tiny"' in s_on.split(">", 1)[0] and e is not None and re.search(r"called by pkg/render\.py:\d+ refresh\b", e) and xml_ok(s_on)
+    (ok if good else no)("(G) %d other-file caller(s) (%s) -> tiny, named on the edges line: %s" % (len(xf), ",".join(xf), e))
+# (G7)
+HUBQ = "Where is `notify_hub` defined?"
+h_off, h_on, h_force = run(BIN, ["--for=" + HUBQ], "0"), run(BIN, ["--for=" + HUBQ]), run(BIN, ["--for=" + HUBQ], "force")
+hx = [f for f in callers_files(h_off) if f != "pkg/hub.py" and "/tests/" not in f]
+if len(hx) < 7: no("(G7) vacuous: the knob-off answer shows %d other-file callers of notify_hub (< 7)" % len(hx))
+elif 'shape="tiny"' not in h_force: no("(G7) vacuous: the too-spread question is not tiny even under force")
+else: (ok if h_on == h_off and 'confidence="high"' in h_off else no)("(G7) %d other-file callers (> 6) -> the full answer" % len(hx))
+# (E) / (E0): the body's callees, against the knob-off answer's <calls>
+def callees(t):
+    return [dict(re.findall(r'(\w+)="([^"]*)"', c)) for c in re.findall(r"<c ([^>]*)>", re.sub(r"<!\[CDATA\[.*?\]\]>", "", t, flags=re.S))]
+EDGEQ, SAMEFQ = "Where is `build_report` defined?", "Where is `fmt_all` defined?"
+e_off, e_on = run(BIN, ["--for=" + EDGEQ], "0"), run(BIN, ["--for=" + EDGEQ])
+xc = [c for c in callees(e_off) if c.get("p", "pkg/report.py") != "pkg/report.py"]
+if not xc: no("(E) vacuous: the knob-off body of build_report calls 0 other-file functions")
+else:
+    e = edges_text(e_on)
+    good = 'shape="tiny"' in e_on.split(">", 1)[0] and e is not None and "calls pkg/fmt.py:1 fmt_line" in e and len(e_on.encode()) <= 2048 and xml_ok(e_on) and not outside_cdata_newline(e_on)
+    (ok if good else no)("(E) %d other-file callee(s) -> tiny, named on the edges line: %s" % (len(xc), e))
+f_off, f_on = run(BIN, ["--for=" + SAMEFQ], "0"), run(BIN, ["--for=" + SAMEFQ])
+cs = callees(f_off); same_f = [c for c in cs if "p" not in c]; other_f = [c for c in cs if "p" in c]
+if not same_f: no("(E0) vacuous: the knob-off body of fmt_all calls 0 same-file functions")
+elif other_f: no("(E0) the fixture's fmt_all calls %d other-file functions" % len(other_f))
+else: (ok if 'shape="tiny"' in f_on.split(">", 1)[0] and "<edges" not in f_on else no)("(E0) %d same-file callee(s), 0 other-file -> tiny with no <edges>" % len(same_f))
+# (E4)
+CAPQ = "Where is `fan_out` defined?"
+c_off, c_on = run(BIN, ["--for=" + CAPQ], "0"), run(BIN, ["--for=" + CAPQ])
+cx = [c for c in callees(c_off) if c.get("p", "pkg/fan.py") != "pkg/fan.py"]
+if len(cx) < 5: no("(E4) vacuous: the knob-off body of fan_out calls %d other-file functions (< 5)" % len(cx))
+else:
+    m = re.search(r'<edges shown="(\d+)" total="(\d+)"><!\[CDATA\[(.*?)\]\]></edges>', c_on)
+    good = bool(m) and m.group(1) == "4" and m.group(2) == str(len(cx)) and m.group(3).endswith("(+%d more)" % (len(cx) - 4)) and m.group(3).count("pkg/st") == 4
+    (ok if good else no)("(E4) %d other-file callees -> 4 listed: %s" % (len(cx), m.group(0) if m else None))
+# (N)
+NQ = "Where is `run_job` defined?"
+n_off, n_on = run(BIN, ["--for=" + NQ], "0"), run(BIN, ["--for=" + NQ])
+nc = [c for c in callees(n_off) if c.get("p", "pkg/job.py") != "pkg/job.py"]
+first_name = next((j for j, c in enumerate(nc) if c.get("via") == "name"), None)
+first_exact = next((j for j, c in enumerate(nc) if c.get("via") != "name"), None)
+if first_name is None or first_exact is None or first_name > first_exact:
+    no("(N) vacuous: the knob-off <calls> of run_job lacks a name-only other-file callee before an exact one: %s" % nc)
+else:
+    e = edges_text(n_on) or ""
+    good = e.startswith("calls pkg/zhelpers.py:1 log_line") and "execute_step" in e
+    (ok if good else no)("(N) the exact callee is listed before the name-only one: %s" % e)
+# (B) / (C)
+for arm, q in (("(B)", "How does `build_report` work?"), ("(C)", "MAX_ROWS_PER_PAGE")):
+    q_off, q_on, q_force = run(BIN, ["--for=" + q], "0"), run(BIN, ["--for=" + q]), run(BIN, ["--for=" + q], "force")
+    if 'confidence="high"' not in q_off or 'shape="tiny"' not in q_force: no("%s vacuous: confidence high %s, tiny under force %s" % (arm, 'confidence="high"' in q_off, 'shape="tiny"' in q_force))
+    else: (ok if q_on == q_off else no)("%s %r stays the full answer (high confidence, tiny under force)" % (arm, q))
+t_off, t_on = run(BIN, ["--for=" + TESTQ], "0"), run(BIN, ["--for=" + TESTQ])
+cf = callers_files(t_off); tf = [f for f in cf if "/tests/" in f]; nf = [f for f in cf if f != "pkg/util.py" and "/tests/" not in f]
+if not tf: no("(G0) vacuous: the knob-off answer has 0 test-file callers of page_title")
+elif nf: no("(G0) the fixture has %d non-test other-file callers: %s" % (len(nf), nf))
+else: (ok if 'shape="tiny"' in t_on.split(">", 1)[0] else no)("(G0) a symbol called only from a test file (%d) is tiny" % len(tf))
+# (F) / (F0): a cut <callers> block
+def callers_cut(t):
+    m = re.search(r"<callers [^>]*>", t)
+    return bool(m) and ('capped="1"' in m.group(0) or 'd2_capped="1"' in m.group(0))
+d_off, d_on = run(BIN, ["--for=Where is `deep_leaf` defined?"], "0"), run(BIN, ["--for=Where is `deep_leaf` defined?"])
+if not callers_cut(d_off): no("(F) vacuous: the knob-off <callers> of deep_leaf is not cut")
+else:
+    m = re.search(r'<edges shown="\d+" total="\d+" floor="1"><!\[CDATA\[(.*?)\]\]></edges>', d_on)
+    good = 'shape="tiny"' in d_on.split(">", 1)[0] and bool(m) and "pkg/mid.py" in m.group(1) and xml_ok(d_on)
+    (ok if good else no)("(F) a cut callers block -> tiny, edges floor=\"1\": %s" % (m.group(0) if m else None))
+SOLOQ = "Where is `solo_leaf` defined?"
+o_off, o_on, o_force = run(BIN, ["--for=" + SOLOQ], "0"), run(BIN, ["--for=" + SOLOQ]), run(BIN, ["--for=" + SOLOQ], "force")
+if not callers_cut(o_off) or 'confidence="high"' not in o_off or 'shape="tiny"' not in o_force:
+    no("(F0) vacuous: cut %s, confidence high %s, tiny under force %s" % (callers_cut(o_off), 'confidence="high"' in o_off, 'shape="tiny"' in o_force))
+else: (ok if o_on == o_off else no)("(F0) a cut callers block with no cross-file edge stays the full answer")
+# (Q)
+QQ = "Where is `quote_leaf` defined?"
+q_off, q_on = run(BIN, ["--for=" + QQ], "0"), run(BIN, ["--for=" + QQ])
+qx = [f for f in callers_files(q_off) if "]]&gt;" in f or "]]>" in f]
+if not qx or 'confidence="high"' not in q_off: no("(Q) vacuous: %d callers under a ]]> directory, confidence high %s" % (len(qx), 'confidence="high"' in q_off))
+else: (ok if q_on == q_off else no)("(Q) a caller path holding ]]> (%s) -> the full answer" % qx[0])
+# (U) the tiny <sigs total=> is the full page's: its own <sigs total=>, else the count of its ranked <d> rows (THETA6-FLIP: total= had been
+# read past the <sigs> open tag, off another element)
+m = re.search(r'<sigs shown="(\d+)" total="(\d+)">', on[NAMED]); so = re.search(r"<sigs[^>]*>", off[NAMED])
+want = (re.search(r' total="(\d+)"', so.group(0)) or [None, None])[1] if so else None
+if want is None:
+    sec = re.search(r"<sigs[^>]*>(.*?)</sigs>", off[NAMED], re.S); body = sec.group(1) if sec else ""
+    cd = re.search(r"<!\[CDATA\[(.*?)\]\]>", body, re.S)
+    want = str(len([l for l in cd.group(1).split("\n") if l.strip()]) if cd else len(re.findall(r"<d ", body)))
+good = bool(m) and int(m.group(1)) <= int(m.group(2)) and m.group(2) == want
+(ok if good else no)("(U) tiny <sigs shown=%s total=%s>: shown <= total, total = the full page's %s" % (m.group(1) if m else "?", m.group(2) if m else "?", want))
+# (K) a block the tiny shape does not summarize keeps the full page (THETA6-FLIP allow list kSummarizedBlocks): a class-scope alias
+# whose defs lookup is empty is answered by the full page's literal <ld> row
+K = W + "/fxk"; os.makedirs(K + "/cpp", exist_ok=True)
+open(K + "/cpp/h.h", "w").write("template <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nstruct Holder {\n    using WidgetRef = Ptr<Widget>;\n};\nint getWidgetRefCount();\n")
+KQ = "what does WidgetRef expand to? the defs lookup is empty"
+k_off, k_on, k_force = run(BIN, ["--for=" + KQ], "0", K), run(BIN, ["--for=" + KQ], None, K), run(BIN, ["--for=" + KQ], "force", K)
+if "<ld " not in k_off or 'confidence="high"' not in k_off or 'shape="tiny"' not in k_force:
+    no("(K) vacuous: <ld> on the full page %s, confidence high %s, tiny under force %s" % ("<ld " in k_off, 'confidence="high"' in k_off, 'shape="tiny"' in k_force))
+else: (ok if k_on == k_off else no)("(K) a page with an <ld> block (not summarized) stays the full answer")
+m = re.search(r'<sigs shown="(\d+)" total="(\d+)">', k_force)   # (U) where the stray total= showed (shown=4 total=1 before the fix)
+(ok if m and int(m.group(1)) <= int(m.group(2)) else no)("(U) forced tiny on the <ld> page: shown=%s <= total=%s" % (m.group(1) if m else "?", m.group(2) if m else "?"))
+# (O) a saved note on the named symbol keeps the full page, which carries it
+O = W + "/fxo"; os.makedirs(O, exist_ok=True)
+open(O + "/notes.py", "w").write("def watch_bound(n):\n    return n + 1\n")
+subprocess.run("git init -q && git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -qm i", shell=True, cwd=O, check=True)
+subprocess.run([BIN, O, "--no-cache", "--note-add=watch_bound: the loop bound is inclusive"], cwd=O, capture_output=True)
+OQ = "Where is `watch_bound` defined?"
+o_off, o_on, o_force = run(BIN, ["--for=" + OQ], "0", O), run(BIN, ["--for=" + OQ], None, O), run(BIN, ["--for=" + OQ], "force", O)
+if "<note " not in o_off or 'shape="tiny"' not in o_force:
+    no("(O) vacuous: note on the full page %s, tiny under force %s" % ("<note " in o_off, 'shape="tiny"' in o_force))
+else: (ok if o_on == o_off else no)("(O) a named symbol with a saved note stays the full answer (the note is served)")
+# (A) the named row's file, not the top row's, anchors the spread guard and the edges line
+A = W + "/fxa"; os.makedirs(A + "/pkg", exist_ok=True)
+open(A + "/pkg/expander.py", "w").write('class Expander:\n    def moduleInstances(self, x):\n        """Expand the module instances."""\n        if x:\n            return [x]\n        return []\n\n\ndef expander_driver():\n    return Expander().moduleInstances(1)\n')
+open(A + "/pkg/state.py", "w").write('from pkg.expander import Expander\n\n\nclass State:\n    def ModuleInstances(self, x):\n        return x\n\n\ndef state_walk():\n    return Expander().moduleInstances(2)\n')
+AQ = "ModuleInstances"
+a_off, a_on = run(BIN, ["--for=" + AQ], "0", A), run(BIN, ["--for=" + AQ], None, A)
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]>", a_off, re.S)
+arows = [(l.split(":", 1)[0], l.split(" ")[1]) for l in (m.group(1).split("\n") if m else []) if " " in l]
+lastseg = lambda n: re.split(r"\.|::|#", n)[-1]
+nrow = next((r for r in arows if lastseg(r[1]) == AQ), None)
+acf = callers_files(a_off)
+top_f = arows[0][0] if arows else None; named_f = nrow[0] if nrow else None
+in_top, in_named = sum(f == top_f for f in acf), sum(f == named_f for f in acf)
+if not arows or lastseg(arows[0][1]) == AQ or not nrow or named_f == top_f or not in_top or not in_named:
+    no("(A) vacuous: top row %s, named row %s, callers in the top file %d, in the named file %d" % (arows[0] if arows else None, nrow, in_top, in_named))
+else:
+    e = edges_text(a_on) or ""
+    good = 'shape="tiny"' in a_on.split(">", 1)[0] and (top_f + ":") in e and (named_f + ":") not in e
+    (ok if good else no)("(A) top row %s, named row %s: the edges line names %s, not %s: %s" % (arows[0][1], nrow[1], top_f, named_f, e))
+# (W) the continuation keeps an explicit --rows=lines over RIPWIRE_NO_ROWLINES
+NR = {"RIPWIRE_NO_ROWLINES": "1"}
+w_el, w_off, w_on = run(BIN, ["--for=" + NAMED], "0", None, NR), run(BIN, ["--for=" + NAMED, "--rows=lines"], "0", None, NR), run(BIN, ["--for=" + NAMED, "--rows=lines"], None, None, NR)
+m = re.search(r'<more next="([^"]+)"/>', w_on)
+elem = lambda t: bool(re.search(r"<sigs[^>]*><d ", t))
+if not elem(w_el) or elem(w_off): no("(W) vacuous: elements without --rows= %s, lines under --rows=lines %s" % (elem(w_el), not elem(w_off)))
+elif 'shape="tiny"' not in w_on.split(">", 1)[0] or not m: no("(W) --rows=lines under RIPWIRE_NO_ROWLINES=1 is not tiny with a more next=")
+else:
+    call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+    (ok if run(BIN, call, None, None, NR) == w_off else no)("(W) under RIPWIRE_NO_ROWLINES=1 the more next= (%s) returns the knob-off --rows=lines answer" % m.group(1))
+# (Y) the continuation keeps a spelled --legend
+y_off, y_def, y_on = run(BIN, ["--for=" + NAMED, "--legend=compact"], "0"), off[NAMED], run(BIN, ["--for=" + NAMED, "--legend=compact"])
+m = re.search(r'<more next="([^"]+)"/>', y_on)
+if y_off == y_def: no("(Y) vacuous: the knob-off --legend=compact answer equals the default one")
+elif 'shape="tiny"' not in y_on.split(">", 1)[0] or not m: no("(Y) --legend=compact is not tiny with a more next=")
+else:
+    call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+    (ok if run(BIN, call) == y_off else no)("(Y) the more next= (%s) returns the knob-off --legend=compact answer" % m.group(1))
+# (Z) the question-sites block rides the tiny answer
+T11 = {"RIPWIRE_THETA11": "1"}
+z_off, z_on = run(BIN, ["--for=" + NAMED], "0", None, T11), run(BIN, ["--for=" + NAMED], None, None, T11)
+qs = re.search(r"<!-- qs:.*?(?=</ctx>)", z_off, re.S)
+if not qs or "<!-- qs:" in on[NAMED]: no("(Z) vacuous: knob-off qs block under THETA11 %s, qs in the default tiny answer %s" % (bool(qs), "<!-- qs:" in on[NAMED]))
+elif 'shape="tiny"' not in z_on.split(">", 1)[0]: no("(Z) the named question is not tiny under RIPWIRE_THETA11=1")
+else: (ok if qs.group(0).strip("\n") in z_on else no)("(Z) the tiny answer under RIPWIRE_THETA11=1 carries the knob-off qs block (%d B)" % len(qs.group(0)))
+# (S)
+SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
+a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]>", a_off, re.S)
+same_off = sum(1 for l in (m.group(1).split("\n") if m else []) if "area_of_shape" in l.split(" | ")[0])
+m = re.search(r"<sigs[^>]*><!\[CDATA\[(.*?)\]\]></sigs>", a_on, re.S)
+lines = m.group(1).split("\n") if m else []
+if same_off < 9: no("(S) vacuous: the knob-off sigs hold %d same-name rows (< 9)" % same_off)
+elif 'shape="tiny"' not in a_on.split(">", 1)[0]: no("(S) the same-name question is not tiny (%s)" % (re.search(r'confidence="\w+"', a_off) or [""])[0])
+else:
+    good = len(lines) == min(same_off, 16) and all(l.endswith("area_of_shape") for l in lines) and xml_ok(a_on)
+    (ok if good else no)("(S) %d same-name rows in the full answer -> %d tiny lines, all area_of_shape" % (same_off, len(lines)))
+print("tinyshapecheck: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
+sys.exit(1 if bad else 0)
+PY

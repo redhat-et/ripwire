@@ -34,7 +34,7 @@ inline constexpr std::string_view kBodiesPointer = "pointer";
         return false;
     }
     const EnvNumber knob = readEnvNumber( "RIPWIRE_BODIES_EDIT" );
-    return knob.set ? !( knob.parsed && knob.value == 0 ) : routing::routingOn();
+    return knob.set ? !knob.isZero() : routing::routingOn();
 }
 
 }   // namespace rw::bodyptr

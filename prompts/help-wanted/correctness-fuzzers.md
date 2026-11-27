@@ -11,10 +11,14 @@ trees**. Run every gate in the foreground.
 
 ## Why it matters
 
-ripwire's fuzzing today answers one question: does a parser crash on hostile bytes?
-`test/fuzz/fuzz_ingest.cpp` hands random input to one tree-sitter grammar and walks the tree. That
-exercises the **vendored parser**. It does not run one line of ripwire's own extraction, resolver, call
-graph, ranking or emitter. Its oracle is "no sanitizer report".
+ripwire's fuzzing today answers one question: does something crash on hostile bytes? There are two
+families. `test/fuzz/fuzz_ingest.cpp` hands random input to one tree-sitter grammar and walks the tree,
+which exercises the **vendored parser**. The **reader fuzzers** in `test/fuzz/readers/` (16 of them)
+feed hostile bytes to ripwire's own readers of input it did not create: cache records and frames, SCIP,
+sidecars, MCP frames, trace input, skill files and more. Neither family runs the resolver, call graph,
+ranking or emitter on a well-formed corpus, and both oracles are "no sanitizer report". The CMake
+block that registers the readers says so in its own words: crash oracles only, and the correctness
+oracles are this issue's.
 
 That is necessary, and it is not enough for this tool. CLAUDE.md's first non-negotiable says why: a
 ranking, a token estimate and a call graph **all look plausible whether or not they are correct**. A
@@ -32,7 +36,9 @@ fuzzer needs. This work turns "it didn't crash" into "it's right".
 | File | What it gives you |
 | --- | --- |
 | `CMakeLists.txt`, `RIPWIRE_FUZZ` | Opt-in, OFF by default, mutually exclusive with `RIPWIRE_ASAN` and `RIPWIRE_TSAN`. Requires Clang, and configure compiles and links a real harness first because some Xcode distributions ship Clang without `libclang_rt.fuzzer_osx.a` |
-| `CMakeLists.txt`, `add_ripwire_fuzzer( NAME LANGUAGE KEY )` | One `ripwire_fuzz_<name>` per grammar, `EXCLUDE_FROM_ALL`, linking only `test/fuzz/fuzz_ingest.cpp` and that grammar's objects; 21 are registered, and the umbrella target is `ripwire_fuzzers` |
+| `CMakeLists.txt`, `add_ripwire_fuzzer( NAME LANGUAGE KEY )` | One `ripwire_fuzz_<name>` per grammar, `EXCLUDE_FROM_ALL`, linking only `test/fuzz/fuzz_ingest.cpp` and that grammar's objects; 25 are registered at `09995f4b`, and the umbrella target is `ripwire_fuzzers` |
+| `CMakeLists.txt`, `RIPWIRE_FUZZ_READERS` and `add_ripwire_reader_fuzzer` | The reader fuzzers: one `ripwire_fuzz_reader_<name>` per reader, all linking one instrumented library (`readers_ingest.cpp` is the ingest translation unit). The list is declared **once**, there; umbrella target `ripwire_reader_fuzzers` |
+| `test/fuzz/readers/run.sh` | `replay` runs every committed seed through its reader with no mutation and FAILS on zero inputs executed or on a reader that accepted none of its valid seeds; `fuzz SECONDS [R]` fuzzes one reader at a time. It derives its reader list from CMake, never a hand list — **the model for the sweep-list gap below**. Seeds come from the real writers (`test/fuzz/readers/make_seeds.sh`). No CI step runs the replay today |
 | `test/fuzz/run.sh` | The bounded local sweep: 120 s per grammar by default, 4 jobs, inputs up to 64 KiB, artifacts kept on failure. "Not part of normal regression" |
 | `test/fuzz/seeds/<grammar>/valid`, `test/fuzz/seeds/common/utf8.txt` | The seed corpus. Note the extensionless names (trap 4) |
 | `test/cachefuzzcheck.sh` | The existing **correctness** fuzzer, for cache blobs: a fixed table of about 26 byte-level and 5 filesystem-shape mutations; the oracle is output byte-identical to a `--no-cache` run. In the regression loop, and a named CI step under ASan. **The model for everything below:** a fixed table, never a random seed at gate time |
@@ -46,13 +52,25 @@ fuzzer needs. This work turns "it didn't crash" into "it's right".
 
 Two gaps worth knowing before you start, both verified on `main`:
 
-- **`test/fuzz/run.sh` sweeps 15 of the 21 registered targets.** `toml`, `yaml`, `csharp`, `c`, `php`
-  and `lua` have targets and seeds but are not in its grammar list. `test/g1configcheck.sh` greps the
-  runner for its flags, not for its coverage.
-- **Nothing builds the CSR and PageRank property tests.** They exist only under
-  `-DRIPWIRE_TESTS=ON`. No gate and no CI step builds `ripwire_test_csr` or `ripwire_test_pagerank`
-  (only `ripwire_test_strkern` is built, by `test/strkerncheck.sh` and `test/emitescapecheck.sh`), yet
-  CONTRIBUTING.md §2 lists "the CSR property test fails" as an automatic rejection.
+- **`test/fuzz/run.sh` sweeps 17 of the 25 registered grammar targets.** `toml`, `yaml`, `csharp`, `c`,
+  `php`, `lua`, `gdscript` and `proto` have targets and seeds but are not in its hand-written
+  `GRAMMARS` list. `test/g1configcheck.sh` checks the reader list against CMake, but for the grammar
+  runner it greps flags, not coverage. This is the smallest slice in the kit and a good first PR.
+- **The CSR and PageRank property tests run on Windows only.** They exist under `-DRIPWIRE_TESTS=ON`.
+  The Windows CI leg configures with it and runs `ctest` (`.github/workflows/ci.yml`, the "Unit tests
+  (ctest …)" step); no Linux or macOS leg and no gate in `test/regression.sh` builds them, yet
+  CONTRIBUTING.md §2 lists "the CSR property test fails" as an automatic rejection. **#153 owns this:**
+  PR #531 (open since 2026-11-04, in review) adds `test/csrpagerankcheck.sh`. Do not duplicate it.
+
+---
+
+## Orient with ripwire first
+
+Before you open files, run `./build/ripwire . --for="fuzz harness oracle verifyCsr buildGraph cache round-trip"`
+(or name the oracle you picked) and read what it ranks first. Before you write a harness or gate, run
+`./build/ripwire . --exemplar="a gate that replays a fixed mutation table"` — `test/cachefuzzcheck.sh`
+should come back, and it is the shape to copy. Before you call it done, run
+`./build/ripwire . --quality-delta --legend=compact`, then `./build/ripwire . --test-gate`.
 
 ---
 
@@ -176,10 +194,12 @@ bash test/fuzz/run.sh fuzz 60                  # bounded local sweep: build dir,
 5. **Every bug found** gets its minimized input committed to the replay corpus, and its fix lands
    separately with a red-first arm.
 6. **The sweep list stops drifting.** `test/fuzz/run.sh` covers every registered target, derived from
-   CMake rather than a hand list, or states why not; `test/g1configcheck.sh` asserts whichever you choose.
-7. **The property tests run.** The CSR and PageRank doctest targets are built and run by a gate, or the
-   PR states why they should not be and CONTRIBUTING.md §2 is corrected.
-8. **Gates green in the foreground:** your new gate, `test/manifestcheck.sh`, `test/gatecountcheck.sh`,
+   CMake the way `test/fuzz/readers/run.sh` derives `RIPWIRE_FUZZ_READERS`, or states why not;
+   `test/g1configcheck.sh` asserts whichever you choose, as it already does for the readers.
+7. **The property tests run.** This is #153's PR #531 (`test/csrpagerankcheck.sh`). If it has not
+   landed when your oracle does, say so in your PR rather than adding a second gate for the same
+   targets.
+8. **Done means** gates green in the foreground: your new gate, `test/manifestcheck.sh`, `test/gatecountcheck.sh`,
    `test/g1configcheck.sh`, `test/ripwirepubliccheck.sh`, `test/cachefuzzcheck.sh`,
    `test/declinecheck.sh`, and the two-run determinism diff.
 

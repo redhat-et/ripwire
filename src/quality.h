@@ -4503,13 +4503,22 @@ inline void sweepStaleEditLocks( const std::string& dir )
     }
 }
 
+// --NO-CACHE RUNS NO DIR-WIDE SWEEP (2026-11-26). A run told not to use the cache still writes the HEAD-side families —
+// qheadsnap/qsnap through computeHeadSnapshot and loadRefTree, qms through --merge-scout, on purpose (test/qsnapcachecheck.sh,
+// test/headsnapcachecheck.sh) — and their ingest's saveCache is what calls the sweep below. So a `--no-cache --edit-check`
+// on zed ran the age and byte-budget passes over EVERY root's blobs and said "evicted 19 blob(s) of other roots": a gate or
+// an agent that asked for no cache turned other projects' warm caches cold. main() spends the once-per-process slot before
+// any thread exists, so a --no-cache process never sweeps. What stays: each written family's own keep-2 cap (this root's
+// blobs only), and the next cached run sweeps the dir as before. test/nocacheevictcheck.sh.
+inline std::atomic<bool> gCacheDirSwept{ false };
+inline void skipCacheDirSweepForProcess() noexcept { gCacheDirSwept.store( true, std::memory_order_relaxed ); }
+
 inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string& keepPath )
 {
-    static std::atomic<bool> swept{ false };
     bool expected = false;
-    if( !swept.compare_exchange_strong( expected, true ) )
+    if( !gCacheDirSwept.compare_exchange_strong( expected, true ) )
     {
-        return; // only the first saveCache in this process sweeps
+        return; // only the first saveCache in this process sweeps, and a --no-cache process none (above)
     }
 
     evictOldCacheFamily( dir, "ripwire-", keepPath, kMaxCacheBlobCount, kMaxCacheBlobAgeDays, kMaxCacheDirBytes );

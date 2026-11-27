@@ -239,3 +239,34 @@ def seen_grown(page, travel, bodies, marker):
     m = MARKER.match(marker)
     mk = marker[:m.start(1)] + str(len(cl)).encode() + marker[m.end(1):]
     return page.replace(travel, mk + t, 1)
+
+
+# ── (LD10) a re-opened section carries its block-local legend ──────────────────────────────────────────────────────────────────
+# A cut never falls right after a comment, so a section's block-local legend (the comments glued before its open tag, <!-- syms: … -->
+# before <syms>) sits on the page the section starts on. A page that RE-OPENS a section the page before left open (that page's root
+# says continued="NAME") carries the section's open tag and rows, so it needs that legend too: held already when it is on page 1,
+# carried by the continuation page, verbatim, otherwise (src/forpages.h reopenedLegend). Element-form pages, raw bytes.
+CONTINUED = re.compile(rb"<ctx\b[^>]* continued=\"([^\"]+)\"")
+def glued_legend(whole, open_tag):
+    """the comments immediately before `open_tag` in the whole answer, or b"" """
+    at = whole.find(open_tag); start = at
+    while at > 0 and whole[:start].endswith(b"-->"):
+        c = whole.rfind(b"<!--", 0, start)
+        if c < 0: break
+        start = c
+    return whole[start:at] if at > 0 else b""
+
+def reopened_gaps(pages, whole):
+    """(premise, gaps): the (page, section) re-opens whose glued legend page 1 does not hold, and those whose page lacks it too"""
+    premise, gaps = [], []
+    for k in range(1, len(pages)):
+        m = CONTINUED.search(pages[k - 1][:pages[k - 1].find(b">") + 1])
+        if not m: continue
+        page = pages[k]; body = MASK.sub(lambda x: b" " * len(x.group(0)), page[page.find(b">") + 1:])
+        t = re.search(rb"<" + re.escape(m.group(1)) + rb"\b[^>]*>", body)
+        if not t: continue
+        leg = glued_legend(whole, t.group(0))
+        if not leg or leg in pages[0]: continue
+        premise.append((k + 1, m.group(1).decode()))
+        if leg not in page: gaps.append((k + 1, m.group(1).decode()))
+    return premise, gaps

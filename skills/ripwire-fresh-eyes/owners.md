@@ -1,5 +1,7 @@
 # ripwire-fresh-eyes — reference: owners (read on demand; the recipe is in SKILL.md)
 
+Contents: ownership and bus factor (`--owners`, `bf="1"`) · per-function size ranking · reachable non-local mutable state · the shape metrics and `join="deep+untested"` · the file-unit `historical` family · why there is no composite score
+
 5. **Ownership / knowledge risk** — `ripwire <dir> --owners[=SYM] --legend=compact`
    `<owners files="N"><f p="…" authors="1" bf="1" top="…@…" share="1.00"/>` (recency-weighted, 6-month
    half-life). `authors=` distinct authors; `share=` the top author's fraction of weighted commits;

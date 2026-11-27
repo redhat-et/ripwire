@@ -106,7 +106,7 @@ enum class Part : std::uint32_t
     Clones = 2,
     Dirs   = 3,
 };
-inline constexpr std::string_view kPartNames[] = { "", "grep", "clones", "dirs" };
+inline constexpr std::string_view kPartNames[] = { "", "grep", "clones", "dirs", "regindex", "slotjoin" };   // SLOTREG-PERSIST registers its two parts here (src/verbfs_slotreg.h finds them by name)
 
 // Why a record was not used: one word on the stats line.
 enum class Why : std::uint8_t
@@ -148,6 +148,17 @@ inline ArmedRoot& armedRoot() noexcept
 {
     static ArmedRoot root;
     return root;
+}
+
+// Every derived record family (QMetrics, SLOTREG) installs its seams only where VERB-FS armed this run's root
+// (verbfs::arm); elsewhere they stay null and the pass computes as before. One gate, one assignment per family.
+template<class SeamSet>
+inline void installSeamsWhereArmed( SeamSet& slot, const SeamSet& armed ) noexcept
+{
+    if( armedRoot().on )
+    {
+        slot = armed;
+    }
 }
 
 inline bool killSwitchOn() noexcept
@@ -213,7 +224,7 @@ inline RecordFile readRecord( Part part, std::string_view rootKey )
         out.why = Why::Ok;
         return out;
     }
-    DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS record that is refused is not read: the pass does its full work, and the run writes a fresh record" );
+    DISCLOSE( Diagnostics::answerUnchanged, "a VERB-FS record that is refused is not read: the pass does its full work and rebuilds the answer; whether a fresh record is written is the keep path's call" );
     out.bytes.clear();
     return out;
 }

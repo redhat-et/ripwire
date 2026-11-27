@@ -26,6 +26,7 @@ import argparse, json, math, pathlib, random, statistics, sys
 
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # train_contaminated_repos(): the ONE re-derivation of the split contract
+import cost_accounting   # the four-way token split, shared with run_agentloop.py so the two cannot drift
 
 SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
@@ -152,7 +153,115 @@ def mean_substitution( recs ):
     vals = [ v for v in ( substitution_rate( r ) for r in recs ) if v is not None ]
     return ( mean( vals ), len( vals ) ) if vals else ( None, 0 )
 
-def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1" ):
+# ── cost accounting: four-way token split, wall clock, tool and model calls (2026-11-26) ────────────────
+# Every column here is ADDED beside the existing tokens_in/tokens_out/cost_usd; none of those changes
+# meaning. Rollups count ok-status runs of every arm (not only paired ones): cost is a property of a run,
+# and a run without a partner still spent it.
+ROLLUP_FIELDS = ( "tokens_in", "tokens_out", "cost_usd" ) + cost_accounting.SPLIT_FIELDS + (
+    "wall_seconds", "tool_calls", "model_calls" )
+
+def _events_path( rec, results_dir=None ):
+    """events_path, or the same file name under <results dir>/events/ when the results moved machines."""
+    path = rec.get( "events_path" )
+    if path and not pathlib.Path( path ).exists() and results_dir is not None:
+        moved = pathlib.Path( results_dir ) / "events" / pathlib.Path( path ).name
+        path = str( moved ) if moved.exists() else path
+    return path
+
+def _is_old_record( rec ):
+    """Written before 2026-11-26: the runner filled the accounting fields on every record from then on."""
+    return all( rec.get( f ) is None for f in cost_accounting.ACCOUNTING_FIELDS )
+
+def run_accounting( rec, results_dir=None ):
+    """The accounting fields of one record. A record written by today's runner carries them; an older
+    record is re-derived from its retained transcript. Fields neither source has stay None."""
+    if not _is_old_record( rec ):
+        return { f: rec.get( f ) for f in cost_accounting.ACCOUNTING_FIELDS }
+    return cost_accounting.accounting_from_events( rec.get( "harness" ), _events_path( rec, results_dir ) )
+
+HEADLINE_FIELDS = ( "tokens_in", "tokens_out", "cost_usd" )
+
+def normalize_headline( rec, results_dir=None ):
+    """An OLD opencode record's tokens_in/tokens_out/cost_usd came from the last step_finish only (the runner
+    kept the last step until 2026-11-26), an undercount on every multi-step run. With its transcript, they
+    are re-derived as sums over every step; without one, the old values are kept but marked
+    headline_floor=True, a last-step floor and never a total. Every other record is returned unchanged:
+    claude and codex headline columns never moved."""
+    if rec.get( "harness" ) != "opencode" or not _is_old_record( rec ):
+        return rec
+    try:
+        text = pathlib.Path( _events_path( rec, results_dir ) or "" ).read_text( errors="replace" )
+    except OSError:
+        text = ""
+    sums = cost_accounting.opencode_headline( text )
+    if any( v is not None for v in sums.values() ):
+        return dict( rec, **sums )
+    if any( rec.get( f ) is not None for f in HEADLINE_FIELDS ):
+        return dict( rec, headline_floor=True )
+    return rec
+
+def cost_rollup( recs, results_dir=None ):
+    """{field: {"sum", "n"}} over recs. n counts the runs that MEASURED the field; sum is None when n is 0,
+    so an unmeasured cell prints n/a rather than a fabricated 0. n_split_unmeasured counts runs missing
+    the uncached-input, cache-read or output cell (cache_write is left out: codex never reports it), i.e. a run
+    whose cost cannot be repriced under a cache schedule."""
+    row = { f: { "sum": None, "n": 0 } for f in ROLLUP_FIELDS }
+    unmeasured = 0
+    for r in recs:
+        vals = dict( r, **run_accounting( r, results_dir ) )
+        for f in ROLLUP_FIELDS:
+            v = vals.get( f )
+            if v is None:
+                continue
+            cell = row[f]
+            cell["sum"] = v if cell["sum"] is None else cell["sum"] + v
+            cell["n"] += 1
+        if any( vals.get( f ) is None for f in ( "split_uncached_in", "split_cache_read", "split_output" ) ):
+            unmeasured += 1
+    row.update( runs=len( recs ), n_split_unmeasured=unmeasured,
+                n_headline_floor=sum( 1 for r in recs if r.get( "headline_floor" ) ) )
+    return row
+
+def cost_accounting_report( records, results_dir=None ):
+    ok = [ r for r in records if r.get( "status" ) == "ok" ]
+    by_arm, by_task = {}, {}
+    for r in ok:
+        by_arm.setdefault( r["arm"], [] ).append( r )
+        by_task.setdefault( ( r["instance_id"], r["arm"] ), [] ).append( r )
+    return ( { arm: cost_rollup( rs, results_dir ) for arm, rs in sorted( by_arm.items() ) },
+             [ dict( instance_id=i, arm=a, **cost_rollup( rs, results_dir ) ) for ( i, a ), rs in sorted( by_task.items() ) ] )
+
+# ── pass^k: consistency over k trials, beside the single-trial rate (2026-11-26) ───────────────────────
+def pass_hat_k( c, n, k ):
+    """Unbiased estimate of P(all k of k fresh trials succeed) from c successes in n trials: C(c,k)/C(n,k)."""
+    return math.comb( c, k ) / math.comb( n, k )
+
+def consistency( records, field ):
+    """Per arm: pass@1 (mean per-task success rate) over every task with >= 1 trial, and pass^k for every
+    k from 2 to the largest trial count, each over the tasks with >= k trials. A trial is an ok-status run
+    whose `field` was scored; anything else (timeout, error, contaminated, unscored) is not a trial and is
+    counted in n_runs_excluded instead of being read as a failure. Duplicate (task, arm, seed) records
+    keep the last, as pair_by_task_seed() does."""
+    trials, excluded = {}, {}
+    for r in records:
+        if r.get( "status" ) != "ok" or r.get( field ) is None:
+            excluded[ r["arm"] ] = excluded.get( r["arm"], 0 ) + 1
+            continue
+        trials.setdefault( r["arm"], {} ).setdefault( r["instance_id"], {} )[ r["seed"] ] = bool( r[field] )
+    out = {}
+    for arm in sorted( set( trials ) | set( excluded ) ):
+        tasks = [ list( seeds.values() ) for seeds in trials.get( arm, {} ).values() ]
+        row = dict( pass_at_1=mean( [ sum( t ) / len( t ) for t in tasks ] ) if tasks else None,
+                    n_tasks=len( tasks ), pass_hat_k={}, n_runs_excluded=excluded.get( arm, 0 ) )
+        for k in range( 2, max( ( len( t ) for t in tasks ), default=0 ) + 1 ):
+            eligible = [ t for t in tasks if len( t ) >= k ]
+            row["pass_hat_k"][k] = dict( value=mean( [ pass_hat_k( sum( t ), len( t ), k ) for t in eligible ] ),
+                                         n_tasks=len( eligible ) )
+        out[arm] = row
+    return out
+
+def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1", results_dir=None ):
+    records = [ normalize_headline( r, results_dir ) for r in records ]
     paired, incomplete = pair_by_task_seed( records )
     repos = sorted( { repo for _, repo, *_ in paired } )
     # Contamination count (arm-isolation fix, 2026-08-20 outcome-harness-fixes lane): a baseline record
@@ -166,6 +275,10 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
                                    if r.get( "arm" ) == ARM_BASELINE and r.get( "status" ) == "contaminated" )
     out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ),
                 n_contaminated_baseline=n_contaminated_baseline )
+    # Added sections (2026-11-26). Computed before the no-pairs early return: neither needs a pair.
+    out["cost_by_arm"], out["cost_by_task"] = cost_accounting_report( records, results_dir )
+    out["consistency"] = { f: consistency( records, f ) for f in ( "resolved", "localization_hit" ) }
+    out["n_headline_floor_runs"] = sum( 1 for r in records if r.get( "headline_floor" ) )
     if not paired:
         out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
@@ -179,6 +292,7 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     tok_p50, tok_p95 = paired_ratio( paired, "tokens_out" )
     wall_p50, wall_p95 = paired_ratio( paired, "wall_seconds" )
     cost_p50, cost_p95 = paired_ratio( paired, "cost_usd" )
+    tool_p50, tool_p95 = paired_ratio( paired, "tool_calls" )
     # Substitution rate is reported PER ARM, not as a paired delta: the baseline arm has no ripwire on
     # PATH at all, so its rate is 0 by construction and a delta against it measures nothing. The number
     # that matters is how close the ripwire arm gets to 1.0 — i.e. how often, when it needed to read or
@@ -192,6 +306,7 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
         tokens_out_ratio_p50=tok_p50, tokens_out_ratio_p95=tok_p95,
         wall_seconds_ratio_p50=wall_p50, wall_seconds_ratio_p95=wall_p95,
         cost_usd_ratio_p50=cost_p50, cost_usd_ratio_p95=cost_p95,
+        tool_calls_ratio_p50=tool_p50, tool_calls_ratio_p95=tool_p95,
         substitution_rate_baseline=sub_base, n_substitution_baseline=n_sub_base,
         substitution_rate_ripwire=sub_ctx,  n_substitution_ripwire=n_sub_ctx,
     )
@@ -207,6 +322,8 @@ def print_report( out ):
         print( f"  ** {contaminated} baseline run(s) invoked ripwire despite the no-ripwire contract "
                f"(status=\"contaminated\") — excluded from n_pairs, but a non-zero count here means the "
                f"round is not clean; see run_agentloop.py's baseline_contamination_note() **" )
+    print_cost_accounting( out )
+    print_consistency( out )
     if "note" in out:
         print( f"  {out['note']}" ); return
     print( f"  resolved-rate delta {pct(out['resolved_delta_mean'])}; "
@@ -216,6 +333,7 @@ def print_report( out ):
     print( f"  tokens_out ratio p50/p95 {rat(out['tokens_out_ratio_p50'])}/{rat(out['tokens_out_ratio_p95'])}" )
     print( f"  wall_seconds ratio p50/p95 {rat(out['wall_seconds_ratio_p50'])}/{rat(out['wall_seconds_ratio_p95'])}" )
     print( f"  cost_usd ratio p50/p95 {rat(out['cost_usd_ratio_p50'])}/{rat(out['cost_usd_ratio_p95'])}" )
+    print( f"  tool_calls ratio p50/p95 {rat(out.get('tool_calls_ratio_p50'))}/{rat(out.get('tool_calls_ratio_p95'))}" )
     def sub( x ): return f"{100*x:.1f}%" if x is not None else "n/a"
     print( f"  substitution rate (ripwire_calls / read+search calls): "
            f"ripwire arm {sub(out.get('substitution_rate_ripwire'))} "
@@ -226,6 +344,55 @@ def print_report( out ):
             " Baseline is 0% by construction (no ripwire on PATH); n counts runs where BOTH counts were"
             " measured — unmeasured runs (claude records from before 2026-08-22, unless backfilled) are"
             " excluded rather than scored 0." )
+
+def _cell( row, f, fmt="{:,}" ):
+    """One rollup cell: the sum, with "(k of N)" when only k of the row's N runs measured it; n/a at k=0."""
+    c = row.get( f ) or { "sum": None, "n": 0 }
+    if not c["n"]:
+        return "n/a"
+    s = fmt.format( round( c["sum"], 4 ) if isinstance( c["sum"], float ) else c["sum"] )
+    return s if c["n"] == row["runs"] else f"{s} ({c['n']} of {row['runs']})"
+
+def _cost_line( label, row ):
+    return ( f"{label} runs={row['runs']} "
+             f"tokens_in={_cell( row, 'tokens_in' )} tokens_out={_cell( row, 'tokens_out' )} "
+             f"cost_usd={_cell( row, 'cost_usd', '{}' )}"
+             + ( f" [floor: {row['n_headline_floor']} of {row['runs']} opencode run(s) last-step only]" if row.get( "n_headline_floor" ) else "" )
+             + " | "
+             f"uncached_in={_cell( row, 'split_uncached_in' )} cache_write={_cell( row, 'split_cache_write' )} "
+             f"cache_read={_cell( row, 'split_cache_read' )} output={_cell( row, 'split_output' )} | "
+             f"wall_s={_cell( row, 'wall_seconds', '{}' )} tool_calls={_cell( row, 'tool_calls' )} "
+             f"model_calls={_cell( row, 'model_calls' )}" )
+
+def print_cost_accounting( out ):
+    arms = out.get( "cost_by_arm" ) or {}
+    if not arms:
+        return
+    print( "  cost accounting, ok runs of every arm (sums; split = uncached_in / cache_write / cache_read / output,"
+           " read from each run's transcript):" )
+    for arm, row in arms.items():
+        print( "    " + _cost_line( arm, row ) )
+        if row["n_split_unmeasured"]:
+            print( f"      ^ {row['n_split_unmeasured']} of {row['runs']} {arm} run(s) carry no cache split"
+                   f" (no usable transcript): their totals are not priceable under a cache schedule" )
+    print( "    cache_write is n/a on codex runs by construction: codex reports no cache-write count." )
+    if out.get( "n_headline_floor_runs" ):
+        print( f"    ** {out['n_headline_floor_runs']} opencode run(s) predate the per-step sum and have no transcript:"
+               f" their tokens_in/tokens_out/cost_usd are LAST-STEP FLOORS, not totals, and enter every sum and"
+               f" ratio in this report as such **" )
+    print( "  per task (instance, arm):" )
+    for row in out.get( "cost_by_task" ) or ():
+        print( "    " + _cost_line( f"{row['instance_id']} {row['arm']}", row ) )
+
+def print_consistency( out ):
+    for field, arms in ( out.get( "consistency" ) or {} ).items():
+        for arm, row in arms.items():
+            if not row["n_tasks"]:
+                continue
+            ks = "  ".join( f"pass^{k} {100*v['value']:.1f}% (n={v['n_tasks']})" for k, v in row["pass_hat_k"].items() )
+            print( f"  {field} {arm}: pass@1 {100*row['pass_at_1']:.1f}% (n={row['n_tasks']} tasks)"
+                   + ( f"  {ks}" if ks else "  pass^k n/a (no task has 2+ trials)" )
+                   + ( f"  [{row['n_runs_excluded']} run(s) not trials: non-ok status or unscored]" if row["n_runs_excluded"] else "" ) )
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
 def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_seconds, cost_usd ):
@@ -355,7 +522,7 @@ def main():
     if not a.results:
         raise SystemExit( "--results PATH is required (or pass --self-test to validate the math on a fixture)" )
     data = load_results( a.results )
-    out = analyze( data["records"], n_boot=a.bootstrap )
+    out = analyze( data["records"], n_boot=a.bootstrap, results_dir=pathlib.Path( a.results ).resolve().parent )
     print_report( out )
     return 0
 

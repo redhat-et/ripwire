@@ -1,5 +1,7 @@
 # ripwire-fresh-eyes — reference: dark-docs-plans (read on demand; the recipe is in SKILL.md)
 
+Contents: 1b. What is BUILT but DARK here? · 1b-ii. If I flip THIS one, what lights up? · 1c. Can I TRUST this repo's docs? · 1d. Did a task in this plan just never get launched?
+
 1b. **What is BUILT but DARK here?** — `ripwire <dir> --flags --legend=compact` (`=SUBSTR` to narrow)
    ```
    <flags gates="98" dark_gates="90" compile="32" cmake="9" env="57"><gate name="X_HARMONY_SFX" kind="compile"

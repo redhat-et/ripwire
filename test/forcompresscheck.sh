@@ -30,6 +30,7 @@ set -u
 export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+export RIPWIRE_TINY_SHAPE=0   # THETA6-FLIP (tiny shape on by default since #742): --compress keeps the full page, so its plain twin must be the full page too
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/compressfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

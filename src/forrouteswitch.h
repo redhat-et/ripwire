@@ -13,8 +13,7 @@ namespace rw::routing
 // one served before this switch existed (test/routingcheck.sh (O)). Any other value, or unset, leaves them on.
 [[nodiscard]] inline bool routingOn() noexcept
 {
-    const EnvNumber knob = readEnvNumber( "RIPWIRE_ROUTING" );
-    return !( knob.parsed && knob.value == 0 );
+    return !readEnvNumber( "RIPWIRE_ROUTING" ).isZero();
 }
 
 }   // namespace rw::routing

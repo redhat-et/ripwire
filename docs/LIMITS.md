@@ -45,16 +45,16 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-23 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-27 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 469 | 162 | 298 | **171** |
+| 478 | 165 | 301 | **177** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 469 + 10 is the 479 constants this generator parses out of `src/`.
+are not counted as caps, and 478 + 10 is the 488 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **146 of 469 caps are classified
-(54 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 323 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 478 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 330 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -771,6 +771,16 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kTailTermMaxWords` | `64` | — | — |
+
+### `src/fortinyshape.h`
+
+Discloses: `d2_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kEdgeCap` | `4` | — | — |
+| `kSpreadEdgeMax` | `6` | — | — |
+| `kTinyRows` | `8` | — | ranked rows listed (and searched for the named symbol): ~8 x 45 B of lines |
 
 ### `src/forunused.h`
 
@@ -1568,7 +1578,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kMaxShellNest` | `64` | — | shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N |
+| `kMaxShellNest` | `64` | — | a file nested past this depth is cut; its defect-shape scan is discarded whole; --quality-delta says shell_cut=N |
 | `kMaxUnguardedSkips` | `2` | — | skipBrace -> skipQuote |
 
 ### `src/siblift.h`

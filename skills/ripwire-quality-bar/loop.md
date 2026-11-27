@@ -1,5 +1,7 @@
 # ripwire-quality-bar — reference: loop (read on demand; the recipe is in SKILL.md)
 
+Contents: The loop · 1. Zero-setup path · 2. Make your change · 3. Measure the delta · 4. Fix the REAL ones, re-run, converge · 5. Want ONE number instead of a list — ripwire <dir> --dmm -
+
 ## The loop
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta --legend=compact`
    before you call it done — add `--legend=compact` every time you run this in a loop: on a CLEAN report the

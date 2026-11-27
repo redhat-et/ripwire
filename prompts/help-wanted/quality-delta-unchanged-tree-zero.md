@@ -1,5 +1,17 @@
 # Unchanged tree, zero delta: `--quality-delta` must not gate a tree identical to HEAD
 
+> **Solved (2026-11-26), except sparse checkout.** A tree identical to HEAD is now compared with itself
+> (`head_basis="identity"`), so untracked content, a shallow clone, `export-ignore`, `TMPDIR` under `fixtures/` and
+> one-sided `--no-ignore`/`--ignore-tests` report `gating="0"`; any `skip-worktree` or `assume-unchanged` path refuses
+> that basis and says so (`head_basis="archived-index-hidden"`). That landed in [#304](https://github.com/redhat-et/ripwire/pull/304)
+> (train 12, "#228 part 1", a maintainer lane); the Django and unittest hook half landed in
+> [#437](https://github.com/redhat-et/ripwire/pull/437) by @llvm-x86, closing [#228](https://github.com/redhat-et/ripwire/issues/228), after the dispatch half in
+> [#237](https://github.com/redhat-et/ripwire/pull/237) by @qinghuanandejiangshi. Slice 1's invariant gate is the (U) block in
+> `test/qualitycheck.sh`. This kit stays as a worked example; the remainder is slice 2's sparse-checkout row: a
+> sparse checkout takes the archived comparison, which is not sparse-aware and gates on a phantom, pinned as the (U4)
+> KNOWN GAP at `test/qualitycheck.sh:831`, with no open issue tracking it. Submodules have no gate arm yet (an
+> unchanged tree with one reported zero when checked by hand), and the stretch below was not re-checked.
+
 `ripwire . --quality-delta` compares the working tree with a snapshot of `git HEAD` and exits 2 when
 something got worse. On a tree that is identical to HEAD, the only correct answer is `regressions="0"`
 and exit 0, for every kind, every time.

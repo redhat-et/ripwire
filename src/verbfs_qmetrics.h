@@ -685,13 +685,7 @@ inline std::vector<char> serveImpure( const IngestResult& ing, const Graph& g )
 // armed a root (so RIPWIRE_NO_VERBFS=1, and every run verbfs::arm is not called for, leaves them null).
 inline void armQMetrics() noexcept
 {
-    if( !armedRoot().on )
-    {
-        return;
-    }
-    DerivedSeams& s = derivedSeams();
-    s.qmetrics      = &serveQMetrics;
-    s.impure        = &serveImpure;
+    installSeamsWhereArmed( derivedSeams(), DerivedSeams{ .qmetrics = &serveQMetrics, .impure = &serveImpure } );
 }
 
 }   // namespace rw::verbfs

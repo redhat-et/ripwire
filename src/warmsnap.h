@@ -95,12 +95,13 @@ inline constexpr std::size_t   kHeaderBytes = 112;
 inline constexpr long long     kRacySlackNs = 2'000'000'000ll;      // FAT keeps 2 s timestamps; nothing coarser is in use
 
 // Why the best fast path was not taken: one word on the snapshot-stats line.
+// Reparsed names only why a stage this run BUILT was not stored (Session::unsavedWhy): the edit rule, recordsWhatItBuilt.
 enum class Why : std::uint8_t
 {
-    Ok, Off, Absent, Version, Producer, Options, Checksum, NoSection, Racy, TreeMoved, GitMoved, Stale, Dep, Count
+    Ok, Off, Absent, Version, Producer, Options, Checksum, NoSection, Racy, TreeMoved, GitMoved, Stale, Dep, Reparsed, Count
 };
 inline constexpr const char* kWhyNames[] = { "ok", "off", "absent", "version", "producer", "options", "checksum", "no-section", "racy",
-                                             "tree-moved", "git-moved", "stale", "dep" };
+                                             "tree-moved", "git-moved", "stale", "dep", "reparsed" };
 static_assert( std::size( kWhyNames ) == std::size_t( Why::Count ), "every Why needs its name on the snapshot-stats line" );
 
 // ── bytes out / bytes in ────────────────────────────────────────────────────────────────────────────────────────────
@@ -629,6 +630,8 @@ struct Session
     Why  why           = Why::Off;   // the FIRST guard that refused anything this run
     Why  graphWhy      = Why::Off;   // the guard that refused the GRAPH section (Ok: it was served)
     Why  modelWhy      = Why::Off;   // ...and the MODEL section
+    Why  unsavedWhy    = Why::Ok;    // the FIRST reason a stage this run built was not stored for the next run (Ok: none)
+    bool coldBlob      = false;      // the run opened with no blob to hit: whatever it parsed, it parsed for want of a record
     bool treeReplayed  = false;
     bool modelLoaded   = false;
     bool graphLoaded   = false;
@@ -642,11 +645,46 @@ struct Session
     bool          treeKeyValid = false;       // false: some file's content is not pinned by a hash, so nothing keyed on it is stored or served
 
     bool on() const noexcept { return !blobPath.empty(); }
-    void refuse( Why w ) noexcept
+    // the FIRST reason sticks: `slot` takes `w` only while it still says Ok
+    static void keepFirst( Why& slot, Why w ) noexcept
     {
-        if( why == Why::Ok ) { why = w; }
+        if( slot == Why::Ok ) { slot = w; }
     }
+    void refuse( Why w ) noexcept { keepFirst( why, w ); }
+    void unsaved( Why w ) noexcept { keepFirst( unsavedWhy, w ); }
 };
+
+// May a run that re-parsed store the MODEL and the GRAPH it built? The edit rule (ingest.cpp recordWarmModel,
+// warmsnap_graph.h buildGraphRecorded): a run that parsed is, as a rule, the run after an edit, and the next edit
+// refuses what it would pay to write. A run that opened with NO blob parsed for want of a record, not because a file
+// changed, and the next run is on the same tree — so it stores. Without this, MEASURE-M5 (11-26, llvm-project) paid
+// calls 2 and 3 as full 24-32 s builds before call 4 was served: call 1 is cold, and call 2 re-reads the few files the
+// cold run left without a hash (ingest_parsepool.h: a binary-sniffed file), which counts as a re-parse too.
+inline bool recordsWhatItBuilt( const Session& s, std::size_t reparsedFiles ) noexcept
+{
+    return reparsedFiles == 0 || s.coldBlob;
+}
+
+// The gate both record sites share (ingest.cpp recordWarmModel, warmsnap_graph.h buildGraphRecorded): may what this run
+// built be stored? A refusal says why on the stats line (unsavedWhy), except a memory stop, which has its own line.
+inline bool mayStoreBuilt( Session& s, std::size_t reparsedFiles, bool memoryStopped ) noexcept
+{
+    if( memoryStopped )
+    {
+        return false;
+    }
+    if( !s.treeKeyValid )
+    {
+        s.unsaved( Why::Racy );   // keyWarmSnapshot found a file too young to pin
+        return false;
+    }
+    if( !recordsWhatItBuilt( s, reparsedFiles ) )
+    {
+        s.unsaved( Why::Reparsed );
+        return false;
+    }
+    return true;
+}
 
 inline thread_local Session* tlSession = nullptr;
 
@@ -760,7 +798,8 @@ inline std::uint64_t sectionSum( std::string_view payload ) noexcept
 inline void openSnapshot( Session& s )
 {
     PROFILE_SCOPE_DESCRIBE( "warmsnap: read + validate the snapshot file" );
-    s.why = Why::Ok;
+    s.why      = Why::Ok;
+    s.coldBlob = s.path.empty();   // ingest() names the snapshot after the blob's identity; no name: there is no blob to hit
     std::optional<std::string> bytes = s.path.empty() ? std::nullopt : pathguard::readRegularFileNoFollow( s.path );
     if( !bytes )
     {
@@ -852,11 +891,13 @@ inline void recordTree( Session& s, const IngestResult& crawl, const std::string
     } );
     if( racy.load() )
     {
+        s.unsaved( Why::Racy );
         return;   // the racy rule: some signature is too young to tell a later same-granule change from no change
     }
     const GitInputs git = respectGitignore || s.capture.readGitIndex ? collectGitInputs( rootReal ) : GitInputs{};   // M1: see gitIndexRead
     if( !git.usable || ( !git.indexPath.empty() && ( git.indexSig.mtimeNs >= racyFrom || git.indexSig.ctimeNs >= racyFrom ) ) )
     {
+        if( git.usable ) { s.unsaved( Why::Racy ); }   // an unusable git input is not a wait: no later run records either
         return;
     }
     Out o;

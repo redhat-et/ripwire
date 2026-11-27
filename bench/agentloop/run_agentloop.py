@@ -57,10 +57,11 @@
 #   python3 bench/agentloop/run_agentloop.py --live-one --limit 1 --arms baseline --seeds 1 \
 #       --work-dir /tmp/agentloop --evaluator none      # ONE real claude -p call — cheapest live proof
 #   python3 bench/agentloop/run_agentloop.py --live --work-dir /tmp/agentloop --evaluator swebench ...
-import argparse, hashlib, json, os, pathlib, platform, re, shlex, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, pathlib, platform, re, shlex, shutil, subprocess, sys, tempfile, time
 
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # reuse fetch_rows()'s HF datasets-server fetch + cache — see load_gold_rows()
+import cost_accounting   # the four-way token split + tool/model-call counts, shared with analyze.py
 
 SCHEMA = "ripwire-agentloop-results-v3"
 # THREE arms, because two could not tell ripwire's effect apart from the cost of shipping skills with
@@ -109,6 +110,12 @@ RECORD_FIELDS = (
     #                     and without this field the substitution is invisible in the results.
     #   harness_version — pinned agent version per run; opencode ships releases multiple times a day.
     "resolved_model", "harness_version",
+    # Cost accounting (2026-11-26), read from the run's own transcript by cost_accounting.py: the token
+    # total split four ways — uncached input, cache write, cache read, output — because under prefix
+    # caching tokens_in/tokens_out cannot price a run (arXiv 2611.22238). tool_calls counts every tool
+    # of any kind (command_calls stays shell-only); model_calls is the harness's own request count. Each
+    # is None when the transcript does not carry it, never 0. tokens_in/tokens_out keep their meaning.
+    *cost_accounting.ACCOUNTING_FIELDS,
 )
 
 def load_tasks_lock( path ):
@@ -156,6 +163,7 @@ def make_record( task, arm, seed, harness, model, status="not_implemented", **ov
         native_read_calls=None,
         error=None, started_unix=now, finished_unix=now,
         resolved_model=None, harness_version=None,
+        **dict.fromkeys( cost_accounting.ACCOUNTING_FIELDS ),
     )
     rec.update( overrides )
     assert set( rec ) == set( RECORD_FIELDS ), f"record schema drift: {sorted(set(rec) ^ set(RECORD_FIELDS))}"
@@ -205,31 +213,132 @@ def sh( args, cwd=None, timeout=1800, env=None ):
 
 def checkout_repo( repo, base_commit, repos_dir ):
     """Adapted from bench/locbench/run_locbench.py's checkout(): the same one-clone-per-repo shallow-
-    fetch cache (24 instances across 6 repos need at most 6 clones total, reused across every arm/seed
-    of that repo), BUT — unlike LocBench's read-only usage — the agent being tested WRITES to this
-    workspace, so every call resets with a fresh `git checkout -f <base_commit> && git clean -qfdx`
-    even when the sha was already fetched once, instead of trusting a "seen this sha before" marker to
-    skip the reset (LocBench's marker check is correct for a read-only consumer; reusing it as-is here
-    would leak a previous run's agent edits into the next run). Returns the workspace dir, or None on a
-    checkout failure (fail-closed — caller must not silently score/execute against a stale tree)."""
-    dst = repos_dir / repo.replace( "/", "__" )
-    fetched_marker = dst / f".ripwire_fetched_{base_commit}"
+    fetch CACHE (32 instances across 8 repos need at most 8 clones, reused across every arm/seed of that
+    repo). Returns the AGENT'S WORKSPACE, a different directory, or None on any failure (fail-closed —
+    the caller must not execute or score against a stale or leaky tree).
+
+    THE CACHE IS NEVER HANDED TO THE AGENT (history-leakage fix, 2026-11-26). It accumulates every
+    instance's base_commit — four per repo in the lock, so a later instance's commit, which can be the
+    very fix an earlier instance asks for — plus the HEAD reflog of every reset, and the unshallow
+    fallback below brings in every branch and tag of the remote. Until this change the cache WAS the
+    workspace: test/agentloophistorycheck.sh found the future commit reachable through the object store,
+    the reflog, origin/* and two tags. Agents exploit local git history (arXiv 2609.06780: shortcut
+    attempts in 60.7-90.1% of trajectories), and ripwire reads git history itself (--cochange, churn,
+    --situ), so a leak would be credited to the tool. The workspace is rebuilt for EVERY run by
+    fresh_ancestor_checkout(): a new repository holding base_commit alone (depth 1, the same snapshot the
+    cache-as-workspace showed on its normal path), no remote, no tags, no reflog. Rebuilding per run also
+    keeps the old guarantee that one run's edits never leak into the next."""
+    cache = repos_dir / repo.replace( "/", "__" )
+    fetched_marker = cache / f".ripwire_fetched_{base_commit}"
     if not fetched_marker.exists():
-        if not ( dst / ".git" ).exists():
-            dst.mkdir( parents=True, exist_ok=True )
-            sh( [ "git", "init", "-q" ], cwd=dst )
-            sh( [ "git", "remote", "add", "origin", f"https://github.com/{repo}.git" ], cwd=dst )
-        f = sh( [ "git", "fetch", "-q", "--depth", "1", "origin", base_commit ], cwd=dst )
+        if not ( cache / ".git" ).exists():
+            cache.mkdir( parents=True, exist_ok=True )
+            sh( [ "git", "init", "-q" ], cwd=cache )
+            sh( [ "git", "remote", "add", "origin", f"https://github.com/{repo}.git" ], cwd=cache )
+        f = sh( [ "git", "fetch", "-q", "--depth", "1", "origin", base_commit ], cwd=cache )
         if f.returncode != 0:
-            sh( [ "git", "fetch", "-q", "origin" ], cwd=dst )   # fallback: unshallow fetch of the ref
+            sh( [ "git", "fetch", "-q", "origin" ], cwd=cache )   # fallback: unshallow fetch of the ref
         fetched_marker.write_text( "" )
-    co = sh( [ "git", "checkout", "-q", "-f", base_commit ], cwd=dst )
-    if co.returncode != 0:
-        co = sh( [ "git", "checkout", "-q", "-f", "FETCH_HEAD" ], cwd=dst )
-    sh( [ "git", "clean", "-qfdx" ], cwd=dst )
-    if co.returncode != 0:
+    workspace = repos_dir.parent / f"{repos_dir.name}-workspaces" / repo.replace( "/", "__" )
+    return fresh_ancestor_checkout( cache, base_commit, workspace, depth=1 )
+
+# ── history-leakage guard (2026-11-26) ───────────────────────────────────────────────────────────────
+# upload-pack refuses a want-by-sha that no ref advertises under protocol v0, and the cache holds base
+# commits no ref names. The override applies to the upload-pack this one fetch spawns, so it never edits
+# the cache's or a local corpus's config.
+ANY_SHA_UPLOAD_PACK = "git -c uploadpack.allowAnySHA1InWant=true upload-pack"
+
+def fresh_ancestor_checkout( source, sha, dst, depth=None ):
+    """Rebuild dst as a NEW repository holding `sha` and nothing after it, fetched from the local repo
+    `source`; return dst, or None on failure.
+
+    depth=1 keeps the snapshot only; depth=None keeps every ANCESTOR of sha, which is legitimate history
+    (the past of the pinned commit) and what ripwire's history verbs read. Nothing else crosses: the fetch
+    names one sha, takes no tags and writes no FETCH_HEAD, dst gets no remote, and the one reflog entry the
+    checkout writes is expired. `sha` may be abbreviated; it is resolved in `source` first."""
+    full = sh( [ "git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}" ], cwd=source )
+    if full.returncode != 0 or not full.stdout.strip():
         return None
+    full = full.stdout.strip()
+    dst = pathlib.Path( dst )
+    if dst.exists():
+        shutil.rmtree( dst )
+    dst.mkdir( parents=True )
+    steps = [ [ "git", "init", "-q" ],
+              [ "git", "fetch", "-q", "--no-tags", "--no-write-fetch-head", f"--upload-pack={ANY_SHA_UPLOAD_PACK}",
+                *( [ "--depth", str( depth ) ] if depth else [] ), str( pathlib.Path( source ).resolve() ), full ],
+              [ "git", "checkout", "-q", "--detach", full ],
+              [ "git", "reflog", "expire", "--expire=now", "--all" ] ]
+    for step in steps:
+        if sh( step, cwd=dst ).returncode != 0:
+            return None
     return dst
+
+def _store_leaks( g, d, gitdir ):
+    """The repository-level roads out: a shared or borrowed object store, or a configured remote."""
+    out = []
+    common = g( "rev-parse", "--path-format=absolute", "--git-common-dir" ).stdout.strip()
+    if ( common and pathlib.Path( common ).resolve() != gitdir.resolve() ) or not gitdir.resolve().is_relative_to( d.resolve() ):
+        out.append( f"the object store is shared with another repository ({common or gitdir})" )
+    if ( gitdir / "objects" / "info" / "alternates" ).exists():
+        out.append( "objects/info/alternates borrows another repository's objects" )
+    remotes = g( "remote" ).stdout.split()
+    if remotes:
+        out.append( f"remote(s) configured ({', '.join( remotes )}): a git fetch reaches past base_commit" )
+    return out
+
+def _commit_leaks( g, gitdir, past ):
+    """Every commit-naming surface — the object store, refs, reflog, FETCH_HEAD/ORIG_HEAD — checked
+    against `past`, the set of base_commit and its ancestors."""
+    out = []
+    listing = g( "cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objecttype)" ).stdout.splitlines()
+    future = sorted( line.split()[0] for line in listing if line.endswith( " commit" ) and line.split()[0] not in past )
+    if future:
+        out.append( f"{len( future )} commit object(s) not base_commit or its ancestor, first {future[0]}" )
+    for line in g( "for-each-ref", "--format=%(refname) %(objectname) %(*objectname)" ).stdout.splitlines():
+        name, *targets = line.split()
+        if any( sha not in past for sha in targets ):
+            out.append( f"ref {name} points past base_commit" )
+    out += [ f"a reflog entry names {sha}, not base_commit or its ancestor"
+             for sha in sorted( set( g( "reflog", "show", "--all", "--format=%H" ).stdout.split() ) - past ) ]
+    for pseudo in ( "FETCH_HEAD", "ORIG_HEAD" ):
+        p = gitdir / pseudo
+        if p.exists() and set( re.findall( r"\b[0-9a-f]{40}\b", p.read_text( errors="replace" ) ) ) - past:
+            out.append( f"{pseudo} names a commit past base_commit" )
+    return out
+
+def history_leak_findings( repo_dir, base_commit ):
+    """Every way the checkout at repo_dir reaches past base_commit, as strings; [] means none found.
+
+    Run on the agent's checkout before every cell (run_one()). It knows nothing about which commits are
+    the future, so it checks the closed property instead: every commit object in the store, every ref,
+    every reflog entry and FETCH_HEAD/ORIG_HEAD must be base_commit or one of its ancestors; HEAD must be
+    base_commit; no remote may be configured (a `git fetch` away from the future); and the object store
+    must be the checkout's own (a `git worktree` shares its source's refs and objects, alternates borrow
+    another's). It inspects the repository, not the filesystem: a cache directory elsewhere on disk is
+    outside what a checkout can promise."""
+    d = pathlib.Path( repo_dir )
+    def g( *args ):
+        return sh( [ "git", *args ], cwd=d )
+    base = g( "rev-parse", "--verify", "--quiet", f"{base_commit}^{{commit}}" ).stdout.strip()
+    if not base:
+        return [ f"base_commit {base_commit} is not in the checkout" ]
+    head = g( "rev-parse", "--verify", "--quiet", "HEAD" ).stdout.strip()
+    out = [] if head == base else [ f"HEAD is {head or 'unborn'}, not base_commit {base}" ]
+    gitdir = pathlib.Path( g( "rev-parse", "--absolute-git-dir" ).stdout.strip() or d / ".git" )
+    past = set( g( "rev-list", base ).stdout.split() )
+    return out + _store_leaks( g, d, gitdir ) + _commit_leaks( g, gitdir, past )
+
+def checkout_leak_error( task, repo_dir, local_pins ):
+    """run_one()'s refusal text when any checkout of the task reaches past its base commit, else None.
+    A QUESTIONS row materialized from a local corpus has one tree per pinned repo under repo_dir."""
+    pins = ( [ ( pathlib.Path( repo_dir ) / r, s ) for r, s in grade_answers.pin_pairs( task ) ] if local_pins
+             else [ ( pathlib.Path( repo_dir ), task["base_commit"] ) ] )
+    leaks = [ f"{d.name}: {msg}" for d, sha in pins for msg in history_leak_findings( d, sha ) ]
+    if not leaks:
+        return None
+    return ( "history leak — the checkout reaches past base_commit, refusing to run: " + "; ".join( leaks[:5] )
+             + ( f" (+{len( leaks ) - 5} more)" if len( leaks ) > 5 else "" ) )
 
 # ── gold row lookup (problem_statement / patch / test_patch / FAIL_TO_PASS / PASS_TO_PASS) ───────────
 # tasks.lock deliberately carries ONLY instance_id/repo/base_commit in its content-hashed instances list
@@ -269,7 +378,7 @@ def load_questions( path ):
     return tasks
 
 def checkout_local_pin( task, dest_root, local_corpus ):
-    """Materialize a questions instance's pinned tree(s) from a LOCAL source repo, via git worktree.
+    """Materialize a questions instance's pinned tree(s) from a LOCAL source repo, ancestors only.
 
     Returns the PARENT directory holding one checkout per repo — never the repo dir itself — because
     that is the shape every gt_command in the bank is written against (`otherrepo/src/x.h`), and the
@@ -282,7 +391,10 @@ def checkout_local_pin( task, dest_root, local_corpus ):
         if not ( source / ".git" ).exists():
             return None
         dest.mkdir( parents=True, exist_ok=True )
-        if sh( [ "git", "-C", str( source ), "worktree", "add", "--detach", str( tree ), sha ] ).returncode != 0:
+        # Not `git worktree add` (until 2026-11-26): a worktree shares the source's object store and refs,
+        # so every later commit, branch and tag of the corpus was one `git log --all` away. A fresh
+        # ancestor-only repository keeps the pinned commit's whole PAST and nothing after it.
+        if fresh_ancestor_checkout( source, sha, tree, depth=None ) is None:
             return None
     return dest
 
@@ -538,7 +650,7 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
     """Token/command accounting from opencode's `--format json` NDJSON event stream.
 
     Every line is {"type":..,"timestamp":..,"sessionID":..,"part":{..}}. Tokens and cost arrive on
-    `step_finish` (part.tokens.{input,output,reasoning,cache{read,write}} and part.cost); every shell
+    `step_finish` (part.tokens.{input,output,reasoning,cache{read,write}} and part.cost, per step, summed); every shell
     command arrives as a `tool_use` whose part.tool == "bash", with the command in part.state.input.
     Returns nulls rather than raising on schema drift — opencode ships releases daily and the
     retained transcript is the evidence of record either way."""
@@ -552,12 +664,6 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             continue
         part = event.get( "part" ) or {}
         etype = event.get( "type" )
-        if etype == "step_finish":
-            usage = part.get( "tokens" ) or {}
-            # last step wins: these are cumulative per-turn totals, same convention as the codex parser
-            tokens_in  = usage.get( "input", tokens_in )
-            tokens_out = usage.get( "output", tokens_out )
-            cost       = part.get( "cost", cost )
         if etype in ( "step_start", "step_finish" ):
             model_id = part.get( "modelID" ) or event.get( "modelID" ) or model_id
         if etype == "tool_use":
@@ -577,6 +683,11 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             # one a shim on PATH can never see, since no subprocess is spawned.
             elif classify_native_read( tool_name=tool ):
                 native_read_calls += 1
+    # Summed over every step_finish (cost_accounting.opencode_headline()): each step carries its OWN usage —
+    # opencode 1.x adds part.cost into the message total step by step. Until 2026-11-26 this kept the last
+    # step, an undercount on every multi-step run.
+    headline = cost_accounting.opencode_headline( stdout )
+    tokens_in, tokens_out, cost = headline["tokens_in"], headline["tokens_out"], headline["cost_usd"]
     return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands, native_read_calls
 
 def parse_claude_session_metrics( transcript_text, ripwire_bin ):
@@ -1017,7 +1128,8 @@ def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=Non
         ripwire_calls = shim_calls
     return dict( tokens_in=tokens_in, tokens_out=tokens_out, command_calls=command_calls,
                  ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
-                 native_read_calls=native_read_calls, events_path=str( events_file ) )
+                 native_read_calls=native_read_calls, events_path=str( events_file ),
+                 **cost_accounting.codex_accounting( stdout ) )
 
 def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=None ):
     """Retain opencode's NDJSON transcript and parse it into record fields.
@@ -1046,7 +1158,8 @@ def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=
     return dict( tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
                  command_calls=command_calls, ripwire_calls=ripwire_calls,
                  ripwire_commands=ripwire_commands, native_read_calls=native_read_calls,
-                 events_path=str( events_file ), resolved_model=model_id )
+                 events_path=str( events_file ), resolved_model=model_id,
+                 **cost_accounting.opencode_accounting( stdout ) )
 
 def _claude_metrics( stdout, shim_log=None, retain=None, run_home=None, ripwire_bin=None ):
     """Parse the `claude -p --output-format json` single-result trailer into record fields, and
@@ -1080,6 +1193,7 @@ def _claude_metrics( stdout, shim_log=None, retain=None, run_home=None, ripwire_
         session_id = payload.get( "session_id" )
         out.update( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
                     cost_usd=payload.get( "total_cost_usd" ) )
+        out.update( cost_accounting.claude_trailer_accounting( stdout ) )
     if run_home is not None and retain is not None:
         transcript = find_claude_session_transcript( run_home, session_id )
         if transcript is not None:
@@ -1089,7 +1203,8 @@ def _claude_metrics( stdout, shim_log=None, retain=None, run_home=None, ripwire_
             ( command_calls, ripwire_calls,
               ripwire_commands, native_read_calls ) = parse_claude_session_metrics( text, ripwire_bin )
             out.update( command_calls=command_calls, native_read_calls=native_read_calls,
-                        ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands )
+                        ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
+                        tool_calls=cost_accounting.claude_transcript_tool_calls( text ) )
     # The shim log is the AUTHORITATIVE ripwire counter and overrides the transcript-parsed count:
     # it sees every spawned invocation (absolute paths, subshells) that a transcript classifier
     # could misread, and it existed for years before the transcript was retained at all.
@@ -1126,8 +1241,9 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
              local_corpus="", swebench_dataset=SWEBENCH_SCORE_DATASET_DEFAULT ):
     """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
-    Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
-    for this run (checkout_repo()); (b) invoke the harness in that workspace with an arm-specific CLI
+    Steps: (a) checkout task["repo"]@task["base_commit"] into a per-repo workspace rebuilt fresh for this
+    run from a cached clone, ancestors only, and refuse it if history_leak_findings() finds a road past
+    base_commit (checkout_repo()); (b) invoke the harness in that workspace with an arm-specific CLI
     retrieval contract and no MCP servers; (c) capture wall-clock, token/cost accounting
     (_codex_metrics()/_claude_metrics(), best-effort), and the workspace's final `git diff` as the
     candidate patch; (d) score it via evaluate_patch()."""
@@ -1153,8 +1269,8 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     if is_question:
         timeout_s = question_timeout( task, timeout_s )
 
-    # Per-worker checkout root. checkout_repo() keeps ONE clone per repo and hard-resets it for every
-    # run, so two concurrent runs touching the same repo would clobber each other's working tree
+    # Per-worker checkout root. checkout_repo() keeps ONE cached clone per repo and rebuilds ONE workspace
+    # per repo for every run, so two concurrent runs touching the same repo would clobber each other's tree
     # mid-agent. Sharding the root by worker is what makes --concurrency safe; the default lane
     # ("") is byte-identical to the old single-threaded path.
     repos_dir = pathlib.Path( work_dir ) / ( f"repos{lane}" if lane else "repos" )
@@ -1162,6 +1278,11 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                  else checkout_repo( task["repo"], task["base_commit"], repos_dir ) )
     if repo_dir is None:
         return _fail( "error", f"checkout failed for {task['repo']}@{task['base_commit']}" )
+    # The history-leakage gate, before the agent sees anything: a checkout that reaches past its base
+    # commit is not run, because a leaked fix would be credited to whichever arm found it.
+    leak = checkout_leak_error( task, repo_dir, is_question and bool( local_corpus ) )
+    if leak:
+        return _fail( "error", leak )
 
     # The environment is prepared BEFORE the prompt, because it installs the ripwire shim and the
     # prompt must name that shim rather than the bare binary — otherwise an agent invoking ripwire by

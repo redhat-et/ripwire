@@ -307,11 +307,13 @@ for _g in \
     affectedfoldcheck \
     affectedgroupcheck \
     affectedpathcheck \
+    agentloopaccountingcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
     agentloopfollowupcheck \
     agentloopgradercheck \
+    agentloophistorycheck \
     agentlooplockcheck \
     agentloopopencodecheck \
     agentsurfacecheck \
@@ -857,6 +859,7 @@ for _g in \
     nextaposcheck \
     nextverbcheck \
     noaliascheck \
+    nocacheevictcheck \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
@@ -1115,6 +1118,7 @@ for _g in \
     skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
+    skillshapecheck \
     skilltruthcheck \
     skipclassifycheck \
     skippedcheck \
@@ -1123,7 +1127,9 @@ for _g in \
     slicediffcheck \
     sliceflowcheck \
     sliceflowsenscheck \
+    slotbasecheck \
     slotjoincheck \
+    slotregcheck \
     snapdeterminismcheck \
     spectimingcheck \
     staleackcheck \
@@ -1166,6 +1172,7 @@ for _g in \
     tiebreakcontentcheck \
     tiercallerscheck \
     timsortcheck \
+    tinyshapecheck \
     tokenbudgetcheck \
     tomllangcheck \
     toolcallroutecheck \
@@ -1206,6 +1213,7 @@ for _g in \
     warmpeakcheck \
     warmsnapcheck \
     weaksignalcheck \
+    whereisnographcheck \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
