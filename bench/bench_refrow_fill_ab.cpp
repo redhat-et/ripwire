@@ -40,13 +40,15 @@ int main()
     const unsigned    threads = std::max( 2u, std::thread::hardware_concurrency() );
     std::printf( "n=%zu sizeof(Reference)=%zu bytes=%zu (%.1f MB) threads=%u\n", n, sizeof( rw::Reference ), bytes, double( bytes ) / 1e6, threads );
 
-    double best[ 6 ] = { 1e9, 1e9, 1e9, 1e9, 1e9, 1e9 };
-    const char* label[ 6 ] = { "A cold pages, Reference ctor, 1 thread",
+    double best[ 8 ] = { 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9 };
+    const char* label[ 8 ] = { "A cold pages, Reference ctor, 1 thread",
                                "B resident pages, Reference ctor, 1 thread",
                                "C cold pages, memset (bulk-store ceiling)",
                                "D resident pages, memset (bulk-store ceiling)",
                                "E cold pages, construct_at, N threads",
-                               "F cold pages, memset NON-ZERO (true ceiling)" };
+                               "F cold pages, memset NON-ZERO (true ceiling)",
+                               "G ROUTED cold, construct_at, N threads",
+                               "H ROUTED cold, memset NON-ZERO (ceiling)" };
 
     for( int rep = 0; rep < 5; ++rep )
     {
@@ -115,8 +117,47 @@ int main()
             std::destroy_n( raw, n );
             ::free( raw );
         }
+        {
+            auto* raw = static_cast<rw::Reference*>( ::operator new( bytes ) );
+            FENCE( raw );
+            const auto t0 = Clock::now();
+            {
+                std::vector<std::thread> pool;
+                pool.reserve( threads );
+                const std::size_t share = ( n + threads - 1 ) / threads;
+                for( unsigned t = 0; t < threads; ++t )
+                {
+                    pool.emplace_back( [ & , t ]
+                    {
+                        const std::size_t from = t * share, to = std::min( n, from + share );
+                        for( std::size_t i = from; i < to; ++i ) { std::construct_at( raw + i ); }
+                    } );
+                }
+                for( std::thread& th : pool ) { th.join(); }
+            }
+            FENCE( raw );
+            const auto t1 = Clock::now();
+            best[ 6 ] = std::min( best[ 6 ], ms( t1 - t0 ) );
+            std::destroy_n( raw, n );
+            ::operator delete( raw );
+        }
+        {
+            auto* raw = static_cast<unsigned char*>( ::operator new( bytes ) );
+            FENCE( raw );
+            const auto t0 = Clock::now();
+            std::memset( raw, 0xA5, bytes );
+            FENCE( raw );
+            const auto t1 = Clock::now();
+            best[ 7 ] = std::min( best[ 7 ], ms( t1 - t0 ) );
+            ::operator delete( raw );
+        }
     }
-    for( int i = 0; i < 6; ++i ) { std::printf( "%-46s %7.2f ms  %7.1f GB/s\n", label[ i ], best[ i ], double( bytes ) / best[ i ] / 1e6 ); }
+    for( int i = 0; i < 8; ++i ) { std::printf( "%-46s %7.2f ms  %7.1f GB/s\n", label[ i ], best[ i ], double( bytes ) / best[ i ] / 1e6 ); }
+    std::printf( "\n-- within the PRODUCTION regime (A, B, G, H: operator new, which largealloc routes) --\n" );
+    std::printf( "A-G = %.2f ms  <- THE PRIZE for constructing the rows on the threads that fill them\n", best[ 0 ] - best[ 6 ] );
+    std::printf( "G-H = %.2f ms  <- what a triviality change could add ON TOP of parallel construction\n", best[ 6 ] - best[ 7 ] );
+    std::printf( "A-B = %.2f ms  <- first-touch paging, cold vs resident, one run one regime\n\n", best[ 0 ] - best[ 1 ] );
+    std::printf( "-- the malloc-regime arms below may NOT be differenced against those above --\n" );
     std::printf( "A-F = %.2f ms  <- the prize against the ceiling for a NON-ZERO default pattern\n", best[ 0 ] - best[ 5 ] );
     std::printf( "E-F = %.2f ms  <- what a triviality change could add ON TOP of parallel construction\n", best[ 4 ] - best[ 5 ] );
     std::printf( "A-C = %.2f ms  <- the ENTIRE prize a triviality change could win on the production shape\n", best[ 0 ] - best[ 2 ] );
