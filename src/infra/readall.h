@@ -17,7 +17,8 @@
 //   - readFileToEnd is the path form: nullopt when the file cannot be opened or read to its end; an empty file is an
 //     engaged empty string. A directory opens on macOS and Linux and its first read fails (EISDIR): unreadable here.
 //
-// TEST SEAM. RIPWIRE_TEST_READ_ERROR=SUBSTR: a read whose `what` (the path, or the caller's label for a nameless stream)
+// TEST SEAM. setReadErrorSeam( SUBSTR ) (the host binary feeds it from a test-only environment variable, so this layer
+// names no host): a read whose `what` (the path, or the caller's label for a nameless stream)
 // contains SUBSTR keeps the first half of its bytes and reports an error, as a mid-file EIO would. Deterministic and
 // LD_PRELOAD-free. test/readerrorcheck.sh drives it where no real error can be provoked from outside (a temp file the
 // process wrote, an indexed source file) and passes a directory where the path is the caller's.
@@ -25,7 +26,6 @@
 #include "ownedfile.h"   // OwnedFile — the stream is owned before any other line runs
 
 #include <cstdio>
-#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,11 +33,24 @@
 namespace rw
 {
 
-// The test seam above, asked by name: true when RIPWIRE_TEST_READ_ERROR is set and `what` contains it.
+// The seam's one piece of state: the substring a failing read must contain, empty when the seam is off.
+inline std::string& readErrorSeamSubstr() noexcept
+{
+    static std::string substr;
+    return substr;
+}
+
+// Turn the seam on for this process (null or empty turns it off). Called once at startup, before any read.
+inline void setReadErrorSeam( const char* substr )
+{
+    readErrorSeamSubstr() = substr != nullptr ? substr : "";
+}
+
+// The test seam above, asked by name: true when a seam is set and `what` contains it.
 inline bool readErrorInjected( std::string_view what ) noexcept
 {
-    static const char* const seam = std::getenv( "RIPWIRE_TEST_READ_ERROR" );   // read once: a test sets it per process
-    return seam != nullptr && *seam != '\0' && what.find( seam ) != std::string_view::npos;
+    const std::string& seam = readErrorSeamSubstr();
+    return !seam.empty() && what.find( seam ) != std::string_view::npos;
 }
 
 // After a read loop has stopped: true when it stopped at the end, false when on an error (the stream's flag, or the seam).

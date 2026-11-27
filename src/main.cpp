@@ -4901,6 +4901,7 @@ int main( int argc, char** argv )
     using namespace rw;
 
     rw::os::init_process( argc, argv );   // POSIX: nothing. Windows: UTF-8 argv, binary stdio, path-valued environment in the program's spelling
+    rw::setReadErrorSeam( std::getenv( "RIPWIRE_TEST_READ_ERROR" ) );   // test seam (infra/readall.h): a read whose label holds this text fails
 
     if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )
     { // adoption recipe (subcommand, not a flag)
