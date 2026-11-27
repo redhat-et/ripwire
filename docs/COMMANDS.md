@@ -1892,7 +1892,9 @@ $ ./build/ripwire . --hotspots
 
 ### `--clones`
 
-**Answers:** token-normalized duplicate bodies
+**Answers:** token-normalized duplicate bodies which CAN span LANGUAGES: normalization keeps keywords and punctuation verbatim while erasing identifiers, numbers and strings, and the candidate pass filters on symbol kind alone with no language term.
+
+3 of 262,737 groups over five polyglot corpora (a floor). The row prints no language -- read it from p=. A crossing only means something where a link unit, a classpath or a declared FFI/ABI surface already BINDS the two sides; otherwise two bodies that rhyme.
 
 **Try it**
 
@@ -1918,6 +1920,10 @@ $ ./build/ripwire . --clones
 ```
 
 **Shaped by:** `--affected`, `--page-bytes`, `--limit`
+
+**Caveats (stated by the binary):**
+
+- 3 of 262,737 groups over five polyglot corpora (a floor).
 
 ### `--biggest-first`
 
