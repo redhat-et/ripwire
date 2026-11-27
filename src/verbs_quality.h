@@ -1499,7 +1499,8 @@ inline constexpr const char* kQdLegendCore =
 
 // CR712-SHSTATUS-DEPTH — present-only: rides with shell_cut= on the root (QdRootFields::shellCut), absent at 0.
 inline constexpr const char* kQdShellCutLegend =
-    "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; what lies deeper was not judged. ";
+    "shell_cut=N: shell files whose parse stopped at nesting depth 64; such a file's Bash defect-shape scan is discarded "
+    "whole, so defect-shape judged no line of it. ";
 
 static_assert( rw::shstatus::kMaxShellNest == 64, "kQdShellCutLegend's and compactlegend.h's shell_cut= sentences say depth 64" );
 

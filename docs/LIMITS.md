@@ -1568,7 +1568,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kMaxShellNest` | `64` | — | shell nesting past this depth is cut and not judged; --quality-delta says shell_cut=N |
+| `kMaxShellNest` | `64` | — | a file nested past this depth is cut; its defect-shape scan is discarded whole; --quality-delta says shell_cut=N |
 | `kMaxUnguardedSkips` | `2` | — | skipBrace -> skipQuote |
 
 ### `src/siblift.h`
