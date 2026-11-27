@@ -509,6 +509,10 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
         ing.references.resize( rowCount );
     }
     PROFILE_SCOPE_DESCRIBE( "warmsnap/model: the parallel reference decode itself" );
+    // itemsPerWorker = 1: one item here is a 4096-row CHUNK costing ~163 us, so a single chunk is worth a
+    // worker. Under the 2048 default this decode ran on ONE core (measured effective threads 1.00 at both
+    // envoy's 287 chunks and llvm-project's 1,449) despite the format being cut into chunks precisely so
+    // that it could be decoded in parallel.
     parallelFor( refStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
         // INSIDE the lambda, so this fires once per chunk and its total is THREAD time, while the
@@ -570,7 +574,7 @@ inline bool readRefRows( const Stream& refStream, const std::vector<std::uint64_
             if( x.fileId >= t.fileCount || !t.symOk( x.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 
@@ -583,6 +587,7 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
         return false;
     }
     ing.bindings.resize( rowCount );
+    // itemsPerWorker = 1, for the same reason as the reference chunks above.
     parallelFor( bindStream.chunkAt.size() - 1, [ & ]( std::size_t c )
     {
         VarIn         row = bindStream.chunk( c );
@@ -613,7 +618,7 @@ inline bool readBindRows( const Stream& bindStream, const std::vector<std::uint6
             if( b.fileId >= t.fileCount || !t.symOk( b.fromSymbol ) ) { row.ok = false; }
         }
         if( !row.ok || row.p != row.e ) { bad.store( true, std::memory_order_relaxed ); }
-    } );
+    }, 1 );
     return !bad.load();
 }
 

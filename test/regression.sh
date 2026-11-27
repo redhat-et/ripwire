@@ -896,6 +896,7 @@ for _g in \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    parallelforcheck \
     paramslotcheck \
     parentcachecheck \
     pargatescheck \
