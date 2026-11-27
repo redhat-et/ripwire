@@ -1562,7 +1562,8 @@ four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
 stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
 warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
-**≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
+**≈167× fewer**. Two opt-in builds go faster still — PGO by **6–16% cold over the default build** (14–25% against an
+LTO-off baseline) — with **byte-identical**
 output on every one.
 
 </details>
@@ -1601,7 +1602,7 @@ via `PL2_CACHE_MISS_LD`).
 </details>
 
 <details>
-<summary>The two opt-in faster builds — LTO on by default, PGO at 14–25% cold, and why the output stays byte-identical</summary>
+<summary>The two opt-in faster builds — LTO on by default, PGO at 6–16% cold over that default, and why the output stays byte-identical</summary>
 
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
