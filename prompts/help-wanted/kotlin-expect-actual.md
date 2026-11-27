@@ -5,10 +5,8 @@ declarations. Today a call from shared code to a multiplatform type can resolve 
 output reads exactly as if nobody made the call. The change is small in lines and large in reach:
 every Kotlin Multiplatform codebase gets its shared-code call graph back.
 
-> **Builds on PR #126 (Kotlin support, by @xCatG), merged 2026-09-11.** Everything below describes
-> code that #126 added, so work from `main`. Before you plan, confirm it is there: `src/graph.h`
-> defines `keepOwnJvmLanguageCandidates`, and `isDefinitionNotDeclaration` in `src/model.h` carries a
-> Kotlin clause. The outputs below were recorded on #126's integrated head before it merged; re-record
+> **Builds on PR #126 (Kotlin support, by @xCatG), merged 2026-09-11.** Work from `main`. The gap is
+> still open there: the outputs below were re-recorded on `main` at `09995f4b` (2026-11-26). Re-record
 > them on your base. Line numbers drift; the function names are the pointers.
 
 Work in a git worktree, not your main checkout. Run every gate in the foreground.
@@ -22,11 +20,11 @@ platform source set supplies an `actual class Platform`. An agent working in sha
 natural questions — who constructs `Platform`, what breaks if I change it — and ripwire has to
 answer them from the call graph.
 
-With #126 it cannot. On the three-file fixture in "Reproduce the gap", the one call from shared code
-to `Platform()` produces **no edge**. On #126's integrated head `--callees=greet` answers a bare
-`count="0"`, with no `amb=` and no `unresolved=` — the same bytes it would print if `greet` called
-nothing. Main now counts such a call as declined (#136, `declined_calls=`), which makes the loss
-visible; it still leaves the agent's question — who constructs `Platform`? — without an answer.
+It cannot. On the three-file fixture in "Reproduce the gap", the one call from shared code to
+`Platform()` produces **no edge**. `main` discloses the loss — `--callees=greet` answers `count="0"
+declined_calls="1"` with a hedged `<dc n="Platform" l="6" cands="2" via="declined"/>` row (#136 and
+the declined-site rows that followed it) — but the agent's question, who constructs `Platform`, still
+has no answer.
 
 The cost on a real library, measured by the maintainers when #126's bodyless-type rule landed: of
 the 138 Kotlin call pairs on ktor that the rule moved, **48 sit on `expect`/`actual` type names**
@@ -49,7 +47,7 @@ positionally, because tree-sitter-kotlin's declarations carry no named fields. F
 `src/ingest_sidecap.h` fills a `RawDef` — find the block that sets `d.arityExact`, `d.testScope`,
 `d.kind` and `d.lang`. The `RawDef` rides the per-file cache record (`writeDef`/`readDef` in
 `src/ingest_cache.h`) and becomes a `Symbol` (`src/model.h`; the copy is in `src/ingest_model.h`,
-next to `s.testScope = d.testScope`).
+next to `s.testScope = ( d.testScope != 0 ) ? 1 : 0`).
 
 **Definition or declaration.** `isDefinitionNotDeclaration` (`src/model.h`) is the one predicate
 every consumer uses to tell them apart. The house test is `endByte > sigEndByte`: a span that runs
@@ -60,9 +58,9 @@ declaration: an interface member or an `abstract fun` really is a contract.
 
 **The decl/def collapse.** `collapseDeclarationsOfName` (`src/graph.h`, buildGraph step 1e) removes
 a name's declarations from resolution whenever a definition with the same collapse key exists. The
-key is the root and the *family* — Kotlin rows with Kotlin rows, every other language together:
-`2u * root + ( s.lang == Lang::Kotlin ? 1u : 0u )`. A name with no definition keeps its declarations
-as the best available target.
+key is the root and the *family* (`collapseFamilyOf`, just above it): Kotlin is family 1, Ruby 2, and
+every other language shares 0. A name with no definition keeps its declarations as the best available
+target.
 
 **Resolution.** In buildGraph's resolve loop a call's candidates are the surviving same-named
 definitions, filtered by `langCompatible` (Kotlin and Java share one JVM call graph), the namespace
@@ -87,17 +85,23 @@ and `enum class` share `class_declaration`; `expect object` is an `object_declar
 so a type can have fewer `actual` rows in the index than it has platforms.
 
 **Room in `Symbol`.** `src/model.h` pins `static_assert( sizeof( Symbol ) == 64 + 2 * sizeof(
-std::string ) )`. Measured with `offsetof` on #126's tree and on main: `testScope` sits at offset 62
-and `name` at 64, so **exactly one byte, 63, is free**. A `std::uint8_t` placed directly after
-`testScope` keeps the assert green. Anything wider is a layout decision you must justify.
+std::string ) )`. **There is no free pad byte left.** When this kit was first written, byte 63 was
+free; since then `extentSuspect : 4` and `rankFlags : 4` have taken it (read their comments, just
+above `name`), and `testScope`'s bit-field byte is full (`testScope`, `internalLinkage`,
+`scopeRootsStd`, `fnLocal`, `paramsMin : 4`). `rankFlags` has two unused bits, but they are set by a
+doc post-pass and never cached, so they are not a natural home for an extracted fact. Your plan must
+choose where the `expect` bit lives — a justified spare bit, a growth of `Symbol` by 8 B (a layout
+decision with a measured cost), or a fact that never needs a `Symbol` field — and say why.
 
 **Versions.** A new extracted fact is two bumps, in one commit:
 
 - `kParserVer` (`src/ingest_cache.h`, bumped on any extraction change) and its mirror
   `kIngestParserVerMirror` (`src/quality.h`);
 - `kCacheVersion`, because the `RawDef` record changes shape, and its mirror
-  `kIngestCacheVersionMirror`; plus `kMinDefRecordBytesLean` (77 on main: 14×u32 + 13×u8 + 2×str),
-  which `verifyCacheRecordMinimaTripwire()` re-derives from the writer at runtime.
+  `kIngestCacheVersionMirror`; plus `kMinDefRecordBytesLean` (99 at `09995f4b`: 18×u32 + 19×u8 +
+  2×str), which `verifyCacheRecordMinimaTripwire()` re-derives from the writer at runtime.
+
+At `09995f4b` the values are `kParserVer = 342` and `kCacheVersion = 54`.
 
 `test/qschemetripcheck.sh` hashes both constants. Re-pin `test/qschemetrip.hash` with
 `UPDATE_GOLDEN=1 test/qschemetripcheck.sh` and add a dated RE-PIN LOG entry to that script saying
@@ -150,17 +154,22 @@ fun greet(): String {
 ```
 
 ```bash
-./build/ripwire "$FX" --no-cache --callees=greet      # count="0" graph_ambiguous="0" graph_unresolved="0"
-./build/ripwire "$FX" --no-cache --callers=Platform   # defs="2" count="0"
+./build/ripwire "$FX" --no-cache --callees=greet      # count="0" declined_calls="1", <dc n="Platform" l="6" cands="2" via="declined"/>
+./build/ripwire "$FX" --no-cache --callers=Platform   # defs="2" count="0" declined_calls="1"
 ./build/ripwire "$FX" --no-cache --uses=Platform      # the call site IS there: role="call" Greeting.kt:6 in_id="greet"
 rm "$FX/src/commonMain/kotlin/demo/Platform.kt"
 ./build/ripwire "$FX" --no-cache --callees=greet      # count="1": Platform at src/jvmMain/kotlin/demo/Platform.jvm.kt:3
 ```
 
-All four outputs were recorded on #126's integrated head. The last run is the diagnosis: deleting
-the bodyless `expect` declaration, and nothing else, brings the edge back. That head predates #136;
-on `main`, which includes both, the first run should also carry `declined_calls="1"` — disclosed,
-still unbound.
+All four outputs were recorded on `main` at `09995f4b`. The last run is the diagnosis: deleting the
+bodyless `expect` declaration, and nothing else, brings the edge back.
+
+**Orient with ripwire before you open files.** Run
+`./build/ripwire . --for="Kotlin expect actual declaration collapse isDefinitionNotDeclaration"` and
+read what it ranks first; `--expand=collapseDeclarationsOfName` and `--impact=isDefinitionNotDeclaration`
+show the resolver path and every consumer of the predicate. Before you write a new extraction helper,
+run `./build/ripwire . --exemplar="extract a declaration modifier into RawDef"`. Before you call it
+done, run `./build/ripwire . --quality-delta --legend=compact`, then `./build/ripwire . --test-gate`.
 
 Then take your baseline on ktor (Apache-2.0; clone it and write down the commit). Run the full map
 with `--no-cache` and `--top-k` above the symbol count, once with a `main` binary and once with yours,
@@ -225,7 +234,11 @@ declaration and must not move; members declared inside an `expect class` body st
 
 ## Acceptance criteria
 
-Add a section to `test/kotlincheck.sh` (the next free § number) that builds its trees in `$TMP` with
+**Done means** every arm below is green in a new section of `test/kotlincheck.sh` (§15 is the next
+free number at `09995f4b`; the gate is already in `test/regression.sh`), each one seen red on `main`
+first, plus the gates listed after the arms.
+
+Add a section to `test/kotlincheck.sh` that builds its trees in `$TMP` with
 heredocs, the way the file's §13 does. Each arm is red on `main` first:
 
 1. **Split tree** — caller, `expect` and `actual` in three different directories: `--callees=greet`
@@ -257,7 +270,7 @@ tree without `.kt` files.
 `test/savecachecheck.sh`, `test/statgatecheck.sh`, `test/defoverdeclcheck.sh`,
 `test/javarubycheck.sh`, `test/multirootcheck.sh`, `test/legocheck.sh`. Then
 `./build/ripwire . --quality-delta --legend=compact`,
-`python3 test/pargates.py . ./build/ripwire -j 6` in the foreground, and
+`./build/ripwire . --test-gate`, `python3 test/pargates.py . ./build/ripwire -j 6` in the foreground, and
 `LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <ktor> >/dev/null` with zero
 sanitizer lines.
 

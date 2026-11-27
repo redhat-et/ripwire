@@ -7,15 +7,22 @@ from this repository's own instruments. Nothing is invented, estimated, rounded 
 
 ```bash
 cmake -S . -B build && cmake --build build -j
+./build/ripwire . --recall="published numbers, their instruments and the claims we do not publish"
 ```
+
+`--recall` returns the repo's own docs in full, ranked for the question; read what it ranks before you
+open anything else.
 
 - **`docs/EVALS.md`** — every published number with its instrument, its corpus, its N and the
   in-tree file that pins it. This is your only source of figures. §7 is the honest counterexamples,
   §8 is the list of claims this project deliberately does *not* publish. Read both before you write
-  a single slide.
-- **`docs/captures/`** — a fresh recorded run of every verb against a real repository. Regenerate it
-  first with `python3 test/showcase_capture.py` if it predates the binary you are showing; a capture
-  from an earlier round documents behavior that no longer exists.
+  a single slide. §2b, the 0.7.0 comparison tables the README quotes (measured 2026-11-22), says of
+  itself that its harness and grader live outside this repository: a slide may quote it only as
+  *reported, not yet reproducible from this checkout*, in those words.
+- **`docs/captures/`** — a recorded run of every verb against a real repository (newest on 2026-11-26:
+  `COMMANDS_showcase_2026-11-23.md`). Regenerate it first with `python3 test/showcase_capture.py` if it
+  predates the binary you are showing; a capture from an earlier round documents behavior that no
+  longer exists.
 - **`docs/COMMANDS.md`** — the per-verb reference, generated from `--help`, so its examples cannot
   disagree with the shipped binary. Real output for your screenshots lives here and in the capture.
 - **`docs/METHODOLOGY.md`** and **`docs/ARCHITECTURE.md`** — for the "why trust this" material.

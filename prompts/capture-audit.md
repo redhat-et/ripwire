@@ -14,8 +14,10 @@ python3 test/showcase_capture.py                     # writes docs/captures/COMM
 ```
 
 Regenerate against the binary you are auditing, never one from an earlier round — a stale capture
-documents behavior that no longer exists. The capture is scrubbed and root-neutralised on write; if
-it refuses, fix the offending output rather than bypassing the refusal.
+documents behavior that no longer exists. Diff the new capture against the newest committed one
+(`docs/captures/COMMANDS_showcase_2026-11-23.md` on 2026-11-26): what moved since the last round is
+where to read first. The capture is scrubbed and root-neutralised on write; if it refuses, fix the
+offending output rather than bypassing the refusal.
 
 ## Step 2 — read it with these lenses, IN PARALLEL
 
@@ -43,8 +45,9 @@ contaminate each other when combined. Every finding quotes the exact capture lin
    accepted form — with a did-you-mean from a real edit distance. A selector that answers `0`
    instead of refusing is a finding.
 7. **Sibling-completeness.** For every disclosure the capture *does* show, enumerate the family it
-   belongs to in `src/` and check every member. This lens finds more than the other six combined;
-   `prompts/sibling-sweep.md` is the standalone version of it.
+   belongs to in `src/` and check every member — `./build/ripwire . --grep=<attribute>` finds the
+   emitter, `--uses=<emitter>` every site that reaches it. This lens finds more than the other six
+   combined; `prompts/sibling-sweep.md` is the standalone version of it.
 
 ## Standing rules (they decide what counts as a finding)
 
@@ -59,6 +62,9 @@ contaminate each other when combined. Every finding quotes the exact capture lin
 - **Every truncation is disclosed**, and an estimate says it is calibrated rather than exact.
 
 ## Step 3 — land the findings
+
+Before a producer touches a finding's code, it orients: `./build/ripwire . --for="<the finding, in
+words>"` ranks the emitter and its siblings; read what it ranks, not whole files.
 
 Each finding becomes a **gate over the whole family**, not over the instance you found. "Every verb
 that emits a count states its unit" is worth more than a dozen single-verb checks, because it fails

@@ -4,10 +4,16 @@ Pick a competitor and beat it, or find out you do not. The point of this loop is
 table; it is the **loss buckets**. Where the baseline won is the finding, and it is the part that
 tells you what to build next.
 
-`bench/headtohead/` holds the last run of this: `bench/headtohead/REPORT.md` (methodology, versions,
-the win/loss matrix, per-instance loss buckets), `bench/headtohead/paired_table.md`, and the
-machine-readable results. Read it before you design yours — matching its shape makes the two
-comparable.
+Read the earlier runs before you design yours — matching their shape makes the results comparable.
+`./build/ripwire . --recall="head-to-head comparison methodology and loss buckets"` finds them:
+
+- `bench/headtohead/REPORT.md` — the first paired run (LocBench, 60 instances, four arms,
+  2026-07-13/14): methodology, versions, the win/loss matrix, per-instance loss buckets, with
+  `bench/headtohead/paired_table.md` and the machine-readable results beside it.
+- `docs/EVALS.md` §2 and its later "Head-to-head vs …" sections — Graft (2026-09-07, `bench/graft-h2h/`), tgrep
+  (2026-09-09, `bench/tgrep-h2h/`), gortex / cocoindex-code / codanna (registered 2026-09-06).
+- `docs/EVALS.md` §2b — the 0.7.0 tables (six tools, 213 tasks, measured 2026-11-22). Its harness and
+  grader are not in this repository yet, as that section says; reuse its definitions, not its numbers.
 
 ## Step 1 — decide the arms
 
@@ -32,12 +38,16 @@ database". Not "find the function named `foo`", which every tool wins.
 State N. State how the questions were chosen. State every exclusion and why — the target is **zero
 exclusions**, and an excluded instance is a finding about the metric, not a free win.
 
-## Step 3 — measure two things
+## Step 3 — measure three things
 
-1. **Tokens to correct answer.** Total bytes of context consumed before the correct answer was
+1. **Completeness.** Per question: complete, partial or missed, under definitions written before the
+   run — §2b's are the house ones (complete = every gold file named and every gold function located
+   beside its own file). Report the count of complete answers beside any byte figure: a median of
+   bytes alone reads the same whether or not the answers were cut.
+2. **Tokens to correct answer.** Total bytes of context consumed before the correct answer was
    reachable, per arm, per question. Count what the arm actually emitted, not what it could have
    emitted with better flags. Define "correct" by the gold, before the run.
-2. **Wall time.** Median and spread, cache state named next to every figure. Report the multiple if
+3. **Wall time.** Median and spread, cache state named next to every figure. Report the multiple if
    you want, but report the cache states in the same sentence — otherwise the multiple is a lie of
    omission even when every number in it is true.
 

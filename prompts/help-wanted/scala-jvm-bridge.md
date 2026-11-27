@@ -4,16 +4,24 @@ You are adding **Scala** to ripwire and joining it to the call graph that Java a
 share. This is a full language round — a vendored grammar, extraction, disclosed blind spots, a
 red-first gate — plus one resolver change that comes with an invariant that must not bend.
 
-> **Builds on PR #126 (Kotlin support, by @xCatG), merged 2026-09-11.** The JVM bridge this prompt
-> extends — `langCompatible`'s JVM arm, `keepOwnJvmLanguageCandidates` and the per-family decl/def
-> collapse in `src/graph.h` — came with #126, and so did the nesting-refusal shape Scala should reuse
-> (see "Hostile nesting"). Work from `main`, and confirm that `keepOwnJvmLanguageCandidates` exists
-> before you plan. Line numbers drift; the function names are the pointers.
+> **Builds on PR #126 (Kotlin support, by @xCatG), merged 2026-09-11, and on #157's shared nesting
+> guard.** The JVM bridge this prompt extends — the `edgeFamily` column in `src/langfacts.h` that
+> `langCompatible` reads, `keepOwnJvmLanguageCandidates` and the per-family decl/def collapse in
+> `src/graph.h` — came with #126 and has since moved into the facts table. Status 2026-11-26: #159 is
+> open with no claim, and nothing under `src/` mentions Scala. Line numbers drift; the function names
+> are the pointers.
 
 **Read `prompts/add-a-language.md` first and follow it step by step.** This prompt does not repeat
 its file list. It adds what is specific to Scala and to the JVM bridge, and it overrides nothing.
 
 Work in a git worktree, not your main checkout. Run every gate in the foreground.
+
+**Orient first.** Before opening files, run
+`./build/ripwire . --for="JVM bridge langCompatible keepOwnJvmLanguageCandidates collapseDeclarationsOfName Kotlin Java"`
+and `--for="register a new tree-sitter language: Lang enum, kLangTable row, kLangFacts row, tags.scm"`.
+Before writing the gate or a helper, `--exemplar="<what you are writing>"`; `test/kotlincheck.sh` is
+the likely answer for the gate. Before calling a round done, `./build/ripwire . --quality-delta
+--legend=compact`, then `--test-gate`.
 
 ---
 
@@ -74,7 +82,12 @@ Pin a full 40-hex commit — the tag's, or a newer one with a reason — and say
 `THIRD_PARTY.md` row, the way the Kotlin row explains its own pin.
 
 **The registration surfaces.** `prompts/add-a-language.md` lists the files the Elixir grammar
-touched. Landing Kotlin found more that a new language has to reach, and Scala will too: the `--help`
+touched. On main a language is data first: `queries/scala/tags.scm`, one `kLangFacts` row in
+`src/langfacts.h` (a missing row does not compile; the Java and Kotlin rows show the JVM columns —
+`edgeFamily`, `baseImportEvidence = JvmImport`, `writtenModule = DirsOnly`), the `kLangTable` row in
+`src/ingest_crawl.h`, and its mirrors in `src/lintrules.h`; the compile-time checks in
+`src/ingest_crawl.h` and `src/main.cpp` name each table you missed. Landing Kotlin found more that a
+new language has to reach, and Scala will too: the `--help`
 languages line in `src/cli.h` and its regenerated copy in `docs/COMMANDS.md`
 (`test/docscommandscheck.sh` arm G), the README's languages line and grammar count, a
 `THIRD_PARTY.md` row with the grammar's ABI and size, `test/fuzz/run.sh` and a seed directory under
@@ -84,10 +97,13 @@ Dart's and Kotlin's. `Lang` in `src/model.h` is append-only because its values a
 the cache: `Lang::Scala` goes after the last enumerator on the `main` you land on, and `kLangCount`
 follows.
 
-**The JVM bridge, as #126 left it** (`src/graph.h`):
+**The JVM bridge on main** (`src/graph.h`, `src/langfacts.h`):
 
-- `langCompatible( a, b )` admits a pair when both languages are in `{ Lang::Kotlin, Lang::Java }` —
-  admission by bare name.
+- `langCompatible( a, b )` admits a pair when `langFamilyOf( a ) == langFamilyOf( b )`, and
+  `langFamilyOf` reads each row's `edgeFamily` column (Kotlin's row says `Lang::Java`) — admission by
+  bare name. `kLangFamilyMatchesBridge` beside `langCompatible` proves at compile time that the
+  column still matches the original pair set, so adding Scala to the family means editing that
+  proof too, in the same commit.
 - `keepOwnJvmLanguageCandidates( ing, r, cand )` then lets a Java or Kotlin reference keep the *other*
   JVM language's candidates only when its own language offers none. It runs on call candidates right
   after the namespace gate, and on base candidates in the inheritance overlay. Its comment carries the
@@ -95,9 +111,11 @@ follows.
   `body` from 279 callers to 5, because same-named Kotlin test functions in other directories made the
   name non-unique and the tier ladder declined every Java call.
 - `collapseDeclarationsOfName` keys the decl/def collapse by root and family —
-  `2u * root + ( s.lang == Lang::Kotlin ? 1u : 0u )`, over a
-  `std::array<bool, 2u * kMaxWorkspaceRoots>`. The family split exists because a Kotlin body once
-  evicted a Java interface-only declaration, so adding a `.kt` file moved a Java edge.
+  `kCollapseFamilies * root + collapseFamilyOf( s.lang )`, over a
+  `std::array<bool, kCollapseFamilies * kMaxWorkspaceRoots>`. `kCollapseFamilies` is 3 today: Kotlin,
+  Ruby, and everything else. The Kotlin split exists because a Kotlin body once evicted a Java
+  interface-only declaration, so adding a `.kt` file moved a Java edge; Ruby's for the same reason
+  against C headers.
 - `test/kotlincheck.sh` §14c ("THE INVARIANT" in its comments) is the template for the arm you will
   write: a Java-only tree, then the same tree plus a directory of Kotlin definitions spelling the same
   names, with every Java `--callers` row, `--lego` implementor and map row required to be identical.
@@ -233,12 +251,12 @@ because a `.scala` file appeared. The fallback has to be **ordered**:
 - a Scala reference: Scala first, then Java and Kotlin in an order your measurement justifies — Java
   is the common interop surface; say whether Kotlin comes after it or beside it.
 
-**The collapse needs a third family.** A Scala body must not evict a Java or Kotlin declaration —
+**The collapse needs a fourth family.** A Scala body must not evict a Java or Kotlin declaration —
 the exact bug #126's family split fixed for Kotlin. The collapse runs by name across languages
 *before* any bridge, so this bites even with Scala outside `langCompatible`: a Java interface-only
-declaration evicted by a same-named Scala `def` leaves the Java call with nothing to bind. The key
-space grows from two families per root to three, and `keyHasDefinition` with it. A tree with no
-`.scala` file must still collapse byte-identically.
+declaration evicted by a same-named Scala `def` leaves the Java call with nothing to bind.
+`collapseFamilyOf` gains a Scala arm and `kCollapseFamilies` goes from 3 to 4, with
+`keyHasDefinition` sized from it. A tree with no `.scala` file must still collapse byte-identically.
 
 **The inheritance overlay takes the same ordered rule:** `class Foo extends JavaBase with KotlinTrait`
 resolves its bases through it.
@@ -254,7 +272,7 @@ first is useful on its own. The hostile-nesting layers below belong in the first
 Scala gives a hostile file two nesting shapes: string interpolation (`s"…${ s"…" }…"`) and Scala 3's
 significant indentation, whose INDENT/OUTDENT stack the external scanner keeps and serializes. Deep
 indentation is the same overflow class as Kotlin's string stack, and as the indent stack of any
-layout-sensitive grammar (Python's; GDScript's in #233). Kotlin already solved this class with two
+layout-sensitive grammar (Python's; GDScript's, merged in #233). Kotlin already solved this class with two
 independent layers. Reuse that shape for **both** Scala shapes rather than inventing a second mechanism,
 and make the disclosure safe under concurrency from the first commit.
 
@@ -267,7 +285,8 @@ and make the disclosure safe under concurrency from the first commit.
      it at twice its ceiling).
 
    Each ceiling sits well under the depth STEP 0 measured for that shape. The exemplar is
-   `kotlinStringsNestTooDeep` (`src/ingest_crawl.h`) with `kMaxKotlinStringNestDepth` (`src/ingest.h`).
+   `kotlinStringsNestTooDeep` (`src/ingest_crawl.h`) with `kMaxKotlinStringNestDepth` (`src/ingest.h`,
+   128).
 2. **A vendored scanner patch that refuses instead of failing**, for every stack and counter STEP 0
    flags: the indentation push is refused once the stack would no longer serialize, rather than state
    being dropped, and a width counter saturates rather than wrapping. The parser then recovers with an
@@ -275,17 +294,16 @@ and make the disclosure safe under concurrency from the first commit.
    `third_party/patches/kotlin/001-stack-push-no-abort.patch` (a push refused) and
    `003-dollar-run-saturate.patch` (a counter saturated), each with its arm in
    `test/vendorpatchcheck.sh`.
-3. **One table-driven check, at every parse site.** A declarative row (language, pre-parse scan,
-   ceiling, reason) consulted wherever a corpus file is parsed: the ingest parse pool (`runParseWorker`,
-   where `refuseKotlinNesting` sits today), `astQueryGrouped` (`--match`, `--pattern`) and
-   `spanTiersOfFiles` (`--grep`). Today only the parse pool checks, and `--match` returns hits inside a
-   refused Kotlin file. That shared check is issue #157's kit,
-   `prompts/help-wanted/nesting-refusals-visible.md`. If it has landed, Scala is one more row; if it has
-   not, coordinate on #157 rather than hand-copying another `if` block. Keep the Kotlin mechanics: one
-   writer per slot (`scan.nestRefusedBytes[ fileId ]`), rows collected serially in fileId order
-   (`collectNestRefusals`), and the refused file's cache record written UNKNOWN
-   (`forgetNestRefusalsForCache`) so a warm run re-refuses it. `writeNestRefusedLegend` hard-codes the
-   Kotlin ceiling today and needs a clause per language.
+3. **One more case in the shared guard.** #157 landed: `refuseNesting` (`src/ingest_prewarm.h`) is
+   the one call every corpus-file parse makes — the ingest pool's `runParseWorker` and the blob pass's
+   `rawDefsOfOneBlob` — and `astQueryGrouped` (`--match`, `--pattern`, `--lint`) reads
+   `ing.nestRefusedFile` so it never walks a refused file. Scala is one more `case Lang::Scala` arm
+   there, one more `NestRefusal::DisclosureWhy` enumerator, and one more clause in
+   `writeNestRefusedLegend` (`src/verbs_report.h`). The switch is deliberate — its header comment
+   says why a table of function pointers left every prescan with zero call edges — so do not turn it
+   back into a table. Keep the Kotlin mechanics: one writer per slot (`scan.nestRefusedBytes[ fileId ]`),
+   rows collected serially in fileId order (`collectNestRefusals`), and the refused file's cache
+   record written UNKNOWN (`forgetNestRefusalsForCache`) so a warm run re-refuses it.
 4. **Disclosure lives in output rows, never only on stderr.** A refusal is a `--skipped` row with
    `why="nest-refused"`, counted in `nest_refused=`, plus a legend-defined refusal attribute on `--match`.
    Gates assert those rows. They never assert the `DISCLOSE` text: the alert fires once per
@@ -359,17 +377,18 @@ and make the disclosure safe under concurrency from the first commit.
    fuzzer registered with `add_ripwire_fuzzer`.
    - **Hostile nesting, for the interpolation path and the indentation stack alike:** STEP 0's scanner
      findings in the plan; the pre-parse scan, the vendored patch with its `test/vendorpatchcheck.sh`
-     arm, and the guard row applied at every parse site; `--skipped` rows and `nest_refused=` asserted
+     arm, and the `refuseNesting` case; `--skipped` rows and `nest_refused=` asserted
      cold and warm over fixtures that each hold a ceiling-depth file, two refused files and a sibling;
      `--match` returns no hits inside a refused file and says so; the map exits 0 on the ASan build.
 9. **Every registration surface** above updated, and every blind spot above either modeled or stated.
 
-**Gates, plain and ASan:** `bash test/scalacheck.sh`, `bash test/kotlincheck.sh`,
+**Done means** every criterion above, proven by these **gates, plain and ASan:** `bash test/scalacheck.sh`, `bash test/kotlincheck.sh`,
 `test/javarubycheck.sh`, `test/langcensuscheck.sh`, `test/parsehealthcheck.sh`,
 `test/vendorpatchcheck.sh`, `test/dependencypincheck.sh`, `test/docscommandscheck.sh`,
 `test/printffmtparitycheck.sh`, `test/qschemetripcheck.sh`, `test/qextractionkeycheck.sh`,
-`test/multirootcheck.sh`, `test/readmedriftcheck.sh`, `test/deckcheck.sh`, `test/gatecountcheck.sh`.
-Then `./build/ripwire . --quality-delta --legend=compact` and
+`test/multirootcheck.sh`, `test/readmedriftcheck.sh`, `test/deckcheck.sh`, `test/gatecountcheck.sh`,
+`test/langidentitycheck.sh`, `test/deplangscheck.sh`.
+Then `./build/ripwire . --quality-delta --legend=compact`, `./build/ripwire . --test-gate`, and
 `python3 test/pargates.py . ./build/ripwire -j 6` in the foreground.
 
 ---
@@ -384,8 +403,10 @@ Read the traps in `prompts/add-a-language.md` first. These are the ones Scala ad
 - **Bare-name admission deletes edges.** retrofit's `Response.body` went from 279 callers to 5 before
   own-language-first existed. Measure a mixed tree, not only a pure-Scala one.
 - **Enumerator order.** `Lang` values are serialized, so `Lang::Scala` goes after the last enumerator
-  on the `main` you land on. Other language PRs append too (#233 adds GDScript), and two branches that
-  each append one value give two languages the same serialized value. Re-check at every rebase.
+  on the `main` you land on (today that is after `Lang::Proto`). Other language PRs append too — Zig
+  (#166) is in flight — and two branches that each append one value give two languages the same
+  serialized value. `enumCountIsExact` makes a stale `kLangCount` a build error; the duplicate value
+  is still yours to catch. Re-check at every rebase.
 - **A hostile file can take the whole index down.** tree-sitter-kotlin's scanner called `abort()`
   when a string stack passed 512 entries, ending the run for the entire tree; the fix is the two layers
   in "Hostile nesting" plus the patches under `third_party/patches/kotlin/`. Do STEP 0's scanner read
@@ -400,7 +421,8 @@ Read the traps in `prompts/add-a-language.md` first. These are the ones Scala ad
 - **Gates share one checkout.** Build fixture trees under `$TMP`; a probe written into the checkout
   flips every stamped verb's dirty bit for the gates running beside you.
 - **Numbers collide across lanes.** `kParserVer` and the published gate count are both claimed by
-  parallel work. Re-bump at landing; regenerate the gate count, never hand-merge it.
+  parallel work. The maintainers assign your `kParserVer` in the PR (add-a-language STEP 4); regenerate
+  the gate count on the merged tree, never hand-merge it.
 
 ---
 

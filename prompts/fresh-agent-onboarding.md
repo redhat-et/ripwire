@@ -12,9 +12,11 @@ Build the tool and install what a first-time user would get:
 
 ```bash
 cmake -S . -B build && cmake --build build -j
-./install.sh                 # ripwire onto PATH
-skills/install.sh            # the agent skills (symlinks back into skills/)
+./install.sh                 # ripwire onto PATH, and activates the skills for the agents it detects
 ```
+
+`./install.sh` runs the staged skills installer itself; `RIPWIRE_NO_ACTIVATE=1` stages the skills without
+activating them, which is the arm to run if you want to measure the binary without them.
 
 Spawn a **fresh agent** with:
 
@@ -22,10 +24,14 @@ Spawn a **fresh agent** with:
   ever face, and the agent can read the source to compensate);
 - the tool available, and nothing else about it: no flag cheatsheet, no worked examples, no hints
   from you mid-run;
-- an instruction to narrate which command it runs and why, so the transcript is readable.
+- an instruction to narrate which command it runs and why, so the transcript is readable;
+- no user-level instructions or memory that mention ripwire. A global agent config with a ripwire
+  cheatsheet coaches the subject before its first turn — check what the subject loads, and say so in
+  the report.
 
-If you want the MCP path measured too, run a second subject with `ripwire --mcp` wired in and
-nothing else changed. Report the two separately — the surfaces are discovered differently.
+If you want the MCP path measured too, run a second subject with the MCP server wired in
+(`ripwire wrap <agent>` prints the wiring for that agent) and nothing else changed. Report the two
+separately — the surfaces are discovered differently.
 
 **Do not coach.** The moment you help, the experiment is over and the transcript stops being
 evidence. If the subject stalls, let it stall and write the stall down.

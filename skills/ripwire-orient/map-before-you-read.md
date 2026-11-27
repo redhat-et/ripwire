@@ -1,5 +1,7 @@
 # Map before you read — the token + accuracy discipline (companion to ripwire-orient)
 
+Contents: Why this isn't just about cost — it's about accuracy · Defaults to break · The reflex · Cost calibration (stay honest)
+
 Folded into **ripwire-orient** on 2026-09-07: three blind rater models routed every prompt written for this
 discipline to orient anyway, so the moment lives there and this file is its full text (the former `efficient` skill) — load it when you
 catch yourself about to open more than ~2 files, or to paste whole files, to answer one question.
