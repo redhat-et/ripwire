@@ -62,6 +62,16 @@ public. Re-run the `Reproduce` commands above against your own large repo to rep
 absolute numbers will differ by corpus.
 
 ## Timing breakdown — whole private C++ corpus (1560 files), Apple Silicon
+
+> **SCALE WARNING, added 2026-11-27.** Every table in this section, and the two `Fresh
+> private-corpus phase table` tables below it, were measured on a **1,560-1,849-file** corpus.
+> The *balance* they report does not survive a large repo, and the row most likely to mislead is
+> `resolve refs + build CSR`, at **~1% of cold** here: measured on llvm-project (80,576 indexed
+> files) the same phase is **62% of cold wall clock**, single-threaded, and it grows faster than
+> the corpus does. Read these tables as a statement about small repos. The large-repo balance is
+> in **"Large-repo phase balance (2026-11-27)"** at the end of this file, and
+> `bench/largescale.py` is the harness that re-derives it on any ladder of corpora.
+
 Structure is stable run-to-run (±~15% wall); percentages are the robust story. (Numbers below are
 the *pre-fix diagnosis*; the query-compile column is then cut by the optimization — see end.)
 
@@ -1670,3 +1680,136 @@ pass by being dead. A re-vendor from upstream would delete the patch, and E and 
 `src/infra/radixSort.h` carried "the current paths already beat timsort 3-6x on random float keys" — a
 claim that could not be re-measured in this repo, because the routine it named was not vendored here at the
 time. It is now replaced with the two-sided, reproducible statement the table above supports.
+
+## Large-repo phase balance (2026-11-27) — where wall clock and peak RSS go at 80k files
+
+Everything above this heading was measured on a 1,560–1,849-file corpus. This section re-derives the
+balance on a ladder of public corpora up to **llvm-project, 80,576 indexed files / 1,399,098 symbols /
+4,013,203 edges**, because the small-corpus balance is not merely less precise at scale — it is wrong
+about which phase to look at. `bench/largescale.py` is the harness; its header states the method,
+including why phase milliseconds and headline wall clock are never mixed into one table.
+
+**Provenance, stated before the numbers.** Every number in this section was taken on an M5 Pro (18
+cores, 48 GB) **outside a quiet timing window**, with other work on the machine (load average 4.2–7.1
+when sampled). They are **indicative**: good enough to tell 1% from 62% and to fit a slope over an 8x
+corpus range, not good enough to defend a 10% delta. Phase milliseconds come from a
+`-DRIPWIRE_PROFILE=ON` build, so they carry the instrumentation tax described in `largescale.py`'s
+header, which falls hardest on the per-file and per-symbol scopes — i.e. on *ingest*, which means
+`buildGraph`'s share below is if anything **understated**.
+
+### Matched arms: cold, flagless core map, `--no-cache`, `--top-k=1`
+
+One verb, one mode, four corpora. `--top-k=1` keeps emit out of the comparison; the `sum` column is
+the four top-level scopes and is a floor on cold wall clock, not a total.
+
+| corpus | indexed files | symbols | edges | ingest total | **buildGraph** | — resolve loop | PageRank | verb | sum (ms) | buildGraph share |
+|---|---|---|---|---|---|---|---|---|---|---|
+| angular (TS)      |  9,988 |   109,852 |    76,933 |  1,236.6 |    376.8 |    212.6 |  22.4 |  45.0 |  1,680.8 | 22.4% |
+| envoy (C++)       | 11,041 |   171,803 |   286,434 |  1,849.3 |  1,110.7 |    669.3 |  42.9 |  71.6 |  3,074.6 | 36.1% |
+| kubernetes (Go)   | 22,456 |   293,542 |   376,585 |  2,940.0 |    847.8 |    522.9 |  69.7 | 112.0 |  3,969.5 | 21.4% |
+| **llvm-project (C++)** | **80,576** | **1,399,098** | **4,013,203** | 13,580.9 | **23,684.0** | **19,964.3** | 463.6 | 597.8 | **38,326.2** | **61.8%** |
+
+**Three findings, and one of them replaces a published one.**
+
+1. **`ingest` is linear in files; `buildGraph` is not.** Over the language-matched pair envoy → llvm
+   (files x7.30, symbols x8.14, edges x14.01), `ingest: total` goes x7.34 — a log-log slope of
+   **1.00 in files**, flat. `buildGraph` goes x21.32 over the same pair: slope **1.54 in files**,
+   **1.46 in symbols**, **1.16 in edges**. `buildGraph/3: resolve loop (per reference)` alone goes
+   x29.83 — slope **1.71 / 1.62 / 1.29**. A per-reference loop that grows faster than the reference
+   count is doing more work *per reference* as the corpus grows, which is the shape this lane exists
+   to find.
+2. **"The ranking is the cheap part" survives; "resolve refs is the cheap part" does not.** PageRank
+   is 1.2–1.8% of cold wall at every one of the four sizes, so the first finding at the top of this
+   file holds at 80k files. But the line beside it — `resolve refs + build CSR ~1% (~10 ms)` — is a
+   small-corpus artifact: the same phase is **61.8% of cold wall clock on llvm-project**, and it is
+   **single-threaded** while the parse pool beside it uses every core. On an 18-core machine the
+   largest single fact about a cold llvm run is that most of it happens on one core.
+3. **Language mix moves `buildGraph` more than size does, below ~20k files.** kubernetes has 2.0x
+   envoy's files and 1.7x its symbols, and a *lower* `buildGraph` (847.8 vs 1,110.7 ms): Go resolves
+   without the C++ base-class machinery. Any slope fitted across mixed languages measures the mix.
+   The slopes in finding 1 are therefore quoted on the C++/C++ pair only, and the four-point table is
+   published so the confound is visible rather than averaged away.
+
+### Where the resolve loop's time actually goes (`sample`, main thread, llvm cold)
+
+`sample` on the plain (uninstrumented) binary for 40 s of an llvm cold run, 3,393 main-thread samples
+at 10 ms. 26.9% of them are `__ulock_wait` — the main thread waiting on the parse pool — so the
+non-waiting remainder, ~24.8 s, is essentially `buildGraph`. Self time, rescaled to that remainder:
+
+| self | symbol |
+|---|---|
+| 10.2% | `rw::buildGraph` itself |
+|  9.7% | `buildGraph`'s `LadderRefFacts` lambda (per reference) |
+|  5.1% | `rw::IdentityNarrower::fileVisibleFrom` |
+|  4.6% | `rw::Narrower::drawnAndStandingBases` |
+|  3.7% / 3.0% / 1.3% | `_platform_memmove` / `_platform_memcmp` / `std::string::append` |
+|  2.4% | `std::vector<unsigned int>::push_back` |
+|  2.3% / 2.2% / 1.5% | `Narrower::bareCallReachesFree` / `FileSetStore::rowHolds` / `Narrower::oneDrawnBase` |
+|  1.9% / 1.7% | `ankerl…wyhash::hash` / `wmemchr` |
+
+The live chain is `bareCallReachesFree → keepGuardedCone → expandGuardedCone → expandGuardedLevel →
+meantBaseKept → meantBase → drawnAndStandingBases`: the guarded base-class cone, walked per call site.
+**No single symbol exceeds ~10%**, which is the honest shape of this phase — it is diffuse and
+memory-bound, consistent with the recorded PGO reading (−19% instructions for only −8% wall on llvm).
+A micro-optimisation of any one of these symbols cannot move 24 s; the levers are structural.
+
+One negative result worth recording so it is not re-derived: `meantBaseKept` (`resolve.h`, the
+MEANT-MEMO added 2026-11-21) builds its memo key by appending the parent's whole `ids` vector, so the
+key length is proportional to the thing being memoised. That looked like a defeated memo. The sample
+refutes it: of 128 samples inside `meantBaseKept`, ~35 are key construction and 93 are the `meantBase`
+miss underneath, so key building is ~1.4% of `buildGraph` — real, but far too small to justify the
+correctness risk of changing a memo key. Measured before changed, not after.
+
+### Warm, flagless core map
+
+| corpus | ingest total | — model section | — replay crawl | — read+validate | graph section | verb | emit | sum (ms) |
+|---|---|---|---|---|---|---|---|---|
+| envoy      |   146.6 |  99.5 |  26.6 |  20.3 | 22.5 |  54.4 |  14.9 |   238.4 |
+| kubernetes |   150.7 | 100.7 |  26.8 |  22.8 | 11.8 |  48.5 |  26.3 |   237.3 |
+| llvm       | 1,105.3 | 533.1 | 443.3 | 123.6 | 94.0 | 116.7 | 100.6 | 1,416.6 |
+
+**The warm path no longer rebuilds the graph.** A previously recorded reading — "the warm path is the
+graph rebuild", envoy 8.55x / vscode 13.05x — does not describe this tip: at all three sizes the warm
+run shows `warmsnap: load the graph section` and **no `buildGraph` scope at all**, llvm-project
+included. The warm snapshot's graph section serves 80,576 files without refusing. Warm wall clock is
+now **snapshot deserialisation plus the verb**: at llvm, 38% model section, 31% crawl replay, 9%
+snapshot read+validate, 8% verb, 7% emit, 7% graph section.
+
+**The crawl replay's super-linear look is the operating system, not ripwire.** `replay the crawl` goes
+26.8 → 443.3 ms from kubernetes to llvm, x16.5 for x3.6 files — a slope of 2.19, which reads as a
+defect. It is not. The replay's job is one `lstat` per watched path, and the *bare syscall floor* for
+the same two trees, measured by a standalone 8-thread `lstat` loop over `find` output, is:
+
+| tree | paths | 8-thread wall | µs/path | 1-thread wall | µs/path |
+|---|---|---|---|---|---|
+| kubernetes   |  38,327 |  16.5 ms | 0.43 | 56.0 ms | 1.46 |
+| llvm-project | 197,275 | 307.1 ms | 1.56 | 1,370.7 ms | 6.95 |
+
+Per-path `lstat` cost is **3.6x worse** on the larger tree — the floor itself is super-linear (x18.6
+wall for x5.15 paths), because the metadata working set outgrows the kernel's caches. ripwire's 443.3
+ms sits within 1.44x of a 307.1 ms floor it cannot go below without doing **fewer** stats. There is no
+constant-factor win here; only a change in what gets stat'ed would help, and that is a correctness
+question about staleness detection, not a performance one.
+
+### Verb-level: the history walk, and what the qchurn cache already does for it
+
+Measured on kubernetes (144,102 commits; note that `envoy` and `llvm-project` as cloned here are
+**depth-1 shallow clones**, 1 commit each, so no history-walk number from them means anything):
+
+| arm | `gitmine` scope | ms |
+|---|---|---|
+| first `--for` on a cold churn cache | `gitLogNameOnlyRaw (git log --name-only popen)` | 1,719.6 |
+| second `--for`, churn cache primed | `popenTrimmed (one shell + git child, block read)` | 192.3 |
+
+So the walk is a **one-time 1.72 s** at 144k commits — about 30% of a cold `--for`'s wall clock — and
+afterwards the cache reduces it to a 192 ms validation probe, ~19% of a ~1.1 s warm `--for`. Any
+proposal to shard the walk should be priced against that amortisation, not against the 1.72 s alone.
+
+### What a quiet window is still owed
+
+Headline wall clock and peak RSS from the **plain** binary, medians of 3, inside a window:
+`python3 bench/largescale.py --bin build/ripwire --prof-bin build_prof/ripwire --reps 3 --mode both
+--window-label <id> --corpus angular=… --corpus envoy=… --corpus kubernetes=… --corpus
+llvm-project=…`. Peak RSS is deliberately absent from every table above: `ru_maxrss` is cheap to
+collect but worthless when five other processes are competing for the page cache, and the house ruling
+is that memory is one lifecycle peak — a figure that deserves a clean machine.

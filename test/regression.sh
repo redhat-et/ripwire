@@ -734,6 +734,7 @@ for _g in \
     langcheck \
     langidentitycheck \
     largeallocpeakcheck \
+    largescalecheck \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
