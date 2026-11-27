@@ -123,6 +123,7 @@ NEW2_N="$( name_only_count "$TMP/trace_new2.log" )"
 [ "$rcNew2" -eq 0 ] && [ "$NEW2_N" -eq 0 ] \
     && ok "second run on the NEW head is warm again (count=$NEW2_N)" \
     || no "second run on new head did not memoize (rc=$rcNew2, count=$NEW2_N)"
+[ -s "$TMP/new.out" ] || no "zero-evidence premise (qchurncheck.sh:124): the file the next arm judges is empty, so its verdict proves nothing"
 diff -q "$TMP/new.out" "$TMP/new2.out" >/dev/null \
     && ok "new-head cold vs warm output byte-identical" \
     || no "new-head cold vs warm output differs"

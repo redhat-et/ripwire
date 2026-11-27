@@ -230,6 +230,7 @@ printf '%s' "$R" | grep -q '^receiver-rule	py/boxes.py::Interval::validate#[0-9]
     && ok "(N) control: Box::check -> Interval.validate keeps the route despite self.Interval: $R" \
     || no "(N) control: Box::check -> validate is not receiver-rule to Interval::validate: '${R:-no row}' (a Python attribute must not veto)"
 "$BIN" "$MFIX" --no-cache >"$TMP/mmap2.xml" 2>/dev/null
+[ -s "$TMP/mmap.xml" ] || no "zero-evidence premise (clsrecvcheck.sh:233): the file the next arm judges is empty, so its verdict proves nothing"
 if cmp -s "$TMP/mmap.xml" "$TMP/mmap2.xml"; then ok "(N) member fixture: two runs byte-identical"; else no "(N) member fixture: the map is not deterministic"; fi
 
 [ "$fail" = 0 ] && { echo "clsrecvcheck: OK"; exit 0; }

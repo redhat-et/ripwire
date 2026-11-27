@@ -1291,6 +1291,7 @@ printf 'class Z {\n  void victim() {\n    try { g(); } catch (Exception e) { }\n
 ( cd "$CAPD" && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 )
 mkjava 1
 CAPOUT="$( cd "$CAPD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; CAPRC=$?
+[ -n "$CAPOUT" ] || no "zero-evidence premise (qualitykindscheck.sh:1294): the text the next arm judges is empty, so its verdict proves nothing"
 if printf '%s' "$CAPOUT" | tr '>' '\n' | grep -q '<r kind="error-masking" sym="[^"]*victim"'; then
     no "5m cap: untouched Z.victim reads as an error-masking regression (the per-tag cut moved): $( printf '%s' "$CAPOUT" | tr '>' '\n' | grep 'victim' | head -2 )"
 else ok "5m cap: 6000 -> 100 catches in A.java leaves untouched Z.victim with no error-masking row"; fi
@@ -1304,6 +1305,7 @@ DEEPD="$WORK/deepnest"; mkdir -p "$DEEPD"
 python3 -c 'N = 20000; print( "def deep(x):\n    try:\n        risky()\n    except Exception as e:\n        log.error(" + "f(" * N + "x" + ")" * N + ")" )' >"$DEEPD/m.py"
 DEEPOUT="$( cd "$DEEPD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; DEEPRC=$?
 if [ "$DEEPRC" -lt 128 ]; then ok "5n deep: a 20000-deep log argument does not overflow the stack (rc=$DEEPRC)"; else no "5n deep: --quality-delta died on a 20000-deep log argument (rc=$DEEPRC)"; fi
+[ -n "$DEEPOUT" ] || no "zero-evidence premise (qualitykindscheck.sh:1307): the text the next arm judges is empty, so its verdict proves nothing"
 printf '%s' "$DEEPOUT" | tr '>' '\n' | grep -q '<r kind="error-masking" sym="deep"' \
     && no "5n deep: a handler too deep to read is reported log-only (the bound must answer 'mentions it')" \
     || ok "5n deep: past the depth bound the handler is not called log-only"

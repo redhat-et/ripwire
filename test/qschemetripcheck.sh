@@ -34,6 +34,15 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, lane resolve-parallel: RE-DERIVED with UPDATE_GOLDEN=1 after merging origin/main (52663e4b2) with
+#   scripts/merge_main.sh. BOTH PARENTS HAD RE-PINNED THIS HASH INDEPENDENTLY -- ours 0a151a98c9…87783b12 (train
+#   m5-1126-5's landing renumber), main's e640115f3e…ccbd8342 (lane cr-qd3 #750's kQSnapCacheScheme 39 -> 41) -- and the
+#   base had neither, so the MERGED watched text matches neither parent and the pin had to be derived rather than chosen:
+#   406ec22c68…f091e15a6. No extraction-identity change from this lane: kParserVer, kIngestParserVerMirror, kCacheVersion
+#   and kQSnapCacheScheme are all untouched by it. What this lane changed is buildGraph's SHAPE, not its output -- nine
+#   declared phases moved into named functions with byte-identical output over five corpora -- plus one RIPWIRE_STATS
+#   counter ([mem] owned_sites). The watched text moved because the manifest captures function SOURCE TEXT, and a
+#   function that moves out of buildGraph changes that text even when every byte it produces is identical.
 # 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
 #   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
 #   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57
@@ -53,6 +62,14 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   kQSnapCacheScheme 38 unchanged (the qsnap key carries the producer identity). Hash 159a79d30b…bd8253dc on the lane's
 #   own base. RE-PINNED AGAIN on the merge with origin/main f18bba967 (#756 merged; main had moved kCacheVersion to 55, lane
 #   tangle-rule, pin e4355917b4…b71344719): 57 stays above it, and both histories ride the mirror comment. Hash de4fefdaf4…5339dcdc.
+# 2026-11-26, lane cr-qd3 (#750) rebased onto main f7cfcec7a (#743 TANGLE-RULE took kQSnapCacheScheme 40): RE-PINNED ONCE with
+#   UPDATE_GOLDEN=1 from the rebased build. #750's scheme moves 39 -> 41 (one above main's 40; v39 never shipped). Watched text
+#   is main's tangle-cap snapshot fields plus #750's defectSitesOf scans. kCacheVersion and kParserVer unchanged. Hash
+#   e640115f3e…ccbd8342.
+# 2026-11-25, lane cr-qd3 (rebased onto main fec2ab27c): RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf (a manifest function) now also
+#   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
+#   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
+#   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix
