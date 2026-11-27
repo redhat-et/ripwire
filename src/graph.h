@@ -11130,6 +11130,40 @@ inline bool collapseDeclarationsIntoDefinitions( const IngestResult& ing, bool m
     return rule3AltAny;
 }
 
+// buildGraph/1h. P2-D Rule 2 binding table: per-scope `(fromSymbol, var) → type` from ingest's local var→type bindings,
+// for receiver-VARIABLE narrowing (`Foo x; x.m()` → `Foo::m`). CONSERVATIVE — a var bound to ≥2 DISTINCT types in one
+// scope (two declarations, or a constructor assignment of another class) is TOMBSTONED (value set to ""), so it never
+// narrows; only an unambiguous single-type binding is usable. A binding's `type` is matched as a SCOPE in canonByName by
+// Rule 2, so a DECLARATION's type that names no class (`auto x = makeT()`) never produces a `type::method` hit — but it
+// still conflicts with a sibling declaration of the name, which is the point: that declaration's type is simply
+// unrecorded (test/narrowcheck.sh arm 48). An ASSIGNMENT's such type is no fact at all and is skipped (resolve.h
+// assignmentNamesNoClass, arms 44-46).
+// Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
+// THE EMPTY STRING IS A LIVE VALUE HERE, not an absence: absent, present-but-empty (the ambiguous tombstone) and
+// present-with-a-type are three distinct states, and the resolve loop's call-result typing later inserts into this same
+// table. The reused key buffer escapes nowhere, so it lives here.
+inline HashMap<std::string, FlatRecvType> buildVarTypeBindingTable( const IngestResult& ing, const HashMap<std::string, char>& classNames )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: varType binding table" );
+    HashMap<std::string, FlatRecvType> varType;
+    varType.reserve( BindKindCounts::of( ing ).inDefOf( LocalBindKind::Type ) );   // G1a: the Type records in a definition, not every binding
+    std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind != LocalBindKind::Type )
+        {
+            continue; // L3 var→function records live in varFn/varFnFile below — never in Rule 2's table
+        }
+        if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() || assignmentNamesNoClass( b, classNames ) )
+        {
+            continue; // file-scope/empty → unusable; an assignment's callee that no class is called → no type fact
+        }
+        buildShadowKey( key, b.fromSymbol, b.var );   // "<fromSymbol>#var"
+        recordFlatRecvType( varType, key, b );         // a conflicting or `std::` type tombstones (resolve.h)
+    }
+    return varType;
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11200,25 +11234,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // declaration's type is simply unrecorded (test/narrowcheck.sh arm 48). An ASSIGNMENT's such type is no fact at all
     // and is skipped (resolve.h assignmentNamesNoClass, arms 44-46).
     // Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
-    HashMap<std::string, FlatRecvType> varType;
-    varType.reserve( BindKindCounts::of( ing ).inDefOf( LocalBindKind::Type ) );   // G1a: the Type records in a definition, not every binding
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: varType binding table" );
-        std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
-        for( const Binding& b : ing.bindings )
-        {
-            if( b.kind != LocalBindKind::Type )
-            {
-                continue; // L3 var→function records live in varFn/varFnFile below — never in Rule 2's table
-            }
-            if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() || assignmentNamesNoClass( b, classNames ) )
-            {
-                continue; // file-scope/empty → unusable; an assignment's callee that no class is called → no type fact
-            }
-            buildShadowKey( key, b.fromSymbol, b.var );   // "<fromSymbol>#var"
-            recordFlatRecvType( varType, key, b );         // a conflicting or `std::` type tombstones (resolve.h)
-        }
-    }
+    // NOT const: the resolve loop's call-result typing (typeRule2CallResult) inserts into this table as it goes.
+    HashMap<std::string, FlatRecvType> varType = buildVarTypeBindingTable( ing, classNames );   // buildGraph/1h
 
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
