@@ -1704,8 +1704,12 @@ above, with a scale warning beside it, so this disagreement is visible rather th
 
 Two provenances appear below and they are never merged:
 
-- **SEALED.** Taken inside quiet window `QUIET-2026-11-27-largeperf` on an M5 Pro (18 cores, 48 GB)
-  with every other lane handed back and nothing else building; load average 2.7–2.8 at the start.
+- **SEALED.** Taken inside quiet window `QUIET-2026-11-27-largeperf` on an M5 Pro (18 cores, 48 GB),
+  **re-taken** after an orphaned pagination loop from a finished lane was found running
+  `--clones --limit=400 --offset=…` at 86% CPU inside the window. That loop had called
+  `quiet-guard` once before the lock existed and then looped, which is the hazard the lane rules
+  name: the guard only checks when a command *starts*. Both passes are reported below, because the
+  comparison is itself the evidence that the conclusions do not rest on the contaminated one.
   Medians of 3, interleaved per corpus, **every warm cell verified `reparsed=0`**. Binaries were
   cleanly rebuilt (`--clean-first`) at `fb805cbe7` after merging the train tip, so these describe the
   tree that is about to be `main` (`tiny=on`).
@@ -1721,19 +1725,27 @@ and peak RSS come from the plain binary, where `PROFILE_SCOPE` compiles to `((vo
 
 ### SEALED — wall clock and peak RSS, cold and warm, medians of 3
 
-| corpus | indexed files | symbols | cold wall (s) | cold peak RSS (MiB) | warm wall (s) | warm peak RSS (MiB) |
-|---|---|---|---|---|---|---|
-| ninja (C++) | 154 | 2,283 | 0.167 | 64 | 0.026 | 8 |
-| libzmq (C++) | 805 | 7,194 | 0.209 | 69 | 0.032 | 13 |
-| cpython (C) | 4,688 | 183,143 | 2.576 | 759 | 0.205 | 299 |
-| angular (TS) | 9,988 | 109,852 | 1.563 | 379 | 0.105 | 137 |
-| envoy (C++) | 11,041 | 171,803 | 2.987 | 618 | 0.174 | 268 |
-| cockroach (Go) | 11,784 | 187,579 | 3.352 | 788 | 0.227 | 336 |
-| kubernetes (Go) | 22,456 | 293,542 | 3.519 | 700 | 0.220 | 346 |
-| **llvm-project (C++)** | **80,576** | **1,399,098** | **33.464** | **3,862** | **0.990** | **1,905** |
+Authoritative column is the **retake**, on a machine verified to have no competitor. The first pass
+is kept beside it so the size of the contamination is on the record rather than asserted.
 
-Spread was tight: every cold median sat within 0.5–4.6% of its own minimum, every warm one within
-0.5%. **Peak RSS at the top of the ladder is 3.77 GiB cold and 1.86 GiB warm on a 48 GB machine**, so
+| corpus | indexed files | symbols | cold wall (s) | cold RSS (MiB) | warm wall (s) | warm RSS (MiB) | first pass, cold wall |
+|---|---|---|---|---|---|---|---|
+| ninja (C++) | 154 | 2,283 | 0.163 | 64 | 0.024 | 8 | 0.167 (−2.1%) |
+| libzmq (C++) | 805 | 7,194 | 0.196 | 69 | 0.029 | 13 | 0.209 (−6.1%) |
+| cpython (C) | 4,688 | 183,143 | 2.546 | 782 | 0.205 | 299 | 2.576 (−1.2%) |
+| angular (TS) | 9,988 | 109,852 | 1.460 | 415 | 0.103 | 137 | 1.563 (−6.6%) |
+| envoy (C++) | 11,041 | 171,803 | 2.721 | 607 | 0.173 | 268 | 2.987 (−8.9%) |
+| cockroach (Go) | 11,784 | 187,579 | 3.031 | 817 | 0.219 | 336 | 3.352 (−9.6%) |
+| kubernetes (Go) | 22,456 | 293,542 | 3.385 | 682 | 0.226 | 346 | 3.519 (−3.8%) |
+| **llvm-project (C++)** | **80,576** | **1,399,098** | **33.099** | **3,787** | **0.969** | **1,905** | 33.464 (−1.1%) |
+
+**The contamination moved cold wall by 1–10% and changed no conclusion.** Warm peak RSS agreed to
+**0.1% on every corpus** and cold peak RSS to within 3% except angular (+9.6%, 379 → 415 MiB, where
+the run is short enough for allocator noise to show). The largest corpus was the *least* affected
+(−1.1%), because a 33 s parallel run averages a competitor away, while the mid-size corpora — short,
+and least able to absorb it — moved most. `buildGraph`'s share at llvm scale went 65.6% → **66.2%**,
+and the envoy → llvm slope 1.52 → **1.53**. Spread in the retake: every cold median within 0.4–7.5%
+of its own minimum, every warm one within 1.4%. **Peak RSS at the top of the ladder is 3.77 GiB cold and 1.86 GiB warm on a 48 GB machine**, so
 the house ruling that memory may be spent for speed has roughly an order of magnitude of headroom
 left at the largest corpus anyone has pointed this tool at. Memory is not the binding constraint at
 80k files; a single core is.
@@ -1742,16 +1754,16 @@ left at the largest corpus anyone has pointed this tool at. Memory is not the bi
 
 | corpus | files | symbols | edges | ingest | **buildGraph** | — resolve loop | PageRank | verb | bG share |
 |---|---|---|---|---|---|---|---|---|---|
-| ninja | 154 | 2,283 | 4,976 | 133.9 | **10.2** | 5.8 | 0.2 | 15.3 | 6.4% |
-| libzmq | 805 | 7,194 | 12,548 | 163.1 | **14.5** | 7.3 | 0.8 | 16.8 | 7.4% |
-| cpython | 4,688 | 183,143 | 581,820 | 1,597.9 | **879.0** | 450.7 | 67.1 | 93.8 | 33.3% |
-| angular | 9,988 | 109,852 | 76,933 | 1,052.1 | **381.3** | 213.7 | 21.8 | 53.0 | 25.3% |
-| envoy | 11,041 | 171,803 | 286,434 | 1,767.5 | **1,094.4** | 656.8 | 42.4 | 74.8 | 36.7% |
-| cockroach | 11,784 | 187,579 | 1,467,624 | 2,104.7 | **1,077.7** | 711.7 | 94.8 | 132.3 | 31.6% |
-| kubernetes | 22,456 | 293,542 | 376,585 | 2,546.0 | **1,106.5** | 772.2 | 71.7 | 123.8 | 28.8% |
-| **llvm-project** | 80,576 | 1,399,098 | 4,013,203 | 10,889.6 | **22,547.6** | **19,016.2** | 414.2 | 537.6 | **65.6%** |
+| ninja | 154 | 2,283 | 4,976 | 134.1 | **8.9** | 5.1 | 0.2 | 15.1 | 5.6% |
+| libzmq | 805 | 7,194 | 12,548 | 157.2 | **14.5** | 7.3 | 0.8 | 16.5 | 7.7% |
+| cpython | 4,688 | 183,143 | 581,820 | 1,492.2 | **916.6** | 472.1 | 66.9 | 92.1 | 35.7% |
+| angular | 9,988 | 109,852 | 76,933 | 1,006.9 | **354.9** | 199.3 | 21.5 | 52.1 | 24.7% |
+| envoy | 11,041 | 171,803 | 286,434 | 1,517.3 | **1,069.8** | 644.6 | 42.2 | 74.1 | 39.5% |
+| cockroach | 11,784 | 187,579 | 1,467,624 | 1,935.0 | **1,023.7** | 677.2 | 93.6 | 131.0 | 32.1% |
+| kubernetes | 22,456 | 293,542 | 376,585 | 2,306.2 | **856.0** | 574.8 | 70.9 | 122.4 | 25.5% |
+| **llvm-project** | 80,576 | 1,399,098 | 4,013,203 | 10,461.1 | **22,388.1** | **18,816.5** | 409.0 | 531.6 | **66.2%** |
 
-`buildGraph`'s share of cold wall runs **6.4% → 65.6%** across the ladder. PageRank is **0.1–2.4% at
+`buildGraph`'s share of cold wall runs **5.6% → 66.2%** across the ladder. PageRank is **0.1–2.4% at
 every one of the eight sizes**, so this file's original finding — "the ranking is the cheap part" —
 holds at 80k files. The line beside it does not.
 
@@ -1762,21 +1774,21 @@ A per-reference loop whose cost per reference is flat is linear. Stated directly
 
 | corpus | symbols | µs per symbol | edges | µs per edge |
 |---|---|---|---|---|
-| ninja (C++) | 2,283 | 2.54 | 4,976 | 1.16 |
+| ninja (C++) | 2,283 | 2.22 | 4,976 | 1.02 |
 | libzmq (C++) | 7,194 | 1.01 | 12,548 | 0.58 |
-| cpython (C) | 183,143 | 2.46 | 581,820 | 0.77 |
-| envoy (C++) | 171,803 | 3.82 | 286,434 | 2.29 |
-| **llvm-project (C++)** | **1,399,098** | **13.59** | **4,013,203** | **4.74** |
+| cpython (C) | 183,143 | 2.58 | 581,820 | 0.81 |
+| envoy (C++) | 171,803 | 3.75 | 286,434 | 2.25 |
+| **llvm-project (C++)** | **1,399,098** | **13.45** | **4,013,203** | **4.69** |
 
 llvm-project does **3.6x more resolve work per symbol than envoy** and **2.1x more per edge**, on the
-same language with the same extractor. That is the finding, and it survives without a regression: the
+same language, same extractor. That is the finding, and it survives without a regression: the
 loop does more work per reference as the corpus grows.
 
-Fitted slopes, for readers who want them. Over the five C-family points: `buildGraph` **1.31** in
-files / **1.23** in symbols; resolve loop **1.37 / 1.28**; `ingest` **0.74 / 0.69** (sub-linear — the
+Fitted slopes, for readers who want them. Over the five C-family points: `buildGraph` **1.33** in
+files / **1.24** in symbols; resolve loop **1.39 / 1.29**; `ingest` **0.73 / 0.68** (sub-linear — the
 cold parse is parallel, so its wall clock scales below its work). Over the language-matched C++ pair
-envoy → llvm-project: `buildGraph` **1.52 / 1.44 / 1.15** (files / symbols / edges), resolve loop
-**1.69 / 1.60 / 1.27**, `ingest` **0.91 / 0.87 / 0.69**, cold wall **1.22 / 1.15**, cold peak RSS
+envoy → llvm-project: `buildGraph` **1.53 / 1.45 / 1.15** (files / symbols / edges), resolve loop
+**1.70 / 1.61 / 1.28**, `ingest` **0.97 / 0.92 / 0.73**, cold wall **1.26 / 1.19**, cold peak RSS
 **0.92 / 0.87**, warm peak RSS **0.99 / 0.94**.
 
 **Two confounds, named rather than averaged away.** Fit a slope across the whole eight-corpus ladder
@@ -1851,6 +1863,66 @@ is proportional to the thing being memoised. That looked like a defeated memo. T
 of 128 samples inside `meantBaseKept`, ~35 are key construction and 93 are the `meantBase` miss
 underneath, so key building is ~1.4% of `buildGraph` — real, but far too small to justify the
 correctness risk of changing a memo key. Measured before changed, not after.
+
+### SEALED — the PER-WARM-QUERY cost of personalized ranking
+
+The personalized rank is **not** a per-index cost. `rankGraph()` (`src/graph.h:15136`) is a three-line
+wrapper that calls `rankGraphTeleport` with a **uniform** teleport vector, and the profiled scope
+lives inside `rankGraphTeleport` — so one kernel serves both the flagless map's plain rank and
+`--for`'s personalized rank, and the cold table's single `rankGraph` row is **one invocation per
+index build**. In a session the graph is built once and every query pays the rank again. Reading the
+cold row as a per-query cost prices a per-call cost against a one-time one.
+
+Eight successive warm `--for` calls, eight **different** tasks, profile build, shared warm cache, one
+process per call so `calls=1` makes the attribution unambiguous:
+
+| corpus | symbols | edges | `rankGraph` ms/query (median of 8) | range | BM25 ms | `main: query + emit` ms | rank share of the query |
+|---|---|---|---|---|---|---|---|
+| envoy | 171,803 | 286,434 | **41.3** | 40.8–43.1 | 25.4 | 344.1 | **12.0%** |
+| kubernetes | 293,542 | 376,585 | **67.5** | 67.1–67.7 | 34.5 | 415.7 | **16.2%** |
+| **llvm-project** | **1,399,098** | **4,013,203** | **397.9** | 392.5–412.4 | 206.6 | 2,920.4 | **13.6%** |
+
+Against an **MCP session** that holds the graph in memory — eight `for` calls, the server's own
+`RIPWIRE_MCP_TIMINGS` line as the clock — llvm-project's warm per-call wall is **1,907–2,378 ms**
+(median ~2,134; the first call, which builds the index, is 33.1 s and `rebuilt=1`). So ~398 ms of
+ranking is **~19% of every warm query** on that tree, paid again on each one, while `buildGraph` is
+`calls=1` and amortises across the whole session.
+
+**Two properties that bear on whether an approximation can win here.** The cost is **seed-insensitive**
+— eight unrelated tasks span 40.8–43.1 ms on envoy and 392.5–412.4 ms on llvm, about ±2.5% — which is
+what a full power iteration over every node should do, since it does not care how sparse the teleport
+vector is. An Andersen–Chung–Lang push *does* care, so the headroom is real rather than notional. And
+the growth is **roughly linear in symbols**: envoy → llvm is x9.64 for x8.14 symbols, a slope of
+**1.08** (x14.01 edges, slope 0.86). This is a fixed per-query toll that scales with the tree, not a
+super-linear defect.
+
+**A larger per-query target nobody is on.** `main: query + emit` is **2,920 ms** per warm query on
+llvm-project, of which ranking (398) and BM25 (207) account for ~605 ms. The remaining **~2.3 s is
+unattributed inside that one scope** and is the biggest per-query cost on a large tree by a wide
+margin — bigger than the ranking it contains. Naming it needs finer `PROFILE_SCOPE`s inside the verb;
+until someone adds them, "2.3 s unattributed" is the honest statement and not a claim about cause.
+
+### SEALED — the degraded-path alerts on llvm-project: a handful of sites, each once
+
+`DEGRADED_PATH_ALERT` output counted per corpus, from stderr captures taken anyway. The line count is
+not the quantity of interest, because the format logs **once per site**:
+
+| corpus | lines | distinct sites | which |
+|---|---|---|---|
+| kubernetes | **0** | 0 | — |
+| envoy | 1 | 1 | `ingest_prewarm.h:231` — a `.json` nests past `kMaxJsonNestDepth`, refused before the parse |
+| llvm-project | 2 | 2 | `ingest_valuerefs.h:506` — value-reference subtrees below `kVrMaxDepth` not visited; `graph.h:10432` — `kMaxAliasDepth` (8 alias steps) reached with a queued alias unread |
+
+**A handful of known sites, each firing once, all disclosed — and two of the three do reach an
+answer.** `ingest_prewarm.h:231` discloses itself in the output as `--skipped why=nest-refused`, and
+`ingest_valuerefs.h:506` as the `value_refs_depth_capped=` attribute, so both are disclosed
+truncations rather than silent ones, which is the house contract. `graph.h:10432` is the one worth a
+second look by whoever owns alias resolution: an uncollected element type can change which edges
+exist, and unlike the other two its disclosure is a stderr alert — which `NDEBUG` compiles out in a
+Release build, per the degrade-disclosure audit. Not fixing anything this round; naming it.
+
+kubernetes' zero is a real absence, not a broken pattern: the same grep returns 1 on the envoy
+capture, so it was shown capable of matching before the zero was reported.
 
 ### INDICATIVE (outside the window) — the history walk, and what the qchurn cache already does
 
