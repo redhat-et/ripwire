@@ -22,12 +22,16 @@
 #       well-formed under a cut, every spliced attribute on the root (ROOT-SPLICE-SIZE-1).
 #   (T) a git shim that prints the first commits of the real walk and then goes silent for longer than the budget: --for, --cochange exit inside the
 #       time budget's reach, disclosed; a shim silent from the first byte ends the same way.
+#   (D) THE CLOCK CUT DECIDES NO VALUE (PR #813): a shim that hands the walk exactly EMIT_N records and then stalls, run at 0, 40 and 90
+#       records — five verbs must answer byte for byte the same on stdout AND stderr, no commit count in the prose, churn= absent
+#       (with its positive twin: an uncut walk prints churn=), a COMMIT cut still served as a floor, and the published determinism
+#       claim unqualified again.
 #   (M) --mcp: no comment line on the protocol stream, the cut in the answer's envelope; a stalled walk's short prefix is not stored; the cut
 #       sentence and --help=all say the prefix moves with load; a zero-commit cut names the budget (M4); --exemplar starts no walk (L2).
 #   (Q) a dirty partial clone's plain --quality-delta: history the churn kind could not read is unread_history= and exit 6, a failed
 #       blame is churn="unknown" (never ambient), a cut window walk too; --quality-baseline refuses; a sidecar floor names renames.
 #   (S) --slice --since on a partial clone: a refused blob or rename record is unread_at_rev, never file_absent_at_rev.
-#   (R) red, only when RIPWIRE_BASE_BIN names a pre-fix binary: (P) fetches and (T) outlives its timeout.
+#   (R) red, only when RIPWIRE_BASE_BIN names a pre-fix binary: (P) fetches, (T) outlives its timeout, and (D) diverges.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -39,6 +43,7 @@ ok()  { pass=$((pass+1)); echo "ok   $1"; }
 bad() { fail=$((fail+1)); echo "FAIL $1"; }
 check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 REALGIT="$(command -v git)"
+echo "BIN=$BIN $( "$BIN" --version 2>/dev/null | head -1 )"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com GIT_CONFIG_NOSYSTEM=1 HOME="$TMP/home"
 mkdir -p "$HOME"
 
@@ -285,8 +290,72 @@ read -r rc secs <<<"$(timed "$BIN" --cochange=m1.c)"
 check "(T2) --cochange against a git gone silent: on time (rc=$rc ${secs}s), disclosed" '[ "$secs" -lt 25 ] && grep -q "history_cut=1" "$TMP/err"'
 export STALL_AT_START=1 TWS=3   # a budget of its own: T1's prefix is cached under its budget
 read -r rc secs <<<"$(timed "$BIN" --for="caller f1")"
-check "(T3) --for against a git silent from the first byte: exit 0, on time (rc=$rc ${secs}s), disclosed" '[ "$rc" = 0 ] && [ "$secs" -lt 25 ] && grep -q "hit its budget after the newest 0 commits" "$TMP/out"'
+check "(T3) --for against a git silent from the first byte: exit 0, on time (rc=$rc ${secs}s), disclosed" '[ "$rc" = 0 ] && [ "$secs" -lt 25 ] && grep -q "history_unread=\"1\"" "$TMP/out" && grep -q "ran out of its wall.clock budget" "$TMP/out"'
 unset STALL_AT_START
+
+# ── (D) THE CLOCK CUT DECIDES NO VALUE (PR #813: windows-package ran the exe twice and the two runs disagreed on where the walk
+# was cut — "the newest 9756 commits" against "the newest 9770" — so churn= and amp= were absent from one run's rows and present
+# in the other). How far a walk gets before the wall clock stops it moves with machine load, so no emitted byte may depend on it:
+# a clock-cut walk's commits are not counted at all, and the answer is the same whether the walk read 0 commits or 89.
+# The divergence is forced DETERMINISTICALLY here — a shim that hands the walk exactly EMIT_N real records and then goes silent
+# past the budget — so a run under no load reproduces what a loaded Windows runner hit. Three EMIT_N values, one expected answer.
+SHIMD="$TMP/shim-emitn"; mkdir -p "$SHIMD"
+cat > "$SHIMD/git" <<SH
+#!/bin/sh
+# EMIT_N real records, then silence for far longer than the budget: the walk is clock-cut after exactly EMIT_N-1 visited commits.
+case " \$* " in
+  *" -z "*" --raw "*|*" -z --raw "*)
+    echo "\$EMIT_N" >>"$TMP/emitlog"
+    "$REALGIT" "\$@" -n "\$EMIT_N" 2>/dev/null | cat
+    exec sleep 45 ;;
+esac
+exec "$REALGIT" "\$@"
+SH
+chmod +x "$SHIMD/git"
+# $1 = EMIT_N, $2 = output basename, rest = verb flags. stdout and stderr are both captured: the cut sentence rides stderr.
+demit() { local n="$1" tag="$2"; shift 2
+  ( cd "$LONG" && PATH="$SHIMD:$PATH" EMIT_N="$n" RIPWIRE_GIT_WALK_SECONDS=2 perl -e 'alarm 40; exec @ARGV' "$BIN" "$LONG" --no-cache "$@" \
+      >"$TMP/d.$tag.out" 2>"$TMP/d.$tag.err" ); echo $?
+}
+dpair() {  # $1 = arm id, $2 = label, rest = verb flags. Three prefixes (0, 40, 90 records) must give ONE answer, on stdout and stderr.
+  local id="$1" label="$2"; shift 2
+  : > "$TMP/emitlog"
+  local r0 r40 r90; r0="$( demit 0 "${id}a" "$@" )"; r40="$( demit 40 "${id}b" "$@" )"; r90="$( demit 90 "${id}c" "$@" )"
+  # NOT VACUOUS: the shim must really have fed three different prefixes, and the budget must really have fired in all three
+  # (a run the clock never cut, or a shim that emitted the same prefix thrice, cannot pass this as "identical").
+  check "($id) $label: the shim fed 0/40/90 records and all three runs were clock-cut" \
+        '[ "$(tr "\n" " " < "$TMP/emitlog")" = "0 40 90 " ] && grep -lq "history_cut\|history_unread" "$TMP/d.'"$id"'a.out" "$TMP/d.'"$id"'a.err"'
+  check "($id) $label: the three runs agree byte for byte on stdout (rc $r0/$r40/$r90)" \
+        'cmp -s "$TMP/d.'"$id"'a.out" "$TMP/d.'"$id"'b.out" && cmp -s "$TMP/d.'"$id"'b.out" "$TMP/d.'"$id"'c.out"'
+  check "($id) $label: ... and on stderr, and the three exit codes match" \
+        'cmp -s "$TMP/d.'"$id"'a.err" "$TMP/d.'"$id"'b.err" && cmp -s "$TMP/d.'"$id"'b.err" "$TMP/d.'"$id"'c.err" && [ "'"$r0"'" = "'"$r40"'" ] && [ "'"$r40"'" = "'"$r90"'" ]'
+}
+dpair D1 "--for"             --for="caller f1"
+dpair D2 "--cochange"        --cochange=m1.c
+dpair D3 "--hotspots"        --hotspots
+dpair D4 "--rank-by=churn"   --rank-by=churn
+dpair D5 "--owners"          --owners
+# (D6) and no load-dependent NUMBER survives in the prose either: a clock cut names no commit count, and says what it did instead.
+# The prose itself spells `churn=` ("churn= is absent"), so a churn COUNT is matched, never the bare name.
+check "(D6) a clock cut's disclosure carries no commit count, and says the commits are not counted" \
+      '! grep -q "after the newest" "$TMP/d.D1c.out" && grep -q "none of its commits is counted" "$TMP/d.D1c.out" && grep -q "RIPWIRE_GIT_WALK_COMMITS" "$TMP/d.D1c.out"'
+check "(D6b) ... and churn= carries no count on any row" '! grep -qE "churn=\"?[0-9]" "$TMP/d.D1c.out"'
+# (D7) THE POSITIVE TWIN, so (D6b) cannot pass because the fixture has no churn: the same verb with the budget off prints churn=.
+( cd "$LONG" && RIPWIRE_GIT_WALK_SECONDS=0 RIPWIRE_GIT_WALK_COMMITS=0 "$BIN" "$LONG" --no-cache --for="caller f1" >"$TMP/d.full.out" 2>/dev/null )
+check "(D7) the fixture does have churn to lose: an uncut walk prints a churn count and no history_unread" \
+      'grep -qE "churn=\"?[0-9]" "$TMP/d.full.out" && ! grep -q "history_unread" "$TMP/d.full.out"'
+# (D8) THE OTHER TWIN: a COMMIT cut is reproducible by construction, so it is still SERVED as a floor — the fix must not have
+# bought determinism by dropping the budget's answer altogether.
+for i in 1 2; do ( cd "$LONG" && RIPWIRE_GIT_WALK_COMMITS=100 "$BIN" "$LONG" --no-cache --for="caller f1" >"$TMP/d.cc$i.out" 2>/dev/null ); done
+check "(D8) a commit cut is still served as a floor, with its count, and the two runs agree" \
+      'cmp -s "$TMP/d.cc1.out" "$TMP/d.cc2.out" && grep -q "hit its budget after the newest 100 commits" "$TMP/d.cc1.out" && grep -qE "churn=\"?[0-9]" "$TMP/d.cc1.out"'
+# (D9) the determinism CLAIM is unqualified again — the exception the clock cut forced into --help, the README and the reference
+# guide is gone. Both halves are checked: a "must not say X" alone passes on text that says nothing at all.
+"$BIN" --help=all 2>/dev/null >"$TMP/d.help"
+check "(D9) --help=all claims byte-identical runs with no history-cut exception" \
+      'grep -q "determinism: output is byte-identical run-to-run  (" "$TMP/d.help" && ! grep -q "except a disclosed history cut" "$TMP/d.help"'
+check "(D9b) the README and the reference guide carry no cut exception either" \
+      'grep -q "byte-identical, and a warm run equals a cold one" "$ROOT/README.md" && ! grep -q "except a disclosed history cut" "$ROOT/README.md" "$ROOT/docs/REFERENCE_GUIDE.md" && grep -q "Two runs over one tree produce the same bytes," "$ROOT/docs/REFERENCE_GUIDE.md"'
 
 # ── (M) a cut is said where the host can hold it ──
 # (M1) --mcp: stdout is the protocol, so no comment line on it; the cut rides the envelope of the answer that read it.
@@ -320,9 +389,10 @@ rm -f "$TMP/walklog"; QC="$TMP/qc2"; mkdir -p "$QC"
 STALL_AFTER_5=1 RIPWIRE_GIT_WALK_SECONDS=2 wrun --for="caller f1"; s1="$(walks)"
 STALL_AFTER_5=1 RIPWIRE_GIT_WALK_SECONDS=2 wrun --for="caller f1"; s2="$(walks)"
 check "(M3c) a short prefix of a stalled walk is not stored: the second run walks again (walks $s1 then $s2), disclosed" '[ "$s2" -gt "$s1" ] && grep -q "history_unread=\"1\"" "$TMP/out"'
-check "(M3d) the cut disclosure says the prefix moves with machine load" 'grep -q "moves with machine load" "$TMP/out"'
-"$BIN" --help=all 2>/dev/null | grep -q "except a disclosed history cut"; hrc=$?
-check "(M3e) --help=all and the README no longer claim byte-identical runs without the cut exception" '[ "$hrc" = 0 ] && grep -q "moves with machine load" "$ROOT/README.md"'
+check "(M3d) the cut disclosure says WHY the clock cut's commits are not counted (how far it gets moves with machine load)" 'grep -q "moves with machine load" "$TMP/out" && grep -q "none of its commits is counted" "$TMP/out"'
+# (M3e) the stalled walk's answer stands on its own: it never reports a commit count the clock chose, and it names the budget
+# that WOULD give a reproducible prefix. (D9) carries the published determinism claim.
+check "(M3e) a stalled walk's answer names no clock-chosen commit count and points at the commit budget" '! grep -q "after the newest" "$TMP/out" && grep -q "RIPWIRE_GIT_WALK_COMMITS" "$TMP/out"'
 # (M4) a walk cut before its first commit is not "git unavailable"
 export STALL_AT_START=1 TWS=2
 for v in --hotspots --owners "--cochange"; do
@@ -437,6 +507,12 @@ if [ -n "${RIPWIRE_BASE_BIN:-}" ]; then
   check "(R1) the pre-fix binary fetched on the partial clone" '[ "$(grep -c fetched "$TMP/verdicts.base")" -gt 0 ]'
   read -r rc secs <<<"$(timed "$RIPWIRE_BASE_BIN" --for="caller f1")"
   check "(R2) the pre-fix binary outlived a silent git (rc=$rc ${secs}s)" '[ "$rc" != 0 ] && [ "$secs" -ge 29 ]'
+  # (R3) the (D) adversary: on a binary whose clock cut still decides a value, the 40-record and 90-record runs DIFFER. This is
+  # what keeps (D) from passing vacuously — reintroduce a load-dependent value and this arm goes green while (D1) goes red.
+  : > "$TMP/emitlog"
+  DBIN="$BIN"; BIN="$RIPWIRE_BASE_BIN"; demit 40 R3b --for="caller f1" >/dev/null; demit 90 R3c --for="caller f1" >/dev/null; BIN="$DBIN"
+  check "(R3) the pre-fix binary's clock cut decided a value: the 40-record and 90-record runs differ" \
+        '! cmp -s "$TMP/d.R3b.out" "$TMP/d.R3c.out" && grep -q "after the newest 39 commits" "$TMP/d.R3b.out" && grep -q "after the newest 89 commits" "$TMP/d.R3c.out"'
 fi
 
 echo "historywalkcheck: $pass ok, $fail failed"

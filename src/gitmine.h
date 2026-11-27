@@ -981,6 +981,17 @@ inline std::string gitHistoryPolicySentence()
 // RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS move them (0 = no limit, at most 1e9: a larger or malformed value keeps the default), for a user willing to wait.
 // A cut walk is a prefix, newest first, and is DISCLOSED: amp=/churn= by history_unread (historyread.h), every other walk by
 // gitWalkCutsToDisclose, which main() prints once after the answer.
+//
+// WHICH BUDGET CUT IT DECIDES WHETHER THE PREFIX IS AN ANSWER (PR #813). A `Commits` cut is a pure function of the history: it is
+// exactly the newest RIPWIRE_GIT_WALK_COMMITS commits, the same ones on a slow machine and a fast one, so its prefix IS served and
+// labelled a floor. A `Time` cut is not: how far the walk got before the wall clock stopped it moves with machine load. On #813 the
+// Windows packaging job ran one unzipped exe twice and the two runs cut at 9,756 and 9,770 commits, so churn= and amp= were absent
+// from one run's rows and present in the other — a determinism-contract violation (CLAUDE.md non-negotiable 2: output must not
+// depend on timing), and on the same fixture a time cut decided whether --owners answered at all or refused. So a Time cut's
+// records are NOT served: gitWalkValuesVoid is true, every consumer drops what it accumulated and takes its own no-history degrade
+// (each of which is already disclosed), and the disclosure says the commits were not counted instead of printing a count the clock
+// chose. The way to a floor on a repository too big for the clock is RIPWIRE_GIT_WALK_COMMITS, which every machine reproduces.
+// The same rule already held one layer up for `git diff` (prcontext.h: a prefix of the rows is not a list).
 enum class GitWalkCut : std::uint8_t { None, Commits, Time };
 inline constexpr std::uint64_t kGitWalkMaxCommits = 200'000;
 inline constexpr std::uint64_t kGitWalkMaxSeconds = 20;
@@ -1149,10 +1160,13 @@ inline long gitAbsentBlobCount( const std::string& root, const std::string& rev 
 }
 
 // The DISCLOSE sink for a walk whose consumer has no history_unread of its own. Worker threads write it; main() reads it last.
+// The two cuts are counted apart because only one of them yields a number fit to print: `commitWalks`/`commitsRead` describe a
+// reproducible prefix (the count IS the budget), while a clock-cut walk's commit count is load-dependent and so is never reported.
 struct GitWalkCutReport
 {
-    std::atomic<std::uint32_t> walks{ 0 };
-    std::atomic<std::uint64_t> commitsRead{ 0 };
+    std::atomic<std::uint32_t> walks{ 0 };         // cut at the COMMIT budget: a reproducible prefix, served as a floor
+    std::atomic<std::uint64_t> commitsRead{ 0 };   // ...and the commits those walks read
+    std::atomic<std::uint32_t> timeWalks{ 0 };     // cut by the WALL CLOCK: nothing of those walks is counted (THE BUDGET above)
 };
 inline GitWalkCutReport& gitWalkCutsToDisclose() noexcept
 {
@@ -1163,35 +1177,66 @@ inline GitWalkCutReport& gitWalkCutsToDisclose() noexcept
 // What the process has cut so far, read before and after one unit of work (an MCP request) to say what THAT work cut.
 struct GitWalkCutMark
 {
-    std::uint32_t walks   = 0;
-    std::uint64_t commits = 0;
+    std::uint32_t walks     = 0;
+    std::uint64_t commits   = 0;
+    std::uint32_t timeWalks = 0;
 };
 inline GitWalkCutMark gitWalkCutMark() noexcept
 {
     const GitWalkCutReport& report = gitWalkCutsToDisclose();
-    return GitWalkCutMark{ report.walks.load( std::memory_order_relaxed ), report.commitsRead.load( std::memory_order_relaxed ) };
+    return GitWalkCutMark{ report.walks.load( std::memory_order_relaxed ), report.commitsRead.load( std::memory_order_relaxed ),
+                           report.timeWalks.load( std::memory_order_relaxed ) };
+}
+
+// What has been cut SINCE a mark, as one value. The sentence below takes this rather than its fields, so a counter added to the
+// report later never changes a call site, and the per-request subtraction an MCP server needs is spelled once, here.
+inline GitWalkCutMark gitWalkCutsSince( const GitWalkCutMark& since ) noexcept
+{
+    const GitWalkCutMark now = gitWalkCutMark();
+    return GitWalkCutMark{ now.walks - since.walks, now.commits - since.commits, now.timeWalks - since.timeWalks };
 }
 
 // The one sentence for "N history walks hit their budget": the CLI's stdout comment, its stderr line and the MCP envelope's
-// `_history_cut` all print it. `walks`/`commits` are the cut walks and the commits they read. "" when nothing was cut.
-inline std::string gitWalkCutSentence( std::uint32_t walks, std::uint64_t commits )
+// `_history_cut` all print it. `cut.walks`/`cut.commits` are the walks the COMMIT budget cut and the commits they read — a
+// reproducible prefix, served as a floor; `cut.timeWalks` are the walks the WALL CLOCK cut, whose commits are not counted at all,
+// because how far such a walk gets moves with machine load (THE BUDGET above). "" when nothing was cut.
+inline std::string gitWalkCutSentence( const GitWalkCutMark& cut )
 {
-    if( walks == 0 )
+    if( cut.walks + cut.timeWalks == 0 )
     {
         return {};
     }
-    return std::format( "history_cut={}: that many git history walks hit their budget and read only the newest commits ({} read in all), so co-change, "
-                        "owner and churn numbers from history in this answer are floors, and the prefix a time cut reaches moves with machine load, so two "
-                        "runs can differ. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.", walks, commits );
+    std::string said = std::format( "history_cut={}: that many git history walks hit their budget.", cut.walks + cut.timeWalks );
+    if( cut.walks != 0 )
+    {
+        said += std::format( " {} stopped at the commit budget and read only the newest commits ({} read in all), so co-change, owner and churn numbers from"
+                             " history in this answer are floors; that prefix is the same commits on every machine.", cut.walks, cut.commits );
+    }
+    if( cut.timeWalks != 0 )
+    {
+        said += std::format( " {} ran out of the wall-clock budget, and how far a walk gets before the clock stops it moves with machine load, so none of"
+                             " their commits is counted: the history numbers they would have fed are absent, not zero.", cut.timeWalks );
+    }
+    said += " RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget";
+    said += cut.timeWalks == 0 ? "." : ", and a commit budget cuts at the same commit on every machine.";
+    return said;
 }
 
-// A refusal that would say "git unavailable / no history" when the history walk was ended by its budget before it read one commit
-// names that instead: git ran, there IS history, the clock or the commit cap stopped the read. "" when no walk was cut.
+// A refusal that would say "git unavailable / no history" when the history walk was ended by its budget names that instead: git
+// ran, there IS history, the clock or the commit cap stopped the read. "" when no walk was cut.
 // `since` scopes it to one unit of work: an MCP server lives for many requests, and a walk an earlier request cut is not the cause of this
 // one's empty answer. The default (the whole process) is the CLI's, which answers one verb.
+// The two cuts give different causes: a COMMIT cut read nothing that answers this (the answer lies older than the budget), while a
+// CLOCK cut may have read plenty and had to drop all of it, because counting it would make the answer move with machine load.
 inline std::string gitWalkCutRefusalCause( const GitWalkCutMark& since = {} )
 {
     const GitWalkCutMark mark = gitWalkCutMark();
+    if( mark.timeWalks > since.timeWalks )
+    {
+        return "the git history walk hit its budget and none of its commits is counted (the wall clock ran out, and how far a walk gets before it does moves "
+               "with machine load, so counting them would make this answer differ run to run) - raise RIPWIRE_GIT_WALK_SECONDS, or set "
+               "RIPWIRE_GIT_WALK_COMMITS to bound the walk by a commit count every machine reproduces";
+    }
     if( mark.walks <= since.walks )
     {
         return {};
@@ -1214,9 +1259,20 @@ struct GitLogWalk
     // means a malformed stream or the disclosed `__C__` merge collision.
     int                       epochUnparsed = 0;
     GitWalkCut                cut           = GitWalkCut::None;   // the budget ended the walk: the records are the newest part
+    // The commits the visitor was handed. ZERO after a Time cut, and so is `census`: the clock's prefix is load-dependent, so no
+    // count of it may leave this walk (THE BUDGET, WHICH BUDGET CUT IT). A Commits cut's count is the budget and is kept.
     std::uint64_t             commitsVisited = 0;
     GitHistoryCensus          census;                              // a Signals walk's bots / agents / exact moves (WHOSE HISTORY)
 };
+
+// The records this walk handed its visitor must not be served: the WALL CLOCK ended it, and how far it got moves with machine
+// load (THE BUDGET, WHICH BUDGET CUT IT). Every consumer of a walk asks this and, when it is true, drops what it accumulated and
+// returns its own no-history result — which is the degrade it already had for a git that could not be read, and already disclosed.
+// A Commits cut is false here: its prefix is exactly the newest RIPWIRE_GIT_WALK_COMMITS commits on any machine.
+inline bool gitWalkValuesVoid( const GitLogWalk& walk ) noexcept
+{
+    return walk.cut == GitWalkCut::Time;
+}
 
 // One field of lookahead over a NUL-framed stream: `next` reads a field (infra/pipefields.h) or hands back the one the boundary
 // rule in forEachGitLogRecord parked in `held` while it decided what an empty field means.
@@ -1335,8 +1391,17 @@ inline void finishGitLogWalk( std::FILE* pipe, GitLogWalk& walk, GitWalkCutDiscl
         }
         if( cutSink == GitWalkCutDisclosure::ProcessTail )
         {
-            gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
-            gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
+            // A clock cut is counted but its commit count is NOT added: that number moves with machine load, and the sentence
+            // that prints the sum would then differ run to run (THE BUDGET, WHICH BUDGET CUT IT).
+            if( walk.cut == GitWalkCut::Time )
+            {
+                gitWalkCutsToDisclose().timeWalks.fetch_add( 1, std::memory_order_relaxed );
+            }
+            else
+            {
+                gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
+                gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
+            }
         }
         return;
     }
@@ -1714,6 +1779,15 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
         closeRecord();
     }
     finishGitLogWalk( pipe, walk, cutSink, anyData && !anyMarker );
+    if( gitWalkValuesVoid( walk ) )
+    {
+        // The clock ended it, so every number derived from this walk's prefix is load-dependent — the commit count and the
+        // census counts alike. They are dropped HERE, at the one seam every walk passes through, so a consumer that forgets to
+        // ask gitWalkValuesVoid can still not report a count the clock chose (it would report zero, which its own disclosure
+        // then names). The RECORDS the visitor already took are the consumer's to drop; the gate is test/historywalkcheck.sh (D).
+        walk.commitsVisited = 0;
+        walk.census         = GitHistoryCensus{};
+    }
     if( use == GitHistoryUse::Signals )
     {
         noteGitHistoryCensus( walk.census );
@@ -2517,6 +2591,13 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
         }
         flush();
     } );
+    if( gitWalkValuesVoid( walk ) )
+    {
+        // The wall clock ended the walk, so these sets are the load-dependent prefix of a window (THE BUDGET, WHICH BUDGET CUT
+        // IT): dropped, which is this miner's own no-history degrade, disclosed by the cut sentence main() prints after the answer.
+        sets.clear();
+        if( outCensus ) { *outCensus = CommitWindowCensus{}; }
+    }
     if( outHistory )
     {
         *outHistory = walk.census;
@@ -2610,6 +2691,14 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     out.exitCode = walk.exitCode;
     out.cut      = walk.cut;
     out.census   = walk.census;
+    if( gitWalkValuesVoid( walk ) )
+    {
+        // THE BUDGET, WHICH BUDGET CUT IT: the clock chose where this prefix ends, so churn= and amp= computed from it would move
+        // with machine load (PR #813). The stream goes back EMPTY with `cut` set, and main.cpp's amp=/churn= block turns that into
+        // history_unread with the clock cause: churn= absent, amp= callers only — the degrade it already has for a git that did
+        // not run. `cut` is also what keeps this stream out of the qchurn blob (quality.h).
+        out.commits.clear();
+    }
     return out;
 }
 
@@ -2841,6 +2930,15 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
         cur.clear();
     } );
     unread = gitWalkStoppedAboveFloor( walk, passedFloor );
+    if( gitWalkValuesVoid( walk ) )
+    {
+        // The clock ended the walk, so these window counts are a load-dependent prefix of the window (THE BUDGET, WHICH BUDGET
+        // CUT IT). Dropped, and `unread` is set whether or not the walk passed the window floor: --quality-delta's
+        // short-horizon-churn kind then reads this as history it could not read (unread_history="churn-window", exit 6), never
+        // as "no churn".
+        counts.assign( ing.files.size(), 0 );
+        unread = true;
+    }
     return counts;
 }
 
@@ -3024,7 +3122,7 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
     // Stream `git log --name-only` through the shared NUL-framed reader: one record per commit, its
     // committer epoch in hand, its paths resolved against the index built above.
     bool anyCommit = false;
-    forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
+    const GitLogWalk decayWalk = forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
     {
         anyCommit                 = true;
         const std::int64_t epoch  = rec.committerTs;
@@ -3055,6 +3153,16 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
         }
     } );
     m.anyHistory = anyCommit;
+    if( gitWalkValuesVoid( decayWalk ) )
+    {
+        // The clock chose where this prefix ends, so every decayed weight and every lastEpoch from it moves with machine load
+        // (THE BUDGET, WHICH BUDGET CUT IT). Dropped to the no-history shape this family already has: !anyHistory ⇒ the churn
+        // prior is UNIFORM, which churnPriorFromDecayed discloses and the verb reports in its stamp.
+        m.weights.assign( ing.files.size(), 0.0 );
+        m.lastEpoch.assign( ing.files.size(), 0 );
+        m.anyHistory        = false;
+        m.mergeBombsSkipped = 0;
+    }
     return m;
 }
 
@@ -3384,7 +3492,7 @@ inline std::vector<FileOwnership> gitFileAuthors(
         extraArgs = " -- " + shSingleQuote( relPath ) + " ";
     }
 
-    forEachGitLogRecord( root, extraArgs, [ & ]( const GitLogRecord& rec )
+    const GitLogWalk ownersWalk = forEachGitLogRecord( root, extraArgs, [ & ]( const GitLogRecord& rec )
     {
         // The old line frame parsed `email|ts` out of one field and skipped the commit's files when
         // either half was missing or the epoch did not parse. Under the NUL frame the epoch half of
@@ -3425,6 +3533,20 @@ inline std::vector<FileOwnership> gitFileAuthors(
             newestTsByFile[ f ] = std::max( newestTsByFile[ f ], curTs );
         }
     }, GitWalkCutDisclosure::ProcessTail, GitHistoryUse::Raw );   // ownership reads every author, and a move as both of its paths
+    if( gitWalkValuesVoid( ownersWalk ) )
+    {
+        // The wall clock ended the walk, so which authors and how many commits each of them owns is the load-dependent prefix
+        // the clock happened to reach (THE BUDGET, WHICH BUDGET CUT IT): on this repository's own fixture it decided whether
+        // --owners answered at all. Dropped, which makes the answer empty, and an empty one is already turned into a refusal
+        // that names the budget rather than a missing history (gitWalkCutRefusalCause).
+        singleAuthorTs = AuthorTimestamps{};
+        singleNewestTs = 0;
+        for( std::unique_ptr<AuthorTimestamps>& slot : perFile )
+        {
+            slot.reset();
+        }
+        newestTsByFile.assign( newestTsByFile.size(), 0 );
+    }
 
     std::vector<FileOwnership> result;
     const auto reduceFile = [ & ]( std::uint32_t fid, const AuthorTimestamps& authorTs, std::int64_t newestTs )
@@ -4379,6 +4501,13 @@ inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing
     } );
     if( walk.notRun )
     {
+        return false;
+    }
+    if( rw::gitWalkValuesVoid( walk ) )
+    {
+        // The wall clock ended the walk, so this per-path tally covers the prefix the clock happened to reach, which moves with
+        // machine load (THE BUDGET, WHICH BUDGET CUT IT). Dropped: false is this function's one definition of "git could not be
+        // mined", and every caller must then report UNAVAILABLE rather than read an all-zero vector as "nothing changed".
         return false;
     }
     if( counts.empty() )

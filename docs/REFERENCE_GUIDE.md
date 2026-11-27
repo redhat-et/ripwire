@@ -375,7 +375,7 @@ The map is `<r>` root, `<f p="PATH">` files, `<s t n k>` symbols, `<c n>` call e
 command wraps its rows in an element named for the verb — `<callers>`, `<uses>`, `<pr-context>`,
 `<dmm>`, `<skillscan>`.
 
-Two runs over one tree produce the same bytes (except a disclosed history cut, whose prefix moves with machine load), and every attribute and text node is XML-escaped, so
+Two runs over one tree produce the same bytes, and every attribute and text node is XML-escaped, so
 `operator<` and a path containing `&` round-trip: `ripwire . | xmllint --noout -` is a gate here.
 `docs/ARCHITECTURE.md` has the schema and the streaming writer behind it.
 
@@ -512,7 +512,9 @@ Neither diff may report a difference.
 
 **The gate scripts** hold five contracts that a unit test cannot hold.
 
-1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg — except a disclosed history cut, whose prefix moves with machine load.
+1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg. A git history walk the
+   wall clock cuts is the one place that was ever qualified: its commits are now not counted at all, because how far such a walk
+   gets moves with machine load (`test/historywalkcheck.sh` (D)).
 2. A warm run equals a cold run — the cache-transparency gates.
 3. Every XML output is well-formed. The verification command is `xmllint --noout`.
 4. The sanitizer build uses `-fno-sanitize-recover=all`, without which a run with undefined behaviour

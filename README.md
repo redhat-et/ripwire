@@ -1251,9 +1251,7 @@ all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
 **The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
 floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
-exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one, except where a
-git history walk hits its time budget on a slow repository: that cut is disclosed in the answer, and the
-prefix it keeps moves with machine load, so two runs can differ. That is a
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
 contract, gated on every pull request and every push to main, not a tendency.
 [The full discipline — and the losses published next to the wins →](#the-honesty-contract)
 

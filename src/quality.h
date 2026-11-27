@@ -6382,7 +6382,10 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // and its file's older history is followed to the new path) and so did the policy applied to the stream (a bot-authored
 // commit carries no path unless --include-bots). The bot policy is now IN the key (gitRawCommitStreamCached) — a blob read under
 // one policy never answers the other — and the blob carries the walk's census, so a warm hit discloses what a cold one would.
-constexpr std::uint32_t kQChurnCacheScheme = 6;
+// SCHEME 7 (2026-11-27, lane/gitwalk-deterministic-cut): a WALL-CLOCK cut no longer yields a stream to serve (gitmine.h WHICH
+// BUDGET CUT IT), so no blob of this scheme may carry one. A scheme-6 blob can, and a stored one would hand the load of the machine
+// that wrote it to every later run; the bump retires those as clean misses.
+constexpr std::uint32_t kQChurnCacheScheme = 7;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )
@@ -6449,7 +6452,9 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     constexpr std::size_t kMinCommitRecordBytes = sizeof( RawCommitStream::Commit::epoch ) + sizeof( std::uint32_t );
     constexpr std::size_t kMinPathRecordBytes   = sizeof( std::uint32_t );
     std::uint32_t cutCode = 0;
-    if( !qsnapGet( p, end, cutCode ) || cutCode > std::uint32_t( GitWalkCut::Time ) )
+    // A clock-cut stream is never written under this scheme (gitmine.h WHICH BUDGET CUT IT), so one in a blob is a foreign or
+    // hand-made file: a clean miss, which recomputes, never a load-dependent prefix served as an answer.
+    if( !qsnapGet( p, end, cutCode ) || cutCode >= std::uint32_t( GitWalkCut::Time ) )
     {
         return false;
     }
@@ -6516,8 +6521,10 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
 // degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
 // gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
 // mutex, and the blob write is an atomic rename. K51: a walk git could not complete comes back with `unread` set and is never stored.
-// A prefix the BUDGET cut (gitmine.h THE BUDGET) is stored only when it is worth keeping: a Time cut under kMinStoredTimeCutCommits is a git
-// that stalled, not a slow repo, and `noCache` (--no-cache) neither reads nor writes any cut, so the flag that asks for a fresh answer gets one.
+// A prefix the COMMIT budget cut (gitmine.h THE BUDGET) IS stored: it is the newest N commits on any machine, so keeping it keeps the
+// same answer. A WALL-CLOCK cut is never stored and comes back empty (gitmine.h WHICH BUDGET CUT IT) — storing one froze the load of
+// the machine that wrote it into every later run — and `noCache` (--no-cache) neither reads nor writes any cut, so the flag that asks
+// for a fresh answer gets one.
 inline constexpr std::size_t kMinStoredTimeCutCommits = 1024;
 inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince, bool noCache = false )
 {
@@ -6575,14 +6582,16 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
         // An abandoned read (a memory-guard refusal stopped the walk) is a prefix too, even when git exited 0: never cached.
         return raw;
     }
-    if( raw.cut != GitWalkCut::None
-        && ( noCache || ( raw.cut == GitWalkCut::Time && raw.commits.size() < kMinStoredTimeCutCommits ) ) )
+    if( raw.cut != GitWalkCut::None && ( noCache || raw.cut == GitWalkCut::Time ) )
     {
-        return raw;   // --no-cache keeps no cut; a clock that ran out within the first ~1,000 commits is a stalled git, not a prefix worth keeping until HEAD moves
+        // --no-cache keeps no cut. A CLOCK cut is never kept under any flag: it carries no commits to keep (gitLogNameOnlyRaw
+        // emptied it), and a stored empty stream would read as "read, no commits" under this (repo, HEAD, window) key until HEAD
+        // moved — the K51 mistake, with one machine's load in place of the history.
+        return raw;
     }
-    // A cut prefix IS stored (a Commits cut, or a Time cut of a slow repo): re-walking would cost the whole budget on every call of a repo
-    // that will only cut again, and the blob carries the cut, so the next answer still discloses it. Where the clock decided, WHICH commits
-    // it reached moves with machine load, so the answer says so (renderHistoryUnread). It is the same prefix until HEAD moves.
+    // A COMMIT-cut prefix IS stored: re-walking would cost the whole budget on every call of a repo that will only cut again, and
+    // the blob carries the cut, so the next answer still discloses it. It is the newest N commits — the same ones on any machine,
+    // which is what makes storing it sound — and it stays that prefix until HEAD moves.
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                    // write just recomputes next time
     return raw;
