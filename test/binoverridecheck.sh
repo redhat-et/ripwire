@@ -128,6 +128,7 @@ EXEMPT = {
     "strkerncheck.sh":           "drives the CMake target ripwire_test_strkern (test/verify_strkern.cpp) and two direct-compiled SIMD arms (mutated, x86_64 cross) — never invokes build/ripwire",
     "releaseinstallcheck.sh":    "tests install.sh against a FABRICATED release asset/stub server; independent of build/ripwire",
     "reusefirstworkflowcheck.sh":"checks skills/ripwire-reuse-first/SKILL.md content; pure file check",
+    "skillshapecheck.sh":        "checks skills/*/ line counts and Contents: lines against planted copies; pure file check",
     "roundcderivecheck.sh":      "gates bench/roundc-h2h/derive_questions.py (#492, #540): it runs a COPY of that python harness against a stub git it writes itself and reads only the harness's exit code, stderr and questions.json; no ripwire binary is bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so a broken binary cannot turn it red",
     "ripwirepubliccheck.sh":     "checks git-tracked files for leaked private content; pure file/grep check",
     "shardapartcheck.sh":        "gates test/pargates.py's shard plan (--shard-plan runs no gate and needs no binary) against the workflow's shard counts and skip lists, plus a synthetic root and the binoverride hint table; build/ripwire is never bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so (2b)'s static tell needs no exemption row for it, the same shape as skipclassifycheck below",

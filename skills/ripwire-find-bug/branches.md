@@ -1,5 +1,7 @@
 # ripwire-find-bug — reference: branches (read on demand; the recipe is in SKILL.md)
 
+Contents: Branch A — "I have a symptom, no idea where it lives" · 1. Symptom search · 2. If several candidates remain, maintenance hotspots · 3. If the symptom is broad, blast radius of each remaining c · 4. Read narrowly · Branch B — "I suspect a subsystem — narrow it" · 1. Symptom-to-code · 2. Hotspots in those directories · 3. Find the exact emit site · Branch C — "I changed X and now something's broken" (regress · 1. Situational awareness on the change · 2. Who calls the broken symbol · 3. Co-change history · 4. Read · Branch D — "I have a stack trace / sanitizer report / compil · 1. Map the trace onto symbols · 2. Read rank 1 first · 3. Compose the budget · 4. Or skip the run-read-paste loop entirely · Output
+
 # Find the bug with ripwire
 
 > Nearest neighbours:

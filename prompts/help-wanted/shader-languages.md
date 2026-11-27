@@ -7,6 +7,8 @@ design decisions.
 
 Work in a git worktree. Run gates in the foreground.
 
+Status (2026-11-26): #160 is open with no claim, and no shader grammar is vendored.
+
 ---
 
 ## Why this matters
@@ -88,7 +90,7 @@ Checked against each repository on 2026-09-11. Re-check before you vendor.
 - **HLSL** uses `.hlsl`, and commonly `.hlsli` for included files.
 - **WGSL** uses `.wgsl`.
 
-Every extension you add to `kLangTable` is a claim. Check the corpora for non-shader files with the
+Every extension you add to `kLangTable` (`src/ingest_crawl.h`) is a claim. Check the corpora for non-shader files with the
 same extension before you claim it.
 
 **The measurement.** Follow add-a-language.md STEP 0, and record two numbers per file:
@@ -105,6 +107,20 @@ files separately, because that is where the parse rate will fall.
 ---
 
 ## Design notes
+
+**Orient first.** Before opening files, run
+`./build/ripwire . --for="metal cuda ride Lang::Cpp kLangTable grammar row tags.scm"` and read the
+`.metal` and `.cu` rows it ranks. Before writing a helper or the gate, `--exemplar="<what you are
+writing>"` (`test/cudacheck.sh` is the nearest gate).
+
+**Where a language lives on main today.** add-a-language.md's steps hold, but the files moved after
+its Elixir reconstruction; Lua/PHP (`a8b99318f`), GDScript (`1ca964b89`) and Clojure (`3205e4c85`)
+show the current set. A **new** `Lang` is data first: `queries/<lang>/tags.scm`, a `kLangFacts` row in
+`src/langfacts.h` (a missing row does not compile), the `enum class Lang` append in `src/model.h`, the
+`kLangTable` row and its `src/lintrules.h` mirrors (the compile-time checks in `src/ingest_crawl.h` and
+`src/main.cpp` name each one you missed). A **riding** language is one `kLangTable` row plus its
+`kLintExtRows` and `includeLangOf` (`src/resolve.h`) mirrors, the way `.metal` and `.cu` are, and
+`test/deplangscheck.sh` arm (G) refuses the lint row without the include row.
 
 **A new `Lang`, or ride a C-family one?**
 
@@ -183,8 +199,8 @@ definition of that name, and one method gained 2,107 false callers on a real cor
 
 - Fix grammar bugs upstream.
 - The only local edits are crash or memory-safety fixes, carried as
-  `third_party/patches/<dep>/NNN-name.patch` under `test/vendorpatchcheck.sh`'s convention. The yaml,
-  markdown and swift grammars already carry such patches.
+  `third_party/patches/<dep>/NNN-name.patch` under `test/vendorpatchcheck.sh`'s convention; nine
+  vendored trees carry such patches today (`third_party/patches/README.md`).
 - The vendored tree lives under `third_party/deps/<name>/`, because `ripwire_use_vendored_source` in
   CMakeLists.txt never fetches.
 
@@ -219,7 +235,8 @@ bodies are all unbounded.
   - Every vendored scanner that uses the serialization buffer must be classified
     (`test/vendorpatchcheck.sh` arm H).
 - **Parser versions collide across PRs.** `kParserVer` and `kIngestParserVerMirror` move together,
-  and in-flight language PRs claim versions too. Take the next free value on the tree you merge onto.
+  and in-flight language PRs claim versions too. The maintainers assign your number in the PR
+  (add-a-language STEP 4); re-check it on the tree you merge onto.
 
 ---
 
@@ -246,6 +263,11 @@ bodies are all unbounded.
 8. **Disclosure**: the README Languages section's count and a paragraph for the new language, plus
    the blind spots stated in the gate header.
 9. **STEP 8's suite**, green in the foreground.
+
+**Done means** `bash test/<lang>check.sh` red on the base binary and green on yours, with
+`test/cudacheck.sh`, `test/vendorpatchcheck.sh` and `test/deplangscheck.sh` still green; then
+`./build/ripwire . --quality-delta --legend=compact` clean, `--test-gate`'s named tests green, and
+`python3 test/pargates.py . ./build/ripwire -j 6` green.
 
 ---
 
