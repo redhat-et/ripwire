@@ -313,7 +313,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "start_line",    "a positive integer, 1-based and body-relative (omit it to start at line 1)",  "start_line=1", "integer" },
     { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
     { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
-    { "bytes",         "an integer in 512..8192 (the brief's byte cap; omit it for the size class's own 2.5 / 4 / 6 KB)", "bytes=4096", "integer" },
+    { "bytes",         "an integer in 512..8192 (the brief's byte cap; omit it for the size class's own 3.5 / 5 / 7 KB)", "bytes=4096", "integer" },
     // ── string ──
     { "path",          "a STRING repo directory",                                                     "path=\".\"" },
     { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },

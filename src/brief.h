@@ -7,11 +7,12 @@
 //   2 <build>        build/test commands QUOTED from manifests and the repo's own docs, never guessed; the test registration
 //   3 <entry>        program entries and the public header, ranked by call/include reach to the task's act symbols
 //   4 <task>         the --for core for TASK: confidence, <act read=> with up to 8 ranges, θ11 question sites
+//   4b <ranked>      the files --for's own page ranks (exemplar family, registration, sigs and tail rows) no other section names
 //   5 <edges>        callers and cross-file callees of the top-3 act symbols
 //   6 <where-else>   co-change partners, tests, docs, changelog and the test-registering build file of the act files
 //   7 <conventions>  agent/contributor docs as pointers: path + H2 headings with their lines
 //   8 <next>         the three-moment line `ripwire wrap claude` prints (subagentblock.h), unchanged
-// Size by repo class (files indexed): small < 1K -> 2,560 B; medium < 10K -> 4,096 B; large -> 6,144 B; --brief-bytes=N
+// Size by repo class (files indexed): small < 1K -> 3,584 B; medium < 10K -> 5,120 B; large -> 7,168 B; --brief-bytes=N
 // (512..8,192) overrides. Over budget, parts drop in kDropOrder and each drop is named in dropped=; act and build never drop
 // (owner: "a budget that prevents answers is bad"), so an answer that still does not fit says over="1".
 //
@@ -32,7 +33,7 @@
 #include "sarif.h"         // rootPrefixOf — the question sites' root-relative paths
 #include "serialize.h"     // escapeXml, attrOf
 #include "subagentblock.h" // kSubagentBriefBlock — section 8
-#include "infra/envnumber.h" // readEnvNumber — the two halves' OFF switches
+#include "infra/envnumber.h" // envSwitchedOff — the RIPWIRE_BRIEF_* OFF switches
 #include "infra/namesplit.h" // afterLast — the one last-segment split
 #include "infra/ownedfile.h"
 #include "infra/sortutil.h"  // sortUnique — the co-change path sets
@@ -114,9 +115,9 @@ inline std::string compactLegend( const LegendTerms& t )
 inline constexpr std::size_t kReadingNotesBytes = 104;
 inline constexpr std::size_t kLegendDefsBytes   = kLegend.size() + kSchemaAttr.size() - kReadingNotesBytes;
 inline constexpr std::array<ClassCaps, 3> kClassCaps = { {
-    { "small", 1000, 2560 + kLegendDefsBytes, 12, 3, 6 },
-    { "medium", 10000, 4096 + kLegendDefsBytes, 12, 4, 8 },
-    { "large", 0, 6144 + kLegendDefsBytes, 20, 5, 8 },
+    { "small", 1000, 3584 + kLegendDefsBytes, 12, 3, 6 },
+    { "medium", 10000, 5120 + kLegendDefsBytes, 12, 4, 8 },
+    { "large", 0, 7168 + kLegendDefsBytes, 20, 5, 8 },
 } };
 inline constexpr std::size_t kMinBudgetBytes  = 512;
 inline constexpr std::size_t kHardCapBytes    = 8192;
@@ -343,9 +344,6 @@ inline bool isDocPath( std::string_view rel ) noexcept
     const std::string_view b = baseName( rel );
     return roleOfPath( rel ) == "docs" || b.ends_with( ".md" ) || b.ends_with( ".rst" ) || b.ends_with( ".adoc" ) || b.ends_with( ".txt" );
 }
-
-// An OFF switch: the env knob is set to 0 (unset, empty or not a number: the feature stays on).
-inline bool switchOff( const char* name ) noexcept { return readEnvNumber( name ).isZero(); }
 
 inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
 
@@ -663,7 +661,7 @@ inline std::vector<std::string> exemplarWords( std::string_view task )
         {
             const char ch   = i < task.size() ? task[i] : ' ';
             const bool last = i + 1 >= task.size() || task[i + 1] == ' ';
-            const bool end  = ch == ')' || ch == ',' || ch == ';' || ch == '?' || ch == '!' || ch == '\n' || ( ch == '.' && last );
+            const bool end  = ch == ')' || ch == ',' || ch == ';' || ch == '?' || ch == '!' || ch == '\n' || ( ( ch == '.' || ch == ':' ) && last );
             if( ch == ' ' || end )
             {
                 const std::string w = lower( cur );
@@ -833,18 +831,40 @@ inline std::string singular( std::string w )
 
 // The probes in order (one word: its name leaf exact, then case-blind, then as a path leaf; several: their CamelCase join
 // case-blind, the snake join, then the first word as a path leaf with the rest as kind words); the first probe that hits decides.
-inline Exemplar findExemplar( const Corpus& c, std::string_view task )
+// The file a "like X: path" phrase names outright, when it is an indexed file: the task's own pointer beats any name probe.
+inline std::string namedExemplarFile( const Corpus& c, std::string_view task )
 {
-    Exemplar                       ex;
-    const std::vector<std::string> words = exemplarWords( task );
-    if( words.empty() )
+    const std::string lo = lower( task );
+    for( std::size_t at = lo.find( "like " ); at != std::string::npos; at = lo.find( "like ", at + 1 ) )
     {
-        return ex;
+        const std::size_t close = task.find_first_of( ")\n", at );
+        const std::size_t colon = task.find( ": ", at );
+        if( ( at > 0 && lo[at - 1] != ' ' && lo[at - 1] != '(' ) || colon == std::string_view::npos || ( close != std::string_view::npos && colon > close ) )
+        {
+            continue;
+        }
+        std::string_view path = task.substr( colon + 2 );
+        path = path.substr( 0, path.find_first_of( " ),;\n" ) );
+        while( !path.empty() && ( path.back() == '.' || path.back() == '`' ) )
+        {
+            path.remove_suffix( 1 );
+        }
+        if( !path.empty() && path.front() == '`' )
+        {
+            path.remove_prefix( 1 );
+        }
+        if( c.indexedId( path ) )
+        {
+            return std::string( path );
+        }
     }
-    for( const std::string& w : words )
-    {
-        ex.phrase += ( ex.phrase.empty() ? "" : " " ) + w;
-    }
+    return {};
+}
+
+// The exemplar phrase's lookups, most specific first: one word -> the exact symbol, then its prefix, then a path leaf (unqualified
+// only); several words -> the camelCase and snake_case joins, then a path named by the first word with the rest as its kinds.
+inline std::vector<std::vector<std::string>> exemplarProbes( const Corpus& c, const std::vector<std::string>& words )
+{
     std::vector<std::vector<std::string>> probes;
     if( words.size() == 1 )
     {
@@ -874,7 +894,27 @@ inline Exemplar findExemplar( const Corpus& c, std::string_view task )
         }
         probes.push_back( pathHits( c, nameLeaf( words[0] ), kinds ) );
     }
-    for( const std::vector<std::string>& hits : probes )
+    return probes;
+}
+
+inline Exemplar findExemplar( const Corpus& c, std::string_view task )
+{
+    Exemplar                       ex;
+    const std::vector<std::string> words = exemplarWords( task );
+    if( words.empty() )
+    {
+        return ex;
+    }
+    for( const std::string& w : words )
+    {
+        ex.phrase += ( ex.phrase.empty() ? "" : " " ) + w;
+    }
+    if( std::string named = namedExemplarFile( c, task ); !named.empty() )
+    {
+        ex.file = std::move( named );
+        return ex;
+    }
+    for( const std::vector<std::string>& hits : exemplarProbes( c, words ) )
     {
         std::vector<std::string> units = exemplarUnits( hits );
         if( units.size() == 1 )
@@ -2327,8 +2367,8 @@ inline std::string supportFile( const Corpus& c, const FileAdjacency& adj, const
 inline SubjectTests subjectTests( const Corpus& c, const FileAdjacency& adj, std::string_view anchor, std::string_view leaf )
 {
     SubjectTests                       out;
-    const std::optional<std::uint32_t> anchorId = c.file( anchor );
-    if( !anchorId || c.g.outOff.size() < c.ing.symbols.size() + 1 || switchOff( "RIPWIRE_BRIEF_SUBJECTTESTS" ) )
+    const std::optional<std::uint32_t> anchorId = c.indexedId( anchor );
+    if( !anchorId || c.g.outOff.size() < c.ing.symbols.size() + 1 || envSwitchedOff( "RIPWIRE_BRIEF_SUBJECTTESTS" ) )
     {
         return out;
     }
@@ -2898,7 +2938,7 @@ inline std::vector<std::string> mainDelegates( const Corpus& c, Entry& e )
     {
         shown.push_back( out[order[i]] );
     }
-    if( out.size() == 1 && !switchOff( "RIPWIRE_BRIEF_HANDOFF" ) )
+    if( out.size() == 1 && !envSwitchedOff( "RIPWIRE_BRIEF_HANDOFF" ) )
     {
         std::vector<std::string> next;
         std::vector<int>         nextCalls;
@@ -3134,7 +3174,7 @@ inline bool isAncestorDir( std::string_view dir, std::string_view of ) noexcept
 inline std::vector<std::string> packageSurface( const Corpus& c, const FileAdjacency& adj, std::string_view page, const std::vector<std::string>& from )
 {
     std::vector<std::string> out;
-    if( switchOff( "RIPWIRE_BRIEF_SURFACE" ) )
+    if( envSwitchedOff( "RIPWIRE_BRIEF_SURFACE" ) )
     {
         return out;
     }
@@ -3168,7 +3208,7 @@ inline std::vector<std::string> packageSurface( const Corpus& c, const FileAdjac
     std::vector<std::uint32_t> level;
     for( const std::string& p : from )
     {
-        if( const std::optional<std::uint32_t> id = c.file( p ); id && !seen[*id] )
+        if( const std::optional<std::uint32_t> id = c.indexedId( p ); id && !seen[*id] )
         {
             seen[*id] = 1;
             level.push_back( *id );
@@ -3221,9 +3261,16 @@ inline std::string renderEntrySlot( const Corpus& c, const std::vector<Entry>& e
     {
         out += ( k == 0 ? "surface: " : " · " ) + xml( surface[k] );
     }
+    bool first = surface.empty();
     for( int i = 0; i < int( entries.size() ) && i < cap; ++i )
     {
-        out += ( i > 0 || !surface.empty() ? " · " : "" ) + entryRow( c, entries[std::size_t( i )], lean );
+        const Entry& e = entries[std::size_t( i )];
+        if( lean && e.delegates.empty() && std::ranges::contains( surface, c.rel[e.fileId] ) )
+        {
+            continue;   // the lean row would repeat a surface path and say nothing else
+        }
+        out += ( first ? "" : " · " ) + entryRow( c, e, lean );
+        first = false;
     }
     if( entries.empty() && surface.empty() )
     {
@@ -3284,6 +3331,80 @@ inline std::string renderTask( const ForCore& core, std::string_view qs )
     out += "\"/>";
     out += qs;
     return out + "</task>";
+}
+
+// ── section 4b: the files --for's page ranks that the brief does not name ─────────────────────────────────────────────────
+// Reuses --for's own ranking, never a name rule: the exemplar family's members (<m p=>) and the files that register them
+// (<touch p=>), then the files of the <sigs> rows and of the <tail> rows, page order. Only indexed files count; the slot
+// drops those any other slot already names.
+inline constexpr std::size_t kRankedShown = 12;   // ranked files named in <ranked>
+inline constexpr std::size_t kRankedKept  = 4;    // what the ranked drop keeps
+
+// The CDATA text of the first `<tag …><![CDATA[…]]>` on the page (empty when the page has none).
+inline std::string_view pageCdata( std::string_view page, std::string_view tag )
+{
+    const std::size_t open = page.find( "<" + std::string( tag ) + " " );
+    const std::size_t gt   = open == std::string_view::npos ? open : page.find( '>', open );
+    if( gt == std::string_view::npos || page.substr( gt + 1 ).rfind( "<![CDATA[", 0 ) != 0 )
+    {
+        return {};
+    }
+    const std::size_t from = gt + 1 + 9;
+    const std::size_t shut = page.find( "]]>", from );
+    return shut == std::string_view::npos ? std::string_view() : page.substr( from, shut - from );
+}
+
+inline std::string_view pathOfRow( std::string_view row ) noexcept
+{
+    const std::size_t end = row.find_first_of( ": \t" );
+    return row.substr( 0, end );
+}
+
+inline std::vector<std::string> pageRanked( const Corpus& c, std::string_view page )
+{
+    std::vector<std::string> out;
+    if( envSwitchedOff( "RIPWIRE_BRIEF_RANKED" ) )
+    {
+        return out;
+    }
+    const auto add = [ & ]( std::string_view p )
+    {
+        if( !p.empty() && c.indexedId( p ) )
+        {
+            pattern::appendUnique( out, std::string( p ) );
+        }
+    };
+    for( const std::string_view tag : { std::string_view( "<m n=" ), std::string_view( "<touch p=" ) } )
+    {
+        for( std::size_t at = page.find( tag ); at != std::string_view::npos; at = page.find( tag, at + 1 ) )
+        {
+            add( pathOfRow( attrOf( page.substr( at, page.find( '>', at ) - at ), "p" ) ) );
+        }
+    }
+    for( const std::string_view block : { pageCdata( page, "sigs" ), pageCdata( page, "tail" ) } )
+    {
+        forEachLine( block, [ & ]( std::string_view row, int )
+        {
+            add( pathOfRow( row ) );
+            return true;
+        } );
+    }
+    return out;
+}
+
+// The ranked files no other slot names, at most `cap`; `named` is the rest of the brief at its fullest.
+inline std::string renderRanked( const std::vector<std::string>& ranked, std::string_view named, std::size_t cap )
+{
+    std::string out;
+    std::size_t shown = 0;
+    for( const std::string& p : ranked )
+    {
+        if( shown < cap && named.find( p ) == std::string_view::npos )
+        {
+            out += ( shown++ > 0 ? " · " : "" ) + xml( p );
+        }
+    }
+    return shown == 0 ? std::string() : "<ranked>" + out + "</ranked>";
 }
 
 // ── section 5: edges ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -3551,7 +3672,7 @@ inline std::vector<std::string> goPackageImporters( const Corpus& c, std::string
     std::vector<std::string> out;
     const std::string_view   dir    = dirName( anchor );
     const std::string        module = anchor.ends_with( ".go" ) && !dir.empty() ? goModule( c ) : std::string();
-    if( module.empty() || switchOff( "RIPWIRE_BRIEF_SURFACE" ) )
+    if( module.empty() || envSwitchedOff( "RIPWIRE_BRIEF_SURFACE" ) )
     {
         return out;
     }
@@ -4067,7 +4188,7 @@ inline void assignRoles( const Corpus& c, const std::vector<CoScore>& scores, co
 inline RoleHistory roleHistory( const Corpus& c, std::string_view anchor, bool noCache )
 {
     RoleHistory h;
-    if( anchor.empty() || switchOff( "RIPWIRE_BRIEF_COCHANGE" ) || !hasEnclosingGitRepo( c.diskRoot ) )
+    if( anchor.empty() || envSwitchedOff( "RIPWIRE_BRIEF_COCHANGE" ) || !hasEnclosingGitRepo( c.diskRoot ) )
     {
         return h;
     }
@@ -4092,7 +4213,7 @@ inline RoleHistory roleHistory( const Corpus& c, std::string_view anchor, bool n
 inline std::vector<std::string> unitBuild( const Corpus& c, std::string_view anchor, const TestHome& home, const RoleHistory& h )
 {
     std::vector<std::string> out;
-    if( !switchOff( "RIPWIRE_BRIEF_UNITBUILD" ) && !anchor.empty() )
+    if( !envSwitchedOff( "RIPWIRE_BRIEF_UNITBUILD" ) && !anchor.empty() )
     {
         const std::string_view testFrom = !h.tests.empty()          ? std::string_view( h.tests.front() )
                                           : !home.testDir.empty()   ? std::string_view( home.testDir )
@@ -4423,9 +4544,10 @@ inline std::string renderConventions( const std::vector<ConventionDoc>& docs, bo
 // ── the drop ladder ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Byte order inside each slot (round 2): the attrs step sheds what holds no path — an entry's line, kind and hops, an edge row's
 // caller lines and names, a question site's line numbers — before any step cuts a path. The act ranges stay: they are the read plan.
-enum class Drop : std::uint8_t { ConventionHeadings, Attrs, LayoutDepth, EntriesPast3, EdgesPast1, WhereElsePast3, QuestionSites };
-inline constexpr std::array<std::pair<Drop, std::string_view>, 7> kDropOrder = { {
-    { Drop::ConventionHeadings, "conventions" }, { Drop::Attrs, "attrs" }, { Drop::LayoutDepth, "layout_depth" }, { Drop::EntriesPast3, "entry" },
+enum class Drop : std::uint8_t { ConventionHeadings, Attrs, LayoutDepth, RankedPast4, EntriesPast3, EdgesPast1, WhereElsePast3, QuestionSites };
+inline constexpr std::array<std::pair<Drop, std::string_view>, 8> kDropOrder = { {
+    { Drop::ConventionHeadings, "conventions" }, { Drop::Attrs, "attrs" }, { Drop::LayoutDepth, "layout_depth" }, { Drop::RankedPast4, "ranked" },
+    { Drop::EntriesPast3, "entry" },
     { Drop::EdgesPast1, "edges" }, { Drop::WhereElsePast3, "where_else" }, { Drop::QuestionSites, "qs" },
 } };
 
@@ -4433,7 +4555,7 @@ inline constexpr std::array<std::pair<Drop, std::string_view>, 7> kDropOrder = {
 struct SlotForms
 {
     std::array<std::array<std::string, 2>, 2> form;
-    const std::string& at( bool lean, bool cut ) const { return form[lean ? 1 : 0][cut ? 1 : 0]; }
+    const std::string& pick( bool lean, bool cut ) const { return form[lean ? 1 : 0][cut ? 1 : 0]; }
 };
 
 struct Sections
@@ -4441,14 +4563,15 @@ struct Sections
     std::string layoutDeep, layoutTop, build;
     SlotForms   entry, task, edges;
     std::string whereAll, where3, convFull, convPaths, next;
+    std::string rankedAll, ranked4;   // filled after the rest: it names only what no other slot does
 };
 
 inline std::string body( const Sections& s, std::span<const bool> dropped )
 {
     const auto on   = [ & ]( Drop d ) { return dropped[std::size_t( d )]; };
     const bool lean = on( Drop::Attrs );
-    return ( on( Drop::LayoutDepth ) ? s.layoutTop : s.layoutDeep ) + s.build + s.entry.at( lean, on( Drop::EntriesPast3 ) )
-           + s.task.at( lean, on( Drop::QuestionSites ) ) + s.edges.at( lean, on( Drop::EdgesPast1 ) )
+    return ( on( Drop::LayoutDepth ) ? s.layoutTop : s.layoutDeep ) + s.build + s.entry.pick( lean, on( Drop::EntriesPast3 ) )
+           + s.task.pick( lean, on( Drop::QuestionSites ) ) + ( on( Drop::RankedPast4 ) ? s.ranked4 : s.rankedAll ) + s.edges.pick( lean, on( Drop::EdgesPast1 ) )
            + ( on( Drop::WhereElsePast3 ) ? s.where3 : s.whereAll ) + ( on( Drop::ConventionHeadings ) ? s.convPaths : s.convFull ) + s.next;
 }
 
@@ -4595,7 +4718,14 @@ inline std::string composeBrief( const BriefInputs& in )
                 SlotForms{ { { { renderEdgeSlot( edges, kEdgeSymbols, imports, reg, false ), renderEdgeSlot( edges, 1, imports, reg, false ) },
                                { renderEdgeSlot( edges, kEdgeSymbols, imports, reg, true ), renderEdgeSlot( edges, 1, imports, reg, true ) } } } },
                 renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
-                renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>" };
+                renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>", {}, {} };
+    {
+        const std::array<bool, kDropOrder.size()> none{};
+        const std::string                         named   = body( s, none );
+        const std::vector<std::string>            ranked  = pageRanked( c, in.forPage );
+        s.rankedAll = renderRanked( ranked, named, kRankedShown );
+        s.ranked4   = renderRanked( ranked, named, kRankedKept );
+    }
 
     // the root, then the fit: drop in kDropOrder until the whole answer is within budget
     std::string task( in.task.substr( 0, std::min( in.task.size(), kTaskEchoBytes ) ) );

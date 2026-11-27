@@ -885,6 +885,7 @@ rleg_rec=0; rleg_abs=0; rleg_abs_bare=0
 while IFS= read -r _t; do
     [ -n "$_t" ] || continue
     route "$_t" 2>/dev/null > "$TMP/rleg_one.xml"
+    rleg_row=$(( ${rleg_row:-0} + 1 )); cp "$TMP/rleg_one.xml" "$TMP/rleg_on_$rleg_row.xml"   # (OB4) reuses the ON answers
     grep -oE '<run>[^<]*' "$TMP/rleg_one.xml" | sed 's/^<run>//' >> "$TMP/rleg_cmds.txt"
     _root="$( grep -oE '<task-route [^>]*>' "$TMP/rleg_one.xml" | head -1 )"
     case "$_root" in
@@ -954,6 +955,75 @@ done < "$TMP/rleg_u.txt"
 [ "$rleg_st_bad" -eq 0 ] \
     && ok "R-LEG: every generated command exited 0 (answered: $rleg_st0) or 1 (documented empty-corpus degrade: $rleg_st1) — no unexpected status, none swallowed" \
     || no "R-LEG: $rleg_st_bad of $rleg_n generated commands exited with an unexpected status (listed above) — the old '|| true' reported PASS for these"
+
+
+# ── ORIENT-BRIEF (BRIEF round 3): an orientation question about the repository itself routes to --brief ─────────────────────
+# The card sits where the router would otherwise ABSTAIN (classifyRoutesUncapped's last fallback, after recency), so:
+# (OB1) a repository noun plus orientation wording recommends --brief=TASK; (OB2) the negatives keep their old answer — no
+# repository noun, a subsystem question, office prose whose only noun is "project"; (OB3) older routes keep first refusal
+# (plan-feature, recency); (OB4) RIPWIRE_BRIEF_ROUTE=0 turns the card off — the positives abstain with next="--for=…" again —
+# and every corpus row answers byte-identically ON and OFF (the corpus has no orientation row, so the card may change none);
+# (OB5) the recommended command runs and prints a brief.
+OB_POS=( "I'm new to this repo, where do I start?"
+         'give me an overview of this codebase'
+         'how is this project organized'
+         'explain the architecture of this project'
+         'give me a tour of this repository' )
+OB_NEG=( 'how does the plugin system work'
+         'where do I start with my taxes'
+         'overview of the quarter for the project budget'
+         "I'm new to the team, who should I meet"
+         'give me a tour of the office' )
+ob_pos=0; ob_neg=0
+for p in "${OB_POS[@]}"; do
+    out="$( route "$p" )"
+    case "$out" in
+        *'status="recommend"'*'intent="orient-brief"'*'--brief='*) ob_pos=$(( ob_pos + 1 ));;
+        *) no "(OB1) orientation question did not route to --brief: '$p' -> $( printf '%s' "$out" | head -c 240 )";;
+    esac
+done
+[ "$ob_pos" -eq "${#OB_POS[@]}" ] && ok "(OB1) $ob_pos/${#OB_POS[@]} orientation questions -> --brief=TASK (intent orient-brief)"
+for p in "${OB_NEG[@]}"; do
+    out="$( route "$p" )"
+    case "$out" in
+        *'intent="orient-brief"'*) no "(OB2) non-orientation prompt minted orient-brief: '$p'";;
+        *) ob_neg=$(( ob_neg + 1 ));;
+    esac
+done
+[ "$ob_neg" -eq "${#OB_NEG[@]}" ] && ok "(OB2) $ob_neg/${#OB_NEG[@]} negatives (no repository noun / subsystem / 'project' office prose) never mint orient-brief"
+OB3A="$( route "I'm new to this repo and want to plan a new feature" )"
+OB3B="$( route "I'm new to this repo, what changed recently?" )"
+case "$OB3A" in *'intent="plan-feature"'*) ok "(OB3) plan-feature keeps first refusal over orient-brief";; *) no "(OB3) plan-feature lost its row: $( printf '%s' "$OB3A" | head -c 240 )";; esac
+case "$OB3B" in *'intent="recency-window"'*) ok "(OB3) recency-window keeps first refusal over orient-brief";; *) no "(OB3) recency-window lost its row: $( printf '%s' "$OB3B" | head -c 240 )";; esac
+ob_off=0
+for p in "${OB_POS[@]}"; do
+    out="$( RIPWIRE_BRIEF_ROUTE=0 route "$p" )"
+    case "$out" in
+        *'status="abstain"'*' next="--for='*) ob_off=$(( ob_off + 1 ));;
+        *) no "(OB4) RIPWIRE_BRIEF_ROUTE=0 still routed: '$p' -> $( printf '%s' "$out" | head -c 240 )";;
+    esac
+done
+[ "$ob_off" -eq "${#OB_POS[@]}" ] && ok "(OB4) RIPWIRE_BRIEF_ROUTE=0: $ob_off/${#OB_POS[@]} orientation questions abstain with next=--for= as before the card"
+ob_rows=0; ob_diff=0
+while IFS= read -r _t; do
+    [ -n "$_t" ] || continue
+    ob_rows=$(( ob_rows + 1 ))
+    RIPWIRE_BRIEF_ROUTE=0 route "$_t" > "$TMP/ob_off.xml" 2>/dev/null
+    if ! cmp -s "$TMP/rleg_on_$ob_rows.xml" "$TMP/ob_off.xml"; then
+        ob_diff=$(( ob_diff + 1 ))
+        [ "$ob_diff" -le 3 ] && printf '        ON != OFF: %s\n' "$( printf '%s' "$_t" | head -c 100 )"
+    fi
+done < "$TMP/rleg_tasks.txt"
+[ "$ob_rows" -gt 0 ] || no "(OB4) premise: the corpus pass compared no row"
+[ "$ob_rows" -gt 0 ] && [ "$ob_diff" -eq 0 ] && ok "(OB4) all $ob_rows corpus rows answer byte-identically with the card ON and OFF"
+[ "$ob_diff" -eq 0 ] || no "(OB4) $ob_diff of $ob_rows corpus rows changed with the card ON (listed above)"
+OB5="$( route 'give me an overview of this codebase' | grep -oE '<run>[^<]*' | sed 's/^<run>//' | python3 -c 'import html,sys; sys.stdout.write(html.unescape(sys.stdin.read()))' )"
+case "$OB5" in ripwire\ *) OB5="${OB5#ripwire }";; *) OB5="";; esac   # run THIS binary, not whatever ripwire is on PATH
+if [ -n "$OB5" ] && eval "\"\$BIN\" $OB5 --no-cache" >"$TMP/ob5.out" 2>"$TMP/ob5.err" && grep -q '<brief' "$TMP/ob5.out"; then
+    ok "(OB5) the recommended --brief command runs and prints a <brief> ($( wc -c <"$TMP/ob5.out" | tr -d ' ' ) B)"
+else
+    no "(OB5) the recommended command failed or printed no <brief>: '$OB5' $( head -c 200 "$TMP/ob5.err" )"
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

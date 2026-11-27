@@ -17,7 +17,7 @@ section (branch, HEAD sha with `+dirty`, changed files and their symbols, blast 
 and a `<heuristic>` section (co-change partners, notes, design-doc pointers) labelled as suggestion. Paste it as-is.
 Single-root.
 
-**A fresh code-editing subagent** (a task, not a subsystem)? One call: `ripwire <dir> --brief="TASK" --legend=compact` — one 2.5/4/6 KB page
+**A fresh code-editing subagent** (a task, not a subsystem)? One call: `ripwire <dir> --brief="TASK" --legend=compact` — one 3.5/5/7 KB page
 (layout with `(skip)` dirs, build/test commands quoted from manifests, entries, the task's act ranges, edges, where-else,
 conventions, the three-moment block). Paste it into the subagent's prompt as-is. Single-root.
 

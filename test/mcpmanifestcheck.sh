@@ -365,7 +365,12 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #   from 485 B before landing) + schema 428 B (path, task, bytes, paths) + 131 B tool envelope and separator = 898 B; batch's
 #   description +7 B (", brief": the NOT-batchable list names every excluded verb, now 18). Descriptions 15,117 -> 15,463 B,
 #   schemas 20,464 -> 20,892 B, the other 33 stanzas unchanged. Measured 41,051 B; ceiling = measured + 30 B, the same margin.
-CEILING = 41081
+# BRIEF-R3 (2026-11-27, lane/brief-r3): +81 B over the 41,075 B base 32961b319, every byte attributed — the `brief` description
+#   only: the cap figures 2.5 / 4 / 6 -> 3.5 / 5 / 7 KB (same length; round 3 raised the caps), ", ranked files" (+14 B, the new
+#   <ranked> section) and "Also the first call when new to a repo (overview, where to start). " (+67 B, the orientation route the
+#   sealed holdout-5 check turned on); the bytes schema text names the same new caps at the same length. Measured 41,156 B;
+#   ceiling = measured + 30 B, the same margin.
+CEILING = 41186
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

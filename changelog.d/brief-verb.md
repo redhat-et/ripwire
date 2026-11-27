@@ -1,6 +1,6 @@
 ### Added — `--brief="TASK"`: one page to paste into a fresh code-editing subagent
 
-`ripwire <dir> --brief="TASK"` prints a size-capped brief for a subagent that will edit code for TASK. The cap follows the repo's size class: 2.5 KB under 1K indexed files, 4 KB under 10K, 6 KB above that. `--brief-bytes=N` (512..8192) overrides it. The page has eight sections, in this order:
+`ripwire <dir> --brief="TASK"` prints a size-capped brief for a subagent that will edit code for TASK. The cap follows the repo's size class: 3.5 KB under 1K indexed files, 5 KB under 10K, 7 KB above that. `--brief-bytes=N` (512..8192) overrides it. The page has eight sections, in this order:
 
 1. layout: top dirs with their role. Vendored and generated dirs are marked `(skip)`, including ones the index leaves out (`third_party/`, `node_modules/`, an untracked `build/`).
 2. build: build and test commands quoted from the docs' fenced blocks (`AGENTS.md:31 make test …`) and from manifests (CMake, autotools, Make targets, package.json scripts, go.mod, Cargo, tox, Bazel, meson…). Each command names the file it came from. Nothing is run and nothing is guessed. A tree with no manifest says `none found`. The section also names where a new test is registered and what runs the tests.
@@ -13,7 +13,7 @@
 
 When the page is over budget it drops, in order: conventions, layout depth, entries past 3, edges past one symbol, where-else past 3, then question sites. Act and build never drop. The root names what went (`dropped=`), and `over="1"` says the fixed sections alone outgrew the cap. Root attributes: `size_class`, `budget`, `bytes`, `confidence`, `build_source` (`none|manifest|docs+manifest`), `history` (`0` on a shallow clone).
 
-`--brief` is opt-in. `--for` output is byte-identical to before. The MCP server adds a `brief` tool (`task`, optional `bytes`; single-root) that serves the same composer. The tool catalog goes from 33 to 34 tools, and `brief` is in the `no-edit` profile that `ripwire wrap claude` registers. New gate: `test/briefcheck.sh`.
+`--for` output is byte-identical to before. The MCP server adds a `brief` tool (`task`, optional `bytes`; single-root) that serves the same composer. The tool catalog goes from 33 to 34 tools, and `brief` is in the `no-edit` profile that `ripwire wrap claude` registers. New gate: `test/briefcheck.sh`.
 
 #### The unit's build file and co-change roles
 
@@ -34,6 +34,15 @@ The brief now learns a unit's registration, test home, build file and docs from 
 
 Off switches: `RIPWIRE_BRIEF_COCHANGE=0` drops the history roles and `RIPWIRE_BRIEF_UNITBUILD=0` drops the build-file line. Each leaves the rest of the brief as it was. New gate arm: `test/briefcheck.sh (H)`.
 
-#### Opt-in, with the measured limits
+#### The package surface, subject tests and `<ranked>`
 
-`--brief` is an opt-in verb; `--for` stays the default route. Held-out check (8 repos; axum, django, fmt, gin, nest, pydantic, textual, trpc): `--brief` 64 items in 25,483 B, `--for` 58 items in 121,072 B. By class (E/S/T/B items, `--brief` vs `--for`): 9/24 vs 13/24, 24/32 vs 23/32, 12/24 vs 6/24, 19/32 vs 16/32. By language: Python 23 vs 16, TypeScript 17 vs 10, Go 10 vs 11, C++ 9 vs 12, Rust 5 vs 9. Entry points are the limit: `--for` finds more (13 vs 9). Only 1 of 8 repos met every per-class bar. The help (`--help=--brief`), `docs/COMMANDS.md` and `docs/LIMITS.md` state this.
+- `<entry>` names the package surface (`__init__.py`, `index.ts`, `lib.rs`, `mod.rs`) and the file that hands off to `main`, once each.
+- The tests of the unit's subject lead `<where-else>`: tests anchored on the file the task imitates (a `like X: path` task takes that path as the exemplar).
+- `<ranked>` names the files `--for`'s own page ranks that no other section names: the exemplar family, their registration files, then the files of its signature and tail rows. 12 are shown; over budget the line keeps 4. Off switch: `RIPWIRE_BRIEF_RANKED=0`.
+- Over budget, attributes drop before items.
+
+#### Routed for orientation questions, with the measured limits
+
+`--help-task` (and so the Claude Code and Codex router hooks) recommends `--brief=TASK` for a question about the repository itself: "I'm new to this repo, where do I start", "give me an overview of this codebase", "how is this project organized". The card needs a repository noun plus orientation wording, and it is asked only where the router would otherwise abstain, so no earlier route changes. `--for` stays the default for task questions. The MCP `brief` description says it is the first call when new to a repo. Off switch: `RIPWIRE_BRIEF_ROUTE=0`. New gate arms: `test/taskroutecheck.sh (OB1)-(OB5)`.
+
+Sealed check (8 fresh repos: sqlalchemy, pip, scrapy, vite, TanStack query, tokio, hugo, Catch2; items written by a separate agent): `--brief` 59 items in 32,022 B, `--for` 51 items in 120,161 B (26.6 % of the bytes; `--brief` matched or beat `--for` on 5 of 8 repos). By class (E/S/T/B items, `--brief` vs `--for`): 11/24 vs 9/24, 22/32 vs 27/32, 10/24 vs 3/24, 16/32 vs 12/32. By language: Python 26 vs 24, TypeScript 15 vs 11, Rust 8 vs 4, Go 5 vs 6, C++ 5 vs 6. Structure is the limit: `--for` finds more (27 vs 22). The help (`--help=--brief`), `docs/COMMANDS.md` and `docs/LIMITS.md` state this.
