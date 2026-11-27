@@ -20,6 +20,10 @@
 #   (C) ZERO COST WHEN OFF, in the binary. The default build must emit no scope text and no
 #       #PROF_TSV block on any stream. This is the contract that lets the markers exist at all.
 #   (D) BEHAVIOUR, when a profile build is available: the scopes must actually fire, with calls>=1.
+#       This arm covers the model-section tree too (warmsnap_model.h), because that attribution is
+#       what redirected this lane's work twice: the validation re-walk LOOKED like the cost of the
+#       509.9 ms model section and measured ~0.03 ms, while the reference-row decode measured 56% of
+#       it. A scope that silently stops firing takes that evidence with it.
 #       Skipped with a reason when there is no profile tree, in the pmccheck.sh manner -- the arm
 #       the machine can express is asserted, and the skip says which arm was not.
 #
@@ -101,9 +105,24 @@ if [ ! -x "$PROF_BIN" ]; then
     echo "        cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j"
     echo "        Arms A-C asserted; the behavioural arm is the one this machine did not express."
 else
+    # The arena must EXIST: a non-existent TMPDIR makes the snapshot WRITE fail silently, so the
+    # second run finds nothing to load, every model-section scope reads as absent, and the gate
+    # blames the source. Found exactly that way -- the scopes were present and firing all along.
+    mkdir -p "$WORK/c" "$WORK/t"
+    # TWO runs: the first builds the warm snapshot, the second LOADS it. The model-section scopes
+    # below only exist on a warm run, so a single cold run would report them absent and this arm
+    # would fail on a correct tree -- the inverse of a vacuous check, and just as useless.
+    XDG_CACHE_HOME="$WORK/c" TMPDIR="$WORK/t" "$PROF_BIN" "$ROOT/test/largescalefix" \
+        --for="resolve a symbol reference" > /dev/null 2>&1
     XDG_CACHE_HOME="$WORK/c" TMPDIR="$WORK/t" "$PROF_BIN" "$ROOT/test/largescalefix" \
         --for="resolve a symbol reference" > /dev/null 2> "$WORK/prof.err"
-    for scope in 'main: query + emit' 'verb/for: runForLens'; do
+    for scope in 'main: query + emit' 'verb/for: runForLens' \
+                 'warmsnap: load the model section' \
+                 'warmsnap/model: read the row streams' \
+                 'warmsnap/model: decode the reference rows' \
+                 'warmsnap/model: decode the binding rows' \
+                 'warmsnap/model: build the interned-name table' \
+                 'warmsnap/model: validate the shape'; do
         line="$( awk -F'\t' -v s="$scope" '
             /^#PROF_TSV_BEGIN/ { f = 1; next } /^#PROF_TSV_END/ { f = 0 }
             f && index($1, s) == 1 { print $4; exit }' "$WORK/prof.err" )"
@@ -113,6 +132,24 @@ else
             note "arm D: '$scope' did not appear in the #PROF_TSV block with calls>=1 (got '${line:-nothing}')"
         fi
     done
+
+    # Arm D's CONTROL, on the same run, for the same reason arm B exists: a matcher that found every
+    # name would pass arm D in silence. A scope that cannot exist must be REPORTED absent.
+    #
+    # Why a control rather than a reverted-source red: reverting warmsnap_model.h in a scratch copy
+    # DID make arm D fail, but for the wrong reason -- the scratch root is not a git repo, warmsnap
+    # records no snapshot there, so the warm path never engages and every model scope reads absent
+    # whatever the source says. That red proved nothing about the mutation, and a red whose cause you
+    # have not isolated is not evidence. This control runs against the real root and the real binary,
+    # so the only thing it varies is whether the scope exists.
+    absent="$( awk -F'\t' '
+        /^#PROF_TSV_BEGIN/ { f = 1; next } /^#PROF_TSV_END/ { f = 0 }
+        f && index($1, "warmsnap/model: a scope that does not exist") == 1 { print $4; exit }' "$WORK/prof.err" )"
+    if [ -z "$absent" ]; then
+        ok "arm D control: a scope that cannot exist is reported absent (arm D is not vacuous)"
+    else
+        note "arm D control: a non-existent scope was reported present with calls=$absent — the matcher finds anything, so arm D proved nothing"
+    fi
 fi
 
 if [ "$fail" -ne 0 ]; then
