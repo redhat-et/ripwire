@@ -11324,6 +11324,193 @@ inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std:
              && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
 }
 
+// buildGraph/6. doc<->code edges: isDocLink refs (a markdown `backtick` naming a code symbol) resolved to real
+// DEFINITIONS (body present), any file -- 'what docs discuss this symbol'. Stored OUT of the call graph so a doc
+// mentioning a symbol never inflates its PageRank or its blast radius. The caller allocates and sorts the rows.
+template<typename SameRoot>
+inline void fillDocMentions( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                            SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/6: doc mentions" );
+    for( const Reference& r : ing.references )
+    {
+        if( !r.isDocLink || r.fromSymbol == kNoNode )
+        {
+            continue;
+        }
+        const auto it = byName.find( r.calleeName );
+        if( it == byName.end() )
+        {
+            continue;
+        }
+        for( NodeId def : it->second )
+        {
+            if( ing.symbols[def].endByte <= ing.symbols[def].sigEndByte )
+            {
+                continue; // a real def, not a decl
+            }
+            if( def == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( def, r.fileId ) )
+            {
+                continue; // §3: a doc backtick-name never crosses roots
+            }
+            g.mentions[ def ].push_back( r.fromSymbol );
+        }
+    }
+}
+
+// buildGraph/7. S5-E HAS-A composition edges: isCompose refs (owner class -> member type name) resolved to
+// class/struct symbols by name, any file. Stored OUTSIDE the call graph, so PageRank, ranks and the default map are
+// UNCHANGED by them. The caller sorts and dedups what this fills.
+template<typename SameRoot>
+inline void fillComposeEdges( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                             SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/7: HAS-A compose edges" );
+    for( const Reference& r : ing.references )
+    {
+        if( !r.isCompose || r.fromSymbol == kNoNode || fieldTypeWrittenInStd( r ) || isTypeAliasRecord( r ) || r.viaArrow )
+        {
+            continue;   // a member type written in namespace std names no in-repo class, whatever its final segment; an alias is no member; a smart pointer's pointee is Rule 2b's alone
+        }
+        const auto it = byName.find( r.calleeName );
+        if( it == byName.end() )
+        {
+            continue;
+        }
+        for( NodeId typeId : it->second )
+        {
+            const SymKind k = ing.symbols[ typeId ].kind;
+            if( k != SymKind::Class && !isStructOrNamedType( k ) )
+            {
+                continue;
+            }
+            if( typeId == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( typeId, r.fileId ) )
+            {
+                continue; // §3: a HAS-A type NAME never crosses roots
+            }
+            // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
+            // WITHIN a compatible language (or the C/ObjC↔C++ bridge). Compose CAPTURE is C++-only
+            // (ingest.cpp captureFields), but without this gate the RESOLUTION was language-blind: a
+            // C++ member `Foo m_foo;` bound its HAS-A edge to a Python/TS `class Foo` in the same
+            // repo — and the cross-language candidate's lower id even defeated the adjacency dedup
+            // below, emitting the same field twice. Gate: test/composelangcheck.sh.
+            if( !langCompatible( ing.symbols[ typeId ].lang, r.lang ) )
+            {
+                continue;
+            }
+            ComposeEdge ce;
+            ce.ownerSym  = r.fromSymbol;
+            ce.typeSym   = typeId;
+            ce.fieldName = r.fieldName();
+            ce.typeName  = r.calleeName;
+            ce.ownerName = ing.symbols[ r.fromSymbol ].name;
+            ce.rel       = r.composeRel();
+            // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
+            // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
+            // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
+            // and every copy reached <compose> byte-identically. byName is id-ascending, so this keeps
+            // the lowest-id candidate: deterministic, and byte-invisible. Gate: composelangcheck §4/§5.
+            g.composeEdges.push_back( std::move( ce ) );  break;
+        }
+    }
+}
+
+// buildGraph/8. B6.3 HTTP-route USE -> DEF edges: resolve each route DEF's handler name to a symbol, then join the
+// USEs to it by method and path. A USE matching zero DEFs synthesizes NO edge -- never a guess. Outside the call
+// graph, so PageRank and the default map are unchanged by it.
+template<typename SameRoot>
+inline void fillRouteEdges( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                           SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
+        std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
+        for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
+        {
+            const RouteDef& rd = ing.routeDefs[d];
+            if( rd.handlerName.empty() )
+            {
+                continue; // inline/anonymous handler → stays unresolved
+            }
+            const auto it = byName.find( rd.handlerName );
+            if( it == byName.end() )
+            {
+                continue;
+            }
+            for( NodeId cand : it->second )
+            {
+                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
+                { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
+            }
+        }
+
+        std::vector<NodeId> distinctScratch;   // reused per USE — the "≥2 distinct handlers ⇒ ambiguous" set
+        for( const RouteUse& ru : ing.routeUses )
+        {
+            distinctScratch.clear();
+            NodeId      matchedHandler = kNoNode;
+            HttpMethod  matchedMethod  = HttpMethod::Unknown;
+            std::string matchedPath;
+            for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
+            {
+                const RouteDef& rd = ing.routeDefs[d];
+                if( defHandler[d] == kNoNode )
+                {
+                    continue; // an unresolved match adds no distinctness
+                }
+                if( !routematch::methodsCompatible( rd.method, ru.method ) )
+                {
+                    continue;
+                }
+                if( !routematch::pathsMatch( rd.path, ru.path ) )
+                {
+                    continue;
+                }
+                if( std::find( distinctScratch.begin(), distinctScratch.end(), defHandler[d] ) != distinctScratch.end() )
+                {
+                    continue;                                              // same handler already counted (dup registration)
+                }
+                distinctScratch.push_back( defHandler[d] );
+                matchedHandler = defHandler[d];
+                matchedMethod  = rd.method;
+                matchedPath    = rd.path;
+            }
+            if( distinctScratch.size() != 1 )
+            {
+                continue; // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
+            }
+            RouteEdge re;
+            re.fromSym  = ru.fromSymbol;
+            re.toSym    = matchedHandler;
+            re.method   = matchedMethod != HttpMethod::Unknown ? matchedMethod : ru.method;
+            re.path     = std::move( matchedPath );
+            re.fromName = ru.fromSymbol != kNoNode ? ing.symbols[ ru.fromSymbol ].name : std::string();
+            re.toName   = ing.symbols[ matchedHandler ].name;
+            g.routeEdges.push_back( std::move( re ) );
+        }
+        std::sort( g.routeEdges.begin(), g.routeEdges.end(),
+                   []( const RouteEdge& a, const RouteEdge& b ) noexcept
+                   {
+                       if( a.fromSym != b.fromSym )
+                       {
+                           return a.fromSym < b.fromSym;
+                       }
+                       if( a.toSym != b.toSym )
+                       {
+                           return a.toSym < b.toSym;
+                       }
+                       return a.path < b.path;
+                   } );
+        g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -14897,37 +15084,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // Resolve the name to real DEFINITIONS (body present), any file; stored OUT of the call graph so a doc
     // mentioning a symbol never inflates its PageRank / blast radius. "what docs discuss this symbol".
     g.mentions.assign( N, {} );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/6: doc mentions" );
-    for( const Reference& r : ing.references )
-    {
-        if( !r.isDocLink || r.fromSymbol == kNoNode )
-        {
-            continue;
-        }
-        const auto it = byName.find( r.calleeName );
-        if( it == byName.end() )
-        {
-            continue;
-        }
-        for( NodeId def : it->second )
-        {
-            if( ing.symbols[def].endByte <= ing.symbols[def].sigEndByte )
-            {
-                continue; // a real def, not a decl
-            }
-            if( def == r.fromSymbol )
-            {
-                continue;
-            }
-            if( !sameRoot( def, r.fileId ) )
-            {
-                continue; // §3: a doc backtick-name never crosses roots
-            }
-            g.mentions[ def ].push_back( r.fromSymbol );
-        }
-    }
-    }
+    fillDocMentions( g, ing, byName, sameRoot );   // buildGraph/6
     for( std::vector<NodeId>& v : g.mentions )
     {
         sortutil::sortUnique( v );
@@ -14936,60 +15093,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // S5-E HAS-A composition edges: isCompose refs (owner class → member type name) → composeEdges.
     // Resolve the type name to class/struct symbols (any-file, by name); store OUTSIDE the call graph so
     // PageRank, ranks, and the default map are UNCHANGED. Sorted (ownerSym, typeSym) for determinism.
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/7: HAS-A compose edges" );
-    for( const Reference& r : ing.references )
-    {
-        if( !r.isCompose || r.fromSymbol == kNoNode || fieldTypeWrittenInStd( r ) || isTypeAliasRecord( r ) || r.viaArrow )
-        {
-            continue;   // a member type written in namespace std names no in-repo class, whatever its final segment; an alias is no member; a smart pointer's pointee is Rule 2b's alone
-        }
-        const auto it = byName.find( r.calleeName );
-        if( it == byName.end() )
-        {
-            continue;
-        }
-        for( NodeId typeId : it->second )
-        {
-            const SymKind k = ing.symbols[ typeId ].kind;
-            if( k != SymKind::Class && !isStructOrNamedType( k ) )
-            {
-                continue;
-            }
-            if( typeId == r.fromSymbol )
-            {
-                continue;
-            }
-            if( !sameRoot( typeId, r.fileId ) )
-            {
-                continue; // §3: a HAS-A type NAME never crosses roots
-            }
-            // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
-            // WITHIN a compatible language (or the C/ObjC↔C++ bridge). Compose CAPTURE is C++-only
-            // (ingest.cpp captureFields), but without this gate the RESOLUTION was language-blind: a
-            // C++ member `Foo m_foo;` bound its HAS-A edge to a Python/TS `class Foo` in the same
-            // repo — and the cross-language candidate's lower id even defeated the adjacency dedup
-            // below, emitting the same field twice. Gate: test/composelangcheck.sh.
-            if( !langCompatible( ing.symbols[ typeId ].lang, r.lang ) )
-            {
-                continue;
-            }
-            ComposeEdge ce;
-            ce.ownerSym  = r.fromSymbol;
-            ce.typeSym   = typeId;
-            ce.fieldName = r.fieldName();
-            ce.typeName  = r.calleeName;
-            ce.ownerName = ing.symbols[ r.fromSymbol ].name;
-            ce.rel       = r.composeRel();
-            // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
-            // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
-            // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
-            // and every copy reached <compose> byte-identically. byName is id-ascending, so this keeps
-            // the lowest-id candidate: deterministic, and byte-invisible. Gate: composelangcheck §4/§5.
-            g.composeEdges.push_back( std::move( ce ) );  break;
-        }
-    }
-    }
+    fillComposeEdges( g, ing, byName, sameRoot );   // buildGraph/7
     // sort by (ownerSym, typeSym, fieldName) for determinism; dedup on (ownerSym, fieldName) — the
     // type name is the primary identity (one field has exactly one declared type).
     std::sort( g.composeEdges.begin(), g.composeEdges.end(),
@@ -15017,87 +15121,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // evidence the multi-root design requires, so this never applies the sameRoot() guard the call/HAS-A/
     // extends resolvers above use. Ambiguous USEs (matching ≥2 DISTINCT resolved handlers) and unresolved
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
-        std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
-        for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
-        {
-            const RouteDef& rd = ing.routeDefs[d];
-            if( rd.handlerName.empty() )
-            {
-                continue; // inline/anonymous handler → stays unresolved
-            }
-            const auto it = byName.find( rd.handlerName );
-            if( it == byName.end() )
-            {
-                continue;
-            }
-            for( NodeId cand : it->second )
-            {
-                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
-                { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
-            }
-        }
-
-        std::vector<NodeId> distinctScratch;   // reused per USE — the "≥2 distinct handlers ⇒ ambiguous" set
-        for( const RouteUse& ru : ing.routeUses )
-        {
-            distinctScratch.clear();
-            NodeId      matchedHandler = kNoNode;
-            HttpMethod  matchedMethod  = HttpMethod::Unknown;
-            std::string matchedPath;
-            for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
-            {
-                const RouteDef& rd = ing.routeDefs[d];
-                if( defHandler[d] == kNoNode )
-                {
-                    continue; // an unresolved match adds no distinctness
-                }
-                if( !routematch::methodsCompatible( rd.method, ru.method ) )
-                {
-                    continue;
-                }
-                if( !routematch::pathsMatch( rd.path, ru.path ) )
-                {
-                    continue;
-                }
-                if( std::find( distinctScratch.begin(), distinctScratch.end(), defHandler[d] ) != distinctScratch.end() )
-                {
-                    continue;                                              // same handler already counted (dup registration)
-                }
-                distinctScratch.push_back( defHandler[d] );
-                matchedHandler = defHandler[d];
-                matchedMethod  = rd.method;
-                matchedPath    = rd.path;
-            }
-            if( distinctScratch.size() != 1 )
-            {
-                continue; // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
-            }
-            RouteEdge re;
-            re.fromSym  = ru.fromSymbol;
-            re.toSym    = matchedHandler;
-            re.method   = matchedMethod != HttpMethod::Unknown ? matchedMethod : ru.method;
-            re.path     = std::move( matchedPath );
-            re.fromName = ru.fromSymbol != kNoNode ? ing.symbols[ ru.fromSymbol ].name : std::string();
-            re.toName   = ing.symbols[ matchedHandler ].name;
-            g.routeEdges.push_back( std::move( re ) );
-        }
-        std::sort( g.routeEdges.begin(), g.routeEdges.end(),
-                   []( const RouteEdge& a, const RouteEdge& b ) noexcept
-                   {
-                       if( a.fromSym != b.fromSym )
-                       {
-                           return a.fromSym < b.fromSym;
-                       }
-                       if( a.toSym != b.toSym )
-                       {
-                           return a.toSym < b.toSym;
-                       }
-                       return a.path < b.path;
-                   } );
-        g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
-    }
+    fillRouteEdges( g, ing, byName, sameRoot );   // buildGraph/8
 
     // Per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
     // (byName[name].size() = # of same-name definitions across the repo — the "common name" signal) rather
