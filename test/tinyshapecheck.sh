@@ -56,6 +56,10 @@
 #   (W)  THE CONTINUATION KEEPS THE ROW FORM (CodeRabbit on #742): under RIPWIRE_NO_ROWLINES=1 an explicit --rows=lines is tiny and
 #        its <more next=> call (same environment) returns the knob-off --rows=lines answer byte for byte; non-vacuous: the knob-off
 #        answer without --rows= is in elements there (its <sigs> holds <d> rows), and the --rows=lines one is in lines
+#   (Y)  THE CONTINUATION KEEPS A SPELLED LEGEND (CodeRabbit on #742): --legend=compact is tiny and its <more next=> returns the
+#        knob-off --legend=compact answer byte for byte; non-vacuous: that answer differs from the knob-off default one
+#   (Z)  THE QUESTION-SITES BLOCK RIDES THE TINY ANSWER (CodeRabbit on #742): under RIPWIRE_THETA11=1 the tiny answer carries the
+#        knob-off answer's <!-- qs: block; non-vacuous: the knob-off answer has it and the default (θ11 unset) answer does not
 #   (S)  SAME-NAME COMPLETION: a function defined in 12 files is listed once per file past row 8 (the knob-off <sigs> holds >= 9
 #        same-name rows, counted, FAIL on fewer); every tiny line names the method; <= 16 lines
 set -u
@@ -363,6 +367,21 @@ elif 'shape="tiny"' not in w_on.split(">", 1)[0] or not m: no("(W) --rows=lines 
 else:
     call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
     (ok if run(BIN, call, None, None, NR) == w_off else no)("(W) under RIPWIRE_NO_ROWLINES=1 the more next= (%s) returns the knob-off --rows=lines answer" % m.group(1))
+# (Y) the continuation keeps a spelled --legend
+y_off, y_def, y_on = run(BIN, ["--for=" + NAMED, "--legend=compact"], "0"), off[NAMED], run(BIN, ["--for=" + NAMED, "--legend=compact"])
+m = re.search(r'<more next="([^"]+)"/>', y_on)
+if y_off == y_def: no("(Y) vacuous: the knob-off --legend=compact answer equals the default one")
+elif 'shape="tiny"' not in y_on.split(">", 1)[0] or not m: no("(Y) --legend=compact is not tiny with a more next=")
+else:
+    call = shlex.split(m.group(1).replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+    (ok if run(BIN, call) == y_off else no)("(Y) the more next= (%s) returns the knob-off --legend=compact answer" % m.group(1))
+# (Z) the question-sites block rides the tiny answer
+T11 = {"RIPWIRE_THETA11": "1"}
+z_off, z_on = run(BIN, ["--for=" + NAMED], "0", None, T11), run(BIN, ["--for=" + NAMED], None, None, T11)
+qs = re.search(r"<!-- qs:.*?(?=</ctx>)", z_off, re.S)
+if not qs or "<!-- qs:" in on[NAMED]: no("(Z) vacuous: knob-off qs block under THETA11 %s, qs in the default tiny answer %s" % (bool(qs), "<!-- qs:" in on[NAMED]))
+elif 'shape="tiny"' not in z_on.split(">", 1)[0]: no("(Z) the named question is not tiny under RIPWIRE_THETA11=1")
+else: (ok if qs.group(0).strip("\n") in z_on else no)("(Z) the tiny answer under RIPWIRE_THETA11=1 carries the knob-off qs block (%d B)" % len(qs.group(0)))
 # (S)
 SAMEQ = "area_of_shape"   # the bare-symbol form NL1 asks (a backticked sentence over 12 same-name defs resolves none)
 a_off, a_on = run(BIN, ["--for=" + SAMEQ], "0"), run(BIN, ["--for=" + SAMEQ])
