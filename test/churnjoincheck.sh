@@ -314,6 +314,13 @@ fi
 # is pinned: every `want` is still derived from git in-gate, and on a merge-free fixture `-c` is a no-op, so the
 # only numbers that moved are the LIVE repo's — legitimately, because the tool now mines merge-introduced
 # content it used to drop. The merge behaviour itself is gated by test/mergechurncheck.sh, not here.
+#
+# THE HISTORY POLICY IN THE LIVE ORACLES (2026-11-26, lane/history-honesty — again NOT a re-pin: every `want` is still derived
+# from git in-gate). The walk now reads `-M100% --name-status`, leaves bot-authored commits out and follows a file across an
+# exact move (src/gitmine.h WHOSE HISTORY, AND WHAT A MOVE IS). A bare `--name-only` tally asks the old question, so on this
+# repository 23 [bot] commits and every src/ -> src/infra/ move "disagreed" (src/infra/jsonesc.h: tool 17, bare tally 14,
+# because 3 of its commits were made at its old path). test/lib/history_oracle.py re-derives the same policy from git's own
+# line output, independently of the C++ reader; the bot and move cases themselves are gated by test/historyhonestycheck.sh.
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
     DUPES="$( git -C "$ROOT" ls-files | awk -F/ '{ print $NF }' | sort | uniq -d | grep -c . )"
     # auditWindow LABEL WINDOW_START [EXTRA_FLAGS...] — every ranked row's churn= must equal the number of
@@ -324,7 +331,7 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
     auditWindow(){
         local label="$1" gitWindow="$2"; shift 2
         "$BIN" "$ROOT" --hotspots --limit=1000 "$@" > "$TMP/live.hot" 2>/dev/null
-        git -C "$ROOT" log -c --since="$gitWindow" --name-only --format= | sort | uniq -c | awk '{ print $1" "$2 }' > "$TMP/live.counts"
+        python3 "$ROOT/test/lib/history_oracle.py" "$ROOT" "$gitWindow" > "$TMP/live.counts"
         # RE-PINNED 2026-08-19 (R-E CORRECTION): p= is ROOT-RELATIVE now, so the old "$ROOT/"-anchored
         # pattern selected nothing and this audit reported "all 0 ranked rows" — green, and inert.
         tr '>' '\n' < "$TMP/live.hot" | grep -oE 'p="[^"]+" churn="[0-9]+"' \
@@ -547,10 +554,12 @@ WWANT="$( git -C "$R3" -c core.quotepath=false log -c --since="2026-01-01" --nam
     && ok "empty window: ranked=\"0\" and git's own walk over the same window names 0 paths — no row borrows a count from outside it" \
     || no "empty window: ranked=\"$WRANKED\" but git's walk over that window names $WWANT path(s)"
 
-# ── 7. RENAME (git's R100): the pre-rename path is a DEAD path, and a same-basename file must not inherit it ─
+# ── 7. RENAME (git's R100): the pre-rename history follows the FILE, and a same-basename file must not inherit it ─
 # `old.cpp` (4 commits) is renamed to `new.cpp`; `sub/old.cpp` exists with 1 commit of its own. `git log
 # --name-only` reports the pre-rename commits under `old.cpp`, which no longer names an indexed file — and
-# `sub/old.cpp` is its ONLY surviving same-basename candidate, so there is no tie. Nothing may inherit it.
+# `sub/old.cpp` is its ONLY surviving same-basename candidate, so there is no tie. Nothing may inherit it BY NAME.
+# Since lane/history-honesty an EXACT move is followed: new.cpp owns old.cpp's 4 commits and the move itself is no
+# churn event (it was the only commit new.cpp had before). The join question is unchanged: sub/old.cpp keeps its own 1.
 R7="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R7"
 mkdir -p "$R7/sub"
 mkfn oldFn > "$R7/old.cpp"
@@ -570,11 +579,12 @@ git -C "$R7" log -1 --name-status --find-renames=40% --format= | grep -q '^R' \
 C7SUB="$( churn_of "$TMP/h7.out" /sub/old.cpp )"
 W7SUB="$( git -C "$R7" log -c --since="$( defaultWindowStart "$R7" )" --name-only --format= | grep -cx 'sub/old.cpp' )"
 C7NEW="$( churn_of "$TMP/h7.out" /new.cpp )"
-W7NEW="$( git -C "$R7" log -c --since="$( defaultWindowStart "$R7" )" --name-only --format= | grep -cx 'new.cpp' )"
+W7NEW="$( python3 "$ROOT/test/lib/history_oracle.py" "$R7" "$( defaultWindowStart "$R7" )" | awk '$2 == "new.cpp" { print $1 }' )"
+W7OLD="$( git -C "$R7" log -c --since="$( defaultWindowStart "$R7" )" --name-only --format= | grep -cx 'old.cpp' )"
 [ "${C7SUB:-0}" = "$W7SUB" ] && ok "rename: sub/old.cpp keeps its own $W7SUB commit(s) — the 4 pre-rename commits of the DEAD old.cpp are nobody's" \
     || no "rename: sub/old.cpp churn=\"$C7SUB\" but its own path appears in $W7SUB in-window commit(s)"
-[ "${C7NEW:-0}" = "$W7NEW" ] && ok "rename: new.cpp reports exactly the $W7NEW commit(s) that name it (history starts at the rename, as documented)" \
-    || no "rename: new.cpp churn=\"$C7NEW\", git's own walk names it in $W7NEW commit(s)"
+[ "${C7NEW:-0}" = "$W7NEW" ] && [ "$W7NEW" = "$W7OLD" ] && ok "rename: new.cpp reports old.cpp's $W7NEW commit(s) — the exact move is followed and adds none (history_oracle.py agrees)" \
+    || no "rename: new.cpp churn=\"$C7NEW\", the policy oracle says $W7NEW, and git names old.cpp in $W7OLD commit(s)"
 
 # ── 8. PATH SPELLINGS: spaces, non-ASCII, and a CASE-ONLY difference ────────────────────────────────
 # Spaces and UTF-8 must JOIN (git emits them raw under core.quotepath=false, and a C-quoted path is unquoted
@@ -912,7 +922,7 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 && [ -d "$ROOT/src" ]; the
     [ "${RA:-0}" = "${RD:-1}" ] && ok "offset: the absolute-subdir and dot-from-inside spellings agree (ranked=$RA)" \
         || no "offset: ranked=\"$RA\" for '$ROOT/src' vs \"$RD\" for '.' inside it — one spelling of the same tree is wrong"
     # and every row of the dot spelling re-derives against git's own walk, prefixed by the offset
-    git -C "$ROOT" log -c --since="$( defaultWindowStart "$ROOT" )" --name-only --format= | sort | uniq -c | awk '{ print $1" "$2 }' > "$TMP/o.counts"
+    python3 "$ROOT/test/lib/history_oracle.py" "$ROOT" "$( defaultWindowStart "$ROOT" )" > "$TMP/o.counts"   # the history policy's oracle (arm 4)
     # RE-POINTED with THE WINDOW RULE: this selector still demanded the retired `p="./…"` spelling, so on a root-relative
     # p= it read ZERO rows and the arm below printed "all 0 rows … re-derive" as a PASS — the R-E shape this file's
     # header already records, surviving here. A leading "./" is now optional, and the row count must equal ranked=.

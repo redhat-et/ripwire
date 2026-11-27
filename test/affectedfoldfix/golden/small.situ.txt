@@ -10,6 +10,6 @@ root: small
   [2] tests to run (3) order=evidence: [changed] you edited it, [partner] named after a changed file, then hops asc (1 = direct); "(n): a, b" = n runner-less files sharing that evidence; a (run: …) is relative to root:
         [hops=1] (3): tests/test_s1.py, tests/test_s2.py, tests/test_s3.py   (run: not derivable)
         script_gates_unmodelled=0 — test/*.sh gates never appear above: script-to-binary edges are not call edges (a path count)
-  [3] co-change — usually edited with these but NOT in your diff (0) window="18mo" commits="0":
+  [3] co-change — usually edited with these but NOT in your diff (0) window="18mo" commits="0" floor="3" floor_tail="corroborated":
         (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)
   next: --test-gate

@@ -286,10 +286,13 @@ inline std::string stampAt( const std::string& root )
 // a caller can simply concatenate the result into its printf/snprintf attribute list and the attribute is
 // OMITTED entirely on a non-repo target. The value is always plain hex + the literal "+dirty" (never user
 // content), so it is deliberately NOT run through escapeXml.
+inline std::string atAttrOf( const std::string& stamp )
+{
+    return stamp.empty() ? std::string() : ( " at=\"" + stamp + "\"" );
+}
 inline std::string atAttr( const std::string& root )
 {
-    const std::string v = stampAt( root );
-    return v.empty() ? std::string() : ( " at=\"" + v + "\"" );
+    return atAttrOf( stampAt( root ) );
 }
 
 }}   // namespace rw::gitstamp

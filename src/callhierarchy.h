@@ -75,6 +75,13 @@ inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, co
 
 // TIER-FOLLOWUP: whether a test definition is among rows[begin, end) — the columnar <test> column and its legend clause ride
 // exactly then (a page with none is byte-identical to the two-tier answer).
+// Lane asserted-signal: does a shown row carry asserted="1" (graph.h isAssertedByReach)? The full-dialect reading is present-only on it.
+inline bool anyAssertedRowIn( const IngestResult& ing, const std::vector<char>& testReach, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
+{
+    return std::any_of( rows.begin() + std::ptrdiff_t( std::min( begin, rows.size() ) ), rows.begin() + std::ptrdiff_t( std::min( end, rows.size() ) ),
+                        [ & ]( NodeId n ) { return isAssertedByReach( ing, testReach, n ); } );
+}
+
 inline bool anyTestRowIn( const IngestResult& ing, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
 {
     const std::size_t last  = std::min( end, rows.size() );
@@ -727,6 +734,7 @@ inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const
         bytes += std::string_view( "<s t=\"\" n=\"\" p=\":\"/>" ).size() + std::string_view( symTag( s.kind ) ).size() + nameLen + pathLen
                + std::to_string( s.line ).size()
                + ( isTestedByReach( ing, testReach, rows[i] ) ? std::string_view( " tested=\"1\"" ).size() : 0 )
+               + ( isAssertedByReach( ing, testReach, rows[i] ) ? std::string_view( " asserted=\"1\"" ).size() : 0 )   // lane asserted-signal
                + ( attr.viaMacro( i ) != kNoNode ? viaMacroAttrXml( ing, attr.viaMacro( i ) ).size() : std::string_view( viaNameAttr( attr.nameOnly( i ) ) ).size() )
                + std::string_view( splitArmAttrXml( attr.splitArm( i ) ) ).size()
                + ofDefAttrXml( attr.groups, attr.tokens, i ).size() + callSitesAttrXml( sites.tokens[i], sites.totals[i] ).size();

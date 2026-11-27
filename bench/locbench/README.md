@@ -18,12 +18,18 @@ numbers here — denominators and identity rules differ.
 
 The corrected evaluator (this `run_locbench.py`) enforces: exact repo-relative path identity (duplicate
 basenames never earn credit), method identity = file + scope + name, one flat global candidate rank, a
-frozen repository-disjoint train/held-out split (`dataset.lock`, salted SHA-256; train 317/87 repos,
-held-out 243/78), zero silent skips, and paired repository-clustered bootstrap comparison
+frozen repository-disjoint train/held-out split (`dataset.lock`, salted SHA-256; under the current salt
+`ripwire-a7-v2`, train 254 instances / 77 repos and held-out 306 / 88), zero silent skips, and paired repository-clustered bootstrap comparison
 (`compare_runs.py`); production payload/latency are measured from the real `--for` output (five warm
 samples, one cold, one index rebuild per instance), separately from the scored candidate export.
 
-Held-out (N=243, zero exclusions, 564/564 scoped gold-function coverage), shipping routed `--for`:
+**This result predates the current split.** The salt is part of the hashed string, and the 2026-07-31
+rename from the pre-release name to ripwire (`3315fb19d`) changed it from `<pre-release name>-a7-v2` to `ripwire-a7-v2`. The old salt
+gave train 317 / 87 repos and held-out 243 / 78; the acceptance run below was measured on that held-out
+243 and has not been re-run on the current 306. Recount either split with `frozen_partition()` over
+`full560.json`.
+
+Held-out (N=243 on the pre-rename split, zero exclusions, 564/564 scoped gold-function coverage), shipping routed `--for`:
 
 | | file@1 | file@3 | file@5 | file@10 | lenient@10 | func-any@10 | fn-MRR | single-file strict | multi-file strict | all-patch strict |
 |---|---|---|---|---|---|---|---|---|---|---|

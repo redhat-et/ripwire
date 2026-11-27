@@ -118,10 +118,11 @@ inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<
         const rw::Symbol&      s = ing.symbols[ ids[i] ];
         const std::string_view p = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] )
                                                        : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
-        rw::emitTo( stdout, "{}{{\"t\":\"{}\",\"n\":\"{}\",\"p\":\"{}:{}\"{}{}{}{}}}", i == begin ? "" : ",",
+        rw::emitTo( stdout, "{}{{\"t\":\"{}\",\"n\":\"{}\",\"p\":\"{}:{}\"{}{}{}{}{}}}", i == begin ? "" : ",",
                      rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( p ).c_str(), s.line,
                      depth ? ",\"d\":" + std::to_string( ( *depth )[ ids[i] ] ) : std::string(),
                      ( testReach && rw::isTestedByReach( ing, *testReach, ids[i] ) ) ? ",\"tested\":true" : "",
+                     ( testReach && rw::isAssertedByReach( ing, *testReach, ids[i] ) ) ? ",\"asserted\":true" : "",   // lane asserted-signal
                      jsonViaField( viaName, i ),
                      jsonRowKeysAt( rowKeys, i ) );
     }
@@ -443,7 +444,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const bool chHasMiss = rw::pageHasAnchorMiss( g, matches, result, pw.begin, pw.end, wantCallers );
             chHasVia = chHasVia || rw::closureBlocksAnyVia( ing, g, chClosures );   // ix2-slice: a closure block's row may carry it too
             // TIER-FOLLOWUP: the test tier's clause beside the partition it splits, exactly when hop_tests= rides
-            const std::string chOpen = rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar, chNextIsPage )
+            const std::string chOpen = rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar, chNextIsPage,
+                                                                    rw::anyAssertedRowIn( ing, chTested.testReach, result, pw.begin, pw.end ) )
                                      + rw::hopTestTierLegend( chTested.tests, cfg.columnar, rw::anyTestRowIn( ing, result, pw.begin, pw.end ) );
             rw::emitTo( stdout, "{}{}{}{}{}{}{}-->{}{}", chOpen.c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
@@ -3592,6 +3594,7 @@ struct ImpactRootReadings
 {
     bool        contract    = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
     std::size_t radiusTests = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
+    bool        anyAsserted = false;   // lane asserted-signal: a shown row carries asserted="1" (callhierarchy.h anyAssertedRowIn)
 };
 
 inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& reach,
@@ -3620,7 +3623,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
-                 rw::testedLensLegend( cfg.columnar ), ( rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar )   // IMPACT-TEST-TIER
+                 ( std::string( rw::testedLensLegend( cfg.columnar ) ) + rw::assertedLensLegend( cfg.columnar, imRoot.anyAsserted ) ).c_str(), ( rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar )   // IMPACT-TEST-TIER
                    + rw::testColumnLegend( cfg.columnar && rw::anyTestRowIn( ing, show, imPage.begin, imPage.end ) ) ).c_str(),   // TIER-FOLLOWUP: the <test> column
                  rw::kTestedLensBlindSpotLegend,
                  ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
@@ -3924,7 +3927,8 @@ std::optional<int> runImpact( const MainDispatch& d )
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
                           imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,
-                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests } );
+                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests,
+                                              .anyAsserted = rw::anyAssertedRowIn( ing, imTestReach, show, imPage.begin, imPage.end ) } );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
         // (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). LB-G: the same NAMED constant

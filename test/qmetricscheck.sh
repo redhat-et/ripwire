@@ -8,7 +8,10 @@
 # on every call, though both are pure functions of the index and the graph. Each is now served from a record in the cache
 # directory (ripwire-verbfs-<rootKey>-<part>-….bin, parts qmetrics and impure) when a digest of EVERY input the
 # computation reads from the model and the graph equals the stored one. The digest is kept as named components, so a miss
-# says which input moved (why=files|symbols|refs|graph|shape) and each mutant below can blind exactly one of them.
+# says which input moved (why=files|symbols|refs|graph|asserts|shape) and each mutant below can blind exactly one of them.
+# asserts (lane asserted-signal) digests the test symbols' Call/Macro sites; which symbols are tests is itself read off files
+# and symbols, so an edit that adds a call in a test, renames a file into the test partition or renames a test moves asserts
+# TOO, and those arms' mutants blind both components (a comma list in mutrun).
 #
 # THE ARMS. Identity arms compare stdout (+ rc) of a served call against RIPWIRE_NO_VERBFS=1 (no record read or written)
 # and against --no-cache (no cache of any kind). An identity arm passes on code with no record at all, so the record's use
@@ -23,6 +26,9 @@
 #   I3  a file renamed into the test partition (only a path text moves)            why=files    mutant NOFILES
 #   I4  a changed flag (--exclude=tests: the index loses its test file)             why=shape/…  mutant ANYDIGEST
 #   I6  a symbol leaves the in-file test convention (def test_probe -> check_probe)  why=symbols  mutant NOSYMS
+#   I7  an assertion added in a test (EXPECT_EQ: an external call, so no edge moves) why=asserts  mutant NOASSERTS
+#       asserted= moves while graph stays equal; read off the stats line's asserted= count, since no stdout surface prints
+#       QMetrics::asserted yet (the map rows are serialize.h's)
 #   I5  a record of another version, another layout, a flipped payload byte, a truncated file: refused (why=version,
 #       why=shape, why=checksum), answer unchanged, the next run writes a valid one; mutant NOSUM serves a damaged one
 #   H   a new commit that changes no file keeps both records served, and the answer identical (git history is NOT an
@@ -133,7 +139,7 @@ identAll(){ ident "$1 --for" --for="$TASK" && cp "$TMP/id.w.out" "$TMP/id.f.out"
 # mut LABEL FAULT : a binary blinded by FAULT, served from the record of the state before the edit, must differ from --no-cache
 MUT=0
 # mutrun FAULT TAG ARGS... : a served run under one fault switch (exported for that run only), through run's own rc file
-mutrun(){ local fault="$1"; shift; export "$fault=1"; run "$1" warm "${@:2}"; unset "$fault"; }
+mutrun(){ local faults="$1" f; shift; for f in ${faults//,/ }; do export "$f=1"; done; run "$1" warm "${@:2}"; for f in ${faults//,/ }; do unset "$f"; done; }
 mut(){
     [ "$MUT" = 1 ] || return 0
     local label="$1" fault="$2" diffs=0
@@ -212,7 +218,7 @@ cat >"$FIX/tests/widget_test.cpp" <<'E'
 #include "../src/widget.hpp"
 void test_arrange() { Widget w; w.arrange(); w.unrelated(); }
 E
-mut "I1 a call added in a test" RIPWIRE_FAULT_VERBFS_QMETRICS_NOGRAPH
+mut "I1 a call added in a test" RIPWIRE_FAULT_VERBFS_QMETRICS_NOGRAPH,RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS
 statrun i1s --for="$TASK"
 if identAll "I1" && [ "$( field i1s qmetrics served )" = 0 ] && [ "$( field i1s qmetrics why )" = graph ]; then
     ok "I1 a call added inside a test function: recomputed (why=graph), identical"
@@ -239,7 +245,7 @@ else no "I2: '$( line i2s impure )'"; fi
 # ── I3: a path text only — a file renamed into the test partition ───────────────────────────────────────────────────
 run pre3 warm --for="$TASK"
 gitq mv src/zz_helper.cpp src/zz_helper_test.cpp
-mut "I3 a file renamed into the test partition" RIPWIRE_FAULT_VERBFS_QMETRICS_NOFILES
+mut "I3 a file renamed into the test partition" RIPWIRE_FAULT_VERBFS_QMETRICS_NOFILES,RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS
 statrun i3s --for="$TASK"
 if identAll "I3" && [ "$( field i3s qmetrics served )" = 0 ] && [ "$( field i3s qmetrics why )" = files ]; then
     ok "I3 a file renamed into the test partition: recomputed (why=files), identical"
@@ -262,7 +268,7 @@ if identAll "I4b back without the flag" && [ "$( field i4b qmetrics served )" = 
 # ── I6: a symbol's fields only — a function leaves the in-file test convention ──────────────────────────────────────
 run pre6 warm --metrics
 sed 's/def test_probe/def check_probe/' "$FIX/src/util.py" >"$TMP/util.py" && cat "$TMP/util.py" >"$FIX/src/util.py"
-mut "I6 a symbol leaves the test convention" RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS
+mut "I6 a symbol leaves the test convention" RIPWIRE_FAULT_VERBFS_QMETRICS_NOSYMS,RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS
 statrun i6s --metrics
 if identAll "I6" && [ "$( field i6s qmetrics served )" = 0 ] && [ "$( field i6s qmetrics why )" = symbols ]; then
     ok "I6 a function leaves the in-file test convention: recomputed (why=symbols), identical"
@@ -320,6 +326,32 @@ if [ -n "$QREC" ]; then
         cp "$TMP/qrec.good" "$QREC"
     fi
 else no "I5 no qmetrics record to damage"; fi
+
+# ── I7: the asserts component only — an assertion added in a test (lane asserted-signal) ─────────────────────────────
+# EXPECT_EQ is an external macro call and w.arrange() is already an edge of test_arrange (the CSR keeps one per pair), so no
+# component but asserts moves; asserted= does (test_arrange now asserts, so every row it reaches is asserted).
+statrun pre7 --metrics
+A0="$( field pre7 qmetrics asserted )"
+cat >"$FIX/tests/widget_test.cpp" <<'E'
+#include "../src/widget.hpp"
+void test_arrange() { Widget w; w.arrange(); w.unrelated(); EXPECT_EQ( w.arrange(), 3 ); }
+E
+if [ "$MUT" = 1 ]; then
+    ( cd "$FIX" && RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS=1 RIPWIRE_STATS=1 "$BIN" "$FIX" --cache="$TMP/c.bin" --metrics </dev/null >/dev/null 2>"$TMP/mu7.err" )
+    M7="$( grep '^\[verbfs\] qmetrics ' "$TMP/mu7.err" | head -1 )"
+fi
+statrun i7s --metrics
+A1="$( field i7s qmetrics asserted )"
+statrun i7b --metrics
+if [ -n "$A0" ] && [ -n "$A1" ] && [ "$A1" -gt "$A0" ] && [ "$( field i7s qmetrics served )" = 0 ] && [ "$( field i7s qmetrics why )" = asserts ] \
+   && [ "$( field i7b qmetrics served )" = 1 ] && [ "$( field i7b qmetrics asserted )" = "$A1" ] && identAll "I7"; then
+    ok "I7 an assertion added in a test: recomputed (why=asserts, graph equal), asserted= $A0 -> $A1, served again at $A1, identical"
+else no "I7: pre asserted=$A0 '$( line i7s qmetrics )' then '$( line i7b qmetrics )'"; fi
+if [ "$MUT" = 1 ]; then
+    case "$M7" in *"served=1"*"asserted=$A0"*) [ "$A0" != "$A1" ] && ok "MUT I7 RIPWIRE_FAULT_VERBFS_QMETRICS_NOASSERTS serves the stale record (asserted=$A0, the computed answer is $A1): without the asserts component the arm is red" \
+                                                                  || no "MUT I7: the premise asserted=$A0 -> $A1 did not move" ;;
+                  *) no "MUT I7: the NOASSERTS mutant did not serve the stale record: '$M7'" ;; esac
+fi
 
 # ── K: the kill switch ────────────────────────────────────────────────────────────────────────────────────────────
 rm -f "$( recordOf qmetrics )" "$( recordOf impure )"

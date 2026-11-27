@@ -1711,6 +1711,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
             const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
+            resetGitHistoryCensus();   // lane/history-honesty: this request's _history_policy counts only its own walks (gitmine.h WHOSE HISTORY)
             ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
@@ -1724,6 +1725,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 const GitWalkCutMark cutsNow  = gitWalkCutMark();
                 const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
+                // `_history_policy`: what the history-signal tools' walks in THIS request left out (bots) and followed (exact moves)
+                const bool        historyTool = name == "cochange" || name == "situational_awareness" || name == "quality_delta" || name == "rank_by";
+                const std::string historyNote = historyTool ? gitHistoryPolicySentence() : std::string();
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1766,7 +1770,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
                      + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
-                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + mcpEnvelopeNoteField( "_history_policy", historyNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too

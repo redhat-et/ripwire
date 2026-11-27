@@ -186,31 +186,56 @@ def _shard_weights():
     return w, med
 
 
+# SHARD_APART (2026-11-26, lane GATE-SPLIT): groups of gates that must never share a shard. A weight says how long a
+# gate takes ALONE; it cannot say that two gates slow EACH OTHER down. binoverridecheck (a meta-gate: ~870 gates
+# re-run against a stub on 6 worker threads of its own) and mcpframehonestycheck (arm K: ~200 back-to-back MCP edit
+# ingests) both ran at their 1200 s budget on macos-26 Release shard 2/4 -- 1,137.4 s and 1,106.2 s on #754's run,
+# 1,207.8 s and 1,201.3 s (killed) on #756's -- while mcpframehonestycheck took under 262 s on the macos-26 plain leg,
+# whose skip list drops binoverridecheck. Plain LPT put them together on every leg: binoverride is the 2nd-heaviest
+# row, and mcpframe arrived 7th when shard 2 was the lightest. A gate in a group is handed the lightest shard that
+# holds NO other member of its group; only when every shard already holds one (N smaller than the group) does it
+# fall back to the lightest shard overall, and the plan says so (apart_unmet=). Correcting the weights instead would
+# separate them only until the next regeneration; this holds for any weights. test/shardapartcheck.sh gates it.
+SHARD_APART = (("binoverridecheck.sh", "mcpframehonestycheck.sh"),)
+
+
 def shard_plan_for(gate_names, n):
     weights, median = _shard_weights()
     order = sorted(gate_names, key=lambda g: (-weights.get(g, median), g))
     buckets = [[] for _ in range(n)]
     load = [0.0] * n
+    group_of = {g: k for k, grp in enumerate(SHARD_APART) for g in grp}
+    held = [set() for _ in range(n)]     # the apart groups each shard already holds a member of
+    unmet = 0
     for g in order:
-        i = min(range(n), key=lambda j: (load[j], j))
+        k = group_of.get(g)
+        free = [j for j in range(n) if k is None or k not in held[j]]
+        if not free:
+            free, unmet = list(range(n)), unmet + 1
+        i = min(free, key=lambda j: (load[j], j))
         buckets[i].append(g)
         load[i] += weights.get(g, median)
-    return buckets, load
+        if k is not None:
+            held[i].add(k)
+    return buckets, load, unmet
 
 
 if shard_plan:
     n = shard[1] if shard else 4
-    buckets, load = shard_plan_for(gates, n)
+    buckets, load, unmet = shard_plan_for(gates, n)
     for i, (b, w) in enumerate(zip(buckets, load), 1):
         print(f"shard {i}/{n}: {len(b)} gates, predicted {w:.0f}s")
-    print(f"total {len(gates)} gates, predicted {sum(load):.0f}s; largest shard {max(load):.0f}s")
+        print("  gates: " + " ".join(sorted(b)))     # membership, so a gate (test/shardapartcheck.sh) can read the plan
+    print(f"total {len(gates)} gates, predicted {sum(load):.0f}s; largest shard {max(load):.0f}s"
+          + (f"; apart_unmet={unmet} (fewer shards than an apart group's members)" if unmet else ""))
     sys.exit(0)
 
 if shard:
-    buckets, load = shard_plan_for(gates, shard[1])
+    buckets, load, unmet = shard_plan_for(gates, shard[1])
     gates = buckets[shard[0] - 1]
     print(f"shard {shard[0]}/{shard[1]}: {len(gates)} gates, predicted {load[shard[0] - 1]:.0f}s "
-          f"(largest shard {max(load):.0f}s)")
+          f"(largest shard {max(load):.0f}s)"
+          + (f"; apart_unmet={unmet} (fewer shards than an apart group's members)" if unmet else ""))
 
 # Sort longest-first using recorded durations. A gate with NO recorded duration is unknown, not
 # fast -- treat it as potentially the slowest thing in the batch (float('inf')) so it schedules

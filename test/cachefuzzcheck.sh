@@ -1326,12 +1326,17 @@ fi
 # PART 5 — qchurn blob (deserializeRawCommitStream) — the co-change/churn history memo behind --for
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # Same reader family as Part 2 (readQSnapBlob + qsnapGet), a different layout: magic "QCHN"(4), scheme(4),
-# fnv(key)(8), then a u32 commit count, and per commit an i64 epoch and a u32 path count ahead of its
+# fnv(key)(8), the walk's budget cut(4), the walk's WHOSE-HISTORY census (bot commits, agent commits, exact moves:
+# three u32s, scheme 6 / #777), then a u32 commit count, and per commit an i64 epoch and a u32 path count ahead of its
 # length-prefixed paths. Both counts used to size a reserve before any byte of the records was read: 2^32-1
 # commits is ~128 GiB and 2^32-1 paths ~96 GiB, and Linux answered either with an uncaught std::bad_alloc
 # (SIGABRT on every --for until the blob was evicted). A rejected blob is a SILENT miss by this memo's contract
 # (a stale key is the ordinary case), so the proof that the reader refused it rather than trusting it is that
 # the recompute rewrote the blob byte-identical to the good one.
+# The census sizes no allocation, but it is a disclosure: every visited commit is one stream record (a skipped bot
+# commit is kept as a record with no path), so bot + agent commits can never exceed the commit count. A blob that
+# claims more would put an impossible bots/agents count in the header of every warm answer; qchurn_census_over_commits
+# claims one more bot commit than the blob holds commits, and must be refused like the huge counts.
 echo
 echo "=== Part 5: qchurn blob huge counts (--for) ==="
 if command -v git >/dev/null 2>&1 && [ -n "${QREPO:-}" ] && [ -d "$QREPO" ]; then
@@ -1353,7 +1358,8 @@ def fnv1a64(data):
     for c in data:
         h = ((h ^ c) * 1099511628211) & ((1 << 64) - 1)
     return h
-QCHURN_COUNT_OFF = 20   # magic(4) + scheme(4) + fnv(key)(8) + the budget cut(4): the key check must pass for the count to be read at all
+QCHURN_CENSUS_OFF = 20  # magic(4) + scheme(4) + fnv(key)(8) + the budget cut(4): the key check must pass for anything after it to be read
+QCHURN_COUNT_OFF = QCHURN_CENSUS_OFF + 12   # + the census: bot commits(4), agent commits(4), exact moves(4)
 # Verify the layout on the good blob before aiming a row at it: walking commits and paths from QCHURN_COUNT_OFF must
 # land exactly on the trailer. A header that grew a field would make that walk miss, and the rows would then be
 # refused by an earlier guard while passing — so a miss fails the arm instead.
@@ -1371,9 +1377,12 @@ if off != len(good) - 8:
     print("qchurn layout: walking the good blob from offset %d does not land on its trailer" % QCHURN_COUNT_OFF)
     sys.exit(3)
 header = good[:QCHURN_COUNT_OFF]
+(good_commits,) = struct.unpack_from("<I", good, QCHURN_COUNT_OFF)
 rows = {
-    "qchurn_huge_commit_count": header + struct.pack("<I", 0xFFFFFFFF),
-    "qchurn_huge_path_count":   header + struct.pack("<I", 1) + struct.pack("<q", 0) + struct.pack("<I", 0xFFFFFFFF),
+    "qchurn_huge_commit_count":   header + struct.pack("<I", 0xFFFFFFFF),
+    "qchurn_huge_path_count":     header + struct.pack("<I", 1) + struct.pack("<q", 0) + struct.pack("<I", 0xFFFFFFFF),
+    # the good blob's own records, its census raised to one bot commit more than it holds commits
+    "qchurn_census_over_commits": good[:QCHURN_CENSUS_OFF] + struct.pack("<I", good_commits + 1) + good[QCHURN_CENSUS_OFF + 4:len(good) - 8],
 }
 for name, body in rows.items():
     open(sys.argv[2] + "/" + name + ".bin", "wb").write(body + struct.pack("<Q", fnv1a64(body)))
@@ -1395,7 +1404,7 @@ PYEOF3
         }
         # The unbounded row is a CORRECTNESS row: it proves the blob is refused and rewritten, and it is named so,
         # because on an overcommitting allocator it cannot see the allocation. Only the bounded and ASan legs can.
-        for name in qchurn_huge_commit_count qchurn_huge_path_count; do
+        for name in qchurn_huge_commit_count qchurn_huge_path_count qchurn_census_over_commits; do
             [ -f "$MUTDIR/$name.bin" ] || { no "[$name] no mutant was built — nothing to judge"; continue; }
             cp "$MUTDIR/$name.bin" "$CBLOB"
             crun "$BIN" >"$TMP/c_$name.out" 2>"$TMP/c_$name.err"; rc=$?

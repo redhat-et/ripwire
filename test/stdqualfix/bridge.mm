@@ -1,10 +1,10 @@
-// test/stdqualfix — file 13: the ObjC++ arm, and a STATED FLOOR. tree-sitter-objc parses `std::move( x )` as an
-// ERROR node spelling `std::` beside a bare `move( x )` call (measured with --match='(ERROR) @e'), and ingest sets
-// no call qualifier for Lang::ObjC, so the reference arrives UNQUALIFIED and the std:: guard never sees it. Both
-// sites below are therefore bare calls to the resolver, before the fix and after it:
-//   bridgeMove  std::move       → refused by the Phase-5 veto (move is in the table, no free move exists)
-//   bridgeStop  std::unreachable → NOT in the table, so it still binds Cursor::unreachable — the floor.
-// Closing it needs the qualifier recovered at EXTRACTION for the ObjC grammar, which is a parser change.
+// test/stdqualfix — file 13: the ObjC++ arm (was a STATED FLOOR). tree-sitter-objc parses `std::move( x )` as an
+// ERROR node spelling `std::` beside a bare `move( x )` call (measured with --match='(ERROR) @e'). Since lane
+// objcxx-std-qualified, ingest reads the std-rooted chain back (ingest_names.h objcxxStdQualifierBefore), so the
+// reference arrives qualified `std` and the std:: guard refuses both sites, as it does in callers.cpp:
+//   bridgeMove  std::move       → refused (also a Phase-5 veto table name: no free move exists)
+//   bridgeStop  std::unreachable → refused (NOT a table name: before the lane it bound Cursor::unreachable — the floor).
+// A non-std chain in a .mm keeps the bare-call ladder (stdqualcheck §16's vendor:: controls).
 
 #include "buffers.h"
 
