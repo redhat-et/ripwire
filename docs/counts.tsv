@@ -3,22 +3,22 @@
 # re-takes it from the tree; `check` compares it with the tree. A feature PR leaves it alone, which is what keeps
 # two open PRs that each add a gate or a cap from conflicting on a total.
 taken	2026-11-27
-gates.scripts	947
+gates.scripts	948
 limits.boundary	46
-limits.caps	482
-limits.constants	492
-limits.disclosing	303
-limits.files	166
+limits.caps	485
+limits.constants	495
+limits.disclosing	306
+limits.files	167
 limits.indexing	56
 limits.output	46
 limits.parameters	10
 limits.silent	179
 tuning.constexpr_live	12
-tuning.declarations	348
+tuning.declarations	351
 tuning.duplicated	`kRowCap`
 tuning.gone	1
 tuning.gone_shown	`kSituTestRowsShown`
-tuning.names	347
+tuning.names	350
 tuning.tunable_live	111
-tuning.unswept	224
-tuning.unswept_shown	`kActRows`, `kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, +218 more
+tuning.unswept	227
+tuning.unswept_shown	`kActRows`, `kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, +221 more
