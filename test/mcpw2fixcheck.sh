@@ -98,11 +98,15 @@ def rpc(req):
 names = [ t["name"] for t in json.load(open(TOOLS))["result"]["tools"] ]
 excluded = []
 for i in range(0, len(names), 12):                       # chunk well under kBatchCap=16
-    args = {"path": ROOT, "queries": [ {"verb": n} for n in names[i:i+12] ]}
-    req  = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":%s}' % json.dumps({"name":"batch","arguments":args})
-    t    = rpc(req)["result"]["content"][0]["text"]
-    for m in re.finditer(r'<q i="\d+" verb="([^"]*)" ok="0" err="([^"]*)"', t):
-        if "unknown sub-verb" in html.unescape(m.group(2)): excluded.append(m.group(1))
+    offset = 0
+    while offset is not None:                            # CL1: a batch past the output ceiling pages; read every page
+        args = {"path": ROOT, "queries": [ {"verb": n} for n in names[i:i+12] ], "offset": offset}
+        req  = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":%s}' % json.dumps({"name":"batch","arguments":args})
+        t    = rpc(req)["result"]["content"][0]["text"]
+        for m in re.finditer(r'<q i="\d+" verb="([^"]*)" ok="0" err="([^"]*)"', t):
+            if "unknown sub-verb" in html.unescape(m.group(2)): excluded.append(m.group(1))
+        nx = re.search(r'<batch\b[^>]*\bnext_offset="(\d+)"', t)
+        offset = int(nx.group(1)) if nx else None
 stanza = { t["name"]: t for t in json.load(open(TOOLS))["result"]["tools"] }["batch"]["description"]
 m = re.search(r"The other (\d+) advertised verbs", stanza)
 problems = []

@@ -1,0 +1,7 @@
+### Fixed — MCP git verbs and `grep` answer on a tree with tens of thousands of directories, and an empty `whereis` names its real cause
+
+On a checkout with 45,547 directories, MCP `whereis` and `stray_content` refused with "not a git repository (or no HEAD commit)", and MCP `grep` answered `files=0 total=0` for a name present in three indexed files. The CLI answered all three on the same tree. The cause was the MCP freshness watcher: it held one open descriptor per directory with no cap, so every descriptor the server opened afterwards was numbered past 32,767, where macOS stdio cannot open a stream (`fdopen` fails with EMFILE). Every `popen` the server made after building the index failed, and the git probe read that as "no HEAD". The watcher now has a descriptor budget of 16,384 directories. A larger tree is not watched, and its freshness comes from the full stat sweep: the same answers, only slower per request.
+
+The empty-answer refusal of MCP `whereis` and `stray_content` used to name the same two-part cause for every empty return. It now runs two git probes on that path and names what they found: "not a git repository" (with git's exit code), "a git repository with no HEAD commit", "this server could not start git" (with errno; it then says nothing about the repository), or "no answer, cause unknown". A `stray_content` ref filter that matched no ref now says so.
+
+`test/mcpwhereiscausecheck.sh` builds a 33,000-directory git fixture. On the parent, 5 of its 6 arms fail; on this change all 6 pass.

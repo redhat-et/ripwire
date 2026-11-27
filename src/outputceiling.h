@@ -22,6 +22,11 @@
 //   --expand    body lines: the default --pack-budget-bytes leaves the answer under the ceiling; a cut body says lines="lo-hi/T"
 //               and next= names the slice that continues it (serialize.h)
 //   --for --page-bytes=0   the whole answer by request: printed whole, plus ONE stderr line when it is over the ceiling
+//   MCP memory_recall   body bytes: a budget_tokens past the ceiling builds the answer as asked and pages it — the header line says
+//               offset= shown_bytes= of_bytes= has_more= next_offset=, and the pages' bodies rebuild the whole answer (mcpverbs.h recallPage)
+//   MCP batch   whole <q> sub-answers: offset= shown= has_more= next_offset= on the root; a <q> larger than a page is served alone,
+//               over_ceiling="1" (mcpverbs.h batchText). Both from research audit 2026-11-26 item 2: Claude Code spilled a 153,394-char
+//               recall and a 61,579-char batch to a file.
 #include <cstddef>
 
 namespace rw

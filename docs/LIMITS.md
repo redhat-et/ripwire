@@ -51,10 +51,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 478 | 165 | 301 | **177** |
+| 479 | 166 | 301 | **178** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 478 + 10 is the 488 constants this generator parses out of `src/`.
+are not counted as caps, and 479 + 10 is the 489 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **148 of 478 caps are classified
-(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 330 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 479 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 331 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -1181,6 +1181,14 @@ Discloses: `capped`
 | --- | --- | --- | --- |
 | `kMaxEditDistance` | `3` | BOUNDARY | the read verbs' bandwidth (didyoumean.h::didYouMean) |
 | `kReceiptRegionBudgetBytes` | `2048` | — | — |
+
+### `src/mcpindex.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxWatchedDirs` | `16384` | — | — |
 
 ### `src/mcpjson.h`
 

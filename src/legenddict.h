@@ -597,8 +597,15 @@ inline std::string rosterText()
 
 // One per server process that can hold a session (the stdio loop; mcp.h). Never shared across threads: the stdio loop
 // dispatches one line at a time, and the HTTP transport holds none (every answer there stays inline).
+// Where a reader of a ref answer gets every definition, named by its <about dict=>. The CLI reader runs a command; an MCP
+// reader reads a resource (mcp.h sets its session's). The answer must name it ITSELF: the reader may no longer hold the first
+// answer of its session, or the server's instructions (client-side compaction, `clear_tool_uses` — research audit 2026-11-26
+// item 6), and the server cannot see either happen. test/mcplegendrecoverycheck.sh.
+inline constexpr std::string_view kCliDictPointer = "ripwire --legend-dict";
+
 struct LegendSession
 {
+    std::string_view          dictPointer = kCliDictPointer;   // <about dict=> on this session's ref answers (above)
     bool                      refOn = false;   // the core was served in THIS process: answers may take the ref posture
     std::vector<std::uint8_t> served;          // per entry id: 1 once this process sent its bytes
 
@@ -994,6 +1001,7 @@ struct RefShape
     std::size_t              closeAt = 0;      // where the root's close begins (its open's end when self-closing)
     bool                     selfClosing = false;
     std::string_view         have;             // the tiers a CLI caller named, for <about have=>; empty in a session
+    std::string_view         dict = kCliDictPointer;   // <about dict=>: where THIS reader gets every definition (LegendSession)
 };
 
 // Which legend family the answer carries, and where its root closes; nullopt when the dictionary cannot reduce it (not
@@ -1217,7 +1225,7 @@ struct RefParts
 // The ref answer's last child. have= rides only a CLI handshake answer: it says which tiers the caller named, so a reader
 // of the answer (or of a transcript, later) can tell which definitions were left out on purpose. The session posture
 // passes none, and its pointer is the three attributes it always was.
-inline std::string aboutPointer( std::string_view have )
+inline std::string aboutPointer( std::string_view have, std::string_view dict = kCliDictPointer )
 {
     std::string out = "<about legend=\"ref\"";
     if( !have.empty() )
@@ -1226,7 +1234,9 @@ inline std::string aboutPointer( std::string_view have )
         out.append( have );
         out += '"';
     }
-    return out + " dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"/>";
+    out += " dict=\"";
+    out.append( dict );
+    return out + "\" dictv=\"" + dictionaryVersion() + "\"/>";
 }
 
 inline RefParts assembleRef( std::string_view view, const RefShape& s, const HeadReduction& r )
@@ -1260,7 +1270,7 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
         p.body.assign( view.substr( bodyBegin, s.closeAt - bodyBegin ) );
     }
     for( const std::string& kept : r.residual ) { p.trailer += kept; }
-    p.trailer += aboutPointer( s.have );
+    p.trailer += aboutPointer( s.have, s.dict );
     return p;
 }
 
@@ -1350,6 +1360,7 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std
         return RefOutcome::NotApplicable;
     }
     shape->have = have;
+    shape->dict = session.dictPointer;
     std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
     if( !head )
     {

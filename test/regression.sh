@@ -788,6 +788,7 @@ for _g in \
     mcpeditmodecheck \
     mcpeditpresencecheck \
     mcpeditracecheck \
+    mcpenvelopevisiblecheck \
     mcpflagshipcheck \
     mcpforparitycheck \
     mcpforroutecheck \
@@ -797,6 +798,7 @@ for _g in \
     mcpgrepdegradedcheck \
     mcphandlecheck \
     mcpincrementalcheck \
+    mcplegendrecoverycheck \
     mcplisttrimcheck \
     mcpmanifestcheck \
     mcponeparsecheck \
@@ -819,6 +821,7 @@ for _g in \
     mcpw2fixcheck \
     mcpw3fixcheck \
     mcpwatchercheck \
+    mcpwhereiscausecheck \
     mdembedcheck \
     mdsectioncheck \
     memceilingcheck \

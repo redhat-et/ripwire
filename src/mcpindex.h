@@ -237,6 +237,17 @@ namespace mcpdetail
     //
     // DEGRADE, never throw: if kqueue()/open() fail (fd pressure, an OS without kqueue), the watcher is simply
     //   marked unhealthy — getIndex() then always runs the full dir sweep, i.e. the exact pre-Feature-1 path.
+    //
+    // THE DESCRIPTOR BUDGET (kMaxWatchedDirs). "Bounded = dir count, small" above is not true of every tree. The watcher's
+    //   fds are the lowest free numbers, so every descriptor the server opens after arming is numbered past them, and macOS
+    //   stdio keeps a FILE's descriptor in a `short`: fdopen() of one past 32,767 fails with EMFILE whatever RLIMIT_NOFILE
+    //   allows, and popen() goes through it. MEASURED 2026-11-26: this project's main checkout has 45,547 directories, the
+    //   uncapped watcher held 45,547 fds, every later popen() returned NULL with EMFILE, and every git-backed MCP verb read
+    //   that as "not a git repository" while the CLI (no watcher) answered (test/mcpwhereiscausecheck.sh). A tree with more
+    //   directories than the budget is not watched at all — the same all-or-nothing degrade as a failed registration — so
+    //   half of the stdio descriptor range stays free for everything else the server opens.
+    inline constexpr std::size_t kMaxWatchedDirs = 16384;
+
     struct FsWatcher
     {
         int              kq       = -1;      // the kqueue fd, or -1 if unavailable (→ unhealthy → always sweep)
@@ -293,6 +304,13 @@ namespace mcpdetail
                 return;
             }
 
+            if( dirs.size() > kMaxWatchedDirs )                         // past the descriptor budget (above): the sweep answers instead
+            {
+                DISCLOSE( Diagnostics::answerUnchanged, "the full stat sweep keeps the index exactly as fresh: only slower",
+                          "mcp watcher: more directories than the descriptor budget — falling back to stat-sweep freshness" );
+                reset();
+                return;
+            }
             dirFds.reserve( dirs.size() );
             for( const std::string& d : dirs )
             {

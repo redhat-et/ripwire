@@ -17,6 +17,10 @@
 #   --grep     matches (PG1): shown= has_more= next_offset= and next="--grep=… --offset=K"; the pages chain to both lists whole
 #   --clones   clone groups (PG1): the same window and next="--clones --offset=K"; the pages chain to every group once
 #   --expand=<many definitions> (PG1): unserved_next= (selectors, or past 16 of them --offset=K) serves each definition once
+#   MCP memory_recall   an explicit budget_tokens is served whole (the --page-bytes=0 rule), its visible notes saying _over_ceiling;
+#              with offset it pages by body bytes (audit 2026-11-26): offset= shown_bytes= of_bytes= has_more= next_offset= on the
+#              header line, and the pages' bodies rebuild the CLI --recall's whole answer
+#   MCP batch  whole <q> sub-answers: offset= shown= has_more= next_offset= on the root; every <q> exactly once
 #   the map   file groups (and, inside a large inventory, its ls rows): page= pages= withheld_bytes= has_more= and
 #              next="--page-bytes=24000:K" (page_next= when the root already has a next=); the pages rebuild --page-bytes=0's map
 #
@@ -410,6 +414,85 @@ rc, xagain, _ = run(BIN, MULTI, ["--expand=str_of"])
 say(xagain == xpages[0], "(X7) [C] determinism: the first page is byte-identical across two runs")
 rc, _, err = run(BIN, MULTI, ["--expand=str_of", "--offset=40"])
 say(rc != 0 and "past the 40 definitions" in err, "(X8) [P] an --offset past the last definition refuses (exit %d)" % rc)
+
+# ── (RC/BC) the MCP verbs (research audit 2026-11-26 item 2): memory_recall and batch ────────────────────────────────
+# memory_recall: a caller's budget_tokens shapes an answer past the ceiling; it pages by its body bytes, and the pages' bodies
+# rebuild the CLI --recall's whole answer byte for byte. batch: sixteen bounded sub-answers made an unbounded aggregate; it pages
+# by whole <q> sub-answers, and the pages carry every <q> exactly once.
+import json
+
+
+def mcp_session(calls, cwd=W):
+    lines = [json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})]
+    for i, (tool, a) in enumerate(calls):
+        lines.append(json.dumps({"jsonrpc": "2.0", "id": i + 2, "method": "tools/call", "params": {"name": tool, "arguments": a}}))
+    r = subprocess.run([BIN, "--mcp", "--no-cache"], input="\n".join(lines) + "\n", capture_output=True, text=True, errors="replace", cwd=cwd)
+    got = {}
+    for ln in r.stdout.splitlines():
+        try:
+            m = json.loads(ln)
+        except ValueError:
+            continue
+        got[m.get("id")] = m
+    return [got.get(i + 2, {}) for i in range(len(calls))]
+
+
+def payload(m):
+    c = m.get("result", {}).get("content", [])
+    return c[0].get("text", "") if c else "ERROR " + m.get("error", {}).get("message", "")
+
+
+DOCS = os.path.join(W, "docs")
+for d in range(6):
+    paras = "".join("## Cache key section %d.%d\n\nThe cache key folds the parser version, the options key and the tree digest; "
+                    "eviction runs oldest first and the budget is per root. Paragraph %d of doc %d.\n\n" % (d, k, k, d) for k in range(260))
+    w(os.path.join(DOCS, "design_cache_%d.md" % d), "# Cache key design %d\n\n" % d + paras)
+TASK = "how does the cache key and eviction budget work"
+rc, cli_whole, _ = run(BIN, DOCS, ["--recall=" + TASK, "--max-tokens=60000"])
+pages, offset = [], 0
+for _ in range(40):
+    (m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000, "offset": offset})])
+    t = payload(m)
+    pages.append(t)
+    hm = re.search(r" has_more=1 next_offset=(\d+)", t.split("\n", 1)[0])
+    if not hm:
+        break
+    offset = int(hm.group(1))
+say(len(cli_whole) > 2 * CEILING, "(RC0) [C] the fixture's whole recall at budget_tokens=60000 is past the ceiling (%d B): the arms below judge a real cut" % len(cli_whole))
+say(len(pages) > 1 and all(len(p.encode()) <= CEILING for p in pages),
+    "(RC1) [P] memory_recall budget_tokens=60000 pages under the ceiling (%d pages, largest %d B)" % (len(pages), max(len(p.encode()) for p in pages)))
+joined = "".join(p.split("\n", 1)[1] if "\n" in p else "" for p in pages)
+say(len(pages) > 1 and joined == cli_whole.split("\n", 1)[1], "(RC2) [P] the pages' bodies rebuild the CLI --recall's whole body byte for byte (%d vs %d B)" % (len(joined), len(cli_whole.split("\n", 1)[1])))
+(m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK})])
+rc, cli_default, _ = run(BIN, DOCS, ["--recall=" + TASK])
+say(payload(m) == cli_default and " offset=" not in payload(m).split("\n", 1)[0],
+    "(RC3) [C] the DEFAULT memory_recall fits and is unchanged: byte-identical to the CLI --recall (%d B)" % len(payload(m)))
+(m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000})])
+whole_t = payload(m)
+notes = whole_t[len(cli_whole):]
+say(whole_t.startswith(cli_whole) and notes.startswith("\n_over_ceiling: ") and "offset=0" in notes,
+    "(RC5) [P] an explicit budget_tokens with no offset is served WHOLE (the CLI's %d B, then a trailing _over_ceiling: line naming offset=0)" % len(cli_whole))
+(m,) = mcp_session([("memory_recall", {"path": DOCS, "task": TASK, "budget_tokens": 60000, "offset": 10 ** 8})])
+say("past the end" in payload(m), "(RC4) [P] an offset past the body refuses, naming where offsets come from")
+
+queries = [{"verb": "grep", "pattern": "mod%02d_fn" % k} for k in range(16)]
+bpages, offset = [], 0
+for _ in range(20):
+    (m,) = mcp_session([("batch", {"path": BIG, "queries": queries, "offset": offset})])
+    t = payload(m)
+    bpages.append(t)
+    nx = root_attr(t, "batch", "next_offset")
+    if root_attr(t, "batch", "has_more") != "1" or nx is None:
+        break
+    offset = int(nx)
+qs = [int(i) for p in bpages for i in re.findall(r'<q i="(\d+)"', p)]
+(whole_m,) = mcp_session([("batch", {"path": BIG, "queries": queries[:2]})])
+say(len(bpages) > 1 and all(len(p.encode()) <= CEILING for p in bpages),
+    "(BC1) [P] a 16-query batch pages under the ceiling (%d pages, largest %d B)" % (len(bpages), max(len(p.encode()) for p in bpages)))
+say(sorted(qs) == list(range(16)), "(BC2) [P] the pages carry every <q> exactly once, in order (%s)" % qs)
+say(all(well_formed(p) for p in bpages), "(BC3) [C] every batch page is well-formed XML")
+say(root_attr(payload(whole_m), "batch", "offset") is None and payload(whole_m).count("<q i=") == 2,
+    "(BC4) [C] a batch that fits carries no page attributes (unchanged)")
 
 # ── (N) answers that fit are unchanged ───────────────────────────────────────────────────────────────────────────────
 if BASE:

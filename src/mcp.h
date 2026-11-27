@@ -680,6 +680,133 @@ inline std::string mcpEnvelopeNoteField( std::string_view key, const std::string
     return ",\"" + std::string( key ) + "\":\"" + mcpdetail::jsonEscape( note ) + "\"";
 }
 
+// Research audit 2026-11-26 item 1: an MCP host hands the MODEL `content` and nothing else — 0 of 102 sampled Claude Code
+// results carried `_index` or `_fresh` — so an envelope sibling alone discloses a cut to the JSON-RPC client and not to
+// the agent. Every non-empty note that limits or qualifies the answer is therefore said again INSIDE the answer, in the answer's own form, the same sentence as
+// the machine copy, and only when there is one (an answer with nothing to disclose is byte-identical):
+//   XML   a <notes><n k="KEY">sentence</n>…</notes> child of the root, after its rows and before its trailing comments and
+//         ref-posture <about> (which stays the root's LAST child) — so the answer is still ONE well-formed document for a
+//         client that joins blocks;
+//   JSON  a "_notes":{"KEY":"sentence",…} member of the top-level object, so the payload still parses;
+//   text  trailing "KEY: sentence" lines (memory_recall, the one plain-text answer).
+// It is not a second content block: CI #774 measured that one breaking every gate (and client) that joins the text blocks
+// into one document. `_memory_peak` is NOT said here, on purpose: the answer it rides is whole (the run finished and
+// answered), its number is the process's peak footprint — different run to run — and the CLI says it on stderr, never in a
+// verb's answer (memguard.h). It stays the machine copy only. So does `_memory_stop`'s GENERIC sentence (a stop elsewhere in
+// the process during the request, the background snapshot's included: timing- and pressure-dependent, and it cannot say the
+// answer used it); the index-cut sentence, about the index that answered, is said. Gate: test/mcpenvelopevisiblecheck.sh.
+struct McpEnvelopeNotes
+{
+    std::string_view assumedRoot;
+    std::string_view indexStop;     // the index that answered THIS request was cut by the memory guard
+    std::string_view anyStop;       // _memory_stop as the envelope says it: indexStop, or the generic sentence (a stop anywhere)
+    std::string_view historyCut;
+    std::string_view overCeiling;   // CL1: an answer served whole BY REQUEST past the output ceiling (memory_recall's budget_tokens)
+};
+
+// `_fresh` is NOT said in the answer either, and that is the contract, not an omission: it is about the CALL — whether
+// this server had to rebuild an index it already held — and it limits nothing (a reindexed answer is the answer a cold
+// server gives: test/mcpincrementalcheck.sh and test/freshnesscheck.sh compare exactly that, byte for byte). An answer
+// body is a function of the tree and the request, never of the session's history; `_fresh` stays the machine copy.
+inline std::vector<std::pair<std::string_view, std::string>> mcpVisibleNotes( std::string_view verb, const McpEnvelopeNotes& n )
+{
+    // a verb that runs its OWN ingest inside the tool answers from it: there the generic stop sentence is about this answer
+    const bool ownIngest = verb == "quality_delta" || verb == "quality_baseline" || verb == "edit_check";
+    std::vector<std::pair<std::string_view, std::string>> notes;
+    const auto add = [ & ]( std::string_view key, std::string_view sentence )
+    {
+        if( !sentence.empty() ) { notes.emplace_back( key, std::string( sentence ) ); }
+    };
+    add( "_assumed_root", n.assumedRoot );
+    add( "_memory_stop", ownIngest ? n.anyStop : n.indexStop );
+    add( "_history_cut", n.historyCut );
+    add( "_over_ceiling", n.overCeiling );
+    return notes;
+}
+
+// Splice the notes into `payload` in its own form (above). Returns false when there was nothing to say (payload untouched).
+inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes );
+
+// The answer to serve: `body` itself when this request has no note to say, else `scratch` holding `body` with the notes said
+// inside it (mcpSpliceNotes). No copy is made of an answer with nothing to disclose.
+inline const std::string* mcpAnswerWithNotes( std::string_view verb, const std::string* body, const McpEnvelopeNotes& n, std::string& scratch )
+{
+    const auto notes = mcpVisibleNotes( verb, n );
+    if( notes.empty() )
+    {
+        return body;
+    }
+    scratch = *body;
+    mcpSpliceNotes( scratch, notes );
+    return &scratch;
+}
+
+inline bool mcpSpliceNotes( std::string& payload, const std::vector<std::pair<std::string_view, std::string>>& notes )
+{
+    if( notes.empty() )
+    {
+        return false;
+    }
+    const std::size_t end = payload.find_last_not_of( " \n" );
+    const char        last = end == std::string::npos ? '\0' : payload[ end ];
+    if( !payload.empty() && payload.front() == '{' && last == '}' )
+    {
+        std::string member = "\"_notes\":{";
+        for( std::size_t i = 0; i < notes.size(); ++i )
+        {
+            member += ( i ? ",\"" : "\"" ) + std::string( notes[i].first ) + "\":\"" + mcpdetail::jsonEscape( notes[i].second ) + "\"";
+        }
+        member += "}";
+        const bool emptyObject = payload.find_first_not_of( " \n", 1 ) == end;
+        payload.insert( end, emptyObject ? member : "," + member );
+        return true;
+    }
+    const std::size_t close = last == '>' ? payload.rfind( "</", end ) : std::string::npos;
+    if( !payload.empty() && payload.front() == '<' && close != std::string::npos && payload.find( '<', close + 2 ) == std::string::npos )
+    {
+        std::vector<char> esc;
+        std::string       element = "<notes>";
+        for( const auto& [ key, sentence ] : notes )
+        {
+            element += "<n k=\"" + std::string( key ) + "\">";
+            element.append( escapeXml( sentence, esc ) );   // serialize.h's one XML escaper
+            element += "</n>";
+        }
+        element += "</notes>";
+        // before the root's TRAILING comments and <about/> pointer: the ref posture's pointer stays the root's LAST child
+        // (legenddict.h), and a verb's closing legend clause stays last before its close (the `for` rows clause)
+        std::size_t at = close;
+        for( ;; )
+        {
+            const std::string_view head( payload.data(), at );
+            if( head.ends_with( "-->" ) )
+            {
+                const std::size_t open = head.rfind( "<!--" );
+                if( open == std::string::npos ) { break; }
+                at = open;
+            }
+            else if( head.ends_with( "/>" ) && head.rfind( "<about " ) != std::string::npos && head.find( '<', head.rfind( "<about " ) + 1 ) == std::string::npos )
+            {
+                at = head.rfind( "<about " );
+            }
+            else
+            {
+                break;
+            }
+        }
+        payload.insert( at, element );
+        return true;
+    }
+    for( const auto& [ key, sentence ] : notes )
+    {
+        payload += "\n";
+        payload.append( key );
+        payload += ": ";
+        payload += sentence;
+    }
+    return true;
+}
+
 // is `candidatePath` the workspace root itself, or STRICTLY inside it — a path-COMPONENT prefix, so a
 // sibling directory that merely shares a text prefix (root "/repo" vs candidate "/repo-foo") never matches.
 // `canonRoot` must already be canonicalized (mcpCanonRoot); `candidatePath` is canonicalized here so callers
@@ -1062,7 +1189,8 @@ inline constexpr std::string_view kMcpLegendDictFullUri = "ripwire://legend-dict
 inline legenddict::LegendSession& mcpStdioLegendSession()
 {
     ASSUME_SAME_THREAD( "the stdio request loop is the one thread that dispatches, and so the one that reads or writes the session" );
-    static legenddict::LegendSession session;
+    // audit 2026-11-26 item 6: a ref answer names the resource that recovers its definitions, not the CLI command
+    static legenddict::LegendSession session{ .dictPointer = kMcpLegendDictFullUri };
     return session;
 }
 
@@ -1674,6 +1802,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // (JSON, XML, or plain text) — so it's the version of "append a trailing marker" that is actually
             // uniform across every verb, per the requirement.
             std::string memoryStopNote;   // #350: set by indexStamp when the index answering this request is memory-guard partial
+            std::string overCeilingNote;  // CL1: set by a verb that served a whole answer past the output ceiling because the caller asked
             const auto indexStamp = [ & ]( const std::string& root ) -> std::string
             {
                 // F-W1: the stamp is built AFTER the verb's answer is complete, so a rebuild that stops here refuses nothing. A write
@@ -1716,6 +1845,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // stamp FIRST, then the pass count: on a verb that never touched the index, building the
                 // stamp is what forces the rebuild, and one `+` chain would not sequence those two reads.
                 const std::string stamp = indexStamp( path );
+                // the index answering THIS request was cut: said inside the answer too (McpEnvelopeNotes). The generic sentence below
+                // is machine-only: a stop somewhere in this process during the request (the background snapshot included) "may"
+                // touch the answer, it cannot say which, and whether it happens depends on timing and machine pressure.
+                const std::string visibleStopNote = memoryStopNote;
                 if( memoryStopNote.empty() && memguard::stopCounts().recorded.load( std::memory_order_relaxed ) > stopsAtEntry )
                 {
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
@@ -1760,12 +1893,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     legenddict::openSessionWith( *body, *legendSession );   // served as-is; opens the session when reducible
                 }
+                const std::string peakNote = memguard::peakNoteOnIncrease();   // once: it reports each rise only the first time
+                std::string noted;
+                body = mcpAnswerWithNotes( name, body, McpEnvelopeNotes{ assumedRootNote, visibleStopNote, memoryStopNote, cutNote, overCeilingNote }, noted );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
-                     + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
-                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_memory_peak", peakNote )
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + mcpEnvelopeNoteField( "_over_ceiling", overCeilingNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
@@ -1861,6 +1997,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // bad one once, and otherwise hand the validated window to the verb. Written as one shape rather
             // than as the same three-line if/else copied into three dispatch arms, because those copies ARE
             // the complexity — a --quality-delta pass reads three of them as exactly that, and it is right to.
+            // CL1 (audit 2026-11-26 item 2): a paged answer (recallPage / batchPage), or its continuation's refusal
+            const auto pagedTextResult = [ & ]( const McpPagedText& page )
+            {
+                return page.refusal.empty() ? textResult( page.text ) : errResultMsg( -32602, page.refusal );
+            };
             const auto pagedResult = [ & ]( auto&& buildWithPage ) -> std::string
             {
                 const McpPageParse pg = mcpPageArgs( args );
@@ -2377,7 +2518,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // a 1500-token ceiling and disclosed none. recall.h's recallBytesForTokens owns it now.
                     const std::size_t recallTokens = budgetArg.isPresent ? std::size_t( budgetArg.value )
                                                                          : kDefaultRecallMaxTokens;
-                    resp = textResult( recallText( path, task, recallTopK, recallTokens, redactPtr ) );
+                    // CL1 (audit 2026-11-26 item 2): an explicit budget_tokens is a request for the whole answer, and gets it (the CLI
+                    // --page-bytes=0 rule); past the ceiling the answer says so and names offset, which pages it (recallPage)
+                    const bool pageAsked = mcpdetail::findRawValue( args, "offset" ).isPresent;
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        return pagedTextResult( recallServe( recallText( path, task, recallTopK, recallTokens, redactPtr ), pageAsked,
+                                                             std::size_t( pg.offset ), overCeilingNote ) );
+                    } );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
                 {
@@ -2478,7 +2626,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
                         }
-                        return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to search" ) : textResult( t );
+                        // audit 2026-11-26 item 4: the cause sweepEmptyCause measured, never a fixed guess
+                        return t.empty() ? errResultMsg( -32602, sweepEmptyCause( path, "search" ) ) : textResult( t );
                     } );
                 }
                 else if( name == "stray_content" && !path.empty() )
@@ -2487,13 +2636,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
                         SweepFault        sweepFault = SweepFault::None;
-                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault );
+                        std::string       emptyCause;
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault, &emptyCause );
                         if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );
                         }
-                        return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to compare" ) : textResult( t );
+                        return t.empty() ? errResultMsg( -32602, emptyCause ) : textResult( t );
                     } );
                 }
                 else if( name == "flags" && !path.empty() )
@@ -2951,7 +3101,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                     }
                                 }
                             }
-                            resp = textResult( batchText( subs, requested, kBatchCap ) );
+                            // CL1 (audit 2026-11-26 item 2): the aggregate pages by whole <q> sub-answers (batchText)
+                            resp = pagedResult( [ & ]( McpPageArgs pg ) { return pagedTextResult( batchPage( subs, requested, kBatchCap, std::size_t( pg.offset ) ) ); } );
                         }
                     }
                 }
