@@ -60,6 +60,7 @@
 #include <utility>
 #include <span>
 #include <system_error>
+#include <tuple>
 
 #include <cctype>
 
@@ -118,6 +119,13 @@ struct Site
     std::string_view call;   // unchecked-status: the call whose status is dropped (a static spelling); empty otherwise
     std::string      why;    // unhandled-arm: the values the classifier leaves without an outcome; empty otherwise
 };
+
+// Sites by position, then text, then facet: two facets on one line stay apart, so the dedup's neighbour compare sees
+// every repeat of one facet (an unstable sort could interleave them).
+inline bool siteOrder( const Site& a, const Site& b )
+{
+    return std::tie( a.startByte, a.text, a.facet ) < std::tie( b.startByte, b.text, b.facet );
+}
 
 // A definition's byte span [begin, end) in the scanned file — the function bodies the per-function rules
 // (utf8-cut, dedup-first) and the Bash scopes (vacuous-assert) read.
@@ -3692,7 +3700,8 @@ private:
         {
             for( const sh::Redir& r : node( l ).fredirs )
             {
-                if( ( r.fd == 2 || isStdoutRedir( r ) ) && !r.target.empty() && r.target != "/dev/null" && r.target[0] != '&' )
+                const bool errOut = r.fd == 2 && ( r.op == ">" || r.op == ">>" || r.op == ">|" );   // 2< reads a file: not output
+                if( ( errOut || isStdoutRedir( r ) ) && !r.target.empty() && r.target != "/dev/null" && r.target[0] != '&' )
                 {
                     e.files.push_back( normTarget( r.target ) );
                 }
@@ -4330,7 +4339,7 @@ inline std::vector<Site> Script::sites() const
             out.push_back( { i < vaCount ? Facet::VacuousAssert : Facet::ZeroEvidence, l.startByte, std::move( text ) } );
         }
     }
-    std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
+    std::sort( out.begin(), out.end(), siteOrder );   // facet is the third key: std::unique sees only neighbours
     out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ), out.end() );
     return out;
 }
@@ -6194,7 +6203,7 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
             scanUnhandledArmCpp( src, toks, pp, from, to, *enums, out );
         }
     }
-    std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
+    std::sort( out.begin(), out.end(), siteOrder );   // facet is the third key: std::unique sees only neighbours
     out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ),
                out.end() );
     return out;

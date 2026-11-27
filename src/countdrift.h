@@ -12,8 +12,9 @@
 // Where it reads: a Markdown file's paragraphs (soft line breaks joined) and a C++ file's string-literal runs (a help or
 // legend paragraph spans many literals). An item is a bare or backticked lower-case word (kebab or snake), optionally
 // followed by a parenthesized gloss; a list with anything else in it is prose, not a list, and is not judged.
-// Floors, stated: a count spelled past twenty, a list split by a sentence, a closed set held in an enum (CamelCase
-// enumerators) or in another language's array, and a count of rows or files (no list) are not checked.
+// Floors, stated: a count spelled past twenty (or under two: "one of: a, b" is a choice, not a count), a list split by a
+// sentence, a list body over kMaxListBytes, a fenced code block, a closed set held in an enum (CamelCase enumerators) or
+// in another language's array, and a count of rows or files (no list) are not checked.
 
 #include "defectshape.h"
 
@@ -42,9 +43,17 @@ public:
     NameSetTable() = default;
     // Name order, then members: one table whatever order the files were read in.
     explicit NameSetTable( std::vector<NameSet> sets ) : sets_( std::move( sets ) ) { rw::sortutil::sortUnique( sets_ ); }
-    // The first set (in name order) that holds every one of `items` (sorted, unique); nullptr when none does.
+    // The set whose members are exactly `items` (sorted, unique), else the first set (in name order) that holds every one
+    // of them; nullptr when none does. An exact set wins: a complete list of kSafeModes is not short of kAllModes.
     const NameSet* covering( const std::vector<std::string>& items ) const
     {
+        for( const NameSet& s : sets_ )
+        {
+            if( s.members == items )
+            {
+                return &s;
+            }
+        }
         for( const NameSet& s : sets_ )
         {
             if( std::includes( s.members.begin(), s.members.end(), items.begin(), items.end() ) )
@@ -66,6 +75,42 @@ namespace detail
 inline bool isNameWord( std::string_view w ) noexcept   // a-z first, then a-z 0-9 - _
 {
     return wordCaseOf( w ) == WordCase::Lower;
+}
+
+// The string elements of the brace list whose first token is toks[from] (just past its `{`), into `members`: adjacent
+// literals ("read" "only") are ONE element, a comma starts the next. The index of the closing `}`, or npos when the list
+// does not close or holds a token that is neither (a nested brace, an identifier: more than names).
+inline std::size_t braceStringMembers( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::vector<std::string>& members )
+{
+    bool afterString = false;
+    for( std::size_t q = from; q < toks.size(); ++q )
+    {
+        if( tokIs( src, toks[q], "}" ) )
+        {
+            return q;
+        }
+        if( toks[q].kind == TokKind::String )
+        {
+            if( afterString )
+            {
+                members.back() += tokContent( src, toks[q] );
+            }
+            else
+            {
+                members.emplace_back( tokContent( src, toks[q] ) );
+            }
+            afterString = true;
+        }
+        else if( tokIs( src, toks[q], "," ) )
+        {
+            afterString = false;
+        }
+        else
+        {
+            return std::string::npos;
+        }
+    }
+    return std::string::npos;
 }
 
 // Append the string-literal arrays of a C++ file: `NAME[] = { "a", "b", "c" }` or `std::array<…> NAME = { … }`, every
@@ -107,22 +152,9 @@ inline void appendNameSetsOfCpp( std::string_view src, std::vector<NameSet>& out
         {
             continue;
         }
-        NameSet     set{ std::string( tokText( src, toks[nameAt] ) ), {} };
-        std::size_t q  = k + 2;
-        bool        ok = true;
-        for( ; q < toks.size() && !tokIs( src, toks[q], "}" ); ++q )
-        {
-            if( toks[q].kind == TokKind::String && isNameWord( tokContent( src, toks[q] ) ) )
-            {
-                set.members.emplace_back( tokContent( src, toks[q] ) );
-            }
-            else if( !tokIs( src, toks[q], "," ) )
-            {
-                ok = false;
-                break;
-            }
-        }
-        if( ok && q < toks.size() && set.members.size() >= 3 )
+        NameSet    set{ std::string( tokText( src, toks[nameAt] ) ), {} };
+        const bool closed = braceStringMembers( src, toks, k + 2, set.members ) != std::string::npos;
+        if( closed && set.members.size() >= 3 && std::all_of( set.members.begin(), set.members.end(), []( const std::string& m ) { return isNameWord( m ); } ) )
         {
             rw::sortutil::sortUnique( set.members );
             out.push_back( std::move( set ) );
@@ -218,10 +250,16 @@ inline std::vector<std::string> listItems( std::string_view body )
     return items.size() >= 2 ? items : std::vector<std::string>{};
 }
 
+// A list of names is short; a longer body is prose. The bound also keeps a paragraph of rejected candidates linear: each
+// one stops its end scan here instead of at the paragraph's end.
+inline constexpr std::size_t kMaxListBytes = 512;
+
 // Does the body end here? A list ends at the ")" that closes a paren form, or at ". ", ";" or the text's end after a colon.
+// npos when no end falls within kMaxListBytes of `from`.
 inline std::size_t listEnd( std::string_view t, std::size_t from, bool paren ) noexcept
 {
-    for( std::size_t i = from; i < t.size(); ++i )
+    const std::size_t bound = std::min( t.size(), from + kMaxListBytes );
+    for( std::size_t i = from; i < bound; ++i )
     {
         const char c = t[i];
         if( paren ? c == ')' : ( c == ';' || c == '\n' || ( c == '.' && ( i + 1 == t.size() || isSpace( t[i + 1] ) ) ) ) )
@@ -230,7 +268,7 @@ inline std::size_t listEnd( std::string_view t, std::size_t from, bool paren ) n
         }
         if( paren && c == '(' )
         {
-            const std::size_t close = t.find( ')', i );   // a gloss inside the list
+            const std::size_t close = t.substr( 0, bound ).find( ')', i );   // a gloss inside the list, within the bound
             if( close == std::string_view::npos )
             {
                 return std::string_view::npos;
@@ -238,7 +276,7 @@ inline std::size_t listEnd( std::string_view t, std::size_t from, bool paren ) n
             i = close;
         }
     }
-    return paren ? std::string_view::npos : t.size();
+    return paren || bound < t.size() ? std::string_view::npos : t.size();
 }
 
 inline constexpr std::array<std::string_view, 7> kNotANoun = { "by", "the", "of", "in", "to", "a", "an" };
@@ -328,6 +366,49 @@ inline std::vector<CountList> countLists( std::string_view t )
     return out;
 }
 
+// A Markdown text with every fenced code block (its fence lines and body) blanked to spaces, newlines kept (same length:
+// every byte keeps its offset), so an example in a fence is never judged as prose. A fence is three or more backticks or
+// tildes after up to three spaces, and it closes at a run of the same character at least as long (CommonMark).
+inline std::string maskFencedCode( std::string_view s )
+{
+    std::string out( s );
+    char        fenceChar = 0;
+    std::size_t fenceLen  = 0;
+    for( std::size_t lineAt = 0; lineAt < out.size(); )
+    {
+        const std::size_t nl      = out.find( '\n', lineAt );
+        const std::size_t lineEnd = nl == std::string::npos ? out.size() : nl;
+        std::size_t       p       = lineAt;
+        while( p < lineEnd && p - lineAt < 3 && out[p] == ' ' )
+        {
+            ++p;
+        }
+        const char  c   = p < lineEnd ? out[p] : '\0';
+        std::size_t run = 0;
+        while( ( c == '`' || c == '~' ) && p + run < lineEnd && out[p + run] == c )
+        {
+            ++run;
+        }
+        const bool closes = fenceChar != 0 && c == fenceChar && run >= fenceLen;
+        if( fenceChar == 0 && run >= 3 )
+        {
+            fenceChar = c;
+            fenceLen  = run;
+        }
+        if( fenceChar != 0 )
+        {
+            std::fill( out.begin() + static_cast<std::ptrdiff_t>( lineAt ), out.begin() + static_cast<std::ptrdiff_t>( lineEnd ), ' ' );
+        }
+        if( closes )
+        {
+            fenceChar = 0;
+            fenceLen  = 0;
+        }
+        lineAt = lineEnd + 1;
+    }
+    return out;
+}
+
 // A Markdown text with each paragraph's soft line breaks turned into spaces (same length: every byte keeps its offset).
 // A break stays when the next line opens a block: a blank line, a heading, a list item, a table row, a fence or a quote.
 inline std::string unwrapParagraphs( std::string_view s )
@@ -388,13 +469,14 @@ inline void judgeCountLists( std::string_view text, std::size_t base, const std:
 inline std::vector<Site> scanCountDriftMarkdown( std::string_view src, const NameSetTable& sets )
 {
     std::vector<Site> out;
-    const std::string text = detail::unwrapParagraphs( src );
+    const std::string text = detail::unwrapParagraphs( detail::maskFencedCode( src ) );
     detail::judgeCountLists( text, 0, nullptr, sets, out );
     return out;
 }
 
-// C++: each run of lines holding string literals, the literals' contents joined (a help paragraph spans many literals;
-// a "\n" escape reads as a space), every byte mapped back to its source offset.
+// C++: each run of adjacent string literals (one string value: a help paragraph spans many literals; a "\n" escape reads as
+// a space), the literals' contents joined, every byte mapped back to its source offset. A blank line between two literals
+// also ends the run.
 inline std::vector<Site> scanCountDriftCpp( std::string_view src, const NameSetTable& sets )
 {
     std::vector<Site>              out;
@@ -415,15 +497,7 @@ inline std::vector<Site> scanCountDriftCpp( std::string_view src, const NameSetT
     {
         if( t.kind != detail::TokKind::String )
         {
-            if( text.empty() )
-            {
-                continue;   // no paragraph pending: nothing to end, so no newline to look for
-            }
-            if( !detail::tokIs( src, t, "," ) || std::count( src.begin() + lastEnd, src.begin() + t.begin, '\n' ) > 0 )
-            {
-                flush();
-            }
-            lastEnd = t.end;   // the next look starts after this comma: each byte is scanned once
+            flush();   // only adjacent literals are one string value: a comma (the next array element), a paren, any token ends it
             continue;
         }
         if( !text.empty() && std::count( src.begin() + lastEnd, src.begin() + t.begin, '\n' ) > 1 )
