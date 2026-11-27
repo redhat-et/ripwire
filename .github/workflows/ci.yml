@@ -845,6 +845,14 @@ jobs:
       - name: TS/JS import resolution — --deps (test/depsprecisecheck.sh)
         run: RIPWIRE_BIN=asan/ripwire bash test/depsprecisecheck.sh
 
+      # The defect-shape readers (quality-delta's lexers and facet scanners) under the G1 sanitizers, on fixtures that drive
+      # each shape on purpose. count-drift's array look-back wrapped its unsigned cursor past token 0 when a brace list opened
+      # the file (-fsanitize=integer, #750); editcheckcheck arm (g) only caught it because this repo's own tree happens to hold
+      # such a file (test/falseedgefix/c/copy.c). The gate's src/first.h fixture holds that shape on purpose (about 1 min of
+      # CPU under ASan).
+      - name: Defect-shape readers — --quality-delta (test/defectshapecheck.sh)
+        run: RIPWIRE_BIN=asan/ripwire bash test/defectshapecheck.sh
+
       # cachefuzzcheck's two mutation tables ARE sanitizer sweeps: they drive corrupt/truncated/hostile cache
       # blobs and corrupt qsnap blobs through the readers and assert that no sanitizer report fires. That needs
       # an instrumented binary — RIPWIRE_ASAN_BIN is the whole point of the gate — and the `release` jobs, which

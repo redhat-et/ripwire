@@ -495,6 +495,16 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
   ordered container); and `unordered_dense` invalidates references on insert (values live in one
   vector), so never hold a `T&` into it across an insert.
 
+### String search
+
+- **The one string-find utility is `rw::strkern::find( hay, needle, from = 0 )` (`src/infra/strkern.h`).** It returns
+  exactly what `std::string_view::find` returns for every input (D2 in `test/verify_strkern.cpp` is the property test that
+  holds it to that) and picks NEON, AVX2 or the portable scalar twin inside, so it swaps in with no other change.
+- Use it in a hot loop over file text: a scan walked over every file, or a pattern found again and again in one file.
+  A one-off probe of a short string gains nothing; leave it as `std::string_view::find`.
+- A new SIMD string kernel goes in the same header, with its NEON, AVX2 and scalar paths side by side and the scalar
+  twin as the oracle that `test/strkerncheck.sh` runs it against.
+
 **The global allocator.** On macOS `operator new` of 256 KiB or more goes through mmap and munmap
 (`src/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does
 not route). So never `free()` what `new` returned, and read a macOS peak knowing a big array is returned at delete.

@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, #548 arm 2 merged with main 52663e4b2 (which carries lane cr-qd3 #750, kQSnapCacheScheme 41): RE-PINNED with
+#   UPDATE_GOLDEN=1 on the merged sources (hash 2148ab87ca…b89ec40659). kParserVer stays 344, kCacheVersion 55 and kQSnapCacheScheme
+#   take main's 55 and 41. Neither side's hash (d97049fac7…f729754d4a, e640115f3e…ccbd8342) can be right once both moves are in.
 # 2026-11-27, #548 arm 2 merged with main (which carries lane tangle-rule, kCacheVersion 54 -> 55): RE-PINNED with
 #   UPDATE_GOLDEN=1 on the merged sources (hash d97049fac7…f729754d4a). kParserVer stays 344 (above main's 342), kCacheVersion
 #   and kIngestCacheVersionMirror take main's 55, kQSnapCacheScheme unchanged. Neither side's hash (366b3fa9c3…9030201c,
@@ -43,6 +46,14 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   342's rich 343): queries/clojure/tags.scm gains an anon_fn_lit call pattern and src/ingest_clojure.h clojureListHead accepts
 #   anon_fn_lit. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54 and kQSnapCacheScheme 38 stay: no record
 #   changes shape and no watched quality.h function moved.
+# 2026-11-26, lane cr-qd3 (#750) rebased onto main f7cfcec7a (#743 TANGLE-RULE took kQSnapCacheScheme 40): RE-PINNED ONCE with
+#   UPDATE_GOLDEN=1 from the rebased build. #750's scheme moves 39 -> 41 (one above main's 40; v39 never shipped). Watched text
+#   is main's tangle-cap snapshot fields plus #750's defectSitesOf scans. kCacheVersion and kParserVer unchanged. Hash
+#   e640115f3e…ccbd8342.
+# 2026-11-25, lane cr-qd3 (rebased onto main fec2ab27c): RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf (a manifest function) now also
+#   scans Markdown and C/C++ string literals for the count-drift facet, and Bash tests for zero-evidence, so a cached snapshot
+#   gains defect-shape sites of two new facets: kQSnapCacheScheme 38 -> 39 in the same diff (41 after the rebase above). kCacheVersion and kParserVer
+#   unchanged (no extraction change). Hash 804f175a7e…b4c2507.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

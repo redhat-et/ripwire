@@ -218,6 +218,7 @@ printf '%s' "$OV_OUT" | grep -q '"alpha"' \
 
 # ── determinism x3 (the node fixture — mixes in-corpus + two out-of-corpus frames) ──────────────────────
 D1="$( tr_run node.txt )"; D2="$( tr_run node.txt )"; D3="$( tr_run node.txt )"
+[ -n "$D1" ] || no "zero-evidence premise (tracecheck.sh:221): the text the next arm judges is empty, so its verdict proves nothing"
 { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } \
     && ok "deterministic (byte-identical x3)" || no "non-deterministic --from-trace output"
 
@@ -245,6 +246,7 @@ norm(){ printf '%s' "$1" | sed -E 's/src="[^"]*"/src="X"/; s/trace-to-locus for 
 # legend echoes the source label; both operands ask for the full legend (FILE_OUT is tr_run's exact invocation plus --legend=full).
 STDIN_OUT="$( cd "$WORK" && "$BIN" . --from-trace=- --no-cache --legend=full < "$WORK/traces/py.txt" 2>/dev/null )"
 FILE_OUT="$( cd "$WORK" && "$BIN" . --from-trace="traces/py.txt" --no-cache --legend=full 2>/dev/null )"
+[ -n "$STDIN_OUT" ] || no "zero-evidence premise (tracecheck.sh:248): the text the next arm judges is empty, so its verdict proves nothing"
 [ "$( norm "$STDIN_OUT" )" = "$( norm "$FILE_OUT" )" ] \
     && ok "'-' reads the trace from stdin (identical bundle apart from the source label)" \
     || { no "stdin form differs from the file form beyond the source label"; diff <(norm "$STDIN_OUT") <(norm "$FILE_OUT") | head; }
@@ -472,6 +474,7 @@ for t in py asan clang node generic overflow; do arith_ok "$t" "$( tr_run "$t.tx
 
 # ── determinism + G4 over the new fixtures ──────────────────────────────────────────────────────────────
 A1="$( a2_run stale.txt )"; A2="$( a2_run stale.txt )"
+[ -n "$A1" ] || no "zero-evidence premise (tracecheck.sh:475): the text the next arm judges is empty, so its verdict proves nothing"
 [ "$A1" = "$A2" ] && ok "(A2) the name-resolved bundle is deterministic (byte-identical x2)" \
                   || no "(A2) non-deterministic name-resolved bundle"
 if command -v xmllint >/dev/null 2>&1; then

@@ -36,6 +36,7 @@
 
 #include "infra/jsonesc.h"       // jsonesc::appendUtf8 — the one code-point encoder
 #include "infra/tablelookup.h"   // rw::findByField — the one small-constexpr-table scan
+#include "infra/strkern.h"       // strkern::ciFindLiteral / lowerFoldedStartsWith — the ASCII case-insensitive find and prefix test
 
 #include <algorithm>
 #include <array>
@@ -78,9 +79,7 @@ namespace htmldetail
 // Does s, at offset p, begin with `lowerLit` (already lower case), ignoring the case of s?
 inline bool startsWithLower( std::string_view s, std::size_t p, std::string_view lowerLit ) noexcept
 {
-    return p <= s.size() && s.size() - p >= lowerLit.size()
-        && std::equal( lowerLit.begin(), lowerLit.end(), s.begin() + std::ptrdiff_t( p ),
-                       []( char lit, char c ) { return lit == char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
+    return p <= s.size() && strkern::lowerFoldedStartsWith( s.substr( p ), lowerLit );
 }
 
 // One tag, read in place. `name` is lower-cased into a fixed buffer: every name this file compares against is
@@ -325,13 +324,7 @@ enum class Region : std::uint8_t { Body, Main, Article, ContentClass };
 // The first case-insensitive occurrence of `lowerLit` at or after `from`, or npos.
 inline std::size_t findLower( std::string_view s, std::size_t from, std::string_view lowerLit ) noexcept
 {
-    if( from >= s.size() )
-    {
-        return std::string_view::npos;
-    }
-    const auto hit = std::search( s.begin() + std::ptrdiff_t( from ), s.end(), lowerLit.begin(), lowerLit.end(),
-                                  []( char c, char lit ) { return lit == char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
-    return hit == s.end() ? std::string_view::npos : std::size_t( hit - s.begin() );
+    return from >= s.size() ? std::string_view::npos : strkern::ciFindLiteral( s, lowerLit, from );
 }
 
 // Rule 1's probe: which region kinds this page has (one bit per Region, Body never set). One pass over the tags,
