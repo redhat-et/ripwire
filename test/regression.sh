@@ -1189,6 +1189,7 @@ for _g in \
     tiebreakcontentcheck \
     tiercallerscheck \
     timsortcheck \
+    tinyshapecheck \
     tokenbudgetcheck \
     tomllangcheck \
     toolcallroutecheck \
