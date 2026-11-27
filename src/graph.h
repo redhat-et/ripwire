@@ -17,6 +17,7 @@
 #include "infra/hashutil.h"      // packPair — composite integer keys
 #include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
 #include "prconverge.h"          // RankDisclosure — the power iteration's own account, carried with its result
+#include "pprshadow.h"           // RANK-SPEED step 2: the push's shadow arm, inert unless RIPWIRE_PPR_PUSH is set
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "receiverevidence.h"    // FE-B: typed receivers RESOLVE; a call nothing proves keeps its rows marked via="name"
@@ -43,6 +44,8 @@
 #include <cmath>
 #include <cstdint>
 #include <charconv>      // std::from_chars — collectFileClassEvidence reads the fileId back out of a "<fileId>#name" key
+#include <chrono>        // steady_clock — the shadow arm times the exact rank and the push within one call
+#include <iterator>      // std::back_inserter — the shadow arm's reported-only top-40 set algebra
 #include <deque>         // resolveAllByWrittenSpelling's per-answer source cache (stable references)
 #include <cstring>       // std::memcmp — internDeclinedList confirms a bucket hit against the stored list
 #include <span>          // std::span — transitiveCallers' seed seam takes any contiguous NodeId range
@@ -15780,6 +15783,124 @@ inline std::vector<float> blendMaxNorm( const std::vector<float>& a, const std::
     return out;
 }
 
+// RANK-SPEED step 2's shadow arm at the ANCHORS SITE — the one personalized rank an agent pays again on
+// every question (the working-set teleport is the git diff, computed once per index in mcpindex.h getIndex
+// and once per process in runDefaultMap, so it amortises; this one is seeded from the query and never does).
+// Reached only when RIPWIRE_PPR_PUSH is set, and src/pprshadow.h carries the whole rationale. It returns the
+// EXACT blend under `shadow` — the approximation cannot reach the document — and the push's blend under `on`,
+// which is never a default.
+//
+// `msExact` is the caller's measurement of the exact rank it already had to compute, passed in rather than
+// re-timed, so the two timings in one row are of the same call and not of two.
+inline std::vector<float> pprshadowAnchors( const Graph& g, const std::vector<float>& lex, const std::vector<float>& p,
+                                            const RankedGraph& exact, double msExact )
+{
+    std::vector< float > exactBlend = blendMaxNorm( lex, exact.rank, anchorcfg::kGraphBlend );
+    const std::size_t    N          = lex.size();
+    pprshadow::Row    row;
+    row.site       = "anchors";
+    row.nodeCount  = N;
+    row.edgeCount  = g.outTargets.size();
+    row.epsilon    = pprshadow::kEpsilonAnchors;
+    row.msExact    = msExact;
+    row.iterations = exact.iterationCount;
+    const std::size_t ranked = N - std::min< std::size_t >( N, g.unrankedNodeCount );
+    row.tau                  = pprshadow::referenceGapError( ranked );
+
+    // The push walks g.outOff/outTargets/outVals DIRECTLY. buildGraph fills them and g.inEdges from one
+    // flattened edge vector in one pass, accumulating g.wOutDeg[e.from] += e.w beside them, so the out-edge
+    // CSR is the exact transpose of what the kernel gathers and wOutDeg is exactly the kernel's divisor.
+    // Transposing inEdges to get it — which the offline lab does — would cost one power iteration and ~48 MB
+    // at llvm scale for a structure the graph already holds.
+    const std::vector<float> biased = biasPrior( g, p );
+    const auto               seed   = pprshadow::sparseSeedOf( biased );
+    row.seedCount                   = seed.size();
+    if( seed.empty() )
+    {
+        // A teleport wider than kMaxSeedSupport, or no mass at all. No comparison is made, and the row says
+        // so with -1 rather than a 0 that would read as "the orders disagreed".
+        pprshadow::emitRow( row );
+        return exactBlend;
+    }
+
+    std::vector<double> estimate( N, 0.0 );
+    const auto          pushStart = std::chrono::steady_clock::now();
+    const PushRun       pushRun   = pageRankPushPersonalized( OutEdgeCsr{ g.outOff, g.outTargets, g.outVals, g.wOutDeg }, seed, estimate,
+                                                              PushConfig{ .alpha = 0.85, .epsilon = pprshadow::kEpsilonAnchors } );
+    double              estimateMass = 0.0;
+    for( const double value : estimate )
+    {
+        estimateMass += value;
+    }
+    std::vector<float> pushRank( N, 0.f );
+    if( estimateMass > 0.0 )
+    {
+        // The exact fixed point is R*t / Sigma(R*t): the (alpha*dangling + 1 - alpha) scalar is a function of
+        // the answer and cancels under the Sigma = 1 normalization both vectors carry. So the scalar is never
+        // reproduced and is never claimed to be.
+        const double inverseMass = 1.0 / estimateMass;
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            pushRank[i] = float( estimate[i] * inverseMass );
+        }
+    }
+    row.msPush    = pprshadow::elapsedMs( pushStart );
+    row.pushes    = pushRun.pushCount;
+    row.touched   = pushRun.touchedNodeCount;
+    row.edgeWalks = pushRun.edgeWalkCount;
+    row.budgetHit = pushRun.hitWalkBudget;
+
+    // THE BINDING CRITERION: tie-aware top-10 agreement on the RANK vector.
+    const auto exactTop40 = pprshadow::topByScore( exact.rank, 40 );
+    const auto pushTop40  = pprshadow::topByScore( pushRank, 40 );
+    const auto swaps      = pprshadow::countNonTieSwaps( exact.rank, exactTop40, pushTop40, 10, row.tau );
+    row.nonTieSwaps       = swaps.nonTieSwaps;
+    row.tiedPositions     = swaps.tiedPositions;
+    row.minNonTieGap10    = swaps.minNonTieGap;
+    row.firstDiffRank     = swaps.firstDiffRank;
+    row.top10Same         = swaps.nonTieSwaps == 0 ? 1 : 0;
+    {
+        std::vector< std::uint32_t > a( exactTop40.begin(), exactTop40.begin() + std::min< std::size_t >( 10, exactTop40.size() ) );
+        std::vector< std::uint32_t > b( pushTop40.begin(), pushTop40.begin() + std::min< std::size_t >( 10, pushTop40.size() ) );
+        std::sort( a.begin(), a.end() );
+        std::sort( b.begin(), b.end() );
+        row.top10SetSame = a == b ? 1 : 0;
+    }
+    // REPORTED ONLY, and deliberately not in any pass condition: a Jaccard index over 40 rows and a maximum
+    // absolute error are both satisfiable by a vector whose top 10 is wrong, so promoting either would
+    // weaken the criterion while looking like it strengthened it.
+    {
+        std::vector< std::uint32_t > a( exactTop40 ), b( pushTop40 ), both, either;
+        std::sort( a.begin(), a.end() );
+        std::sort( b.begin(), b.end() );
+        std::set_intersection( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( both ) );
+        std::set_union( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( either ) );
+        row.top40Jaccard = either.empty() ? 1.0 : double( both.size() ) / double( either.size() );
+        for( const std::uint32_t id : exactTop40 )
+        {
+            row.maxAbsErrTop40 = std::max( row.maxAbsErrTop40, std::fabs( double( pushRank[id] ) - double( exact.rank[id] ) ) );
+        }
+    }
+
+    // THE CONSUMER'S ORDER, which is what an agent actually reads: the rows are ordered by
+    // blendMaxNorm(lex, ppr, lambda), not by ppr. A push UNDER-estimates every coordinate and under-estimates
+    // the tail more than the head, and blendMaxNorm divides by max(ppr), which does not cancel that. So
+    // fidelity on the rank vector is necessary and not evidently sufficient, and this arm closes the gap. It
+    // is an ADDITIONAL bar on top of the relayed criterion, never a replacement for it.
+    std::vector< float >       pushBlend      = blendMaxNorm( lex, pushRank, anchorcfg::kGraphBlend );
+    const auto                 exactBlendTop  = pprshadow::topByScore( exactBlend, 10 );
+    const auto                 pushBlendTop   = pprshadow::topByScore( pushBlend, 10 );
+    const auto                 blendSwaps     = pprshadow::countNonTieSwaps( exactBlend, exactBlendTop, pushBlendTop, 10, row.tau );
+    row.blend10Same                           = blendSwaps.nonTieSwaps == 0 ? 1 : 0;
+
+    pprshadow::emitRow( row );
+    if( pprshadow::mode() == pprshadow::Mode::On )
+    {
+        return pushBlend;   // site-scoped by pprshadow::kPushOnIsSiteScoped; never a default
+    }
+    return exactBlend;
+}
+
 // anchored rank: pick the top-kAnchorCount symbols by lexical score (score desc, canonical-id asc —
 // content-based, never crawl order), seed the PPR personalization with each anchor's NORMALIZED lexical
 // score (per-anchor confidence weighting: a marginal 20th anchor teleports proportionally little mass, so
@@ -15853,8 +15974,18 @@ inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector
     // this function is a BLEND of a lexical score and a PPR vector, so no document ordered by it was ordered
     // by a power iteration, and stamping pr_iters= on the lens would name a run that shaped only part of the
     // order (prconverge.h: absence of pr_iters= means exactly this, and is why it means it).
-    const std::vector<float> ppr = rankGraphTeleport( g, p ).rank;
-    return blendMaxNorm( lex, ppr, anchorcfg::kGraphBlend );
+    if( pprshadow::mode() == pprshadow::Mode::Off )
+    {
+        // The default path, and deliberately written as ONE expression: the blend is elided straight into
+        // the caller's slot, as it was before the shadow arm existed. Naming the rank or the blend in a
+        // local would add a copy of an N-float vector to every --for call — 5.6 MB at llvm scale — for a
+        // mode that does not use it.
+        return blendMaxNorm( lex, rankGraphTeleport( g, p ).rank, anchorcfg::kGraphBlend );
+    }
+    const auto        exactStart = std::chrono::steady_clock::now();
+    const RankedGraph exact      = rankGraphTeleport( g, p );
+    const double      msExact    = pprshadow::elapsedMs( exactStart );
+    return pprshadowAnchors( g, lex, p, exact, msExact );
 }
 
 // all symbols whose final-segment name matches `name` (overloads + same-name across files), in id

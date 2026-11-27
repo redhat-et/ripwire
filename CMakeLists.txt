@@ -789,6 +789,32 @@ foreach(_ripwire_build_target ripwire ripwire_probe)
     "RIPWIRE_BUILD_KEY=\"${_ripwire_build_key}\"" "RIPWIRE_BUILD_CONFIG=\"$<CONFIG>\"")
 endforeach()
 
+# ---- RANK-SPEED step 2's OFFLINE lab (test/pprlab.cpp) — OFF by default, never shipped ----
+# It links the same ingest/graph/PageRank sources the binary does, so what it measures is the SHIPPED push
+# kernel (src/pagerank.cpp pageRankPushPersonalized) and not a private copy of it. It is not a gate and not a
+# user surface: it writes a TSV of fidelity-against-epsilon rows that the epsilon rule is derived from, and
+# test/pprpushcheck.sh asserts the product's behaviour without needing it. Default OFF, so the ordinary
+# build — and every CI leg — is byte-identical to a tree without this option.
+option(RIPWIRE_PPRLAB "build the offline personalized-rank push lab (test/pprlab.cpp)" OFF)
+if(RIPWIRE_PPRLAB)
+  add_executable(ripwire_pprlab
+    test/pprlab.cpp
+    ${RIPWIRE_SRCS}
+    ${_ripwire_source_identity_cpp}
+    ${RIPWIRE_TS_OBJECTS})
+  target_link_libraries(ripwire_pprlab PRIVATE tree-sitter Threads::Threads)
+  ripwire_windows_target(ripwire_pprlab)
+  target_include_directories(ripwire_pprlab PRIVATE
+    ${tree_sitter_SOURCE_DIR}/lib/include
+    ${_ripwire_generated_include_dirs}
+    src/infra
+    third_party
+    src)
+  target_compile_definitions(ripwire_pprlab PRIVATE
+    "RIPWIRE_BUILD_KEY=\"${_ripwire_build_key}\"" "RIPWIRE_BUILD_CONFIG=\"$<CONFIG>\"")
+  add_dependencies(ripwire_pprlab ripwire_version_stamp ripwire_source_identity)
+endif()
+
 # ---- small-vector A/B knobs (bench/svectorab.py drives both; see bench/SVECTORAB.md) ----
 # RIPWIRE_SMALLVEC selects which container src/smallvec.h's `rw::SmallVec` alias resolves to:
 #   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)
