@@ -159,3 +159,4 @@
 --resolve	curl's host-to-address pin option, named in changelog.d/353-net-exfil-flow.md as a destination the --scan-skills net-exfil proof refuses to vouch for — a foreign tool flag, not a ripwire flag
 --url	curl's URL option (and its @file URL-list form, curl ≥ 8.13), named in changelog.d/353-net-exfil-flow.md as a destination the --scan-skills net-exfil proof refuses to vouch for — a foreign tool flag, not a ripwire flag
 --location	curl's follow-redirects option, named in changelog.d/353-net-exfil-flow.md as an option in option position that withholds the --scan-skills local-dest WARN — a foreign tool flag, not a ripwire flag
+--list	test/fuzz/run.sh's own flag ("run.sh --list" prints the grammar list read from the add_ripwire_fuzzer lines), named in changelog.d/fuzz-sweep-list.md and test/g1configcheck.sh, not a ripwire flag
