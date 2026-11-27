@@ -25,6 +25,7 @@
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "infra/sortutil.h"     // sortUnique — the one sorted-unique step
+#include "infra/strkern.h"      // strkern::find — the literal scan's string find, == std::string_view::find (grepScanText)
 #include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
 #include "pathguard.h"           // openRegularFileNoFollow — a piece-read file is opened no-follow, its size read from the descriptor
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
@@ -1250,7 +1251,7 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
     }
     else
     {
-        for( std::size_t pos = text.find( pat ); pos != std::string::npos; pos = text.find( pat, pos + 1 ) )
+        for( std::size_t pos = strkern::find( text, pat ); pos != std::string::npos; pos = strkern::find( text, pat, pos + 1 ) )
         {
             if( wordBounded && !darkflags::wholeWordAt( text, pos, pat.size() ) )
             {

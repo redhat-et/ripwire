@@ -35,6 +35,7 @@
 
 #include "infra/os.h"        // rw::os::realpath / getcwd / stat — the root-is-a-directory check at initialize, the launch-cwd base for relative index paths
 #include "infra/pctenc.h"    // rw::appendPercentEncoded — the file-URI path escape
+#include "infra/strkern.h"   // rw::strkern::ciFindLiteral — workspace/symbol's case-insensitive name match
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -796,13 +797,13 @@ inline std::string lspWorkspaceSymbol( const rw::IngestResult& ing, const std::s
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
         const rw::Symbol& s = ing.symbols[ i ];
-        if( seen[ i ] || lowerCopy( s.name ).find( qLower ) == std::string::npos ) continue;
+        if( seen[ i ] || rw::strkern::ciFindLiteral( s.name, qLower ) == std::string_view::npos ) continue;   // no lowered copy per name
         seen[ i ] = 1;
         take( s );
     }
     for( const rw::Symbol& f : ing.fields )   // fields join the picker too (D8's spirit — the outline and the picker agree)
     {
-        if( lowerCopy( f.name ).find( qLower ) != std::string::npos ) take( f );
+        if( rw::strkern::ciFindLiteral( f.name, qLower ) != std::string_view::npos ) take( f );
     }
     out += "]";
     return out;

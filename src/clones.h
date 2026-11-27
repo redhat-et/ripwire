@@ -12,6 +12,8 @@
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/depwatch.h"     // digest64 — a path's bytes in the clone pass's input digest
 #include "verbfs_seam.h"        // VERB-FS: the groups of an unchanged input are served from the record (src/verbfs.h)
+#include "infra/namesplit.h"    // isIdentChar / isIdentStart — the ONE ASCII identifier-byte pair (scanCodeTokens)
+#include "infra/strkern.h"      // strkern::find — the block-comment close (scanCodeTokens)
 
 #include <algorithm>
 #include <array>
@@ -231,7 +233,11 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
     const bool        munchMultiByteOperators = options.munchMultiByteOperators;
     const std::size_t n = std::min<std::size_t>( b, src.size() );
     std::size_t       i = std::min<std::size_t>( a, n );
-    const auto        idc = []( unsigned char c ) noexcept { return std::isalnum( c ) != 0 || c == '_'; };
+    // ASCII byte classes, spelled out: the "C" locale's isalnum/isspace/isdigit/isalpha, the only locale ripwire runs in, without a
+    // libc call per byte.
+    const auto        idc   = []( unsigned char c ) noexcept { return namesplit::isIdentChar( char( c ) ); };
+    const auto        space = []( unsigned char c ) noexcept { return c == ' ' || ( c >= '\t' && c <= '\r' ); };
+    const std::string_view span( src.data(), n );   // the scan never looks past n
     // a `"`-style string: from the opening quote to the next unescaped close (or the end of the span), one String token;
     // with tripleQuoteStrings, an opening `"""` runs to the next unescaped `"""`
     const auto        quoted = [ & ]( char quote )
@@ -260,37 +266,25 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
     while( i < n )
     {
         const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
-        if( std::isspace( c ) != 0 )
+        if( space( c ) )
         {
             ++i;
             continue;
         }
         if( options.slashComments && c == '/' && i + 1 < n && src[i + 1] == '/' )
         {
-            i += 2;
-            while( i < n && src[i] != '\n' )
-            {
-                ++i;
-            }
+            i = std::min( n, span.find( '\n', i + 2 ) );   // to the newline (memchr), or the end of the span
             continue;
         }
         if( options.slashComments && c == '/' && i + 1 < n && src[i + 1] == '*' )
         {
-            i += 2;
-            while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
-            {
-                ++i;
-            }
-            i = std::min( n, i + 2 );
+            const std::size_t close = strkern::find( span, "*/", i + 2 );
+            i                       = close == std::string_view::npos ? n : close + 2;
             continue;
         }
         if( stripHashComments && c == '#' )
         {
-            ++i;
-            while( i < n && src[i] != '\n' )
-            {
-                ++i;
-            }
+            i = std::min( n, span.find( '\n', i + 1 ) );
             continue;
         }
         if( c == '"' )
@@ -320,7 +314,7 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
             ++i;
             continue;
         }
-        if( std::isdigit( c ) != 0 )
+        if( c >= '0' && c <= '9' )
         {
             const std::size_t begin = i;
             while( i < n && ( idc( static_cast<unsigned char>( src[i] ) ) || src[i] == '.'
@@ -331,7 +325,7 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
             sink( std::string_view( src.data() + begin, i - begin ), CodeTokenKind::Number );
             continue;
         }
-        if( std::isalpha( c ) != 0 || c == '_' )
+        if( namesplit::isIdentStart( char( c ) ) )
         {
             const std::size_t begin = i;
             while( i < n && idc( static_cast<unsigned char>( src[i] ) ) )
