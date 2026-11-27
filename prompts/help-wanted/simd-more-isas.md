@@ -11,6 +11,16 @@ it is faster at all.
 
 Work in a git worktree, not the main checkout. Run gates in the foreground.
 
+Status (2026-11-26): #161 is open with no claim. `src/infra/strkern.h` still has exactly three paths
+(NEON, AVX2, scalar). Its most recent change (2026-11-25, `20b9fb1d6`, `dae28b6e8`) wired
+`lowerFoldedEquals` and a new `lowerFoldedStartsWith` into short ASCII-fold compares that used to have
+private copies; no kernel body changed.
+
+**Orient first.** Run `./build/ripwire . --callers=rw::strkern::classMasks` and
+`./build/ripwire . --for="strkern classMasks forEachLexTokenSpan block carry tokenizer"` before opening
+files, so you know every reader of the kernel you widen. Before adding a test case or gate arm,
+`--exemplar="a strkern parity test case against the scalar oracle"`.
+
 ---
 
 ## Why this matters
@@ -103,7 +113,8 @@ gate enforces it:
 - **The kernels.**
   - `classMasks` fills `Masks { alnum, upper, lower, digit }`: four `std::uint32_t`, one bit per byte,
     zero at and above `n`. It is built on a two-stage nibble table.
-  - `lowerFoldAscii` / `lowerFoldedEquals` fold A–Z only and leave bytes ≥ 0x80 alone.
+  - `lowerFoldAscii` / `lowerFoldedEquals` / `lowerFoldedStartsWith` fold A–Z only and leave bytes
+    ≥ 0x80 alone.
   - `findByte` / `find3` / `findByteset` return the first index, or `n`, never `npos`.
   - `Byteset256` carries two derived representations: `bits` for vector lookups, `words` for the
     scalar tail. A tail that re-derived the set on every call once took escapeXml from 4.62% to 22.46%
@@ -331,6 +342,12 @@ name in the plan as a question for the owner.
 8. **Lineage.** `docs/LINEAGE.md` gains a row only for a source whose technique is in the shipped
    code, the rule #127 applied.
 
+**Done means** `test/strkerncheck.sh` green with the new path named in its `strkern path:` banner and
+its mutation arm red-then-green as above, `test/portablebuildcheck.sh` green if flags changed, then
+`./build/ripwire . --quality-delta --legend=compact` clean and `python3 test/pargates.py .
+./build/ripwire -j 6` green. A measured "not faster" with those arms green is also done: it ships as
+the negative result, not as code.
+
 ---
 
 ## Known traps — each one already cost somebody a day here
@@ -345,8 +362,10 @@ name in the plan as a question for the owner.
   widest mask is where the next one will be.
 - **A native build silently changes the compiled path.** See the `-march=native` note above.
 - **A kernel win is not a verb win.** A 15–23% cut in escapeXml was ~0.2% of the verb.
-- **Widening a short, early-deciding compare loses.** `lowerFoldedEquals` ships unwired for exactly
-  that reason (F3, PR #107).
+- **Widening a short, early-deciding compare loses** (F3, PR #107). `lowerFoldedEquals` is still
+  deliberately not wired into `src/lexical.h`'s scan loop, for exactly that reason. Since 2026-11-25
+  it does serve header, keyword and prefix compares (`src/mcpserver.h`, `src/arch.h`,
+  `src/docparse.h`) — inputs of a few bytes that decide early, so a wider body there is overhead too.
 - **Per-call preamble in a tail.** 4.62% → 22.46%, `Byteset256`.
 - **Mixed objects after a branch switch.** CLAUDE.md's `sizeof(Symbol)` stories apply to a kernel
   header as much as to the model. When in doubt, `cmake --build build --clean-first -j`.
