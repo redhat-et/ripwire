@@ -45,9 +45,10 @@ inline constexpr std::size_t kActShippedRanges = 3;
 // of the line was uncounted, so it never cost a page a row. The wide line's added ranges are counted: they come out of the bottom of
 // the page (owner rule "answers to the top, then cut the bottom"). So the uncounted part is the element as it would be with its
 // first `shipped` ranges only: `<act read="` + those ranges + `"/>`. Off, or a shape this reader does not know: the whole element.
+inline constexpr std::string_view kActOpen = "<act read=\"", kActClose = "\"/>";
 [[nodiscard]] inline std::size_t uncountedActBytes( std::string_view element, std::size_t shipped ) noexcept
 {
-    constexpr std::string_view kOpen = "<act read=\"", kClose = "\"/>";
+    constexpr std::string_view kOpen = kActOpen, kClose = kActClose;
     if( !actEdgesOn( kPartAct8 ) || !element.starts_with( kOpen ) || !element.ends_with( kClose ) )
     {
         return element.size();

@@ -367,7 +367,10 @@ inline void markActLine( Stream& st )
             // ACT-EDGES: only the shipped (top kActRows) part; the wide line's added ranges come out of the bottom of the page
             const std::size_t uncounted = actedges::uncountedActBytes( st.view.substr( b.begin, b.end - b.begin ), actedges::kActShippedRanges );
             for( Cut& cut : st.cuts ) { cut.free += uncountedBefore( cut.at, b.begin, b.begin + uncounted ); }
-            if( b.begin + uncounted < b.end ) { st.lane.emplace_back( b.begin + uncounted, b.end ); }
+            // the added ranges sit before the closing `"/>`, which the uncounted part counts: the lane span is `,r4,…,r8` exactly, so
+            // withoutLane's twin is the 3-range element (measured: erasing from begin + uncounted kept 3 bytes of range 4 and dropped the
+            // close, a broken twin that paged as Whole — 11 DEV answers OFF pages were served whole, +57 KB)
+            if( b.begin + uncounted < b.end ) { st.lane.emplace_back( b.begin + uncounted - actedges::kActClose.size(), b.end - actedges::kActClose.size() ); }
             for( std::size_t j = k + 1; j < st.streamBlocks && !st.blocks[ j ].comment && actedges::isLaneLine( st.blocks[ j ].name ); ++j )
             {
                 st.lane.emplace_back( st.blocks[ j ].begin, st.blocks[ j ].end );

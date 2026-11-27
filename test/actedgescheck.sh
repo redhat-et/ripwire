@@ -15,6 +15,10 @@
 #        and is at most the OFF page 1 plus the core-legend clauses (200 B): the lane's bytes are counted and come off the bottom
 #   (P2) NEVER FROM AN ITEM: at the smallest --page-bytes the OFF answer is served whole at (one page, found to the byte), the ON
 #        answer is served whole too: the lane's bytes never push a whole answer's last rows onto a page 2 (mf1-ninja-01 R3, measured)
+#   (T)  THE TWIN IS THE OFF ANSWER: test/actedgestwin_unit.cpp prints forpages::detail::withoutLane of the whole ON answer (Q1, Q2, QF,
+#        --page-bytes=900000 under RIPWIRE_NO_CORE_LEGEND=1): it is the OFF answer byte for byte, est_tokens= aside — pageAnswer serves an answer whole when its twin is, so a
+#        twin that differs pages differently (measured: one that kept 3 bytes of range 4 and lost the act element's close made 11 DEV
+#        answers OFF pages served whole, +57 KB)
 #   (K)  THE ARMS: RIPWIRE_ACT_EDGES=1 is ACT-8 alone (no <edges>, no <where>), =2 EDGES alone (3 ranges), =4 WHERE alone
 #   (B)  BUDGET: a --token-budget the ON answer fits returns it with the lines; MCP `for` carries the wide act line and <edges>
 #   (O)  OFF: RIPWIRE_ACT_EDGES=0 writes <= 3 ranges (more only in θ17's edit form, as main), no <edges>, no <where>, no lane clause; with RIPWIRE_PARENT_BIN (a binary from before
@@ -33,7 +37,21 @@ PARENT="${RIPWIRE_PARENT_BIN:-}"
 echo "actedgescheck: BIN=$BIN${PARENT:+ PARENT=$PARENT}"
 cd "$ROOT" || exit 2
 unset RIPWIRE_ACT_EDGES RIPWIRE_NO_ACTLINE RIPWIRE_NO_CORE_LEGEND
-exec python3 - "$BIN" "$PARENT" "$ROOT" <<'PY'
+# (T) the lane-off twin driver, compiled with the flags CMake used for $BIN (the cxxflags.sh parse, as forrowfeaturescheck's (U))
+. "$ROOT/test/lib/cxxflags.sh"
+TWIN_TMP="$( mktemp -d )"; trap 'rm -rf "$TWIN_TMP"' EXIT
+TWIN="" TWIN_WHY="no CMake flags.make beside $BIN"
+BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"; FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"; LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
+if [ -f "$FLAGS_MK" ] && [ -f "$LINK_TXT" ] && cxxflags_load "$FLAGS_MK"; then
+    CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
+    [ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
+    DIAG_OBJ="$BUILD_DIR/CMakeFiles/ripwire.dir/src/infra/diagnostics.cpp.o"; DIAG_LINK=(); [ -f "$DIAG_OBJ" ] && DIAG_LINK=( "$DIAG_OBJ" )
+    if "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -I"$ROOT/src" "$ROOT/test/actedgestwin_unit.cpp" "${DIAG_LINK[@]}" \
+         -o "$TWIN_TMP/twin" >"$TWIN_TMP/build.log" 2>&1; then TWIN="$TWIN_TMP/twin"; TWIN_WHY=""
+    else TWIN_WHY="actedgestwin_unit does not compile: $( grep -m2 -E 'error' "$TWIN_TMP/build.log" | tr '\n' ' ' | cut -c1-300 )"; fi
+fi
+export TWIN TWIN_WHY TWIN_TMP
+python3 - "$BIN" "$PARENT" "$ROOT" <<'PY'
 import json, os, re, subprocess, sys
 BIN, PARENT, ROOT = sys.argv[1], sys.argv[2], sys.argv[3]
 Q1 = "where does the paging cut a for answer into pages"   # paged, ranged sigs rows, callers in other files
@@ -179,6 +197,20 @@ if paged(run(["--for=" + Q1, f"--page-bytes={lo}"], OFF)) and not paged(run(["--
         ok(f"(P2) at --page-bytes={hi}, the smallest the OFF answer is whole at, the ON answer is whole too, with its lines")
     else: no(f"(P2) at --page-bytes={hi} the OFF answer is whole and the ON answer {'is paged' if paged(on) else 'lacks <edges>'}")
 else: no("(P2) premise: the OFF answer is not paged at 1000 B and whole at 200000 B")
+# T
+est = lambda t: re.sub(r' est_tokens="\d+"', ' est_tokens="*"', t, count=1)
+if not os.environ.get("TWIN"): no("(T) " + os.environ.get("TWIN_WHY", "no twin driver"))
+else:
+    pts, same = [], []
+    for q, root in ((Q1, "src"), (Q2, "src"), (QF, FIX)):
+        whole = ["--for=" + q, "--page-bytes=900000"]   # one page, the document legend as rendered (no core legend), as pageAnswer sees it
+        on, off = run(whole, {"RIPWIRE_NO_CORE_LEGEND": "1"}, root=root), run(whole, dict(OFF, RIPWIRE_NO_CORE_LEGEND="1"), root=root)
+        f = os.path.join(os.environ["TWIN_TMP"], "on.xml"); open(f, "w").write(on)
+        p = subprocess.run([os.environ["TWIN"], f], capture_output=True)
+        if p.returncode == 0: pts.append(q[:24]); same += [q[:24]] if est(p.stdout.decode("utf8", "replace")) == est(off) else []
+    if pts and len(same) == len(pts):
+        ok(f"(T) the lane-off twin of the ON answer IS the OFF answer (est_tokens= aside) on {len(pts)} answers: {', '.join(pts)}")
+    else: no(f"(T) the lane-off twin is the OFF answer on {len(same)} of {len(pts)} answers: the twin pages differently from OFF")
 # K
 k1, k2 = run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "1"}), run(["--for=" + Q1], {"RIPWIRE_ACT_EDGES": "2"})
 if act_ok(k1) and not has_edges(k1) and not has_where(k1): ok("(K) =1: ACT-8 alone")
