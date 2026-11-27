@@ -79,9 +79,10 @@ cap60 "$BIN" "$R" --quality-delta --legend=full --no-cache >"$TMP/l-full.xml" 2>
 cap60 "$BIN" "$R" --quality-delta --legend=compact --no-cache >"$TMP/l-compact.xml" 2>/dev/null; lcrc=$?
 for form in full compact; do
     def="$( grep -oE 'shell_cut=N: [^.;]*[.;][^.]*' "$TMP/l-$form.xml" | head -1 )"
-    if [ "$( cutof "$TMP/l-$form.xml" )" = 1 ] && printf '%s' "$def" | grep -q 'discarded whole' && ! printf '%s' "$def" | grep -qE 'deeper'; then
+    formrc=$lrc; [ "$form" = compact ] && formrc=$lcrc
+    if { [ "$formrc" = 0 ] || [ "$formrc" = 2 ]; } && [ "$( cutof "$TMP/l-$form.xml" )" = 1 ] && printf '%s' "$def" | grep -q 'discarded whole' && ! printf '%s' "$def" | grep -qE 'deeper'; then
         ok "(l) --legend=$form defines shell_cut= as a scan discarded whole: $def"
-    else no "(l) --legend=$form: want shell_cut=\"1\" and a definition saying the scan is discarded whole (rc full=$lrc compact=$lcrc); got '${def:-none}'"; fi
+    else no "(l) --legend=$form: want rc 0/2, shell_cut=\"1\" and a definition saying the scan is discarded whole (rc full=$lrc compact=$lcrc); got '${def:-none}'"; fi
 done
 
 for n in 40 1; do
