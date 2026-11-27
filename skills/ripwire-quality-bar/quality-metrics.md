@@ -1,5 +1,7 @@
 # Universal software-quality metrics → ripwire verb → the fix
 
+Contents: Evidence-tier calibration — trust these unevenly · The four that earn their keep · Supporting signals · Why --quality-delta's 13 kinds — the measured agent failure  · When the range form answers only part of the question (memor · The three steering rules (why this beats a linter) · 1. Delta, not absolute · 2. Descriptive, not dogmatic · 3. Structure, not flow · One-liner the agent can run on its own diff
+
 Reference for `ripwire-quality-bar` (and `ripwire-reuse-first`). Each metric is *measurable today*, has a
 *defensible threshold*, and a *concrete fix*. Thresholds are heuristics — weigh them, don't blindly gate.
 

@@ -1,0 +1,8 @@
+PRE-REGISTERED 2026-11-26, before any C2 rating was taken.
+C2 = every "you/your" removed from the descriptions (audit d.1) + the 9 cross-routing clauses removed (audit d.2); 4,970 chars vs 5,277.
+Lexical, already measured: bm25-desc 142/214 vs 147 (judged 96/160 vs 100).
+Adopt C2 only if, for EACH of Haiku and Sonnet (two runs each):
+  mean hit@1(C2) >= mean hit@1(before) - 1,
+  negatives fired <= 1 in every C2 run,
+  pass^2(C2) >= pass^2(before) - 1   (pass^2 = positive rows right in both runs).
+Otherwise keep the current text (desc_current) and record C2 as measured and rejected.
