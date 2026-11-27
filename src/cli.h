@@ -153,10 +153,10 @@ struct Config
                                                            // corpus
     std::string_view cacheFile;                            // --cache=PATH: incremental index (re-parse only changed)
     std::string_view indexOut;                             // --index-out=BASE: CI generate-and-exit. Cold-parses the tree
-                                                           // TWICE — lean then rich — writing BASE.lean.ripwirecache +
-                                                           // BASE.rich.ripwirecache (both families: --for/--exemplar/--metrics
-                                                           // are RICH and would stay cold on a lean-only artifact), then exits 0
-                                                           // WITHOUT emitting a map. Sugar over --cache (force-rebuild both paths).
+                                                           // ONCE and writes the one parse blob (format 56: every verb reads
+                                                           // it) as BASE.lean.ripwirecache + BASE.rich.ripwirecache, the two
+                                                           // names a committed artifact has always used, then exits 0 WITHOUT
+                                                           // emitting a map. Sugar over --cache (force-rebuild).
     bool             noCache = false;                      // --no-cache: disable the warm-by-default per-root TMPDIR cache
     bool             noIgnore = false;                     // --no-ignore (§N6-C): crawl gitignored paths too — the pre-2026-09-03
                                                            // walk. Default OFF: a git root's own ignore rules shape the corpus and
@@ -3099,9 +3099,9 @@ inline constexpr char kHelpTail[] =
         "    --cache=PATH               incremental cache at PATH (re-parse only changed files)\n"
         "    --index-out=BASE           cold-parse the tree, write the committable index artifact, and exit without a map\n"
         "                               CI generate-and-exit: cold-parse the tree and write the committable index artifact,\n"
-        "                               then exit 0 with NO map on stdout. Writes BOTH families — BASE.lean.ripwirecache (map/\n"
-        "                               nav/--pr-context) and BASE.rich.ripwirecache (--for/--exemplar/--metrics/--uses are RICH,\n"
-        "                               a lean-only artifact leaves them cold). Consume in a PR job with --cache=BASE.lean.ripwirecache\n"
+        "                               then exit 0 with NO map on stdout. Writes BASE.lean.ripwirecache and BASE.rich.ripwirecache,\n"
+        "                               ONE parse blob under both names (it serves every verb: map/nav/--pr-context and the rich\n"
+        "                               --for/--exemplar/--metrics/--uses alike). Consume in a PR job with --cache=BASE.lean.ripwirecache\n"
         "                               (or .rich.). --exclude shapes the crawl and therefore the blob content. Same-architecture\n"
         "                               speed cache: consumed on a different arch it self-heals to a full cold parse (correct, slower).\n"
         "                               NOT byte-identical run-to-run (the header stamps the blob write time); the contract is\n"

@@ -46,7 +46,7 @@ for_text(){ grep '"id":2' "$1" | python3 -c 'import sys,json; r=json.load(sys.st
 C1="$TMP/c1/"; mkdir -p "$C1"
 ( cd "$WORK" && TMPDIR="$C1" RIPWIRE_CACHE_STATS=1 "$BIN" "$WORK" --for="$TASK" >"$TMP/cli1.out" 2>"$TMP/cli1.err" ) || no "arm 1: the CLI --for exited $?"
 r1="$( reparsed "$TMP/cli1.err" )"
-rich1="$( find "$C1" -type f -name 'ripwire-*-rich*.bin' | wc -l | tr -d ' ' )"
+rich1="$( find "$C1" -type f -name 'ripwire-????????????????-c*p*.bin' | wc -l | tr -d ' ' )"
 if [ "${r1:-0}" -gt 0 ] && [ "$rich1" -ge 1 ]; then ok "arm 1: a CLI --for on a fresh cache dir parses ($r1 files) and writes a rich blob"
 else no "arm 1: premise — CLI --for reparsed=${r1:-none}, rich blobs=$rich1 (want > 0 and >= 1)"; fi
 
@@ -56,7 +56,7 @@ if [ "${r2:-x}" = 0 ]; then ok "arm 2: an MCP server after the CLI --for re-pars
 else no "arm 2: the MCP server after a CLI --for re-parsed ${r2:-?} files — it does not read the CLI rich blob"; fi
 
 mcpb="$( find "$C1" -type f -name 'ripwire-mcp-*' | wc -l | tr -d ' ' )"
-rich2="$( find "$C1" -type f -name 'ripwire-*-rich*.bin' | wc -l | tr -d ' ' )"
+rich2="$( find "$C1" -type f -name 'ripwire-????????????????-c*p*.bin' | wc -l | tr -d ' ' )"
 if [ "$mcpb" = 0 ] && [ "$rich2" = 1 ]; then ok "arm 3: one rich blob for the root, no MCP-only blob"
 else no "arm 3: $mcpb MCP-only blob(s) and $rich2 rich blob(s) — want 0 and 1"; fi
 
