@@ -333,7 +333,7 @@ struct ParsePoolShared
     std::atomic<std::size_t>&        warmGrowths;           // P1-11: warm-hit accumulator reallocations (RIPWIRE_CACHE_STATS)
     std::size_t                      nfiles;
     bool                             needsCacheHash;
-    bool                             captureValueUses;
+    bool                             captureValueUses;      // the RICH extraction: value-use rows + subtoken stats (every blob-writing run, ONE-PARSE)
     memguard::Watch*                 memWatch;              // #350: null = unguarded; else checked before each claim
 };
 
@@ -1054,12 +1054,30 @@ inline bool applyMemoryParseCut( IngestResult& result, memguard::Watch* memWatch
     return true;
 }
 
+// ONE-PARSE (kCacheVersion 56): what only the rich family reads, dropped from a lean ingest's facts once the one blob holds
+// them — the value-use rows (RawRef::valueUse) and each def's subtoken stats. Every other row is the one a lean parse
+// extracts, in the order it extracts it: the rich-only passes append to their own rows and read nothing the lean passes
+// write (ingest_sidecap.h captureSideFacts arms them; appendBlankedMacroUses), so the lean facts are a projection of the
+// rich ones. test/cachesplitcheck.sh holds that to the recorded MODEL and GRAPH sections of a lean parse.
+inline void dropRichOnlyFacts( RawFacts& raw )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: drop the rich-only rows for a lean ingest (ONE-PARSE)" );
+    std::erase_if( raw.refs, []( const RawRef& r ) noexcept { return r.valueUse; } );
+    for( RawDef& d : raw.defs )
+    {
+        d.lex = RawDefLex{};
+    }
+}
+
 inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::string_view cacheFile, bool captureValueUses,
                               CacheRecords& cache, const CacheLoadStats& cacheStats,
                               IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch = nullptr )
 {
     RawFacts raw;
     const bool needsCacheHash = !cacheFile.empty();
+    // ONE-PARSE: a run that writes the one blob writes the rich records, whichever verb class it is; a lean run with no
+    // blob (--no-cache) has nothing to share and parses lean.
+    const bool parseRich = captureValueUses || !cacheFile.empty();
     QueryReadyGate queryReadyGate{ &prewarm.ready, &prewarm.mutex, &prewarm.cv };
 
     // Win 2 (PERF.md P2) — dirty flag: skip saveCache when nothing changed.
@@ -1186,7 +1204,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         std::atomic<std::size_t>          nextFile{ 0 };   // lock-free work queue: threads fetch_add for the next parseOrder slot
 
         ParsePoolShared shared{ result.files, cache, scan, prewarm, queryReadyGate, cacheCandidateFacts, cacheHitFacts, lateMiss,
-                                tFacts, parseOrder, nextFile, dirty, reparsedCount, warmGrowths, nfiles, needsCacheHash, captureValueUses,
+                                tFacts, parseOrder, nextFile, dirty, reparsedCount, warmGrowths, nfiles, needsCacheHash, parseRich,
                                 memWatch };
 
         for( unsigned t = 0; t < nthreads; ++t )
@@ -1250,8 +1268,12 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown }, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown } );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
+        }
+        if( parseRich && !captureValueUses )
+        {
+            dropRichOnlyFacts( raw );
         }
     }
     return raw;

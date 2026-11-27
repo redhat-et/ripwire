@@ -400,7 +400,9 @@ inline bool crawlPathStaysInRoot( const std::string& path, const std::string& ro
 // maxFileBytes: the crawl's per-file size ceiling (default kDefaultMaxFileBytes; --max-file-size).
 // captureValueUses: include read/write use-sites for --uses / metrics-quality lenses. Default true
 // preserves the complete index for library/MCP callers; the CLI default map may pass false because
-// PageRank consumes calls/imports/inheritance/composition only.
+// PageRank consumes calls/imports/inheritance/composition only. It chooses the MODEL, not the cache: with a cacheFile
+// the parse is always the rich one, so the one blob serves both classes (ONE-PARSE), and a lean ingest drops the
+// rich-only rows after the blob is written (ingest_parsepool.h dropRichOnlyFacts).
 // excludeLabel (multi-root workspaces ONLY, A12): when non-empty, each --exclude
 // substring is matched against the LABELED spelling `<excludeLabel>/<root-relative-path>` instead of the
 // crawled path — so ONE excludes list applies uniformly across roots and `--exclude=lib1/` scopes to the
@@ -484,8 +486,7 @@ inline IngestResult ingestTrackedTree( const char* rootDir, const std::vector<st
 struct CacheIdentity
 {
     std::uint32_t cacheVersion  = 0;   // kCacheVersion — the on-disk format generation
-    std::uint32_t parserVerLean = 0;   // parserVerFor(false) — the extraction identity of the lean family
-    std::uint32_t parserVerRich = 0;   // parserVerFor(true)  — …and of the rich family (--for/--exemplar/--metrics/--uses)
+    std::uint32_t parserVer     = 0;   // kParserVer — the extraction identity of the one blob family (format 56 on)
     unsigned      artifactArch  = 0;   // kArtifactArch — endianness | sizeof(void*) << 1
 };
 CacheIdentity cacheIdentity() noexcept;
@@ -495,7 +496,7 @@ CacheIdentity cacheIdentity() noexcept;
 // "format-version" | "parser-version" | "artifact-arch" | "checksum" | "corrupt-frame". A FORMAT verdict
 // about an artifact, never a freshness verdict about an index: per-file freshness is re-validated on every
 // invocation (docs/EVALS.md, "card A3"), which is why no equivalent may be emitted on the map.
-const char* cacheArtifactVerdict( const std::string& path, bool captureValueUses );
+const char* cacheArtifactVerdict( const std::string& path );
 
 // ---- shared AST-query pass (powers --match structural search + --lint) ----
 // Re-parse the already-crawled files in parallel and run one or more tree-sitter queries over each tree.

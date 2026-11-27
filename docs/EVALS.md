@@ -1491,7 +1491,7 @@ record's own stored key against the key that found it, so even a 64-bit pathHash
 than answers.
 
 **Band (8) after the build tag (2026-09-26, #334 follow-up).** The auto name now also carries the cache
-format, `ripwire-<rootKey>-lean-c<format>p<parser>.bin`: two builds of different formats alternating on one tree
+format, `ripwire-<rootKey>-c<format>p<parser>.bin` (`-lean-c…`/`-rich-c…` before format 56): two builds of different formats alternating on one tree
 (an installed release and a local build) refused and rewrote each other's blob on every run, measured
 `reparsed=5 reused=0` on every run of three alternating rounds on `test/fixture`, `reused=5` on every run
 after the first with the tag. Band (8) holds per build: every configuration of one binary still shares one
