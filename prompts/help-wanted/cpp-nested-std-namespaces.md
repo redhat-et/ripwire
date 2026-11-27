@@ -60,7 +60,7 @@ every ranking computed over those edges.
   `enclosingScopeOf( … )`.
 - `src/model.h` `struct Reference`, and `src/ingest_cache.h` `RawRef` with `writeRef` / `readRef`: the
   cached record a new per-reference field would join.
-- `test/stdqualcheck.sh` with `test/stdqualfix/`: #134's gate. §7 pins the ObjC++ floor. **§11 is this
+- `test/stdqualcheck.sh` with `test/stdqualfix/`: #134's gate. §7 is the ObjC++ arm (a floor until 2026-11-26). **§11 is this
   task:** three `KNOWN GAP` arms (K1 to K3), their census twins, a header arm, and three `CONTROL` arms.
   Its corpus is written into `$TMP` at run time; read the section comment before adding C++ under
   `test/`.
@@ -117,9 +117,10 @@ One shape that works. The choices inside it are yours, and the PR should argue t
    the definition win. Find out whether extraction already tells a prototype from a definition before
    you add a flag. If you keep the edge and disclose it instead, argue that and rewrite K3 to assert the
    disclosure.
-5. **ObjC++, if feasible.** tree-sitter-objc leaves an ERROR node spelling `std::` beside a bare call.
-   Recovering the qualifier means reading that sibling's text. Keep it bounded, and never invent a
-   qualifier from an unrelated error. If you do it, §7's `FLOOR` arm flips; if you don't, disclose it.
+5. **ObjC++ — done (lane objcxx-std-qualified, 2026-11-26).** tree-sitter-objc leaves an ERROR node
+   spelling `std::` beside a bare call; `ingest_names.h` `objcxxStdQualifierBefore` reads the std-rooted
+   chain back, bounded, and only when the nearest `::` lies inside error recovery. §7's former `FLOOR` arm
+   is now a real arm, and §16 covers the spellings plus ObjC++, Metal and CUDA controls.
 
 The non-negotiables from `CLAUDE.md`:
 

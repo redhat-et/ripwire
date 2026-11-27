@@ -727,6 +727,92 @@ inline bool cppQualifiedChainRootsStd( TSNode nameNode, std::string_view src )
     return written.has_value() && written->root == "std";
 }
 
+// OBJCXX-STD-QUALIFIER — the ObjC++ (.mm, Lang::ObjC) twin of cppQualifiedChainRootsStd. tree-sitter-objc has no `::`
+// token: `std::unreachable()` parses as error recovery spelling `std::` beside a bare `unreachable()` call, so the call
+// name has no qualified_identifier parent and the C++ path above answers nothing. The qualifier is read back LEXICALLY:
+// the `ident ::` pairs written immediately before the call name, blanks allowed, out to the chain's root (a leading `::`
+// names no segment). Kept only when (a) that root is `std` — the guard (graph.h keepStdQualifiedCandidates) is std-ONLY,
+// so a non-std chain keeps its unchanged bare-call ladder, a stated floor — and (b) one of the nearest separator's two
+// bytes lies inside an ERROR (or MISSING) node, so a `::` the grammar DID parse, or one ending a comment just above the
+// call, is never mistaken for a qualifier. Returns the IMMEDIATE segment (`std`, `__1`, `ranges`), the value
+// qualifierOf gives a C++ call with the same written chain; nullopt otherwise. A template-id segment (`std::vector<int>::`)
+// stops the scan at `>`, so it is not recovered (floor). The segment cap bounds a pathological run of `a::a::…`.
+inline bool byteInErrorRecovery( TSNode nameNode, std::uint32_t at ) noexcept
+{
+    TSNode cover = nameNode;
+    while( !ts_node_is_null( cover ) && ts_node_start_byte( cover ) > at )
+    {
+        cover = parentOf( cover );
+    }
+    if( ts_node_is_null( cover ) )
+    {
+        return false;
+    }
+    for( TSNode n = ts_node_descendant_for_byte_range( cover, at, at + 1 ); !ts_node_is_null( n ); n = parentOf( n ) )
+    {
+        if( ts_node_is_error( n ) || ts_node_is_missing( n ) )
+        {
+            return true;
+        }
+        if( ts_node_eq( n, cover ) )
+        {
+            break;
+        }
+    }
+    return false;
+}
+inline std::optional<std::string_view> objcxxStdQualifierBefore( TSNode nameNode, std::string_view src )
+{
+    constexpr std::size_t kMaxChainSegments = 16;
+    const auto skipBlanksBack = [ src ]( std::size_t k ) noexcept
+    {
+        while( k > 0 && rw::isJsonWs( src[ k - 1 ] ) ) { --k; }
+        return k;
+    };
+    const std::size_t nameByte = ts_node_start_byte( nameNode );
+    if( nameByte > src.size() )
+    {
+        return std::nullopt;
+    }
+    std::size_t      at         = skipBlanksBack( nameByte );
+    std::size_t      nearestSep = std::string_view::npos;
+    std::string_view immediate;
+    std::string_view root;
+    for( std::size_t segmentIndex = 0; segmentIndex < kMaxChainSegments && at >= 2 && src.substr( at - 2, 2 ) == "::"; ++segmentIndex )
+    {
+        if( segmentIndex == 0 )
+        {
+            nearestSep = at - 2;
+        }
+        const std::size_t identEnd   = skipBlanksBack( at - 2 );
+        std::size_t       identBegin = identEnd;
+        while( identBegin > 0 && namesplit::isIdentChar( src[ identBegin - 1 ] ) )
+        {
+            --identBegin;
+        }
+        if( identBegin == identEnd )
+        {
+            break;   // a leading `::` (`::std::x`): the global scope names no segment
+        }
+        root = src.substr( identBegin, identEnd - identBegin );
+        if( immediate.empty() )
+        {
+            immediate = root;
+        }
+        at = skipBlanksBack( identBegin );
+    }
+    if( root != "std" )
+    {
+        return std::nullopt;
+    }
+    const auto sep = static_cast<std::uint32_t>( nearestSep );
+    if( !byteInErrorRecovery( nameNode, sep ) && !byteInErrorRecovery( nameNode, sep + 1 ) )
+    {
+        return std::nullopt;
+    }
+    return immediate;
+}
+
 // The definition-side twin for an IN-CLASS / in-namespace def (`namespace std { namespace ranges { … } }`,
 // or the C++17 nested spelling `namespace std::ranges { … }`) — the shape `cppQualifiedChainRootsStd` above
 // does not reach, because such a def's @name node is never the `name:` field of a qualified_identifier at

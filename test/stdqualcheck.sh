@@ -175,18 +175,20 @@ expect callees bareMove            0 "unqualified move( x ) binds nothing — th
     && ok "census: bareMove's site is refused by the Phase-5 veto ('external', no target) — unchanged" \
     || no "census: bareMove expected one external row, got: $( crows bareMove | tr '\n' ' ' )"
 
-# ── §7 ObjC++ — the qualifier is lost at EXTRACTION, so the guard cannot see it (a STATED FLOOR) ────────────────
-# tree-sitter-objc parses `std::move( x )` as an ERROR node `std::` beside a bare call. bridgeMove is refused by
-# the Phase-5 veto on both binaries; bridgeStop's std::unreachable is not a table name and still binds the lone
-# Cursor::unreachable. Pinned so that closing the floor (a parser change) is a visible decision, not drift.
-# KNOWN GAP (help wanted, the optional part of prompts/help-wanted/cpp-nested-std-namespaces.md): recovering the ObjC++
-# qualifier flips the FLOOR arm below — rewrite it to count=0 in the same commit.
-expect callees bridgeMove          0 "bridge.mm std::move — refused by the Phase-5 veto, not by this guard"
-BSTOP="$( run "$FIX" --callees=bridgeStop --no-cache )"
-{ [ "$( cnt "$BSTOP" )" = 1 ] && printf '%s' "$BSTOP" | grep -q 'n="Cursor::unreachable" p="buffers.h:38"'; } \
-    && ok "FLOOR: bridge.mm std::unreachable() still binds Cursor::unreachable — ObjC++ carries no qualifier" \
-    || no "the ObjC++ floor moved (bridgeStop no longer binds Cursor::unreachable) — update this arm and the fixture: $( el "$BSTOP" )"
-expect callers Cursor::unreachable 1 "only the ObjC++ floor remains under Cursor::unreachable (was 2: stopHere too)"
+# ── §7 ObjC++ — the qualifier is read back from error recovery (lane objcxx-std-qualified, was a STATED FLOOR) ──
+# tree-sitter-objc parses `std::move( x )` as an ERROR node spelling `std::` beside a bare call. Until this lane ingest
+# set no call qualifier for Lang::ObjC, so the guard never saw the site: bridgeStop's std::unreachable is not a
+# Phase-5 table name and bound the lone Cursor::unreachable (pinned here as the FLOOR, count=1). ingest_names.h
+# objcxxStdQualifierBefore now reads the std-rooted chain back from the bytes before the call name, kept only when the
+# nearest `::` sits inside an ERROR node, so the guard refuses the .mm site exactly as it refuses stopHere in the .cpp.
+# RED-FIRST: on origin/main f7cfcec7a the three arms below that name bridgeStop or Cursor::unreachable FAIL (callees 1,
+# census 'unique', callers 1); §9's header and census-count arms FAIL with them (edges=6 external=12).
+expect callees bridgeMove          0 "bridge.mm std::move — refused (the Phase-5 veto before this lane, the std guard as well now)"
+expect callees bridgeStop          0 "bridge.mm std::unreachable() binds nothing in-repo (was Cursor::unreachable — the old ObjC++ floor)"
+[ "$( crows bridgeStop )" = "$( printf 'external\t' )" ] \
+    && ok "census: bridgeStop's one site is 'external' — refused, counted, not dropped" \
+    || no "census: bridgeStop expected one external row, got: $( crows bridgeStop | tr '\n' ' ' )"
+expect callers Cursor::unreachable 0 "no std::unreachable site binds Cursor::unreachable — .cpp (stopHere) and .mm (bridgeStop) both refused (was 2, then 1)"
 
 # ── §8 A NON-std QUALIFIER IS UNCHANGED — the alias control ──────────────────────────────────────────────────
 PROBE="$( run "$FIX" --callees=probePath --no-cache )"
@@ -198,15 +200,16 @@ PROBE="$( run "$FIX" --callees=probePath --no-cache )"
 # edges 15 -> 6: the eight std-qualified false edges go, and launderIt's split collapses to one arm.
 # ambiguous 1 -> 0: that split was the corpus's only guess. external 2 -> 12: the ten refused std-qualified SITES
 # (takeTwice 2, takeRooted, takeInline, flipTwice 2, flipRooted, stopHere, rotate, clearHost) join the two
-# Phase-5 refusals (bareMove, bridgeMove). unresolved stays 0: that gauge means "defined in-repo but lang-filtered".
+# Phase-5 refusals (bareMove, bridgeMove). edges 6 -> 5, external 12 -> 13 (lane objcxx-std-qualified): the ObjC++
+# bridgeStop site, §7's old floor, is the eleventh refused std-qualified site. unresolved stays 0: that gauge means "defined in-repo but lang-filtered".
 # symbols 35 -> 36 (lane index-alias-const): alias.cpp's `namespace fs = vendor::fsimpl;` is a definition (t="alias"); it is the
 # corpus's one alias form (`using namespace std;` in unqualified.cpp is a directive, no def), and no edge moves.
-printf '%s' "$MAP" | grep -qE 'files=13 symbols=36 edges=6 shown=36 est_tokens=[0-9]+ ambiguous=0 unresolved=0 external=12 ' \
-    && ok "fixture header: edges=6 ambiguous=0 unresolved=0 external=12 (was edges=15 ambiguous=1 external=2)" \
+printf '%s' "$MAP" | grep -qE 'files=13 symbols=36 edges=5 shown=36 est_tokens=[0-9]+ ambiguous=0 unresolved=0 external=13 ' \
+    && ok "fixture header: edges=5 ambiguous=0 unresolved=0 external=13 (was edges=15 ambiguous=1 external=2; edges=6 external=12 before the ObjC++ arm)" \
     || no "fixture header wrong: $( printf '%s' "$MAP" | grep -oE 'files=13 [^-]*' | head -1 )"
-[ "$( grep -c $'^C\texternal\t' "$TMP/c.tsv" )" = 12 ] \
-    && ok "census: exactly 12 'C external' rows — one per refusal, agreeing with the header's external=12" \
-    || no "census: expected 12 external rows, got $( grep -c $'^C\texternal\t' "$TMP/c.tsv" )"
+[ "$( grep -c $'^C\texternal\t' "$TMP/c.tsv" )" = 13 ] \
+    && ok "census: exactly 13 'C external' rows — one per refusal, agreeing with the header's external=13" \
+    || no "census: expected 13 external rows, got $( grep -c $'^C\texternal\t' "$TMP/c.tsv" )"
 
 # ── §10 hygiene: determinism, warm == cold, well-formed XML ──────────────────────────────────────────────────
 run "$FIX" --pin-census="$TMP/c2.tsv" --no-cache >"$TMP/map2.xml"
@@ -716,5 +719,87 @@ for vsym in callGlobal callWritten; do
         no "#331 §15 REGRESSED: --callees=$vsym must not bind the def written inside namespace vendor — got '${vgot:-REFUSED}': $( el "$vout" )"
     fi
 done
+
+# ── §16 (lane objcxx-std-qualified, 2026-11-26) — EVERY C++ DIALECT takes the guard: ObjC++, Metal, CUDA ─────────
+# §7 closes the ObjC++ floor on the shared corpus; this one proves the recovery across the written spellings and
+# that it took ONLY std. ObjC++ arrives through objcxxStdQualifierBefore (ingest_names.h); .metal and .cu are
+# Lang::Cpp and ride tree-sitter-cpp / tree-sitter-cuda's real qualified_identifier, so they are controls here.
+# RED-FIRST (origin/main f7cfcec7a, plain build): the six mm* std arms FAIL (mmStd mmRooted mmInline mmNested
+# mmSpaced count=1 -> Cursor::unreachable; mmPoly count=2, the std::polyStop def split with the Arena decoy).
+# The controls pass on BOTH binaries: a member call, a non-std qualifier's true edge, a non-std qualifier's unchanged
+# bare ladder, a `std::` that ENDS A COMMENT above a bare call (not error recovery, so not a qualifier), Metal, CUDA.
+OXX="$TMP/objcxx"
+mkdir -p "$OXX"
+cat >"$OXX/cursor.h" <<'EOF'
+#pragma once
+class Cursor
+{
+public:
+    void unreachable() { position = -1; }
+    int position = 0;
+};
+class Arena
+{
+public:
+    void polyStop() { used = 0; }
+    int used = 0;
+};
+namespace vendor { inline void halt() {} }
+namespace std { inline void polyStop() {} }
+EOF
+cat >"$OXX/bridge.mm" <<'EOF'
+#include "cursor.h"
+void mmStd() { std::unreachable(); }
+void mmRooted() { ::std::unreachable(); }
+void mmInline() { std::__1::unreachable(); }
+void mmNested() { std::ranges::unreachable(); }
+void mmSpaced() { std :: unreachable(); }
+void mmPoly() { std::polyStop(); }
+void mmDirect( Cursor *c ) { c->unreachable(); }
+void mmVendor() { vendor::halt(); }
+void mmVendorBare() { vendor::unreachable(); }
+void mmComment()
+{
+    // the next call is NOT std::
+    unreachable();
+}
+EOF
+cat >"$OXX/shader.metal" <<'EOF'
+#include "cursor.h"
+void metalStop() { std::unreachable(); }
+void metalDirect( Cursor &c ) { c.unreachable(); }
+EOF
+cat >"$OXX/kern.cu" <<'EOF'
+#include "cursor.h"
+void cudaStop() { std::unreachable(); }
+EOF
+oxx(){   # $1 sym  $2 want count  $3 want def row (n="..." p="..."), or "" for none  $4 prose
+    local out got; out="$( run "$OXX" "--callees=$1" --no-cache )"; got="$( cnt "$out" )"
+    if [ "${got:-REFUSED}" = "$2" ] && { [ -z "$3" ] || printf '%s' "$out" | grep -qF "$3"; }; then
+        ok "§16 --callees=$1 count=$2 — $4"
+    else
+        no "§16 --callees=$1 expected count=$2${3:+ ($3)}, got '${got:-REFUSED}' — $4: $( el "$out" )"
+    fi
+}
+oxx mmStd        0 ""                                    "ObjC++ std::unreachable() binds nothing in-repo (was Cursor::unreachable)"
+oxx mmRooted     0 ""                                    "ObjC++ ::std::unreachable() — the leading :: names no segment, root std"
+oxx mmInline     0 ""                                    "ObjC++ std::__1::unreachable() — the libc++ inline-namespace spelling"
+oxx mmNested     0 ""                                    "ObjC++ std::ranges::unreachable() — a nested std chain (immediate segment ranges)"
+oxx mmSpaced     0 ""                                    "ObjC++ std :: unreachable() — blanks around the separator"
+oxx mmPoly       1 'n="polyStop" p="cursor.h:15"'        "ObjC++ std::polyStop() keeps the def INSIDE namespace std, drops the Arena decoy (was 2, split)"
+oxx mmDirect     1 'n="Cursor::unreachable" p="cursor.h:5"' "CONTROL: c->unreachable() still binds Cursor::unreachable"
+oxx mmVendor     1 'n="halt" p="cursor.h:14"'            "CONTROL: vendor::halt() — a non-std qualifier keeps its true edge"
+oxx mmVendorBare 1 'n="Cursor::unreachable" p="cursor.h:5"' "CONTROL: vendor::unreachable() stays on the unchanged bare ladder — the recovery is std-ONLY"
+oxx mmComment    1 'n="Cursor::unreachable" p="cursor.h:5"' "CONTROL: a comment ending in std:: is not error recovery, so the bare call is untouched"
+oxx metalStop    0 ""                                    "Metal (.metal, Lang::Cpp) std::unreachable() binds nothing in-repo"
+oxx metalDirect  1 'n="Cursor::unreachable" p="cursor.h:5"' "CONTROL: Metal c.unreachable() still binds Cursor::unreachable"
+oxx cudaStop     0 ""                                    "CUDA (.cu, Lang::Cpp) std::unreachable() binds nothing in-repo"
+OXXC="$( run "$OXX" --callers=Cursor::unreachable --no-cache )"
+printf '%s' "$OXXC" | grep -qE 'n="(mmStd|mmRooted|mmInline|mmNested|mmSpaced|metalStop|cudaStop)"' \
+    && no "§16 a std::unreachable caller is still listed under Cursor::unreachable: $( el "$OXXC" )" \
+    || ok "§16 no std-qualified caller, in any dialect, is listed under Cursor::unreachable"
+[ "$( cnt "$OXXC" )" = 4 ] \
+    && ok "§16 --callers=Cursor::unreachable count=4 — exactly the four controls (mmDirect mmVendorBare mmComment metalDirect), non-vacuous" \
+    || no "§16 --callers=Cursor::unreachable expected 4, got '$( cnt "$OXXC" )': $( el "$OXXC" )"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
