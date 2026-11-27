@@ -188,6 +188,13 @@ inline void emitColumnarTestedColumn( std::FILE* out, const IngestResult& ing, c
     emitColumnarFlagColumn( out, "tested", rows.size(), [ & ]( std::size_t i ) { return isTestedByReach( ing, testReach, rows[i] ); } );
 }
 
+// Lane asserted-signal: the dense 0/1 `<asserted>` column, 1 where graph.h isAssertedByReach holds. Present-only (like `<test>`): an
+// answer with no asserted row carries neither the column nor its fields= item. It is the LAST column, so no earlier one moves.
+inline bool columnarAssertedPresent( const IngestResult& ing, const std::vector<NodeId>& rows, const std::vector<char>* testReach )
+{
+    return testReach != nullptr && std::ranges::any_of( rows, [ & ]( NodeId n ) { return isAssertedByReach( ing, *testReach, n ); } );
+}
+
 // 0.6.5: the optional dense `<depth>` column — --impact's hop depth per row (graph.h transitiveCallersDepth), one value
 // per row in row order. Built as one string and written once: a depth is a multi-digit number, not the tested column's
 // single character.
@@ -369,6 +376,10 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
     {
         emitColumnarFlagColumn( out, "test", rows.size(), [ & ]( std::size_t i ) { return i < extras.testRow->size() && ( *extras.testRow )[ i ] != 0; } );
     }
+    if( columnarAssertedPresent( ing, rows, testReach ) )
+    {
+        emitColumnarFlagColumn( out, "asserted", rows.size(), [ & ]( std::size_t i ) { return isAssertedByReach( ing, *testReach, rows[i] ); } );
+    }
 }
 
 // The `<name>` column: XML-escaped names (most identifiers never contain a comma, but markdown SECTION symbols and canonical ids
@@ -429,8 +440,8 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     {
         rw::emitRaw( out, extras.defRows->c_str() );   // attrib-multidef: the <def> table the of_def column's ix= name
     }
-    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
-                columnarExtraFields( extras ) );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
+                columnarExtraFields( extras ), columnarAssertedPresent( ing, rows, testReach ) ? ",asserted" : "" );
 
     // path index array
     std::fputs( "<path>", out );

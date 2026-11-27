@@ -278,7 +278,8 @@ inline bool refuseNesting( const LangEntry& le, std::string_view bytes, const ch
 // async compile threads capture it and are joined by installCompiledQueriesAndOpenGate before it dies.
 struct QueryPrewarm
 {
-    std::vector<const LangEntry*> toCompile;         // distinct grammars the miss set needs
+    std::vector<const LangEntry*> toCompile;         // distinct grammars the miss set needs and the process cache lacks
+    std::vector<const LangEntry*> held;              // distinct grammars the miss set needs whose query the cache already holds
     std::vector<TSQuery*>         compiledQueries;   // 1:1 with toCompile — filled by the async pool
     std::vector<std::thread>      compilePool;       // the ts_query_new workers
     std::atomic<bool>             ready{ true };     // true ⇒ compiledQueryCache() is safe to read
@@ -602,7 +603,52 @@ inline LangRowSet markCacheMissGrammars( const PrewarmMissPass& pass )
     return reduceMissedGrammars( pass.scan, pass.slots );
 }
 
-// The distinct grammars the marked rows need (several extensions share one grammar), first row first.
+// QUERY-COMPILE-CACHE: compiledQueryCache() lives for the process and is keyed by grammar alone, which is exact only while
+// every grammar names ONE tags query (the cache then cannot hold a query of the wrong text). A row that gave a grammar a
+// second querySub would make reuse serve the first one's query, so it is a compile error here, not a silent wrong answer.
+consteval bool eachGrammarNamesOneQuery()
+{
+    for( std::size_t i = 0; i < kLangTable.size(); ++i )
+    {
+        for( std::size_t j = i + 1; j < kLangTable.size(); ++j )
+        {
+            if( kLangTable[ i ].grammar != nullptr && kLangTable[ i ].grammar == kLangTable[ j ].grammar && kLangTable[ i ].querySub != kLangTable[ j ].querySub )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert( eachGrammarNamesOneQuery(), "a grammar names two tags queries — compiledQueryCache() is keyed by grammar alone" );
+
+// FAULT INJECTION (non-NDEBUG; release: constexpr false): RIPWIRE_FAULT_QUERY_RECOMPILE=1 treats no grammar as held, so every
+// needed grammar is compiled again and installCompiledQueriesAndOpenGate deletes the copy it displaces — the path before the
+// reuse, which test/querycachereusecheck.sh arm I1 compares byte for byte.
+struct QueryRecompileFaultTag {};
+inline bool isQueryRecompileFaultInjected() noexcept
+{
+    return rw::faultSwitchOnOnce<QueryRecompileFaultTag>( "RIPWIRE_FAULT_QUERY_RECOMPILE" );
+}
+
+// Whether an earlier ingest in this process left a compiled query for `lang` in the cache. A nullptr entry (a compile that
+// failed) is NOT held, so it is compiled again and its stderr disclosure repeats exactly as before. Read on the ingest
+// thread before this ingest's compiles launch and before its parse workers exist, under the single-writer contract the
+// install already relies on: that install writes this map with no lock, so two ingests overlapping would race there today
+// (the MCP server serialises its ingest call sites for that reason); this read adds no new racing pair.
+inline bool isQueryHeld( const TSLanguage* lang )
+{
+    if( isQueryRecompileFaultInjected() )
+    {
+        return false;
+    }
+    const HashMap<const TSLanguage*, TSQuery*>& cache = compiledQueryCache();
+    const auto                                  it    = cache.find( lang );
+    return it != cache.end() && it->second != nullptr;
+}
+
+// The distinct grammars the marked rows need (several extensions share one grammar), first row first, split by whether the
+// process cache already holds each one's query.
 inline void collectGrammarsToCompile( const LangRowSet& present, QueryPrewarm& prewarm )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: unique grammars" );
@@ -614,11 +660,27 @@ inline void collectGrammarsToCompile( const LangRowSet& present, QueryPrewarm& p
         {
             continue;   // querySub "" = markdown: a grammar with NO tags.scm (custom walk) — nothing to compile
         }
-        const TSLanguage* lang = e.grammar();
-        if( std::ranges::none_of( prewarm.toCompile, [ lang ]( const LangEntry* c ) { return c->grammar() == lang; } ) )
+        const TSLanguage* lang        = e.grammar();
+        const auto        sameGrammar = [ lang ]( const LangEntry* c ) { return c->grammar() == lang; };
+        if( std::ranges::any_of( prewarm.toCompile, sameGrammar ) || std::ranges::any_of( prewarm.held, sameGrammar ) )
         {
-            prewarm.toCompile.push_back( &e );
+            continue;
         }
+        ( isQueryHeld( lang ) ? prewarm.held : prewarm.toCompile ).push_back( &e );
+    }
+}
+
+// RIPWIRE_STATS: one `ripwire: stats query-reuse ingest=K needed=N held=H compiled=C` line per ingest after the process's first
+// (a one-shot CLI run prints none). N = distinct grammars the miss set needs, H = of those, the ones already compiled in this
+// process, C = the compiles this ingest launches. Gate: test/querycachereusecheck.sh.
+inline void noteQueryReuse( const QueryPrewarm& prewarm )
+{
+    static std::atomic<std::uint32_t> ingests{ 0 };
+    const std::uint32_t               ordinal = ingests.fetch_add( 1, std::memory_order_relaxed ) + 1;
+    if( ordinal >= 2 && memstats::enabled() )
+    {
+        rw::emitTo( stderr, "ripwire: stats query-reuse ingest={} needed={} held={} compiled={}\n", ordinal,
+                    prewarm.toCompile.size() + prewarm.held.size(), prewarm.held.size(), prewarm.toCompile.size() );
     }
 }
 
@@ -657,6 +719,7 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
     const LangRowSet present = cache.empty() ? markNoCacheGrammars( scan, files.size() )
                                              : markCacheMissGrammars( PrewarmMissPass{ files, cache, cacheWriteNs, scan, missSlots } );
     collectGrammarsToCompile( present, prewarm );
+    noteQueryReuse( prewarm );
 
     // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
     // (the hash pool has joined), so the footprint they add is theirs alone.

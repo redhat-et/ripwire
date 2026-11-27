@@ -23,7 +23,7 @@ first — a prior agent's pinned gotcha is the cheapest fact there is.
 | Question | Run |
 |---|---|
 | "what's gnarly here?" — one ranked report over six evidence families (a lens, not a gate) | `ripwire <dir> --quality-panel --legend=compact` |
-| where people keep working AND the code is hard (`score = churn × ccx`, `top=` = worst fn) | `ripwire <dir> --hotspots` (`--since="2 weeks ago"` for recent) |
+| where people keep working AND the code is hard (`score = churn × ccx`, `top=` = worst fn) | `ripwire <dir> --hotspots --legend=compact` (`--since="2 weeks ago"` for recent) — bot commits are left out (`bots_skipped=` after the answer); `--include-bots` keeps them |
 | what the repository has been moving lately | `ripwire <dir> --rank-by=churn-decay --legend=compact` |
 | built but DARK (compiled or flagged off) — "why don't I see feature X" | `ripwire <dir> --flags --legend=compact` · `--flip=NAME` for turning one on |
 | can I trust the docs? | `ripwire <dir> --doc-drift --legend=compact` |

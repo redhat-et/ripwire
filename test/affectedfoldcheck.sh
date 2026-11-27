@@ -18,6 +18,12 @@
 # THREE INDEPENDENT REFERENCES, never one:
 #   1. GOLDENS captured from the binary before the change (994f0021f) on the fixtures test/affectedfoldfix/build.sh
 #      writes, committed under test/affectedfoldfix/golden/ (test/affectedfoldfix/capture.sh is the call list).
+#      MIXED PROVENANCE, stated so nobody reads the directory as one capture: the files arms B/C/D compare against
+#      are the 994f0021f bytes and must stay there — re-taking them would make "unfold(new) == the pre-fold answer"
+#      compare the new answer with itself, and arm (A) refuses a golden that already carries the folded form. The
+#      five files arms B/C/D never read — big/brace/odd/small.pack-task.xml and small.situ.txt, pure byte-identity
+#      anchors for arm (E) — were re-taken at train/m5-1126-4 (2026-11-27) after #786 and #796 moved them on
+#      purpose; the per-file deltas were diffed against the pre-train binary first (see arm (E)).
 #   2. test/lib/pathfold.py — a reader and a writer written from the RULE, sharing no line with the C++. Its reader
 #      unfolds the new answer (arm B/C); its writer must produce the very bytes the binary printed (arm D).
 #   3. bash itself: each folded item is handed to the shell's own brace expansion (arm H) — the rule the legend states
@@ -27,11 +33,18 @@
 #   (A)  the fixtures are the bytes the goldens were captured on, and the goldens hold the rows the arms read (no pf=)
 #   (B)  XML, --affected and --test-gate, compact and --legend=full: unfold(new) == golden outside the legend, and the
 #        legend differs by ONE inserted run that defines pf= (LOSSLESS + DISCLOSED)
-#   (C)  --situ text: unfold(new) == golden but for one inserted heading clause
+#   (C)  --situ text: same line count, and every moved line is its golden line plus ONE insertion the TEXT_CLAUSES
+#        table names (the fold's own clause, which must be there; #796's floor= / floor_tail= on the [3] heading)
 #   (D)  second reference: every pf= is pathfold.py's fold of the golden row, every p= row is one the rule leaves flat,
 #        and the document-level decision is the rule's
 #   (E)  what must not move: the under-the-bar fixture (every verb), --json, and the verbs that share the row seam but
-#        do not fold (--exercises, --pack-task); a row holding a literal '{' keeps p= beside rows that fold
+#        do not fold (--exercises, --pack-task); a row holding a literal '{' keeps p= beside rows that fold.
+#        The bar is byte-identity to a COMMITTED capture, so a deliberate disclosure elsewhere reds it (the same
+#        contract test/printf_parity.manifest carries) and the remedy is the same: re-take the file and review the
+#        diff against the previous binary, byte by byte, before committing it. Done once here, 2026-11-27 on
+#        train/m5-1126-4: #786 put partners_none="no_git" plus its legend clause (and the est_tokens recount the
+#        longer document earns) in all four pack-task answers, #796 put floor=/floor_tail= on small.situ.txt's [3]
+#        heading, and nothing else in the fixture corpus moved at all.
 #   (F)  counts and commands: tests=, shown_tests=, run_first=, every n=, every exit code (--test-gate's 4), and every
 #        file's path and command through the shared reader, in order
 #   (G)  mutation controls, each of which MUST go red
@@ -121,13 +134,36 @@ def arm_B():
             if len( new ) >= len( gold ): no( "(B) %s.%s folded and did not shrink (%d -> %d B)" % ( fx, x, len( gold ), len( new ) ) )
     if n == len( FOLD ) * len( XML ): ok( "(B) %d XML answers: unfold(new) == golden byte for byte outside the legend; %d pf= rows, %d B smaller with the legend term paid" % ( n, rows, saved ) )
 
+# EVERY heading clause a --situ answer is allowed to have gained since the goldens were captured, as
+# ( name, the golden heading it must ride on, a matcher for the WHOLE inserted run ). The comparison is
+# LINE-SCOPED (same line count, same order, each moved line its golden line plus ONE insertion) and an
+# insertion this table does not name is a FAIL that prints the bytes — so the arm stays a kill bar for
+# collateral damage instead of degrading into "the heading got longer, probably fine".
+#   fold:  the clause the fold itself defines, loose on purpose (its wording is the legend's to choose).
+#   floor: #796, 2026-11-26. kCoSupportFloor rides on every [3] heading now, and floor_tail= names the
+#          corroborated 2-commit tail a ONE-seed question also takes — so a one-file diff carries both
+#          and a two-file diff carries only floor=. Matched EXACTLY: a third attribute goes red here.
+TEXT_CLAUSES = ( ( "the fold's own definition", "[2] tests to run",
+                   lambda s: "folded" in s and "{" in s ),
+                 ( "#796's co-change support floor", "[3] co-change",
+                   lambda s: re.fullmatch( r' floor="\d+"(?: floor_tail="corroborated")?', s ) is not None ) )
+
 def lossless_text( new, gold ):
     if " folded): " not in new: return "no '(n folded):' line — the fold did not fire"
     try: un = pathfold.unfold_text( new )
     except ValueError as e: return "the folded list is malformed: %s" % e
-    ins = one_insertion( gold, un )
-    if ins is None: return "unfolded --situ text is not the golden plus one inserted heading clause"
-    if "folded" not in ins or "{" not in ins or "\n" in ins: return "the inserted run is not a one-line heading clause defining the fold: %r" % ins
+    gl, nl = gold.split( "\n" ), un.split( "\n" )
+    if len( gl ) != len( nl ): return "unfolded --situ text has %d lines, the golden %d" % ( len( nl ), len( gl ) )
+    seen = {}
+    for k in range( len( gl ) ):
+        if gl[k] == nl[k]: continue
+        ins = one_insertion( gl[k], nl[k] )
+        if ins is None: return "line %d is not its golden line plus one inserted clause:\n      golden %r\n      new    %r" % ( k + 1, gl[k], nl[k] )
+        name = next( ( nm for nm, anchor, fits in TEXT_CLAUSES if anchor in gl[k] and fits( ins ) ), None )
+        if name is None: return "line %d carries an insertion this gate does not name: %r" % ( k + 1, ins )
+        if name in seen: return "%s was inserted on two lines (%d and %d)" % ( name, seen[ name ], k + 1 )
+        seen[ name ] = k + 1
+    if "the fold's own definition" not in seen: return "unfolded --situ text is not the golden plus one inserted heading clause"
     if testrowpaths.text_rows( new ) != testrowpaths.text_rows( gold ): return "the shared reader names different files or commands"
     return None
 
@@ -137,7 +173,7 @@ def arm_C():
         why = lossless_text( rd( NEW, fx + ".situ.txt" ), rd( GOLD, fx + ".situ.txt" ) )
         if why: no( "(C) %s.situ.txt: %s" % ( fx, why ) )
         else: n += 1
-    if n == len( FOLD ): ok( "(C) %d --situ answers: unfold(new) == golden but for one heading clause; same files and commands in order" % n )
+    if n == len( FOLD ): ok( "(C) %d --situ answers: unfold(new) == golden line for line but for the %d named heading clauses; same files and commands in order" % ( n, len( TEXT_CLAUSES ) ) )
 
 def arm_D():
     n = folded = flat = 0

@@ -34,6 +34,34 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, lane resolve-parallel: RE-DERIVED with UPDATE_GOLDEN=1 after merging origin/main (52663e4b2) with
+#   scripts/merge_main.sh. BOTH PARENTS HAD RE-PINNED THIS HASH INDEPENDENTLY -- ours 0a151a98c9…87783b12 (train
+#   m5-1126-5's landing renumber), main's e640115f3e…ccbd8342 (lane cr-qd3 #750's kQSnapCacheScheme 39 -> 41) -- and the
+#   base had neither, so the MERGED watched text matches neither parent and the pin had to be derived rather than chosen:
+#   406ec22c68…f091e15a6. No extraction-identity change from this lane: kParserVer, kIngestParserVerMirror, kCacheVersion
+#   and kQSnapCacheScheme are all untouched by it. What this lane changed is buildGraph's SHAPE, not its output -- nine
+#   declared phases moved into named functions with byte-identical output over five corpora -- plus one RIPWIRE_STATS
+#   counter ([mem] owned_sites). The watched text moved because the manifest captures function SOURCE TEXT, and a
+#   function that moves out of buildGraph changes that text even when every byte it produces is identical.
+# 2026-11-26, train m5-1126-5 (#769 + #778 on train m5-1126-3): RE-PINNED with UPDATE_GOLDEN=1. The landing renumber:
+#   kParserVer and kIngestParserVerMirror take ONE number above both lanes' placeholders, 344 (#769, Rust turbofish calls,
+#   rich 345) and 348 (#778, ObjC++ std::-qualified calls, rich 349) -> 350, rich file tag 351. kCacheVersion stays 57
+#   (lane asserted-signal) and kQSnapCacheScheme is unchanged: the extraction key moves, and the snapshot blob shape does not.
+#   Hash 0a151a98c9…87783b12.
+# 2026-11-26, lane objcxx-std-qualified (on origin/main f7cfcec7a): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 348 (PLACEHOLDER above drafts #769's 344 and the RESOLVER lane's possible 346, rich 349): an
+#   ObjC++ (.mm) call written `std::X()` carries its std-rooted qualifier (ingest_names.h objcxxStdQualifierBefore). kCacheVersion
+#   55 and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 7cacf91040…caef25.
+# 2026-11-26, lane rust-turbofish-callers (on main 5f4b50415): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 342 -> 344 (PLACEHOLDER, rich 345): a Rust turbofish on a path function or a method is a call
+#   (queries/rust/tags.scm), and a transcriber's `f::<T>(` is read as a call (ingest_names.h readCallPath). kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not. Hash 366b3fa9c3…9030201c.
+# 2026-11-26, lane asserted-signal (stacked on #770, 790ff59b5): RE-PINNED with UPDATE_GOLDEN=1. kCacheVersion and
+#   kIngestCacheVersionMirror 54 -> 57 (the M5's ingest slot): queries/python/tags.scm records the `assert` statement as a call
+#   reference named `assert`, so a v54 .py blob lacks those references. No record shape change; kParserVer 342 and
+#   kQSnapCacheScheme 38 unchanged (the qsnap key carries the producer identity). Hash 159a79d30b…bd8253dc on the lane's
+#   own base. RE-PINNED AGAIN on the merge with origin/main f18bba967 (#756 merged; main had moved kCacheVersion to 55, lane
+#   tangle-rule, pin e4355917b4…b71344719): 57 stays above it, and both histories ride the mirror comment. Hash de4fefdaf4…5339dcdc.
 # 2026-11-26, lane cr-qd3 (#750) rebased onto main f7cfcec7a (#743 TANGLE-RULE took kQSnapCacheScheme 40): RE-PINNED ONCE with
 #   UPDATE_GOLDEN=1 from the rebased build. #750's scheme moves 39 -> 41 (one above main's 40; v39 never shipped). Watched text
 #   is main's tangle-cap snapshot fields plus #750's defectSitesOf scans. kCacheVersion and kParserVer unchanged. Hash

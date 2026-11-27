@@ -1492,7 +1492,7 @@ inline bool cppCandidateScopeIsStd( const Symbol& sym, bool namespaceMember, Nam
 // true whenever the def's FULL enclosing-namespace chain roots at std regardless of how many levels sit
 // between (`std::ranges::contains`, `std::__1::ranges::contains`). The three IMMEDIATE-scope tests are kept
 // as a floor alongside `scopeRootsStd`, never replaced by it: they still catch a def whose enclosing-chain
-// walk cannot run (ObjC++'s stated floor below) the same way they always did. The call side is symmetric:
+// walk cannot run (an ObjC++ def, whose grammar has no namespace_definition) the same way they always did. The call side is symmetric:
 // `namesStd(r.qualifier)` is #134's original IMMEDIATE-qualifier test (`std::move`, `::std::move` and
 // `std::__1::move` arrive as "std", "std" and "__1"), widened by Reference::qualifierRootsStd, which reads
 // the call's ENTIRE written chain (ingest_names.h cppQualifiedChainRootsStd) so `std::ranges::move` — whose
@@ -1516,10 +1516,11 @@ inline bool cppCandidateScopeIsStd( const Symbol& sym, bool namespaceMember, Nam
 //     own TRAPS section): the call's written qualifier is "sr" or empty, neither of which names std at all, so
 //     it never reaches this guard — test/stdqualcheck.sh §8's alias arm and §11's `using namespace` control
 //     pin that it stays on today's ladder, unchanged, not silently refused;
-//   * ObjC++ (Lang::ObjC, .mm): tree-sitter-objc parses `std::move( x )` as an ERROR node spelling `std::` beside
-//     a bare `move( x )` call (measured), and ingest sets no qualifier for Lang::ObjC, so the reference arrives
-//     unqualified and the guard cannot see it (the Phase-5 veto still refuses table names such as move). The
-//     Lang::ObjC arm below is live the day extraction supplies a qualifier;
+//   * ObjC++ (Lang::ObjC, .mm) is CLOSED for a std-rooted chain (lane objcxx-std-qualified): tree-sitter-objc parses
+//     `std::move( x )` as an ERROR node spelling `std::` beside a bare `move( x )` call, and ingest_names.h
+//     objcxxStdQualifierBefore reads the chain back (only when its nearest `::` lies in error recovery), so the
+//     Lang::ObjC arm below is live. A NON-std ObjC++ chain (`vendor::f()`) still arrives unqualified — a floor,
+//     harmless to this guard (std-only by design), pinned by stdqualcheck §16's vendor:: controls;
 //   * Lang::C is unaffected by construction: C has no `::`, and ingest sets a call qualifier for Lang::Cpp only.
 //     CUDA (.cu/.cuh) and Metal (.metal) ARE Lang::Cpp, so they take this guard exactly as .cpp does.
 //   * LANGUAGE NEUTRALITY (checked, not fixed here): Rust's own qualified-call guard
@@ -10997,6 +10998,661 @@ inline std::string_view canonicalCallQualifier( const Reference& r, const CallSc
     return inCallerBody || !callerScopesMayDeclare( r, named, at ) ? named.scope : std::string_view( r.qualifier );
 }
 
+// ── buildGraph's setup phases, extracted ───────────────────────────────────────────────────────────────────────────
+// buildGraph was one 4,043-line function reached by 79 symbols with NO indexed test in its production radius
+// (--impact=buildGraph: radius_tested=0, one test). It is being cut along the phase boundaries it already declared
+// for itself with PROFILE_SCOPE_DESCRIBE, one phase at a time, each cut proved to move ZERO bytes of output
+// (test/lib/extractparity.sh, over a C++, a mixed-language and two Rust corpora). The phase names and their
+// PROFILE_SCOPE strings are unchanged, so a profile taken before and after a cut names the same phases.
+// These are leaves: each reads the IngestResult and tables already final, and writes one named output. Nothing here
+// closes over the resolve loop's state (144 top-level declarations, 33 of them lambdas), which is why they go first.
+
+// buildGraph/1a. S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once so the
+// resolution locality tie-break and serialize's `id=` attribute share one definition. Deterministic.
+inline void fillCanonIdsAndLocalityKeys( Graph& g, const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
+    g.canonId.resize( ing.symbols.size() );
+    g.localityKey.resize( ing.symbols.size() );
+    for( const Symbol& s : ing.symbols )
+    {
+        g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        if( s.scope.empty() )   // scoped: localityKeyOf is canonicalId verbatim, so Graph::localityKeyAt reads canonId (G1b)
+        {
+            g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );
+        }
+    }
+}
+
+// buildGraph/1b. A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it
+// as the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The vector
+// stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
+inline void fillJniBindLabels( Graph& g, const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1b: JNI name decode (per symbol)" );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
+        {
+            continue;
+        }
+        std::string readable = decodeJniName( s.name );
+        if( readable.empty() )
+        {
+            continue;
+        }
+        g.bindLabel.add( s.id, std::move( readable ) );   // G1d: sparse, one row per JNI export
+    }
+}
+
+// buildGraph/1c. file → directory id (path up to the last '/'). The interning table escapes nowhere — only the per-file
+// ids do — so it lives here rather than in buildGraph's frame.
+inline std::vector<std::uint32_t> buildFileDirIndex( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1c: fileDir (dir interning)" );
+    HashMap<std::string, std::uint32_t> dirIds;
+    std::vector<std::uint32_t>          fileDir( ing.files.size(), 0 );
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        std::string_view p     = ing.files[f];
+        const std::size_t sl   = p.rfind( '/' );
+        std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
+        fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
+    }
+    return fileDir;
+}
+
+// buildGraph/1d. name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
+// inline (no per-name malloc) and size() is branch-free — the measured-best value type for this write-once /
+// read-hot (the resolve loop) shape (see bench/bench_svector3.cpp). Iterates in insertion order exactly like
+// std::vector, so the resolved graph — and the output — is unchanged.
+inline HashMap<std::string, rw::SmallVec<NodeId, 2>> buildByNameTable( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
+    byName.reserve( ing.symbols.size() );   // ≤ one entry per symbol → skip the rehash cascade
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
+        {
+            continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
+                        // a def, but admits NO call edge — the byName table feeds both call binding and the
+                        // common-name damping, so an untyped `response.code` must not become a column's
+                        // caller, and 200 `name` columns must not damp a model's real `def name`.
+                        // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
+                        // later behind an evidence rule (receiver proven to be the owning model).
+        }
+        if( notNamed( s ) )
+        {
+            continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
+        }
+        byName[ s.name ].push_back( s.id );
+    }
+    return byName;
+}
+
+// buildGraph/1f. canonical scope::name → definition ids (E#4): lets a qualified call `A::b()` resolve to the `b` whose
+// enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph ambiguity. Definitions
+// only (body present); the obj.method()/unqualified halves stay bare-name (and keep their honest `amb`). C++ only
+// (scope is populated for Lang::Cpp). The reused key buffer escapes nowhere, so it lives here too.
+inline void buildCanonicalScopeTables( const IngestResult& ing, HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                       HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonFamilyByName )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1f: canonByName (scope::name -> def ids)" );
+    canonByName.reserve( ing.symbols.size() );
+    std::string canonKey;
+    for( const Symbol& s : ing.symbols )
+    {
+        // a definition under scope::name; a C++ specialization's definition again under its template's family key, and
+        // any symbol a specialization scopes (declarations too) as that specialization's existence marker
+        indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
+    }
+}
+
+// buildGraph/1e. The decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its
+// per-root and per-family keys, and why a Kotlin body never evicts a Java declaration (or the reverse). Unlike the
+// phases above this one is in/out: it REWRITES each name's id list in `byName`, fills `rule3AltBody`, and accumulates
+// the prototypes it evicted into `freeDeclReach`. It returns the one fact the caller reads later (`rule3AltAny`,
+// read once at the Rule 3 preprocessor-alternative test) instead of writing it through a fourth reference. The
+// `beforeCollapse` scratch escapes nowhere, so it lives here.
+inline bool collapseDeclarationsIntoDefinitions( const IngestResult& ing, bool multiRoot,
+                                                 HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                                                 FreeDeclReach& freeDeclReach, std::vector<bool>& rule3AltBody )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
+    bool                rule3AltAny = false;
+    std::vector<NodeId> beforeCollapse;   // reused: a name's list as it stood, read only when the collapse shortened it
+    for( auto& [ name, ids ] : byName )
+    {
+        rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
+        freeDeclReach.collapse( ing, multiRoot, name, ids, beforeCollapse );   // collapseDeclarationsOfName, the evicted prototypes kept
+    }
+    return rule3AltAny;
+}
+
+// buildGraph/1h. P2-D Rule 2 binding table: per-scope `(fromSymbol, var) → type` from ingest's local var→type bindings,
+// for receiver-VARIABLE narrowing (`Foo x; x.m()` → `Foo::m`). CONSERVATIVE — a var bound to ≥2 DISTINCT types in one
+// scope (two declarations, or a constructor assignment of another class) is TOMBSTONED (value set to ""), so it never
+// narrows; only an unambiguous single-type binding is usable. A binding's `type` is matched as a SCOPE in canonByName by
+// Rule 2, so a DECLARATION's type that names no class (`auto x = makeT()`) never produces a `type::method` hit — but it
+// still conflicts with a sibling declaration of the name, which is the point: that declaration's type is simply
+// unrecorded (test/narrowcheck.sh arm 48). An ASSIGNMENT's such type is no fact at all and is skipped (resolve.h
+// assignmentNamesNoClass, arms 44-46).
+// Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
+// THE EMPTY STRING IS A LIVE VALUE HERE, not an absence: absent, present-but-empty (the ambiguous tombstone) and
+// present-with-a-type are three distinct states, and the resolve loop's call-result typing later inserts into this same
+// table. The reused key buffer escapes nowhere, so it lives here.
+inline HashMap<std::string, FlatRecvType> buildVarTypeBindingTable( const IngestResult& ing, const HashMap<std::string, char>& classNames )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: varType binding table" );
+    HashMap<std::string, FlatRecvType> varType;
+    varType.reserve( BindKindCounts::of( ing ).inDefOf( LocalBindKind::Type ) );   // G1a: the Type records in a definition, not every binding
+    std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind != LocalBindKind::Type )
+        {
+            continue; // L3 var→function records live in varFn/varFnFile below — never in Rule 2's table
+        }
+        if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() || assignmentNamesNoClass( b, classNames ) )
+        {
+            continue; // file-scope/empty → unusable; an assignment's callee that no class is called → no type fact
+        }
+        buildShadowKey( key, b.fromSymbol, b.var );   // "<fromSymbol>#var"
+        recordFlatRecvType( varType, key, b );         // a conflicting or `std::` type tombstones (resolve.h)
+    }
+    return varType;
+}
+
+// The per-edge accumulator the resolve loop folds each call site into, and buildGraph/4 flattens. At file scope (it was
+// local to buildGraph) so the extracted flatten phase can name it; `marks` carries resolve.h EdgeMark (EDGE-FLAGS).
+// confSum is a FLOAT SUM IN SITE ORDER: non-associative, so any future partition of the resolve loop must keep all of
+// one edge's sites in one partition, or the low bits move and the ranking with them (see src/pagerank.cpp's note).
+struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };
+
+// One flattened call-graph edge, as buildGraph/4 sorts and stores it. At file scope (it was local to the flatten phase)
+// so the three steps below can each take the edge list; `marks` carries resolve.h EdgeMark (EDGE-FLAGS).
+struct GraphEdge { NodeId from, to; float w; std::uint8_t marks; };
+
+// buildGraph/4, step 1. Flatten the accumulator into one edge list: weight each edge confSum/nref * sqrt(nref), CAP it
+// at 8, then radix-sort by (from, to) so the order is the edge keys' and not the hash map's. `acc` is CONSUMED (G1c):
+// released as soon as it has been read, so the sort and the CSR arrays stack on the edge list alone.
+inline std::vector<GraphEdge> flattenEdgeAccumulator( HashMap<std::uint64_t, EdgeAcc>& acc )
+{
+    std::vector<GraphEdge> edges;
+    edges.reserve( acc.size() );
+    for( const auto& [ k, e ] : acc )
+    {
+        float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
+        if( w > 8.f )
+        {
+            w = 8.f;
+        }
+        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
+    }
+    releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
+    std::vector<GraphEdge> edgeScratch;
+    sortutil::radixSortByFromTo( edges, edgeScratch );
+    return edges;
+}
+
+// buildGraph/4, step 2. The out-edge CSR, the weighted out-degree, and the three OPTIONAL per-edge columns --
+// provenance, name-only and anchor-miss -- each allocated only when some edge needs it, so a cleanly resolving corpus
+// carries none of them and serialize emits no prov= at all. `scip` and `anyImplSite` are facts the caller owns, passed
+// in rather than re-derived.
+inline void buildOutEdgeCsr( Graph& g, const IngestResult& ing, const std::vector<GraphEdge>& edges,
+                             const ScipOverlay* scip, bool anyImplSite )
+{
+    const std::size_t N = ing.symbols.size();
+
+    // out-edges (by source) + weighted out-degree
+    g.outOff.assign( N + 1, 0 );
+    for( const GraphEdge& e : edges )
+    {
+        ++g.outOff[e.from + 1];
+    }
+    for( std::size_t i = 0; i < N; ++i )
+    {
+        g.outOff[i + 1] += g.outOff[i];
+    }
+    g.outTargets.resize( edges.size() );
+    g.outVals.resize( edges.size() );
+    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR an ES
+    // named-import binding pinned one OR the resolver had to split at least one call — a corpus that resolves
+    // cleanly keeps it EMPTY so serialize emits no prov= at all (zero token cost, byte-identical to before;
+    // test/golden.xml is the standing proof).
+    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
+    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split";
+    //   4 = an ES named-import binding named the module and the export → prov="import".
+    //   5 = a receiver's QUALIFIED written type chose this edge by its last name alone → prov="final-segment".
+    //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
+    // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
+    std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
+    for( const GraphEdge& e : edges )
+    {
+        anyMarks |= e.marks;
+    }
+    if( memstats::enabled() )   // M0 + EDGE-FLAGS: how many flattened edges carry each mark (test/edgemarkcheck.sh counts them)
+    {
+        std::array<std::size_t, 8> perBit{};
+        std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
+        for( const GraphEdge& e : edges )
+        {
+            for( std::size_t b = 0; b < perBit.size(); ++b )
+            {
+                perBit[ b ] += ( e.marks >> b ) & 1u;
+            }
+            nameOnlyRows += ( e.marks & ( kEdgeMarkProven | kEdgeMarkLink ) ) == 0 ? 1u : 0u;
+        }
+        rw::emitTo( stderr, "[mem] edge marks edges={} split={} binding={} import={} final-segment={} impl-only={} proven={} link={} anchor-miss={} name-only={}\n",
+                    edges.size(), perBit[ 0 ], perBit[ 1 ], perBit[ 2 ], perBit[ 3 ], perBit[ 4 ], perBit[ 5 ], perBit[ 6 ], perBit[ 7 ], nameOnlyRows );
+    }
+    if( scip || ( anyMarks & kEdgeMarksProv ) != 0 || anyImplSite )
+    {
+        g.outProv.assign( edges.size(), 0u );
+    }
+    const auto anchorMissed = []( const GraphEdge& e ) noexcept
+    {
+        return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
+    };
+    if( std::any_of( edges.begin(), edges.end(), anchorMissed ) )
+    {
+        g.outAnchorMiss.assign( edges.size(), 0u );
+    }
+    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
+    // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
+    const auto hedged = []( const GraphEdge& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
+    const auto marked = [ & ]( const GraphEdge& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
+    if( std::any_of( edges.begin(), edges.end(), marked ) )
+    {
+        g.outNameOnly.assign( edges.size(), 0u );
+    }
+    {
+        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
+        for( const GraphEdge& e : edges )
+        {
+            const std::uint32_t pos = cur[ e.from ]++;
+            g.outTargets[ pos ] = e.to;
+            g.outVals[ pos ]    = e.w;
+            g.wOutDeg[ e.from ] += e.w;
+            // one value per edge, by resolve.h edgeProvenance's fixed precedence: scip PINS an edge (precise), binding and
+            // import NAME the mechanism that resolved it, split says the resolver could not choose, final-segment says it
+            // chose by a qualified type's last name. A binding edge that is also a split keeps the more specific label;
+            // the symbol's amb= counts it either way, so nothing is lost by the ordering.
+            if( !g.outProv.empty() )
+            {
+                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), e.marks );
+            }
+            if( !g.outNameOnly.empty() )
+            {
+                ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
+                std::uint8_t kind = 0;
+                if( ( e.marks & kEdgeMarkLink ) != 0 )
+                {
+                    kind = anchorMissed( e ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
+                }
+                else if( hedged( e ) )
+                {
+                    kind = kEdgeName;
+                }
+                g.outNameOnly[ pos ] = kind;
+            }
+            if( !g.outAnchorMiss.empty() )
+            {
+                g.outAnchorMiss[ pos ] = anchorMissed( e ) ? 1u : 0u;
+            }
+        }
+    }
+
+    rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
+
+}
+
+// buildGraph/4, step 3. The in-edge CSR, built by counting in-degree and filling each target row with its sources. The
+// structural checks stay here, where the arrays they describe have just been written.
+inline void buildInEdgeCsr( Graph& g, const IngestResult& ing, const std::vector<GraphEdge>& edges )
+{
+    const std::size_t N = ing.symbols.size();
+    // in-edge CSR (row = target) for PageRank
+    std::vector<std::uint32_t> inDeg( N, 0 );
+    for( const GraphEdge& e : edges )
+    {
+        ++inDeg[e.to];
+    }
+    g.inEdges = sparseCsr<float>( N, N, edges.size() );
+    {
+        auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
+        ro[0] = 0;
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            ro[i + 1] = ro[i] + inDeg[i];
+        }
+        std::vector<std::uint32_t> cur( ro, ro + N );
+        for( const GraphEdge& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
+    }
+    DASSERT( verifyCsr( g.inEdges, N ) );   // structural, so CHECKED in debug and not promised in release — see Diagnostics.h
+    DASSERT( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
+    // One site record per declined call (recordDecline): at most one per reference, so the uint32 record and reference
+    // indices cannot wrap, and the four columns stay parallel.
+    ENSURES( g.declinedSiteCaller.size() <= ing.references.size() && g.declinedSiteList.size() == g.declinedSiteCaller.size()
+             && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
+}
+
+// buildGraph/4. Flatten the edge accumulator, cap and sort by (from, to) — deterministic regardless of map order —
+// then build the out-edge CSR, the weighted out-degree, the optional per-edge provenance / name-only / anchor-miss
+// columns, and the in-edge CSR. `acc` is CONSUMED: it is released as soon as it has been flattened (G1c), so the sort
+// and the CSR arrays stack on the edge list alone. The two provenance facts the caller owns are passed in rather than
+// re-derived — whether a SCIP overlay was supplied, and whether any site committed a one-implementor dispatch edge.
+// This is the phase test/verify_csr.cpp reaches, which is the one indexed test in buildGraph's production radius.
+inline void flattenEdgesIntoCsr( Graph& g, const IngestResult& ing, HashMap<std::uint64_t, EdgeAcc>& acc,
+                                 const ScipOverlay* scip, bool anyImplSite )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
+    const std::vector<GraphEdge> edges = flattenEdgeAccumulator( acc );
+    buildOutEdgeCsr( g, ing, edges, scip, anyImplSite );
+    buildInEdgeCsr( g, ing, edges );
+}
+
+// buildGraph/6. doc<->code edges: isDocLink refs (a markdown `backtick` naming a code symbol) resolved to real
+// DEFINITIONS (body present), any file -- 'what docs discuss this symbol'. Stored OUT of the call graph so a doc
+// mentioning a symbol never inflates its PageRank or its blast radius. The caller allocates and sorts the rows.
+template<typename SameRoot>
+inline void fillDocMentions( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                            SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/6: doc mentions" );
+    for( const Reference& r : ing.references )
+    {
+        if( !r.isDocLink || r.fromSymbol == kNoNode )
+        {
+            continue;
+        }
+        const auto it = byName.find( r.calleeName );
+        if( it == byName.end() )
+        {
+            continue;
+        }
+        for( NodeId def : it->second )
+        {
+            if( ing.symbols[def].endByte <= ing.symbols[def].sigEndByte )
+            {
+                continue; // a real def, not a decl
+            }
+            if( def == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( def, r.fileId ) )
+            {
+                continue; // §3: a doc backtick-name never crosses roots
+            }
+            g.mentions[ def ].push_back( r.fromSymbol );
+        }
+    }
+}
+
+// buildGraph/7. S5-E HAS-A composition edges: isCompose refs (owner class -> member type name) resolved to
+// class/struct symbols by name, any file. Stored OUTSIDE the call graph, so PageRank, ranks and the default map are
+// UNCHANGED by them. The caller sorts and dedups what this fills.
+template<typename SameRoot>
+inline void fillComposeEdges( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                             SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/7: HAS-A compose edges" );
+    for( const Reference& r : ing.references )
+    {
+        if( !r.isCompose || r.fromSymbol == kNoNode || fieldTypeWrittenInStd( r ) || isTypeAliasRecord( r ) || r.viaArrow )
+        {
+            continue;   // a member type written in namespace std names no in-repo class, whatever its final segment; an alias is no member; a smart pointer's pointee is Rule 2b's alone
+        }
+        const auto it = byName.find( r.calleeName );
+        if( it == byName.end() )
+        {
+            continue;
+        }
+        for( NodeId typeId : it->second )
+        {
+            const SymKind k = ing.symbols[ typeId ].kind;
+            if( k != SymKind::Class && !isStructOrNamedType( k ) )
+            {
+                continue;
+            }
+            if( typeId == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( typeId, r.fileId ) )
+            {
+                continue; // §3: a HAS-A type NAME never crosses roots
+            }
+            // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
+            // WITHIN a compatible language (or the C/ObjC↔C++ bridge). Compose CAPTURE is C++-only
+            // (ingest.cpp captureFields), but without this gate the RESOLUTION was language-blind: a
+            // C++ member `Foo m_foo;` bound its HAS-A edge to a Python/TS `class Foo` in the same
+            // repo — and the cross-language candidate's lower id even defeated the adjacency dedup
+            // below, emitting the same field twice. Gate: test/composelangcheck.sh.
+            if( !langCompatible( ing.symbols[ typeId ].lang, r.lang ) )
+            {
+                continue;
+            }
+            ComposeEdge ce;
+            ce.ownerSym  = r.fromSymbol;
+            ce.typeSym   = typeId;
+            ce.fieldName = r.fieldName();
+            ce.typeName  = r.calleeName;
+            ce.ownerName = ing.symbols[ r.fromSymbol ].name;
+            ce.rel       = r.composeRel();
+            // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
+            // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
+            // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
+            // and every copy reached <compose> byte-identically. byName is id-ascending, so this keeps
+            // the lowest-id candidate: deterministic, and byte-invisible. Gate: composelangcheck §4/§5.
+            g.composeEdges.push_back( std::move( ce ) );  break;
+        }
+    }
+}
+
+// buildGraph/8. B6.3 HTTP-route USE -> DEF edges: resolve each route DEF's handler name to a symbol, then join the
+// USEs to it by method and path. A USE matching zero DEFs synthesizes NO edge -- never a guess. Outside the call
+// graph, so PageRank and the default map are unchanged by it.
+template<typename SameRoot>
+inline void fillRouteEdges( Graph& g, const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
+                           SameRoot sameRoot )
+{
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
+        std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
+        for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
+        {
+            const RouteDef& rd = ing.routeDefs[d];
+            if( rd.handlerName.empty() )
+            {
+                continue; // inline/anonymous handler → stays unresolved
+            }
+            const auto it = byName.find( rd.handlerName );
+            if( it == byName.end() )
+            {
+                continue;
+            }
+            for( NodeId cand : it->second )
+            {
+                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
+                { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
+            }
+        }
+
+        std::vector<NodeId> distinctScratch;   // reused per USE — the "≥2 distinct handlers ⇒ ambiguous" set
+        for( const RouteUse& ru : ing.routeUses )
+        {
+            distinctScratch.clear();
+            NodeId      matchedHandler = kNoNode;
+            HttpMethod  matchedMethod  = HttpMethod::Unknown;
+            std::string matchedPath;
+            for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
+            {
+                const RouteDef& rd = ing.routeDefs[d];
+                if( defHandler[d] == kNoNode )
+                {
+                    continue; // an unresolved match adds no distinctness
+                }
+                if( !routematch::methodsCompatible( rd.method, ru.method ) )
+                {
+                    continue;
+                }
+                if( !routematch::pathsMatch( rd.path, ru.path ) )
+                {
+                    continue;
+                }
+                if( std::find( distinctScratch.begin(), distinctScratch.end(), defHandler[d] ) != distinctScratch.end() )
+                {
+                    continue;                                              // same handler already counted (dup registration)
+                }
+                distinctScratch.push_back( defHandler[d] );
+                matchedHandler = defHandler[d];
+                matchedMethod  = rd.method;
+                matchedPath    = rd.path;
+            }
+            if( distinctScratch.size() != 1 )
+            {
+                continue; // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
+            }
+            RouteEdge re;
+            re.fromSym  = ru.fromSymbol;
+            re.toSym    = matchedHandler;
+            re.method   = matchedMethod != HttpMethod::Unknown ? matchedMethod : ru.method;
+            re.path     = std::move( matchedPath );
+            re.fromName = ru.fromSymbol != kNoNode ? ing.symbols[ ru.fromSymbol ].name : std::string();
+            re.toName   = ing.symbols[ matchedHandler ].name;
+            g.routeEdges.push_back( std::move( re ) );
+        }
+        std::sort( g.routeEdges.begin(), g.routeEdges.end(),
+                   []( const RouteEdge& a, const RouteEdge& b ) noexcept
+                   {
+                       if( a.fromSym != b.fromSym )
+                       {
+                           return a.fromSym < b.fromSym;
+                       }
+                       if( a.toSym != b.toSym )
+                       {
+                           return a.toSym < b.toSym;
+                       }
+                       return a.path < b.path;
+                   } );
+        g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
+}
+
+// buildGraph/2h. CHA-lite: the inheritance NAME graph, derived-name -> base-names and back, plus the subset whose base
+// clause the deriving class only DECLARED. Names, not ids, deliberately: a base clause is text until the implementor
+// pass binds it, and resolve.h's guarded base walk reads these tables as the graph its cone questions walk.
+inline void buildChaNameGraph( const IngestResult& ing, const RubyBaseScope& rubyBases, HashMap<std::string, std::vector<std::string>>& chaUp,
+                               HashMap<std::string, std::vector<std::string>>& chaDown, HashMap<std::string, std::vector<std::string>>& chaUpDeclared )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
+        for( const Reference& ir : ing.references )
+        {
+            if( !ir.isInherit )
+            {
+                continue;
+            }
+            if( const std::string* scoped = rubyBases.resolvedBase( std::size_t( &ir - ing.references.data() ) ); scoped && scoped->empty() )
+            {
+                continue;   // a Ruby base the tree never opens: nothing in-tree to walk to
+            }
+            if( const std::size_t at = std::size_t( &ir - ing.references.data() ); at < rubyBases.mixinRefs.size() && rubyBases.mixinRefs[ at ] != 0 )
+            {
+                continue;   // a Ruby mixin: only the Ruby overlay (buildRubyCha) carries it
+            }
+            std::string_view derivedName;
+            if( !ir.qualifier.empty() )
+            { // Rust impl → derived type name in qualifier
+                derivedName = ir.qualifier;
+            }
+            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
+                                                   || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
+            {
+                derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
+            }
+            if( derivedName.empty() || ir.calleeName.empty() )
+            {
+                continue;
+            }
+            chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
+            chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
+            std::vector<std::string>& declared = chaUpDeclared[ std::string( derivedName ) ];
+            if( std::find( declared.begin(), declared.end(), ir.calleeName ) == declared.end() )
+            {
+                declared.push_back( ir.calleeName );   // source order (ing.references is in (file, byte) order)
+            }
+        }
+        addTypeAliasBases( ing, chaUp );   // a typedef / using alias continues at its target class; dedup below is order-independent
+        for( auto& [ k, v ] : chaUp )   { sortutil::sortUnique( v ); }
+        for( auto& [ k, v ] : chaDown ) { sortutil::sortUnique( v ); }
+}
+
+// buildGraph/2i. The FFI binding alias tables: an extern-"C" symbol name to the C/C++ definitions that carry it, and
+// each ctypes CDLL handle variable by "<fileId>#<var>". THE GUARD IS INSIDE, where the phase is: a corpus with no
+// binding aliases does no work and enters no profile scope, exactly as before.
+inline void buildFfiAliasTables( const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                 HashMap<std::string, rw::SmallVec<NodeId, 2>>& externCAlias, HashMap<std::string, rw::SmallVec<NodeId, 2>>& pybindAlias, HashMap<std::string, char>& ctypesHandle )
+{
+    if( ing.bindingAliases.empty() )
+    {
+        return;
+    }
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: FFI binding alias tables" );
+        std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
+        std::vector<NodeId> tgt;
+        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
+        {
+            for( NodeId c : srcIds )
+            {
+                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC )
+                {
+                    tgt.push_back( c );
+                }
+            }
+        };
+        for( const BindingAlias& ba : ing.bindingAliases )
+        {
+            if( ba.kind == BindKind::CtypesHandle )
+            {
+                sk.clear();  Narrower::appendUint( sk, ba.fileId );  sk.push_back( '#' );  sk.append( ba.aliasName );
+                ctypesHandle[ sk ] = 1;
+                continue;
+            }
+            tgt.clear();
+            if( !ba.targetScope.empty() )                        // prefer the scope::name canonical target
+            {
+                sk.clear();  sk.append( ba.targetScope ).append( "::" ).append( ba.targetName );
+                const auto cit = canonByName.find( sk );
+                if( cit != canonByName.end() )
+                {
+                    pushCFamily( cit->second );
+                }
+            }
+            if( tgt.empty() )                                    // else the bare-name target
+            {
+                const auto bit = byName.find( ba.targetName );
+                if( bit != byName.end() )
+                {
+                    pushCFamily( bit->second );
+                }
+            }
+            if( tgt.empty() )
+            {
+                continue; // target not an in-repo C/C++ def → no alias edge
+            }
+            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
+                                                                            : externCAlias[ ba.aliasName ];
+            slot.insert( slot.end(), tgt.begin(), tgt.end() );
+        }
+        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
+        {
+            for( auto& [ k, v ] : m ) { sortutil::sortUnique( v ); }
+        };
+        dedup( pybindAlias );
+        dedup( externCAlias );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -11014,41 +11670,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // exactly the two-derivations-of-one-number defect M15 fixed for the gauge pair.
     for( const UnindexedExt& ue : ing.crawlSkips.unindexedExts ) { g.unindexedFiles += ue.files; }
 
-    // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
-    // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
-    g.canonId.resize( N );
-    g.localityKey.resize( N );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
-            if( s.scope.empty() )   // scoped: localityKeyOf is canonicalId verbatim, so Graph::localityKeyAt reads canonId (G1b)
-            {
-                g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );
-            }
-        }
-    }
-
-    // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
-    // the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The
-    // vector stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1b: JNI name decode (per symbol)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
-            {
-                continue;
-            }
-            std::string readable = decodeJniName( s.name );
-            if( readable.empty() )
-            {
-                continue;
-            }
-            g.bindLabel.add( s.id, std::move( readable ) );   // G1d: sparse, one row per JNI export
-        }
-    }
+    fillCanonIdsAndLocalityKeys( g, ing );   // buildGraph/1a
+    fillJniBindLabels( g, ing );             // buildGraph/1b
 
     // ── Multi-root workspace: name-based resolution NEVER crosses roots. Every
     // name-tier candidate below (qualified canonical, Rule 1/2, the name-based-fallback byName fill, inheritance, doc
@@ -11062,64 +11685,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         return !multiRoot || ing.fileRoot[ ing.symbols[ candSym ].fileId ] == ing.fileRoot[ refFileId ];
     };
 
-    // file → directory id (path up to the last '/')
-    HashMap<std::string, std::uint32_t> dirIds;
-    std::vector<std::uint32_t>          fileDir( ing.files.size(), 0 );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1c: fileDir (dir interning)" );
-        for( std::size_t f = 0; f < ing.files.size(); ++f )
-        {
-            std::string_view p     = ing.files[f];
-            const std::size_t sl   = p.rfind( '/' );
-            std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
-            fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
-        }
-    }
+    const std::vector<std::uint32_t> fileDir = buildFileDirIndex( ing );   // buildGraph/1c
 
-    // name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
-    // inline (no per-name malloc) and size() is branch-free — the measured-best value type for this
-    // write-once (here) / read-hot (resolve below) shape (see bench/bench_svector3.cpp). Iterates in
-    // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
-    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
-    byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
-            {
-                continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
-                            // a def, but admits NO call edge — the byName table feeds both call binding and the
-                            // common-name damping, so an untyped `response.code` must not become a column's
-                            // caller, and 200 `name` columns must not damp a model's real `def name`.
-                            // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
-                            // later behind an evidence rule (receiver proven to be the owning model).
-            }
-            if( notNamed( s ) )
-            {
-                continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
-            }
-            byName[ s.name ].push_back( s.id );
-        }
-    }
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName = buildByNameTable( ing );   // buildGraph/1d
 
     // B2.2 minimum arity: read every declaration's minimum BEFORE the collapse below folds declarations away.
     const std::vector<std::uint16_t> paramsMinOf = paramsMinAcrossDeclarations( ing, byName );
 
-    FreeDeclReach     freeDeclReach;              // CPP-FREE-VS-MEMBER: the prototypes the collapse below evicts, for the bare-call declaration rule
+    FreeDeclReach     freeDeclReach;              // CPP-FREE-VS-MEMBER: the prototypes the collapse evicts, for the bare-call declaration rule
     std::vector<bool> rule3AltBody( N, false );   // EXTQUAL-FIX1: a C-family function body beside its own prototype in one file (markPreprocessorAlternatives)
-    bool              rule3AltAny = false;
-    // decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its per-root and per-family
-    // keys, and why a Kotlin body never evicts a Java declaration (or the reverse).
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
-        std::vector<NodeId> beforeCollapse;   // reused: a name's list as it stood, read only when the collapse shortened it
-        for( auto& [ name, ids ] : byName )
-        {
-            rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
-            freeDeclReach.collapse( ing, multiRoot, name, ids, beforeCollapse );   // collapseDeclarationsOfName, the evicted prototypes kept
-        }
-    }
+    const bool        rule3AltAny = collapseDeclarationsIntoDefinitions( ing, multiRoot, byName, freeDeclReach, rule3AltBody );   // buildGraph/1e
 
     // canonical scope::name → definition ids (E#4): lets a qualified call `A::b()` resolve to the `b` whose
     // enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph
@@ -11127,17 +11702,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // keep their honest `amb`). C++ only (scope is populated for Lang::Cpp).
     HashMap<std::string, rw::SmallVec<NodeId, 2>> canonByName;
     HashMap<std::string, rw::SmallVec<NodeId, 2>> canonFamilyByName;   // C++ specializations under their template's `T::name`, plus existence markers (resolve.h)
-    canonByName.reserve( N );
-    std::string canonKey;
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1f: canonByName (scope::name -> def ids)" );
-        for( const Symbol& s : ing.symbols )
-        {
-            // a definition under scope::name; a C++ specialization's definition again under its template's family key, and
-            // any symbol a specialization scopes (declarations too) as that specialization's existence marker
-            indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
-        }
-    }
+    buildCanonicalScopeTables( ing, canonByName, canonFamilyByName );   // buildGraph/1f
 
     // Rule 2c class-name set (docs/EVALS.md "Phase 4b"): every Class/Struct/Interface definition NAME in the corpus, so
     // `Cls.m()` can read its receiver token as the type it names (Narrower::rule2cClassNameRecv) — and the assignment
@@ -11158,25 +11723,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // declaration's type is simply unrecorded (test/narrowcheck.sh arm 48). An ASSIGNMENT's such type is no fact at all
     // and is skipped (resolve.h assignmentNamesNoClass, arms 44-46).
     // Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
-    HashMap<std::string, FlatRecvType> varType;
-    varType.reserve( BindKindCounts::of( ing ).inDefOf( LocalBindKind::Type ) );   // G1a: the Type records in a definition, not every binding
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: varType binding table" );
-        std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
-        for( const Binding& b : ing.bindings )
-        {
-            if( b.kind != LocalBindKind::Type )
-            {
-                continue; // L3 var→function records live in varFn/varFnFile below — never in Rule 2's table
-            }
-            if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() || assignmentNamesNoClass( b, classNames ) )
-            {
-                continue; // file-scope/empty → unusable; an assignment's callee that no class is called → no type fact
-            }
-            buildShadowKey( key, b.fromSymbol, b.var );   // "<fromSymbol>#var"
-            recordFlatRecvType( varType, key, b );         // a conflicting or `std::` type tombstones (resolve.h)
-        }
-    }
+    // NOT const: the resolve loop's call-result typing (typeRule2CallResult) inserts into this table as it goes.
+    HashMap<std::string, FlatRecvType> varType = buildVarTypeBindingTable( ing, classNames );   // buildGraph/1h
 
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
@@ -11242,62 +11790,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, rw::SmallVec<NodeId, 2>> pybindAlias;    // Python-visible name → C/C++ def ids
     HashMap<std::string, rw::SmallVec<NodeId, 2>> externCAlias;   // extern-C symbol name  → C/C++ def ids
     HashMap<std::string, char>                    ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
-    if( !ing.bindingAliases.empty() )
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: FFI binding alias tables" );
-        std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
-        std::vector<NodeId> tgt;
-        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
-        {
-            for( NodeId c : srcIds )
-            {
-                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC )
-                {
-                    tgt.push_back( c );
-                }
-            }
-        };
-        for( const BindingAlias& ba : ing.bindingAliases )
-        {
-            if( ba.kind == BindKind::CtypesHandle )
-            {
-                sk.clear();  Narrower::appendUint( sk, ba.fileId );  sk.push_back( '#' );  sk.append( ba.aliasName );
-                ctypesHandle[ sk ] = 1;
-                continue;
-            }
-            tgt.clear();
-            if( !ba.targetScope.empty() )                        // prefer the scope::name canonical target
-            {
-                sk.clear();  sk.append( ba.targetScope ).append( "::" ).append( ba.targetName );
-                const auto cit = canonByName.find( sk );
-                if( cit != canonByName.end() )
-                {
-                    pushCFamily( cit->second );
-                }
-            }
-            if( tgt.empty() )                                    // else the bare-name target
-            {
-                const auto bit = byName.find( ba.targetName );
-                if( bit != byName.end() )
-                {
-                    pushCFamily( bit->second );
-                }
-            }
-            if( tgt.empty() )
-            {
-                continue; // target not an in-repo C/C++ def → no alias edge
-            }
-            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
-                                                                            : externCAlias[ ba.aliasName ];
-            slot.insert( slot.end(), tgt.begin(), tgt.end() );
-        }
-        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
-        {
-            for( auto& [ k, v ] : m ) { sortutil::sortUnique( v ); }
-        };
-        dedup( pybindAlias );
-        dedup( externCAlias );
-    }
+    buildFfiAliasTables( ing, byName, canonByName, externCAlias, pybindAlias, ctypesHandle );   // buildGraph/2i
     const bool ffiActive = !pybindAlias.empty() || !externCAlias.empty();
 
     // P2-D one-hop type narrowing over the canonical scope::name map above (no new pass): Rule 1 pins `this->m()` / `self.m()` to the caller's enclosing class; Rule 2
@@ -11357,7 +11850,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
-    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };   // marks: resolve.h EdgeMark (EDGE-FLAGS)
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( std::min<std::size_t>( N, ing.references.size() ) );   // past the 4-bucket / 0.8-load rehash cascade. G1a: one edge per SYMBOL,
                         // not per reference — the table ends at 1.5-8 edges a symbol, and reserve( references ) zero-filled 16-32 MiB of buckets on
@@ -11409,48 +11901,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // cannot reach an unrelated in-tree `Base` — and by the implementor pass below. Empty on a Ruby-free corpus.
     const RubyBaseScope rubyBases = buildRubyBaseScope( ing );
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
-        for( const Reference& ir : ing.references )
-        {
-            if( !ir.isInherit )
-            {
-                continue;
-            }
-            if( const std::string* scoped = rubyBases.resolvedBase( std::size_t( &ir - ing.references.data() ) ); scoped && scoped->empty() )
-            {
-                continue;   // a Ruby base the tree never opens: nothing in-tree to walk to
-            }
-            if( const std::size_t at = std::size_t( &ir - ing.references.data() ); at < rubyBases.mixinRefs.size() && rubyBases.mixinRefs[ at ] != 0 )
-            {
-                continue;   // a Ruby mixin: only the Ruby overlay (buildRubyCha) carries it
-            }
-            std::string_view derivedName;
-            if( !ir.qualifier.empty() )
-            { // Rust impl → derived type name in qualifier
-                derivedName = ir.qualifier;
-            }
-            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
-                                                   || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
-            {
-                derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
-            }
-            if( derivedName.empty() || ir.calleeName.empty() )
-            {
-                continue;
-            }
-            chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
-            chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
-            std::vector<std::string>& declared = chaUpDeclared[ std::string( derivedName ) ];
-            if( std::find( declared.begin(), declared.end(), ir.calleeName ) == declared.end() )
-            {
-                declared.push_back( ir.calleeName );   // source order (ing.references is in (file, byte) order)
-            }
-        }
-        addTypeAliasBases( ing, chaUp );   // a typedef / using alias continues at its target class; dedup below is order-independent
-        for( auto& [ k, v ] : chaUp )   { sortutil::sortUnique( v ); }
-        for( auto& [ k, v ] : chaDown ) { sortutil::sortUnique( v ); }
-    }
+    buildChaNameGraph( ing, rubyBases, chaUp, chaDown, chaUpDeclared );   // buildGraph/2h
     const RubyCha                  rubyCha   = buildRubyCha( ing, rubyBases, chaUp, chaDown );
     const ChaUpNames&              rubyUp    = rubyCha.merged ? rubyCha.up : chaUp;     // a Ruby call to self reads mixins too
     const RubySelfReach            rubyReach = buildRubySelfReach( ing, rubyUp, rubyCha.merged ? rubyCha.down : chaDown, rubyBases );
@@ -14602,6 +15053,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] guarded_walk calls={} walks={} cones={} meant_asks={} meant={}\n", gw.calls, gw.walks, gw.cones, narrower.meantAsks, gw.meant );
         rw::emitTo( stderr, "[mem] guarded_answer asks={} kept={}\n", gw.calls, gw.answered );
         rw::emitTo( stderr, "[mem] plausible owned_asks={} reads={}\n", narrower.identity.ownedAsks, narrower.identity.plausibleReads );
+        // OWNED-ASK-SITES: the owned_asks above, split by the walk that asked (resolve.h IdentityNarrower::AskSite). The
+        // buckets sum to owned_asks by construction — one ask, one innermost scope — which test/ownedasksitescheck.sh holds.
+        using AskSite              = IdentityNarrower::AskSite;
+        const auto& askSiteCounts  = narrower.identity.ownedAsksBySite;
+        rw::emitTo( stderr, "[mem] owned_sites cone={} level={} append={} other={}\n",
+                    askSiteCounts[ std::size_t( AskSite::Cone ) ], askSiteCounts[ std::size_t( AskSite::Level ) ],
+                    askSiteCounts[ std::size_t( AskSite::Append ) ], askSiteCounts[ std::size_t( AskSite::Other ) ] );
         rw::emitTo( stderr, "[mem] base_edges pairs={}\n", narrower.baseEdgePairs );
         rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
@@ -14665,187 +15123,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         releaseStorage( rule3MemoMember );
         releaseStorage( symFileId );
     }
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
-    // flatten + cap + sort by (from, to) — deterministic regardless of map order
-    struct E { NodeId from, to; float w; std::uint8_t marks; };   // marks: the accumulator's EdgeMark bits, carried through the sort
-    std::vector<E> edges;
-    edges.reserve( acc.size() );
-    for( const auto& [ k, e ] : acc )
-    {
-        float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
-        if( w > 8.f )
-        {
-            w = 8.f;
-        }
-        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
-    }
-    releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
-    std::vector<E> edgeScratch;
-    sortutil::radixSortByFromTo( edges, edgeScratch );
-
-    // out-edges (by source) + weighted out-degree
-    g.outOff.assign( N + 1, 0 );
-    for( const E& e : edges )
-    {
-        ++g.outOff[e.from + 1];
-    }
-    for( std::size_t i = 0; i < N; ++i )
-    {
-        g.outOff[i + 1] += g.outOff[i];
-    }
-    g.outTargets.resize( edges.size() );
-    g.outVals.resize( edges.size() );
-    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR an ES
-    // named-import binding pinned one OR the resolver had to split at least one call — a corpus that resolves
-    // cleanly keeps it EMPTY so serialize emits no prov= at all (zero token cost, byte-identical to before;
-    // test/golden.xml is the standing proof).
-    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
-    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split";
-    //   4 = an ES named-import binding named the module and the export → prov="import".
-    //   5 = a receiver's QUALIFIED written type chose this edge by its last name alone → prov="final-segment".
-    //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
-    // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
-    std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
-    for( const E& e : edges )
-    {
-        anyMarks |= e.marks;
-    }
-    if( memstats::enabled() )   // M0 + EDGE-FLAGS: how many flattened edges carry each mark (test/edgemarkcheck.sh counts them)
-    {
-        std::array<std::size_t, 8> perBit{};
-        std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
-        for( const E& e : edges )
-        {
-            for( std::size_t b = 0; b < perBit.size(); ++b )
-            {
-                perBit[ b ] += ( e.marks >> b ) & 1u;
-            }
-            nameOnlyRows += ( e.marks & ( kEdgeMarkProven | kEdgeMarkLink ) ) == 0 ? 1u : 0u;
-        }
-        rw::emitTo( stderr, "[mem] edge marks edges={} split={} binding={} import={} final-segment={} impl-only={} proven={} link={} anchor-miss={} name-only={}\n",
-                    edges.size(), perBit[ 0 ], perBit[ 1 ], perBit[ 2 ], perBit[ 3 ], perBit[ 4 ], perBit[ 5 ], perBit[ 6 ], perBit[ 7 ], nameOnlyRows );
-    }
-    if( scip || ( anyMarks & kEdgeMarksProv ) != 0 || anyImplSite )
-    {
-        g.outProv.assign( edges.size(), 0u );
-    }
-    const auto anchorMissed = []( const E& e ) noexcept
-    {
-        return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
-    };
-    if( std::any_of( edges.begin(), edges.end(), anchorMissed ) )
-    {
-        g.outAnchorMiss.assign( edges.size(), 0u );
-    }
-    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
-    // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
-    const auto hedged = []( const E& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
-    const auto marked = [ & ]( const E& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
-    if( std::any_of( edges.begin(), edges.end(), marked ) )
-    {
-        g.outNameOnly.assign( edges.size(), 0u );
-    }
-    {
-        std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
-        for( const E& e : edges )
-        {
-            const std::uint32_t pos = cur[ e.from ]++;
-            g.outTargets[ pos ] = e.to;
-            g.outVals[ pos ]    = e.w;
-            g.wOutDeg[ e.from ] += e.w;
-            // one value per edge, by resolve.h edgeProvenance's fixed precedence: scip PINS an edge (precise), binding and
-            // import NAME the mechanism that resolved it, split says the resolver could not choose, final-segment says it
-            // chose by a qualified type's last name. A binding edge that is also a split keeps the more specific label;
-            // the symbol's amb= counts it either way, so nothing is lost by the ordering.
-            if( !g.outProv.empty() )
-            {
-                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), e.marks );
-            }
-            if( !g.outNameOnly.empty() )
-            {
-                ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
-                std::uint8_t kind = 0;
-                if( ( e.marks & kEdgeMarkLink ) != 0 )
-                {
-                    kind = anchorMissed( e ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
-                }
-                else if( hedged( e ) )
-                {
-                    kind = kEdgeName;
-                }
-                g.outNameOnly[ pos ] = kind;
-            }
-            if( !g.outAnchorMiss.empty() )
-            {
-                g.outAnchorMiss[ pos ] = anchorMissed( e ) ? 1u : 0u;
-            }
-        }
-    }
-
-    rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
-
-    // in-edge CSR (row = target) for PageRank
-    std::vector<std::uint32_t> inDeg( N, 0 );
-    for( const E& e : edges )
-    {
-        ++inDeg[e.to];
-    }
-    g.inEdges = sparseCsr<float>( N, N, edges.size() );
-    {
-        auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
-        ro[0] = 0;
-        for( std::size_t i = 0; i < N; ++i )
-        {
-            ro[i + 1] = ro[i] + inDeg[i];
-        }
-        std::vector<std::uint32_t> cur( ro, ro + N );
-        for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
-    }
-    DASSERT( verifyCsr( g.inEdges, N ) );   // structural, so CHECKED in debug and not promised in release — see Diagnostics.h
-    DASSERT( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
-    // One site record per declined call (recordDecline): at most one per reference, so the uint32 record and reference
-    // indices cannot wrap, and the four columns stay parallel.
-    ENSURES( g.declinedSiteCaller.size() <= ing.references.size() && g.declinedSiteList.size() == g.declinedSiteCaller.size()
-             && g.declinedSiteRef.size() == g.declinedSiteCaller.size() && g.declinedSiteKind.size() == g.declinedSiteCaller.size() );
-    }
+    flattenEdgesIntoCsr( g, ing, acc, scip, anyImplSite );   // buildGraph/4
 
 
     // doc↔code edges: isDocLink refs (markdown `backtick` → code name) → mentions[codeDef] += docFileNode.
     // Resolve the name to real DEFINITIONS (body present), any file; stored OUT of the call graph so a doc
     // mentioning a symbol never inflates its PageRank / blast radius. "what docs discuss this symbol".
     g.mentions.assign( N, {} );
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/6: doc mentions" );
-    for( const Reference& r : ing.references )
-    {
-        if( !r.isDocLink || r.fromSymbol == kNoNode )
-        {
-            continue;
-        }
-        const auto it = byName.find( r.calleeName );
-        if( it == byName.end() )
-        {
-            continue;
-        }
-        for( NodeId def : it->second )
-        {
-            if( ing.symbols[def].endByte <= ing.symbols[def].sigEndByte )
-            {
-                continue; // a real def, not a decl
-            }
-            if( def == r.fromSymbol )
-            {
-                continue;
-            }
-            if( !sameRoot( def, r.fileId ) )
-            {
-                continue; // §3: a doc backtick-name never crosses roots
-            }
-            g.mentions[ def ].push_back( r.fromSymbol );
-        }
-    }
-    }
+    fillDocMentions( g, ing, byName, sameRoot );   // buildGraph/6
     for( std::vector<NodeId>& v : g.mentions )
     {
         sortutil::sortUnique( v );
@@ -14854,60 +15139,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // S5-E HAS-A composition edges: isCompose refs (owner class → member type name) → composeEdges.
     // Resolve the type name to class/struct symbols (any-file, by name); store OUTSIDE the call graph so
     // PageRank, ranks, and the default map are UNCHANGED. Sorted (ownerSym, typeSym) for determinism.
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/7: HAS-A compose edges" );
-    for( const Reference& r : ing.references )
-    {
-        if( !r.isCompose || r.fromSymbol == kNoNode || fieldTypeWrittenInStd( r ) || isTypeAliasRecord( r ) || r.viaArrow )
-        {
-            continue;   // a member type written in namespace std names no in-repo class, whatever its final segment; an alias is no member; a smart pointer's pointee is Rule 2b's alone
-        }
-        const auto it = byName.find( r.calleeName );
-        if( it == byName.end() )
-        {
-            continue;
-        }
-        for( NodeId typeId : it->second )
-        {
-            const SymKind k = ing.symbols[ typeId ].kind;
-            if( k != SymKind::Class && !isStructOrNamedType( k ) )
-            {
-                continue;
-            }
-            if( typeId == r.fromSymbol )
-            {
-                continue;
-            }
-            if( !sameRoot( typeId, r.fileId ) )
-            {
-                continue; // §3: a HAS-A type NAME never crosses roots
-            }
-            // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
-            // WITHIN a compatible language (or the C/ObjC↔C++ bridge). Compose CAPTURE is C++-only
-            // (ingest.cpp captureFields), but without this gate the RESOLUTION was language-blind: a
-            // C++ member `Foo m_foo;` bound its HAS-A edge to a Python/TS `class Foo` in the same
-            // repo — and the cross-language candidate's lower id even defeated the adjacency dedup
-            // below, emitting the same field twice. Gate: test/composelangcheck.sh.
-            if( !langCompatible( ing.symbols[ typeId ].lang, r.lang ) )
-            {
-                continue;
-            }
-            ComposeEdge ce;
-            ce.ownerSym  = r.fromSymbol;
-            ce.typeSym   = typeId;
-            ce.fieldName = r.fieldName();
-            ce.typeName  = r.calleeName;
-            ce.ownerName = ing.symbols[ r.fromSymbol ].name;
-            ce.rel       = r.composeRel();
-            // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
-            // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
-            // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
-            // and every copy reached <compose> byte-identically. byName is id-ascending, so this keeps
-            // the lowest-id candidate: deterministic, and byte-invisible. Gate: composelangcheck §4/§5.
-            g.composeEdges.push_back( std::move( ce ) );  break;
-        }
-    }
-    }
+    fillComposeEdges( g, ing, byName, sameRoot );   // buildGraph/7
     // sort by (ownerSym, typeSym, fieldName) for determinism; dedup on (ownerSym, fieldName) — the
     // type name is the primary identity (one field has exactly one declared type).
     std::sort( g.composeEdges.begin(), g.composeEdges.end(),
@@ -14935,87 +15167,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // evidence the multi-root design requires, so this never applies the sameRoot() guard the call/HAS-A/
     // extends resolvers above use. Ambiguous USEs (matching ≥2 DISTINCT resolved handlers) and unresolved
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
-    {
-        PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
-        std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
-        for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
-        {
-            const RouteDef& rd = ing.routeDefs[d];
-            if( rd.handlerName.empty() )
-            {
-                continue; // inline/anonymous handler → stays unresolved
-            }
-            const auto it = byName.find( rd.handlerName );
-            if( it == byName.end() )
-            {
-                continue;
-            }
-            for( NodeId cand : it->second )
-            {
-                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
-                { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
-            }
-        }
-
-        std::vector<NodeId> distinctScratch;   // reused per USE — the "≥2 distinct handlers ⇒ ambiguous" set
-        for( const RouteUse& ru : ing.routeUses )
-        {
-            distinctScratch.clear();
-            NodeId      matchedHandler = kNoNode;
-            HttpMethod  matchedMethod  = HttpMethod::Unknown;
-            std::string matchedPath;
-            for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
-            {
-                const RouteDef& rd = ing.routeDefs[d];
-                if( defHandler[d] == kNoNode )
-                {
-                    continue; // an unresolved match adds no distinctness
-                }
-                if( !routematch::methodsCompatible( rd.method, ru.method ) )
-                {
-                    continue;
-                }
-                if( !routematch::pathsMatch( rd.path, ru.path ) )
-                {
-                    continue;
-                }
-                if( std::find( distinctScratch.begin(), distinctScratch.end(), defHandler[d] ) != distinctScratch.end() )
-                {
-                    continue;                                              // same handler already counted (dup registration)
-                }
-                distinctScratch.push_back( defHandler[d] );
-                matchedHandler = defHandler[d];
-                matchedMethod  = rd.method;
-                matchedPath    = rd.path;
-            }
-            if( distinctScratch.size() != 1 )
-            {
-                continue; // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
-            }
-            RouteEdge re;
-            re.fromSym  = ru.fromSymbol;
-            re.toSym    = matchedHandler;
-            re.method   = matchedMethod != HttpMethod::Unknown ? matchedMethod : ru.method;
-            re.path     = std::move( matchedPath );
-            re.fromName = ru.fromSymbol != kNoNode ? ing.symbols[ ru.fromSymbol ].name : std::string();
-            re.toName   = ing.symbols[ matchedHandler ].name;
-            g.routeEdges.push_back( std::move( re ) );
-        }
-        std::sort( g.routeEdges.begin(), g.routeEdges.end(),
-                   []( const RouteEdge& a, const RouteEdge& b ) noexcept
-                   {
-                       if( a.fromSym != b.fromSym )
-                       {
-                           return a.fromSym < b.fromSym;
-                       }
-                       if( a.toSym != b.toSym )
-                       {
-                           return a.toSym < b.toSym;
-                       }
-                       return a.path < b.path;
-                   } );
-        g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
-    }
+    fillRouteEdges( g, ing, byName, sameRoot );   // buildGraph/8
 
     // Per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
     // (byName[name].size() = # of same-name definitions across the repo — the "common name" signal) rather
@@ -18312,6 +18464,10 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 //   tested[i] — Q2: 1 iff symbol i is transitively reachable from ANY test-path symbol over the resolved
 //               out-edge call graph. This is the same coverage set --exercises and --seams use. Dynamic
 //               dispatch, unbound callbacks and subprocess-driven shell tests remain outside the graph.
+//   asserted[i] — 1 iff tested[i] AND at least one test that reaches i ASSERTS: its own body, or a test-scoped
+//               helper it calls, makes a call from its language's assertion vocabulary (langfacts.h assertionCalls).
+//               Reached is not checked (arXiv 2610.33708); 0 = none found, never none exists. No emitter reads
+//               it yet: the map/--metrics/--for rows are serialize.h's and verbs_for.h's (lane asserted-signal).
 //   lcom4[i]  — Q4 class cohesion (LCOM4 = # connected components of the method graph, edge = two methods
 //               CALL each other OR SHARE a field). Emitted ONLY for Class/Struct/Interface WITH ≥1 method
 //               (kLcom4NA = "not applicable" for free functions / method-less types — we NEVER fabricate 1).
@@ -18323,6 +18479,7 @@ struct QMetrics
 {
     std::vector<std::uint32_t> cbo;          // distinct in-repo dependency targets per symbol
     std::vector<std::uint8_t>  tested;       // 1 = transitively reachable from a test-path symbol, else 0
+    std::vector<std::uint8_t>  asserted;     // 1 = tested AND an ASSERTING test reaches it (testSymbolForwardReach), else 0
     std::vector<std::uint32_t> lcom4;        // # connected components (class-kinds w/ methods); kLcom4NA otherwise
     std::vector<std::uint32_t> callerCount;  // |direct callers| (in-edge CSR) — the symbol-level half of change-amplification
 };
@@ -18331,6 +18488,12 @@ inline constexpr std::uint32_t kLcom4NA = 0xFFFFFFFFu;   // LCOM4 not applicable
 // Defined with the other reachability helpers below. QMetrics uses the same traversal as --exercises and
 // --seams so every surface answers the same question about whether an indexed test reaches a symbol.
 inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds );
+
+// ASSERTED (lane asserted-signal): the mask's VALUE carries a second fact. 0 = no indexed test reaches the node; 1 = one does, and
+// none of the tests that reach it asserts anything (none found); 2 = at least one reaching test asserts (assertingTestSymbols
+// below). Every reader that asks only "is it reached" tests the mask for non-zero, so it reads exactly what it read before.
+inline constexpr char kReachedByTest      = 1;
+inline constexpr char kReachedByAssertion = 2;
 
 // A6 (tested/untested partition): the isTestSymbol-seeded forwardReach computeQMetrics' tested[] column
 // runs, factored out so a caller that wants ONLY this lens (--safe-delete, --impact, --callers) is not
@@ -18347,6 +18510,12 @@ inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const 
 inline bool isTestedByReach( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
 {
     return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n );
+}
+
+// asserted=1's predicate: tested, and an asserting test is among the tests that reach it (the mask's value 2, above).
+inline bool isAssertedByReach( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
+{
+    return isTestedByReach( ing, testReach, n ) && testReach[n] == kReachedByAssertion;
 }
 
 // IMPACT-TEST-TIER: the transitive radius in THREE tiers, not two. isTestedByReach never counts a test symbol (a test is a
@@ -18382,14 +18551,14 @@ inline RadiusTiers radiusTiers( const IngestResult& ing, const std::vector<char>
 
 // The per-row half of the same three tiers on an --impact XML row (CLI and MCP twin): tested="1" on a covered production row,
 // test="1" on a test definition (radius_tests= counts them), nothing on an untested production row. The two never co-occur:
-// isTestedByReach excludes a test symbol.
+// isTestedByReach excludes a test symbol. asserted="1" rides only beside tested="1" (isAssertedByReach).
 inline const char* radiusTierRowAttrXml( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
 {
     if( isTestSymbol( ing, n ) )
     {
         return " test=\"1\"";
     }
-    return isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
+    return isAssertedByReach( ing, testReach, n ) ? " tested=\"1\" asserted=\"1\"" : isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
 }
 
 // cut-fix C (2026-09-23): the RELEVANCE WEIGHT the navigation lists rank by before a cap (filter.h rankBeforeCap) — a
@@ -18450,6 +18619,7 @@ inline QMetrics sizedQMetrics( std::size_t symbolCount )
     QMetrics q;
     q.cbo.assign( symbolCount, 0u );
     q.tested.assign( symbolCount, 0u );
+    q.asserted.assign( symbolCount, 0u );
     q.lcom4.assign( symbolCount, kLcom4NA );
     q.callerCount.assign( symbolCount, 0u );
     return q;
@@ -18495,11 +18665,11 @@ inline void fillQMetricsDirect( const IngestResult& ing, const Graph& g, QMetric
     }
 }
 
-// The derived column tested=.
+// The derived columns tested= and asserted= (one reach: testSymbolForwardReach's mask value carries both).
 inline void fillQMetricsTested( const IngestResult& ing, const Graph& g, QMetrics& q )
 {
     const std::size_t S = ing.symbols.size();
-    EXPECTS( q.tested.size() == S, "q was sized for this index (sizedQMetrics)" );
+    EXPECTS( q.tested.size() == S && q.asserted.size() == S, "q was sized for this index (sizedQMetrics)" );
     // ── tested=: the same transitive test-seed reach used by --exercises and --seams. A direct-reference
     //    pass silently marked outer() but not outer()->leaf(), contradicting those verbs and the documented
     //    "a test reaches it" contract. Test symbols are seeds, not production coverage rows themselves.
@@ -18514,10 +18684,8 @@ inline void fillQMetricsTested( const IngestResult& ing, const Graph& g, QMetric
     const std::vector<char> testReach = testSymbolForwardReach( ing, g );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        if( isTestedByReach( ing, testReach, i ) )
-        {
-            q.tested[i] = 1u;
-        }
+        q.tested[i]   = isTestedByReach( ing, testReach, i ) ? 1u : 0u;
+        q.asserted[i] = isAssertedByReach( ing, testReach, i ) ? 1u : 0u;   // lane asserted-signal: only ever beside tested
     }
 }
 
@@ -20141,16 +20309,18 @@ inline std::string depthRunAttrXml( std::span<const NodeId> show, const std::vec
 // symbols transitively reachable FROM `seeds` via OUT-edges (everything the seeds call, transitively) — the
 // forward dual of transitiveCallers. Returns a per-node mask (seeds included). Used by --seams as testReach:
 // a cross-module edge u→v is exercised by a test iff testReach[u] (a test transitively reaches the caller).
-inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds )
+// The traversal forwardReach and testSymbolForwardReach share: every node reachable from `seeds` over OUT-edges that `seen` does
+// not already hold is set to `mark`. A node already held is not re-entered: after every call `seen` is closed under out-edges, so its
+// whole forward closure is held too. That is what lets testSymbolForwardReach mark the asserting tests' reach first and the rest after.
+inline void forwardReachMark( const Graph& g, std::span<const NodeId> seeds, std::vector<char>& seen, char mark )
 {
-    const std::size_t   N = g.wOutDeg.size();
-    std::vector<char>   seen( N, 0 );
+    const std::size_t   N = seen.size();
     std::vector<NodeId> q;
     for( NodeId s : seeds )
     {
         if( s < N && !seen[s] )
         {
-            seen[s] = 1;
+            seen[s] = mark;
             q.push_back( s );
         }
     }
@@ -20158,16 +20328,21 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
     {
         const NodeId u = q[ head ];
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
-        { const NodeId v = g.outTargets[k]; if( v < N && !seen[v] ) { seen[v] = 1; q.push_back( v ); } }
+        { const NodeId v = g.outTargets[k]; if( v < N && !seen[v] ) { seen[v] = mark; q.push_back( v ); } }
     }
+}
+
+inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds )
+{
+    std::vector<char> seen( g.wOutDeg.size(), 0 );
+    forwardReachMark( g, seeds, seen, 1 );
     return seen;
 }
 
-// The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, shared by
-// testSymbolForwardReach below (isTestSymbol) and situ.h's testSeedForwardReach (isTestPath) — two
-// DIFFERENT predicates over the SAME traversal shape (the L8 comment on computeQMetrics's tested[] loop
-// explains why the predicates must stay different), so the loop that collects seeds and calls forwardReach
-// belongs in ONE place rather than two near-identical copies (--quality-delta's duplication kind).
+// The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, read by situ.h's
+// testSeedForwardReach (isTestPath). testSymbolForwardReach below (isTestSymbol) collected its seeds here too
+// until lane asserted-signal split them into asserting and other tests; the two predicates must still stay
+// different (the L8 comment on computeQMetrics's tested[] loop explains why).
 template<class Pred>
 inline std::vector<char> seedForwardReachIf( const IngestResult& ing, const Graph& g, Pred&& isSeed )
 {
@@ -20183,10 +20358,103 @@ inline std::vector<char> seedForwardReachIf( const IngestResult& ing, const Grap
     return forwardReach( g, seeds );
 }
 
-// See the forward declaration above for why this is factored out of computeQMetrics.
+// ASSERTED: the receiver an assertion vocabulary row names (langfacts.h AssertionCall::receiver), as the call site wrote it: the
+// member chain's root (Go `assert.Equal`, JS `assert.strictEqual`), else the receiver variable, else the language's own instance
+// receiver for a call on it (Python `self.fail`), else the explicit qualifier (C# `Assert.Equal`, Java `Assert.assertTrue`).
+inline std::string_view assertionReceiverOf( const Reference& r ) noexcept
+{
+    if( !r.memberRoot.empty() )
+    {
+        return r.memberRoot.str();
+    }
+    if( !r.recvVar.empty() )
+    {
+        return r.recvVar.str();
+    }
+    return r.recv == RecvKind::ThisObj ? langFacts( r.lang ).instanceReceiver : std::string_view( r.qualifier.str() );
+}
+
+// ASSERTED: which test symbols ASSERT. Scope (stated, test/assertedcheck.sh): a test asserts when its OWN body makes a call (or a
+// macro site, Rust `assert_eq!`) from its language's assertion vocabulary, or when it calls, over test symbols only and
+// transitively, a test-scoped helper whose own body does. An assertion in production code on the path never counts: the check
+// must be the test's. Name-based, like every call edge: a framework call the extractor records under another name, or a helper
+// outside the test partition, is a miss, so a 0 reads "none found". One pass over the references, one over the in-edges.
+// NEVER A FILE SCOPE (isAssertionUnit): an anonymous test callback (Jest/Vitest/Mocha `test( …, () => … )`, RSpec `it`, busted
+// `it`, clojure.test `deftest`) has no symbol of its own, so its calls belong to the file's module scope, which then stands in for
+// EVERY example in the file. Counting its assertions would mark a row an asserting sibling example reaches but the reaching one
+// never checks: an over-claim. So a module scope never asserts, here or through a helper; its rows stay tested=1 without asserted
+// (none found), the floor the readings name. A NAMED test function in those languages still counts.
+inline bool isAssertionUnit( const IngestResult& ing, const std::vector<char>& isTest, NodeId n ) noexcept
+{
+    return n < isTest.size() && isTest[n] && ing.symbols[n].kind != SymKind::ModuleScope;
+}
+
+// A call (or macro) site from its language's assertion vocabulary (langfacts.h assertionCalls); an IX-1 slot record never is one.
+inline bool isAssertionSite( const Reference& r ) noexcept
+{
+    return ( r.role == RefRole::Call || r.role == RefRole::Macro ) && !isSlotJoinRecord( r )
+        && langFacts( r.lang ).isAssertionCall( r.calleeName.str(), assertionReceiverOf( r ) );
+}
+
+inline std::vector<char> assertingTestSymbols( const IngestResult& ing, const Graph& g, const std::vector<char>& isTest )
+{
+    const std::size_t   S = isTest.size();
+    std::vector<char>   asserts( S, 0 );
+    std::vector<NodeId> q;
+    for( const Reference& r : ing.references )
+    {
+        const NodeId from = r.fromSymbol;
+        if( isAssertionUnit( ing, isTest, from ) && !asserts[from] && isAssertionSite( r ) )
+        {
+            asserts[from] = 1;
+            q.push_back( from );
+        }
+    }
+    const std::uint32_t* inRo = g.inEdges.rowOffsets();
+    const auto*          inCi = g.inEdges.colIndices();
+    if( inRo == nullptr || g.inEdges.rows() < S )
+    {
+        return asserts;   // no in-edge CSR: the own-body reading alone (a floor of the helper scope)
+    }
+    for( std::size_t head = 0; head < q.size(); ++head )   // the helper half: a test that calls an asserting test symbol asserts
+    {
+        const NodeId v = q[ head ];
+        for( std::uint32_t k = inRo[v]; k < inRo[v + 1]; ++k )
+        {
+            const NodeId u = NodeId( inCi[k] );
+            if( isAssertionUnit( ing, isTest, u ) && !asserts[u] )
+            {
+                asserts[u] = 1;
+                q.push_back( u );
+            }
+        }
+    }
+    return asserts;
+}
+
+// See the forward declaration above for why this is factored out of computeQMetrics. The asserting tests' reach is marked first
+// (kReachedByAssertion), then every other test's reach fills what is left (kReachedByTest): one traversal's worth of edges.
 inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const Graph& g )
 {
-    return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestSymbol( ing, i ); } );
+    const std::size_t S = ing.symbols.size();
+    std::vector<char> isTest( S, 0 );
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        isTest[i] = isTestSymbol( ing, i ) ? 1 : 0;
+    }
+    const std::vector<char> asserts = assertingTestSymbols( ing, g, isTest );
+    std::vector<NodeId>     asserting, rest;
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        if( isTest[i] )
+        {
+            ( asserts[i] ? asserting : rest ).push_back( i );
+        }
+    }
+    std::vector<char> reach( g.wOutDeg.size(), 0 );
+    forwardReachMark( g, asserting, reach, kReachedByAssertion );
+    forwardReachMark( g, rest, reach, kReachedByTest );
+    return reach;
 }
 
 // ---- minimal connecting subgraph (--connect=A,B,C): metric-closure 2-approx Steiner ------------------------

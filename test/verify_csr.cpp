@@ -178,3 +178,125 @@ TEST_CASE( "production buildGraph stores caller to callee as target-row source-c
     CHECK( graph.wOutDeg[ 0 ] == doctest::Approx( 1.0 ) );
     CHECK( graph.wOutDeg[ 1 ] == doctest::Approx( 0.0 ) );
 }
+
+// ── buildGraph/4 as a UNIT, not through the whole function ─────────────────────────────────────────
+// Before the decomposition (lane resolve-parallel, Series C) the flatten + CSR build was 144 lines
+// inside a 4,043-line buildGraph whose production radius had NO indexed test: --impact=buildGraph
+// reported radius_tested=0, with this file the single test in its radius. Reaching phase 4 meant
+// running everything before it. Now flattenEdgesIntoCsr is a named function, these cases call it
+// directly, and they can pin properties the whole-function path cannot reach cheaply: the edge
+// WEIGHT formula and its cap, and the rule that the optional per-edge columns stay UNALLOCATED on a
+// corpus that needs none.
+namespace
+{
+
+// the minimum buildGraph has established before phase 4 runs: symbol count and the out-degree vector
+// it accumulates into.
+rw::IngestResult symbolsOnly( std::size_t count )
+{
+    rw::IngestResult ingest;
+    ingest.files.emplace_back( "flatten.cpp" );
+    ingest.symbols.resize( count );
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        ingest.symbols[ i ].id     = rw::NodeId( i );
+        ingest.symbols[ i ].fileId = 0;
+        ingest.symbols[ i ].lang   = rw::Lang::Cpp;
+        ingest.symbols[ i ].kind   = rw::SymKind::Function;
+        ingest.symbols[ i ].name   = "s" + std::to_string( i );
+    }
+    return ingest;
+}
+
+} // namespace
+
+TEST_CASE( "buildGraph/4 flattens the accumulator into both CSRs, called directly" )
+{
+    const rw::IngestResult ingest = symbolsOnly( 3 );
+    rw::Graph              graph;
+    graph.wOutDeg.assign( 3, 0.0 );
+
+    rw::HashMap<std::uint64_t, rw::EdgeAcc> acc;
+    acc[ rw::hashutil::packPair( 0, 1 ) ] = rw::EdgeAcc{ .confSum = 1.0f, .nref = 1, .marks = 0 };
+    acc[ rw::hashutil::packPair( 0, 2 ) ] = rw::EdgeAcc{ .confSum = 1.0f, .nref = 1, .marks = 0 };
+
+    rw::flattenEdgesIntoCsr( graph, ingest, acc, /*scip=*/nullptr, /*anyImplSite=*/false );
+
+    // out-edges: both of node 0's edges, offsets prefix-summed, ascending by target after the sort
+    REQUIRE( graph.outOff.size() == 4 );
+    CHECK( graph.outOff[ 0 ] == 0 );
+    CHECK( graph.outOff[ 1 ] == 2 );
+    CHECK( graph.outOff[ 3 ] == 2 );
+    REQUIRE( graph.outTargets.size() == 2 );
+    CHECK( graph.outTargets[ 0 ] == 1 );
+    CHECK( graph.outTargets[ 1 ] == 2 );
+
+    // in-edges mirror them: one row each for 1 and 2, both naming 0 as the source
+    REQUIRE( graph.inEdges.rows() == 3 );
+    REQUIRE( graph.inEdges.nnz() == 2 );
+    CHECK( graph.inEdges.rowOffsets()[ 1 ] == 0 );
+    CHECK( graph.inEdges.rowOffsets()[ 2 ] == 1 );
+    CHECK( graph.inEdges.rowOffsets()[ 3 ] == 2 );
+    CHECK( graph.inEdges.colIndices()[ 0 ] == 0 );
+    CHECK( graph.inEdges.colIndices()[ 1 ] == 0 );
+
+    // the accumulator is CONSUMED (G1c: released as soon as it is flattened)
+    CHECK( acc.empty() );
+}
+
+TEST_CASE( "buildGraph/4 weights an edge by confidence times sqrt(refs), capped at 8" )
+{
+    const rw::IngestResult ingest = symbolsOnly( 2 );
+
+    // confSum / nref * sqrt( nref ): four sites each contributing 1.0 → 1.0 * 2.0 = 2.0
+    {
+        rw::Graph graph;
+        graph.wOutDeg.assign( 2, 0.0 );
+        rw::HashMap<std::uint64_t, rw::EdgeAcc> acc;
+        acc[ rw::hashutil::packPair( 0, 1 ) ] = rw::EdgeAcc{ .confSum = 4.0f, .nref = 4, .marks = 0 };
+        rw::flattenEdgesIntoCsr( graph, ingest, acc, nullptr, false );
+        REQUIRE( graph.outVals.size() == 1 );
+        CHECK( graph.outVals[ 0 ] == doctest::Approx( 2.0 ) );
+        CHECK( graph.wOutDeg[ 0 ] == doctest::Approx( 2.0 ) );
+    }
+
+    // the cap is a real cut, not a formula: 100 sites at full confidence would weigh 10, and must not
+    {
+        rw::Graph graph;
+        graph.wOutDeg.assign( 2, 0.0 );
+        rw::HashMap<std::uint64_t, rw::EdgeAcc> acc;
+        acc[ rw::hashutil::packPair( 0, 1 ) ] = rw::EdgeAcc{ .confSum = 100.0f, .nref = 100, .marks = 0 };
+        rw::flattenEdgesIntoCsr( graph, ingest, acc, nullptr, false );
+        REQUIRE( graph.outVals.size() == 1 );
+        CHECK( graph.outVals[ 0 ] == doctest::Approx( 8.0 ) );
+    }
+}
+
+TEST_CASE( "buildGraph/4 leaves the optional per-edge columns unallocated when nothing needs them" )
+{
+    const rw::IngestResult ingest = symbolsOnly( 2 );
+
+    // A corpus that resolves cleanly must keep outProv EMPTY, so serialize emits no prov= at all --
+    // the zero-token-cost property test/golden.xml stands as proof of. An unmarked edge, no overlay
+    // and no one-implementor dispatch is exactly that corpus.
+    {
+        rw::Graph graph;
+        graph.wOutDeg.assign( 2, 0.0 );
+        rw::HashMap<std::uint64_t, rw::EdgeAcc> acc;
+        acc[ rw::hashutil::packPair( 0, 1 ) ] = rw::EdgeAcc{ .confSum = 1.0f, .nref = 1, .marks = 0 };
+        rw::flattenEdgesIntoCsr( graph, ingest, acc, nullptr, /*anyImplSite=*/false );
+        CHECK( graph.outProv.empty() );
+        CHECK( graph.outAnchorMiss.empty() );
+    }
+
+    // ... and must allocate it the moment one site committed a one-implementor dispatch edge, which is
+    // a fact only the caller knows, which is why phase 4 takes it as an argument rather than deriving it.
+    {
+        rw::Graph graph;
+        graph.wOutDeg.assign( 2, 0.0 );
+        rw::HashMap<std::uint64_t, rw::EdgeAcc> acc;
+        acc[ rw::hashutil::packPair( 0, 1 ) ] = rw::EdgeAcc{ .confSum = 1.0f, .nref = 1, .marks = 0 };
+        rw::flattenEdgesIntoCsr( graph, ingest, acc, nullptr, /*anyImplSite=*/true );
+        REQUIRE( graph.outProv.size() == 1 );
+    }
+}

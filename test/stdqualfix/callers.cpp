@@ -7,7 +7,7 @@
 //   takeInline  std::__1::move          → external (libc++ inline ABI namespace spelling, qualifier "__1")
 //   flipTwice   std::swap x2            → external (was: 1 edge to Slot::swap)
 //   flipRooted  ::std::swap             → external
-//   stopHere    std::unreachable()      → external (the .cpp twin of bridge.mm's ObjC++ floor)
+//   stopHere    std::unreachable()      → external (the .cpp twin of bridge.mm's ObjC++ arm)
 //   useBuf      buf.move()              → Buf::move  — a TRUE member call, kept
 //   useSlot     a.swap( b )             → Slot::swap — a TRUE member call, kept
 

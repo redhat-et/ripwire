@@ -1,0 +1,12 @@
+### Added — `RIPWIRE_STATS` `[mem] owned_sites`: which walk drives the resolve loop's super-linear ask volume
+
+`buildGraph` is 66.2% of a cold llvm-project run (22,388 ms of 33,099 ms), single-threaded, and the work it does per symbol grows with the corpus: 13.45 µs/symbol on llvm-project against 3.75 on envoy, same language and extractor. Measuring where that goes with the counters already in the tree showed the cost is not in computing answers but in **asking** for them. `ownedBy`'s out-of-line asks grow **×779.5** from envoy to llvm-project (41,943 → 32,694,013) while files grow ×7.30 and the `plausibleMemo` recomputations those asks hit grow only ×4.19 (4,505 → 18,869). The memos already absorb 99.6–99.94% of every ask; across every memo in the loop llvm-project makes about 47.5M probes against about 138,000 fills, 343 probes per fill.
+
+A fix therefore has to know which of the nested walks asks, and nothing recorded that. `[mem] owned_sites` does:
+
+- **`cone=` / `level=` / `append=` / `other=`** split `[mem] plausible owned_asks=` by the walk that asked — `Narrower::guardedConeOwns`, `Narrower::probeGuardedLevel`, `IdentityNarrower::appendOwnedOf`, and everything that names no site. The attribution is **total**: the innermost naming scope owns an ask, so one ask lands in exactly one bucket and the buckets sum to `owned_asks`. `test/ownedasksitescheck.sh` holds that sum, and holds it only on a corpus where `owned_asks` is non-zero, because `0 == 0` is not evidence.
+- **A count, never a time**, deliberately. A profiler scope around a ~100 ns probe taken 47.5M times costs more than the thing it measures, so a timing instrument here would change its own answer. The counters are deterministic, stderr-only under `RIPWIRE_STATS`, and never ranked or emitted — the ambient site tag chooses a counter's bucket and nothing else, so no answer depends on it, and the gate compares stdout with and without `RIPWIRE_STATS` byte for byte to hold that.
+
+What it found immediately, and what makes it worth having: **`probeGuardedLevel` makes 31,759,148 of llvm-project's 32,694,013 out-of-line asks — 97.1%** — against 670 on envoy, a ×47,402 growth where files grow ×7.30. On envoy the dominant site is a different one (`appendOwnedOf`, 41,241 of 41,943, 98.3%), so the profile inverts between corpora and a single-corpus reading would have aimed the next change at the wrong walk.
+
+The guarded-walk and plausible counters this builds on are unchanged, and no output surface moves: a run without `RIPWIRE_STATS` prints exactly what it printed before.

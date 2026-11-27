@@ -440,3 +440,24 @@ the uncapped variant shows is needed.
 **A capped variant is always graded against its uncapped twin; the better-answering one ships; bytes break ties and
 are driven down across releases without lowering complete answers.** Earlier compaction work sometimes cut useful
 information, which is why every cut must be disclosed, recoverable, and measured against the uncapped twin.
+
+### 9.3 Addendum, 2026-11-26 — the quality bars are delta heuristics, not smell detectors
+
+`--quality-delta`'s size and complexity bars (`kLocBar` 60 lines, `kCcxBar` 15, `kNestBar` 4, `kParamBar` 5 in
+`src/quality.h`) are **delta heuristics, not smell detectors**. A row says that a change made a function worse and that
+the function now sits past a bar. It does not say the function is a Long Method, a God Class or any other labelled smell,
+and a function under every bar is not certified clean. The bars exist so that a +1 line on a ten-line helper is not
+reported; they were never fitted to human smell labels. The legends already say "heuristic"; this addendum says what the
+word means here, so nobody reads a bar crossing as a smell verdict.
+
+The evidence says no single threshold could do that job. On five Java systems, no single size or complexity threshold
+separated the files developers went on to refactor from the rest (SPLASH 2026 SRC). There is one human-labelled length
+reference, and it is recorded here as a reference point only: on MLCQ, Long Method is best separated at **≥ 26 lines,
+MCC 0.777** (arXiv 2611.01636, single author, preprint), with individual reviewers' cutoffs spread from 17 to 34 lines.
+`kLocBar` is 60. That is not an error to correct towards 26. The bar measures a different thing (growth past a size where
+the reported set stays small) and the reference is one author on one dataset. **No default changes on this evidence.**
+Moving a bar needs a measurement on this tool's own rows, graded the §9.2 way, not a citation.
+
+What follows for readers of a quality-delta row: treat it as "this change grew a function past a bar", read the numbers,
+and decide. What follows for a new kind: a measure that claims to *detect* a smell needs its own labelled validation
+before it ships, and until it has one it is a delta heuristic and says so.
