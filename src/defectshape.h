@@ -3750,9 +3750,12 @@ private:
         }
         return false;
     }
+    // Does `text` name one of the files `needles` as a whole path, not as a longer path's head ("$TMP/out.meta",
+    // "$TMP/out/x") or tail ("$D/out" for "out")?
     static bool mentionsAny( const std::string& text, const std::vector<std::string>& needles )
     {
-        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f ) { return text.find( f ) != std::string::npos; } );
+        const auto inPath = []( char c ) { return c == '/' || c == '.' || c == '-' || isIdentChar( c ); };
+        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f ) { return rw::namesplit::containsWordBoundedBy( text, f, inPath ); } );
     }
     // Does `text` read "$V" as a whole text, not only as a directory prefix ("$V/f") or a longer name's head ("$VX")?
     static bool readsWhole( const std::string& text, const std::string& v )
@@ -3810,8 +3813,13 @@ private:
     }
     // The judgment's condition tests only that a text is empty or not ([ -z ], [ -n ], [ -s ]) and compares no text
     // (grep, cmp, diff, [ A = B ]): an empty answer IS what it claims (a refusal prints nothing), not missing evidence.
+    // A case claims it when an arm whose only pattern is the empty string ("") passes and no other arm can.
     bool claimsEmptiness( const Judgment& j ) const
     {
+        if( j.kind == Judgment::Kind::Case )
+        {
+            return caseClaimsEmptiness( node( j.node ) );
+        }
         bool       emptiness = false;
         bool       compares  = false;
         const auto see       = [ & ]( std::uint32_t c )
@@ -3859,6 +3867,26 @@ private:
             }
         }
         return emptiness && !compares;
+    }
+    bool caseClaimsEmptiness( const sh::Node& n ) const
+    {
+        bool emptyPasses = false;
+        for( std::size_t b = 0; b < n.bodies.size() && b < n.casePats.size(); ++b )
+        {
+            const std::vector<std::string>& pats      = n.casePats[b];
+            const bool                      emptyOnly = !pats.empty() && std::all_of( pats.begin(), pats.end(), []( const std::string& pt )
+                                                                                 { return !pt.empty() && sh::detail::unq( pt ).empty(); } );
+            const bool                      passes    = repOfList( n.bodies[b] ) == Rep::Pass;
+            if( emptyOnly )
+            {
+                emptyPasses = emptyPasses || passes;
+            }
+            else if( passes )
+            {
+                return false;   // a nonempty subject can pass too (`*) ok`): a classifier, not a claim of emptiness
+            }
+        }
+        return emptyPasses;
     }
     bool inOwnPipeline( const Judgment& j, std::uint32_t l ) const
     {

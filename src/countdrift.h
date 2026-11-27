@@ -176,7 +176,13 @@ inline int countOf( std::string_view w ) noexcept
     for( std::size_t i = 0; i < kCountWords.size(); ++i )
     {
         const std::string_view cw = kCountWords[i];
-        if( cw.size() == w.size() && ( w == cw || ( w[0] == cw[0] - 'a' + 'A' && w.substr( 1 ) == cw.substr( 1 ) ) ) )   // "three", "Three"
+        if( cw.size() != w.size() )
+        {
+            continue;
+        }
+        const auto up    = []( char c ) { return static_cast<char>( c - 'a' + 'A' ); };
+        const bool upper = std::equal( w.begin(), w.end(), cw.begin(), [ & ]( char a, char b ) { return a == up( b ); } );
+        if( w == cw || upper || ( w[0] == up( cw[0] ) && w.substr( 1 ) == cw.substr( 1 ) ) )   // "three", "Three", "THREE"
         {
             return static_cast<int>( i );
         }
@@ -411,6 +417,7 @@ inline std::string maskFencedCode( std::string_view s )
 
 // A Markdown text with each paragraph's soft line breaks turned into spaces (same length: every byte keeps its offset).
 // A break stays when the next line opens a block: a blank line, a heading, a list item, a table row, a fence or a quote.
+// The marker is read after the line's indentation: an indented continuation line (" beta, gamma.") continues the paragraph.
 inline std::string unwrapParagraphs( std::string_view s )
 {
     std::string out( s );
@@ -420,9 +427,14 @@ inline std::string unwrapParagraphs( std::string_view s )
         {
             continue;
         }
-        const char n = out[i + 1];
+        std::size_t at = i + 1;
+        while( at < out.size() && ( out[at] == ' ' || out[at] == '\t' ) )
+        {
+            ++at;
+        }
+        const char n = at < out.size() ? out[at] : '\n';
         // a fence opens with three backticks or tildes; a line that starts with one backticked name continues the paragraph
-        const bool fence = out.compare( i + 1, 3, "```" ) == 0 || out.compare( i + 1, 3, "~~~" ) == 0;
+        const bool fence = out.compare( at, 3, "```" ) == 0 || out.compare( at, 3, "~~~" ) == 0;
         const bool block = isSpace( n ) || n == '#' || n == '*' || n == '-' || n == '|' || fence || n == '>' || ( n >= '0' && n <= '9' );
         if( !block )
         {

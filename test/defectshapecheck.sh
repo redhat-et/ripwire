@@ -2159,9 +2159,12 @@ fi
 #   with what makes it sound: a presence twin on the same capture; a presence twin on one of the cmp'd files; an arm
 #   whose claim IS emptiness ([ -z ]); a statement a vacuous-assert shape already names (one row, not two). The
 #   positives' rows are the premise of every negative, and the arm counts its pairs and fails short of all.
+#   #750 CR round 3 (taken in #758): a presence grep on "$TMPDIR/out.meta" is no twin of an absence on "$TMPDIR/out"
+#   (t_zmeta: the file is matched as a whole path, not a substring); a case whose only passing arm is `"")` claims
+#   emptiness (n_zcase), while a classifier whose `*)` arm passes still has no evidence (t_zcasewild).
 fx_init zev
 mkdir -p "$WORK/zev/test"
-for f in t_zabs t_zcmp t_zredir n_ztwin n_ztwinfile n_zempty n_zva; do
+for f in t_zabs t_zcmp t_zredir t_zmeta t_zcasewild n_ztwin n_ztwinfile n_zempty n_zva n_zcase; do
     printf '%s' "$VHDR" >"$WORK/zev/test/$f.sh"
 done
 fx_commit zev
@@ -2200,9 +2203,28 @@ cat >>"$WORK/zev/test/n_zva.sh" <<'EOF'
 OUT="$( "$BIN" --list 2>/dev/null )"
 printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
+cat >>"$WORK/zev/test/t_zmeta.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/out" 2>/dev/null || no "the list run failed"
+grep -q 'v1' "$TMPDIR/out.meta" && ok "the meta names v1" || no "the meta names no v1"
+grep -q 'bad' "$TMPDIR/out" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/zev/test/t_zcasewild.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )" || no "the list run failed"
+case "$OUT" in
+    *bad*) no "bad present" ;;
+    *)     ok "bad absent" ;;
+esac
+EOF
+cat >>"$WORK/zev/test/n_zcase.sh" <<'EOF'
+OUT="$( "$BIN" --quiet 2>/dev/null )" || no "the quiet run failed"
+case "$OUT" in
+    "") ok "quiet prints nothing" ;;
+    *)  no "quiet printed: $OUT" ;;
+esac
+EOF
 fx_run zev
 L="zero-evidence"
-for f in t_zabs t_zcmp t_zredir; do
+for f in t_zabs t_zcmp t_zredir t_zmeta t_zcasewild; do
     ds_has_p "$L" zero-evidence "test/$f.sh" minor
 done
 zpairs=0
@@ -2216,8 +2238,9 @@ zpair n_ztwin t_zabs "a presence grep on the same capture is the twin"
 zpair n_ztwinfile t_zcmp "a presence grep on a cmp'd file is the twin"
 zpair n_zempty t_zabs "[ -z ] claims emptiness: an empty answer IS the pass"
 zpair n_zva t_zabs "the unchecked capture is vacuous-assert's site: one row, not two"
-[ "$zpairs" = 4 ] && ok "$L: all $zpairs negative arms print 0 zero-evidence rows beside a firing twin" \
-    || no "$L: $zpairs of 4 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
+zpair n_zcase t_zcasewild "a case whose only passing arm is the empty pattern claims emptiness"
+[ "$zpairs" = 5 ] && ok "$L: all $zpairs negative arms print 0 zero-evidence rows beside a firing twin" \
+    || no "$L: $zpairs of 5 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
 [ -n "$( ds_row_p vacuous-assert test/n_zva.sh )" ] && ok "$L: n_zva keeps its vacuous-assert row" \
     || no "$L: n_zva should keep its vacuous-assert row (the premise that the statement was va's)"
 gating_split "$L" 0
@@ -2258,7 +2281,7 @@ printf '#pragma once\ninline constexpr const char* kAllModes[] = { "fast", "slow
 # Adjacent literals are one array element: "sil" "ver" is silver. The edit adds "plat" "inum", so tiers.md drifts.
 printf '#pragma once\ninline constexpr const char* kTiers[] = { "gold", "sil" "ver", "bronze" };\n' >"$WORK/cdr/src/tiers.h"
 printf '# Tiers\n\nThe three tiers: gold, silver and bronze.\n' >"$WORK/cdr/docs/tiers.md"
-for f in modes wrap ok prose gloss bare agg exact fence; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
+for f in modes wrap ok prose gloss bare agg exact fence upper indent; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
 # A list whose last item is "an", shorter than the "and " separator it is tested against and a prefix of it: libstdc++'s
 # string_view compare( pos, n, s ) subtracted the lengths as unsigned there (G1 abort on the Linux asan leg only; libc++
 # does not). Also a negative: "two" and two items, no row.
@@ -2277,6 +2300,8 @@ printf 'The three flaky arms: memguard (B6b, B21) and pargates.\n' >>"$WORK/cdr/
 printf 'Two passes run before the scan.\n' >>"$WORK/cdr/docs/bare.md"
 printf 'The four kinds: alpha,\n`beta`, gamma.\n' >>"$WORK/cdr/docs/wrap.md"
 printf 'The three options: alpha, beta, gamma.\n' >>"$WORK/cdr/docs/agg.md"
+printf 'THREE modes: alpha, beta, gamma and delta.\n' >>"$WORK/cdr/docs/upper.md"   # #750 CR round 3: an uppercase count word
+printf 'The four modes: alpha,\n beta, gamma.\n' >>"$WORK/cdr/docs/indent.md"      # #750 CR round 3: an indented continuation line
 fx_run cdr
 L="count-drift"
 ds_has_p "$L" count-drift docs/shapes.md minor
@@ -2284,6 +2309,8 @@ ds_has_p "$L" count-drift src/shapes.h minor
 ds_has_p "$L" count-drift docs/modes.md minor
 ds_has_p "$L" count-drift docs/wrap.md minor   # a soft line break before a backticked name is not a fence
 ds_has_p "$L" count-drift docs/tiers.md minor
+ds_has_p "$L" count-drift docs/upper.md minor
+ds_has_p "$L" count-drift docs/indent.md minor
 ds_has_p "$L" count-drift src/rows.h new-symbol   # a comma ends the run: "safe" is not joined to "Details" (kRows is new code)
 row="$( ds_row_p count-drift docs/tiers.md )"
 printf '%s' "$row" | grep -q 'why="says 3, kTiers holds 4; missing platinum"' && ok "$L: adjacent literals are one name-array member (sil+ver, plat+inum)" \
@@ -2294,6 +2321,12 @@ printf '%s' "$row" | grep -q 'why="says 3, kShapeNames holds 4; missing hexagon"
 row="$( ds_row_p count-drift docs/modes.md )"
 printf '%s' "$row" | grep -q 'why="says 2, lists 3"' && ok "$L: the self row says the count and the list's length" \
     || no "$L: the self row should carry why=\"says 2, lists 3\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/upper.md )"
+printf '%s' "$row" | grep -q 'why="says 3, lists 4"' && ok "$L: an uppercase count word (THREE) is read" \
+    || no "$L: the upper row should carry why=\"says 3, lists 4\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/indent.md )"
+printf '%s' "$row" | grep -q 'why="says 4, lists 3"' && ok "$L: an indented continuation line joins its paragraph" \
+    || no "$L: the indent row should carry why=\"says 4, lists 3\": ${row:-<no row>}"
 cpairs=0
 for nf in ok prose gloss bare agg tail exact fence; do
     if [ "$QD_OK" = 1 ] && [ -n "$( ds_row_p count-drift docs/modes.md )" ]; then
@@ -2309,6 +2342,8 @@ printf '# Shapes\n\nThe four shapes: circle, square, triangle and hexagon.\n' >"
 printf '# modes\n\nThe three modes: fast, slow and safe.\n' >"$WORK/cdr/docs/modes.md"
 printf '# wrap\n\nThe three kinds: alpha,\n`beta`, gamma.\n' >"$WORK/cdr/docs/wrap.md"
 printf '# Tiers\n\nThe four tiers: gold, silver, bronze and platinum.\n' >"$WORK/cdr/docs/tiers.md"
+printf '# upper\n\nFOUR modes: alpha, beta, gamma and delta.\n' >"$WORK/cdr/docs/upper.md"
+printf '# indent\n\nThe three modes: alpha,\n beta, gamma.\n' >"$WORK/cdr/docs/indent.md"
 sed -i.bak 's/The two modes/The three modes/' "$WORK/cdr/src/rows.h" && rm -f "$WORK/cdr/src/rows.h.bak"
 fx_run cdr
 if [ "$QD_OK" = 1 ]; then
