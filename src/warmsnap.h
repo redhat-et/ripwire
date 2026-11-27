@@ -64,6 +64,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include "infra/envnumber.h"
+
 #include <cstring>
 #include <format>      // the snapshot's name: its options key and the blob identity it is derived from
 #include <optional>    // readRegularFileNoFollow's answer: the file's bytes, or "there is none"
@@ -269,11 +271,58 @@ struct WatchedPath
     std::uint8_t follow = 0;
 };
 
-// fn( i ) for every i in [0, n), on up to hardware_concurrency threads; fn must touch only slot i and shared atomics.
-template <class Fn>
-inline void parallelFor( std::size_t n, Fn&& fn )
+// The worker ceiling for warmsnap::parallelFor: one per core, or RIPWIRE_PARALLEL_WORKERS=<n>
+// (1 <= n <= kMaxParallelWorkers). A TEST SEAM, not a tuning knob, in the same sense as
+// RIPWIRE_PARSE_THREADS: it exists so test/parallelforcheck.sh can show that a one-worker run and a
+// many-worker run of the same build write the same bytes, which only a run that picks its worker
+// count can show. Nothing in an answer may depend on it, which is why it is listed among
+// optionsKeyOf's kObservers — an unlisted RIPWIRE_* variable is folded into the cache key, so a seam
+// that was not declared an observer would silently cost a full re-index every time it was set.
+// A value that is not a whole number in range is refused with one stderr line and one worker per core.
+inline constexpr unsigned kMaxParallelWorkers = 256;
+inline unsigned parallelForWorkerCeiling()
 {
-    const std::size_t workers = std::min<std::size_t>( std::max<unsigned>( std::thread::hardware_concurrency(), 1u ), ( n + 2047 ) / 2048 );
+    const unsigned hw = std::max( std::thread::hardware_concurrency(), 1u );
+    // rw::readEnvNumber (infra/envnumber.h) is the shared reader every knob in this tree uses, and its own
+    // header says so. The first draft of this function hand-rolled the getenv + from_chars + range dance and
+    // --quality-delta gated it as 155 tokens duplicated from parsePoolWorkers -- correctly: the range and the
+    // reply to a bad value are this caller's business, and the PARSING never was.
+    const rw::EnvNumber env = rw::readEnvNumber( "RIPWIRE_PARALLEL_WORKERS" );
+    if( !env.set || env.text.empty() )
+    {
+        return hw;
+    }
+    if( env.parsed && env.value >= 1 && env.value <= kMaxParallelWorkers )
+    {
+        return unsigned( env.value );
+    }
+    rw::emitTo( stderr, "ripwire: ignoring RIPWIRE_PARALLEL_WORKERS=\"{}\" (not a whole number in 1..{}) — one worker per core\n",
+                env.text, kMaxParallelWorkers );
+    return hw;
+}
+
+// fn( i ) for every i in [0, n), on up to hardware_concurrency threads; fn must touch only slot i and shared atomics.
+//
+// `itemsPerWorker` is how many items are worth one worker — the CALLER's statement about how expensive
+// one item is. The default of 2048 suits a cheap item and is wrong for a coarse one: a caller handing
+// over 4096-row CHUNKS (readRefRows, readBindRows) has an item costing ~163 us, and under the default
+// ceil( 1449 / 2048 ) == 1 on llvm-project, so ~5.94 M reference rows decoded on ONE core of eighteen —
+// in a format whose own comment says chunks decode in parallel. Measured effective threads were 1.00 on
+// envoy (287 chunks) and 1.00 on llvm-project (1,449 chunks).
+//
+// Opt-in, with the default unchanged, deliberately: verbfs_qmetrics.h folds its block digests in BLOCK
+// ORDER, so a call site that never asked for coarse-item parallelism keeps the scheduling it has.
+// Moving the default would have put a deterministic digest at risk for a speedup it never asked for.
+//
+// The inner batch moves with it. At a fixed fetch_add( 256 ) over 1,449 items there are only ~6 batches,
+// so most workers would get nothing: fixing the ceiling alone would buy a fraction of the win and look
+// like the change not working. max( itemsPerWorker / 8, 1 ) leaves the default at 256, unchanged.
+template <class Fn>
+inline void parallelFor( std::size_t n, Fn&& fn, std::size_t itemsPerWorker = 2048 )
+{
+    const std::size_t perWorker = std::max<std::size_t>( itemsPerWorker, 1 );
+    const std::size_t workers   = std::min<std::size_t>( parallelForWorkerCeiling(), ( n + perWorker - 1 ) / perWorker );
+    const std::size_t batch     = std::max<std::size_t>( perWorker / 8, 1 );
     if( workers <= 1 )
     {
         for( std::size_t i = 0; i < n; ++i ) { fn( i ); }
@@ -282,9 +331,9 @@ inline void parallelFor( std::size_t n, Fn&& fn )
     std::atomic<std::size_t> next{ 0 };
     const auto body = [ & ]() noexcept
     {
-        for( std::size_t at = next.fetch_add( 256, std::memory_order_relaxed ); at < n; at = next.fetch_add( 256, std::memory_order_relaxed ) )
+        for( std::size_t at = next.fetch_add( batch, std::memory_order_relaxed ); at < n; at = next.fetch_add( batch, std::memory_order_relaxed ) )
         {
-            for( std::size_t i = at; i < std::min( n, at + 256 ); ++i ) { fn( i ); }
+            for( std::size_t i = at; i < std::min( n, at + batch ); ++i ) { fn( i ); }
         }
     };
     std::vector<std::thread> pool;
@@ -713,6 +762,9 @@ inline std::uint64_t layoutKey() noexcept
 // the pure observers (so a test seam or a kill switch never meets a snapshot recorded without it), every GIT_* one, and
 // the four that decide which git runs and which configuration it reads. RIPWIRE_PARSE_THREADS is an observer: it picks
 // the parse pool's worker count, and the model a run builds does not depend on it (test/snapdeterminismcheck.sh).
+// RIPWIRE_PARALLEL_WORKERS is an observer for the same reason: it caps warmsnap::parallelFor's workers, and no answer
+// may depend on how many ran (test/parallelforcheck.sh arm C). Listing it here is what keeps setting it from re-keying
+// the cache and costing a full re-index — a seam that is not inert is not a seam.
 inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<std::string>& excludes, std::size_t maxFileBytes, bool captureValueUses,
                                    std::string_view excludeLabel, bool respectGitignore, std::uint32_t extractionStamp, bool wantConstructHits,
                                    bool crawlTreeAllTracked )
@@ -732,7 +784,7 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     o.u8( wantConstructHits ? 1 : 0 );
     o.u8( crawlTreeAllTracked ? 1 : 0 );   // M1: a materialized commit tree crawls build-output names the working tree may prune
     static constexpr std::string_view kObservers[] = { "RIPWIRE_CACHE_STATS=", "RIPWIRE_SNAPSHOT_STATS=", "RIPWIRE_STATS=", "RIPWIRE_BIN=", "RIPWIRE_PROFILE",
-                                                       "RIPWIRE_PARSE_THREADS=" };
+                                                       "RIPWIRE_PARSE_THREADS=", "RIPWIRE_PARALLEL_WORKERS=" };
     static constexpr std::string_view kExact[]     = { "HOME=", "PATH=", "PWD=", "XDG_CONFIG_HOME=" };
     std::vector<std::string_view> read;
     for( char** env = os::environment(); env != nullptr && *env != nullptr; ++env )

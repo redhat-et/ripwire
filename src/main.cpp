@@ -3349,10 +3349,16 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
     if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
     {
         // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)
-        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={}\n",
+        // parallel_workers=: warmsnap::parallelFor's worker CEILING for this run (one per core, or
+        // RIPWIRE_PARALLEL_WORKERS). It is here so test/parallelforcheck.sh arm C can prove the two runs it
+        // compares really did use different worker counts before concluding that their maps agree — an arm that
+        // compares a run with itself passes while proving nothing, which is how that arm first read green on a
+        // tree that had no seam at all.
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={} unsaved_why={} parallel_workers={}\n",
                     snap.treeReplayed ? "replayed" : "walked", snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built",
                     rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ],
-                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ] );
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0, rw::warmsnap::kWhyNames[ std::size_t( snap.unsavedWhy ) ],
+                    rw::warmsnap::parallelForWorkerCeiling() );
     }
 }
 
