@@ -123,22 +123,56 @@ row()   # $1 attack, $2 transport, $3 expected, $4 observed, $5 wall, $6 verdict
 # the CLI's refusal status and the second, independent tell.
 echo "arm A1a: the three audit bombs are refused on the CLI (lead-in = the discriminator)"
 A1_LEADIN='refused, nothing was scanned:'
+# THE DEADLINE. A binary that regresses to a non-returning regex run would hang this arm — and the suite with
+# it — rather than fail it. The cap is the house poll-and-kill pattern (regexbombcheck.sh capRun, the
+# p6-negative-control run_capped): a background launch, a `kill -0` poll, `kill -9` at the cap. NOT timeout(1):
+# it is absent on stock macOS and this gate runs on both. The cap fires ONLY on a binary that does not return;
+# a run that returns is untouched (same rc, same output, same wall). RIPWIRE_A1A_CAP_SECONDS lets an operator
+# shorten the cap to aim the real arm at a hanging stub by hand; the in-gate control below does not need it.
+A1_CAP_SECONDS="${RIPWIRE_A1A_CAP_SECONDS:-60}"
+A1_CAPPED=0
+a1_capped()          # a1_capped <bin> <cap-seconds> <outfile> <errfile> <args…> -> the child's rc, or 124 when killed at the cap
+{
+    local capBin="$1" capSeconds="$2" capOut="$3" capErr="$4"; shift 4
+    A1_CAPPED=0
+    "$capBin" "$@" >"$capOut" 2>"$capErr" &
+    local capPid=$! waitedTenths=0 capTenths=$(( capSeconds * 10 ))
+    while kill -0 "$capPid" 2>/dev/null; do
+        if [ "$waitedTenths" -ge "$capTenths" ]; then
+            kill -9 "$capPid" 2>/dev/null; wait "$capPid" 2>/dev/null
+            A1_CAPPED=1; return 124
+        fi
+        sleep 0.1; waitedTenths=$(( waitedTenths + 1 ))
+    done
+    wait "$capPid"; return $?
+}
+# The verdict for one capped run is a function so the CONTROL below exercises the very code the arm uses.
+a1_judge()           # a1_judge <label> <rc> <wall> <catfile> -> prints PASS/FAIL via ok/no; returns 0 when refused structurally
+{
+    local label="$1" judgeRc="$2" judgeWall="$3" judgeCat="$4" judgeHit=0
+    if [ "$A1_CAPPED" = 1 ]; then
+        no "$label: DEADLINE — the binary did not return within the ${A1_CAP_SECONDS}s cap and was killed (a hung run is a finding, not a skip)"
+        return 1
+    fi
+    grep -qF -- "$A1_LEADIN" "$judgeCat" && judgeHit=1
+    grep -qF -- 'no hit is reported' "$judgeCat" && judgeHit=0      # the abandonment lead-in is NOT this one
+    if [ "$judgeRc" = 1 ] && [ "$judgeHit" = 1 ] && [ "$judgeWall" -lt 60 ]; then
+        ok "$label refused with the structural lead-in (rc=1, ${judgeWall}s)"
+        return 0
+    fi
+    no "$label: rc=$judgeRc structural-lead-in=$judgeHit wall=${judgeWall}s — want rc=1 (+lead-in, <60s)"
+    return 1
+}
 a1_all=1; a1_worst=0; a1_saw=""; a1_rcs=""
 for pat in '^(a|aa)+b$' '(x|xy)+c$' '(\w|\d)+$'; do
     a1_t0=$( date +%s )
-    "$BIN" "$FIXTURE" --regex="$pat" >"$TMP/a1.out" 2>"$TMP/a1.err"
+    a1_capped "$BIN" "$A1_CAP_SECONDS" "$TMP/a1.out" "$TMP/a1.err" "$FIXTURE" --regex="$pat"
     a1_rc=$?
     a1_wall=$(( $( date +%s ) - a1_t0 ))
     a1_rcs="$a1_rcs$a1_rc"
+    [ "$A1_CAPPED" = 1 ] && a1_rcs="${a1_rcs}(DEADLINE)"
     cat "$TMP/a1.out" "$TMP/a1.err" >"$TMP/a1.cat" 2>/dev/null
-    a1_hit=0; grep -qF -- "$A1_LEADIN" "$TMP/a1.cat" && a1_hit=1
-    grep -qF -- 'no hit is reported' "$TMP/a1.cat" && a1_hit=0      # the abandonment lead-in is NOT this one
-    if [ "$a1_rc" = 1 ] && [ "$a1_hit" = 1 ] && [ "$a1_wall" -lt 60 ]; then
-        ok "A1a --regex='$pat' refused with the structural lead-in (rc=1, ${a1_wall}s)"
-    else
-        no "A1a --regex='$pat': rc=$a1_rc structural-lead-in=$a1_hit wall=${a1_wall}s — want rc=1 (+lead-in, <60s)"
-        a1_all=0
-    fi
+    a1_judge "A1a --regex='$pat'" "$a1_rc" "$a1_wall" "$TMP/a1.cat" || a1_all=0
     [ "$a1_wall" -gt "$a1_worst" ] && a1_worst="$a1_wall"
     # MEASURED, not appended: the lead-in is taken from the output. The reason text after it is a long sentence
     # in the binary's own words, so only the lead-in is quoted — appending a guess at the reason would be the
@@ -148,6 +182,23 @@ for pat in '^(a|aa)+b$' '(x|xy)+c$' '(\w|\d)+$'; do
         [ -z "$a1_saw" ] && a1_saw="(no structural lead-in in the output)"
     fi
 done
+# THE CAP'S OWN CONTROL (a guard that cannot fail is a comment that runs). The same a1_capped + a1_judge the arm
+# just used, pointed at a stub that sleeps well past a 2 s cap: the cap must fire (rc 124, killed, wall far below
+# the stub's 30 s) and the arm's verdict must be the DEADLINE report, not a pass and not a bare rc mismatch.
+printf '#!/bin/sh\nexec sleep 30\n' >"$TMP/a1-hang-stub"; chmod +x "$TMP/a1-hang-stub"
+a1_keepcap="$A1_CAP_SECONDS"; A1_CAP_SECONDS=2
+a1c_t0=$( date +%s )
+a1_capped "$TMP/a1-hang-stub" "$A1_CAP_SECONDS" "$TMP/a1c.out" "$TMP/a1c.err" "$FIXTURE" --regex='(a+)+b'
+a1c_rc=$?; a1c_capped="$A1_CAPPED"
+a1c_wall=$(( $( date +%s ) - a1c_t0 ))
+: >"$TMP/a1c.cat"
+a1c_say="$( a1_judge "A1a control (hanging stub)" "$a1c_rc" "$a1c_wall" "$TMP/a1c.cat" )"   # subshell: its FAIL line is the EXPECTED output here, not a failure of this gate
+A1_CAP_SECONDS="$a1_keepcap"; A1_CAPPED=0
+if [ "$a1c_capped" = 1 ] && [ "$a1c_rc" = 124 ] && [ "$a1c_wall" -lt 15 ] && case "$a1c_say" in *"DEADLINE"*) true ;; *) false ;; esac; then
+    ok "A1a cap control: a stub that sleeps past the cap is killed at 2s (rc=124, ${a1c_wall}s) and the arm reports the DEADLINE"
+else
+    no "A1a cap control: the cap did NOT fire on a hanging stub (capped=$a1c_capped rc=$a1c_rc wall=${a1c_wall}s say='$a1c_say') — the deadline guard cannot fail"
+fi
 a1v="unproven"; [ "$a1_all" = 1 ] && a1v="repelled"
 row "A1" "cli" "$A1_LEADIN" "$a1_saw rc per pattern = $a1_rcs" "${a1_worst}s" "$a1v"
 
@@ -276,12 +327,36 @@ def toolCall( name, args ):
     return json.dumps( { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
                          "params": { "name": name, "arguments": args } } )
 
-def stdioSession( root, frames, cwd = None ):
-    """One `ripwire <root> --mcp` process. cwd matters: a RELATIVE `path` resolves against the CHILD's cwd,
-    so an arm asking about a fixture must either pass an absolute path or run with cwd inside it."""
-    p = subprocess.Popen( [ BIN, root, "--mcp" ], stdin = subprocess.PIPE, stdout = subprocess.PIPE,
-                          stderr = subprocess.PIPE, text = True, cwd = cwd )
-    out, err = p.communicate( "".join( f + "\n" for f in frames ), timeout = 240 )
+STDIO_LIMIT_SECONDS = 240
+
+def stdioStart( root, cwd = None ):
+    """Spawn `ripwire <root> --mcp` and return the Popen with nothing sent yet. Split from stdioFinish so an arm
+    that needs the CHILD's pid (A3) can act between the spawn and the first frame."""
+    return subprocess.Popen( [ BIN, root, "--mcp" ], stdin = subprocess.PIPE, stdout = subprocess.PIPE,
+                             stderr = subprocess.PIPE, text = True, cwd = cwd )
+
+def stdioAbandon( p ):
+    """Kill and reap a child that will not be asked anything (or that hung). Returns whatever stderr it left."""
+    p.kill()
+    try: _, err = p.communicate( timeout = 30 )
+    except Exception:
+        try: p.wait( 10 )
+        except Exception: pass
+        err = ""
+    return err or ""
+
+def stdioFinish( p, frames, arm ):
+    """Send the frames, collect the answers. A child that does not finish within STDIO_LIMIT_SECONDS is KILLED
+    and REAPED (never left running, never an unhandled traceback that swallows the remaining arms) and is
+    reported as the ARM'S FAILURE: a hung child is a finding, not a skip. On a timeout the answers are discarded
+    (returned empty), so the arm's own checks fail too and its row cannot read `repelled` off partial output."""
+    try:
+        out, err = p.communicate( "".join( f + "\n" for f in frames ), timeout = STDIO_LIMIT_SECONDS )
+    except subprocess.TimeoutExpired:
+        late = stdioAbandon( p )
+        no( "%s: the stdio child did not finish within %ds — killed and reaped; a hung child is the arm's failure, not a skip"
+            % ( arm, STDIO_LIMIT_SECONDS ) )
+        return [], late
     parsed = []
     for line in out.splitlines():
         line = line.strip()
@@ -289,6 +364,11 @@ def stdioSession( root, frames, cwd = None ):
         try: parsed.append( json.loads( line ) )
         except Exception: pass
     return parsed, err
+
+def stdioSession( root, frames, arm, cwd = None ):
+    """One `ripwire <root> --mcp` process. cwd matters: a RELATIVE `path` resolves against the CHILD's cwd,
+    so an arm asking about a fixture must either pass an absolute path or run with cwd inside it."""
+    return stdioFinish( stdioStart( root, cwd ), frames, arm )
 
 # ═══ A1b — the bombs are TRANSPORT-SAFE over HTTP ════════════════════════════════════════════════════════
 # No refusal is asserted, because there is none to assert: the verb is literal-only, so a regex-shaped pattern
@@ -374,7 +454,7 @@ frames = [ '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"."}}}',
            toolCall( "replace_symbol_body", ESCAPE_ARGS ) ]
 t0 = time.monotonic()
-answers, err = stdioSession( A, frames, cwd = A )
+answers, err = stdioSession( A, frames, "A2a", cwd = A )
 a2a_wall = time.monotonic() - t0
 errored = [ a for a in answers if a.get( "id" ) == 1 and "error" in a ]
 code = errored[ 0 ][ "error" ].get( "code" ) if errored else None
@@ -445,43 +525,80 @@ open( outside, "w" ).write( "ORIGINAL-EXTERNAL\n" )
 for cmd in ( [ "git", "init", "-q" ], [ "git", "add", "-A" ],
              [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "t" ] ):
     subprocess.run( cmd, cwd = T3, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL )
-planted = []
-for shp in ( str( os.getpid() ), "0", "1", "2", "XXXXXX" ):
+# THE CHILD'S OWN PID. The historical writer named its temp <file>.<getpid()>.tmp, and getpid() there is the
+# RIPWIRE process's — not this gate's. A name built from the gate's pid is a name the writer never used, so the
+# plant was inert. The child is spawned first (nothing sent yet), its pid is read off the Popen, and the plants
+# are laid with THAT pid, before the one frame that triggers the edit is sent.
+child = stdioStart( T3, cwd = T3 )
+shapes = [ str( child.pid ), "0", "1", "2", "XXXXXX" ]
+intended = [ os.path.join( T3, "subject.c.%s.tmp" % shp ) for shp in shapes ] + [ os.path.join( T3, "subject.c.tmp" ) ]
+child_plant = intended[ 0 ]
+setup_errors = []
+for name in intended:
+    try: os.symlink( outside, name )
+    except OSError as e: setup_errors.append( "%s: %s" % ( os.path.basename( name ), e.strerror or e ) )
+# Trust the filesystem, not the absence of an exception: every intended link must EXIST and point at the victim
+# BEFORE the edit runs. A skipped attack is a failed setup with the payload named, never a quiet pass.
+for name in intended:
     try:
-        name = os.path.join( T3, "subject.c." + shp + ".tmp" ); os.symlink( outside, name ); planted.append( name )
-    except OSError: pass
-try:                                            # the bare no-suffix shape as well
-    name = os.path.join( T3, "subject.c.tmp" ); os.symlink( outside, name ); planted.append( name )
-except OSError: pass
+        if not ( os.path.islink( name ) and os.readlink( name ) == outside ):
+            setup_errors.append( "%s: not a symlink to the victim after planting" % os.path.basename( name ) )
+    except OSError as e:
+        setup_errors.append( "%s: %s" % ( os.path.basename( name ), e.strerror or e ) )
+planted = [ n for n in intended if os.path.islink( n ) ]
 sub_before, out_before = sha( subject ), sha( outside )
-t0 = time.monotonic()
-answers, err = stdioSession( T3, [ toolCall( "replace_symbol_body",
-    { "path": T3, "file": "subject.c", "symbol": "targetFn",
-      "new_body": "int targetFn( int x )\n{\n    return x + 200;\n}" } ) ], cwd = T3 )
-a3_wall = time.monotonic() - t0
-applied = False
-for a in answers:
-    if "result" in a:
-        try: applied = json.loads( a[ "result" ][ "content" ][ 0 ][ "text" ] ).get( "applied" ) == "replace_symbol_body"
-        except Exception: pass
-residue = [ f for f in os.listdir( T3 ) if f.endswith( ".tmp" ) and not os.path.islink( os.path.join( T3, f ) ) ]
-a3_ok, out_same, sub_changed = True, sha( outside ) == out_before, sha( subject ) != sub_before
-if out_same: ok( "A3 all %d planted symlinks ignored — the victim outside is byte-identical" % len( planted ) )
-else: no( "A3 A PLANTED SYMLINK WAS FOLLOWED — the victim outside changed" ); a3_ok = False
-if applied: ok( "A3 the edit still published to its real target (applied=replace_symbol_body)" )
-else: no( "A3 the edit did not report applied — a guard that cannot tell safe from broken is not a guard" ); a3_ok = False
-if sub_changed: ok( "A3 subject.c changed as expected — the edit landed" )
-else: no( "A3 subject.c did not change — the edit silently did nothing" ); a3_ok = False
-if not residue: ok( "A3 no non-symlink *.tmp residue left behind" )
-else: no( "A3 temp residue left behind: %r" % residue ); a3_ok = False
-# the escaped-root line is an HONEST DISCLOSURE from the crawl, not a defect: tolerated, and asserted present
-# so that a future silence there is visible rather than silent.
-if "escaped-root" in err or "leaves the crawl root" in err:
-    ok( "A3 the crawl disclosed the escaped-root symlinks on stderr (honest, tolerated by design)" )
-row( "A3", "stdio", "victim byte-identical", 
-     "victim %s; %d planted symlinks ignored; applied=%s; residue=%d"
-     % ( "byte-identical" if out_same else "CHANGED", len( planted ), json.dumps( applied ), len( residue ) ),
-     "%.2fs" % a3_wall, "repelled" if a3_ok else "unproven" )
+if setup_errors:
+    stdioAbandon( child )                       # the edit is NEVER sent: an attack that was not mounted proves nothing
+    reason = "; ".join( sorted( set( setup_errors ) ) )
+    no( "A3 SETUP FAILURE: the planted symlinks could not all be created (%s) — payload not mounted, nothing proven" % reason )
+    row( "A3", "stdio", "victim byte-identical",
+         "SETUP FAILURE — %d of %d intended symlinks present (child-PID plant subject.c.%d.tmp %s); %s; edit NOT run"
+         % ( len( planted ), len( intended ), child.pid, "present" if os.path.islink( child_plant ) else "MISSING", reason ),
+         "0.00s", "unproven" )
+else:
+    t0 = time.monotonic()
+    answers, err = stdioFinish( child, [ toolCall( "replace_symbol_body",
+        { "path": T3, "file": "subject.c", "symbol": "targetFn",
+          "new_body": "int targetFn( int x )\n{\n    return x + 200;\n}" } ) ], "A3" )
+    a3_wall = time.monotonic() - t0
+    applied = False
+    for a in answers:
+        if "result" in a:
+            try: applied = json.loads( a[ "result" ][ "content" ][ 0 ][ "text" ] ).get( "applied" ) == "replace_symbol_body"
+            except Exception: pass
+    residue = [ f for f in os.listdir( T3 ) if f.endswith( ".tmp" ) and not os.path.islink( os.path.join( T3, f ) ) ]
+    a3_ok, out_same, sub_changed = True, sha( outside ) == out_before, sha( subject ) != sub_before
+    if out_same: ok( "A3 all %d planted symlinks ignored (incl. the CHILD-PID name subject.c.%d.tmp) — the victim outside is byte-identical" % ( len( planted ), child.pid ) )
+    else: no( "A3 A PLANTED SYMLINK WAS FOLLOWED — the victim outside changed" ); a3_ok = False
+    if applied: ok( "A3 the edit still published to its real target (applied=replace_symbol_body)" )
+    else: no( "A3 the edit did not report applied — a guard that cannot tell safe from broken is not a guard" ); a3_ok = False
+    if sub_changed: ok( "A3 subject.c changed as expected — the edit landed" )
+    else: no( "A3 subject.c did not change — the edit silently did nothing" ); a3_ok = False
+    if not residue: ok( "A3 no non-symlink *.tmp residue left behind" )
+    else: no( "A3 temp residue left behind: %r" % residue ); a3_ok = False
+    # PLANT LIVENESS CONTROL. The edit above must NOT change the victim, so "the link carried the write" cannot be
+    # shown by the edit itself. It is shown by a contrast on the SAME planted child-PID link, after the
+    # byte-identical check has already been taken: an ordinary O_TRUNC write through it (the historical writer's
+    # flags) must change the victim. Without this, "victim unchanged" cannot tell a binary that refused the link
+    # from a link that never pointed anywhere.
+    live = False
+    if out_same:
+        try:
+            with open( child_plant, "w" ) as f: f.write( "CONTROL-WRITE-THROUGH-THE-LINK\n" )
+            live = sha( outside ) != out_before
+        except OSError: live = False
+        open( outside, "w" ).write( "ORIGINAL-EXTERNAL\n" )            # restore (the victim lives under TMP regardless)
+    if live: ok( "A3 liveness control: a historical-flags write through subject.c.%d.tmp DID change the victim — the plant is a live attack, so the byte-identical result is the binary's doing" % child.pid )
+    else: no( "A3 liveness control: a write through the planted child-PID link did not change the victim — the plant is inert and 'byte-identical' proves nothing" ); a3_ok = False
+    # the escaped-root line is an HONEST DISCLOSURE from the crawl, not a defect: tolerated, and asserted present
+    # so that a future silence there is visible rather than silent.
+    if "escaped-root" in err or "leaves the crawl root" in err:
+        ok( "A3 the crawl disclosed the escaped-root symlinks on stderr (honest, tolerated by design)" )
+    row( "A3", "stdio", "victim byte-identical",
+         "victim %s; %d planted symlinks ignored incl. child-PID plant subject.c.%d.tmp (pid of the ripwire child); plant liveness control %s; applied=%s; residue=%d"
+         % ( "byte-identical" if out_same else "CHANGED", len( planted ), child.pid,
+             "live (a write through the link changed the victim)" if live else "NOT LIVE", json.dumps( applied ), len( residue ) ),
+         "%.2fs" % a3_wall, "repelled" if a3_ok else "unproven" )
 
 # ═══ A5h — the HTTP body cap refuses at ITS bound, once, and keeps serving ═══════════════════════════════
 # HEADERS FIRST, then read: the refusal fires on Content-Length (src/mcpserver.h:311) BEFORE the body is read,
@@ -562,7 +679,7 @@ A5SW = "request line exceeds the 33554432-byte limit"
 big  = "x" * ( 33 * 1024 * 1024 )
 t0   = time.monotonic()
 answers, err = stdioSession( FIXTURE, [ toolCall( "grep", { "pattern": big } ),
-                                        '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' ] )
+                                        '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' ], "A5s" )
 a5s_wall = time.monotonic() - t0
 refusals = [ a for a in answers if a.get( "error", {} ).get( "code" ) == -32600 and A5SW in a.get( "error", {} ).get( "message", "" ) ]
 healthy  = [ a for a in answers if a.get( "id" ) == 2 and "result" in a ]
