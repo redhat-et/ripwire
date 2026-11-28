@@ -805,7 +805,7 @@ $ ./build/ripwire . --callers=DoesNotExist
 
 **Answers:** what SYM calls (1-hop out-edges).
 
-file:name disambiguates like --callers; each call it makes that the resolver declined to bind is a <dc n= l= via="declined"> row, never an edge or a count= row
+file:name disambiguates like --callers; each call it makes that the resolver declined to bind is a <dc n= l= via="declined"> row, never an edge or a count= row; a call of an in-tree name that kept no edge and no <dc> (every def ruled out: another language, the written qualifier) is named once on the <unres n= calls= more=> line
 
 **Try it**
 
@@ -834,7 +834,7 @@ $ ./build/ripwire . --callees=rankGraphTeleport
 **Caveats (stated by the binary):**
 
 - file:name disambiguates like --callers;
-- each call it makes that the resolver declined to bind is a <dc n= l= via="declined"> row, never an edge or a count= row
+- each call it makes that the resolver declined to bind is a <dc n= l= via="declined"> row, never an edge or a count= row;
 
 ### `--uses=SYM`
 
@@ -3516,10 +3516,10 @@ $ ./build/ripwire . --slice-depth=3
 _Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost._
 
 ```
-$ ./build/ripwire . --at=src/graph.h:15118
+$ ./build/ripwire . --at=src/graph.h:15119
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
-<at schema="ripwire.at/v1" p="src/graph.h" l="15118" sym="rankGraphTeleport" chain="1" root=".">
-<s n="rankGraphTeleport" t="fn" l="15116" el="15144"/>
+<at schema="ripwire.at/v1" p="src/graph.h" l="15119" sym="rankGraphTeleport" chain="1" root=".">
+<s n="rankGraphTeleport" t="fn" l="15117" el="15145"/>
 </at>
 ```
 
@@ -4102,10 +4102,10 @@ $ ./build/ripwire . --from-trace=-
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:15118
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:15161
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:15119
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:15162
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1931
-    #3 0x102e01a44 in main src/main.cpp:4849
+    #3 0x102e01a44 in main src/main.cpp:4890
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
 ==41337==ABORTING
 ```
@@ -4800,7 +4800,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=7735f04112800391 entries=1344
+ripwire legend dictionary ripwire.dict/v1 dictv=1f186b102aa82e27 entries=1345
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
