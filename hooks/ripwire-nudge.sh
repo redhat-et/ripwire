@@ -1447,7 +1447,7 @@ claudeMdHoldsBlurb()
 # agentsMdHoldsBlurb DIR BLURB: the Codex counterpart (θ20, 2026-11-27): true when an AGENTS.md that Codex loads at session start
 # already holds BLURB word for word. Codex's documented discovery (learn.chatgpt.com/docs/agent-configuration/agents-md; the
 # selection below follows codex-rs core/src/agents_md.rs at rust-v0.164.0): the global level in ${CODEX_HOME:-~/.codex} is
-# AGENTS.override.md when non-empty, else AGENTS.md; then, for a TRUSTED project only, one file per directory from the project root
+# AGENTS.override.md when it holds a non-whitespace byte, else AGENTS.md; then, for a TRUSTED project only, one file per directory from the project root
 # (the Git root) down to DIR, where an AGENTS.override.md that exists is taken even when empty (no fallback to AGENTS.md beside
 # it); root-first, and no file is added once the combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it).
 # CONSERVATIVE where that is not modelled: a file only counts when every byte up to its end lies within 32 KiB, the global file
@@ -1476,10 +1476,13 @@ codexTrustOf() # CONFIG PATH: prints the trust_level of CONFIG's [projects."PATH
         if [[ "$line" =~ ^[[:space:]]*\[ ]]
         then
             in=0
-            [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*$ ]] && [ "${BASH_REMATCH[1]}" = "$2" ] && in=1 && found=1
+            [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*(#.*)?$ ]] && [ "${BASH_REMATCH[1]}" = "$2" ] && in=1 && found=1
         elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]
         then
             val="${BASH_REMATCH[1]}"
+        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*[\"\']?trust_level ]]
+        then
+            val="?"   # a trust_level this reader cannot classify (another quoting, a quoted key): untrusted, the primer is kept
         fi
     done <<< "$text"
     [ "$found" = 1 ] && printf '%s' "${val:--}"
@@ -1499,6 +1502,18 @@ codexProjectTrusted()
 # trust_level). Codex merges every layer's projects map before resolving trust, and a managed layer sits above the user one
 # (config/src/loader/project_discovery.rs), so such a mention may override the user's entry: the primer is kept (conservative).
 # Out of the hook's sight, so not honoured: an MDM profile and cloud-managed config.
+# codexMultiline FILE...: true when a readable config file holds a TOML multi-line string (''' or """), inside which a line-based reader
+# could take text for a table header or a trust_level: no project file counts then (CodeRabbit #831 round 3, closed conservatively)
+codexMultiline()
+{
+    local f text
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *"'''"* || "$text" == *'"""'* ]] && return 0
+    done
+    return 1
+}
 codexTrustElsewhere()
 {
     local f text
@@ -1509,14 +1524,21 @@ codexTrustElsewhere()
     done
     return 1
 }
+codexHasText() # FILE: true when FILE is readable and holds a non-whitespace byte
+{
+    local text
+    claudeMdRead "$1" || return 1
+    [[ "$text" == *[![:space:]]* ]]
+}
 agentsMdHoldsBlurb()
 {
     local d="${1%/}" want="$2" f text size top="" cwd="" total=0 project=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
     local -a files=() dirs=()
     codexDiscoveryKeys "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/config.toml" "$home/"*.config.toml && return 1
     local -a otherLayers=( "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/"*.config.toml )
-    if [ -s "$home/AGENTS.override.md" ]; then files+=( "$home/AGENTS.override.md" )
-    elif [ -s "$home/AGENTS.md" ]; then files+=( "$home/AGENTS.md" ); fi
+    # the global level takes the first file holding a non-whitespace byte (Codex trims it: codex-home instructions/mod.rs)
+    if codexHasText "$home/AGENTS.override.md"; then files+=( "$home/AGENTS.override.md" )
+    elif codexHasText "$home/AGENTS.md"; then files+=( "$home/AGENTS.md" ); fi
     top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || top=""
     if [ -n "$top" ] && top="$( cd "$top" 2>/dev/null && pwd -P )" && cwd="$( cd "$d" 2>/dev/null && pwd -P )" \
         && { [ "$cwd" = "$top" ] || [[ "$cwd" == "$top"/* ]]; } && codexProjectTrusted "$home/config.toml" "$top" "$cwd"
@@ -1528,7 +1550,8 @@ agentsMdHoldsBlurb()
             [ "$d" = "$top" ] && break
             d="${d%/*}"
         done
-        codexTrustElsewhere "${otherLayers[@]}" || project=1   # another layer may override the trust: then no project file counts
+        codexTrustElsewhere "${otherLayers[@]}" || codexMultiline "$home/config.toml" "${otherLayers[@]}" || project=1   # another layer may
+        # override the trust, or a multi-line string may hide a table: then no project file counts
     fi
     if [ "$project" = 1 ]
     then

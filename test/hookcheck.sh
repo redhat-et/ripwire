@@ -644,9 +644,31 @@ if [ -x "$REALBIN" ]; then
         ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_file="${ssd_rest%%|*}"; mkdir -p "${ssd_file%/*}"; printf '%s\n' "${ssd_rest#*|}" > "$ssd_file"
         ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$ssd_file" "$SSDREPO/AGENTS.md"
     done
+    # CodeRabbit #831 round 3: a header with a trailing comment is a header; a multi-line string (""" or ''') may hide a table, so no
+    # project file counts while one is present. Each config's premise is counted before the run.
+    SSDX_ROOTP="$( cd "$SSDREPO" && pwd -P )"
+    for ssd_case in "cwd header with a trailing comment, untrusted, over a trusted Git root|header|$( printf '[projects."%s"]  # the sub dir\ntrust_level = "untrusted"' "$SSDX_CWDP" )"$'\n'"$SSDX_TRUST" \
+                    "the only trusted table inside a multi-line string|multiline|$( printf 'notes = """\n[projects."%s"]\ntrust_level = "trusted"\n"""' "$SSDX_ROOTP" )"; do
+        ssd_name="${ssd_case%%|*}"; ssd_rest="${ssd_case#*|}"; ssd_kind="${ssd_rest%%|*}"; printf '%s\n' "${ssd_rest#*|}" > "$CODEX_HOME/config.toml"
+        case "$ssd_kind" in
+            header)    ssd_n="$( grep -cE '^\[projects\.".*"\][[:space:]]+#' "$CODEX_HOME/config.toml" )" ;;
+            multiline) ssd_n="$( grep -c '"""' "$CODEX_HOME/config.toml" )"; [ "$ssd_n" = 2 ] && ssd_n=1 ;;
+        esac
+        [ "$ssd_n" = 1 ] || no "Codex dedup ($ssd_name): premise not planted (count $ssd_n, want 1)"
+        ssd_plant "$SSDREPO/AGENTS.md" "$SSD_CODEX"; ssdx_keep "$ssd_name" "$SSDREPO/AGENTS.md"; rm -f "$SSDREPO/AGENTS.md"
+    done
+    printf '%s\n' "$SSDX_TRUST" > "$CODEX_HOME/config.toml"
     ssd_plant "$SSDCWD/CLAUDE.md" "$SSD_CODEX"; ssdx_keep "the block in CLAUDE.md, which Codex does not read" "$SSDCWD/CLAUDE.md"; rm -f "$SSDCWD/CLAUDE.md"
-    [ "$ssdx_cases" -eq 16 ] && [ "$ssdx_kept" -eq 16 ] && ok "Codex dedup NOT DELIVERED: 16 of 16 keep the primer" \
-        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 16 of 16)"
+    [ "$ssdx_cases" -eq 18 ] && [ "$ssdx_kept" -eq 18 ] && ok "Codex dedup NOT DELIVERED: 18 of 18 keep the primer" \
+        || no "Codex dedup NOT DELIVERED: $ssdx_kept of $ssdx_cases (want 18 of 18)"
+    # CodeRabbit #831 round 3: a whitespace-only global AGENTS.override.md is skipped (Codex trims it), so the global AGENTS.md beside it
+    # is what Codex loads: silent
+    printf ' \n\t\n' > "$CODEX_HOME/AGENTS.override.md"; ssd_plant "$CODEX_HOME/AGENTS.md" "$SSD_CODEX"
+    ssd_n="$( wc -c < "$CODEX_HOME/AGENTS.override.md" )"; ssd_t="$( tr -d ' \t\n' < "$CODEX_HOME/AGENTS.override.md" | wc -c )"; ssd_p="$( ssdx_has "$CODEX_HOME/AGENTS.md" )"
+    ssd_out="$( ssdx_run xwsovr )"
+    if [ "$(( ssd_n ))" -gt 0 ] && [ "$(( ssd_t ))" -eq 0 ] && [ "${ssd_p:-0}" -ge 1 ] && [ -z "$ssd_out" ]; then ok "Codex dedup PRESENT (a whitespace-only global AGENTS.override.md, the block in the global AGENTS.md): silent"
+    else no "Codex dedup PRESENT (whitespace-only global override): override $(( ssd_n )) B / $(( ssd_t )) non-space, planted=${ssd_p:-0} out=${#ssd_out} B, expected silent"; fi
+    rm -f "$CODEX_HOME/AGENTS.override.md" "$CODEX_HOME/AGENTS.md"
     # controls: a trusted cwd table wins over an untrusted Git root one; a trust mention in another layer still leaves the global file
     ssdx_ctl=0
     printf '[projects."%s"]\ntrust_level = "untrusted"\n[projects."%s"]\ntrust_level = "trusted"\n' "$( cd "$SSDREPO" && pwd -P )" "$SSDX_CWDP" > "$CODEX_HOME/config.toml"
