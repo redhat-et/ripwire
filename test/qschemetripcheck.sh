@@ -88,6 +88,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   facets 7 and 8 with the extension mark (count-drift's site values move), so a cached snapshot gains sites of a ninth
 #   facet and holds stale count-drift values: kQSnapCacheScheme moves to 42 in the same diff (40 is #743's, 41 #750's). kCacheVersion and
 #   kParserVer unchanged (no extraction change). Hash 60b6637b9d…329c15a6.
+# 2026-11-28, lane silent-cap2 CodeRabbit round 1 (#758, on main 6d8d11fb9): RE-PINNED with UPDATE_GOLDEN=1. The silent-cap
+#   scan's reads moved (a cut site's text is the whole cut expression, a static_assert ties by namespace, std::size of a
+#   runtime container is no limit), all inside the still-unreleased v42 facet, so kQSnapCacheScheme stays 42 (main is at 41;
+#   no v42 blob shipped). kCacheVersion and kParserVer unchanged (kParserVer 354 is main's, #842). Hash 1321c155a1…af7c8b4e.
 # 2026-11-23, train ge3 rebased onto main 326dec9f4 (#721, lane GE721): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash 4e92d58b18…50535f5b). Watched text moved by the train's qd-lessons-2 members (defectSitesOf's shell-cut
 #   counter + legacySite, as on the 11-22 composed tip) on top of main's pin a606e48d5b…2f4e02ec, and by the CR721 fix

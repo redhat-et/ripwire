@@ -74,6 +74,8 @@ struct CapFinding
     std::string      text;       // the site's identity: the loop head or the if condition, tokens joined
     std::string      limit;      // the limit as written (a constant's last name segment)
     std::string      function;   // the enclosing function's name (its own naming of the limit was judged already); empty when the head names none
+    std::string      ns;         // the namespace the function is in (`a::b`, empty at file scope)
+    std::string      qual;       // the limit's own qualifier as written (`b` for `b::kCap`); empty when unqualified
 };
 
 namespace detail::cap
@@ -170,6 +172,79 @@ inline bool isConstName( std::string_view w ) noexcept
     return w.size() >= 3 && wordCaseOf( w ) == WordCase::Upper;
 }
 
+// The `a::b` written before the name at `k` (`a::b::kCap`), empty when it stands alone.
+inline std::string qualifierOf( std::string_view src, const std::vector<Tok>& toks, std::size_t k )
+{
+    std::string out;
+    while( k >= 2 && tokIs( src, toks[k - 1], "::" ) && toks[k - 2].kind == TokKind::Ident )
+    {
+        k -= 2;
+        out = out.empty() ? std::string( tokText( src, toks[k] ) ) : std::string( tokText( src, toks[k] ) ) + "::" + out;
+    }
+    return out;
+}
+
+// Where the namespace path changes: from token `at` on, code is in `path` (`a::b`; an anonymous namespace adds nothing,
+// a class body is not a namespace). One forward pass per file.
+struct NsMark
+{
+    std::size_t at = 0;
+    std::string path;
+};
+
+inline std::vector<NsMark> namespaceMarks( std::string_view src, const std::vector<Tok>& toks )
+{
+    std::vector<NsMark>      out{ NsMark{} };
+    std::vector<std::size_t> kept;   // the path's length before each open brace, restored at its close
+    std::string              path;
+    std::size_t              stmt = 0;   // the first token after the last `;`, `{` or `}`
+    for( std::size_t k = 0; k < toks.size(); ++k )
+    {
+        if( toks[k].kind != TokKind::Punct || toks[k].end - toks[k].begin != 1 )
+        {
+            continue;
+        }
+        const char c = src[ toks[k].begin ];
+        if( c == '{' )
+        {
+            kept.push_back( path.size() );
+            const std::size_t h = stmt < k && tokIs( src, toks[stmt], "inline" ) ? stmt + 1 : stmt;
+            if( h < k && tokIs( src, toks[h], "namespace" ) )
+            {
+                for( std::size_t j = h + 1; j < k; ++j )
+                {
+                    if( toks[j].kind == TokKind::Ident )
+                    {
+                        path += ( path.empty() ? "" : "::" ) + std::string( tokText( src, toks[j] ) );
+                    }
+                }
+                out.push_back( { k, path } );
+            }
+        }
+        else if( c == '}' && !kept.empty() )
+        {
+            const std::size_t n = kept.back();
+            kept.pop_back();
+            if( n != path.size() )
+            {
+                path.resize( n );
+                out.push_back( { k, path } );
+            }
+        }
+        if( c == '{' || c == '}' || c == ';' )
+        {
+            stmt = k + 1;
+        }
+    }
+    return out;
+}
+
+inline const std::string& namespaceAt( const std::vector<NsMark>& marks, std::size_t k ) noexcept
+{
+    const auto it = std::upper_bound( marks.begin(), marks.end(), k, []( std::size_t t, const NsMark& m ) { return t < m.at; } );
+    return std::prev( it )->path;
+}
+
 // One comparison of a counter against a limit, read off a condition.
 struct Compare
 {
@@ -180,6 +255,7 @@ struct Compare
     CapLimit    limitKind  = CapLimit::None;
     std::string limit;
     std::string alias;                // the parameter a constant limit arrives through, when the head defaults it
+    std::string qual;                 // the limit's qualifier as written (`a::b` for `a::b::kCap`)
     std::string counter;              // the grown identifier, or the collection whose size() is compared
     bool        counterIsSize = false;
     bool        below      = false;   // counter < limit (the loop goes on) as against counter >= limit (the stop)
@@ -229,7 +305,8 @@ public:
 private:
     bool             is( std::size_t k, std::string_view s ) const noexcept { return k < toks_.size() && tokIs( src_, toks_[k], s ); }
     std::string_view text( std::size_t k ) const noexcept { return tokText( src_, toks_[k] ); }
-    bool             isIdent( std::size_t k ) const noexcept { return k < toks_.size() && toks_[k].kind == TokKind::Ident; }
+    TokKind          kindAt( std::size_t k ) const noexcept { return k < toks_.size() ? toks_[k].kind : TokKind::Punct; }
+    bool             isIdent( std::size_t k ) const noexcept { return kindAt( k ) == TokKind::Ident; }
 
     // `<` ... `>` that brackets template arguments, not a comparison: static_cast<int>( x ), std::min<std::size_t>( a, b ).
     void markAngles()
@@ -396,10 +473,12 @@ private:
         {
             return;
         }
-        if( ( is( a, "sizeof" ) && is( a + 1, "(" ) && matchClose( src_, toks_, a + 1 ) == b )
-            || ( is( a, "std" ) && is( a + 1, "::" ) && is( a + 2, "size" ) && is( a + 3, "(" ) && matchClose( src_, toks_, a + 3 ) == b ) )
+        const bool stdSize = is( a, "std" ) && is( a + 1, "::" ) && is( a + 2, "size" ) && is( a + 3, "(" ) && matchClose( src_, toks_, a + 3 ) == b;
+        if( ( is( a, "sizeof" ) && is( a + 1, "(" ) && matchClose( src_, toks_, a + 1 ) == b ) || stdSize )
         {
-            c.limitKind = CapLimit::FixedSize;
+            // sizeof is a compile-time extent; std::size( x ) is one only when x is a fixed array (a constant's name, a
+            // `T x[N]` or a std::array): of a runtime container it is the size the caller handed in
+            c.limitKind = !stdSize || fixedExtent( a + 4, b - 1 ) ? CapLimit::FixedSize : CapLimit::Requested;
             c.limit     = joinTokens( src_, toks_, a, b );
             c.limitAt   = a;
             return;
@@ -484,6 +563,62 @@ private:
         }
         c.limit   = std::string( name );
         c.limitAt = at;
+        c.qual    = qualifierOf( src_, toks_, at );
+    }
+
+    // Is the operand [a, b] of std::size( ) a fixed array: one name (a `this->` or `ns::` path before it) that is a
+    // constant's, or that the file declares as `T name[ N ]` or `std::array< … > name`?
+    bool fixedExtent( std::size_t a, std::size_t b ) const noexcept
+    {
+        if( a > b || !isIdent( b ) )
+        {
+            return false;
+        }
+        for( std::size_t k = a; k < b; ++k )
+        {
+            if( !isIdent( k ) && !is( k, "::" ) && !is( k, "->" ) && !is( k, "." ) )
+            {
+                return false;
+            }
+        }
+        const std::string_view name = text( b );
+        if( isConstName( name ) )
+        {
+            return true;
+        }
+        for( std::size_t k = 1; k + 1 < toks_.size(); ++k )
+        {
+            if( toks_[k].kind != TokKind::Ident || tokText( src_, toks_[k] ) != name )
+            {
+                continue;
+            }
+            const std::string_view before = tokText( src_, toks_[k - 1] );
+            const bool typed = ( toks_[k - 1].kind == TokKind::Ident && before != "return" && before != "case" ) || before == "*" || before == "&";
+            if( typed && tokIs( src_, toks_[k + 1], "[" ) )
+            {
+                return true;   // T name[ N ]
+            }
+            if( before == ">" )
+            {
+                // std::array< T, N > name: walk back to the matching `<`
+                int         depth = 0;
+                std::size_t j     = k - 1;
+                for( ; j > 0; --j )
+                {
+                    const std::string_view w = tokText( src_, toks_[j] );
+                    depth += w == ">" ? 1 : w == ">>" ? 2 : w == "<" ? -1 : 0;
+                    if( depth <= 0 || w == ";" || w == "{" || w == "}" )
+                    {
+                        break;
+                    }
+                }
+                if( depth == 0 && j > 0 && tokIs( src_, toks_[j], "<" ) && tokIs( src_, toks_[j - 1], "array" ) )
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // The counter a comparison side [a, b] reads: C.size() / C.length() of a collection this function appends to, or an
@@ -665,7 +800,7 @@ private:
         }
         for( Compare& c : comparesIn( a, b ) )
         {
-            if( c.below )
+            if( c.below && controlsLoop( a, b, c ) )
             {
                 Raw r{ std::move( c ), CapShape::Loop, kw, a, b, stmtEnd( kw ) };
                 if( holdsWord( close + 1, r.end, "return" ) || holdsWord( close + 1, r.end, "break" ) )
@@ -679,6 +814,44 @@ private:
                 }
                 raws_.push_back( std::move( r ) );
             }
+        }
+    }
+
+    // Does the comparison `c` end the loop whose condition is [a, b] whenever it fails: is it a conjunct of the whole
+    // condition, at every level of parentheses around it? `i < kCap || more()` and `( i < kCap || x ) && more()` go on
+    // past the cap; `more() && ( i < kCap )` does not. A call's argument or a negated group is not a conjunct either.
+    bool controlsLoop( std::size_t a, std::size_t b, const Compare& c ) const noexcept
+    {
+        for( ;; )
+        {
+            std::size_t inner = 0;   // the `(` of the group at this level that holds the comparison
+            int         depth = 0;
+            for( std::size_t k = a; k <= b; ++k )
+            {
+                if( depth == 0 && ( is( k, "||" ) || is( k, "?" ) ) )
+                {
+                    return false;
+                }
+                if( depth == 0 && is( k, "(" ) && k < c.first )
+                {
+                    const std::size_t close = matchClose( src_, toks_, k );
+                    if( close > c.last && close <= b )
+                    {
+                        inner = k;
+                    }
+                }
+                depth += ( is( k, "(" ) || is( k, "[" ) ) ? 1 : ( is( k, ")" ) || is( k, "]" ) ) ? -1 : 0;
+            }
+            if( inner == 0 )
+            {
+                return true;   // the comparison stands at this level, under `&&` only
+            }
+            if( inner > a && ( isIdent( inner - 1 ) || is( inner - 1, "!" ) || is( inner - 1, ">" ) ) )
+            {
+                return false;   // f( i < kCap ), !( i < kCap ), g<T>( … )
+            }
+            a = inner + 1;
+            b = matchClose( src_, toks_, inner ) - 1;
         }
     }
 
@@ -827,6 +1000,36 @@ private:
             --stmt;
         }
         raws_.push_back( { std::move( c ), CapShape::Cut, stmt, name, close - 1, stmtEnd( stmt ) } );
+    }
+
+    // The first token of the receiver of the member call whose name is at `name` (`a.b( x )[ 2 ].substr` at substr gives a).
+    std::size_t receiverStart( std::size_t name ) const noexcept
+    {
+        std::size_t k = name;
+        while( k >= sc_.open + 3 && ( is( k - 1, "." ) || is( k - 1, "->" ) || is( k - 1, "::" ) ) )
+        {
+            std::size_t j = k - 2;
+            // a call's or a subscript's closing bracket: back to its opening, then to the name before it
+            for( int depth = 0; j > sc_.open && ( is( j, ")" ) || is( j, "]" ) ); )
+            {
+                std::size_t m = j;
+                for( ; m > sc_.open; --m )
+                {
+                    depth += ( is( m, ")" ) || is( m, "]" ) ) ? 1 : ( is( m, "(" ) || is( m, "[" ) ) ? -1 : 0;
+                    if( depth == 0 )
+                    {
+                        break;
+                    }
+                }
+                j = m - 1;
+            }
+            if( !isIdent( j ) || j <= sc_.open )
+            {
+                break;
+            }
+            k = j;
+        }
+        return k;
     }
 
     // Is the size of the cut's source compared, or read as a value, anywhere outside the cut itself?
@@ -1066,71 +1269,85 @@ private:
         return false;
     }
 
-    // An if site: does a statement of its own block, before or after it, grow a count whatever the limit says — another
-    // name's (`++total;`), or the counter's own when it outlives the function (a member that counts past the limit) — or
-    // is a DISCLOSE statement there?
-    bool totalCountedBeside( const Raw& r ) const noexcept
+    bool opens( std::size_t k ) const noexcept { return is( k, "(" ) || is( k, "[" ) || is( k, "{" ); }
+    bool closes( std::size_t k ) const noexcept { return is( k, ")" ) || is( k, "]" ) || is( k, "}" ); }
+
+    // Is the DISCLOSE at `k` the form that sets a field a reader sees, DISCLOSE( sink, why ): two or more top-level
+    // arguments? A one-argument DISCLOSE( msg ) is a debug trace that ships nothing (CLAUDE.md non-negotiable 4), so it
+    // tells no caller the limit was reached.
+    bool disclosesToSink( std::size_t k ) const noexcept
     {
-        const auto grownAt = [ & ]( std::size_t k )
+        if( !is( k + 1, "(" ) )
         {
-            if( isIdent( k ) && is( k, "DISCLOSE" ) )
+            return false;
+        }
+        const std::size_t close = std::min( matchClose( src_, toks_, k + 1 ), sc_.close );
+        int               depth = 0;
+        for( std::size_t j = k + 2; j < close; ++j )
+        {
+            depth += opens( j ) ? 1 : closes( j ) ? -1 : 0;
+            if( depth == 0 && is( j, "," ) )
             {
                 return true;
             }
-            if( !is( k, "++" ) && !is( k, "+=" ) )
-            {
-                return false;
-            }
-            // the grown name: `++a.b;` reads forward along the member path, `a.b++` / `a.b += x` reads the token before
-            std::size_t n = k;
-            if( is( k, "++" ) && isIdent( k + 1 ) )
-            {
-                n = k + 1;
-                while( ( is( n + 1, "." ) || is( n + 1, "->" ) ) && isIdent( n + 2 ) )
-                {
-                    n += 2;
-                }
-            }
-            else if( k > 0 && isIdent( k - 1 ) )
-            {
-                n = k - 1;
-            }
-            return n != k && ( text( n ) != r.cmp.counter || ( !r.cmp.counterIsSize && !isLocal( r.cmp.counter ) ) );
-        };
-        int depth = 0;
-        for( std::size_t k = r.at; k-- > sc_.open + 1; )
+        }
+        return false;
+    }
+
+    // Does the token at `k` count beside the site `r` whatever the limit says: a sink DISCLOSE, or a `++` / `+=` of another
+    // name (`++total;`), or of the counter itself when it outlives the function (a member that counts past the limit)?
+    bool countsBeside( std::size_t k, const Raw& r ) const noexcept
+    {
+        if( isIdent( k ) && is( k, "DISCLOSE" ) )
         {
-            if( is( k, ")" ) || is( k, "]" ) || is( k, "}" ) )
+            return disclosesToSink( k );
+        }
+        if( !is( k, "++" ) && !is( k, "+=" ) )
+        {
+            return false;
+        }
+        // the grown name: `++a.b;` reads forward along the member path, `a.b++` / `a.b += x` reads the token before
+        std::size_t n = k;
+        if( is( k, "++" ) && isIdent( k + 1 ) )
+        {
+            n = k + 1;
+            while( ( is( n + 1, "." ) || is( n + 1, "->" ) ) && isIdent( n + 2 ) )
             {
-                ++depth;
+                n += 2;
             }
-            else if( is( k, "(" ) || is( k, "[" ) || is( k, "{" ) )
+        }
+        else if( k > 0 && isIdent( k - 1 ) )
+        {
+            n = k - 1;
+        }
+        return n != k && ( text( n ) != r.cmp.counter || ( !r.cmp.counterIsSize && !isLocal( r.cmp.counter ) ) );
+    }
+
+    // An if site: does a statement of its own block, before or after it, count beside it (countsBeside)?
+    bool totalCountedBeside( const Raw& r ) const noexcept
+    {
+        int depth = 0;
+        for( std::size_t k = r.at; k-- > sc_.open + 1; )   // back to the block's own opening
+        {
+            depth += closes( k ) ? 1 : opens( k ) ? -1 : 0;
+            if( depth < 0 )
             {
-                if( depth-- == 0 )
-                {
-                    break;   // the block's own opening
-                }
+                break;
             }
-            else if( depth == 0 && grownAt( k ) )
+            if( depth == 0 && !closes( k ) && countsBeside( k, r ) )
             {
                 return true;
             }
         }
         depth = 0;
-        for( std::size_t k = r.end + 1; k < sc_.close; ++k )
+        for( std::size_t k = r.end + 1; k < sc_.close; ++k )   // on to the block's own closing
         {
-            if( is( k, "(" ) || is( k, "[" ) || is( k, "{" ) )
+            depth += opens( k ) ? 1 : closes( k ) ? -1 : 0;
+            if( depth < 0 )
             {
-                ++depth;
+                break;
             }
-            else if( is( k, ")" ) || is( k, "]" ) || is( k, "}" ) )
-            {
-                if( depth-- == 0 )
-                {
-                    break;   // the block's own closing
-                }
-            }
-            else if( depth == 0 && grownAt( k ) )
+            if( depth == 0 && !opens( k ) && countsBeside( k, r ) )
             {
                 return true;
             }
@@ -1354,7 +1571,7 @@ private:
             {
                 const std::size_t after = loopEndAround( r );
                 r.verdict = r.shape == CapShape::Loop && appendedAfter( r.cmp.counter, after ) ? CapVerdict::WorkBound
-                          : backReadAfter( r.cmp.counter, after )                             ? CapVerdict::EndRetested
+                          : !r.returns && backReadAfter( r.cmp.counter, after )               ? CapVerdict::EndRetested
                                                                                               : CapVerdict::Silent;
             }
             if( r.verdict == CapVerdict::Silent && r.shape == CapShape::Loop )
@@ -1372,9 +1589,12 @@ private:
             f.shape     = r.shape;
             f.limitKind = r.cmp.limitKind;
             f.startByte = toks_[r.at].begin;
-            f.text      = joinTokens( src_, toks_, r.at, r.shape == CapShape::Cut ? std::min( r.end, r.at + 60 ) : r.condB + 1 );
+            // a cut's identity is the whole cut expression, receiver to limit (`name_ = opts.name.substr( 0, kCap )`), however
+            // long the statement before it; a stop's is its head
+            f.text      = r.shape == CapShape::Cut ? joinTokens( src_, toks_, receiverStart( r.cmp.opAt ), r.cmp.last ) : joinTokens( src_, toks_, r.at, r.condB + 1 );
             f.limit     = r.cmp.limit;
             f.function  = std::string( fn );
+            f.qual      = r.cmp.qual;
             out.push_back( std::move( f ) );
         }
         // a site that left a trace names its limit for the rest of the tree (namedConstants); set after every verdict, so a
@@ -1390,28 +1610,29 @@ public:
     // noteSite( r.testAt, f, l );`): the callee's keep is counted here.
     void countedCallees( std::vector<std::string>& out ) const
     {
-        for( std::size_t k = sc_.open + 2; k + 1 < sc_.close; ++k )
+        // one forward pass: a frame per open bracket records whether a `++` stood at its own level yet (a nested block's
+        // or an argument's count is not the enclosing block's), so a call statement reads its block's flag in O(1)
+        std::vector<char> counted{ 0 };
+        for( std::size_t k = sc_.open + 1; k + 1 < sc_.close; ++k )
         {
-            if( !isIdent( k ) || !is( k + 1, "(" ) || !cppStatementStartsAt( src_, toks_, k ) || !is( k - 1, ";" ) )
+            if( is( k, "(" ) || is( k, "[" ) || is( k, "{" ) )
             {
-                continue;
+                counted.push_back( 0 );
             }
-            int depth = 0;
-            for( std::size_t j = k - 1; j-- > sc_.open + 1; )
+            else if( is( k, ")" ) || is( k, "]" ) || is( k, "}" ) )
             {
-                if( is( j, ")" ) || is( j, "]" ) || is( j, "}" ) )
+                if( counted.size() > 1 )
                 {
-                    ++depth;
+                    counted.pop_back();
                 }
-                else if( ( is( j, "(" ) || is( j, "[" ) || is( j, "{" ) ) && depth-- == 0 )
-                {
-                    break;
-                }
-                else if( depth == 0 && is( j, "++" ) )
-                {
-                    out.emplace_back( text( k ) );
-                    break;
-                }
+            }
+            else if( is( k, "++" ) )
+            {
+                counted.back() = 1;
+            }
+            else if( k >= sc_.open + 2 && counted.back() != 0 && isIdent( k ) && is( k + 1, "(" ) && is( k - 1, ";" ) && cppStatementStartsAt( src_, toks_, k ) )
+            {
+                out.emplace_back( text( k ) );
             }
         }
     }
@@ -1453,11 +1674,16 @@ struct CapFileScan
 inline CapFileScan capScanCpp( std::string_view src, const std::vector<detail::Tok>& toks )
 {
     using namespace detail;
-    CapFileScan out;
+    CapFileScan                    out;
+    const std::vector<cap::NsMark> marks = cap::namespaceMarks( src, toks );
     for( const cap::Scope& sc : cap::functionScopes( src, toks ) )
     {
         cap::FnScan             scan( src, toks, sc );
         std::vector<CapFinding> found = scan.findings();
+        for( CapFinding& f : found )
+        {
+            f.ns = cap::namespaceAt( marks, sc.open );
+        }
         // a constant the function names is named for every OTHER function's sites; its own sites were judged above
         std::vector<std::string> names;
         scan.namedConstants( names );
@@ -1477,9 +1703,12 @@ inline CapFileScan capScanCpp( std::string_view src, const std::vector<detail::T
             const std::size_t close = matchClose( src, toks, k + 1 );
             for( std::size_t j = k + 2; j < close && j < toks.size(); ++j )
             {
-                if( toks[j].kind == TokKind::Ident && cap::isConstName( tokText( src, toks[j] ) ) )
+                if( toks[j].kind == TokKind::Ident && cap::isConstName( tokText( src, toks[j] ) ) && !( j + 1 < toks.size() && tokIs( src, toks[j + 1], "::" ) ) )
                 {
-                    out.asserted.emplace_back( tokText( src, toks[j] ) );
+                    // CONSTANT \x1f the namespace it resolves in: the assertion's own, then the qualifier written before it
+                    const std::string& here = cap::namespaceAt( marks, k );
+                    const std::string  qual = cap::qualifierOf( src, toks, j );
+                    out.asserted.push_back( std::string( tokText( src, toks[j] ) ) + '\x1f' + ( qual.empty() ? here : here.empty() ? qual : here + "::" + qual ) );
                 }
             }
         }
@@ -1494,7 +1723,7 @@ inline std::string capWhy( const CapFinding& f )
          + ( f.limitKind == CapLimit::Named ? std::string( ", and no other function names the limit" ) : std::string() );
 }
 
-// The tree's two name sets, sorted and unique: `named` rows are FUNCTION \x1f CONSTANT.
+// The tree's name sets, sorted and unique: `named` rows are FUNCTION \x1f CONSTANT, `asserted` rows CONSTANT \x1f NAMESPACE.
 struct CapTreeNames
 {
     std::vector<std::string> named;
@@ -1532,9 +1761,17 @@ inline CapVerdict capResolve( const CapFinding& f, const CapTreeNames& tree )
     {
         return CapVerdict::Silent;
     }
-    if( std::binary_search( tree.asserted.begin(), tree.asserted.end(), f.limit ) )
+    // a static_assert of the SAME constant: a same-named one in a sibling namespace ties nothing here
+    const std::string key = f.limit + '\x1f';
+    for( auto it = std::lower_bound( tree.asserted.begin(), tree.asserted.end(), key ); it != tree.asserted.end() && it->starts_with( key ); ++it )
     {
-        return CapVerdict::LegendTied;
+        const std::string_view path = std::string_view( *it ).substr( key.size() );
+        const bool             tied = f.qual.empty() ? ( path.empty() || path == f.ns || ( f.ns.starts_with( path ) && f.ns.substr( path.size() ).starts_with( "::" ) ) )
+                                                     : ( path == f.qual || ( path.ends_with( f.qual ) && path.substr( 0, path.size() - f.qual.size() ).ends_with( "::" ) ) );
+        if( tied )
+        {
+            return CapVerdict::LegendTied;
+        }
     }
     const std::string suffix = '\x1f' + f.limit;
     for( const std::string& row : tree.named )

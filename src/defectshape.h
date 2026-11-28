@@ -2014,6 +2014,11 @@ struct Judgment
 inline std::string normTarget( std::string_view w )
 {
     std::string u = sh::detail::unq( w );
+    // `./out` and `out` name one file (the writer `>out`, the check `[ -s ./out ]`); `./out.meta` stays its own name
+    while( u.size() > 2 && u.starts_with( "./" ) )
+    {
+        u.erase( 0, 2 );
+    }
     std::string out;
     for( std::size_t i = 0; i < u.size(); ++i )
     {
@@ -3751,11 +3756,12 @@ private:
         return false;
     }
     // Does `text` name one of the files `needles` as a whole path, not as a longer path's head ("$TMP/out.meta",
-    // "$TMP/out/x") or tail ("$D/out" for "out")?
+    // "$TMP/out/x") or tail ("$D/out" for "out")? A needle is a normTarget name, so `./out` in the text names "out" too.
     static bool mentionsAny( const std::string& text, const std::vector<std::string>& needles )
     {
         const auto inPath = []( char c ) { return c == '/' || c == '.' || c == '-' || isIdentChar( c ); };
-        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f ) { return rw::namesplit::containsWordBoundedBy( text, f, inPath ); } );
+        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f )
+                            { return rw::namesplit::containsWordBoundedBy( text, f, inPath ) || rw::namesplit::containsWordBoundedBy( text, "./" + f, inPath ); } );
     }
     // Does `text` read "$V" as a whole text, not only as a directory prefix ("$V/f") or a longer name's head ("$VX")?
     static bool readsWhole( const std::string& text, const std::string& v )

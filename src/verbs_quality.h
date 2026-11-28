@@ -1755,7 +1755,7 @@ inline constexpr const char* kQdSilentCapLegend =
     "the counter and the walked list's size are not read after it, and a returned value is one the function returns "
     "elsewhere too. Also not a row: a loop that appends nothing and calls nothing, a list that grows again after the "
     "loop, a keep whose caller counts beside the call, a name with total in it beside the list. why= names the limit. Fix: record the stop where a reader sees it (a capped / floor attribute, a "
-    "DISCLOSE), or say why it cannot change an answer and ack the row. About seven rows in ten are real on the measured trees; "
+    "DISCLOSE), or say why it cannot change an answer and ack the row. About six rows in ten are real on the measured trees; "
     "the others are work bounds that cut no answer and stops disclosed in a way this check does not read. Not checked: a "
     "number as the limit (a runaway guard), a limit that is a parameter or a member (the caller's requested size), a "
     "search that leaves on a find, a size filter on one input (if x.size() > kMax: skip), a std::min clamp, a fixed "
@@ -2711,7 +2711,7 @@ QdPartition applyScopeAndAcks( const rw::quality::Scope& scope, DeltaBasis& basi
 // --ack-only=SUBSTR[,SUBSTR]: ack a SUBSET instead of everything on screen. Without it, the only way to accept one
 // deliberate contract change was to accept the whole report — which is how a ratchet quietly becomes a rubber stamp. A
 // finding matches if a pattern occurs in its kind, its canonical id or its FACET (so "api-surface", "src/quality.h", one
-// exact id, or "format-arity" all work). The facet is what makes this precise enough to be honest: "api-surface" also
+// exact id, or "format-arity" all work); a pattern that IS a facet name matches that facet exactly, never an id holding it. The facet is what makes this precise enough to be honest: "api-surface" also
 // covers the never-gating new-symbol rows, so acking by kind would sweep in 59 findings to accept 8;
 // --ack-only=contract-change accepts exactly the deliberate ones. The pseudo-token "gating" selects whatever would
 // actually exit 2.
@@ -2732,6 +2732,13 @@ bool ackOnlySelects( std::string_view ackOnly, const rw::quality::Regression& r,
         if( pat == "gating" )
         {
             return gates;
+        }
+        // a FACET NAME selects that facet alone: --ack-only=silent-cap must not also ack a format-arity row in
+        // src/silent-cap.cpp because its canonical id holds the word (CR758)
+        if( pat == "contract-change" || pat == "new-symbol"
+            || std::find( rw::defectshape::kFacetNames.begin(), rw::defectshape::kFacetNames.end(), pat ) != rw::defectshape::kFacetNames.end() )
+        {
+            return r.facet == pat;
         }
         return !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos
                                  || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) );

@@ -6298,9 +6298,9 @@ Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only; record
 leaves the function no worse (or acks it).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries eight
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries nine
 facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`,
-`zero-evidence`, `count-drift`), shapes this project's own
+`zero-evidence`, `count-drift`, `silent-cap`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity, a new function at the ceiling (QD-ENTRY-CEILING) and a tangled new function (TANGLE-GATE-B)). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6385,6 +6385,17 @@ facet: its prototype matched named `k*` constants and looked for a disclosure wo
 precision. `silent-cap` (src/silentcap.h) finds the site by structure and decides silence by what the code does after the stop. The rule,
 its eleven trace tests and the stated misses are in the legend (`--quality-delta` prints it beside a row) and in the file header.
 
+**Provenance.** Measured on an Apple M2 Pro (16 GB). Two instruments read the facet's own code (`capScanCpp` and `capResolve`
+in `src/silentcap.h`): the product, `ripwire . --quality-delta --no-cache`, run on a copy of this tree without `third_party/`
+committed as one change over a one-file seed commit, so every site is new and every silent-cap row prints; and a standalone
+driver that compiles `src/silentcap.h` and prints every finding with its verdict (lane tooling, not in this repository). The two
+print the same 19 sites on this tree at b1d4856d4 (and the same 18 at fe284b2af), so the driver stands in for the product on
+the seed replay and on the two outside trees. The seeds are the 45 "disclose this cap" CodeRabbit items harvested for CR-QD-3;
+the driver ran over `src/` at each seed's reviewed commit and at its fix commit. Outside trees: envoy at 744a11b5b (4,313
+non-test `.h`/`.cc`/`.cpp` files) and dgl (265 non-test files; its revision was not recorded, and it has no cap site of any
+verdict). The labels of the current rows are pinned in the table under **Precision**; rows of the earlier rounds are named in
+the text.
+
 **Recall.** The 43 `src/` seeds replayed at their reviewed commit (the other 2 of the 45 are docs-table items), matched by hand on
 function and limit, since a review anchor is rarely the cap's own line:
 
@@ -6398,15 +6409,20 @@ function and limit, since a review anchor is rarely the cap's own line:
 | **all `src/` seeds** | **43** | **12** |
 | docs-table | 2 | not a code shape |
 
-Every found seed that has a fix commit (6 of the 12) prints no row on the fix tree.
+Every found seed that has a fix commit (6 of the 12) prints no row on the fix tree. The 12 found, by their review anchor:
+`infra/diagnostics.cpp:586`, `foronesidereach.h:389`, `forreadercallers.h:254`, `forimportspec.h:757`, `degradedscan.h:195`,
+`fordispatchhop.h:609` (two items), `forfilesyms.h:1104` and `:1108`, `ingest_metrics.h:1008`, `resolve.h:1532`,
+`forrowfeatures.h:45`. The CR758 round-1 rule (below) changes no silent row on any of the 56 seed and fix trees.
 
 **Precision.** Every row hand read, three labels: real (silent, and reachable on an input the tool accepts), guard (silent, a
 runaway guard not reachable in practice), false (disclosed in a way the check does not read, or a work bound that cuts no answer).
 
 | tree | files | rows | real | guard | false | real / rows | Wilson 95 % |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| this project's `src/`, first rule | 326 | 23 | 12 | 1 | 10 | 52 % | [0.33, 0.71] |
-| this project's `src/`, after the 11-26 round | 326 | 17 | 12 | 1 | 4 | 71 % | [0.47, 0.87] |
+| this project's `src/` at f814e59d1, first rule (driver) | 326 | 23 | 12 | 1 | 10 | 52 % | [0.33, 0.71] |
+| this project's `src/` at f814e59d1, after the 11-26 round (driver) | 326 | 17 | 12 | 1 | 4 | 71 % | [0.47, 0.87] |
+| this project at fe284b2af (product) | 337 | 18 | 12 | 1 | 5 | 67 % | [0.44, 0.84] |
+| this project at b1d4856d4, CR758 round-1 rule (product) | 340 | 19 | 12 | 1 | 6 | 63 % | [0.41, 0.81] |
 | envoy (non-test), both rounds | 4,313 | 4 | 2 | 0 | 2 | 50 % | [0.15, 0.85] |
 | dgl (non-test) | 265 | 0 | - | - | - | - | - |
 
@@ -6420,9 +6436,29 @@ and one is false (a doc-body ride-along on rows the answer already prints). The 
   name with `total` in it kept beside the list. The 1 left is a rollup's top directories with no total printed.
 - one cheap rule beside them: a list whose last element is compared after the walk (a cache's completeness test).
 
-The 4 false rows left on this tree: the fold scope, the line's kept hits, the rollup's top directories, the doc-body ride-along. On
-envoy both false rows are protocol refusals that return an error. No seed was lost in the round (12 of 43 before and after). 71 % is
-below the 80 % a gating facet needs, so the facet is report-only and its legend states the measured share.
+The 4 false rows left after the round: the fold scope, the line's kept hits, the rollup's top directories, the doc-body
+ride-along. On envoy both false rows are protocol refusals that return an error. No seed was lost in the round (12 of 43 before
+and after). Main code added since brings two more false rows (a clone cache's retention count, and a co-change list's tail that
+only fills to a size from rows below the support floor), so the current share is 12 of 19. That is below the 80 % a gating facet
+needs, so the facet is report-only and its legend states the measured share ("about six rows in ten").
+
+The 19 rows at b1d4856d4 (`src/`, file:line of the stop, its limit, the label):
+
+| label | rows |
+| --- | --- |
+| real (12) | `degradedscan.h:81` kDegradedScanFiles + kDegradedScanBytes (one row), `fordispatchhop.h:375` kForDispatchSites, `forgraphverb.h:467` kGraphSubjectAttempts, `forreexport.h:792` and `:805` kReexportUseCap, `forreexport.h:1019` kReexportNameCap, `forreexport.h:1446` kReexportDefCap, `graph.h:1258` kChaConeCap, `ingest_metrics.h:1351` std::size( stack ), `memceiling.h:178` sizeof( text ), `resolve.h:1664` kMaxRustUseTreeDepth, `verbs_grep.h:972` kGrepHitRefsMax |
+| guard (1) | `ingest_names.h:3896` kExtendChainCap |
+| false (6) | `fordocbody.h:219` kForDocBodyFiles, `forfold.h:77` kForBodyFoldRows, `forliteral.h:4352` kForRegLineHits, `graph.h:19301` kImportTierRollupDirs, `situ.h:490` kCoTailFillTo, `verbfs.h:923` kCloneEntriesKept |
+
+**CR758 round 1** (CodeRabbit on #758) tightened six reads: `std::size( x )` is a fixed limit only when `x` is a constant, a
+`T x[ N ]` or a `std::array` (of a runtime container it is the caller's size, so not a site); a loop comparison counts only as a
+conjunct of the whole condition (`i < kCap || more()` goes on past the cap); a one-argument `DISCLOSE( msg )` beside a stop is a
+debug trace and discloses nothing; a stop that returns is not retested by a `back()` read after the walk; a cut's site identity
+is the whole cut expression, receiver to limit; and a `static_assert` ties a stop only when it names the same constant by
+namespace (a same-named `kCap` in a sibling namespace ties nothing). On this tree the rule moves no silent row (19 before and
+after); on envoy its 4 rows are unchanged. The caller-counts read became one forward pass per function: a function of 20,000
+consecutive calls scans in 0.13 s instead of 2.84 s (driver, best of 5); this tree's `src/` (0.51 s / 0.52 s) and envoy
+(0.67 s / 0.70 s) are unchanged within noise.
 
 **What the measurement removed.** A bare number as the limit: 81 such sites on this tree; of the 13 hand read none was real (7
 line windows or grammar bounds, 6 runaway guards), so a number is not reported. A `std::min( x.size(), kMax )` clamp: 15 rows, most
