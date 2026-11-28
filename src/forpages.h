@@ -252,7 +252,50 @@ inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no 
     return "<!-- " + body + " -->";
 }
 
-// The first (schema) comment cut at a "; " clause boundary so it and the full-legend pointer fit kCoreLegendBytes.
+// θ5 round 2 (lane CORE-NOTES, 2026-11-27): THE DATA-NOTE TAIL of the schema comment, held back from the
+// clause cut below. The note channels verbs_for.h appends last (" [adaptive: …]", " [doc mentions: …]",
+// " [floor: …]", the siblift/boost/expansion notes) are DATA, not definitions — verbs_for.h's own comment
+// beside them says their text IS the data (cliff rank, drop, the env knob). The cut below sheds
+// DEFINITIONS, and a definition is recoverable from kFullLegendPointer because it is the same bytes in
+// every answer; a datum is not, because the pointer's call RE-DERIVES it instead of reading it back.
+//
+// This repo's own `--for="tree-sitter parse of a source file" --adaptive` is the case that found it: a
+// 1,661 B schema comment whose LAST 220 B were exactly the two notes, so they were the first thing the
+// 1 KiB cut threw away and the defaulted CLI posture disclosed no narrowing at all (--legend=compact,
+// =full, =last and RIPWIRE_NO_CORE_LEGEND=1 all carried it). That silently undid SHOWCASE-TAIL-SEAM
+// (2026-11-20, IN5), a fix made so that very clause would reach the page; showcasecapturecheck arm (G)
+// is what caught it, four days later, as an unfulfilled caption claim.
+//
+// The notes come out of the SAME kCoreLegendBytes ceiling — they displace definition clauses, they do not
+// widen the core, and corelegendcheck (C1) is unmoved. A note run with no room left keeps the cut it had:
+// a 1 KiB comment of nothing but notes is not an improvement on one that at least names the schema.
+//
+// Returns the offset in `head` at which the trailing note run starts, or head.size() when there is none. A
+// group counts as a note only if it is " [" … "]" holding no further ']' and carrying a ": " label seam —
+// the shape every emitter above writes. Prose that merely ends in a bracket is left in the cuttable body,
+// because guessing wider here would move bytes that the byte pins read.
+[[nodiscard]] inline std::size_t coreNoteTailAt( std::string_view head ) noexcept
+{
+    std::size_t at = head.size();
+    while( at > 0 && head[ at - 1 ] == ']' )
+    {
+        const std::size_t open = head.rfind( " [", at - 1 );
+        if( open == std::string_view::npos )
+        {
+            break;
+        }
+        const std::string_view body = head.substr( open + 2, at - 1 - ( open + 2 ) );
+        if( body.find( ']' ) != std::string_view::npos || body.find( ": " ) == std::string_view::npos )
+        {
+            break;
+        }
+        at = open;
+    }
+    return at;
+}
+
+// The first (schema) comment cut at a "; " clause boundary so it, the full-legend pointer and this answer's
+// data notes fit kCoreLegendBytes.
 [[nodiscard]] inline std::string coreSchema( std::string_view legend )
 {
     constexpr std::string_view open = "<!--", close = " -->";
@@ -260,14 +303,26 @@ inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no 
     if( !legend.starts_with( open ) || end == std::string_view::npos ) { return std::string( legend ); }
     std::string_view head = legend.substr( 0, end );
     while( head.ends_with( ' ' ) || head.ends_with( ';' ) ) { head.remove_suffix( 1 ); }
-    const std::size_t room = kCoreLegendBytes - kFullLegendPointer.size() - close.size();
+    // Hold the data notes aside BEFORE the cut, and charge them to the same ceiling.
+    const std::string_view notes = head.substr( coreNoteTailAt( head ) );
+    head.remove_suffix( notes.size() );
+    while( head.ends_with( ' ' ) || head.ends_with( ';' ) ) { head.remove_suffix( 1 ); }
+    const std::size_t fixed = kFullLegendPointer.size() + close.size();
+    // The clamp: a comment must keep its own "<!--" open or the document is not well formed, so the head
+    // never cuts below it. Reaching the clamp means the note run alone ate the ceiling (over 900 B of
+    // notes), which no emitter above can write — each formats into a 200 B buffer and compactForNote only
+    // shrinks it. If it ever does fire the comment stays well formed and goes OVER kCoreLegendBytes, where
+    // corelegendcheck (C1) reds on it: a gate catching a widened core is the right failure here, and it is
+    // why this is a clamp rather than an ASSUME on a path Release would delete.
+    const bool        fits = kCoreLegendBytes > fixed + notes.size() + open.size();
+    const std::size_t room = fits ? kCoreLegendBytes - fixed - notes.size() : open.size();
     if( head.size() > room )
     {
-        const std::size_t j = head.rfind( "; ", room - 2 );
+        const std::size_t j = room >= 2 ? head.rfind( "; ", room - 2 ) : std::string_view::npos;
         head = head.substr( 0, j == std::string_view::npos || j <= open.size() ? room : j );
     }
     std::string out( head );
-    out.append( kFullLegendPointer ).append( close );
+    out.append( kFullLegendPointer ).append( notes ).append( close );
     return out;
 }
 

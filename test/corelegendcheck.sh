@@ -14,6 +14,13 @@
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
+#   (C10) THE DATA NOTES SURVIVE THE CUT (lane CORE-NOTES, 2026-11-27): a " [label: ...]" note is this ANSWER'S DATA, not a
+#        definition, so the pointer cannot stand in for it -- following it RE-DERIVES the datum instead of reading it back. Every
+#        note the full (--legend=last) page 1 carries is in the core schema comment too, on the default fixture and on the
+#        --adaptive one (two notes, so the multi-note walk is exercised), and that comment still meets (C1)'s bounds: the notes are
+#        charged to the same 1 KiB and displace definition clauses. COUNTS the notes it read and fails on zero. Before this arm the
+#        notes sat in the comment's last bytes and were the FIRST thing the cut dropped -- a default --adaptive run disclosed no
+#        narrowing at all. (C10n) the same comparison against a core page with its note tail stripped fails
 #   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1, and its
 #        withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
 #   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte, but for the --legend=compact its next= names (C9)
@@ -57,6 +64,9 @@ env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK"                 >"$WORK/lines_
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --legend=last   >"$WORK/lines_last_1.xml" 2>/dev/null
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --page-bytes=100000000 >"$WORK/lines_onepage.xml" 2>/dev/null
 for p in compact dict; do "$BIN" . --for="$TASK" --legend=$p >"$WORK/${p}_1.xml" 2>/dev/null; done
+# (C10): the same task with --adaptive, whose answer carries TWO data notes (adaptive + doc mentions) back to back
+"$BIN" . --for="$TASK" --adaptive                        >"$WORK/anote_1.xml" 2>/dev/null
+"$BIN" . --for="$TASK" --adaptive --legend=last           >"$WORK/anote_last_1.xml" 2>/dev/null
 follow(){   # follow next= from $WORK/$1_1.xml to the last page (pasteable shell: shlex, never by hand); pages served -> $1.n
     local k=1 nx   # $2..: the env(1) arguments every continuation runs under
     while :; do
@@ -120,6 +130,25 @@ say(okl, f"(C1) row-line form (as served): page 1 legend {nbl} B in {ncl} commen
 say(not core_ok(core.replace(POINTER, ""))[0], "(C1n) the checker fails page 1 with the pointer removed")
 say(not core_ok(last)[0], "(C1n) the checker fails the full-legend (--legend=last) page 1")
 say("<!-- page=K of pages=N:" in last and len(lleg.encode()) > 1024, "(C2) --legend=last page 1 carries the page clause and the full legend")
+# (C10) the data-note tail. A note is " [label: text]" with no ']' inside it -- the shape every emitter writes
+# (verbs_for.h/mcpverbs.h formatTo sites) and the shape forpages.h coreNoteTailAt holds back from the clause cut.
+NOTE = re.compile(r" \[[a-z][a-z ]*: [^\]]*\]")
+def notes_of(t):
+    return NOTE.findall(doc_legend(t)[0])
+def schema_of(t):
+    cs = re.findall(r"<!--.*?-->", doc_legend(t)[0], re.S)
+    return cs[0] if cs else ""
+anote, anote_last = rd(W + "/anote_1.xml"), rd(W + "/anote_last_1.xml")
+for name, cf, lf, least in (("default", core, last, 1), ("--adaptive", anote, anote_last, 2)):
+    want, have = notes_of(lf), schema_of(cf)
+    miss = [n for n in want if n not in have]
+    say(len(want) >= least and not miss,
+        f"(C10) {name} page 1: {len(want)} data note(s) in the full legend, all in the core schema comment; lost: {miss}")
+oka, nba, nca = core_ok(anote)
+say(oka, f"(C10) --adaptive page 1 legend {nba} B in {nca} comment(s): the notes are charged to the same 1 KiB, (C1) bounds held")
+stripped = NOTE.sub("", anote)
+say([n for n in notes_of(anote_last) if n not in schema_of(stripped)] != [],
+    "(C10n) the comparison fails a core page with its data-note tail stripped")
 lc, ll = rd(W + "/lines_1.xml"), rd(W + "/lines_last_1.xml")
 cw, lw = root_int(lc, "withheld_bytes"), root_int(ll, "withheld_bytes")
 say(len(lc.encode()) <= len(ll.encode()) and cw is not None and lw is not None and cw <= lw,
