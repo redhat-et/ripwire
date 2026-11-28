@@ -1425,45 +1425,56 @@ inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint
     }
     return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
 }
+// RUST-TURBOFISH: one past the block or line comment that starts at `k` (`k` itself when none starts there; `end + 1` when it never
+// closes inside [k, end)). A comment is whitespace to Rust, so a `>`, `;` or `{` inside one belongs to no type list.
+inline std::uint32_t pastComment( std::string_view src, std::uint32_t k, std::uint32_t end ) noexcept
+{
+    if( src[ k ] != '/' || k + 1 >= end || ( src[ k + 1 ] != '*' && src[ k + 1 ] != '/' ) )
+    {
+        return k;
+    }
+    const std::string_view stop = src[ k + 1 ] == '*' ? "*/" : "\n";
+    const std::size_t      at   = src.find( stop, k + 2 );
+    return at == std::string_view::npos || at >= end ? end + 1 : static_cast< std::uint32_t >( at + stop.size() );
+}
+// RUST-TURBOFISH: the bracket depths of a generic-argument list being scanned: `<`/`>` pairs and `[`/`]` pairs.
+struct ArgDepth
+{
+    std::uint32_t angle  = 0;
+    std::uint32_t square = 0;
+    // A byte no type list holds: `{`, `}`, or a `;` outside `[..]` (an array type `[u8; 4]` holds one).
+    [[nodiscard]] bool rejects( char c ) const noexcept { return c == '{' || c == '}' || ( c == ';' && square == 0 ); }
+    // Counts `c`; true when it is the `>` that closes the whole list. `->` (a `Fn(u8) -> u8` argument) closes nothing.
+    bool closes( char c, char prev ) noexcept
+    {
+        square += c == '[';
+        square -= c == ']' && square > 0;
+        angle += c == '<';
+        return c == '>' && prev != '-' && --angle == 0;
+    }
+};
 // RUST-TURBOFISH: the end of the generic-argument list whose `<` sits at `open` — one past its matching `>` — or `open` itself
-// when the list does not close inside [open, end) or meets a byte no type list holds (`{`, `}`, or a `;` outside `[..]`: an array
-// type `[u8; 4]` holds one). `->` (a `Fn(u8) -> u8` argument) is not a closing `>`, and a block or line comment is skipped whole,
-// so a `>` or `;` inside one neither closes nor rejects the list.
+// when the list does not close inside [open, end) or meets a byte no type list holds (see ArgDepth::rejects).
 inline std::uint32_t pastGenericArgs( std::string_view src, std::uint32_t open, std::uint32_t end ) noexcept
 {
-    std::uint32_t depth = 0;
-    std::uint32_t brack = 0;
+    ArgDepth depth;
     for( std::uint32_t k = open; k < end; ++k )
     {
-        const char c = src[ k ];
-        if( c == '/' && k + 1 < end && ( src[ k + 1 ] == '*' || src[ k + 1 ] == '/' ) )
-        {
-            const std::string_view stop = src[ k + 1 ] == '*' ? "*/" : "\n";
-            const std::size_t      at   = src.find( stop, k + 2 );
-            if( at == std::string_view::npos || at >= end )
-            {
-                return open;
-            }
-            k = static_cast< std::uint32_t >( at + stop.size() - 1 );
-            continue;
-        }
-        if( c == '{' || c == '}' || ( c == ';' && brack == 0 ) )
+        const std::uint32_t after = pastComment( src, k, end );
+        if( after > end )
         {
             return open;
         }
-        if( c == '[' )
+        if( after != k )
         {
-            ++brack;
+            k = after - 1;
+            continue;
         }
-        else if( c == ']' && brack > 0 )
+        if( depth.rejects( src[ k ] ) )
         {
-            --brack;
+            return open;
         }
-        else if( c == '<' )
-        {
-            ++depth;
-        }
-        else if( c == '>' && src[ k - 1 ] != '-' && --depth == 0 )
+        if( depth.closes( src[ k ], src[ k - 1 ] ) )
         {
             return k + 1;
         }
