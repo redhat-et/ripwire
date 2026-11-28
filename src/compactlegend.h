@@ -2055,6 +2055,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "page1", "route page1=1: the first page of the ranked lens answer follows as this root's last child <ctx>, its legend inside, its next= the second page", true, "route" },
     // KB1 (src/forkeybody.h): present-only, read only on a routed answer's <bodies of="key"> (value-qualified, any routed verb)
     { "of", "bodies of=key: the definition body of each symbol the question names in backticks (at most 2), b t= l= p= n= as expand prints it, no callee rows, whole up to 4000 B (longer: truncated=1 lines= next=)", true, "bodies", MapHeaderRead::No, "key" },
+    // VERB-SLIM-1 (src/verbslim.h): present-only, on a default-posture --quality-delta root that left out a zero counter (omit0=)
+    { "omit0", "omit0=1: of acked= stale= api-new-surface= and the *-excluded= counts, those not printed are 0", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -2381,6 +2383,20 @@ inline constexpr std::string_view kCompactWithheldMapPurpose =
     return spec.rootTag == "r" && headHasAttr( head, "withheld_est_tokens" );
 }
 
+// VERB-SLIM-1 (src/verbslim.h): the default posture moves an --expand body's file context out of its <b> tag to an <fctx>
+// element right after the </b>, and the include list behind inc_next=. The purpose line of the "expand" row names the
+// old shape, so a bundle carrying <fctx> reads this one instead. It is no dictionary entry, and the dictionary postures
+// never see it (main.cpp applyVerbSlim skips --legend-have= and --legend-seen=). RIPWIRE_VERB_SLIM=0 never writes <fctx>.
+inline constexpr std::string_view kCompactExpandSlimPurpose =
+    "full bodies: <bodies shown= total= capped=> of <b t= l= p= n=>: the body, its <calls><c n= l= p=> resolved callees (p= when "
+    "not the b's file); right after each b element, <fctx sibs= sibs_total= sibs_capped=1 inc_total= inc_next=>: the file's OTHER indexed symbols "
+    "(source order, the first 100) and its include/import count; inc_next= prints the list (inc= the list itself when shorter)";
+
+[[nodiscard]] inline bool isSlimExpandBundle( const CompactLegendSpec& spec, std::string_view doc )
+{
+    return spec.key == "expand" && ( payloadHasAnyAttr( doc, "sibs_total", "fctx" ) || payloadHasAnyAttr( doc, "inc_total", "fctx" ) );
+}
+
 // The paging-window clause of one compact legend — " window: shown= … (capped=1 cut)." — or empty when the payload
 // carries none of the window names. Split out of compactLegendText (lane r2-LO) so the ref posture (legenddict.h) can
 // name the exact bytes the compact legend spends on it; the composition below is unchanged byte for byte.
@@ -2474,7 +2490,9 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     std::string out;
     out.reserve( 400 );
     out += compactLegendOpener( spec );
-    out.append( isWithheldMapRecord( spec, head ) ? kCompactWithheldMapPurpose : spec.purpose );
+    out.append( isWithheldMapRecord( spec, head ) ? kCompactWithheldMapPurpose
+                : isSlimExpandBundle( spec, doc ) ? kCompactExpandSlimPurpose
+                                                  : spec.purpose );
     out += '.';
     // the paging window, one clause, present names only
     out += compactWindowClause( head, doc );

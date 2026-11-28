@@ -26,6 +26,9 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+# VERB-SLIM-1: this gate reads est_tokens= off a plain --expand <ctx> root, which the default posture leaves out; it pins the full answer
+# (RIPWIRE_VERB_SLIM=0, byte-identical to before), and test/verbslimcheck.sh pins the default posture.
+export RIPWIRE_VERB_SLIM=0
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }

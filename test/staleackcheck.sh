@@ -30,6 +30,9 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+# VERB-SLIM-1: arms (1) and (4) read stale="0" off the root, which the default posture leaves out at 0 (omit0="1"); this gate
+# pins the full answer (RIPWIRE_VERB_SLIM=0, byte-identical to before), and test/verbslimcheck.sh pins the default posture.
+export RIPWIRE_VERB_SLIM=0
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }

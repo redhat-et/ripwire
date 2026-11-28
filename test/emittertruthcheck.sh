@@ -415,11 +415,11 @@ fi
 # claim a consumer relies on is the one the tool PRINTS.
 echo "== P2.Z zero-vs-omitted: a declared-unconditional attribute rides at zero =="
 
+# VERB-SLIM-1 took cli.h's "prints even at 0" out: register-macro-excluded= prints at 0 only under --legend=full now, and (Z2c) judges both.
 ZROSTER_EXPECTED="$( cat <<'EOF'
 cli.h|always carries|1
 cli.h|never dropped|2
 cli.h|never suppressed|1
-cli.h|prints even at 0|1
 compactlegend.h|never dropped|1
 forpage.h|never dropped|1
 handoff.h|never dropped|1
@@ -544,8 +544,14 @@ ZQ="$TMP/zerorepo"; mkdir -p "$ZQ"
   git add lib.h && git commit -qm base
   printf 'int keep( int a ) { return a + 1; }\nint added( int a ) { return a + 2; }\n' > lib.h
 ) >/dev/null 2>&1
-"$BIN" "$ZQ" --quality-delta --no-cache > "$TMP/zqd.xml" 2>/dev/null
+# VERB-SLIM-1: the claim is --legend=full's (the full answer prints the zero); the default posture leaves a 0 out and says so
+# with omit0="1", whose own reading the default legend carries (test/verbslimcheck.sh (6)). Both are judged here.
+"$BIN" "$ZQ" --quality-delta --legend=full --no-cache > "$TMP/zqd.xml" 2>/dev/null   # status: the root is the verdict; the presence guard below FAILs on none
 "$BIN" "$ZQ" --quality-delta --json --no-cache > "$TMP/zqd.json" 2>/dev/null
+"$BIN" "$ZQ" --quality-delta --no-cache > "$TMP/zqd.def.xml" 2>/dev/null   # status: the omit0= root is the verdict; no root FAILs (Z2c) default posture
+grep -q '<quality-delta [^>]* omit0="1"' "$TMP/zqd.def.xml" && grep -q 'omit0=1: ' "$TMP/zqd.def.xml" \
+    && ok "(Z2c) default posture: the zero counters left out say omit0=\"1\", read in its legend" \
+    || no "(Z2c) default posture dropped a zero counter without omit0=\"1\" and its reading"
 if ! grep -q '<quality-delta ' "$TMP/zqd.xml"; then
     no "(Z2c) presence guard: --quality-delta produced no root on the zero repo — the probe is inert"
 else
@@ -564,7 +570,7 @@ fi
   cd "$ZQ" && git add lib.h && git commit -qm added
   printf 'int keep( int a ) { return a + 3; }\nint added( int a ) { return a + 2; }\n' > lib.h
 ) >/dev/null 2>&1
-"$BIN" "$ZQ" --quality-delta --no-cache > "$TMP/zqd2.xml" 2>/dev/null
+"$BIN" "$ZQ" --quality-delta --legend=full --no-cache > "$TMP/zqd2.xml" 2>/dev/null   # status: the presence guard below FAILs on no root (VERB-SLIM-1: the full answer's claim, Z2c)
 "$BIN" "$ZQ" --quality-delta --json --no-cache > "$TMP/zqd2.json" 2>/dev/null
 if ! grep -q '<quality-delta ' "$TMP/zqd2.xml"; then
     no "(Z2g) presence guard: --quality-delta produced no root on the body-only change — the probe is inert"

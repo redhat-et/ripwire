@@ -56,6 +56,9 @@ export RIPWIRE_NO_CORE_LEGEND=1
 # one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
 # reads those rows as elements for another rule, so the line form is off here.
 export RIPWIRE_NO_ROWLINES=1
+# VERB-SLIM-1 (src/verbslim.h): the default posture cuts --expand and --quality-delta payloads (fctx, zero counters), so
+# (U)'s "compact = full payload" holds only with it off; test/verbslimcheck.sh pins the cut and every reading it leaves.
+export RIPWIRE_VERB_SLIM=0
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 # body-fold (train 31): a compact-route --for answer now ends with <fold kind="bodies"> and its present-only clause (forbodyfoldcheck

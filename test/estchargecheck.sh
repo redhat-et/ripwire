@@ -52,6 +52,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py: the soft-target readers, shared helpers (CHECKLIST 32)
 unset RIPWIRE_NO_HEAD_RR                  # lane hrr: the head reorder is ON here unless an arm's twin sets it (rwm)
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+# VERB-SLIM-1: this gate reads est_tokens= off a plain --expand <ctx> root, which the default posture leaves out; it pins the full answer
+# (RIPWIRE_VERB_SLIM=0, byte-identical to before), and test/verbslimcheck.sh pins the default posture.
+export RIPWIRE_VERB_SLIM=0
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "estchargecheck: BIN=$BIN"
 fail=0
