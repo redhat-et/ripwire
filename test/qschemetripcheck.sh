@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-28, #548 arm 2 merged with main c42aca029 (which carries #769's turbofish follow-up, kParserVer 352, rich 353): RE-PINNED
+#   with UPDATE_GOLDEN=1 on the merged sources (hash 028f02458a…e7474d406a). kParserVer and kIngestParserVerMirror move 352 -> 354 (rich 355),
+#   one above main's 352; kCacheVersion 57 and kQSnapCacheScheme unchanged. Neither side's hash can be right once both moves are in.
+# 2026-11-27, lane rust-turbofish-callers (CR follow-up to #811, on main 17543d674): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 350 -> 352 (PLACEHOLDER, rich 353): the turbofish scan skips comments and takes an array type
+#   (ingest_names.h pastGenericArgs). kCacheVersion and kQSnapCacheScheme unchanged. Hash c3b283c28c…77bc80f2.
 # 2026-11-28, #548 arm 2 merged with main 17543d674 (which carries train m5-1126-5, kParserVer 350, kCacheVersion 57): RE-PINNED
 #   with UPDATE_GOLDEN=1 on the merged sources (hash c3b283c28c…77bc80f2). kParserVer and kIngestParserVerMirror move 344 -> 352 (rich 353), one above
 #   main's 350 (rich 351); kCacheVersion and kIngestCacheVersionMirror take main's 57, kQSnapCacheScheme unchanged. Neither

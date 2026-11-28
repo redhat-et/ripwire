@@ -406,12 +406,15 @@ constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signa
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 352;          // bump on any grammar/.scm/extraction change
-                                                      // 352 = 2026-11-28 (#548 arm 2, @IG-ABHINAV; above main's 350 and its rich 351): an anonymous function literal
+constexpr std::uint32_t kParserVer    = 354;          // bump on any grammar/.scm/extraction change
+                                                      // 354 = 2026-11-28 (#548 arm 2, @IG-ABHINAV; above main's 352 and its rich 353): an anonymous function literal
                                                       //   whose head is a symbol (`#(cube %)`, also under `^:meta`) is captured as a call of that head, and the
                                                       //   C++ head filter (ingest_clojure.h clojureListHead) accepts anon_fn_lit; special-form heads stay
-                                                      //   excluded. Rich file tag 353. kCacheVersion unchanged.
-                                                      // --- history: 350 ---
+                                                      //   excluded. Rich file tag 355. kCacheVersion unchanged.
+                                                      // --- history: 352 ---
+                                                      // 352 = 2026-11-27 (lane rust-turbofish-callers CR follow-up, PLACEHOLDER: the train renumbers; rich file tag 353): the turbofish
+                                                      //   generic-argument scan (ingest_names.h pastGenericArgs) skips comments and allows `;` inside `[..]` (an array type), so a macro_rules!
+                                                      //   transcriber `f::<[u8; 4]>(` or `f::</* > */ u8>(` is read as a call of `f`. A v350 blob lacks those references. No record shape change.
                                                       // 350 = 2026-11-26 (train m5-1126-5, the landing renumber of two PLACEHOLDERS): ONE number above BOTH lanes' bumps past main's
                                                       //   342 (rich 343): lane rust-turbofish-callers' 344 (#769, rich 345) and lane objcxx-std-qualified's 348 (#778, rich 349).
                                                       //   Rich file tag 351. kCacheVersion stays 57 (lane asserted-signal). Both lane notes are kept below as HISTORY; the tags they
