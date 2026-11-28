@@ -45,6 +45,10 @@
 #                     plain `local X; X=2` (SC_PLAIN), a write after a child shell's `declare -g X=v` (SC_REL: the local
 #                     still binds), a real `local` after a child-shell one (SC_TWICE) -- each red under a guard-off build
 #                     -- plus SC_INNER / SC_NOLOC, writes inside a subshell, which the subshell's own end already scopes
+#                     The #720 review's rows: `local X &` (SC_BG) and a write after `declare -g` (SC_GLOB2) absent;
+#                     a { } group's `local` (SC_GRP), a plain `declare` after `local` (SC_DECL), and `local X; ( local X );
+#                     X=2` (SC_OUTER: the function's own binding outlasts the child's, so the fold takes the furthest end,
+#                     not the latest `local`) stay requirements
 #   shopt.sh          the #688 review's input: a `shopt -u lastpipe` in a child shell (`( … )`, `$( … )`, `&`, a
 #                     group before `|`) leaves the script's lastpipe on (SH_*_KEEP absent); a foreground `shopt -u`
 #                     turns it off and a child's `shopt -s` does not turn it back on (SH_FG_OFF, SH_SUB_OFF present)
@@ -270,10 +274,10 @@ else
 fi
 
 # ── 14. SCOPE (#700 / #701, reported by jflowers): a child shell's `local` and a `declare -g` leave the name global ──
-for n in SC_SUB SC_CMD SC_PIPE SC_GLOB SC_GONLY; do
+for n in SC_SUB SC_CMD SC_PIPE SC_GLOB SC_GONLY SC_BG SC_GLOB2; do
     if has "$n"; then no "scope: $n should be absent (its later write sets the global): $( gate "$n" )"; else ok "scope: $n absent"; fi
 done
-for nl in SC_PLAIN:21 SC_INNER:24 SC_NOLOC:27 SC_REL:30 SC_TWICE:33; do
+for nl in SC_PLAIN:21 SC_INNER:24 SC_NOLOC:27 SC_REL:30 SC_TWICE:33 SC_GRP:44 SC_OUTER:47 SC_DECL:50; do
     row "${nl%%:*}" "<read p=\"scope.sh\" l=\"${nl#*:}\" form=\"required\" colon=\"1\"/>"
 done
 
