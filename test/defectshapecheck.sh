@@ -2159,9 +2159,12 @@ fi
 #   with what makes it sound: a presence twin on the same capture; a presence twin on one of the cmp'd files; an arm
 #   whose claim IS emptiness ([ -z ]); a statement a vacuous-assert shape already names (one row, not two). The
 #   positives' rows are the premise of every negative, and the arm counts its pairs and fails short of all.
+#   #750 CR round 3 (taken in #758): a presence grep on "$TMPDIR/out.meta" is no twin of an absence on "$TMPDIR/out"
+#   (t_zmeta: the file is matched as a whole path, not a substring); a case whose only passing arm is `"")` claims
+#   emptiness (n_zcase), while a classifier whose `*)` arm passes still has no evidence (t_zcasewild).
 fx_init zev
 mkdir -p "$WORK/zev/test"
-for f in t_zabs t_zcmp t_zredir n_ztwin n_ztwinfile n_zempty n_zva; do
+for f in t_zabs t_zcmp t_zredir t_zmeta t_zcasewild n_ztwin n_ztwinfile n_zempty n_zva n_zcase n_zdot; do
     printf '%s' "$VHDR" >"$WORK/zev/test/$f.sh"
 done
 fx_commit zev
@@ -2200,9 +2203,34 @@ cat >>"$WORK/zev/test/n_zva.sh" <<'EOF'
 OUT="$( "$BIN" --list 2>/dev/null )"
 printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
+cat >>"$WORK/zev/test/t_zmeta.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/out" 2>/dev/null || no "the list run failed"
+grep -q 'v1' "$TMPDIR/out.meta" && ok "the meta names v1" || no "the meta names no v1"
+grep -q 'bad' "$TMPDIR/out" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/zev/test/t_zcasewild.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )" || no "the list run failed"
+case "$OUT" in
+    *bad*) no "bad present" ;;
+    *)     ok "bad absent" ;;
+esac
+EOF
+cat >>"$WORK/zev/test/n_zcase.sh" <<'EOF'
+OUT="$( "$BIN" --quiet 2>/dev/null )" || no "the quiet run failed"
+case "$OUT" in
+    "") ok "quiet prints nothing" ;;
+    *)  no "quiet printed: $OUT" ;;
+esac
+EOF
+# CR758: the run writes `out`, the twin reads `./out`: one file, so the presence grep is the absence grep's twin
+cat >>"$WORK/zev/test/n_zdot.sh" <<'EOF'
+"$BIN" --list >out 2>/dev/null || no "the list run failed"
+grep -q '<list' ./out && ok "the list has its root" || no "no list root"
+grep -q 'bad' out && no "bad present" || ok "bad absent"
+EOF
 fx_run zev
 L="zero-evidence"
-for f in t_zabs t_zcmp t_zredir; do
+for f in t_zabs t_zcmp t_zredir t_zmeta t_zcasewild; do
     ds_has_p "$L" zero-evidence "test/$f.sh" minor
 done
 zpairs=0
@@ -2216,8 +2244,10 @@ zpair n_ztwin t_zabs "a presence grep on the same capture is the twin"
 zpair n_ztwinfile t_zcmp "a presence grep on a cmp'd file is the twin"
 zpair n_zempty t_zabs "[ -z ] claims emptiness: an empty answer IS the pass"
 zpair n_zva t_zabs "the unchecked capture is vacuous-assert's site: one row, not two"
-[ "$zpairs" = 4 ] && ok "$L: all $zpairs negative arms print 0 zero-evidence rows beside a firing twin" \
-    || no "$L: $zpairs of 4 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
+zpair n_zcase t_zcasewild "a case whose only passing arm is the empty pattern claims emptiness"
+zpair n_zdot t_zabs "the twin reads ./out, the file the run wrote as out (CR758 normTarget)"
+[ "$zpairs" = 6 ] && ok "$L: all $zpairs negative arms print 0 zero-evidence rows beside a firing twin" \
+    || no "$L: $zpairs of 6 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
 [ -n "$( ds_row_p vacuous-assert test/n_zva.sh )" ] && ok "$L: n_zva keeps its vacuous-assert row" \
     || no "$L: n_zva should keep its vacuous-assert row (the premise that the statement was va's)"
 gating_split "$L" 0
@@ -2258,7 +2288,7 @@ printf '#pragma once\ninline constexpr const char* kAllModes[] = { "fast", "slow
 # Adjacent literals are one array element: "sil" "ver" is silver. The edit adds "plat" "inum", so tiers.md drifts.
 printf '#pragma once\ninline constexpr const char* kTiers[] = { "gold", "sil" "ver", "bronze" };\n' >"$WORK/cdr/src/tiers.h"
 printf '# Tiers\n\nThe three tiers: gold, silver and bronze.\n' >"$WORK/cdr/docs/tiers.md"
-for f in modes wrap ok prose gloss bare agg exact fence; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
+for f in modes wrap ok prose gloss bare agg exact fence upper indent; do printf '# %s\n\n' "$f" >"$WORK/cdr/docs/$f.md"; done
 # A list whose last item is "an", shorter than the "and " separator it is tested against and a prefix of it: libstdc++'s
 # string_view compare( pos, n, s ) subtracted the lengths as unsigned there (G1 abort on the Linux asan leg only; libc++
 # does not). Also a negative: "two" and two items, no row.
@@ -2277,6 +2307,8 @@ printf 'The three flaky arms: memguard (B6b, B21) and pargates.\n' >>"$WORK/cdr/
 printf 'Two passes run before the scan.\n' >>"$WORK/cdr/docs/bare.md"
 printf 'The four kinds: alpha,\n`beta`, gamma.\n' >>"$WORK/cdr/docs/wrap.md"
 printf 'The three options: alpha, beta, gamma.\n' >>"$WORK/cdr/docs/agg.md"
+printf 'THREE modes: alpha, beta, gamma and delta.\n' >>"$WORK/cdr/docs/upper.md"   # #750 CR round 3: an uppercase count word
+printf 'The four modes: alpha,\n beta, gamma.\n' >>"$WORK/cdr/docs/indent.md"      # #750 CR round 3: an indented continuation line
 fx_run cdr
 L="count-drift"
 ds_has_p "$L" count-drift docs/shapes.md minor
@@ -2284,6 +2316,8 @@ ds_has_p "$L" count-drift src/shapes.h minor
 ds_has_p "$L" count-drift docs/modes.md minor
 ds_has_p "$L" count-drift docs/wrap.md minor   # a soft line break before a backticked name is not a fence
 ds_has_p "$L" count-drift docs/tiers.md minor
+ds_has_p "$L" count-drift docs/upper.md minor
+ds_has_p "$L" count-drift docs/indent.md minor
 ds_has_p "$L" count-drift src/rows.h new-symbol   # a comma ends the run: "safe" is not joined to "Details" (kRows is new code)
 row="$( ds_row_p count-drift docs/tiers.md )"
 printf '%s' "$row" | grep -q 'why="says 3, kTiers holds 4; missing platinum"' && ok "$L: adjacent literals are one name-array member (sil+ver, plat+inum)" \
@@ -2294,6 +2328,12 @@ printf '%s' "$row" | grep -q 'why="says 3, kShapeNames holds 4; missing hexagon"
 row="$( ds_row_p count-drift docs/modes.md )"
 printf '%s' "$row" | grep -q 'why="says 2, lists 3"' && ok "$L: the self row says the count and the list's length" \
     || no "$L: the self row should carry why=\"says 2, lists 3\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/upper.md )"
+printf '%s' "$row" | grep -q 'why="says 3, lists 4"' && ok "$L: an uppercase count word (THREE) is read" \
+    || no "$L: the upper row should carry why=\"says 3, lists 4\": ${row:-<no row>}"
+row="$( ds_row_p count-drift docs/indent.md )"
+printf '%s' "$row" | grep -q 'why="says 4, lists 3"' && ok "$L: an indented continuation line joins its paragraph" \
+    || no "$L: the indent row should carry why=\"says 4, lists 3\": ${row:-<no row>}"
 cpairs=0
 for nf in ok prose gloss bare agg tail exact fence; do
     if [ "$QD_OK" = 1 ] && [ -n "$( ds_row_p count-drift docs/modes.md )" ]; then
@@ -2309,12 +2349,568 @@ printf '# Shapes\n\nThe four shapes: circle, square, triangle and hexagon.\n' >"
 printf '# modes\n\nThe three modes: fast, slow and safe.\n' >"$WORK/cdr/docs/modes.md"
 printf '# wrap\n\nThe three kinds: alpha,\n`beta`, gamma.\n' >"$WORK/cdr/docs/wrap.md"
 printf '# Tiers\n\nThe four tiers: gold, silver, bronze and platinum.\n' >"$WORK/cdr/docs/tiers.md"
+printf '# upper\n\nFOUR modes: alpha, beta, gamma and delta.\n' >"$WORK/cdr/docs/upper.md"
+printf '# indent\n\nThe three modes: alpha,\n beta, gamma.\n' >"$WORK/cdr/docs/indent.md"
 sed -i.bak 's/The two modes/The three modes/' "$WORK/cdr/src/rows.h" && rm -f "$WORK/cdr/src/rows.h.bak"
 fx_run cdr
 if [ "$QD_OK" = 1 ]; then
     n="$( ds_rows | grep -c 'defect="count-drift"' )"
     if [ "$n" = 0 ]; then ok "$L: the fixed texts print no count-drift row"; else no "$L: the fixed texts printed $n count-drift rows: $( ds_rows | grep 'defect="count-drift"' | head -3 )"; fi
 fi
+
+# ── 4g) SILENT-CAP (SILENT-CAP-2): a stop at a constant limit that leaves no trace ───────────────────────────────
+#   Baseline: every function as a stub. The edit gives each its body. Three positives, one per reported shape (a bare stop,
+#   a loop condition beside another one, a substr cut), each on a constant nothing else names. Thirteen negatives, each
+#   judged only beside the firing positive and counted (zero judged = FAIL): a flag the stop branch sets and the caller
+#   that prints it, a caller that names the limit, a total counted beside the keep, a static_assert that ties the limit, a
+#   limit that is the caller's parameter, a bare number (a stated miss: 0 real in 81 on this project's tree), a stop
+#   that returns a value the function returns nowhere else; and the five shapes the first hand read found false (owner
+#   11-26): a loop that only rewrites scalars, a list that grows again after the capped loop, a keep whose caller counts
+#   beside the call, a total kept beside the list, a list whose last element is compared after the walk. Then the fix (a caller names the limit) quiets that row alone.
+#   CR758 round 1 (each red on the pre-fix rule 20a0ccc9f unless marked kept): std::size of a caller's vector is no fixed
+#   extent (sizeStop; a `T x[ N ]` array still is: fixedKeep, kept); a cap under a top-level || ends nothing (orLoop); a
+#   one-argument DISCLOSE( msg ) discloses nothing (traceStop; the two-argument sinkStop does, kept); a cap that returns
+#   before the walk's back() test is not retested by it (backReturn); a ++ in a nested block counts nothing beside a call
+#   (nestRow, kept); a static_assert of a same-named constant in a sibling namespace ties nothing (a::nsStop; one in its
+#   own namespace does: nsTiedStop, kept). Then scut (a cut's identity is the whole cut expression) and sack (--ack-only
+#   with a facet name selects that facet exactly).
+fx_init scap
+mkdir -p "$WORK/scap/src"
+SCAP_HDR='#include <cstddef>
+#include <cstdio>
+#include <string>
+#include <vector>
+inline constexpr std::size_t kStopCap = 3;
+inline constexpr std::size_t kLoopCap = 3;
+inline constexpr std::size_t kCutCap = 8;
+inline constexpr std::size_t kFlagCap = 3;
+inline constexpr std::size_t kCallerCap = 3;
+inline constexpr std::size_t kTotalCap = 3;
+inline constexpr std::size_t kLegendCap = 3;
+inline constexpr std::size_t kStatusCap = 3;
+inline constexpr std::size_t kBoostCap = 3;
+inline constexpr std::size_t kSeedCap = 3;
+inline constexpr std::size_t kNoteCap = 3;
+inline constexpr std::size_t kDirCap = 3;
+inline constexpr std::size_t kChainCap = 3;
+inline constexpr std::size_t kOrCap = 3;
+inline constexpr std::size_t kTraceCap = 3;
+inline constexpr std::size_t kSinkCap = 3;
+inline constexpr std::size_t kBackCap = 3;
+inline constexpr std::size_t kNestCap = 3;
+namespace a { inline constexpr std::size_t kNsCap = 3; }
+namespace b { inline constexpr std::size_t kNsCap = 4; static_assert( kNsCap > 0, "the b cap" ); }
+namespace c { inline constexpr std::size_t kNsTied = 3; static_assert( kNsTied == 3, "the legend says three" ); }
+static_assert( kLegendCap == 3, "the legend says three rows" );
+struct Out { std::vector<int> rows; bool capped = false; std::size_t total = 0; };
+'
+{ printf '%s' "$SCAP_HDR"; cat <<'EOF'
+std::vector<int> silentStop( const std::vector<int>& in ) { return in; }
+std::vector<int> silentLoop( const std::vector<int>& in ) { return in; }
+std::string silentCut( const std::string& line ) { return line; }
+Out flagStop( const std::vector<int>& in ) { return Out{ in }; }
+void flagCaller( const std::vector<int>& in ) { (void)in; }
+std::vector<int> callerStop( const std::vector<int>& in ) { return in; }
+bool callerSays( const std::vector<int>& in ) { return in.empty(); }
+Out totalKeep( const std::vector<int>& in ) { return Out{ in }; }
+std::vector<int> legendStop( const std::vector<int>& in ) { return in; }
+std::vector<int> requestedStop( const std::vector<int>& in, std::size_t limit ) { (void)limit; return in; }
+std::vector<int> numberStop( const std::vector<int>& in ) { return in; }
+int statusStop( const std::vector<int>& in ) { return int( in.size() ); }
+void boostLoop( std::vector<int>& rank, const std::vector<std::size_t>& order ) { (void)rank; (void)order; }
+std::vector<int> seedLoop( const std::vector<int>& in, const std::vector<int>& named ) { (void)named; return in; }
+void noteRow( std::vector<int>& rows, int v ) { (void)rows; (void)v; }
+Out noteCaller( const std::vector<int>& in ) { return Out{ in }; }
+std::vector<int> dirKeep( const std::vector<int>& in ) { return in; }
+bool chainKeep( const std::vector<int>& in ) { return in.empty(); }
+std::vector<int> sizeStop( const std::vector<int>& in, const std::vector<int>& requested ) { (void)requested; return in; }
+int fixedKeep( const std::vector<int>& in ) { return int( in.size() ); }
+std::vector<int> orLoop( const std::vector<int>& in ) { return in; }
+std::vector<int> traceStop( const std::vector<int>& in ) { return in; }
+std::vector<int> sinkStop( const std::vector<int>& in ) { return in; }
+std::vector<int> backReturn( const std::vector<int>& in ) { return in; }
+void nestRow( std::vector<int>& rows, int v ) { (void)rows; (void)v; }
+Out nestCaller( const std::vector<int>& in ) { return Out{ in }; }
+namespace a { std::vector<int> nsStop( const std::vector<int>& in ) { return in; } }
+namespace c { std::vector<int> nsTiedStop( const std::vector<int>& in ) { return in; } }
+EOF
+} >"$WORK/scap/src/caps.cpp"
+fx_commit scap
+{ printf '%s' "$SCAP_HDR"; cat <<'EOF'
+std::vector<int> silentStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kStopCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> silentLoop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( std::size_t i = 0; i < in.size() && i < kLoopCap; ++i )
+    {
+        out.push_back( in[i] );
+    }
+    return out;
+}
+std::string silentCut( const std::string& line )
+{
+    std::string text = line.substr( 0, kCutCap );
+    return text;
+}
+Out flagStop( const std::vector<int>& in )
+{
+    Out out;
+    for( const int v : in )
+    {
+        if( out.rows.size() >= kFlagCap )
+        {
+            out.capped = true;
+            break;
+        }
+        out.rows.push_back( v );
+    }
+    return out;
+}
+void flagCaller( const std::vector<int>& in )
+{
+    const Out o = flagStop( in );
+    std::fputs( o.capped ? "capped=\"1\"" : "", stdout );
+}
+std::vector<int> callerStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kCallerCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+bool callerSays( const std::vector<int>& in )
+{
+    return callerStop( in ).size() >= kCallerCap;
+}
+Out totalKeep( const std::vector<int>& in )
+{
+    Out out;
+    for( const int v : in )
+    {
+        ++out.total;
+        if( out.rows.size() < kTotalCap )
+        {
+            out.rows.push_back( v );
+        }
+    }
+    return out;
+}
+std::vector<int> legendStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kLegendCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> requestedStop( const std::vector<int>& in, std::size_t limit )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= limit )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> numberStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= 3 )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+int statusStop( const std::vector<int>& in )
+{
+    std::size_t kept = 0;
+    for( const int v : in )
+    {
+        if( kept >= kStatusCap )
+        {
+            return -1;
+        }
+        kept += v != 0 ? 1 : 1;
+    }
+    return int( kept );
+}
+void boostLoop( std::vector<int>& rank, const std::vector<std::size_t>& order )
+{
+    for( std::size_t i = 0; i < order.size() && i < kBoostCap; ++i )
+    {
+        const std::size_t id = order[i];
+        if( rank[id] < 100 )
+        {
+            rank[id] = rank[id] * 2;
+        }
+    }
+}
+std::vector<int> seedLoop( const std::vector<int>& in, const std::vector<int>& named )
+{
+    std::vector<int> seeds;
+    for( std::size_t k = 0; k < in.size() && seeds.size() < kSeedCap; ++k )
+    {
+        seeds.push_back( in[k] );
+    }
+    for( const int v : named )
+    {
+        seeds.push_back( v );
+    }
+    return seeds;
+}
+void noteRow( std::vector<int>& rows, int v )
+{
+    if( rows.size() < kNoteCap )
+    {
+        rows.push_back( v );
+    }
+}
+Out noteCaller( const std::vector<int>& in )
+{
+    Out out;
+    std::size_t seen = 0;
+    for( const int v : in )
+    {
+        ++seen;
+        noteRow( out.rows, v );
+    }
+    out.capped = seen > out.rows.size();
+    return out;
+}
+std::vector<int> dirKeep( const std::vector<int>& in )
+{
+    const std::size_t dirTotal = in.size();
+    std::vector<int> files;
+    for( const int v : in )
+    {
+        if( files.size() < kDirCap )
+        {
+            files.push_back( v );
+        }
+    }
+    std::fputs( dirTotal > 9 ? "many" : "few", stdout );
+    return files;
+}
+bool chainKeep( const std::vector<int>& in )
+{
+    std::vector<int> chain;
+    for( const int v : in )
+    {
+        if( chain.size() < kChainCap )
+        {
+            chain.push_back( v );
+        }
+    }
+    return !in.empty() && chain.back() == in.back();
+}
+std::vector<int> sizeStop( const std::vector<int>& in, const std::vector<int>& requested )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= std::size( requested ) )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+int fixedKeep( const std::vector<int>& in )
+{
+    int slots[4] = {};
+    std::size_t n = 0;
+    for( const int v : in )
+    {
+        if( n < std::size( slots ) )
+        {
+            slots[n++] = v;
+        }
+    }
+    return slots[0];
+}
+std::vector<int> orLoop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    std::size_t i = 0;
+    while( i < kOrCap || i < in.size() && in[i] != 0 )
+    {
+        out.push_back( in[i] );
+        ++i;
+    }
+    return out;
+}
+std::vector<int> traceStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        DISCLOSE( "starting a row" );
+        if( out.size() >= kTraceCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> sinkStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        DISCLOSE( g_capped, "the row cap was reached" );
+        if( out.size() >= kSinkCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::vector<int> backReturn( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kBackCap )
+        {
+            return out;
+        }
+        out.push_back( v );
+    }
+    if( !out.empty() && out.back() == 0 )
+    {
+        out.pop_back();
+    }
+    return out;
+}
+void nestRow( std::vector<int>& rows, int v )
+{
+    if( rows.size() < kNestCap )
+    {
+        rows.push_back( v );
+    }
+}
+Out nestCaller( const std::vector<int>& in )
+{
+    Out out;
+    std::size_t odd = 0;
+    for( const int v : in )
+    {
+        if( v % 2 != 0 )
+        {
+            ++odd;
+        }
+        const int w = v;
+        nestRow( out.rows, w );
+    }
+    out.capped = odd > 0;
+    return out;
+}
+namespace a
+{
+std::vector<int> nsStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kNsCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+}
+namespace c
+{
+std::vector<int> nsTiedStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kNsTied )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+}
+EOF
+} >"$WORK/scap/src/caps.cpp"
+fx_run scap
+L="silent-cap"
+ds_has "$L" silent-cap silentStop minor
+ds_has "$L" silent-cap silentLoop minor
+ds_has "$L" silent-cap silentCut  minor
+row="$( ds_row silent-cap silentStop )"
+printf '%s' "$row" | grep -q 'why="the stop at kStopCap leaves no trace' && ok "$L: why= names the limit" \
+    || no "$L: the row should carry why=\"the stop at kStopCap leaves no trace ...\": ${row:-<no row>}"
+spairs=0
+spair(){  # NEGATIVE WHY — judged only when the bare-stop positive fired in this same run
+    [ "$QD_OK" = 1 ] && [ -n "$( ds_row silent-cap silentStop )" ] || return 0
+    local r; r="$( ds_row silent-cap "$1" )"
+    if [ -z "$r" ]; then ok "$L: no silent-cap row on $1 ($2; twin silentStop fires)"; spairs=$(( spairs + 1 )); else no "$L: false positive on $1 ($2): $r"; fi
+}
+spair flagStop      "the stop branch sets out.capped, which flagCaller prints"
+spair flagCaller    "it only reads the flag"
+spair callerStop    "callerSays calls it and names kCallerCap"
+spair totalKeep     "++out.total counts beside the keep"
+spair legendStop    "a static_assert ties kLegendCap"
+spair requestedStop "the limit is the caller's parameter"
+spair numberStop    "a bare number is not reported (a stated miss)"
+spair statusStop    "the stop returns -1, which the function returns nowhere else"
+spair boostLoop     "the loop appends nothing and calls nothing: it only rewrites values that exist either way"
+spair seedLoop      "the list grows again after the loop: the limit bounded one source, not the list"
+spair noteRow       "noteCaller counts (++seen) beside the call"
+spair dirKeep       "dirTotal is kept beside the list"
+spair chainKeep     "chain.back() is compared once the walk is over"
+# CR758 round 1: four more negatives; sizeStop and orLoop are red on the pre-fix rule (20a0ccc9f)
+spair sizeStop      "std::size of the caller's vector is the caller's size, not a fixed extent (CR758 402)"
+spair orLoop        "under a top-level || the loop goes on past kOrCap: the comparison is no conjunct of the condition (CR758 660)"
+spair sinkStop      "a two-argument DISCLOSE( sink, why ) beside the stop sets the field the reader sees"
+spair nsTiedStop    "a static_assert in its own namespace ties kNsTied"
+[ "$spairs" = 17 ] && ok "$L: all $spairs negative functions print 0 silent-cap rows beside a firing twin" \
+    || no "$L: $spairs of 17 negative functions passed beside a firing twin (want all; zero means nothing was judged)"
+# CR758 round 1 positives: each a stop the pre-fix rule called disclosed (red on 20a0ccc9f) or one the fix must keep
+ds_has "$L" silent-cap fixedKeep  minor    # a `T x[ N ]` array stays a fixed extent (402 keeps it)
+ds_has "$L" silent-cap traceStop  minor    # a one-argument DISCLOSE( msg ) is a debug trace that ships nothing (1078)
+ds_has "$L" silent-cap backReturn minor    # the cap returns before the walk's out.back() test, so that test never sees it (1353)
+ds_has "$L" silent-cap nestRow    minor    # ++odd sits in a nested block: it counts nothing beside the call (1400 keeps it)
+nsrow="$( ds_rows | grep 'defect="silent-cap"' | grep -E ' sym="[^"]*nsStop"' )"
+if [ "$QD_OK" = 1 ] && [ -n "$nsrow" ] && printf '%s' "$nsrow" | grep -q 'kNsCap'; then ok "$L: a::nsStop keeps its row: b's static_assert names another kNsCap (1537)"
+else no "$L: a::nsStop printed no silent-cap row on kNsCap, so b's same-named static_assert tied a stop it does not name: ${nsrow:-<no row>}"; fi
+gating_split "$L" 0
+printf 'bool stopSays( const std::vector<int>& in )\n{\n    return silentStop( in ).size() >= kStopCap;\n}\n' >>"$WORK/scap/src/caps.cpp"
+fx_run scap
+if [ "$QD_OK" = 1 ]; then
+    if [ -z "$( ds_row silent-cap silentStop )" ]; then ok "$L: once a caller names kStopCap, silentStop prints no silent-cap row"
+    else no "$L: the disclosed stop still prints: $( ds_row silent-cap silentStop )"; fi
+    if [ -n "$( ds_row silent-cap silentLoop )" ]; then ok "$L: the undisclosed loop keeps its row beside the fix (the quiet is the fix's)"
+    else no "$L: silentLoop lost its row, so the fix arm's quiet proves nothing"; fi
+fi
+
+#   CR758 1375: a cut's site identity is the whole cut expression, receiver to limit. The cut below sits after 70 tokens of
+#   one statement: the pre-fix identity was the statement's first 61 tokens, so moving the cut from kOldCut to kNewCut kept
+#   the key and printed nothing. The premise: the baseline already holds the same statement on kOldCut (so the row is the
+#   change's, not the function's), and the statement's head is counted as longer than 60 tokens.
+fx_init scut
+mkdir -p "$WORK/scut/src"
+cat >"$WORK/scut/src/cut.cpp" <<'EOF'
+#include <cstddef>
+#include <string>
+inline constexpr std::size_t kOldCut = 8;
+inline constexpr std::size_t kNewCut = 6;
+std::string join( int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, const std::string& tail );
+std::string longCut( const std::string& line, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35 )
+{
+    std::string text = join( a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28, a29, a30, a31, a32, a33, a34, a35, line.substr( 0, kOldCut ) );
+    return text;
+}
+EOF
+fx_commit scut
+sed -i.bak 's/line.substr( 0, kOldCut )/line.substr( 0, kNewCut )/' "$WORK/scut/src/cut.cpp" && rm -f "$WORK/scut/src/cut.cpp.bak"
+L="silent-cap cut identity"
+head_toks="$( grep 'std::string text = join(' "$WORK/scut/src/cut.cpp" | sed 's/line.substr.*//' | tr -s ' ' '\n' | grep -c . )"
+if [ "${head_toks:-0}" -gt 35 ] && grep -q 'kNewCut' "$WORK/scut/src/cut.cpp"; then ok "$L: premise: the cut sits after $head_toks words of its statement (over 60 tokens), and the edit moved it to kNewCut"
+else no "$L: premise: the fixture's statement head is $head_toks words, or the edit did not land"; fi
+fx_run scut
+ds_has "$L" silent-cap longCut minor
+row="$( ds_row silent-cap longCut )"
+if printf '%s' "$row" | grep -q 'kNewCut'; then ok "$L: the new cut's row names kNewCut"; else no "$L: the row should name kNewCut: ${row:-<no row>}"; fi
+
+#   CR758 2010: a token that IS a facet name selects that facet alone. src/silent-cap.cpp holds a silent-cap stop and a
+#   gating format-arity row; --ack-only=silent-cap must ack the first and leave the second, whose canonical id holds the
+#   word. The premise: both rows print before the ack, and the ack wrote something.
+fx_init sack
+mkdir -p "$WORK/sack/src"
+SACK_HDR='#include <cstddef>
+#include <format>
+#include <string>
+#include <vector>
+inline constexpr std::size_t kAckCap = 3;
+'
+{ printf '%s' "$SACK_HDR"; cat <<'EOF'
+namespace sk
+{
+std::vector<int> ackStop( const std::vector<int>& in ) { return in; }
+std::string ackFmt( int a, int b ) { (void)a; (void)b; return {}; }
+}
+EOF
+} >"$WORK/sack/src/silent-cap.cpp"
+fx_commit sack
+{ printf '%s' "$SACK_HDR"; cat <<'EOF'
+namespace sk
+{
+std::vector<int> ackStop( const std::vector<int>& in )
+{
+    std::vector<int> out;
+    for( const int v : in )
+    {
+        if( out.size() >= kAckCap )
+        {
+            break;
+        }
+        out.push_back( v );
+    }
+    return out;
+}
+std::string ackFmt( int a, int b )
+{
+    return std::format( "{}", a, b );
+}
+}
+EOF
+} >"$WORK/sack/src/silent-cap.cpp"
+L="silent-cap ack-only"
+fx_run sack
+pre_cap="$( ds_rows | grep 'defect="silent-cap"' | grep -c 'ackStop' )"
+pre_fmt="$( ds_rows | grep 'defect="format-arity"' | grep 'ackFmt' | grep -c 'silent-cap' )"
+if [ "$QD_OK" = 1 ] && [ "$pre_cap" = 1 ] && [ "$pre_fmt" = 1 ]; then ok "$L: premise: a silent-cap row and a format-arity row whose id holds 'silent-cap' print before the ack"
+else no "$L: premise: want 1 silent-cap row and 1 format-arity row naming src/silent-cap.cpp before the ack, got $pre_cap and $pre_fmt"; fi
+( cd "$WORK/sack" && "$BIN" . --quality-delta --no-cache --ack-only=silent-cap --quality-ack="the cap is deliberate in this fixture" >/dev/null 2>"$WORK/sack.ack.err" )
+ARC=$?
+if [ "$ARC" = 0 ]; then ok "$L: --ack-only=silent-cap wrote its acks (exit 0)"; else no "$L: --ack-only=silent-cap exited $ARC: $( head -2 "$WORK/sack.ack.err" )"; fi
+fx_run sack
+post_cap="$( ds_rows | grep 'defect="silent-cap"' | grep -c 'ackStop' )"
+post_fmt="$( ds_rows | grep 'defect="format-arity"' | grep 'ackFmt' | grep -c 'gating="1"' )"
+if [ "$QD_OK" = 1 ] && [ "$post_cap" = 0 ] && [ "$post_fmt" = 1 ] && [ "$QD_RC" = 2 ]; then ok "$L: the silent-cap row is acked; the format-arity row in src/silent-cap.cpp still gates (exit 2)"
+else no "$L: after --ack-only=silent-cap want the silent-cap row gone and the format-arity row gating (rc 2), got $post_cap silent-cap, $post_fmt gating format-arity, rc=$QD_RC"; fi
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
 #   D2: format-arity is the one exception to "new-symbol rows never gate", and every surface that states the

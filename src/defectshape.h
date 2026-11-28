@@ -1,6 +1,6 @@
 #pragma once
 
-// defectshape.h — the scanners behind --quality-delta's defect-shape kind: eight shapes of a REAL defect that
+// defectshape.h — the scanners behind --quality-delta's defect-shape kind: nine shapes of a REAL defect that
 // review keeps finding by hand and that a deterministic syntactic check finds at write time.
 //
 //   format-arity    C++: a literal std::format / format_to / format_to_n / print / println, fmt::format /
@@ -36,6 +36,8 @@
 //                   runs' status may be read: exit 0 with an empty answer passes the status check too.
 //   count-drift     Markdown and C/C++ string literals (countdrift.h): a count word that introduces a list of
 //                   names, wrong against the list or against the tree's string-literal array of those names.
+//   silent-cap      C++ (silentcap.h): a loop or walk that stops at a constant limit and leaves no trace — no flag,
+//                   no count beside it, no total, and no other function of the tree that names the limit.
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -84,10 +86,11 @@ enum class Facet : std::uint8_t
     UnhandledArm    = 5,
     ZeroEvidence    = 6,
     CountDrift      = 7,
+    SilentCap       = 8,
 };
-inline constexpr std::size_t kFacetCount = 8;
+inline constexpr std::size_t kFacetCount = 9;
 inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status",
-                                                                           "unhandled-arm", "zero-evidence", "count-drift" };
+                                                                           "unhandled-arm", "zero-evidence", "count-drift", "silent-cap" };
 
 inline constexpr std::string_view facetName( Facet f ) noexcept
 {
@@ -105,7 +108,7 @@ inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 // The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition: one bit
 // per facet.
 inline constexpr unsigned kSiteFacetBits = ( 1u << static_cast<unsigned>( Facet::UncheckedStatus ) ) | ( 1u << static_cast<unsigned>( Facet::UnhandledArm ) )
-                                         | ( 1u << static_cast<unsigned>( Facet::CountDrift ) );
+                                         | ( 1u << static_cast<unsigned>( Facet::CountDrift ) ) | ( 1u << static_cast<unsigned>( Facet::SilentCap ) );
 inline constexpr bool facetNamesSite( Facet f ) noexcept
 {
     return ( ( kSiteFacetBits >> static_cast<unsigned>( f ) ) & 1u ) != 0;
@@ -2011,6 +2014,11 @@ struct Judgment
 inline std::string normTarget( std::string_view w )
 {
     std::string u = sh::detail::unq( w );
+    // `./out` and `out` name one file (the writer `>out`, the check `[ -s ./out ]`); `./out.meta` stays its own name
+    while( u.size() > 2 && u.starts_with( "./" ) )
+    {
+        u.erase( 0, 2 );
+    }
     std::string out;
     for( std::size_t i = 0; i < u.size(); ++i )
     {
@@ -3747,9 +3755,13 @@ private:
         }
         return false;
     }
+    // Does `text` name one of the files `needles` as a whole path, not as a longer path's head ("$TMP/out.meta",
+    // "$TMP/out/x") or tail ("$D/out" for "out")? A needle is a normTarget name, so `./out` in the text names "out" too.
     static bool mentionsAny( const std::string& text, const std::vector<std::string>& needles )
     {
-        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f ) { return text.find( f ) != std::string::npos; } );
+        const auto inPath = []( char c ) { return c == '/' || c == '.' || c == '-' || isIdentChar( c ); };
+        return std::any_of( needles.begin(), needles.end(), [ & ]( const std::string& f )
+                            { return rw::namesplit::containsWordBoundedBy( text, f, inPath ) || rw::namesplit::containsWordBoundedBy( text, "./" + f, inPath ); } );
     }
     // Does `text` read "$V" as a whole text, not only as a directory prefix ("$V/f") or a longer name's head ("$VX")?
     static bool readsWhole( const std::string& text, const std::string& v )
@@ -3807,8 +3819,13 @@ private:
     }
     // The judgment's condition tests only that a text is empty or not ([ -z ], [ -n ], [ -s ]) and compares no text
     // (grep, cmp, diff, [ A = B ]): an empty answer IS what it claims (a refusal prints nothing), not missing evidence.
+    // A case claims it when an arm whose only pattern is the empty string ("") passes and no other arm can.
     bool claimsEmptiness( const Judgment& j ) const
     {
+        if( j.kind == Judgment::Kind::Case )
+        {
+            return caseClaimsEmptiness( node( j.node ) );
+        }
         bool       emptiness = false;
         bool       compares  = false;
         const auto see       = [ & ]( std::uint32_t c )
@@ -3856,6 +3873,26 @@ private:
             }
         }
         return emptiness && !compares;
+    }
+    bool caseClaimsEmptiness( const sh::Node& n ) const
+    {
+        bool emptyPasses = false;
+        for( std::size_t b = 0; b < n.bodies.size() && b < n.casePats.size(); ++b )
+        {
+            const std::vector<std::string>& pats      = n.casePats[b];
+            const bool                      emptyOnly = !pats.empty() && std::all_of( pats.begin(), pats.end(), []( const std::string& pt )
+                                                                                 { return !pt.empty() && sh::detail::unq( pt ).empty(); } );
+            const bool                      passes    = repOfList( n.bodies[b] ) == Rep::Pass;
+            if( emptyOnly )
+            {
+                emptyPasses = emptyPasses || passes;
+            }
+            else if( passes )
+            {
+                return false;   // a nonempty subject can pass too (`*) ok`): a classifier, not a claim of emptiness
+            }
+        }
+        return emptyPasses;
     }
     bool inOwnPipeline( const Judgment& j, std::uint32_t l ) const
     {

@@ -30,7 +30,8 @@
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
 #include "similarargs.h"        // the similar-argument-list scanner (the params kind's report-only similar= facet)
-#include "countdrift.h"         // the defect-shape kind's eight scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift)
+#include "silentcap.h"          // the defect-shape facet silent-cap (its cap scan and the tree's two name sets)
+#include "countdrift.h"         // the defect-shape kind's eight per-file scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
@@ -1414,11 +1415,29 @@ inline std::uint64_t defectFileAnchor( std::string_view relPath )
 // A site value's low three bits are its facet (eight facets, the room is full; QD-UNCHECKED-STATUS widened two bits to
 // three, so every site value moved once: kQSnapCacheScheme 37).
 inline constexpr std::uint64_t kDefectFacetMask = 7;
-static_assert( defectshape::kFacetCount <= kDefectFacetMask + 1, "every facet fits the site value's facet bits" );
+// SILENT-CAP-2: the room past eight. Facets 0..6 are spelled in the three bits. The value 7 there is the EXTENSION mark:
+// the next three bits then hold the facet less 7 (count-drift 0, silent-cap 1, room to 14). Widening the mask instead
+// would move every released site value and every ack of one again (CR712-ACK-KEY-MASK); this way facets 0..6 keep
+// theirs, and only count-drift's moved, in the build after the one that introduced it (kQSnapCacheScheme 42).
+inline constexpr std::uint64_t kDefectExtShift     = 3;
+inline constexpr std::uint64_t kDefectExtFacetMask = kDefectFacetMask | ( kDefectFacetMask << kDefectExtShift );   // the six bits an extension facet takes
+static_assert( defectshape::kFacetCount <= 2 * kDefectFacetMask + 1, "every facet fits the site value's facet bits (three, or three and the extension's three)" );
+
+// The bits of a site value that spell facet `f`, and the mask those bits sit in.
+inline constexpr std::uint64_t defectFacetBits( defectshape::Facet f ) noexcept
+{
+    const std::uint64_t v = static_cast<std::uint64_t>( f );
+    return v < kDefectFacetMask ? v : ( kDefectFacetMask | ( ( v - kDefectFacetMask ) << kDefectExtShift ) );
+}
+inline constexpr std::uint64_t defectFacetBitsMask( defectshape::Facet f ) noexcept
+{
+    return static_cast<std::uint64_t>( f ) < kDefectFacetMask ? kDefectFacetMask : kDefectExtFacetMask;
+}
 
 inline defectshape::Facet defectFacetOf( std::uint64_t site ) noexcept
 {
-    return static_cast<defectshape::Facet>( site & kDefectFacetMask );
+    const std::uint64_t low = site & kDefectFacetMask;
+    return static_cast<defectshape::Facet>( low < kDefectFacetMask ? low : kDefectFacetMask + ( ( site >> kDefectExtShift ) & kDefectFacetMask ) );
 }
 
 // A site's identity: the facet and its normalized text. Never one of the two reserved file records (0, 1).
@@ -1427,13 +1446,14 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
     std::string id( defectshape::facetName( f ) );
     id.push_back( '\0' );
     id.append( text );
-    std::uint64_t h = fnv1a64( id ) & ~kDefectFacetMask;
+    const std::uint64_t mask = defectFacetBitsMask( f );
+    std::uint64_t       h    = fnv1a64( id ) & ~mask;
     if( h == 0 )
     {
-        h = kDefectFacetMask + 1;
+        h = mask + 1;
     }
-    const std::uint64_t v        = h | static_cast<std::uint64_t>( f );
-    const bool          keepsFacet = ( v & kDefectFacetMask ) == static_cast<std::uint64_t>( f );
+    const std::uint64_t v        = h | defectFacetBits( f );
+    const bool          keepsFacet = defectFacetOf( v ) == f;
     ENSURES( v != kDefectFilePresent && v != kDefectFileUnreadable && keepsFacet, "a site value is never a reserved file record and carries its facet" );
     return v;
 }
@@ -4857,7 +4877,11 @@ inline void seedHeadSnapCache( const std::string& dir, const std::string& repoHe
 // count-drift, adds sites in Markdown and in C/C++ string literals (a count word whose list disagrees with itself or with the
 // tree's name array), so a v40 blob holds none of them and a head scan would read every existing one as added. Markdown
 // files now also leave a presence record. Bumped 40 -> 41.
-constexpr std::uint32_t kQSnapCacheScheme = 41;
+// v42 (2026-11-26, lane SILENT-CAP-2) — no blob shape change; the defect-shape SITE SET grew and count-drift's site VALUES
+// moved. A ninth facet, silent-cap, adds sites in C++ (a stop at a constant limit that leaves no trace), and the facet bits
+// gained the extension mark (defectFacetBits): count-drift is spelled 7 + 0 in six bits, not 7 in three, so a v41 blob's
+// count-drift values read as other sites and it holds no silent-cap site. Bumped 41 -> 42.
+constexpr std::uint32_t kQSnapCacheScheme = 42;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -6921,7 +6945,7 @@ inline bool cloneGroupHeldAcrossRenames( const CloneGroup& cg, const std::vector
 
 // Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
 // the same rule error-masking counts by) or on the file. Languages: C++ (format-arity, utf8-cut,
-// dedup-first, unchecked-status, unhandled-arm), C (unchecked-status, unhandled-arm), Python (format-arity,
+// dedup-first, unchecked-status, unhandled-arm, silent-cap), C (unchecked-status, unhandled-arm), Python (format-arity,
 // unchecked-status, unhandled-arm), Bash (unhandled-arm; vacuous-assert and zero-evidence under a test-script path); count-drift in
 // Markdown and in C/C++ string literals, against the tree's name arrays (cFamilyDefectTables). Each scanned file also
 // leaves its presence record; a file that does not read leaves the unreadable record instead and contributes
@@ -6990,6 +7014,58 @@ inline DefectTreeTables cFamilyDefectTables( const IngestResult& ing, std::strin
     return t;
 }
 
+// One scanner site as the delta's record: anchored on the innermost enclosing definition (or on the file), with its line.
+inline DefectSiteAt defectSiteAtOf( const IngestResult& ing, const SymbolsByFile& byFile, std::uint32_t f, std::string_view root, std::string_view src,
+                                    const defectshape::Site& st )
+{
+    ASSUME( st.startByte < src.size(), "a scanner reports a site at a byte of the file it scanned" );
+    const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
+    const std::uint64_t anchor = owner == kNoNode ? defectFileAnchor( relForHash( ing.files[f], root ) ) : qualityKey( ing, owner, root );
+    const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
+    return { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why, defectLegacySiteValue( st.facet, st.text ) };
+}
+
+// silent-cap across the tree (silentcap.h). A C++ file's cap scan leaves its locally silent sites PENDING, each already
+// anchored, and its two name lists; once every file is read, a pending site is a site unless the tree names its limit
+// (capResolve: a static_assert, or another function outside a silent stop). A degraded --quality-delta=A..B holds only the
+// changed files, so it resolves against their names alone, on both sides alike.
+struct CapTreeScan
+{
+    struct Pending
+    {
+        DefectSiteAt            at;
+        defectshape::CapFinding finding;
+    };
+    defectshape::CapTreeNames names;
+    std::vector<Pending>      pending;
+
+    void scanFile( const IngestResult& ing, const SymbolsByFile& byFile, std::uint32_t f, std::string_view root, std::string_view src )
+    {
+        defectshape::CapFileScan scan = defectshape::capScanCpp( src, defectshape::detail::lexCpp( src ) );
+        for( defectshape::CapFinding& c : scan.findings )
+        {
+            if( c.verdict == defectshape::CapVerdict::Silent )
+            {
+                const defectshape::Site st{ defectshape::Facet::SilentCap, c.startByte, c.text, {}, defectshape::capWhy( c ) };
+                pending.push_back( { defectSiteAtOf( ing, byFile, f, root, src, st ), std::move( c ) } );
+            }
+        }
+        names.add( scan );
+    }
+
+    void resolveInto( std::vector<DefectSiteAt>& out )
+    {
+        names.seal();
+        for( Pending& p : pending )
+        {
+            if( defectshape::capResolve( p.finding, names ) == defectshape::CapVerdict::Silent )
+            {
+                out.push_back( std::move( p.at ) );
+            }
+        }
+    }
+};
+
 // `macroOverride`, when given, is the macro-name set to scan C++ files against instead of this index's own — the whole
 // tree's, when this index holds only some of its files (a degraded --quality-delta=A..B's changed files).
 // `shellCut`, when given, counts the shell files whose scan the nesting budget cut (shstatus kMaxShellNest): the answer's shell_cut=.
@@ -7001,6 +7077,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
     const std::vector<std::string> ownMacros  = macroOverride == nullptr ? cFamilyMacroNames( ing ) : std::vector<std::string>{};
     const std::vector<std::string>& treeMacros = macroOverride == nullptr ? ownMacros : *macroOverride;
     const DefectTreeTables          tables     = cFamilyDefectTables( ing, root, fileInBaseline );
+    CapTreeScan                     caps;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( !fileIsInBaseline( fileInBaseline, f ) )
@@ -7039,6 +7116,10 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         {
             sites = defectshape::scanCpp( src, fnSpans, &treeMacros, &tables.enums );
         }
+        if( scan == DefectScan::Cpp )
+        {
+            caps.scanFile( ing, byFile, f, root, src );
+        }
         else if( scan == DefectScan::C && ( defectshape::mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos ) )
         {
             sites = defectshape::scanC( src, fnSpans, &tables.enums );
@@ -7075,13 +7156,10 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         }
         for( const defectshape::Site& st : sites )
         {
-            ASSUME( st.startByte < src.size(), "a scanner reports a site at a byte of the file it scanned" );
-            const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
-            const std::uint64_t anchor = owner == kNoNode ? fileAnchor : qualityKey( ing, owner, root );
-            const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
-            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why, defectLegacySiteValue( st.facet, st.text ) } );
+            out.push_back( defectSiteAtOf( ing, byFile, f, root, src, st ) );
         }
     }
+    caps.resolveInto( out );
     std::stable_sort( out.begin(), out.end(), []( const DefectSiteAt& a, const DefectSiteAt& b ) { return a.key < b.key; } );
     return out;
 }
