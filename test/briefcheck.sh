@@ -517,7 +517,7 @@ case "$en3" in *zzz_unrelated.go*) no "(Q) a Go root file that does not import r
 sect "$TMP/q4.out" entry | grep -qE 'Programs/app.c:2 main( hops=[0-9]+)? -> Modules/main.c -> Python/lifecycle.c' && nq=$(( nq + 1 )) || no "(Q) the trampoline main does not chain through Modules/main.c: $( sect "$TMP/q4.out" entry )"
 sect "$TMP/q4h.out" entry | grep -qF 'Python/lifecycle.c' && no "(Q) RIPWIRE_BRIEF_HANDOFF=0 kept the chain: $( sect "$TMP/q4h.out" entry )" || nq=$(( nq + 1 ))
 # attrs before any path cut: at a budget that needs the attrs step, entry rows lose :line/kind/hops but no row
-( cd "$TMP/r2main" && "$BIN" . --no-cache --brief-bytes=1024 "--brief=change how the app starts up (lifecycle_init)" 2>/dev/null ) > "$TMP/q5.out"
+( cd "$TMP/r2main" && "$BIN" . --no-cache --brief-bytes=1024 "--brief=change how the app starts up (lifecycle_init)" 2>/dev/null ) > "$TMP/q5.out" || no "(Q) --brief exited $? at --brief-bytes=1024"
 dq=$( attr dropped < "$TMP/q5.out" )
 case ",$dq," in *,attrs,*) case "$( sect "$TMP/q5.out" entry )" in *"Programs/app.c -> Modules/main.c"*) nq=$(( nq + 1 )) ;; *) no "(Q) attrs did not shed the entry's line/kind: $( sect "$TMP/q5.out" entry )" ;; esac ;; *) no "(Q) premise: 1024 B did not reach the attrs step (dropped=\"$dq\")" ;; esac
 if [ "$nq" = 11 ]; then ok "(Q) round 2: TS barrel + index and Python roots as surface, Go importer named and a non-importer not, subject tests + dir + same-tree helper, trampoline chain, attrs shed first, three OFF switches (11 of 11)"; else no "(Q) round 2 $nq of 11"; fi
