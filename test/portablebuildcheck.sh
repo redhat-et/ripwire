@@ -1346,21 +1346,108 @@ def range_expr(text, open_index):
     return None
 
 
+# A brace block whose head names one of these is a CONTAINER, not a function body. Mirrors the same
+# distinction test/lib/capdisclose.py draws for cap sites, where it has held since 2026-11-12.
+CONTAINER = re.compile(r'\b(?:namespace|struct|class|union|enum)\b[^;{}()]*$|\bextern\s*"[^"]*"\s*$')
+_BODIES = {}
+
+
+def function_bodies(text):
+    """[(start, end)] of every brace block whose head is NOT a container — i.e. function bodies, and the blocks
+    nested in them. Comments and literals are already blanked, so brace counting is exact. Cached by id(text):
+    the caller's `texts` list owns every string for the life of the process, so the ids cannot be recycled."""
+    key = id(text)
+    if key not in _BODIES:
+        spans, stack, last = [], [], 0
+        for i, ch in enumerate(text):
+            if ch == '{':
+                stack.append((i, bool(CONTAINER.search(text[last:i]))))
+                last = i + 1
+            elif ch == '}':
+                if stack:
+                    start, container = stack.pop()
+                    if not container:
+                        spans.append((start, i + 1))
+                last = i + 1
+            elif ch == ';':
+                last = i + 1
+        _BODIES[key] = sorted(spans)
+    return _BODIES[key]
+
+
+def inside_function(text, pos):
+    """True when pos sits inside a function body. A `RET NAME( … );` THERE is a local variable declared with
+    parenthesised initialisation -- `std::vector<std::uint32_t> queue( nodeCount + 1, 0u )` -- not a declaration
+    of anything a call site could resolve to. Reading one as a by-value declaration of `NAME` is what made
+    src/backhops.h:841's `m_back.queue().putsIn( u )` a finding on two unrelated lanes in one day (#822; #837
+    head b5f2cdafb renamed a member to escape it). A declaration at namespace or class scope is unaffected."""
+    return any(a <= pos < b for a, b in function_bodies(text))
+
+
+def arity(params):
+    """(required, most) parameters a declaration's parameter list spells. `...` makes `most` unbounded.
+    Top-level commas only: `std::map<int, int> m` is ONE parameter. A C++ call cannot resolve to a
+    declaration that takes more required parameters than it passes arguments, so a 0-argument call
+    cannot mean `bool queue( NodeId cls )` -- which is the second half of the two collisions this arm hit
+    (#837 head b5f2cdafb, a by-value `queue( NodeId )` on an UNRELATED class, reached by name alone)."""
+    inner = params.strip()
+    if not inner or inner == 'void':
+        return 0, 0
+    entries, depth, start = [], 0, 0
+    for i, ch in enumerate(inner):
+        if ch in '<([{':
+            depth += 1
+        elif ch in '>)]}':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            entries.append(inner[start:i]); start = i + 1
+    entries.append(inner[start:])
+    if entries and entries[-1].strip() == '...':
+        entries.pop()
+        return sum(1 for e in entries if '=' not in e), 1 << 30
+    return sum(1 for e in entries if '=' not in e), len(entries)
+
+
+def call_args(text):
+    """How many arguments a call's parenthesised text passes; 0 when it is empty. Top-level commas only."""
+    inner = text.strip()
+    if not inner:
+        return 0
+    depth, n = 0, 1
+    for ch in inner:
+        if ch in '<([{':
+            depth += 1
+        elif ch in '>)]}':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            n += 1
+    return n
+
+
 def returns_of(texts, name, memo):
     """The return types the line-leading declarations of `name` spell (`RET NAME(` / `RET Cls::NAME(`), each ending
-    in '&' or '*' when the declaration returns a reference or a pointer. [] when the tree declares none."""
+    in '&' or '*' when the declaration returns a reference or a pointer. [] when the tree declares none.
+    Matches inside a function body are LOCALS, not declarations, and are skipped (see inside_function)."""
     if name not in memo:
         pat = re.compile(r'(?m)^[ \t]*(?:template\s*<[^\n]*>\s*)?([^\n;{}()=,.]*?[\w>])([ \t*&]+)(?:\w+::)*'
                          + re.escape(name) + r'\s*\(')
         rets = []
         for text in texts:
             for m in pat.finditer(text):
+                if inside_function(text, m.start()):
+                    continue
                 ret = SPEC.sub('', m.group(1).strip())
                 words = ret.split()
                 if not words or words[0] in NOT_DECL or words[-1] in KEYWORDS or words[-1] in NOT_DECL:
                     continue
                 marks = m.group(2).replace(' ', '').replace('\t', '')
-                rets.append(ret + marks)
+                close = m.end()
+                depth = 1
+                while close < len(text) and depth:
+                    depth += 1 if text[close] == '(' else -1 if text[close] == ')' else 0
+                    close += 1
+                lo, hi = arity(text[m.end():close - 1]) if not depth else (0, 1 << 30)
+                rets.append((ret + marks, lo, hi))
         memo[name] = rets
     return memo[name]
 
@@ -1394,7 +1481,8 @@ def findings(expr, texts, memo):
         callee = hm.group(1)
         if callee in KEYWORDS or callee in VIEW_TYPES:
             continue
-        rets = returns_of(texts, callee, memo)
+        passed = call_args(expr[k + 1:m.start()])
+        rets = [r for r, lo, hi in returns_of(texts, callee, memo) if lo <= passed <= hi]
         if rets and all(r.endswith(('&', '*')) for r in rets):
             continue
         member = head[:hm.start()].rstrip().endswith(('.', '->'))
@@ -1451,7 +1539,14 @@ cat > "$TMP/rfctl/clean/clean.h" <<'CPP'
 #include <string>
 #include <string_view>
 #include <vector>
-struct Row { std::vector<std::string> cells; const std::vector<std::string>& items() const { return cells; } };
+struct Rows { std::vector<std::string> cells; const std::vector<std::string>& items() const { return cells; } };
+struct Row { std::vector<std::string> cells; Rows held; const std::vector<std::string>& items() const { return cells; }
+             const Rows& queue() const { return held; }
+             const Rows& at( int i ) const { (void)i; return held; } };
+struct Walk
+{
+    bool queue( int cls );   // by value, class scope, 1 required parameter: a 0-arg call cannot mean it
+};
 Row makeRow();
 Row& rowRef();
 const Row* rowPtr();
@@ -1468,6 +1563,19 @@ inline int clean( const std::map<int, std::vector<int>>& m, std::string_view lin
     for( const char ch : std::string_view( line ).substr( 1 ) ) { n += ch; }        // a view temporary
     for( const int v : m.find( 1 )->second ) { n += v; }                            // an iterator into a live map
     for( const std::string& c : localVar.cells.front().size() > 0 ? localVar.cells : makeList() ) { n += int( c.size() ); }
+    // SHADOWED ACCESSOR, both halves. (a) #822: a local declared with parenthesised initialisation reads, to
+    // a text pass, exactly like `std::vector<int> queue( … )` — a declaration of `queue` returning by value.
+    // (b) #837: `Walk::queue( int )` below is a REAL by-value declaration at class scope, on a class the
+    // range-for never names; a 0-argument call cannot resolve to it. The range-for calls the ACCESSOR of that
+    // name, which returns a reference, so neither shape is a finding. Drop the scope filter and (a) reds;
+    // drop the arity filter and (b) reds.
+    const std::vector<int> queue( int( line.size() ) + 1, 0 );
+    // (c) a local whose initialiser passes as many arguments as the call site does, so arity cannot separate
+    // it from a declaration and only the scope filter can: `at( 1 )` here is a local, not a by-value `at`.
+    const Rows at( 1 );
+    for( const int v : m.find( 2 )->second ) { n += v + queue[ 0 ]; }
+    for( const std::string& c : rowRef().queue().items() ) { n += int( c.size() ); }
+    for( const std::string& c : rowRef().at( 1 ).items() ) { n += int( c.size() ) + at.cells.size(); }
     // for( const std::string& c : makeRow().items() )   — a comment is not code
     const char* s = "for( const std::string& c : makeRow().items() )";             // nor is a literal
     for( int i = 0; i < 3; ++i ) { n += i + int( s[ 0 ] ); }                        // a classic for
