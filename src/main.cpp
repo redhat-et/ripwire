@@ -3226,7 +3226,8 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--index-out",        !c.indexOut.empty()       },
         { "--help-task",        !c.helpTask.empty()       },
         // §A2: the query family, contiguous and first among the report verbs — these three outrank every one below.
-        { "--for",              !c.forTask.empty(), true  }, { "--pack-task",     c.packTaskFlag,    true },
+        // --handoff=TASK carries its task in forTask (cli.h), but --handoff answers: the --for row stays dark for it.
+        { "--for",              !c.forTask.empty() && c.handoffTask.empty(), true  }, { "--pack-task",     c.packTaskFlag,    true },
         { "--query",            !c.query.empty(),   true  },
         { "--lego",             !c.legoType.empty()       }, { "--exemplar",     !c.exemplar.empty()      },
         { "--recall",           !c.recall.empty()         }, { "--deps",          c.deps                  },
@@ -4302,7 +4303,9 @@ static bool nativeCompactLegendVerb( const rw::Config& c ) noexcept
     // its legend is pure prose (no data comment), so the layer's rewrite is safe — and required, or
     // --legend=compact is accepted and ignored on the page (the #362 review's item 5).
     const bool forCandidatePage = !c.forTask.empty() && c.tokenBudget != 0 && ( c.pageLimit > 0 || c.pageOffset > 0 );
-    return !batchAnswers && !c.forTask.empty() && !forCandidatePage;
+    // --handoff=TASK carries its task in forTask (cli.h) but --handoff answers: its packet is this layer's, the brief behind it
+    // is native (finishCompactCapture shapes the packet only).
+    return !batchAnswers && !c.forTask.empty() && c.handoffTask.empty() && !forCandidatePage;
 }
 
 // L1 fix round (rv-r1-L1 LOW-3): a DEFAULTED posture captured every run through a tmpfile, a 1.28 MB `--lint --sarif`
@@ -4543,12 +4546,30 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    const auto emitCaptured = [&doc, rc]() { return emitCapturedDoc( doc, rc ); };
+    // --handoff=TASK prints the packet, then the --brief page (verbs_brief.h runBriefPage). The packet is the answer this layer
+    // shapes, exactly as on a bare --handoff; the brief's legend is native, as on --brief, so its bytes are kept as printed.
+    // The packet ends at its root's close and the newline after it (writeHandoffPacket); a doc without that boundary is
+    // shaped whole, as before.
+    std::string trailer;
+    if( !cfg.handoffTask.empty() )
+    {
+        static constexpr std::string_view kPacketEnd = "</handoff>\n";
+        if( const std::size_t end = doc.find( kPacketEnd ); end != std::string::npos )
+        {
+            trailer = doc.substr( end + kPacketEnd.size() );
+            doc.resize( end + kPacketEnd.size() );
+        }
+    }
+    const auto emitCaptured = [&doc, &trailer, rc]()
+    {
+        doc += trailer;
+        return emitCapturedDoc( doc, rc );
+    };
     // the DEFAULT posture shapes what it can and leaves the rest exactly as it was emitted (cfg.legendDefaulted);
     // only an ASKED --legend=compact refuses an answer the dialect cannot shape
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
     const bool budgetIsSoft = cfg.tokenBudget > 0
-                           && ( !cfg.forTask.empty() || ( !cfg.packTask.empty() && cfg.partitionCount == 0 ) || !cfg.fromTrace.empty() || !cfg.runTrace.empty() );
+                           && ( ( !cfg.forTask.empty() && cfg.handoffTask.empty() ) || ( !cfg.packTask.empty() && cfg.partitionCount == 0 ) || !cfg.fromTrace.empty() || !cfg.runTrace.empty() );
     switch( rw::applyCompactDialect( doc, compactLegendHint( cfg, doc ), budgetIsSoft ) )
     {
         case rw::CompactOutcome::Rewritten:
@@ -6565,8 +6586,9 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
     // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
     // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
-    // --brief (verbs_brief.h) answers before the --for chain: its forTask is the brief's task, and its answer is the brief, not --for's.
-    if( std::optional<int> handled = runBrief( dsp ) )
+    // --brief and --handoff=TASK (verbs_brief.h) answer before the --for chain: forTask is their task, and the answer is the brief (after
+    // the packet, for --handoff=TASK), not --for's.
+    if( std::optional<int> handled = runBriefPage( dsp ) )
     {
         return *handled;
     }

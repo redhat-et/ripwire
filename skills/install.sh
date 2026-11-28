@@ -296,31 +296,38 @@ install_claude_route()
     fi
 }
 
-# ── The two SubagentStart registrations (the routing note below, the opt-in primer further down) share one test and
-# one merge. subagent_start_names SETTINGS SCRIPT: is an entry naming SCRIPT, from any copy, registered under
-# SubagentStart? merge_subagent_start SETTINGS SCRIPT CMD WHAT WAS: refresh that entry's command in place, or add
-# exactly one (matcher "*", timeout 5); print "ripwire WHAT WAS" only once the file is really written (the D1 lesson
-# at install_claude_route). Neither touches another event or another script's entry.
+# ── The two SubagentStart registrations (the routing note below, the opt-in primer further down) and the primer's PreToolUse
+# task stash share one test and one merge. subagent_start_names SETTINGS SCRIPT: is an entry naming SCRIPT, from any copy,
+# registered under SubagentStart? merge_script_hook SETTINGS EVENT MATCHER SCRIPT CMD WHAT WAS [TIMEOUT] [MATCHER_ON_REFRESH]:
+# refresh that event's entry naming SCRIPT in place (its command; its timeout only when TIMEOUT is given; its matcher only
+# when MATCHER_ON_REFRESH is 1), or add exactly one (MATCHER, timeout TIMEOUT, default 5); print "ripwire WHAT WAS" only once
+# the file is really written (the D1 lesson at install_claude_route). It touches no other event and no other script's entry.
 subagent_start_names()
 {
     "$jqBin" -e --arg n "$2" "$jqIsScript"'
         any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1
 }
 
-merge_subagent_start()
+merge_script_hook()
 {
     mk_tmp "$1"
-    if "$jqBin" --arg n "$2" --arg cmd "$3" "$jqIsScript"'
+    setTo=false; [ -n "${8:-}" ] && setTo=true
+    setMatcher=false; [ "${9:-0}" = 1 ] && setMatcher=true
+    if "$jqBin" --arg ev "$2" --arg m "$3" --arg n "$4" --arg cmd "$5" --argjson to "${8:-5}" --argjson setTo "$setTo" \
+        --argjson setM "$setMatcher" "$jqIsScript"'
         .hooks //= {} |
-        if any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))
-        then .hooks.SubagentStart |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )
-        else .hooks.SubagentStart = ((.hooks.SubagentStart // []) + [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 5 }] }])
+        if any((.hooks[$ev] // [])[]?.hooks[]?; isScript($n))
+        then .hooks[$ev] |= map( if any(.hooks[]?; isScript($n))
+                                 then ( (if $setM then .matcher = $m else . end)
+                                        | .hooks |= map( if isScript($n) then (.command = $cmd | if $setTo then .timeout = $to else . end) else . end ) )
+                                 else . end )
+        else .hooks[$ev] = ((.hooks[$ev] // []) + [{ matcher: $m, hooks: [{ type: "command", command: $cmd, timeout: $to }] }])
         end
     ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
-        echo "ripwire $4 $5"
+        echo "ripwire $6 $7"
     else
         rm -f "$tmp"
-        echo "skills/install.sh: could not merge the $4 into $1 (is it valid JSON?); nothing changed." >&2
+        echo "skills/install.sh: could not merge the $6 into $1 (is it valid JSON?); nothing changed." >&2
         return 1
     fi
 }
@@ -353,7 +360,7 @@ install_claude_subagent_route()
         echo "  remove:   delete the SubagentStart entry whose command ends in \"ripwire-nudge.sh --subagent-start\" from $1."
     fi
 
-    merge_subagent_start "$1" "ripwire-nudge.sh" "$subRouteCmd" "SubagentStart routing note" "$subRouteWas"
+    merge_script_hook "$1" SubagentStart "*" "ripwire-nudge.sh" "$subRouteCmd" "SubagentStart routing note" "$subRouteWas"
 }
 
 # ── install_claude_legend_seen SETTINGS — register hooks/ripwire-legend-seen.sh (lane LS1, 2026-11-18).
@@ -428,15 +435,24 @@ install_claude_subagent_primer()
         primerWas="registered in $1."
         echo "skills/install.sh --hook-subagent-primer will add this OPT-IN, advisory-only entry to $1:"
         echo "  hooks.SubagentStart += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$primerCmd\" }] }]"
+        echo "  hooks.PreToolUse   += [{ matcher: \"Agent|Task\", hooks: [{ type: \"command\", command: \"$primerCmd\" }] }]"
         echo "  behavior: adds ~660 B of context to each new subagent (orient with --for first; after the last edit, commit,"
-        echo "            --quality-delta=BASE..HEAD, --test-gate). Cannot block a subagent; silent outside a git work tree or without ripwire."
+        echo "            --quality-delta=BASE..HEAD, --test-gate). When the spawn's task is known (the PreToolUse entry keeps it"
+        echo "            for 120 s, readable by you only), the subagent gets \`ripwire --brief=<its task>\` (3.5-7 KB) instead."
+        echo "            Cannot block a subagent; silent outside a git work tree or without ripwire."
+        echo "            RIPWIRE_SUBAGENT_BRIEF=0 (or subagent_brief=off in meter.conf) keeps the two-step text only."
         echo "  switch:   RIPWIRE_SUBAGENT_PRIMER=0 (or subagent_primer=off in ~/.ripwire/meter.conf) turns it off;"
         echo "            =auto randomizes per subagent for the registered A/B."
         echo "  counting: one row per subagent start in ~/.ripwire/subagent_primer.jsonl (session id, agent id and type,"
         echo "            arm, delivered) — never the brief or any text. RIPWIRE_SUBAGENT_METER=0 opts out of counting."
     fi
 
-    merge_subagent_start "$1" "ripwire-subagent-primer.sh" "$primerCmd" "subagent primer hook" "$primerWas"
+    merge_script_hook "$1" SubagentStart "*" "ripwire-subagent-primer.sh" "$primerCmd" "subagent primer hook" "$primerWas" 15 || return 1
+    # The primer's second entry (lane SUBAGENT-PRIMER, 2026-11-27): the same script as a PreToolUse hook on Agent|Task, which keeps
+    # the spawn's task for the SubagentStart half (a SubagentStart payload carries no prompt). It prints nothing and never decides
+    # a permission. A refresh also restores its matcher.
+    merge_script_hook "$1" PreToolUse "Agent|Task" "ripwire-subagent-primer.sh" "$primerCmd" "subagent primer task stash:" \
+        "PreToolUse Agent|Task entry in $1." "" 1
 }
 
 install_claude_subagent_primer_hook()

@@ -41,8 +41,10 @@ context beside it, and context beside the brief is what the stored sessions show
 `skills/install.sh --hook` registers a short routing note for the Explore and Plan subagents, the two built-in types
 that do not load CLAUDE.md (`RIPWIRE_SUBAGENT_ROUTE=0` turns it off). `skills/install.sh --hook-subagent-primer`
 registers the opt-in primer (`hooks/ripwire-subagent-primer.sh`): two steps, orient and check, for every subagent
-type; `RIPWIRE_SUBAGENT_PRIMER=0` turns it off and `auto` randomizes per subagent for its registered A/B. Write the
-block into the brief either way.
+type; `RIPWIRE_SUBAGENT_PRIMER=0` turns it off and `auto` randomizes per subagent for its registered A/B. When the
+primer can tell which task a spawn was given (its PreToolUse `Agent|Task` half keeps the prompt for 120 s), it delivers
+`--brief=<that task>` instead of the two steps; anything uncertain gets the two steps (`RIPWIRE_SUBAGENT_BRIEF=0`
+turns the brief off). Write the block into the brief either way.
 
 **One page instead of the block alone:** `ripwire <dir> --brief="TASK" --legend=compact` prints a size-capped brief (3.5 / 5 / 7 KB by repo
 size; `--brief-bytes=N` overrides) whose last section IS this block, after layout (`(skip)` marks vendored and generated
