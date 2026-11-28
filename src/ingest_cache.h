@@ -406,7 +406,13 @@ constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signa
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 352;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 354;          // bump on any grammar/.scm/extraction change
+                                                      // 354 = 2026-11-27 (lane gskip-1, PLACEHOLDER: above main's 352 (#769, rich 353), the landing renumbers if a lane lands first;
+                                                      //   rich file tag 355): a C# generic member call `x.Get<T>()` keeps its receiver (ingest_binds.h
+                                                      //   memberOnlyReceiver reads through the generic_name), and a C/C++ function-like #define body's
+                                                      //   `name<..>(` is a call of `name` (ingest_relations.h macroTemplateArgsEnd). A v352 blob holds those
+                                                      //   C# refs receiverless and no ref for the macro sites. No record shape changes; kCacheVersion unchanged.
+                                                      // --- history: 352 ---
                                                       // 352 = 2026-11-27 (lane rust-turbofish-callers CR follow-up, PLACEHOLDER: the train renumbers; rich file tag 353): the turbofish
                                                       //   generic-argument scan (ingest_names.h pastGenericArgs) skips comments and allows `;` inside `[..]` (an array type), so a macro_rules!
                                                       //   transcriber `f::<[u8; 4]>(` or `f::</* > */ u8>(` is read as a call of `f`. A v350 blob lacks those references. No record shape change.

@@ -1,0 +1,7 @@
+### Fixed — a C# generic member call keeps its receiver; a C/C++ macro body's `name<T>(` is a call
+
+In C#, the called name of `Util.Make<int>( x )` or `w.Bump<int>()` sits inside a `generic_name`, and the receiver reader took that wrapper for the member access. Every generic member call was read as having no receiver, so `--callees` listed the right method and every namesake in another class, all `via="name"`. The receiver is now read through the wrapper, for `?.` calls too, and only the receiver's class is listed. A bare generic call (`Make<int>( x )`) still has no receiver.
+
+In a function-like `#define` body, a call written with explicit template arguments was not read as a call. envoy's `THROW_OR_RETURN_VALUE` expands to `::Envoy::returnOrThrow<type>( expression )`, so `--callers=returnOrThrow` listed 3 direct callers and none of the macro's 171. It now lists the macro and the callers through it (20 rows shown, 153 more behind `via_macro_next`), and envoy's map gains 26 edges. The template argument list must be written flush against the name, and nested `<>`, `<`/`>` inside parentheses, string literals and line continuations are read through. A comparison such as `a < b > ( c )` or `x<y && z>( w )` is not read as a call, and a `.c` file's macros are not changed, since C has no templates.
+
+`test/genericskipcheck.sh` holds both fixes: 16 positive arms that fail before the change, the same calls without type arguments as controls, and 7 comparisons that must not read as calls.

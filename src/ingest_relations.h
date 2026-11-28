@@ -552,6 +552,147 @@ bool macroBodyKeyword( std::string_view w ) noexcept
     return std::find( std::begin( kw ), std::end( kw ), w ) != std::end( kw );
 }
 
+// lane gskip-1: a C++ keyword that a template argument list may follow, `static_cast<T>( x )`, and that is still no call
+bool macroBodyTemplateKeyword( std::string_view w ) noexcept
+{
+    static constexpr std::string_view kw[] = { "static_cast", "dynamic_cast", "const_cast", "reinterpret_cast", "operator", "template" };
+    return std::find( std::begin( kw ), std::end( kw ), w ) != std::end( kw );
+}
+
+// macroTemplateArgsEnd's scan window (below)
+inline constexpr std::uint32_t kMacroTemplateArgsMaxBytes = 1024;
+
+// macroTemplateArgsEnd's step over one opaque span at `k`: the byte past a block comment, a string or character literal, or a
+// digit separator; `k` itself when none starts there; 0 when the span closes no list (a `//` comment, an unterminated one).
+// tree-sitter-cpp ends a preproc_arg before `/*`, so the block-comment arm is defensive: the bytes it is handed hold none.
+std::uint32_t macroArgOpaqueEnd( std::string_view src, std::uint32_t lt, std::uint32_t k, std::uint32_t stop ) noexcept
+{
+    const char c    = src[k];
+    const char next = k + 1 < stop ? src[ k + 1 ] : '\0';
+    if( c == '/' && next == '*' )
+    {
+        const std::size_t close = src.substr( 0, stop ).find( "*/", k + 2 );
+        return close == std::string_view::npos ? 0u : static_cast<std::uint32_t>( close ) + 2;
+    }
+    if( c == '/' && next == '/' )
+    {
+        return 0;
+    }
+    if( c == '\'' && k > lt + 1 && namesplit::isIdentChar( src[ k - 1 ] ) && namesplit::isIdentChar( next ) )
+    {
+        return k + 1;   // a digit separator, `Fixed<1'000>`
+    }
+    if( c != '"' && c != '\'' )
+    {
+        return k;
+    }
+    std::uint32_t q = k + 1;
+    while( q < stop && src[q] != c )
+    {
+        q += ( src[q] == '\\' && q + 1 < stop ) ? 2u : 1u;
+    }
+    return q < stop ? q + 1 : 0u;
+}
+
+// true when the `&&` at `k` joins two operands (`y && z`), not an rvalue reference closing a type (`T&&>`, `T&&,`)
+bool macroArgConjunctionAt( std::string_view src, std::uint32_t k, std::uint32_t stop ) noexcept
+{
+    std::uint32_t r = k + 2;
+    while( r < stop && ( src[r] == ' ' || src[r] == '\t' || src[r] == '\r' || src[r] == '\n' || src[r] == '\\' ) )
+    {
+        ++r;
+    }
+    return r < stop && ( namesplit::isIdentChar( src[r] ) || src[r] == '(' || src[r] == '!' );
+}
+
+// lane gskip-1: the byte just past the `>` that closes the template argument list opening at `lt` (src[lt] == '<'), or 0
+// when [lt, vb) holds no such list. A macro body is a lexer's view, so `make<int>( x )` (envoy's THROW_OR_RETURN_VALUE:
+// `::Envoy::returnOrThrow<type>(expression)`) and a comparison `a < b > (c)` are the same tokens; what tells them apart is
+// what the list may hold. Angle brackets nest (`make<List<int>>`), a `<`/`>` inside parentheses or brackets is an operand
+// (`Cond<( 1 > 0 )>`), `->` closes nothing, and comments and string or character literals are skipped (`/* > */`, `">"`).
+// It refuses what a type or constant argument does not spell: a `;`, `{` or `}`, an unbalanced `)`/`]`, `||`, an `&&`
+// that joins two operands (`x < y && z > (w)`; `T&&` stays), a `<<` / `<=` opening, and a `//` comment (it runs to the end
+// of the macro's logical line, so no `>` can follow). The caller adds the spacing rule (no blank between the name and `<`).
+// A list longer than kMacroTemplateArgsMaxBytes is refused: the scan is per identifier, and the bound keeps a long body of
+// comparisons linear; a real argument list is a few dozen bytes.
+std::uint32_t macroTemplateArgsEnd( std::string_view src, std::uint32_t lt, std::uint32_t vb ) noexcept
+{
+    const std::uint32_t stop = std::min( vb, lt + kMacroTemplateArgsMaxBytes );
+    if( lt + 1 >= stop || src[ lt + 1 ] == '<' || src[ lt + 1 ] == '=' )
+    {
+        return 0;
+    }
+    std::uint32_t angles = 1;
+    std::uint32_t groups = 0;   // open ( and [ — a `<` or `>` inside one is an operand
+    std::uint32_t k      = lt + 1;
+    while( k < stop )
+    {
+        if( const std::uint32_t past = macroArgOpaqueEnd( src, lt, k, stop ); past != k )
+        {
+            if( past == 0 )
+            {
+                return 0;
+            }
+            k = past;
+            continue;
+        }
+        const char c    = src[k];
+        const char next = k + 1 < stop ? src[ k + 1 ] : '\0';
+        if( c == ';' || c == '{' || c == '}' || ( c == '|' && next == '|' ) || ( groups == 0 && c == '&' && next == '&' && macroArgConjunctionAt( src, k, stop ) ) )
+        {
+            return 0;
+        }
+        if( c == '(' || c == '[' )
+        {
+            ++groups;
+        }
+        else if( c == ')' || c == ']' )
+        {
+            if( groups == 0 )
+            {
+                return 0;
+            }
+            --groups;
+        }
+        else if( groups == 0 && c == '<' )
+        {
+            ++angles;
+        }
+        else if( groups == 0 && c == '>' && src[ k - 1 ] != '-' && --angles == 0 )
+        {
+            return k + 1;
+        }
+        ++k;
+    }
+    return 0;
+}
+
+// whitespace and `\`-newline continuations from `at`: the gap a call-shaped `(` may sit behind
+inline std::uint32_t macroSkipBlanks( std::string_view src, std::uint32_t at, std::uint32_t vb ) noexcept
+{
+    while( at < vb && ( src[at] == ' ' || src[at] == '\t' || src[at] == '\r' || ( src[at] == '\\' && at + 1 < vb && src[ at + 1 ] == '\n' ) ) )
+    {
+        at += ( src[at] == '\\' ) ? 2u : 1u;
+    }
+    return at;
+}
+
+// where the byte that decides whether identifier `word` (ending at `wordEnd`) is call-shaped sits: past the blanks, and for
+// C++ past an explicit template argument list. `name<..>(` (lane gskip-1) counts only written flush against the name, as every
+// C++ style spells a template-id and none spells a comparison; macroTemplateArgsEnd judges the list itself. C has no templates
+// (LangFacts::templateArgumentLists).
+inline std::uint32_t macroCallParenAt( std::string_view src, std::uint32_t wordEnd, std::uint32_t vb, Lang lang, std::string_view word ) noexcept
+{
+    if( langFacts( lang ).templateArgumentLists && wordEnd < vb && src[ wordEnd ] == '<' && !macroBodyTemplateKeyword( word ) )
+    {
+        if( const std::uint32_t past = macroTemplateArgsEnd( src, wordEnd, vb ); past != 0 )
+        {
+            return macroSkipBlanks( src, past, vb );
+        }
+    }
+    return macroSkipBlanks( src, wordEnd, vb );
+}
+
 // the `value:` (preproc_arg) child of a preproc_function_def / preproc_def; null node if absent.
 TSNode preprocValueNode( TSNode defineNode ) noexcept
 {
@@ -864,14 +1005,9 @@ void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, 
             ++i;
         }
         const std::string_view word = src.substr( idStart, i - idStart );
-        // lookahead across whitespace + `\`-newline continuations for the call-shaped `(`. j only PEEKS —
+        // lookahead across whitespace + `\`-newline continuations (and a C++ template argument list) for the call-shaped `(`. j only PEEKS —
         // the main scan resumes at i (the identifier end), so a peeked-over '\n' is still line-counted there.
-        uint32_t j = i;
-        while( j < vb && ( src[j] == ' ' || src[j] == '\t' || src[j] == '\r'
-                           || ( src[j] == '\\' && j + 1 < vb && src[ j + 1 ] == '\n' ) ) )
-        {
-            j += ( src[j] == '\\' ) ? 2u : 1u;
-        }
+        const uint32_t j = macroCallParenAt( src, i, vb, lang, word );
         if( j >= vb || src[j] != '(' || pasted || macroBodyKeyword( word ) || isParam( word ) || word == macroName )
         {
             continue;   // not a call shape (or a known non-callee) — resume the scan at the byte after the identifier

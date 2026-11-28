@@ -635,6 +635,7 @@ for _g in \
     gateexitcheck \
     gdscriptcheck \
     gendocsmergecheck \
+    genericskipcheck \
     genrecallcheck \
     gitchildoptscheck \
     gitenvhermeticcheck \

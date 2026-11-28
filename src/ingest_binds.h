@@ -230,10 +230,26 @@ inline MemberChain memberChainOf( TSNode recv, Lang lang, std::string_view src )
     return out;
 }
 
+// C#'s `x.Get<T>()` / `w?.Gen<T>()`: the called identifier sits in a generic_name, the member access's (or member binding's)
+// `name:`, so the node that holds the receiver is the generic_name's parent. Read through the raw parent, every generic member
+// call was receiverless and split by name (lane gskip-1). Any other parent comes back as it was, and so does a generic_name
+// that is no `name:` (a bare `Gen<T>()`, `new Foo<T>()`), which memberOnlyReceiver keeps receiverless. Of the vendored grammars only
+// tree-sitter-c-sharp names a generic_name, so no language test guards the call.
+inline TSNode csharpThroughGenericName( TSNode parent ) noexcept
+{
+    if( !kindIs( ts_node_type( parent ), "generic_name" ) )
+    {
+        return parent;
+    }
+    const TSNode access = parentOf( parent );
+    return !ts_node_is_null( access ) && ts_node_eq( fieldChild( access, NodeField::Name ), parent ) ? access : parent;
+}
+
 // FE-A: the member-access node kind and its receiver field for the languages whose receiverOf records no shape (Go, JS/TS,
 // Rust; and C, whose only member call is a call through a function-pointer field).
 inline TSNode memberOnlyReceiver( TSNode parent, Lang lang ) noexcept
 {
+    parent = csharpThroughGenericName( parent );   // tree-sitter-c-sharp's node kind: no other grammar names it, so the step is inert elsewhere
     const char* t = ts_node_type( parent );
     if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && kindIs( t, "member_expression" ) )
     {

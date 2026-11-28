@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-27, lane gskip-1 (on main c42aca029): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and kIngestParserVerMirror 352 -> 354
+#   (PLACEHOLDER, rich 355): a C# generic member call keeps its receiver (ingest_binds.h csharpThroughGenericName) and a C/C++ macro
+#   body's `name<..>(` is a call (ingest_relations.h macroTemplateArgsEnd). kCacheVersion and kQSnapCacheScheme unchanged. Hash 028f02458a…e7474d406a.
 # 2026-11-27, lane rust-turbofish-callers (CR follow-up to #811, on main 17543d674): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
 #   kIngestParserVerMirror 350 -> 352 (PLACEHOLDER, rich 353): the turbofish scan skips comments and takes an array type
 #   (ingest_names.h pastGenericArgs). kCacheVersion and kQSnapCacheScheme unchanged. Hash c3b283c28c…77bc80f2.
