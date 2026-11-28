@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forunused.h — UNUSED-IN-FILE (practice-60 group E, widens IDEAS A2 TESTONLY-DEAD): the --for table for "which public X in <file> are unused".
 //
 // --dead-code answers a different question on purpose: internal linkage plus zero callers, so `--dead-code=util/network.py` says
@@ -92,6 +93,7 @@ inline constexpr std::size_t kForUnusedMinStem = 2; // a 2-byte stem reads only 
 
 inline bool forUnusedOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forUnusedOn (is the unused-in-file table on?)" );
     return std::getenv( "RIPWIRE_NO_UNUSED_TABLE" ) == nullptr;
 }
 
@@ -3227,6 +3229,7 @@ inline std::size_t namedDirFileTotal( std::span<const FileAnchor> anchors )
 
 inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForUnusedTable (the unused-in-file table)" );
     using namespace unusedfile;
     if( !subjectAsksUnused( task ) )
     {

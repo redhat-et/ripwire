@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 
 
@@ -361,6 +362,7 @@ inline constexpr std::string_view kForZeroAbsentMcpNote = "; an absent cx/ccx/in
 // The bytes of those readings a header carries — what its sig ledger leaves uncharged.
 inline std::size_t forZeroNoteBytes( std::string_view header ) noexcept
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: forZeroNoteBytes (the zero-note bytes on the header)" );
     std::size_t n = 0;
     for( const std::string_view note : { kForZeroAbsentCompactNote, kForZeroAbsentFullNote, kForZeroAbsentMcpNote } )
     {
@@ -426,6 +428,7 @@ struct ForIdRouteLegendParts
 
 inline ForIdRouteLegendParts forIdRouteLegendParts( bool legendOn, bool scPresent, bool routePresent ) noexcept
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: forIdRouteLegendParts (the id/route legend parts)" );
     if( !legendOn )
     {
         return {}; // rung zero took the readings; the attributes stay and the dropped note names them

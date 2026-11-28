@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forowner.h — THE QUESTION'S OWNER, one implementation for both --for dialects (the CLI lens, verbs_for.h, and the MCP
 // `for` twin, mcpverbs.h): the owner match key (ownerFoldName / ownerQuestionWords), owner-hop's found set (forOwnerCandidates,
 // read by verbs_for.h forOwnerHopPlan), and the ONE owner body an explanatory question carries (the body slot, lane
@@ -198,6 +199,7 @@ struct ForBodySlotOwner
 // `how do`) and the A/B switch not set. The caller adds the posture (compact route, XML dialect, no caller-chosen bodies).
 inline bool forBodySlotAsked( std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forBodySlotAsked (did the task ask for a body slot?)" );
     return std::getenv( "RIPWIRE_NO_BODY_SLOT" ) == nullptr && rw::taskroute::hasExplanatoryCue( rw::queryshape::detail::lowerAscii( task ) );
 }
 
@@ -311,6 +313,7 @@ inline NodeId forMemberOwner( const IngestResult& ing, const std::vector<std::st
 inline ForBodySlotOwner forBodySlotOwner( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                                           std::string_view task, const std::vector<NodeId>& lensSurfaceIds, const std::vector<float>& lensRank )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: forBodySlotOwner (resolve the body slot's owner)" );
     const std::vector<std::string> words = ownerQuestionWords( task );
     if( words.empty() )
     {
@@ -385,6 +388,7 @@ struct BodySlotInputs
 };
 inline BodySlotRender renderForBodySlot( const BodySlotInputs& in, ForBodySlotOwner owner, std::optional<std::size_t> share )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForBodySlot (the body-slot block)" );
     EXPECTS( owner.any() && owner.id < in.ing.symbols.size(), "the slot renders one indexed owner" );
     BodySlotRender                    out;
     const std::optional<RedactCounts> before = in.redact != nullptr ? std::optional<RedactCounts>( *in.redact ) : std::nullopt;

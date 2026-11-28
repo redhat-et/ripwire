@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // subjectanchor.h — SUBJECT-ANCHOR: a symbol named exactly in a descriptive --for subject is the anchor; the ordinary words
 // around it are not.
 //
@@ -960,6 +961,7 @@ inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoi
 // is defined in. No keys (no name-exact route, or nothing to match): true, the check says nothing.
 inline bool routeAnchorHeadsRows( const IngestResult& ing, const RouteAnchorKeys& keys, NodeId head )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/conf: routeAnchorHeadsRows (does the anchor head the rows?)" );
     if( keys.lowerNames.empty() && keys.fileIds.empty() )
     {
         return true;
@@ -980,6 +982,7 @@ inline bool routeAnchorHeadsRows( const IngestResult& ing, const RouteAnchorKeys
 // the first non-Markdown one of the surface. Same predicate on the CLI and MCP twins (their `docsAfterCode` verdicts).
 inline NodeId routeEmittedHead( const IngestResult& ing, std::span<const NodeId> surface, bool docsAfterCode )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/conf: routeEmittedHead (the emitted head row)" );
     if( docsAfterCode )
     {
         const auto code = std::ranges::find_if( surface, [&]( NodeId id ) { return !isDocsAfterCodeRow( ing, id ); } );
@@ -994,6 +997,7 @@ inline NodeId routeEmittedHead( const IngestResult& ing, std::span<const NodeId>
 // The route= clause a head that is not the anchor appends, beside the confidence it lowers: the reader sees which row heads instead.
 inline std::string routeAnchorNotHeadClause( const IngestResult& ing, NodeId head )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: routeAnchorNotHeadClause (the not-the-head clause)" );
     const Symbol& s = ing.symbols[head];
     return "; anchor is not the ranked head (r=1 is " + s.name + " in " + std::string( rootRelPath( ing, s.fileId ) ) + ")";
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // foraliashop.h — XF-ALIAS-HOP, the for verb's surface: an <aliases> block after the answer when the name the task spells has an
 // alias definition (the printed rows first, then the rest: an alias-only name in a sentence prints as literal lines, not rows). The walk itself is aliashop.h aliasChain (the one alias hop); this file only picks the rows and prints.
 //
@@ -124,6 +125,7 @@ struct ForAliasHopArgs
 // The <aliases> block ("" when the name the task spells has no alias definition with a written target).
 inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHopArgs& a )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForAliasHops (the alias-hop chain)" );
     if( a.printed == nullptr || !forAliasHopOn() || ing.aliasTargets.empty() )
     {
         return {};

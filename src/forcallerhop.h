@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forcallerhop.h — THE CALLER HOP of a name-exact --for answer (lane mf1-nx): when the route names ONE function, its callers.
 //
 // WHY. A --for question whose subject is a bare function name routes name-exact and serves that function: its signature row,
@@ -576,6 +577,7 @@ struct FirstHopProof
 inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets, std::string_view rootArg,
                                            std::string_view by = {} )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForCallerHop (the caller-hop block)" );
     CallerHopRender out;
     if( targets.empty() )
     {

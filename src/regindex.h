@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // regindex.h — REGISTRAR (lane registrar; reports/dispatch-register-design.md REGISTRY half, the Python + TypeScript first slice):
 // a registry KEY joined to its registration sites and its consumers, printed on a compact-route --for answer as ONE present-only
 // row per key.
@@ -76,6 +77,7 @@ inline constexpr int         kRegReexportDepth = 3;   // re-export hops followed
 
 inline bool forRegRowsOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forRegRowsOn (are the registration rows on?)" );
     return std::getenv( "RIPWIRE_NO_REG_ROWS" ) == nullptr;
 }
 
@@ -1049,6 +1051,7 @@ inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeI
 // THE SPLICE: the <reg> rows go just inside the end of <sigs> (after the ranked rows they join). Returns the bytes added.
 inline std::size_t spliceRegRows( std::string& sigs, const IngestResult& ing, std::span<const NodeId> shownIds, std::string_view task )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceRegRows (the registration rows)" );
     constexpr std::string_view kClose = "</sigs>";
     if( !sigs.ends_with( kClose ) )
     {

@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // demoterefill.h — DEMOTE-ALL-DIALECTS (card B26): the soft target's refill walk, with no dependency beyond the standard library so
 // test/demoterefillcheck.sh compiles it alone against a model answer (fordemoteall.h includes it; verbs_for.h and mcpverbs.h call it).
 #include <algorithm>
@@ -27,6 +28,7 @@ template<class Block, class RowsCut, class RowsShown, class RenderAt, class Poin
 inline std::string refillRowsForDemote( std::size_t baseRowDrop, const Block& block, const RowsCut& rowsCut, const RowsShown& rowsShown,
                                         const RenderAt& renderAt, const Point& point )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: refillRowsForDemote (refill the rows a demote freed)" );
     std::string       pointed    = point();
     const std::size_t allotted   = std::max( baseRowDrop, block().size() );   // the rows' budget, or the undemoted block: no refill ships more
     std::size_t       acceptedAt = baseRowDrop;      // the budget of the render the walk last kept

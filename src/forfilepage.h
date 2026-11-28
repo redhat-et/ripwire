@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forfilepage.h — FOR-FILE-ANCHOR (issue #466, reported by @pguerrerolinares; peer-mine-mf1 card 2): the --for FILE PAGE.
 //
 // A --for subject that IS a file — a bare basename (`DynamicScreen.c`, `sync_ledger.py`), a file stem (`document-remind`,
@@ -57,6 +58,7 @@ inline constexpr unsigned    kForFilePageNextDepth   = 16;      // calls the nex
 
 inline bool forFilePageOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forFilePageOn (is the file page on?)" );
     return std::getenv( "RIPWIRE_NO_FILE_PAGE" ) == nullptr;
 }
 
@@ -615,6 +617,7 @@ inline void renderOneFile( std::string& out, const IngestResult& ing, const Grap
 // The page for a file-shaped subject ("" when the subject is not one or names nothing indexed).
 inline std::string renderForFilePage( const IngestResult& ing, const Graph& g, std::string_view task, RedactCounts* redact )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForFilePage (the named file's page)" );
     const std::vector<FileAnchor> anchors = resolveFileAnchors( ing, task );
     if( !forSubjectIsFileShaped( task, anchors ) )
     {

@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // forfold.h — THE BODY-TAIL FOLD of a compact-route --for answer (lane body-fold, train 31): the whole bodies of its top ranked
 // rows, appended after the unchanged answer under a fixed byte budget.
 //
@@ -64,6 +65,7 @@ inline constexpr std::size_t kForBodyFoldRows = 3;
 // The A/B switch: the fold rides unless RIPWIRE_NO_BODY_FOLD is set. The caller adds the posture (compact route, XML, default regime).
 inline bool forBodyFoldOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forBodyFoldOn (is the body fold on?)" );
     return std::getenv( "RIPWIRE_NO_BODY_FOLD" ) == nullptr;
 }
 
@@ -73,6 +75,7 @@ inline bool forBodyFoldOn()
 inline std::vector<NodeId> forBodyFoldCandidates( const IngestResult& ing, const std::vector<NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                                   std::size_t headRows, NodeId bodied )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: forBodyFoldCandidates (pick the fold's members)" );
     std::vector<NodeId> out;
     for( std::size_t i = 0; i < lensSurfaceIds.size() && i < headRows && out.size() < kForBodyFoldRows; ++i )
     {
@@ -426,6 +429,7 @@ inline FollowRender renderFollows( const BodyFoldInputs& in, NodeId from, std::v
 // already served counts as served; one that holds served ranked bodies replaces them.
 inline BodyFoldRender renderForBodyFold( const BodyFoldInputs& in, const std::vector<NodeId>& candidates )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForBodyFold (the body-fold block)" );
     BodyFoldRender out;
     out.total = candidates.size();
     if( candidates.empty() )
@@ -537,6 +541,7 @@ inline BodyFoldRender renderForBodyFold( const BodyFoldInputs& in, const std::ve
 inline constexpr std::string_view kForFoldSigsNextNote = " [sigs sigs_next=: one call serving all total= rows uncut]";
 inline void spliceFoldSigsNext( std::string& sigs, std::string& sigsNote, std::string_view firstSkipNext )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: spliceFoldSigsNext (the fold's next= on <sigs>)" );
     if( firstSkipNext.empty() )
     {
         return;   // every candidate was served: no body to lead with, the <sigs> continuation stays the re-call it was

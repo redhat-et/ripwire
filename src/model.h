@@ -2839,6 +2839,7 @@ inline std::string_view relForHash( std::string_view path, std::string_view root
 // tree gated under `.` and passed under "$PWD". test/rootspellingcheck.sh pins all of it.
 inline std::string_view rootRelPath( const IngestResult& ing, std::uint32_t fileId ) noexcept
 {
+    PROFILE_SCOPE_DESCRIBE( "for/helper: rootRelPath (a file's path relative to the crawl root)" );
     const std::string_view path = ing.files[ fileId ];
     return ing.crawlRoot.empty() ? path : relForHash( path, ing.crawlRoot );
 }

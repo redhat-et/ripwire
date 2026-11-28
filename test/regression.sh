@@ -615,6 +615,7 @@ for _g in \
     forroutecheck \
     forroutepagecheck \
     forrowfeaturescheck \
+    forscopecheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \

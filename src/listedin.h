@@ -1,4 +1,5 @@
 #pragma once
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 // listedin.h — LISTED-IN: the build / package / registry manifest lines that list a SHOWN file, on a --for answer whose task is a
 // creation task (lane manifest-noncode; CONTRIBUTING family 10, slice 10c, beside epmanifest.h's Python entry points).
 //
@@ -74,6 +75,7 @@ inline constexpr std::uintmax_t kListedManifestBytes = kDefaultMaxFileBytes;   /
 
 inline bool forListedInOn()
 {
+    PROFILE_SCOPE_DESCRIBE( "for/gate: forListedInOn (is the listed-in block on?)" );
     return std::getenv( "RIPWIRE_NO_LISTED_IN" ) == nullptr;
 }
 
@@ -759,6 +761,7 @@ inline void appendListed( std::string& x, const IngestResult& ing, const std::ve
 // `redact`: the run's redaction tally, every printed <ln> passes it (nullptr: --no-redact).
 inline ListedRender renderForListedIn( const IngestResult& ing, std::span<const NodeId> shown, std::string_view task, RedactCounts* redact )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/section: renderForListedIn (the listed-in block)" );
     using namespace listeddetail;
     ListedRender out;
     if( ing.crawlRoot.empty() || shown.empty() || !isCreationTask( task ) )

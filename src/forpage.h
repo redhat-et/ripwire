@@ -612,6 +612,7 @@ inline bool forFileRowBefore( const IngestResult& ing, const ForFileRow& a, cons
 // The page's ranking, from the finished lens ranking (every lift applied) and the term evidence.
 inline ForFilePage computeForFilePage( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: computeForFilePage (file-grain ranking for the page)" );
     ForFilePage       out;
     const std::size_t S = std::min( ing.symbols.size(), rank.size() );
     const std::size_t F = ing.files.size();
@@ -692,6 +693,7 @@ struct ForPageRenderParts
 
 inline std::string renderForFilePageXml( const IngestResult& ing, const ForFilePage& page, const ForPageRenderParts& p )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: renderForFilePageXml (render the file page)" );
     std::vector<char> esc;
     std::string       x;
     x.reserve( 512 + page.rows.size() * 120 );
@@ -1433,6 +1435,7 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
 inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
                                   std::size_t namedRows )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: fileTailAddTermNames (TAIL-SYM-TERMS names)" );
     const TailTermCands       tc = tailTermCands( t, ing, tieRank, headIds, namedRows );
     std::vector<std::string>  added( t.paths.size() );
     std::vector<std::uint8_t> count( namedRows, 0 );
@@ -1470,6 +1473,7 @@ inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexc
 // (fileTailOldWalk), so a name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound).
 inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task, std::size_t tokenBudget )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: tailTermTieRank (plain PageRank, the TAIL-SYM-TERMS tie-break)" );
     if( tokenBudget > 0 || !tailSymTermsOn() || tailTaskTerms( task ).empty() )
     {
         return {};
@@ -1483,6 +1487,7 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
                                  const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false,
                                  const std::vector<float>* termTieRank = nullptr )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: computeFileTail TOTAL (the file-grain tail walk)" );
     FileTail          out;
     std::vector<char> listed( ing.files.size(), 0 );
     out.task = std::string( task );
@@ -1518,6 +1523,7 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
 // narrow <sigs>; they fill the tail's own share only.
 inline FileTail fileTailOldWalk( const FileTail& t )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: fileTailOldWalk (the pre-widening reserve walk)" );
     FileTail old;
     old.paths.assign( t.paths.begin(), t.paths.begin() + std::ptrdiff_t( t.oldRows ) );
     old.syms.assign( t.syms.begin(), t.syms.begin() + std::ptrdiff_t( t.oldRows ) );
@@ -1545,6 +1551,7 @@ inline std::size_t fileTailPathOnlyShown( const FileTail& t, std::size_t shown )
 // the cut may be narrowed after the tail is funded, and a narrowed row's file must still land somewhere (H2H lane 2).
 inline std::vector<NodeId> rowsAtTargetIds( std::vector<NodeId> shown, const std::vector<float>& rank, std::size_t pastTarget )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: rowsAtTargetIds (ids of the rows at the target)" );
     if( pastTarget == 0 || pastTarget > shown.size() )
     {
         return shown;
@@ -1597,6 +1604,7 @@ inline std::string fileTailNextInvocation( const FileTail& t, std::size_t shown 
 // tail only (shown < total). `shownCap` lets the explicit-budget caller serve fewer rows than were collected.
 inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc )
 {
+    PROFILE_SCOPE_DESCRIBE( "for/tail: renderFileTailXml (serialize the tail rows)" );
     const std::size_t shown = std::min( shownCap, t.paths.size() );
     std::string x = "<tail total=\"" + std::to_string( t.total )
                   + "\" shown=\"" + std::to_string( shown )
