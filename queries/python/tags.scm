@@ -65,6 +65,11 @@
         attribute: (identifier) @name)
   ]) @reference.call
 
+; ASSERTED (lane asserted-signal): pytest's assertion is the `assert` STATEMENT, a keyword, not a call. It is recorded as a call named
+; `assert` (a keyword: no definition can take the name, so the site is always outside the tree, like `assertEqual` from unittest), and
+; graph.h assertingTestSymbols reads it through langfacts.h kPythonAssertionCalls like every other language's assertion call.
+(assert_statement "assert" @name) @reference.call
+
 ; An element access `obj[ k ]` is a call of the receiver class's subscript operator method — `__getitem__`, or
 ; `__setitem__` as an assignment's target — WHEN a receiver rule proves that class (`self[ k ]` in a class, a typed
 ; parameter or local, a constructed receiver). @name is the RECEIVER here, not a callee name: ingest_binds.h

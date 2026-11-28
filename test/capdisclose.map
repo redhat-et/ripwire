@@ -230,3 +230,4 @@ kActRows	legend
 kTinyRows	sink:shown
 kEdgeCap	sink:shown
 kSpreadEdgeMax	none:a shape test, not a cut: a named symbol with more cross-file edges than this, a caller among them, gets the full page; under it every edge is listed (shown=total) (THETA6-FINISH)
+kMaxChainSegments	none:a lexical read bound on one ObjC++ call's `::` chain (ingest_names.h objcxxStdQualifierBefore): past 16 segments the chain is not read as std-rooted and the call keeps the unqualified reference it had before #778, so no answer row is cut

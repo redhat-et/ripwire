@@ -22,6 +22,7 @@
 #include "compactlegend.h"   // P1 (L7): the legend:"compact" rewrite applied in textResult
 #include "legenddict.h"      // r2-LO: the session dictionary and the legend="ref" posture (resources/read, textResult)
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
+#include "gitstampcache.h"   // AT-STAMP-MCP: the STAMP record, armed once per tools/call (the at= stamp's two small git answers)
 #include "notfoundtext.h"   // BX2 FIX 9: a not-found answer's plain-text occurrences, as the CLI twin's
 
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
@@ -1710,6 +1711,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
             const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
+            resetGitHistoryCensus();   // lane/history-honesty: this request's _history_policy counts only its own walks (gitmine.h WHOSE HISTORY)
             ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
@@ -1723,6 +1725,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 const GitWalkCutMark cutsNow  = gitWalkCutMark();
                 const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
+                // `_history_policy`: what the history-signal tools' walks in THIS request left out (bots) and followed (exact moves)
+                const bool        historyTool = name == "cochange" || name == "situational_awareness" || name == "quality_delta" || name == "rank_by";
+                const std::string historyNote = historyTool ? gitHistoryPolicySentence() : std::string();
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1765,7 +1770,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
                      + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
-                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + mcpEnvelopeNoteField( "_history_policy", historyNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
@@ -1891,6 +1896,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 resp = errResultMsg( -32602, hiddenToolRefusal );
             }
             bool pathsUsageError = !hiddenToolRefusal.empty();
+            // AT-STAMP-MCP: true once `paths` rebound `path` to a workspace KEY. The STAMP record's dependencies are ONE
+            // root's, so a merged workspace is never armed (gitstampstore.h: "only the armed root ... is ever looked up").
+            bool isWorkspaceRequest = false;
             if( !pathsUsageError )
             {
                 // W3FIX M8: through the guarded ARRAY reader. `paths:5` used to read as absent, so the request
@@ -1916,6 +1924,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     std::string wsErr;
                     path = mcpWorkspaceKey( rootArgs, wsErr );
+                    isWorkspaceRequest = true;
                     if( path.empty() ) { resp = errResultMsg( -32602, wsErr );  pathsUsageError = true; }
                 }
             }
@@ -2225,6 +2234,29 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     hardenRequestRoot( path );
                 }
+                // ── AT-STAMP-MCP: the STAMP record, ONCE PER REQUEST ───────────────────────────────────────────
+                // gitstamp::stampAt asks git three questions for the at= every answer carries: `rev-parse --verify
+                // HEAD`, `status --porcelain` and `rev-parse --is-shallow-repository`. Two of them are exactly what the
+                // record holds, and a served warm CLI --for has asked neither since the record landed — but it was
+                // armed only there (gitstampcache.h "WHO ARMS IT"), so this server, the surface an agent calls, paid
+                // all three on EVERY request, inline on the request thread (measured on main 03cbe7115: 3 of each over
+                // three `for` calls in one server).
+                //
+                // PER REQUEST, never per process, and that is the correctness argument. at= is provenance that appears
+                // in the answer, and HEAD can move between two requests of one session; a stamp held for the server's
+                // lifetime would make at= WRONG, which this project weighs far above a slow one. arm() re-reads every
+                // file the stored answers depend on, so a commit between two requests invalidates the record and the
+                // next at= is git's own. The +dirty bit is not in the record at all and is asked live on every request,
+                // as before: the record keys only files in the git directory and the environment, and an unstaged edit
+                // or a new untracked file changes none of them, so a stored dirty bit would be served stale.
+                //
+                // Placed after hardenRequestRoot for the CLI's own reason — a trust decision is not something to replay
+                // from a file — and after every refusal above, so a request that serves no answer arms nothing. The
+                // server is single-threaded, one request per connection (mcpserver.h §2b serialize), so the one
+                // process-wide answer table this holds is never shared by two requests. Destroyed at the end of this
+                // try, which is where the record is written. Gate: test/mcpstampcheck.sh.
+                rw::gitstampcache::Session gitStampSession;
+                gitStampSession.arm( path, !pathsUsageError && !path.empty() && !isWorkspaceRequest );
                 if( !pathsUsageError && isMcpEditVerb( name ) )
                 {
                     if( std::string missingEditArg = missingArgMsg(); !missingEditArg.empty() )

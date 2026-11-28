@@ -1,0 +1,7 @@
+### Changed — the MCP server's `at=` stamp comes from the STAMP record too
+
+`gitstamp::stampAt` asks git three questions per answer: `rev-parse --verify HEAD`, `status --porcelain` and `rev-parse --is-shallow-repository`. Two of them are exactly what the STAMP record holds, and a served warm CLI `--for` has asked neither since #752. The record was armed only for a one-shot CLI `--for`, so the MCP server — the surface an agent calls — paid all three children on every request, inline on the request thread. Measured on main 03cbe7115, three `for` calls in one stdio server over libzmq: 3 `rev-parse --verify HEAD`, 3 `rev-parse --is-shallow-repository`, 3 `status --porcelain`. The record is now armed once per `tools/call` over a single git root, so the first request records and every later one serves those two answers from files.
+
+The stamp stays live. Arming is PER REQUEST, and `arm()` re-reads every file the stored answers depend on, so a commit between two requests of one session moves `at=`. The `+dirty` bit is still never stored (`gitstampstore.h`): `status --porcelain` runs on every request, as before, because the record keys only files in the git directory and the environment and an unstaged edit or a new untracked file changes none of them.
+
+Gate: `test/mcpstampcheck.sh` counts git children through `GIT_TRACE2_EVENT` across six `for` calls in one FIFO-driven server, with a commit and an untracked file staged between them, and carries a mutation control (a record served without re-reading its dependencies must break the liveness arm).

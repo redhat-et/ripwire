@@ -32,6 +32,8 @@
 #include <atomic>       // the join's once-per-process disclosure flags
 #include <bit>          // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
 #include <cctype>
+#include <span>         // GitRawPathReader's per-blob groups
+#include <tuple>        // GitRawPathReader's (blob, status, index) order
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -48,6 +50,7 @@
 #include <limits.h>    // PATH_MAX (hasEnclosingGitRepo realpath buffer)
 #include "infra/pipefields.h"  // PipeFieldReader — the record walk's deadline-keeping read
 #include "infra/os.h"  // rw::os::stat — the zero-popen .git walk-up pre-check; popen/pclose/realpath/localtime_r
+#include "gitrootfacts.h"  // gitDiscoveryView — the .git walk-up (hasEnclosingGitRepo) and the toplevel memo's freshness key
 
 namespace rw
 {
@@ -790,19 +793,174 @@ inline GitCommandLines gitCommandLinesStamped( std::string_view dir, const std::
 // The boundary rule, with ONE field of lookahead: an empty field ends the current record and opens
 // the next iff the field after it is the marker (or the stream ends). Any other empty field is a
 // merge prefix and is skipped — that is what keeps a merge's combined-diff files, the ones the first
-// migration draft dropped, attached to the merge that introduced them. The one collision left is the
-// same class the line frame had: a merge whose FIRST combined path is a file literally named `__C__`
-// reads as a pathless record, because its prefix empty is followed by the marker-spelled path: the
-// merge's next three paths become a phantom record's email and (unparsable, so 0) epochs, and a fifth
-// and later path rides that phantom at epoch 0. That boundary is disclosed here and pinned in the gate
-// rather than papered over.
+// migration draft dropped, attached to the merge that introduced them. Under --name-only one collision
+// was left, the same class the line frame had: a merge whose FIRST combined path was a file literally
+// named `__C__` read as a pathless record, its prefix empty followed by the marker-spelled path. Under
+// --raw (lane/history-honesty) the field after a merge's prefix empty is always a RAW field ("::<modes> <blobs> MM"),
+// which cannot spell the marker, so that collision is closed and test/gitframingcheck.sh arm 3 pins it
+// closed. Since that lane the metadata is five fields (%ae, N%an, T%(trailers), %at, %ct) and each change
+// is a raw field and its path: `\n:<modes> <blobs> <status> \0 <path>` — see kGitLogRecordFormat.
 struct GitLogRecord
 {
     std::string              authorEmail;
     std::int64_t             authorTs    = 0;
     std::int64_t             committerTs = 0;
     std::vector<std::string> paths;
+    bool                     botAuthor     = false;   // isBotAuthor( %an, %ae ) — see WHOSE HISTORY below
+    bool                     agentCoAuthor = false;   // a Co-Authored-By trailer names a coding agent
 };
+
+// ── WHOSE HISTORY, AND WHAT A MOVE IS (lane/history-honesty) ────────────────────────────────────────────────
+//
+// BOTS. MSR'26 (arXiv:2602.13170, 91 repos): automated accounts made 74% of hotspot edits. A dependency bot that
+// rewrites a lockfile fifty times is not where maintenance hurts, yet it made that file the top hotspot, the top
+// --rank-by=churn prior and the strongest co-change pair. So every SIGNAL walk (churn, decayed churn, short-horizon
+// churn, co-change) reads a bot-authored commit as touching nothing, and the answer says how many it left out
+// (bots_skipped=). --include-bots restores them. The ownership walk (--owners) is a RAW walk and is not filtered.
+// A bot is an author whose name or email local part ends in `[bot]` (every GitHub App), or one of the few
+// automation accounts that commit without that suffix (kBotAuthorEmails / kBotAuthorNames). The list is short on
+// purpose: a self-hosted bot under a person-shaped identity is counted as a person, so bots_skipped= is a floor.
+//
+// AGENTS. A commit whose Co-Authored-By trailer names a coding agent (kAgentCoAuthorMarks) is a person's commit
+// written with an agent. It is KEPT — the person owns it — and counted (agent_commits=), never silently mixed in.
+//
+// MOVES. An exact move is a delete and an add of the SAME blob in one commit. The walk reads each change's blob ids (--raw, the
+// ids the tree diff already holds, so no blob is ever read and a blobless clone walks it as before) and the reader pairs them
+// (GitRawPathReader). In a signal walk an exact move is no churn event and no co-change, and the file's older history is
+// FOLLOWED to its new path: walking newest-first, a move old->new maps every older record of `old` onto the file's current
+// path (renames=). A rename with an edit is still a delete and an add, as before. A block of lines moved inside one file, or between two, is one edit of each file it
+// touches: churn counts commits per file, not lines, so there is no line to double-count (2611.10530's line-life
+// question has no line here to answer it with).
+enum class GitHistoryUse : std::uint8_t
+{
+    Signals,   // churn / decayed churn / short-horizon churn / co-change: the bot policy and move following apply
+    Raw,       // ownership: every author, and an exact move lists both of its paths (the pre-lane --no-renames shape)
+};
+
+// What one signal walk left out or followed. Every count is commits (renames: exact file moves) the walk READ.
+struct GitHistoryCensus
+{
+    std::uint32_t botCommits   = 0;   // bot-authored commits that changed at least one path: skipped, or kept under --include-bots
+    std::uint32_t agentCommits = 0;   // kept, non-bot commits with an agent Co-Authored-By trailer that changed at least one path
+    std::uint32_t exactMoves   = 0;   // exact file moves (R100), each one path pair
+};
+
+// The process's bot policy: false (the default) skips bot commits in every signal walk; --include-bots sets it once,
+// from main(), before any walk starts. Read by the reader and by the qchurn cache key (quality.h).
+inline std::atomic<bool> gGitIncludeBots{ false };
+inline bool gitIncludeBots() noexcept { return gGitIncludeBots.load( std::memory_order_relaxed ); }
+// The qchurn key's spelling of the policy (quality.h gitRawCommitStreamCached): one blob per policy.
+inline const char* gitBotPolicyKey() noexcept { return gitIncludeBots() ? "bots=kept" : "bots=skipped"; }
+
+// The automation accounts that commit WITHOUT a `[bot]` suffix. Lower-case, compared whole.
+inline constexpr std::array<std::string_view, 5> kBotAuthorEmails = {
+    "action@github.com",                  // the actions/checkout README identity ("GitHub Action")
+    "bot@renovateapp.com",                // Renovate's default gitAuthor
+    "github-actions@github.com",
+    "renovate@whitesourcesoftware.com",   // Renovate's older default gitAuthor
+    "support@dependabot.com",             // Dependabot before it became a GitHub App
+};
+inline constexpr std::array<std::string_view, 5> kBotAuthorNames = {
+    "dependabot", "dependabot-preview", "github-actions", "renovate", "renovate bot",
+};
+// A coding agent, as its Co-Authored-By trailer spells it: a lower-case substring of the trailer value.
+inline constexpr std::array<std::string_view, 6> kAgentCoAuthorMarks = {
+    "noreply@anthropic.com",              // Claude Code
+    "cursoragent@cursor.com",             // Cursor
+    "noreply@aider.chat",                 // Aider
+    "+copilot@users.noreply.github.com",  // GitHub Copilot coding agent
+    "amp@ampcode.com",                    // Amp
+    "openhands@all-hands.dev",            // OpenHands
+};
+
+inline bool isBotAuthor( std::string_view name, std::string_view email )
+{
+    constexpr std::string_view kSuffix = "[bot]";
+    const std::string          n       = mention_detail::asciiLower( name );
+    const std::string          e       = mention_detail::asciiLower( email );
+    const std::string_view     local   = std::string_view( e ).substr( 0, e.find( '@' ) );
+    if( n.ends_with( kSuffix ) || local.ends_with( kSuffix ) )
+    {
+        return true;
+    }
+    return std::ranges::find( kBotAuthorEmails, std::string_view( e ) ) != kBotAuthorEmails.end()
+        || std::ranges::find( kBotAuthorNames, std::string_view( n ) ) != kBotAuthorNames.end();
+}
+
+// `coAuthors`: the trailer values, \x01-separated (the walk's %(trailers:…,separator=%x01) field).
+inline bool hasAgentCoAuthor( std::string_view coAuthors )
+{
+    if( coAuthors.empty() )
+    {
+        return false;
+    }
+    const std::string v = mention_detail::asciiLower( coAuthors );
+    return std::ranges::any_of( kAgentCoAuthorMarks, [ & ]( std::string_view m ) { return v.find( m ) != std::string::npos; } );
+}
+
+// The process-wide disclosure sink: what the signal walks behind this answer left out or followed, said once after the
+// answer (main.cpp discloseHistoryPolicy). One verb can run several walks over nested windows (--situ: an 18-month
+// co-change walk and a 12-month churn walk), so each count is the MOST any one walk saw, never a sum that would count a
+// commit once per walk; the sentence says it is that maximum.
+struct GitHistoryCensusSink
+{
+    std::mutex       lock;
+    GitHistoryCensus most;   // per count, the largest any one walk reported
+};
+inline GitHistoryCensusSink& gitHistoryCensusSink() noexcept
+{
+    static GitHistoryCensusSink sink;
+    return sink;
+}
+inline void noteGitHistoryCensus( const GitHistoryCensus& c )
+{
+    GitHistoryCensusSink&             sink = gitHistoryCensusSink();
+    const std::lock_guard<std::mutex> hold{ sink.lock };
+    sink.most.botCommits   = std::max( sink.most.botCommits, c.botCommits );
+    sink.most.agentCommits = std::max( sink.most.agentCommits, c.agentCommits );
+    sink.most.exactMoves   = std::max( sink.most.exactMoves, c.exactMoves );
+}
+// A long-lived server answers many requests: each one starts the sink empty (mcp.h, beside the _history_cut mark), so its
+// _history_policy says what THAT request's walks read, never a count left over from an earlier call on another root.
+// What the sink holds; `andReset` empties it in the same lock (resetGitHistoryCensus).
+inline GitHistoryCensus gitHistoryCensusSeen( bool andReset = false )
+{
+    GitHistoryCensusSink&             sink = gitHistoryCensusSink();
+    const std::lock_guard<std::mutex> hold{ sink.lock };
+    const GitHistoryCensus            seen = sink.most;
+    if( andReset )
+    {
+        sink.most = GitHistoryCensus{};
+    }
+    return seen;
+}
+inline void resetGitHistoryCensus() { gitHistoryCensusSeen( true ); }
+
+// The one sentence the CLI prints after a history-signal verb's answer, and the MCP envelope's _history_policy. "" when the walks
+// left nothing out and followed nothing: a zero is "none found", and an answer with nothing to qualify carries no clause. It rides
+// inside an XML comment, where `--` is not well-formed, so it names the flag without its dashes ("the include-bots flag"), and
+// main.cpp still passes it through xmlCommentText so no later edit can break the document.
+inline std::string gitHistoryPolicySentence()
+{
+    const GitHistoryCensus seen   = gitHistoryCensusSeen();
+    const std::uint32_t    bots   = seen.botCommits;
+    const std::uint32_t    agents = seen.agentCommits;
+    const std::uint32_t    moves  = seen.exactMoves;
+    if( bots == 0 && agents == 0 && moves == 0 )
+    {
+        return {};
+    }
+    const std::string botPart = gitIncludeBots()
+        ? std::format( "bots_included={}: bot-authored commits (a [bot] name or email, or a listed automation account) were KEPT in churn and "
+                       "co-change, as the include-bots flag asks", bots )
+        : std::format( "bots_skipped={}: bot-authored commits (a [bot] name or email, or a listed automation account) were left out of churn "
+                       "and co-change; the include-bots flag keeps them", bots );
+    return std::format( "history_policy {}. agent_commits={}: kept commits whose Co-Authored-By trailer names a coding agent. renames={}: exact "
+                        "file moves, which add no churn or co-change, and each moved file's older history is followed to its current path; a "
+                        "block of lines moved inside or between files is one edit of each file it touches. Each count is the most any one "
+                        "history walk behind this answer read, and bots_* is a floor (a bot committing as a person is counted as one).",
+                        botPart, agents, moves );
+}
 
 // The walk's exit status, carried so the K51 contract (a prefix is not an answer) survives the
 // migration: `unread` — git would not start, or died part-way, so the records are empty or a prefix, or
@@ -1057,6 +1215,7 @@ struct GitLogWalk
     int                       epochUnparsed = 0;
     GitWalkCut                cut           = GitWalkCut::None;   // the budget ended the walk: the records are the newest part
     std::uint64_t             commitsVisited = 0;
+    GitHistoryCensus          census;                              // a Signals walk's bots / agents / exact moves (WHOSE HISTORY)
 };
 
 // One field of lookahead over a NUL-framed stream: `next` reads a field (infra/pipefields.h) or hands back the one the boundary
@@ -1115,15 +1274,41 @@ inline int decodedExitCode( int status ) noexcept
 // changes: a rename now lists BOTH paths where it listed the new one, so a commit only ever GAINS a path, the old one. Whole
 // history, base vs this: textual 92 of 13104 commits differ (354 paths added, 5 of them at a path that exists at HEAD), hono
 // 50 of 2862 (286, 3), tmux 15 of 12243 (23, 1), none lost. A path gone from HEAD resolves to nothing and drops out at the
-// join; one that exists again was in fact touched by that commit, so it counts. Nothing here follows a file through a rename.
+// join; one that exists again was in fact touched by that commit, so it counts.
+//
+// --raw --no-abbrev (lane/history-honesty) replaced --name-only, and --no-renames stays. Each change is now a raw field
+// (`:<mode> <mode> <src-blob> <dst-blob> <status>`; a merge's combined form opens with `::`) and then its path. The blob ids are
+// what the tree diff already holds, so this reads no blob either, and the reader pairs a delete and an add of the SAME blob in
+// one commit as an exact move itself (GitRawPathReader). --no-abbrev: an abbreviated id costs an object-store lookup per entry
+// to prove it unique.
+//
+// NO RENAME DETECTION ON THIS WALK, NOT EVEN EXACT (measured 2026-11-26, git 2.50.1, kubernetes, --since="12 months ago", n=3).
+// Asking git for exact renames (-M100%) was the first draft. It reads no blob — exact detection pairs by blob id and, with the
+// score at 100%, never starts the inexact phase (a blobless clone under GIT_NO_LAZY_FETCH=1 walks it; plain -M dies there) —
+// but it is the MERGE side that pays. In git's combine-diff.c, diff_tree_combined() takes the find_paths_multitree() fast path
+// (one simultaneous walk of the merge's and all its parents' trees) only when `need_generic_pathscan` is false, and that flag is
+// set by any rename or copy detection (-M100% included), --follow, a break (-B), a pickaxe (-S/-G) or a --diff-filter. Each
+// forces the generic per-parent path scan: a full diff against each parent of every merge. Raw git
+// on that window went 0.64 s -> 6.13 s (one run each; a second n=3 of the -M100% walk: 6.21 / 4.85 / 6.21 s), and --hotspots end to end ~3 s -> 8-11 s (pre-lane
+// binary 2.92 / 3.22 / 3.42 s, the -M100% draft 7.75 / 9.52 / 11.17 s, run alternately).
+// This command, which pairs the moves in the reader instead: 0.47 / 0.47 / 0.52 s of git, against 0.94 / 0.44 / 0.47 s for the
+// pre-lane --name-only command; --hotspots 2.89 / 2.58 / 2.46 s against 6.16 / 2.55 / 2.55 s. So none of -M, -C, --find-renames,
+// --find-copies, --follow, -S, -G, --diff-filter or -B may join these arguments: test/historyhonestycheck.sh arm 12 refuses
+// each, on the source and on the argv git actually received, and pins kGitLogRecordFormat beside them.
+//
+// The format gains the author NAME and the Co-Authored-By trailer values, each behind a one-letter tag so neither can be empty
+// or spell the marker: an empty metadata field followed by a marker-spelled one would read as a record boundary.
+inline constexpr const char* kGitLogRecordWalkArgs = "--no-renames -z --raw --no-abbrev ";   // the diff-program hardening rides on the log line (gitchildoptscheck (G))
+inline constexpr const char* kGitLogRecordFormat =
+    "%x00__C__%x00%ae%x00N%an%x00T%(trailers:key=Co-authored-by,valueonly,separator=%x01,unfold)%x00%at%x00%ct";
 inline std::string gitLogRecordsCmd( const std::string& root, const std::string& extraArgs )
 {
     // One past the budget, so the walk can tell "the budget ended it" from "the history ended exactly there".
     const std::uint64_t maxCommits  = gitWalkMaxCommits();
     const std::string   maxCountArg = maxCommits == 0 ? std::string{} : "-n " + std::to_string( maxCommits + 1 ) + " ";
     return gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-         + " log --no-ext-diff --no-textconv --no-renames " + kMergeDiffArgs
-         + maxCountArg + "-z --name-only --format=%x00__C__%x00%ae%x00%at%x00%ct " + extraArgs + "2>/dev/null";
+         + " log --no-ext-diff --no-textconv " + kGitLogRecordWalkArgs + kMergeDiffArgs
+         + maxCountArg + "--format=" + shSingleQuote( kGitLogRecordFormat ) + " " + extraArgs + "2>/dev/null";
 }
 
 // Stream every record of one `git log --name-only` walk to `visit`, one record in memory at a time, so
@@ -1170,9 +1355,217 @@ inline void finishGitLogWalk( std::FILE* pipe, GitLogWalk& walk, GitWalkCutDiscl
     }
 }
 
+// The --raw half of one walk: each change is a raw field and then its path. A Signals walk holds the record's changes until
+// the record closes, then pairs every delete with an add of the SAME blob (an exact move: neither path is a change), emits the
+// rest through movedTo, and only then records each move as old -> the file's current spelling, so the record's own paths are
+// read through the moves of NEWER records only and every OLDER record through this one's (the stream is newest-first).
+// Pairing: one delete and one add of a blob pair; when a blob is deleted or added more than once in one commit (empty files,
+// a vendored copy) a delete pairs with the add of the same basename when that basename is unique on both sides, and anything
+// left over stays a delete and an add, the pre-lane reading. A merge's combined (`::`) entries never pair. A Raw walk emits
+// every path in stream order, exactly the pre-lane --no-renames --name-only list.
+struct GitRawPathReader
+{
+    struct Change
+    {
+        std::string path;
+        std::string blob;          // a delete's source blob or an add's destination blob; empty otherwise
+        char        status = 0;    // 'D' or 'A' when pairable, 0 for anything else
+    };
+    GitHistoryUse                     use = GitHistoryUse::Signals;
+    HashMap<std::string, std::string> movedTo;          // an older spelling -> where that file lives now
+    std::vector<Change>               changes;          // this record's, in stream order
+    std::string                       pendingBlob;
+    char                              pendingStatus = 0;
+    bool                              haveMeta      = false;
+    std::uint32_t                     recordMoves   = 0; // exact moves in the record just closed
+
+    void startRecord() noexcept
+    {
+        changes.clear();
+        haveMeta    = false;
+        recordMoves = 0;
+    }
+
+    std::string current( const std::string& p ) const
+    {
+        if( !movedTo.empty() )
+        {
+            if( const auto it = movedTo.find( p ); it != movedTo.end() )
+            {
+                return it->second;
+            }
+        }
+        return p;
+    }
+
+    // `:<srcmode> <dstmode> <srcblob> <dstblob> <status>` — the fields after the third space, split once.
+    void takeMeta( std::string_view raw, bool combined )
+    {
+        pendingStatus = 0;
+        pendingBlob.clear();
+        if( combined || raw.size() < 2 || raw[ 0 ] != ':' || raw[ 1 ] == ':' )
+        {
+            return;
+        }
+        std::array<std::string_view, 5> tok{};
+        std::size_t                     n = 0;
+        for( std::size_t at = 1; n < tok.size() && at <= raw.size(); )
+        {
+            const std::size_t sp = std::min( raw.find( ' ', at ), raw.size() );
+            tok[ n++ ]           = raw.substr( at, sp - at );
+            at                   = sp + 1;
+        }
+        if( n == tok.size() && !tok[ 4 ].empty() && ( tok[ 4 ][ 0 ] == 'D' || tok[ 4 ][ 0 ] == 'A' ) )
+        {
+            pendingStatus = tok[ 4 ][ 0 ];
+            pendingBlob   = std::string( pendingStatus == 'D' ? tok[ 2 ] : tok[ 3 ] );
+        }
+    }
+
+    void take( std::string&& field, bool combined )
+    {
+        if( !haveMeta )
+        {
+            haveMeta = true;
+            takeMeta( field, combined );
+            return;
+        }
+        haveMeta = false;
+        changes.push_back( Change{ std::move( field ), std::move( pendingBlob ), pendingStatus } );
+        pendingBlob.clear();
+    }
+
+    // Exact moves among `changes`: pairOf[d] = a for each paired delete d and add a, UINT32_MAX elsewhere.
+    std::vector<std::uint32_t> exactMovePairs() const
+    {
+        std::vector<std::uint32_t> pairOf( changes.size(), UINT32_MAX );
+        std::vector<std::uint32_t> order;
+        for( std::uint32_t i = 0; i < changes.size(); ++i )
+        {
+            if( changes[ i ].status != 0 && !changes[ i ].blob.empty() )
+            {
+                order.push_back( i );
+            }
+        }
+        if( order.size() < 2 )
+        {
+            return pairOf;
+        }
+        std::ranges::sort( order, [ & ]( std::uint32_t x, std::uint32_t y )
+        {
+            return std::tie( changes[ x ].blob, changes[ x ].status, x ) < std::tie( changes[ y ].blob, changes[ y ].status, y );
+        } );
+        for( std::size_t g = 0; g < order.size(); )
+        {
+            std::size_t e = g;
+            while( e < order.size() && changes[ order[ e ] ].blob == changes[ order[ g ] ].blob ) { ++e; }
+            pairBlobGroup( std::span<const std::uint32_t>( order ).subspan( g, e - g ), pairOf );
+            g = e;
+        }
+        return pairOf;
+    }
+
+    // One blob's adds then deletes ('A' sorts before 'D').
+    void pairBlobGroup( std::span<const std::uint32_t> group, std::vector<std::uint32_t>& pairOf ) const
+    {
+        const auto        firstDelete = std::ranges::find_if( group, [ & ]( std::uint32_t i ) { return changes[ i ].status == 'D'; } );
+        const std::size_t adds        = std::size_t( firstDelete - group.begin() );
+        const auto        addsOf      = group.first( adds );
+        const auto        deletesOf   = group.subspan( adds );
+        if( addsOf.size() == 1 && deletesOf.size() == 1 )
+        {
+            pairOf[ deletesOf[ 0 ] ] = addsOf[ 0 ];
+            return;
+        }
+        const auto base   = [ & ]( std::uint32_t i ) { return mention_detail::baseNameOf( changes[ i ].path ); };
+        const auto unique = [ & ]( std::span<const std::uint32_t> side, std::string_view b )
+        {
+            return std::ranges::count_if( side, [ & ]( std::uint32_t i ) { return base( i ) == b; } ) == 1;
+        };
+        for( const std::uint32_t d : deletesOf )
+        {
+            if( !unique( deletesOf, base( d ) ) || !unique( addsOf, base( d ) ) )
+            {
+                continue;
+            }
+            const auto a = std::ranges::find_if( addsOf, [ & ]( std::uint32_t i ) { return base( i ) == base( d ); } );
+            pairOf[ d ] = *a;
+        }
+    }
+
+    // The record closed: its paths, then its moves.
+    void finishRecord( std::vector<std::string>& paths )
+    {
+        if( use == GitHistoryUse::Raw )
+        {
+            for( Change& c : changes ) { paths.push_back( std::move( c.path ) ); }
+            return;
+        }
+        const std::vector<std::uint32_t> pairOf = exactMovePairs();
+        std::vector<bool>                moved( changes.size(), false );
+        for( std::uint32_t d = 0; d < pairOf.size(); ++d )
+        {
+            if( pairOf[ d ] != UINT32_MAX ) { moved[ d ] = true; moved[ pairOf[ d ] ] = true; }
+        }
+        for( std::uint32_t i = 0; i < changes.size(); ++i )
+        {
+            if( !moved[ i ] ) { paths.push_back( current( changes[ i ].path ) ); }
+        }
+        for( std::uint32_t d = 0; d < pairOf.size(); ++d )
+        {
+            if( pairOf[ d ] != UINT32_MAX )
+            {
+                ++recordMoves;
+                movedTo[ changes[ d ].path ] = current( changes[ pairOf[ d ] ].path );
+            }
+        }
+    }
+};
+
+// The Signals policy on one visited record (WHOSE HISTORY): a bot commit touches nothing unless --include-bots, and the census
+// counts what was skipped or kept. A record with no path is no evidence either way and is not counted.
+inline void applyHistoryPolicy( GitLogRecord& rec, GitHistoryCensus& census, std::uint32_t recordMoves )
+{
+    census.exactMoves += recordMoves;
+    if( rec.paths.empty() )
+    {
+        return;
+    }
+    if( rec.botAuthor )
+    {
+        ++census.botCommits;
+        if( !gitIncludeBots() )
+        {
+            rec.paths.clear();
+        }
+        return;
+    }
+    census.agentCommits += rec.agentCoAuthor ? 1u : 0u;
+}
+
+// One metadata field, by its position (`metaLeft` counts down from 5: %ae, N%an, T%(trailers), %at, %ct).
+inline void takeGitLogMetaField( GitLogRecord& cur, GitLogWalk& walk, int metaLeft, const std::string& field )
+{
+    const auto untagged = [ & ]( char tag ) { return std::string_view( field ).substr( !field.empty() && field.front() == tag ? 1 : 0 ); };
+    switch( metaLeft )
+    {
+        case 5: cur.authorEmail = field; return;
+        case 4: cur.botAuthor = isBotAuthor( untagged( 'N' ), cur.authorEmail ); return;
+        case 3: cur.agentCoAuthor = hasAgentCoAuthor( untagged( 'T' ) ); return;
+        default: break;
+    }
+    const std::optional<std::int64_t> epoch = parseEpochField( field );
+    if( !epoch ) { ++walk.epochUnparsed; }
+    if( metaLeft == 2 ) { cur.authorTs    = epoch.value_or( 0 ); }
+    else                { cur.committerTs = epoch.value_or( 0 ); }
+}
+
+inline constexpr int kGitLogMetaFields = 5;
+
 template<typename Visitor>
 inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::string& extraArgs, Visitor&& visit,
-                                       GitWalkCutDisclosure cutSink = GitWalkCutDisclosure::ProcessTail )
+                                       GitWalkCutDisclosure cutSink = GitWalkCutDisclosure::ProcessTail,
+                                       GitHistoryUse use = GitHistoryUse::Signals )
 {
     GitLogWalk walk;
     const std::uint64_t maxCommits = gitWalkMaxCommits();
@@ -1204,17 +1597,25 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
     bool         anyData    = false;  // a non-empty field arrived at all (an empty history is an empty stream)
     int          metaLeft  = 0;       // metadata fields still to read for this record
     int          empties   = 0;       // empty fields since this record's metadata (0 = none, 1 = a merge prefix)
-    bool         havePath  = false;   // this record has taken its first path
+    bool         havePath  = false;   // this record has taken its first change field (its first raw field, under --raw)
+    GitRawPathReader statusPaths{ .use = use };
 
     const auto closeRecord = [ & ]()
     {
         if( inRecord && sawMarker )
         {
             if( maxCommits != 0 && walk.commitsVisited == maxCommits ) { walk.cut = GitWalkCut::Commits; }
-            else                                                       { visit( cur ); ++walk.commitsVisited; }
+            else
+            {
+                statusPaths.finishRecord( cur.paths );
+                if( use == GitHistoryUse::Signals ) { applyHistoryPolicy( cur, walk.census, statusPaths.recordMoves ); }
+                visit( cur );
+                ++walk.commitsVisited;
+            }
         }
         cur        = GitLogRecord{};
         sawMarker  = false;
+        statusPaths.startRecord();
     };
 
     while( !atEnd && walk.cut == GitWalkCut::None )
@@ -1261,7 +1662,7 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
                 closeRecord();
                 inRecord    = true;
                 wantMarker  = true;
-                metaLeft    = 3;
+                metaLeft    = kGitLogMetaFields;
                 empties     = 0;
                 havePath    = false;
                 if( haveNext ) { lookahead = std::move( next ); haveLookahead = true; }
@@ -1289,26 +1690,20 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
         }
         if( metaLeft > 0 )
         {
-            if( metaLeft == 3 ) { cur.authorEmail = field; }
-            else
-            {
-                const std::optional<std::int64_t> epoch = parseEpochField( field );
-                if( !epoch ) { ++walk.epochUnparsed; }
-                if( metaLeft == 2 ) { cur.authorTs    = epoch.value_or( 0 ); }
-                else                { cur.committerTs = epoch.value_or( 0 ); }
-            }
+            takeGitLogMetaField( cur, walk, metaLeft, field );
             --metaLeft;
             continue;
         }
 
-        // A path. The first path of a REGULAR commit arrives with git's '\n' separator (no empty was
-        // counted since the metadata); a merge's first path arrives bare after its prefix empty.
+        // A raw field or a path. The first field of a REGULAR commit's change list arrives with git's '\n'
+        // separator (no empty was counted since the metadata); a merge's arrives bare after its prefix empty,
+        // and a merge's combined (`::`) entries never pair as a move (GitRawPathReader).
         if( !havePath )
         {
             havePath = true;
             if( empties == 0 && !field.empty() && field.front() == '\n' ) { field.erase( 0, 1 ); }
         }
-        cur.paths.push_back( std::move( field ) );
+        statusPaths.take( std::move( field ), empties > 0 );
     }
     if( fields.reader.timedOut )
     {
@@ -1319,25 +1714,43 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
         closeRecord();
     }
     finishGitLogWalk( pipe, walk, cutSink, anyData && !anyMarker );
+    if( use == GitHistoryUse::Signals )
+    {
+        noteGitHistoryCensus( walk.census );
+    }
     return walk;
 }
 
 // The repo TOPLEVEL enclosing `absDir` (absolute and already realpath'd), or empty when `absDir` is not inside
 // a git repo at all. realpath'd on the way out so it compares byte-for-byte with a realpath'd file path — on
 // this platform `/tmp` is a symlink to `/private/tmp`, and an unresolved toplevel would fail every prefix test
-// it exists for. MEMOIZED per directory: a directory's toplevel cannot change under a running process, and up
-// to six miners in this file each build their own index in one run.
+// it exists for. MEMOIZED per directory, because up to six miners in this file each build their own index in one run
+// — but a directory's toplevel CAN change under a long-lived MCP or LSP server (`git init` in the root or in a
+// subdirectory of an outer repo, a `.git` removed, a gitfile rewritten, core.worktree edited), so each answer keeps the
+// GitDiscoveryView it was computed under (gitrootfacts.h, a realpath and two stats per level) and git is asked again
+// whenever the view no longer matches. A root git provably cannot see answers "" with no git child at all.
+struct GitToplevelMemo
+{
+    std::string      top;
+    GitDiscoveryView view;
+};
+
 inline std::string gitRepoToplevel( const std::string& absDir )
 {
-    static std::mutex                        toplevelMutex;
-    static HashMap<std::string, std::string> toplevelByProbeDir;
+    static std::mutex                            toplevelMutex;
+    static HashMap<std::string, GitToplevelMemo> toplevelByProbeDir;
 
+    GitDiscoveryView view = gitDiscoveryView( absDir );
+    if( view.provesNoRepo() )
+    {
+        return {};
+    }
     {
         const std::lock_guard<std::mutex> lock{ toplevelMutex };
         const auto                        it = toplevelByProbeDir.find( absDir );
-        if( it != toplevelByProbeDir.end() )
+        if( it != toplevelByProbeDir.end() && it->second.view == view )
         {
-            return it->second;
+            return it->second.top;
         }
     }
 
@@ -1356,7 +1769,7 @@ inline std::string gitRepoToplevel( const std::string& absDir )
     }
 
     const std::lock_guard<std::mutex> lock{ toplevelMutex };
-    toplevelByProbeDir[ absDir ] = top;
+    toplevelByProbeDir[ absDir ] = GitToplevelMemo{ top, std::move( view ) };
     return top;
 }
 
@@ -2078,9 +2491,11 @@ inline void recordCommitFileSet( std::vector<std::uint32_t>& cur, std::size_t ma
     cur.clear();
 }
 
-// `outCensus` is optional and left alone when null; every caller that passes nothing is byte-identical.
+// `outCensus` is optional and left alone when null; every caller that passes nothing is byte-identical. `outHistory` (optional) receives
+// THIS walk's own WHOSE HISTORY census — the process sink keeps only the maximum over every walk, which a long-lived server never resets.
 inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string& root, const IngestResult& ing, const std::string& windowArgs, std::size_t maxFiles,
-                                                               std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
+                                                               std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr,
+                                                               GitHistoryCensus* outHistory = nullptr )
 {
     std::vector<std::vector<std::uint32_t>> sets;
 
@@ -2090,7 +2505,7 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
 
     std::vector<std::uint32_t> cur;
     const auto flush = [ & ]() { recordCommitFileSet( cur, maxFiles, sets, outCensus ); };
-    forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
+    const GitLogWalk walk = forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
     {
         for( const std::string& p : rec.paths )
         {
@@ -2102,6 +2517,10 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
         }
         flush();
     } );
+    if( outHistory )
+    {
+        *outHistory = walk.census;
+    }
     return sets;
 }
 
@@ -2109,11 +2528,12 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
 // `scope`: nullptr (default) reproduces the pre-flag behavior byte-for-byte — `--since=<since>` (a fixed
 // default date) is used exactly as before; a non-null *inactive* scope ALSO falls back to `<since>`; a
 // non-null *active* scope overrides `since` with the resolved --since=REV|DATE window (sinceLogArgs).
+// `outCensus` (optional) receives what the window held and what the maxFiles cut dropped, for a caller that discloses it.
 inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::string& root, const IngestResult& ing, const char* since, std::size_t maxFiles, const SinceScope* scope = nullptr,
-                                                                  std::uint32_t onlyRoot = UINT32_MAX )
+                                                                  std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitCommitFileSets (git log --name-only popen)" );
-    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot );
+    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot, outCensus );
 }
 
 // B3 (co-change prior boost): per-commit changed-file sets over the LAST `commitCount` commits reachable
@@ -2123,10 +2543,11 @@ inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::str
 // checkouts (a repo pinned to a 2024 base commit has nothing inside a wall-clock window measured in 2026,
 // which is exactly the LocBench-eval shape). Degrades to empty on no-git / no-history, like every miner here.
 inline std::vector<std::vector<std::uint32_t>> gitRecentCommitFileSets( const std::string& root, const IngestResult& ing, std::uint32_t commitCount, std::size_t maxFiles,
-                                                                        std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr )
+                                                                        std::uint32_t onlyRoot = UINT32_MAX, CommitWindowCensus* outCensus = nullptr,
+                                                                        GitHistoryCensus* outHistory = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitRecentCommitFileSets (co-change boost window)" );
-    return gitLogFileSets( root, ing, "-" + std::to_string( commitCount ) + " ", maxFiles, onlyRoot, outCensus );
+    return gitLogFileSets( root, ing, "-" + std::to_string( commitCount ) + " ", maxFiles, onlyRoot, outCensus, outHistory );
 }
 
 // git's approxidate for "<months> months ago" is calendar-month subtraction from the current local time
@@ -2167,6 +2588,9 @@ struct RawCommitStream
     int exitCode = 0;
     // The budget ended the walk (GitWalkCut above): `commits` is the newest part of the window, disclosed, and cached with this set.
     GitWalkCut cut = GitWalkCut::None;
+    // What the walk's history policy left out or followed (WHOSE HISTORY): the stream already reflects it, so a cached
+    // stream carries it too, and the qchurn key carries the bot policy it was read under (quality.h).
+    GitHistoryCensus census;
 };
 
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
@@ -2185,6 +2609,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     out.notRun   = walk.notRun;
     out.exitCode = walk.exitCode;
     out.cut      = walk.cut;
+    out.census   = walk.census;
     return out;
 }
 
@@ -2936,7 +3361,7 @@ inline std::vector<FileOwnership> gitFileAuthors(
     };
     const std::string rootSlash = root + "/";
 
-    // git log -c -z --name-only --format='%x00__C__%x00%ae%x00%at%x00%ct' 2>/dev/null  (optionally
+    // git log -c --no-renames -z --raw --no-abbrev --format=<kGitLogRecordFormat> 2>/dev/null  (optionally
     // scoped to one path with `-- <relpath>`): one record per commit through the shared NUL-framed
     // reader, author email and author timestamp as their own fields. NO trailing %x00 — the last
     // field runs to the stream's end, and the boundary rule reads the empty that FOLLOWS it.
@@ -2999,7 +3424,7 @@ inline std::vector<FileOwnership> gitFileAuthors(
             ( *slot )[ curEmail ].push_back( curTs );
             newestTsByFile[ f ] = std::max( newestTsByFile[ f ], curTs );
         }
-    } );
+    }, GitWalkCutDisclosure::ProcessTail, GitHistoryUse::Raw );   // ownership reads every author, and a move as both of its paths
 
     std::vector<FileOwnership> result;
     const auto reduceFile = [ & ]( std::uint32_t fid, const AuthorTimestamps& authorTs, std::int64_t newestTs )
@@ -3143,6 +3568,21 @@ public:
         }
         const std::vector<char>& fb = forwardClosure( b );
         return a < fb.size() && fb[a];
+    }
+
+    // a DIRECT edge either way (no closure, no bare-name fallback): the corroborated tail's include/import link
+    bool hasDirectEdge( std::uint32_t a, std::uint32_t b ) const
+    {
+        const auto has = [ & ]( std::uint32_t from, std::uint32_t to )
+        {
+            if( from >= adj_.size() )
+            {
+                return false;
+            }
+            const auto row = adj_[from];
+            return std::find( row.begin(), row.end(), to ) != row.end();
+        };
+        return has( a, b ) || has( b, a );
     }
 
 private:
@@ -3409,8 +3849,15 @@ inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, s
 //   degRev  = conf(partner => probed): the other direction, over the PARTNER's own commit count.
 //             The pair form's symmetric deg= is max(deg, degRev) — see coConfidence above.
 //   recur   = how many of `subWindows` sub-windows contain a joint commit (Clio recurrence).
+// Why a partner is listed (why=): support = kCoSupportFloor or more shared commits; confidence / link = a 2-commit partner of a
+// ONE-seed question that the corroborated tail admitted (situ.h coCorroboratedTail), and on which evidence.
+enum class CoWhy : std::uint8_t { Support, Confidence, Link };
+inline constexpr std::string_view coWhyName( CoWhy w ) noexcept
+{
+    return w == CoWhy::Confidence ? "confidence" : w == CoWhy::Link ? "link" : "support";
+}
 struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable;
-                   std::uint32_t noEdgeLangs = 0; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
+                   std::uint32_t noEdgeLangs = 0; CoWhy why = CoWhy::Support; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
 
 // The row's verdict attribute, rendered ONCE for all four emitters (--cochange repo-wide `<pair>`, its
 // per-file `<f>`, --pr-context's `<partner>`, and — via the JSON pair below — the MCP verb). Three states,
@@ -3452,6 +3899,11 @@ inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
     return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
 }
 
+// THE SUPPORT FLOOR — the shared commits a partner needs before it is reported. Every partner list says it (floor="3":
+// --cochange=FILE's root, --situ's [3] header, <partners>, and their JSON twins), beside each row's own count (together=):
+// a row's percentage alone cannot tell 2 of 3 commits from 200 of 300 (bench/cochange; owner ruling 2026-11-26).
+inline constexpr std::uint32_t kCoSupportFloor = 3;
+
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:
 // a one-hop-indirect include like A.cpp→A.h→B.h counts as a dependency, so is NOT surprising). Shared by the
@@ -3465,9 +3917,11 @@ inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
 // git, no I/O. Callers that probe one file (the CLI --cochange / MCP verb) use the git-driven wrapper below.
 // `outSubWindows` (optional): the recurrence denominator this call actually used, for the emitter's
 // `sub_windows=` disclosure. Nobody may publish recur= without it — see kCoRecurSubWindows above.
+// `minSupport`: kCoSupportFloor, or kCoTailSupport when a one-seed caller collects the tail's candidates (situ.h).
 inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits,
                                                 const std::vector<std::vector<std::uint32_t>>& sets, std::uint32_t* outSubWindows = nullptr,
-                                                CoCouplingCache* couplingCache = nullptr )   // multi-probe callers share one (see CoCouplingCache)
+                                                CoCouplingCache* couplingCache = nullptr,   // multi-probe callers share one (see CoCouplingCache)
+                                                std::uint32_t minSupport = kCoSupportFloor )
 {
     outCommits = 0;
     if( outSubWindows )
@@ -3522,10 +3976,9 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     // Built at most once per ingest when the caller passes `couplingCache`; a one-off local cache otherwise.
     std::optional<CoCouplingCache> localCache;
     CoCouplingCache&               cache = couplingCache ? *couplingCache : localCache.emplace( ing );
-    constexpr std::uint32_t kSupport = 3;
     for( const auto& [other, n] : together )
     {
-        if( n >= kSupport )
+        if( n >= minSupport )
         {
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
@@ -3541,13 +3994,27 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     return res;
 }
 
+// ── THE CORROBORATED TAIL — a ONE-seed question's list, filled to kCoTailFillTo with 2-commit partners something corroborates ──
+// MEASURED (bench/cochange; decision_rule_4repo, 2026-11-26): lowering the floor to 2 for one seed raised Hit@10 on ripwire,
+// kubernetes, django and fastify, and cut the share of listed partners that were real on three of them — a bare 2-commit
+// partner is mostly noise. So the floor stays kCoSupportFloor and a 2-commit partner joins only when (C) it moved in at least
+// kCoTailMinConfidence of the seed's commits, or (S) the code links the files (CoSeedLinks). The tail ranks below every
+// support row (confidence desc, path asc) and only FILLS: it never displaces a support row, and adds nothing once the list
+// holds kCoTailFillTo rows. Several seeds get no tail: their merge already supplies the corroboration. Each row says why=.
+// The tail itself (CoSeedLinks, coCorroboratedTail) is in situ.h: its test-of rule is testmap.h's, and testmap.h includes this file.
+inline constexpr std::uint32_t kCoTailSupport         = 2;
+inline constexpr double        kCoTailMinConfidence   = 0.5;
+inline constexpr std::size_t   kCoTailFillTo          = 10;
+inline constexpr std::size_t   kCoTailSameDirMaxFiles = 20;
+
 // git-driven form: mine the co-change file-sets for THIS one probe, then delegate to the precomputed overload.
 // The single-probe callers (CLI --cochange, MCP `cochange`) keep this signature. Multi-probe callers
 // (--situ / --pr-context) must hoist gitCommitFileSets("18 months ago", 30, scope) out of their loop and use
 // the overload above instead — see A4-P10.
+// `minSupport`: --cochange=FILE and the MCP verb pass kCoTailSupport and hand the result to situ.h coCorroboratedTail.
 inline std::vector<CoPartner> cochangePartners( const std::string& root, const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits, const SinceScope* scope = nullptr,
                                                 std::uint32_t onlyRoot = UINT32_MAX,   // multi-root §5: mine ONLY within that root
-                                                std::uint32_t* outSubWindows = nullptr )
+                                                std::uint32_t* outSubWindows = nullptr, std::uint32_t minSupport = kCoSupportFloor )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: cochangePartners (--cochange)" );
     outCommits = 0;
@@ -3560,7 +4027,7 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
         return {}; // unknown file → no git call, as before
     }
     const auto sets = gitCommitFileSets( root, ing, "18 months ago", 30, scope, onlyRoot );
-    return cochangePartners( ing, fileSubstr, outCommits, sets, outSubWindows );
+    return cochangePartners( ing, fileSubstr, outCommits, sets, outSubWindows, nullptr, minSupport );
 }
 
 // B3: cheap "could there be ANY git history above this root?" pre-check — a stat() walk up the directory
@@ -3603,7 +4070,8 @@ inline std::string enclosingGitWorkTree( const std::string& root )
 
 inline bool hasEnclosingGitRepo( const std::string& root )
 {
-    return !enclosingGitWorkTree( root ).empty();
+    const GitDiscoveryView view = gitDiscoveryView( root );   // the ONE walk-up (gitrootfacts.h); an unresolvable root has no marks → no repo (degrade)
+    return view.hasDotGit();
 }
 
 // ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────
@@ -3634,7 +4102,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
 inline constexpr std::uint32_t kCoBoostCommitWindow      = 500;    // last-N-commits mining window (matches the eval's --history-depth=500 deepening)
 inline constexpr std::size_t   kCoBoostMaxFilesPerCommit = 30;     // same bulk-commit cap as the other co-change miners here
 inline constexpr std::uint32_t kCoBoostSeedCount         = 3;      // seeds = the top-3 positively-scored symbols' files
-inline constexpr std::uint32_t kCoBoostSupport           = 3;      // a partner must share >= 3 commits with a seed file (cochangePartners' kSupport)
+inline constexpr std::uint32_t kCoBoostSupport           = kCoSupportFloor;   // a partner must share >= 3 commits with a seed file (cochangePartners' floor)
 inline constexpr std::size_t   kCoBoostMaxPartnerFiles   = 8;      // strongest partners only, by (deg desc, path asc)
 inline constexpr std::size_t   kCoBoostMaxSymbolsPerFile = 3;      // per partner file: its top-3 symbols by (lens score desc, id asc)
 inline constexpr float         kCoBoostFrac              = 0.25f;  // boost = frac · deg · seedFloor — scale-free (relative to the rank's own scores)

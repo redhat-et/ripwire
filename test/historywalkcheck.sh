@@ -268,7 +268,7 @@ cat > "$SHIMT/git" <<SH
 #!/bin/sh
 # Only the record walk stalls: it prints what real git prints for the first commits, then says nothing for far longer than the budget.
 case " \$* " in
-  *" --name-only "*" -z "*|*" -z --name-only "*)
+  *" -z "*" --raw "*|*" -z --raw "*)
     if [ -n "\${STALL_AT_START:-}" ]; then
       # STALL_ONCE=<file>: only the first walk stalls (an earlier request's cut, then a request the budget never touched)
       if [ -z "\${STALL_ONCE:-}" ] || [ ! -e "\$STALL_ONCE" ]; then [ -z "\${STALL_ONCE:-}" ] || : > "\$STALL_ONCE"; exec sleep 45; fi
@@ -300,7 +300,7 @@ check "(M1b) ... and the answer that read a cut walk carries it in its envelope"
 SHIMW="$TMP/shim-count"; mkdir -p "$SHIMW"
 cat > "$SHIMW/git" <<SH
 #!/bin/sh
-case " \$* " in *" --name-only "*" -z "*|*" -z --name-only "*)
+case " \$* " in *" -z "*" --raw "*|*" -z --raw "*)
   echo walk >>"$TMP/walklog"
   if [ -n "\${STALL_AFTER_5:-}" ]; then "$REALGIT" "\$@" -n 5 2>/dev/null | cat; exec sleep 45; fi ;;
 esac

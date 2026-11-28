@@ -326,11 +326,13 @@ for _g in \
     archcheck \
     archhonestcheck \
     archmetricscheck \
+    archunqualifiedcheck \
     argvdiffcheck \
     arisefollowupcheck \
     ariseshimcheck \
     aritycheck \
     artifactcheck \
+    assertedcheck \
     astqueryregexcheck \
     astrocheck \
     atcheck \
@@ -404,9 +406,12 @@ for _g in \
     cloneoperandcheck \
     clonepersistcheck \
     clsrecvcheck \
+    cochangebacktestcheck \
     cochangeboostcheck \
     cochangecliocheck \
+    cochangefloorcheck \
     cochangesurprisecheck \
+    cochangetailcheck \
     codexinstallhonestycheck \
     codexplugincheck \
     codexwrapcheck \
@@ -502,6 +507,7 @@ for _g in \
     editcheckcheck \
     editcheckdeclcheck \
     editchecknotecheck \
+    editcheckstampcheck \
     edithandlehintcheck \
     editpayloadbinarycheck \
     editplancheck \
@@ -509,6 +515,7 @@ for _g in \
     editplanrecheckcheck \
     editplanrollbackmsgcheck \
     editpreviewcheck \
+    editpreviewwarmcheck \
     editroundtripcheck \
     edittargetfileabscheck \
     eliximportcheck \
@@ -671,6 +678,7 @@ for _g in \
     helpbudgetcheck \
     helptaskdeadlinecheck \
     hermesinstallcheck \
+    historyhonestycheck \
     historyoraclecheck \
     historywalkcheck \
     honestlexcheck \
@@ -811,6 +819,7 @@ for _g in \
     mcprobustcheck \
     mcpslicecheck \
     mcpstalecheck \
+    mcpstampcheck \
     mcpstdiolinecapcheck \
     mcpstrictschemacheck \
     mcptoolprunecheck \
@@ -835,6 +844,7 @@ for _g in \
     mergescoutlonglinecheck \
     metalcheck \
     meterdisclosurecheck \
+    metriclegendcheck \
     metricscheck \
     modifierguardcheck \
     moduleconstcheck \
@@ -863,6 +873,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    norepogitcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
@@ -886,6 +897,7 @@ for _g in \
     packcallersharecheck \
     packkeybodycheck \
     packlocatecheck \
+    packpartnerscheck \
     packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
@@ -984,6 +996,7 @@ for _g in \
     qualnamecheck \
     qualnewcheck \
     qualnscallcheck \
+    querycachereusecheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \
@@ -1075,6 +1088,7 @@ for _g in \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
+    rustturbofishcheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1096,6 +1110,7 @@ for _g in \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \
+    shardapartcheck \
     shellgateindexcheck \
     shellnestcheck \
     showcasecapturecheck \
@@ -1108,6 +1123,7 @@ for _g in \
     sincewindowcheck \
     singledefcheck \
     sitesatshortcheck \
+    situbulkcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \
@@ -1136,6 +1152,7 @@ for _g in \
     statgatecheck \
     stdmembergatecheck \
     stdqualcheck \
+    straynographcheck \
     strkerncheck \
     structlayoutcheck \
     subagentprimercheck \

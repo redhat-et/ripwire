@@ -544,6 +544,58 @@ for L in compact full; do
     done
 done
 
+# ── 8g) TAIL-CLAUSE: an owner ranked only into <tail> is printed there, so the clause rides ──────────────
+# 8f's head walk reads the <d>/<hops> rows; a module-scope owner ranked past them still reaches the answer as
+# a <t> pointer row (sym= its file's top symbols). Reported by the M5 session (8f red on #790's tree: a tail
+# row sym="p,&lt;file-scope&gt;" and no definition). Fixture: 60 files whose functions the query names, and
+# one file whose ONLY symbol is its module scope (a top-level call) — it ranks 61st, into the tail alone.
+echo "=== (8g) TAIL-CLAUSE: a <tail> row naming an owner carries the clause ==="
+TC="$TMP/tailowner"; mkdir -p "$TC/src" "$TC/boot"
+for i in $( seq 1 60 ); do
+    printf 'export function emitXmlAttr%d(attr: string): string {\n  return "<x " + attr + "/>"\n}\n' "$i" > "$TC/src/xmlattr$i.ts"
+done
+printf "import { emitXmlAttr1 } from '../src/xmlattr1'\n\nemitXmlAttr1('boot')\n" > "$TC/boot/start.ts"
+tc_seen=0
+for L in compact full; do
+    A="$( "$BIN" "$TC" --no-cache --for='emit xml attributes' --legend=$L 2>/dev/null )"
+    T="$( printf '%s' "$A" | perl -0ne 'print $1 if /(<tail\b.*?<\/tail>)/s' )"
+    REST="$( printf '%s' "$A" | perl -0pe 's/<tail\b.*?<\/tail>//s' )"
+    # PREMISE: the owner's file is in the tail, and nowhere else in the document (not a head row)
+    if printf '%s' "$T" | grep -q 'boot/start\.ts[^<]*\(<file-scope>\|&lt;file-scope&gt;\)' && ! printf '%s' "$REST" | grep -q 'boot/start\.ts'; then
+        tc_seen=$(( tc_seen + 1 ))
+        printf '%s' "$A" | grep -q 'modscope\|MODULE SCOPE' \
+            && ok "(8g) --for --legend=$L: the owner rides only in <tail> and the clause defines it" \
+            || no "(8g) --for --legend=$L: <tail> prints <file-scope> and the legend never defines it"
+    else
+        no "(8g) --for --legend=$L: premise lost — the owner is not a tail-only row (tail: ${T:0:300})"
+    fi
+done
+if [ "$tc_seen" = 2 ]; then ok "(8g) both legends exercised a tail-only owner (2 of 2)"; else no "(8g) only $tc_seen of 2 legends reached a tail-only owner"; fi
+# PAGED: the default answer is served in pages (forpages.h). What page N prints is defined on page N or page 1 — and page 1 does
+# not define in advance what only a later page prints (forpagelegend.h kTravels: the clause travels with the owner's page). On
+# #790's tree the owner's tail row sat on page 2 with the clause on neither page. Small pages put the fixture's tail past page 1.
+tcp(){ "$BIN" "$TC" --no-cache --for='emit xml attributes' --legend=compact --page-bytes=3000${1:+:$1} 2>/dev/null; }
+tcrows(){ perl -0pe 's/<!--.*?-->//gs'; }   # a page's rows: its legend comments removed (the clause itself spells <file-scope>)
+P1="$( tcp )"; NP="$( printf '%s' "$P1" | grep -o ' pages="[0-9]*"' | head -1 | grep -o '[0-9][0-9]*' )"
+tc_owned=0
+if printf '%s' "$P1" | tcrows | grep -q '<file-scope>\|&lt;file-scope&gt;'; then
+    no "(8g) paged: page 1 prints the owner — the fixture lost its premise (the owner must sit on a later page)"
+else
+    printf '%s' "$P1" | grep -q 't=modscope' \
+        && no "(8g) paged: page 1 holds the clause although only a later page prints the owner" \
+        || ok "(8g) paged: page 1 prints no owner and sends no clause in advance"
+    for k in $( seq 2 "${NP:-1}" ); do
+        PK="$( tcp "$k" )"
+        if printf '%s' "$PK" | tcrows | grep -q '<file-scope>\|&lt;file-scope&gt;'; then
+            tc_owned=$(( tc_owned + 1 ))
+            printf '%s' "$PK" | grep -q 't=modscope' \
+                && ok "(8g) paged: page $k of $NP prints the owner and carries its clause" \
+                || no "(8g) paged: page $k of $NP prints the owner and neither it nor page 1 defines it"
+        fi
+    done
+fi
+if [ "$tc_owned" -ge 1 ]; then ok "(8g) paged: $tc_owned later page(s) printed the owner"; else no "(8g) paged: no later page printed the owner (pages=${NP:-?})"; fi
+
 # ── 8d) #60 MED-2: the legend says the owner has no body, and --expand agrees ──────────────────────────
 # Every clause naming this kind says "no body to expand". --expand used to answer either the WHOLE FILE
 # (the whole-file serving always undercuts an empty bundle) or shown="0" capped="1" — a cap over a body

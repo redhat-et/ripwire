@@ -21,6 +21,9 @@
 //   --lint      findings (<f> rows): a byte-budgeted sorted prefix, continued by next="--lint … --offset=K" (verbs_lint.h)
 //   --expand    body lines: the default --pack-budget-bytes leaves the answer under the ceiling; a cut body says lines="lo-hi/T"
 //               and next= names the slice that continues it (serialize.h)
+//   --batch     whole <q> sub-answers: offset= shown= has_more= next_offset= and next="--batch=FILE --offset=K" on the root; a <q>
+//               larger than a page is served alone and whole, over_ceiling="1" plus one stderr line; --page-bytes=0 is the whole
+//               batch (batchpage.h). Research audit 2026-11-26 item 2: the MCP twin pages the same unit (#774).
 //   --for --page-bytes=0   the whole answer by request: printed whole, plus ONE stderr line when it is over the ceiling
 #include <cstddef>
 
@@ -29,5 +32,28 @@ namespace rw
 
 inline constexpr std::size_t kHarnessInlineChars = 30000;                                    // Claude Code Bash tool's inline ceiling (docs, above)
 inline constexpr std::size_t kOutputCeilingChars = kHarnessInlineChars - kHarnessInlineChars / 5;   // 24,000: the inline limit less 20 %
+
+// The page a whole-unit verb serves: units [offset, end) and the bytes they take beside the page's fixed part.
+struct WholeUnitPage
+{
+    std::size_t end  = 0;   // one past the last unit on the page
+    std::size_t used = 0;   // fixedBytes plus the units' bytes; > ceiling only when one unit alone is over it
+};
+
+// From `offset`, as many WHOLE units as fit under `ceiling` beside `fixedBytes` (the root, the legend, the close), and never
+// fewer than one: a unit larger than a page is served whole on its own page rather than cut, and the caller discloses it
+// (used > ceiling). `units` is any sized range of strings or views; `offset` must be < units.size().
+template <class Units>
+[[nodiscard]] inline WholeUnitPage fitWholeUnits( const Units& units, std::size_t offset, std::size_t fixedBytes,
+                                                  std::size_t ceiling = kOutputCeilingChars ) noexcept
+{
+    WholeUnitPage page{ offset, fixedBytes };
+    while( page.end < units.size() && ( page.end == offset || page.used + units[ page.end ].size() <= ceiling ) )
+    {
+        page.used += units[ page.end ].size();
+        ++page.end;
+    }
+    return page;
+}
 
 }   // namespace rw

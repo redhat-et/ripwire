@@ -49,7 +49,7 @@
 #   (e) the marker literal lives ONLY inside the shared helper — five consumer bodies, zero hits.
 #   2. the raw-stream digest + structural count (11 records, 13 marker-spelled byte sequences).
 #   3. the merge shapes: an ordinary name-bearing merge's files are ATTACHED (the lookahead is
-#      load-bearing — a parser without it drops them); the DISCLOSED collision is pinned.
+#      load-bearing — a parser without it drops them); the old collision is CLOSED under --raw.
 #   4. author-not-committer: ownership answers with the AUTHOR, never the committer.
 #   5. non-vacuity: the fixture is what the arms claim (12 tracked, 11 indexed, the extension-less
 #      `__C__` unindexed BY DESIGN per layout-pin Finding 1).
@@ -417,7 +417,7 @@ code_hits=$( code_only "$SRC" | grep -o '__C__' | wc -l | tr -d ' ' )
     && ok "exactly 2 non-comment __C__ occurrences in src/gitmine.h" \
     || no "$code_hits non-comment __C__ occurrences in src/gitmine.h, want 2"
 const_line=$( code_only "$SRC" | grep -c 'kGitLogMarker = "__C__"' )
-fmt_line=$( code_only "$SRC" | grep -c 'format=%x00__C__%x00%ae%x00%at%x00%ct' )
+fmt_line=$( code_only "$SRC" | grep -c '"%x00__C__%x00%ae%x00N%an%x00T%(trailers' )
 if [ "$const_line" = 1 ] && [ "$fmt_line" = 1 ]; then
     ok "the two sites are the kGitLogMarker constant and the shared command's --format= — no consumer body carries the marker"
 else
@@ -432,15 +432,20 @@ echo "arm 2: the raw stream the reader parses is byte-pinned"
 # The reader's contract is a BYTE layout, so the layout itself is pinned: the exact command
 # gitLogRecordsCmd builds (its prefix flags — --no-optional-locks, the fsmonitor/signature pins and the
 # driver pins — govern the index and the worktree, never `log` output, so plain git reproduces it).
-"$REAL_GIT" -c core.quotepath=false -C "$H" log --no-ext-diff --no-textconv -c \
-    -z --name-only --format='%x00__C__%x00%ae%x00%at%x00%ct' 2>/dev/null > "$TMP/raw.z"
+# RE-PINNED 2026-11-26 (lane/history-honesty): the command became `--no-renames -c -z --raw --no-abbrev` with the author name
+# and the Co-Authored-By trailers in the format (gitmine.h kGitLogRecordFormat), so the bytes are new by construction; the
+# structural count below is what says the frame is still the frame.
+"$REAL_GIT" -c core.quotepath=false -C "$H" log --no-ext-diff --no-textconv --no-renames -c \
+    -z --raw --no-abbrev --format='%x00__C__%x00%ae%x00N%an%x00T%(trailers:key=Co-authored-by,valueonly,separator=%x01,unfold)%x00%at%x00%ct' \
+    2>/dev/null > "$TMP/raw.z"
 digest=$( python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$TMP/raw.z" )
-[ "$digest" = 9a11263860e97452932460b72c9eca9020a6ad01b1d29ceba917f1db1167796c ] \
+[ "$digest" = 088feb7e40dceaf2db3c31f89a105eaddbd62a59ac674b60bec79bdef19589b0 ] \
     && ok "the stream is byte-identical to the pinned digest" \
     || no "raw-stream digest drifted: $digest"
-# Fields that spell the marker EXACTLY (NUL-delimited, so a '\n'-prefixed first path does not count):
-# 11 record openers + 2 paths — c1's mid-list `__C__` (not first in byte order, hence no '\n' prefix)
-# and the collision merge's bare first path.
+# Fields that spell the marker EXACTLY (NUL-delimited, so a '\n'-prefixed first field does not count):
+# 11 record openers + 4 paths. Under --name-only it was 13: c1's mid-list `__C__` and the collision merge's bare first path.
+# Under --raw the '\n' rides the first RAW field, so the two commits whose first path was `__C__` now carry it bare too
+# (+2). Every one of the four sits after a raw field, where the reader takes it as a path by position.
 fields=$( python3 -c '
 import sys
 d = open( sys.argv[1], "rb" ).read()
@@ -451,24 +456,27 @@ while i >= 0:
     n += 1
     i = d.find( needle, i + 1 )
 print( n )' "$TMP/raw.z" )
-[ "$fields" = 13 ] \
-    && ok "13 NUL-delimited fields spell the marker: 11 record openers + 2 marker-spelled paths" \
-    || no "marker-spelled fields: $fields, want 13"
+[ "$fields" = 15 ] \
+    && ok "15 NUL-delimited fields spell the marker: 11 record openers + 4 marker-spelled paths, each after a raw field" \
+    || no "marker-spelled fields: $fields, want 15"
 
-# ── ARM 3: the merge shapes — the lookahead is load-bearing, the collision is pinned ────────────────
+# ── ARM 3: the merge shapes — the lookahead is load-bearing, the collision is closed ────────────────
 echo "arm 3: the merge shapes"
 alpha_churn=$( churn_of_fn "$TMP/for-alphaFn.xml" alphaFn )
 [ "$alpha_churn" = 4 ] \
     && ok "M2's name-bearing merge ATTACHES Alpha.cpp (churn=4; a parser without the one-field lookahead reads the merge's prefix empty as a boundary and drops its files — 3)" \
     || no "alphaFn churn='$alpha_churn', want 4 — the lookahead is not attaching merge paths"
 dot_churn=$( churn_of_fn "$TMP/for-dotFn.xml" dotFn )
-[ "$dot_churn" = 3 ] \
-    && ok "the disclosed collision is pinned: the collision merge's __C__.cpp is dropped (churn=3, not 4)" \
-    || no "dotFn churn='$dot_churn', want 3 — the collision's observable moved"
+# The collision is CLOSED since lane/history-honesty: under --raw a merge's combined listing opens with a RAW field
+# ("::<modes> <blobs> MM"), never a path, so the prefix empty is followed by a field that cannot spell the marker and the merge's
+# `__C__` path is read by position. Under --name-only this was 3 (the merge's __C__.cpp dropped).
+[ "$dot_churn" = 4 ] \
+    && ok "the old collision is closed: the collision merge's __C__.cpp is attached (churn=4; --name-only read 3)" \
+    || no "dotFn churn='$dot_churn', want 4 — the collision merge's files are dropped again"
 hs_dot=$( attr_of "$TMP/hotspots.xml" '__C__.cpp' churn )
-[ "$hs_dot" = 3 ] \
-    && ok "--hotspots rides the same record walk since HISTORY-WALK-HANG, so the two miners agree on the collision (3)" \
-    || no "--hotspots __C__.cpp churn='$hs_dot', want 3 — the two miners no longer share the walk, re-derive"
+[ "$hs_dot" = 4 ] \
+    && ok "--hotspots rides the same record walk since HISTORY-WALK-HANG, so the two miners agree (4)" \
+    || no "--hotspots __C__.cpp churn='$hs_dot', want 4 — the two miners no longer share the walk, re-derive"
 
 # ── ARM 4: ownership answers with the AUTHOR, never the committer ──────────────────────────────────
 echo "arm 4: author-not-committer"
@@ -580,7 +588,7 @@ cat > "$BSHIM/git" <<'BSHIMEOF'
 want_z=0; want_name_only=0
 for a in "$@"; do
     [ "$a" = "-z" ] && want_z=1
-    [ "$a" = "--name-only" ] && want_name_only=1
+    [ "$a" = "--raw" ] && want_name_only=1   # the record walk's listing flag (--name-only before lane/history-honesty)
 done
 if [ "$want_z" = 1 ] && [ "$want_name_only" = 1 ]; then
     : > "$BSHIM_DIR/bare-served"

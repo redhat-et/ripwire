@@ -181,7 +181,9 @@ agent's context every session, whether or not it calls them.
 ### How ripwire compares
 
 Six tools on one machine (Apple M5 Pro, 18 cores, 48 GB), one tool at a time, default settings, measured 2026-11-22:
-ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. **Bold** = the best value in a
+ripwire 0.7.0, codegraph 1.6.2, cbm 0.12.1, graphify 0.9.108, graft 0.29.0, crg 2.4.0. ripwire's column is a
+profile-guided release build (`scripts/pgobuild.sh`, what CI ships), not the default `cmake --build build` (LTO on,
+PGO off) that PGO beats by 6-16% cold. **Bold** = the best value in a
 row. How each number was measured: [docs/EVALS.md §2b](docs/EVALS.md#2b-the-070-comparison-tables-measured-2026-11-22).
 
 #### Speed
@@ -1063,9 +1065,9 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 ## What it answers
 
 <details>
-<summary><b>201 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
+<summary><b>202 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
 
-Around the core sit 201 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 202 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `--help` prints one line per flag (~4.5K tokens); `--help=--FLAG` prints that flag's full entry with
 every caveat, `--help=SECTION` one family, and `--help=all` the whole catalog.
@@ -1560,7 +1562,8 @@ four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
 stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
 warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
-**≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
+**≈167× fewer**. Two opt-in builds go faster still — PGO by **6–16% cold over the default build** (14–25% against an
+LTO-off baseline) — with **byte-identical**
 output on every one.
 
 </details>
@@ -1599,7 +1602,7 @@ via `PL2_CACHE_MISS_LD`).
 </details>
 
 <details>
-<summary>The two opt-in faster builds — LTO on by default, PGO at 14–25% cold, and why the output stays byte-identical</summary>
+<summary>The two opt-in faster builds — LTO on by default, PGO at 6–16% cold over that default, and why the output stays byte-identical</summary>
 
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
@@ -1823,9 +1826,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>931 gate scripts</b> (counts snapshot 2026-11-27), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>948 gate scripts</b> (counts snapshot 2026-11-27), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **931 gate scripts** at the counts snapshot 2026-11-27 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **948 gate scripts** at the counts snapshot 2026-11-27 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1834,7 +1837,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-27 the tool had 478 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-27 the tool had 485 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names

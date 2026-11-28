@@ -51,10 +51,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 478 | 165 | 301 | **177** |
+| 485 | 167 | 306 | **179** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 478 + 10 is the 488 constants this generator parses out of `src/`.
+are not counted as caps, and 485 + 10 is the 495 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **148 of 478 caps are classified
-(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 330 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 485 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 337 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -814,6 +814,7 @@ Discloses: `coboost_commits_capped`, `coboost_partners_capped`
 | `kCoBoostMaxFilesPerCommit` | `30` | INDEXING | same bulk-commit cap as the other co-change miners here |
 | `kCoBoostMaxPartnerFiles` | `8` | INDEXING | strongest partners only, by (deg desc, path asc) |
 | `kCoBoostMaxSymbolsPerFile` | `3` | INDEXING | per partner file: its top-3 symbols by (lens score desc, id asc) |
+| `kCoTailSameDirMaxFiles` | `20` | — | — |
 | `kGitWalkMaxSeconds` | `20` | — | — |
 
 ### `src/gitoracle.h`
@@ -826,6 +827,14 @@ Discloses: **none**
 | `kMaxNamesTracked` | `2000000` | INDEXING | map bound; 44,904 on the deepest repo measured |
 | `kMaxProbeCommits` | `40000` | INDEXING | walk bound — past it, misses are "unknown", never "never" |
 | `kMinNameLen` | `4` | BOUNDARY | — |
+
+### `src/gitrootfacts.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kGitDiscoveryMaxLevels` | `64` | — | — |
 
 ### `src/gitstampcache.h`
 
@@ -1019,6 +1028,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kExtendChainCap` | `16` | INDEXING | factory-of-a-factory links the receiver rule follows (nunjucks: 2); past it, no class |
+| `kMaxChainSegments` | `16` | — | — |
 | `kMaxQualifierHops` | `32` | INDEXING | `a::b::c::…` past 32 segments is not written C++ |
 
 ### `src/ingest_parsepool.h`
@@ -1308,6 +1318,7 @@ Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
 | `kOverCeilingKeyBytes` | `22` | — | `,"over_ceiling":true` + the closing brace |
 | `kPackTaskFullHeadRows` | `10` | — | — |
 | `kPackTaskHeadFloorRows` | `4` | — | == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor) |
+| `kPackTaskPartnersCapPct` | `3` | — | — |
 | `kPackTaskRankTopN` | `12` | — | a --partition slice's ranking window (partition.h; lanes.h brief claims) |
 
 ### `src/pageview.h`

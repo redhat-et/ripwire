@@ -25,7 +25,8 @@ COMMENT = re.compile(rb"<!--.*?-->|<!\[CDATA\[.*?\]\]>", re.S)
 TAG = re.compile(rb"<([A-Za-z_][\w-]*)((?:\s+[\w:-]+=\"[^\"]*\")*)\s*/?>")
 ATTR = re.compile(rb"\s([\w:-]+)=\"")
 
-# lead (the clause's opening bytes, as the dictionary spells it) -> triggers: "<name" an element, "name=" an attribute.
+# lead (the clause's opening bytes, as the dictionary spells it) -> triggers: "<name" an element, "name=" an attribute,
+# "&lt;…" a value (its escaped bytes anywhere in the masked rows: the module-scope owner on a <d>, an <h> or a tail sym= list).
 # A clause is NEEDED on a page whose rows carry any trigger. Short attributes (l= p= n= …, on every row kind) are never triggers:
 # such a clause is needed by its ELEMENT.
 CLAUSES = [
@@ -50,7 +51,9 @@ CLAUSES = [
     (b"; d slot_by= functions that MAY call",    [b"slot_by=", b"slot_fields=", b"slot_by_more=", b"slot_fields_more="]),
     (b"; d slot_by= ~C,",                        [b"slot_by=", b"slot_fields="]),
     (b"; d slots= ",                             [b"slots=", b"slots_more="]),
+    (b"; t=modscope n=<file-scope>:",            [b"&lt;file-scope&gt;"]),
 ]
+VALUES = [t for _, ts in CLAUSES for t in ts if t.startswith(b"&")]
 
 
 def rows_of(p): return p[0] if isinstance(p, tuple) else p
@@ -68,7 +71,9 @@ def carried(d):
     """(elements, attributes) the page carries, comments and CDATA masked; <about> (the ref pointer, defined by the dictionary
     it names) is not a row"""
     els, attrs = set(), set()
-    for m in TAG.finditer(MASK.sub(lambda m: b" " * len(m.group(0)), rows_of(d))):
+    masked = MASK.sub(lambda m: b" " * len(m.group(0)), rows_of(d))
+    els.update(v for v in VALUES if v in masked)   # a value trigger rides the element set: attr_gaps reads only attributes
+    for m in TAG.finditer(masked):
         name = m.group(1)
         if name == b"about": continue
         els.add(name)
@@ -78,7 +83,9 @@ def carried(d):
 
 def needs(triggers, els, attrs):
     for t in triggers:
-        if t.startswith(b"<"):
+        if t.startswith(b"&"):
+            if t in els: return True
+        elif t.startswith(b"<"):
             if t[1:] in els: return True
         elif t[:-1] in attrs: return True
     return False
