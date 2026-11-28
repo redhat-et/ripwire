@@ -663,6 +663,7 @@ for _g in \
     grepignorecheck \
     grepscancheck \
     grepseamcheck \
+    grepslimcheck \
     greptiercheck \
     guardedwalkcheck \
     guardmsgcheck \

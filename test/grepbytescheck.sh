@@ -262,7 +262,11 @@ rc = 0
 # U+2212 MINUS SIGN is what the prose actually uses; ASCII '-' accepted so a future edit cannot fail on a
 # character swap alone.
 m_cap = re.search(r"grepbytescheck\.sh`? re-derives a \*\*[−-]([0-9.]+)% median\*\*", text)
-m_unc = re.search(r"\*\*\+([0-9.]+)% median\*\* payload \*increase\*", text)
+# GREP-SLIM (2026-11-27): the uncapped arm moved from a +61.5% increase to parity (a 4.0% median cut on the dev
+# machine, 4 of 12 larger). Near parity its sign follows the corpus path length (grep repeats the absolute path per
+# line), so EVALS states "≈ parity" and this arm holds |median| <= PARITY_BAND points: a return to the old regime fails.
+m_unc = re.search(r"\*\*≈ parity\*\*:\s+a \*\*([0-9.]+)% median\*\* payload cut", text)
+PARITY_BAND = 40.0
 
 def band_check(label, published, signed, sign):
     """`signed` is this gate's own reduction median: positive = ripwire SMALLER. The doc states the capped
@@ -291,7 +295,17 @@ def band_check(label, published, signed, sign):
           f"(this run: {signed}%; magnitude is environment-dependent by design — see this arm's docstring)")
 
 band_check("CAPPED",   float(m_cap.group(1)) if m_cap else None, med_capped,   "−")
-band_check("UNCAPPED", float(m_unc.group(1)) if m_unc else None, med_uncapped, "+")
+if m_unc is None:
+    print(f"  FAIL  doc-drift band: docs/EVALS.md no longer states the UNCAPPED arm as parity in the expected form "
+          f"(re-derived {med_uncapped}%)")
+    rc = 1
+elif abs(med_uncapped) > PARITY_BAND:
+    print(f"  FAIL  doc-drift band: UNCAPPED median re-derives as {med_uncapped}% — outside the ±{PARITY_BAND} parity band "
+          f"EVALS §5 fact 1 states; a regime change, so fact 1 has to be rewritten, not renumbered")
+    rc = 1
+else:
+    print(f"  PASS  doc-drift band: UNCAPPED stated as parity ({m_unc.group(1)}% dev cut), re-derives {med_uncapped}% "
+          f"inside ±{PARITY_BAND} (sign is path-length dependent near parity — see the comment above)")
 sys.exit(rc)
 PY
 
