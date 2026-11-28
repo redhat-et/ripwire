@@ -91,7 +91,7 @@ EOF
 SHA7="$( cd "$FX" && git log -1 --format=%h )"
 
 OUT="$TMP/a.txt"
-situ "$FX" --situ > "$OUT"
+situ "$FX" --situ > "$OUT" || no "(a) ripwire --situ exited non-zero"
 [ -s "$OUT" ] || { no "(a) the fixture produced no --situ report — every arm below would be a false green"; echo "situnamecheck: SOME FAILED"; exit 1; }
 
 # (a) the changed: block names the edited symbol with its span and its direct caller, and leads the report
@@ -119,7 +119,7 @@ if [ -n "$LC" ]; then
 else
   no "(b) no 'last commit:' line — the committed change is unnamed"
 fi
-situ "$FX" --situ=app/engine.py > "$TMP/b2.txt"
+situ "$FX" --situ=app/engine.py > "$TMP/b2.txt" || no "(b) ripwire --situ=app/engine.py exited non-zero"
 [ -s "$TMP/b2.txt" ] || no "(b) --situ=app/engine.py produced nothing"
 if grep -q 'last commit:' "$TMP/b2.txt"; then no "(b) an explicit --situ=FILES list still prints last commit:"
 else ok "(b) an explicit --situ=FILES list prints no last commit: line"; fi
@@ -146,7 +146,7 @@ s = s.replace("    return x\n", "    return x + 1\n")
 open(p, "w").write(s)
 EOF
 OUT2="$TMP/c.txt"
-situ "$FX2" --situ > "$OUT2"
+situ "$FX2" --situ > "$OUT2" || no "(c) ripwire --situ exited non-zero"
 [ -s "$OUT2" ] || no "(c) fixture 2 produced no report"
 n2="$( sed -n '/^  changed: /,/^  [a-z\[]/p' "$OUT2" | grep -c '^        lib/core\.py:' )"
 if [ "$n2" -eq 8 ]; then ok "(c) the default cap shows 8 symbol rows (saw $n2)"; else no "(c) expected 8 shown rows, saw $n2"; fi
@@ -157,7 +157,7 @@ if grep -qE '^        lib/core\.py:1-2 fn00 ← use/u0\.py, use/u1\.py, use/u2\.
 else
   no "(c) fn00's caller row lacks the +2 disclosure: $( grep -m1 'fn00' "$OUT2" )"
 fi
-situ "$FX2" --situ --limit=11 > "$TMP/c2.txt"
+situ "$FX2" --situ --limit=11 > "$TMP/c2.txt" || no "(c) ripwire --situ --limit=11 exited non-zero"
 n3="$( sed -n '/^  changed: /,/^  [a-z\[]/p' "$TMP/c2.txt" | grep -c '^        lib/core\.py:' )"
 if [ "$n3" -eq 11 ]; then ok "(c) --limit=11 shows all 11 rows"; else no "(c) --limit=11 showed $n3 of 11 rows"; fi
 if [ ! -s "$TMP/c2.txt" ]; then no "(c) --limit=11 produced no report (nothing to check for a +N more line)"
@@ -165,7 +165,7 @@ elif grep -q 'more: --situ' "$TMP/c2.txt"; then no "(c) --limit=11 still prints 
 
 # ── (d) a clean tree still names its last change ────────────────────────────────────────────────────────
 gitq "$FX" commit -q -am "engine: guard None" || no "(d) could not commit the engine edit"
-situ "$FX" --situ > "$TMP/d.txt"
+situ "$FX" --situ > "$TMP/d.txt" || no "(d) ripwire --situ exited non-zero"
 grep -q 'working tree is clean' "$TMP/d.txt" || no "(d) the clean tree is not reported as clean: $( head -5 "$TMP/d.txt" | tr '\n' '|' )"
 if grep -qE '^  last commit: [0-9a-f]+ "engine: guard None" — 1 file\(s\): app/engine\.py;' "$TMP/d.txt"; then
   ok "(d) a clean tree names the last commit and its file"
@@ -175,7 +175,7 @@ fi
 
 # ── (d2) a module-level edit returns its file to file-granular: a whole-file row, not symbol rows ─────────
 printf 'RETRIES = 3\n' >> "$FX/app/cli.py"
-situ "$FX" --situ > "$TMP/d2.txt"
+situ "$FX" --situ > "$TMP/d2.txt" || no "(d) ripwire --situ exited non-zero"
 if grep -qE '^        app/cli\.py \(whole file: [0-9]+ symbols\)$' "$TMP/d2.txt" && grep -q '^  changed: 1 file(s), 0 symbol(s), 1 kept whole' "$TMP/d2.txt"; then
   ok "(d2) a module-level edit is named as a whole-file row (app/cli.py, 1 kept whole)"
 else
@@ -186,7 +186,7 @@ fi
 FX3="$TMP/fx3"; mkdir -p "$FX3"; printf 'def solo():\n    return 1\n' > "$FX3/solo.py"
 seed_repo "$FX3" || { echo "git fixture 3 setup failed"; exit 2; }
 printf 'def solo():\n    return 2\n' > "$FX3/solo.py"
-situ "$FX3" --situ > "$TMP/e.txt"
+situ "$FX3" --situ > "$TMP/e.txt" || no "(e) ripwire --situ exited non-zero"
 if grep -q 'solo.py:1-2 solo' "$TMP/e.txt"; then ok "(e) the root-commit fixture names its edit"; else no "(e) the root-commit fixture names no edit"; fi
 if [ ! -s "$TMP/e.txt" ]; then no "(e) the root-commit fixture produced no report"
 elif grep -q 'last commit:' "$TMP/e.txt"; then no "(e) a root commit printed a last commit: line"; else ok "(e) a root commit prints no last commit: line"; fi
