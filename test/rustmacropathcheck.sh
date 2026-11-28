@@ -166,7 +166,12 @@ row     B3.dslparen    "$A" callers ghost_call    src/neg.rs dsl_sql_paren  none
 row     B4.stringify   "$A" callers ghost_call    src/neg.rs dsl_stringify  none
 row     B4.dsllist     "$A" callers ghost_call    src/neg.rs dsl_sql_list   none
 b5=$( ask "$A" callers ghost_call )
-b5rows=$( printf '%s' "$b5" | grep -oE '<(s|dc) [^>]*p="src/(neg|macros)\.rs[^>]*>' | grep -c . )
+# A row whose caller IS the macro_rules! (t="macro" role="macro") is BX2 FIX 5's transcriber call, the macro's own (ingest_names.h
+# scanTranscriberCalls: `ghost_call($value)` in def_site's transcriber is a call of def_site). This arm guards the RUST-MACRO-ARGS
+# re-read, which must never credit a transcriber's tokens to an enclosing FUNCTION, so it counts every other row. Until
+# RUST-PATH-KEYWORD the macro row was absent only because `crate::ghost_call($value)` was declined as qualified-external — the
+# bare `ghost_call($value)` spelling drew it on the same base binary (measured 2026-11-26, origin/main f7cfcec7a).
+b5rows=$( printf '%s' "$b5" | grep -oE '<(s|dc) [^>]*p="src/(neg|macros)\.rs[^>]*>' | grep -vE '^<s t="macro" [^>]*role="macro"' | grep -c . )
 b5all=$( printf '%s' "$b5" | grep -oE '<s [^>]*>' | grep -c . )
 if [ "$b5all" -ge 1 ] && [ "$b5rows" = 0 ]; then echo "PASS B5.defsite (callers=$b5all, none from neg.rs or the macro_rules! definitions)"
 else echo "FAIL B5.defsite --callers=ghost_call: $b5rows row(s) from neg.rs/macros.rs of $b5all (want 0 of >=1)"; fail=1; fi

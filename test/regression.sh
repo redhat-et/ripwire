@@ -1088,6 +1088,7 @@ for _g in \
     rustimportprecisecheck \
     rustmacrocallcheck \
     rustmacropathcheck \
+    rustpathkwcheck \
     rustqualcheck \
     rustrootscheck \
     rustturbofishcheck \

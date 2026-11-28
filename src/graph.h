@@ -1290,14 +1290,16 @@ private:
 // case; it reproduces on test/rustqualfix, where `external_caller`'s `Vec::<u32>::new()` bound the local
 // `Widget::new` before this guard existed.
 //
-// A qualified call names a MEMBER of the scope it spells, so a candidate survives on exactly three grounds:
+// A qualified call names a MEMBER of the scope it spells, so a candidate survives on exactly four grounds:
 //   * its `scope` IS the qualifier — an `impl`/`trait`/inline-`mod` member;
 //   * it is a member of the FILE MODULE the qualifier names (see rustFileModuleOf) — a Rust module can be
 //     spelled by the DIRECTORY LAYOUT (`src/gadget/mod.rs`, `src/util.rs`) with no AST node in the file
 //     spelling it, so `crate::gadget::gadget_free()` reaches a def whose `scope` is legitimately empty;
 //   * its scope IMPLEMENTS the qualifier as a TRAIT — `Shape::area(&w)` names the trait while the def lives
 //     on the implementor, which is precisely the `impl Shape for Widget` edge chaUp holds. The ancestor walk
-//     is transitive (a supertrait chain `trait Shape: Draw` is one more hop) and bounded like the CHA cones.
+//     is transitive (a supertrait chain `trait Shape: Draw` is one more hop) and bounded like the CHA cones;
+//   * RUST-PATH-KEYWORD: the path is written from `crate`/`self`/`super`, which no scope or file module is spelled as, and read
+//     whole it names the module holding the candidate as a free item, in the caller's crate (CallResultTypes::rustKeywordPathHolds).
 //
 // V3 M-2 — WHY THE FILE-MODULE TEST AND NOT A BARE "keep scope-EMPTY defs". The first version of this guard
 // kept every scope-less candidate, on the reasoning that a file module cannot be seen in the AST. But in Rust
@@ -1319,9 +1321,10 @@ private:
 // already the tree's highest-complexity function, and a six-operand `&&` chain in its body is exactly the
 // kind of growth --quality-delta gates on. `alreadyPinned` = the site was resolved by SCIP / the canonical
 // tier / Rule 1-2-3, in which case there is no bare-name spray to guard.
-inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& chaCones,
+inline bool keepRustQualifiedCandidates( const CallResultTypes& types, ChaConeMemo& chaCones,
                                          const Reference& r, bool alreadyPinned, std::vector<NodeId>& cand )
 {
+    const IngestResult& ing = types.ing;
     if( alreadyPinned || r.lang != Lang::Rust || r.qualifier.empty() || cand.empty() )
     {
         return true; // guard does not apply
@@ -1344,7 +1347,8 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
         const bool memberOfFileModule =    candScope.empty()
                                         && cs.fileId < ing.files.size()
                                         && rustFileModuleOf( rootRelPath( ing, cs.fileId ) ) == qualifier;
-        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) )
+        // RUST-PATH-KEYWORD: `crate::f()` / `self::f()` / `super::f()` name a module no scope or file is spelled as — read the whole path
+        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) || types.rustKeywordPathHolds( r, c ) )
         {
             survivors.push_back( c );
         }
@@ -13781,7 +13785,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             keepRustTraitImplementors( chaCones, ing, r, cand, memberRule3 );
         }
         const bool alreadyPinned = scipPinned || canonical || narrowed || rule3QualifiedHedge;
-        if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
+        if( !keepRustQualifiedCandidates( recvEv.types, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
             disposition = CallDisposition::QualifiedExternal;                   // qualified-external → no edge
             continue;

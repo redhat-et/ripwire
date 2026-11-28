@@ -21,7 +21,8 @@ macro_rules! checked {
     };
 }
 
-// N5: a definition site. `$value.ghost_method()` and `ghost_call( $value )` are the transcriber's tokens, not calls here.
+// N5: a definition site. `$value.ghost_method()` and `ghost_call( $value )` are the transcriber's tokens: never calls of an enclosing
+// function (the macro-args re-read), only the macro's own (BX2 FIX 5, a role="macro" row of def_site).
 macro_rules! def_site {
     ( $value:expr ) => {
         assert!($value.ghost_method());
