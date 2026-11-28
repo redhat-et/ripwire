@@ -1358,6 +1358,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "bots_skipped", "partners bots_skipped=N: bot commits left out", true, "partners", MapHeaderRead::No, {}, "pack-task" },
     { "bots_included", "partners bots_included=N: bot commits kept (include-bots)", true, "partners", MapHeaderRead::No, {}, "pack-task" },
     { "agent_commits", "partners agent_commits=N: kept commits an agent co-authored", true, "partners", MapHeaderRead::No, {}, "pack-task" },
+    // pack-task <sigs fold=>: src/packtask.h packTaskFoldHead (PACK-TASK-BY-CLASS: the ranking's rows past rank 12, one row per file)
+    { "fold", "sigs fold=N: rows past rank 12, printed as one <t p= sym= r=/> per file the first 12 do not name (r= its first rank); next= the for call with every row", true, "sigs", MapHeaderRead::No, {}, "pack-task" },
     { "renames", "partners renames=N: exact moves followed, not co-change", true, "partners", MapHeaderRead::No, {}, "pack-task" },
     { "partners_none", "partners_none=: why no <partners>: no_git, no_history (no window commit touched an indexed file), shallow, multi_root, no_seed", false, {}, MapHeaderRead::No, {}, "pack-task" },
     // pr-context: src/prcontext.h (prAnchorAttr, prDirectionAttr, root tail format, per-file impact/cochange/owners, no-ref-work)

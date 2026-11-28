@@ -896,6 +896,7 @@ for _g in \
     ownerhopcheck \
     ownerscheck \
     packcallersharecheck \
+    packclasscheck \
     packkeybodycheck \
     packlocatecheck \
     packpartnerscheck \

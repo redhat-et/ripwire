@@ -1319,8 +1319,10 @@ Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
 | `kOverCeilingKeyBytes` | `22` | — | `,"over_ceiling":true` + the closing brace |
 | `kPackTaskFullHeadRows` | `10` | — | — |
 | `kPackTaskHeadFloorRows` | `4` | — | == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor) |
+| `kPackTaskNameMaxWords` | `12` | — | a longer question is served the full bundle (it may ask for more than one location) |
 | `kPackTaskPartnersCapPct` | `3` | — | — |
 | `kPackTaskRankTopN` | `12` | — | a --partition slice's ranking window (partition.h; lanes.h brief claims) |
+| `kPackTaskSigsRowCap` | `12` | — | rows past rank 12 fold to one row per file, so every file stays named (a plain cut lost 1 of 93 DEV items) |
 
 ### `src/pageview.h`
 
