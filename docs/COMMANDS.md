@@ -3516,10 +3516,10 @@ $ ./build/ripwire . --slice-depth=3
 _Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost._
 
 ```
-$ ./build/ripwire . --at=src/graph.h:15093
+$ ./build/ripwire . --at=src/pagerank.cpp:102
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
-<at schema="ripwire.at/v1" p="src/graph.h" l="15093" sym="rankGraphTeleport" chain="1" root=".">
-<s n="rankGraphTeleport" t="fn" l="15091" el="15119"/>
+<at schema="ripwire.at/v1" p="src/pagerank.cpp" l="102" sym="pageRankDouble" chain="1" root=".">
+<s n="pageRankDouble" t="fn" l="99" el="206"/>
 </at>
 ```
 
@@ -4102,10 +4102,10 @@ $ ./build/ripwire . --from-trace=-
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:15093
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:15136
-    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1930
-    #3 0x102e01a44 in main src/main.cpp:4835
+    #0 0x102f4a1c8 in rw::(anonymous namespace)::probabilityMass(std::span<double const, 18446744073709551615ul>) src/pagerank.cpp:79
+    #1 0x102f3e884 in rw::pageRankDouble(rw::sparseCsr<float> const&, std::span<double const, 18446744073709551615ul>, std::span<double const, 18446744073709551615ul>, std::span<double, 18446744073709551615ul>, rw::PageRankConfig) src/pagerank.cpp:102
+    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1931
+    #3 0x102e01a44 in main src/main.cpp:4887
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
 ==41337==ABORTING
 ```

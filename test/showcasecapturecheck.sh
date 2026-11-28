@@ -25,7 +25,7 @@
 #       block; (F) a "contrast pair" (two consecutive headings differing by one added flag) must actually
 #       differ; (G) a caption naming a header clause ([doc mentions/[mention anchor/[adaptive) must find it
 #       in the block, unless the caption is describing the clause's ABSENCE. See that file's own docstring.
-#   (H) SEED RESOLUTION — a published `--at=src/graph.h:LINE` demo must both PUBLISH and still RESOLVE
+#   (H) SEED RESOLUTION — a published `--at=src/pagerank.cpp:LINE` demo (a SHORT, stable file; the arm also asserts it stays short) must both PUBLISH and still RESOLVE
 #       to the symbol the demo is about. This is the one shape (E) structurally cannot see: a seed that
 #       drifts onto a line inside a DIFFERENT function exits 0 with a well-formed <at> element naming
 #       the wrong symbol. main's 09-05 and 09-07 captures shipped exactly that — l="1148"
@@ -554,13 +554,24 @@ fi
 # shipped. Deriving the seed at capture time (bodySeed) fixes the harness going forward but proves
 # nothing about the capture sitting in docs/ right now, which is what readers actually get. So: read the
 # seed back OUT of the newest capture's own heading and ask the binary what lives there.
-SEEDSYM="rankGraphTeleport"
-graphLines="$( wc -l < "$ROOT/src/graph.h" | tr -d ' ' )"
+SEEDSYM="pageRankDouble"
+SEEDFILE="src/pagerank.cpp"
+SEEDREGEX='src/pagerank\.cpp'
+SEEDMAXLINES=600
+graphLines="$( wc -l < "$ROOT/$SEEDFILE" | tr -d ' ' )"
+# PREMISE: the seed file is SHORT. The seed used to live in src/graph.h (~15k lines edited by nearly every PR), so
+# each PR moved the line, turned (H) red and forced a full re-record (#814, #816, #822, #826 in one day). The seed
+# only stays stable in a small file nobody keeps editing; a future move back into a big file is caught here.
+if [ "$graphLines" -gt 0 ] && [ "$graphLines" -le "$SEEDMAXLINES" ]; then
+    ok "(H) premise: the seed file $SEEDFILE is $graphLines lines (<= $SEEDMAXLINES) — small enough that unrelated PRs do not shift the seed line"
+else
+    no "(H) premise: the seed file $SEEDFILE is $graphLines lines (limit $SEEDMAXLINES, or empty) — a big, busy seed file shifts the published line on every unrelated PR and forces a full re-record; seed from a small stable file"
+fi
 # EVERY in-range --at=src/graph.h:N heading is checked, not `head -1` of them. Picking the first was
 # order-dependent: the capture also carries a deliberate past-the-end seed, and section order was the
 # only reason the resolved demo came first. The past-the-end demo is excluded by line count, which is
 # the property that actually distinguishes it, rather than by its position or its literal value.
-seedCands="$( grep '^## ' "$newestCapture" | grep -oE -- '--at=src/graph\.h:[0-9]+' | grep -oE '[0-9]+$' | sort -un )"
+seedCands="$( grep '^## ' "$newestCapture" | grep -oE -- "--at=$SEEDREGEX:[0-9]+" | grep -oE '[0-9]+$' | sort -un )"
 seedChecked=0
 for cand in $seedCands; do
     [ "$cand" -gt "$graphLines" ] && continue          # the deliberate faulted-location demo
@@ -570,39 +581,39 @@ for cand in $seedCands; do
     # lived: main's 09-05 and 09-07 both carry <at l="1148" sym="buildGraph"> under a rankGraphTeleport demo.
     # The CLI default is the compact dialect (L1, 2026-09-19), whose root carries schema= FIRST; a capture recorded since then
     # spells <at schema="ripwire.at/v1" p=… l=… sym=…>. The optional schema= reads both spellings of the same three facts.
-    recSym="$( grep -oE '<at (schema="[^"]*" )?p="src/graph\.h" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
+    recSym="$( grep -oE '<at (schema="[^"]*" )?p="'"$SEEDREGEX"'" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
     if [ "$recSym" = "sym=\"$SEEDSYM\"" ]; then
-        ok "(H) the capture PUBLISHES sym=\"$SEEDSYM\" for src/graph.h:$cand — the reader is given the symbol the demo is about"
+        ok "(H) the capture PUBLISHES sym=\"$SEEDSYM\" for $SEEDFILE:$cand — the reader is given the symbol the demo is about"
     else
-        no "(H) the capture publishes [${recSym:-no sym= at all}] for src/graph.h:$cand but the demo is about $SEEDSYM — a right-shaped, wrong-symbol seed exits 0 and no exit-code arm can see it"
+        no "(H) the capture publishes [${recSym:-no sym= at all}] for $SEEDFILE:$cand but the demo is about $SEEDSYM — a right-shaped, wrong-symbol seed exits 0 and no exit-code arm can see it"
     fi
 
     # (2) does it STILL resolve that way here? A capture can be internally honest and simply stale.
-    seedOut="$( "$BIN" "$ROOT" "--at=src/graph.h:$cand" 2>&1 )"
+    seedOut="$( "$BIN" "$ROOT" "--at=$SEEDFILE:$cand" 2>&1 )"   # status: the verdict reads sym= from the output; a refusal or crash has none and FAILS below
     case "$seedOut" in
-        *"sym=\"$SEEDSYM\""*) ok "(H) the published seed src/graph.h:$cand still resolves to $SEEDSYM (not merely to SOME symbol, and not merely non-refusing)" ;;
+        *"sym=\"$SEEDSYM\""*) ok "(H) the published seed $SEEDFILE:$cand still resolves to $SEEDSYM (not merely to SOME symbol, and not merely non-refusing)" ;;
         *)
             gotSym="$( printf '%s' "$seedOut" | grep -oE 'sym="[^"]*"' | head -1 )"
-            no "(H) the published seed src/graph.h:$cand does NOT resolve to $SEEDSYM — got [${gotSym:-a refusal}]; regenerate the capture, which re-derives the seed via bodySeed, rather than editing the number by hand" ;;
+            no "(H) the published seed $SEEDFILE:$cand does NOT resolve to $SEEDSYM — got [${gotSym:-a refusal}]; regenerate the capture, which re-derives the seed via bodySeed, rather than editing the number by hand" ;;
     esac
 done
 if [ "$seedChecked" -eq 0 ]; then
-    no "(H) no in-range --at=src/graph.h:LINE heading in $( basename "$newestCapture" ) — the seed demo this arm exists for is gone, or every seed is past the end of the file"
+    no "(H) no in-range --at=$SEEDFILE:LINE heading in $( basename "$newestCapture" ) — the seed demo this arm exists for is gone, or every seed is past the end of the file"
 fi
 
 # Mutation control: the comparison must be able to say NO. A line in a DIFFERENT function has to report
 # that other symbol. The line is the signature line itself — no +N offset, because a hard-coded offset
 # is the exact species of hazard this commit exists to remove, and --at resolves a signature line to its
 # own definition anyway.
-otherLine="$( grep -n '^inline RankedGraph rankGraph(' "$ROOT/src/graph.h" | head -1 | cut -d: -f1 )"
+otherLine="$( grep -n '^double probabilityMass(' "$ROOT/$SEEDFILE" | head -1 | cut -d: -f1 )"
 if [ -z "$otherLine" ]; then
-    no "(H) mutation control: no 'inline RankedGraph rankGraph(' in src/graph.h — cannot build the negative case, so (H) above is unproven"
+    no "(H) mutation control: no 'double probabilityMass(' in $SEEDFILE — cannot build the negative case, so (H) above is unproven"
 else
-    otherOut="$( "$BIN" "$ROOT" "--at=src/graph.h:$otherLine" 2>&1 )"
+    otherOut="$( "$BIN" "$ROOT" "--at=$SEEDFILE:$otherLine" 2>&1 )"   # status: the verdict reads sym= from the output; a refusal or crash has none and reports below
     case "$otherOut" in
-        *"sym=\"$SEEDSYM\""*) no "(H) mutation control: src/graph.h:$otherLine (inside rankGraph) ALSO reported sym=\"$SEEDSYM\" — the comparison cannot discriminate, so (H) proves nothing" ;;
+        *"sym=\"$SEEDSYM\""*) no "(H) mutation control: $SEEDFILE:$otherLine (inside probabilityMass) ALSO reported sym=\"$SEEDSYM\" — the comparison cannot discriminate, so (H) proves nothing" ;;
         *sym=*)                ok "(H) mutation control: a line inside a DIFFERENT function reports that other symbol, so the comparison discriminates (the arm can fail)" ;;
-        *)                     no "(H) mutation control: --at on src/graph.h:$otherLine produced no sym= at all — cannot tell discrimination from breakage: $( printf '%s' "$otherOut" | head -c 120 )" ;;
+        *)                     no "(H) mutation control: --at on $SEEDFILE:$otherLine produced no sym= at all — cannot tell discrimination from breakage: $( printf '%s' "$otherOut" | head -c 120 )" ;;
     esac
 fi
 
