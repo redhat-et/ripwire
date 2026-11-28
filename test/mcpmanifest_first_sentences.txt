@@ -5,6 +5,7 @@
 affected	WHICH TESTS TO RUN for a change — test files that transitively reach the changed files/symbols, ranked by evidence (edited > partner-named > hop distance).
 analyze	Architecture map for a directory: signatures and the call graph for the top symbols.
 batch	ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent).
+brief	A SUBAGENT BRIEF for one code-editing task: one page to paste into a fresh subagent's prompt, capped at 2.5 / 4 / 6 KB by repo size (bytes overrides).
 cochange	Files that historically change together with this file — the co-edit partners.
 connect	When a task touches 2..16 named symbols, returns the minimal subgraph RELATING them - terminals, the fewest joining intermediaries (with signatures), and call edges in true direction - finding the shared-caller joins a directed path_between cannot; unrelated symbols are reported honestly in <unconnected>.
 doc_drift	WHICH OF THIS REPO'S DOC CLAIMS ARE NOW FALSE.

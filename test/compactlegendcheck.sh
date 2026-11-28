@@ -863,7 +863,11 @@ ripwire.expand/v1                280   265
 ripwire.expand-file/v1            510   508
 ripwire.for/v1                   1100  1099
 ripwire.defs/v1                   490   472
+ripwire.brief/v1                  390   379
 '
+# PINNED 2026-11-27 (lane brief-cifix): ripwire.brief/v1 on this gate's --brief=geometry probe, 379 B -> 390. The page's native compact
+#   legend (brief.h compactLegend): the reading notes plus one term per attribute the page carries, present-only for task_cut=,
+#   dropped=, over=, s=, f= and ambiguous= (this probe carries s= and f=; with every term present it is kLegend, 457 B).
 # RE-PINNED 2026-11-21 (lane rp1-repin-m2, owner ruling 171): ripwire.pack-task/v1 990 -> 1070. M2 (the --for basename field, on by
 #   default) lifts geometry.h's struct Point to r=1 of --pack-task=geometry, and that row carries sc=, so the present-only sc= reading
 #   ("sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it.", 96 B) rides again: measured

@@ -45,16 +45,16 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-27 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-28 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 485 | 167 | 306 | **179** |
+| 499 | 169 | 306 | **193** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 485 + 10 is the 495 constants this generator parses out of `src/`.
+are not counted as caps, and 499 + 10 is the 509 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **148 of 485 caps are classified
-(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 337 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **148 of 499 caps are classified
+(56 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 351 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -95,6 +95,19 @@ not spend the afternoon again.
 The second one is the transferable lesson. "The bound trips 97 times" reads like a finding and is
 not one — a fidelity cap is judged by whether re-derivation changes the ANSWER, never by whether
 the bound trips. A tripping counter is a hypothesis; the re-derivation is the measurement.
+
+## `--brief` is opt-in — what the held-out check showed
+
+`--brief="TASK"` is an orientation page for a fresh subagent. It is **opt-in**: agents call it by name,
+`--for` stays the default route and its output is unchanged. Held-out check on 8 repos (axum, django,
+fmt, gin, nest, pydantic, textual, trpc; 24 E / 32 S / 24 T / 32 B items): `--brief` hit 9 / 24 / 12 / 19
+= 64 items in 25,483 B; `--for` hit 13 / 23 / 6 / 16 = 58 items in 121,072 B; the same verb without the
+co-change and unit-build sections hit 62. Only 1 of 8 repos met every per-class bar, so it is not a
+replacement for `--for`. By language (items, `--brief` vs `--for`): Python 23 vs 16, TypeScript 17 vs 10,
+Go 10 vs 11, C++ 9 vs 12, Rust 5 vs 9. **Entry points are its limit:** 9 of 24 found, `--for` 13 of 24.
+The co-change roles need at least 10 kept commits in the walk (`history="1"`); a 1-commit clone gets
+none. Off switches: `RIPWIRE_BRIEF_COCHANGE=0` (history roles) and `RIPWIRE_BRIEF_UNITBUILD=0` (the
+unit's build file).
 
 ## Not caps — ranking and apportionment parameters
 
@@ -187,6 +200,25 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxTrackedFiles` | `20000` | — | — |
+
+### `src/brief.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDelegatesShown` | `2` | — | the files the leading main hands off to |
+| `kDocScanFiles` | `4000` | — | — |
+| `kHardCapBytes` | `8192` | — | — |
+| `kMaxWiden` | `2` | — | … at most twice, never the root |
+| `kMinBudgetBytes` | `512` | — | — |
+| `kReachHops` | `12` | — | — |
+| `kRegistrationShown` | `3` | — | registry / metadata / build-config files beside the act |
+| `kRoleShown` | `2` | — | test, build and docs slots |
+| `kSweepCeil` | `50` | — | … nor above this many |
+| `kUnitBuildShown` | `2` | — | — |
+| `kUsersShown` | `3` | — | files that import the primary file (its registration / load points) |
+| `kWhereElseCap` | `6` | — | — |
 
 ### `src/cachelint.h`
 

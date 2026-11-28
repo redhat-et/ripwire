@@ -195,14 +195,14 @@ same_recipe(){ [ -s "$TMP/w.cursor.default" ] && cmp -s "$TMP/w.cursor.default" 
 # claude is the one agent whose DEFAULT recipe is a subset: Claude Code must Read before it edits, so it registers the
 # server WITHOUT the three edit twins (--mcp-tools=no-edit); an explicit --mcp-tools=full gets the whole catalog back.
 claude_default_no_edit(){ grep -qE -- '^claude mcp add ripwire -- .* --mcp --mcp-tools=no-edit$' "$TMP/w.default" \
-                          && grep -qF '(30 total)' "$TMP/w.default" && ! grep -qE '^#   edit:' "$TMP/w.default"; }
+                          && grep -qF '(31 total)' "$TMP/w.default" && ! grep -qE '^#   edit:' "$TMP/w.default"; }
 claude_full_has_edit(){ grep -qE -- '^claude mcp add ripwire -- .* --mcp$' "$TMP/w.full" \
-                        && grep -qF '(33 total)' "$TMP/w.full" && grep -qE '^#   edit:' "$TMP/w.full"; }
+                        && grep -qF '(34 total)' "$TMP/w.full" && grep -qE '^#   edit:' "$TMP/w.full"; }
 core_listing(){ grep -qF '(8 total)' "$TMP/w.core" && ! grep -qE '^#   edit:' "$TMP/w.core"; }
 wrap cursor >"$TMP/w.cursor.default"; wrap cursor --mcp-tools=full >"$TMP/w.cursor.full"
 check "(I) wrap cursor: --mcp-tools=full prints the unchanged recipe (no flag == full for an agent with no read-before-edit rule)" same_recipe
-check "(I) wrap claude: the DEFAULT server command carries --mcp-tools=no-edit and lists 30 tools, no edit group" claude_default_no_edit
-check "(I) wrap claude: --mcp-tools=full restores the unflagged command, 33 tools, the edit group" claude_full_has_edit
+check "(I) wrap claude: the DEFAULT server command carries --mcp-tools=no-edit and lists 31 tools, no edit group" claude_default_no_edit
+check "(I) wrap claude: --mcp-tools=full restores the unflagged command, 34 tools, the edit group" claude_full_has_edit
 check "(I) wrap claude: the server command carries --mcp-tools=core" grep -qE -- '^claude mcp add ripwire -- .* --mcp --mcp-tools=core$' "$TMP/w.core"
 check "(I) wrap claude: the verb list counts the 8 listed tools and drops the empty edit group" core_listing
 wrap cursor --mcp-tools=core >"$TMP/w.cursor"

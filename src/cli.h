@@ -216,6 +216,12 @@ struct Config
     std::vector<std::string> expand;                       // --expand=NAME,...: emit full def bodies for these symbols; NAME:START-END slices to 1-based lines START..END of the def (octocode partial-fetch)
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
+    std::string_view brief;                                // --brief=TASK: the fresh-subagent brief (brief.h) — layout, build, entries, the --for core,
+                                                            // edges, where-else, conventions, next, under a size-class budget. The one --brief= table row
+                                                            // fills laneBrief; parseArgs moves it here when --plan-lanes is absent and sets forTask to it, so
+                                                            // the run is prepared exactly as a --for run is; runBrief (verbs_brief.h) answers before --for does
+    int              briefBytes = 0;                       // --brief-bytes=N (512..8192, with --brief): the brief's byte budget; 0 = the size class decides
+    bool             briefFullLegend = false;              // --brief with --legend=full: the worded legend; the brief's own --for still runs the default posture
     bool             anchor = false;                       // --anchor (with --for, EXPERIMENTAL): seed PPR personalization from the lexical anchors and blend graph expansion into the lens rank (LARGER-style; graph.h anchoredLexicalRank)
     bool             noVerbRoute = false;                  // RT1 --no-verb-route (with --for): never answer a --for question with the verb it names (verbs_forroute.h); the routed answer's next= spells it
     bool             noRoute = false;                      // --no-route (with --for/--query): force plain subtoken+body BM25 (the pre-default-routing behavior). Routing is the DEFAULT: a deterministic confidence-gated query-shape classifier picks name-exact vs subtoken+body and prints which/why in the header (lexical.h chooseForRanker). --route is still accepted (now a no-op: routing is already on). Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace / sanitizer report / compiler diagnostic, or as a pasted issue-template form, the document tier scores down (repo meta-docs — issue templates, CONTRIBUTING, changelogs — twice as hard) and route= says so; --no-route has no route= to disclose it in, so it does not demote either. Routing also orders doc-mention surfacing (filter.h docNoiseSymbolMultipliers): change logs and translated duplicates of a default-language doc are lifted last and to x0.35 of the usual height (BM25 untouched), unless the task asks about changes or translations or names the file.
@@ -2696,6 +2702,27 @@ inline constexpr char kHelpTail[] =
         "                               a section eventually but never past its own fair share. Each section truncates\n"
         "                               rank-adaptively and the header reports EVERY truncation (no silent caps). A tiny budget\n"
         "                               degrades to ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
+        "    --brief=\"TASK\"            a pasteable brief for a fresh code-editing subagent: layout, build, entries, the --for core\n"
+        "                               ONE size-capped answer a parent pastes into a subagent's prompt so it skips orientation.\n"
+        "                               Eight sections in order: <layout> top dirs with a role and a file count (vendored and\n"
+        "                               generated dirs marked (skip)); <build> build/test commands quoted from the repo's docs and\n"
+        "                               manifests, never guessed (none found when there are none), plus the build file that lists\n"
+        "                               the tests and the unit's own (the nearest manifest above it); <entry> program entries and\n"
+        "                               the public header, ranked by call/include hops to the task; <task> --for's confidence,\n"
+        "                               <act read=> with up to 8 ranges and the question's own sites; <edges> callers and cross-file\n"
+        "                               callees of the top 3 act symbols, registration first; <where-else> the tests, docs and\n"
+        "                               changelog the unit's siblings change with in git history (history=\"1\"), then tests by name,\n"
+        "                               docs and test registration; <conventions> agent docs\n"
+        "                               as path + H2 headings with lines; <next> the three-moment line. Budget by files indexed:\n"
+        "                               < 1K 2,560 B, < 10K 4,096 B, else 6,144 B. Over it, parts drop in a fixed order, named in\n"
+        "                               dropped=; act and build never drop (over=\"1\" says the answer still did not fit).\n"
+        "                               OPT-IN: call it by name; --for stays the default route and is unchanged. Held-out check\n"
+        "                               (8 repos, 24 E / 32 S / 24 T / 32 B items): --brief 9 / 24 / 12 / 19 = 64 items in 25,483 B;\n"
+        "                               --for 13 / 23 / 6 / 16 = 58 items in 121,072 B. Entry points: --for finds more (13 vs 9).\n"
+        "                               Only 1 of 8 repos met every per-class bar (Python 23 vs 16, TypeScript 17 vs 10 items;\n"
+        "                               Rust 5 vs 9, C++ 9 vs 12, Go 10 vs 11). Off switches: RIPWIRE_BRIEF_COCHANGE=0 (history\n"
+        "                               roles), RIPWIRE_BRIEF_UNITBUILD=0 (the unit's build file).\n"
+        "    --brief-bytes=N            (with --brief, 512..8192) the brief's byte budget instead of the size class's\n"
         "    --partition=N              (with --pack-task, N=2..16) FAN OUT: one shared core plus N per-agent slices, not one bundle\n"
         "                               (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"
@@ -3736,7 +3763,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // the lane plan's two inputs (each refused alone by validateConfig)
     { "--task=",        &Config::laneTask        , EmptyValue::Refuse, "a goal in words",                        "--task=\"add a --since filter\"" },
-    { "--brief=",       &Config::laneBrief       , EmptyValue::Refuse, "a brief file path",                      "--brief=lanes_brief.txt" },
+    { "--brief=",       &Config::laneBrief       , EmptyValue::Refuse, "a task in words (with --plan-lanes, a brief file path)", "--brief=lanes_brief.txt" },
 
     // ── §B5: the 23 arms that used to be hand-written in parseArgs ──────────────────────────────────────
     // Each was exactly "assign one member (+ set one or two companion bools)", which this table can express
@@ -3917,6 +3944,7 @@ inline constexpr IntFlag kIntFlags[] =
     { "--zoom-levels=",      &Config::zoomLevels,    true,  kIntFlagMax,       "a non-negative integer (0 = every level)", "--zoom-levels=0",
       nullptr, nullptr, &Config::zoomLevelsSet },
     { "--connect-radius=",   &Config::connectRadius, false, kConnectRadiusMax, "an integer in 1..12",        "--connect-radius=6" },
+    { "--brief-bytes=",      &Config::briefBytes,    false, 8192,              "an integer in 512..8192",    "--brief-bytes=4096" },
 
     // budgets + the ranked head
     { "--max-tokens=",       &Config::maxTokens,     false, kIntFlagMax,       "a positive integer",         "--max-tokens=16000" },
@@ -3989,7 +4017,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 28;   // +1 lane/ls1-legendseen (2026-11-18): --legend-seen=FILE (value arm taking a path, same shape as --legend-have=: read in main.cpp, never against a closed set here); +1 lane/legend-ref-cli (2026-11-16): --legend-have= (value arm taking a dictionary version, same shape as --mcp-legend= but open-valued: the value is checked against legenddict::dictionaryVersion() in main.cpp, not against a closed set here, because cli.h cannot include legenddict.h without shifting declaration order); +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (closed-value arms, same shape as --grep-in=); +1 #350 (2026-09-28): --max-memory= (byte-size arm, same shape as --max-file-size=); +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=); +1 lane/flag-biggest-first (2026-09-23): --readability (deprecation-warning alias, same shape as --stable/--most-important-last/--no-auto-order) — its kBoolFlags row is renamed to --biggest-first (same Config::readability member), so the old spelling moves OUT of the table and becomes a hand-written arm, per the house rule that deprecation-warning aliases stay hand-written
-inline constexpr std::size_t kTotalFlagArms = 232;  // +1 lane/history-honesty (2026-11-26): --include-bots (kBoolFlags row) — the churn / co-change walks keep bot-authored commits, gitmine.h WHOSE HISTORY; +1 lane/nb1-nobodies-flag (2026-11-21, owner ruling 162): --bodies= (kViewFlags row) — inline|pointer, the form of the bodies on a --for answer's first page, forbodyptr.h; +1 lane/fmt2-rowlines (2026-11-21, owner ruling 153): --rows= (kViewFlags row) — lines|elements, the form of a --for answer's <sigs>/<tail> rows, forrowlines.h; +1 task E (2026-10-25, #440): --lsp-langmap= (kViewFlags row) — the --lsp client languageId→tag alias map file, config not recompile; +1 lane/ls1-legendseen (2026-11-18): --legend-seen= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/rt1-route (2026-11-18): --no-verb-route (kBoolFlags row) — the --for answer, never routed to the verb the question names (verbs_forroute.h); +1 lane/af1-answerfirst (2026-11-18): --page-bytes= (kViewFlags row) — the page size (and page) of the answer-first --for answer, forpages.h; +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kTotalFlagArms = 233;  // +1 lane/brief-verb (2026-11-25): --brief-bytes= (kIntFlags); --brief=TASK shares --plan-lanes' --brief= row (parseArgs routes it); +1 lane/history-honesty (2026-11-26): --include-bots (kBoolFlags row) — the churn / co-change walks keep bot-authored commits, gitmine.h WHOSE HISTORY; +1 lane/nb1-nobodies-flag (2026-11-21, owner ruling 162): --bodies= (kViewFlags row) — inline|pointer, the form of the bodies on a --for answer's first page, forbodyptr.h; +1 lane/fmt2-rowlines (2026-11-21, owner ruling 153): --rows= (kViewFlags row) — lines|elements, the form of a --for answer's <sigs>/<tail> rows, forrowlines.h; +1 task E (2026-10-25, #440): --lsp-langmap= (kViewFlags row) — the --lsp client languageId→tag alias map file, config not recompile; +1 lane/ls1-legendseen (2026-11-18): --legend-seen= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/rt1-route (2026-11-18): --no-verb-route (kBoolFlags row) — the --for answer, never routed to the verb the question names (verbs_forroute.h); +1 lane/af1-answerfirst (2026-11-18): --page-bytes= (kViewFlags row) — the page size (and page) of the answer-first --for answer, forpages.h; +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -4587,6 +4615,7 @@ struct ShapingVerb
 //                         interchangeable and the columns differ on exactly those two rows, which is the
 //                         reason this is a third column rather than an alias of the second.
 inline constexpr ShapingVerb kShapingVerbs[] = {
+    { "--brief",        nullptr, &Config::brief        },   // before --for (it sets forTask): the brief is sized by --brief-bytes, never a budget knob
     { "--for",          nullptr, &Config::forTask,      false, false, true },   // --detail=N carve-out below; --top-k: R12 residual
     { "--pack-task",    &Config::packTaskFlag, nullptr, false, false, true },
     { "--exemplar",     nullptr, &Config::exemplar     },
@@ -6153,6 +6182,47 @@ inline void validateConfig( Config& c ) noexcept
     }
 }
 
+// ONE --brief= row, two verbs: beside --plan-lanes it is the lane file (laneBrief, validatePlanLanes); alone it is the subagent brief's task.
+// --brief=TASK runs the --for core for TASK (brief.h), so the run is prepared as a --for run: forTask carries the task from here on and
+// validateConfig holds the brief to every --for rule. false: a misuse was refused on stderr (the caller marks the run not ok).
+static inline bool prepareBriefRun( Config& c )
+{
+    if( !c.laneBrief.empty() && !c.planLanesFlag )
+    {
+        c.brief = c.laneBrief;
+        c.laneBrief = {};
+    }
+    if( !c.brief.empty() )
+    {
+        if( !c.forTask.empty() || c.packTaskFlag )
+        {
+            rw::emitRaw( stderr, "ripwire: --brief runs its own --for for its task — pass --brief=TASK alone, not with --for or --pack-task\n" );
+            return false;
+        }
+        if( c.json || c.columnar || c.candidates )
+        {
+            rw::emitRaw( stderr, "ripwire: --brief prints one XML page to paste into a subagent's prompt — it has no --json, --columnar or --format=candidates form\n" );
+            return false;
+        }
+        c.forTask = c.brief;
+        // The brief reads its own --for page, so that page is always the default posture's: --legend chooses only the brief's legend
+        // comment, never what the brief is composed from (compactlegendcheck (U): the two dialects differ in that comment alone).
+        c.briefFullLegend = c.legend == "full";
+        c.legend          = {};
+    }
+    else if( c.briefBytes != 0 )
+    {
+        rw::emitRaw( stderr, "ripwire: --brief-bytes sizes a --brief answer — pass it with --brief=TASK\n" );
+        return false;
+    }
+    if( c.briefBytes != 0 && c.briefBytes < 512 )
+    {
+        refuseFlagValue( "--brief-bytes", "an integer in 512..8192", std::to_string( c.briefBytes ).c_str(), "--brief-bytes=4096" );
+        return false;
+    }
+    return true;
+}
+
 inline Config parseArgs( int argc, char** argv ) noexcept
 {
     Config c;
@@ -6568,6 +6638,12 @@ inline Config parseArgs( int argc, char** argv ) noexcept
     if( c.mcp && !c.noStable )
     {
         c.stable = true;
+    }
+
+    if( !prepareBriefRun( c ) )
+    {
+        c.ok = false;
+        return c;
     }
 
     validateConfig( c );

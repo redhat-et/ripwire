@@ -23,6 +23,7 @@
 #include "legenddict.h"      // r2-LO: the session dictionary and the legend="ref" posture (resources/read, textResult)
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
 #include "gitstampcache.h"   // AT-STAMP-MCP: the STAMP record, armed once per tools/call (the at= stamp's two small git answers)
+#include "brief.h"         // rw::brief::composeBrief — the `brief` verb, the same composer the CLI --brief prints
 #include "notfoundtext.h"   // BX2 FIX 9: a not-found answer's plain-text occurrences, as the CLI twin's
 
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
@@ -111,6 +112,8 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     // lane/tc-sliceat: the ARISE def-use slice (arXiv:2605.03117) as an MCP read — the CLI --slice
     // contract verb-for-verb (inventory / VAR rows / flow / the @FILE:LINE seed), one emitter, two surfaces.
     { "slice",                   "per-line def-use rows of one variable inside one definition (+ transitive flow)", McpVerbGroup::Read },
+    // lane/brief-verb: the CLI --brief twin — one size-capped orientation page for a parent to paste into a fresh subagent.
+    { "brief",                   "a size-capped brief to paste into a fresh code-editing subagent (layout, build, entry, act, edges)", McpVerbGroup::Read },
     // ── edit verbs (side-effecting; safety contract = refusal leaves the file byte-identical) ──
     { "replace_symbol_body",     "replace a symbol's entire definition with new_body",                     McpVerbGroup::Edit },
     { "insert_before_symbol",    "insert text immediately before a symbol's definition",                   McpVerbGroup::Edit },
@@ -121,8 +124,9 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
 // (`ctx`, `r`). M1 moved it DOWN into mcpverbs.h (unchanged, same signature): applyCompactToBatchSubs
 // needs it there, and mcpverbs.h is included BY this file, so the mapping has to live on the lower side.
 
-inline constexpr std::size_t kMcpVerbCount = 33;   // +1 lane/tc-sliceat: the `slice` read verb; +2 lane/t10-mcp-coverage:
-                                                   // `rank_by` and `affected` — the two --rank-by/--affected MCP twins
+inline constexpr std::size_t kMcpVerbCount = 34;   // +1 lane/tc-sliceat: the `slice` read verb; +2 lane/t10-mcp-coverage:
+                                                   // `rank_by` and `affected` — the two --rank-by/--affected MCP twins;
+                                                   // +1 lane/brief-verb: `brief`, the CLI --brief twin
 static_assert( sizeof( kMcpVerbTable ) / sizeof( kMcpVerbTable[0] ) == kMcpVerbCount,
                "kMcpVerbTable size drifted from kMcpVerbCount — update both together (A4-S2)" );
 
@@ -169,7 +173,7 @@ inline constexpr McpToolProfile kMcpToolProfiles[] = {
     // they were never called there (their schemas, about 4 KB of tools/list, were paid every session). Listed in full
     // rather than derived, to stay a plain table row like `core`; mcpNoEditProfileIsAllButEditGroup below holds it to
     // the table, so a tool added later cannot silently fall out of it.
-    { "no-edit", "analyze,rank_by,find_symbol,find_referencing_symbols,grep,cochange,memory_recall,situational_awareness,mentions,for,lego,owners,fetch_body,batch,exemplar,quality_delta,quality_baseline,impact,uses,affected,path_between,connect,explore,from_trace,edit_check,whereis,stray_content,flags,doc_drift,slice" },
+    { "no-edit", "analyze,rank_by,find_symbol,find_referencing_symbols,grep,cochange,memory_recall,situational_awareness,mentions,for,lego,owners,fetch_body,batch,exemplar,quality_delta,quality_baseline,impact,uses,affected,path_between,connect,explore,from_trace,edit_check,whereis,stray_content,flags,doc_drift,slice,brief" },
     { "full", "" },
 };
 
@@ -310,7 +314,9 @@ inline constexpr std::size_t kBatchExcludedCount = kMcpVerbCount - kBatchServedC
 // lane/t10-mcp-coverage: 15 → 17 — `rank_by` and `affected` joined kMcpVerbTable; neither joined
 // kBatchServedVerbs in this lane (a deliberate scope cut, not a structural one — both are read-only,
 // single-path verbs and are reasonable batch candidates for a future lane).
-static_assert( kBatchExcludedCount == 17,
+// lane/brief-verb: 17 → 18 — `brief` joined kMcpVerbTable and not kBatchServedVerbs (it composes a --for page and four
+// whole-repo detectors: one call per subagent, not a sweep item); the stanza names it.
+static_assert( kBatchExcludedCount == 18,
                "the batch tools/list stanza spells kBatchExcludedCount in prose — a verb joined or left "
                "kMcpVerbTable / kBatchServedVerbs; update the stanza's number and this assert together" );
 
@@ -1148,6 +1154,17 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
+// The MCP `brief` page: the CLI's composer over the warm index, then the run's secret redaction (null under --no-redact). The composer
+// quotes doc fences and manifests, text no other redacted seam has seen.
+inline std::string briefPageRedacted( const McpIndex& ix, std::string_view path, std::string_view task, std::string_view forPage,
+                                      std::size_t budgetBytes, RedactCounts* redact )
+{
+    std::string brief = rw::brief::composeBrief( rw::brief::BriefInputs{ .ing = ix.ing, .g = ix.g, .diskRoot = path, .task = task, .forPage = forPage,
+                                                                         .budgetBytes = budgetBytes } );
+    redactInPlace( brief, redact );
+    return brief;
+}
+
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the
@@ -1425,8 +1442,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // lane/tc-sliceat — the ARISE def-use slice (the CLI --slice contract verb-for-verb; sliceBundleText is the ONE emitter both surfaces call).
                    "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals; add var (or SYM:VAR) for per-line rows. flow=back|fwd|both adds the TRANSITIVE data-flow slice, bounded by depth (1..32, default 8; flow_truncated discloses a cut). @FILE:LINE seeds resolve. reach=cfg (C-family, Python) or reach=linear elsewhere. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust; other languages refuse loudly. Single-root.\","
                    + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
+                   "{\"name\":\"brief\",\"description\":\"A SUBAGENT BRIEF for one code-editing task: one page to paste into a fresh subagent's prompt, capped at 2.5 / 4 / 6 KB by repo size (bytes overrides). Layout ((skip) = vendored), build/test commands quoted from files (none found when absent), entry points, act ranges, edges, where-else, conventions; act and build never drop. Single-root.\","
+                   + mcprefuse::toolMetadataFor( "brief", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path: {verb, ...args} objects, or the CLI --batch file's \\\"verb:arg\\\" strings (\\\"callers:escapeXml\\\"); each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with its own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs, quality_baseline, quality_delta, batch, situational_awareness, memory_recall, connect, explore (and its alias pack_task), from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift, rank_by, affected, brief. Answers come IN ORDER as <q i verb ok>, verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             resp = mcpFilterToolsList( std::move( resp ), policy );   // --mcp-tools: the subset (unchanged without one)
@@ -1659,6 +1678,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                            "the depth refusal names the band 1..32 in mcprefusal.h's kMcpValueFields and in the "
                            "tools/list slice stanza — the core's band moved; move all three wordings with it" );
             const McpIntArg sliceDepthArg = intArg( "depth", slicev::kSliceFlowDepthMin, slicev::kSliceFlowDepthMax );
+            const McpIntArg briefBytesArg = intArg( "bytes", int( rw::brief::kMinBudgetBytes ), int( rw::brief::kHardCapBytes ) );
 
             // Index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
             // of the index it was answered from, so a caller holding results from two different calls can
@@ -2827,6 +2847,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                                     sliceDepthArg.isPresent ? int( sliceDepthArg.value ) : 0, redactPtr,
                                                     legendCompactPosture );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
+                }
+                // lane/brief-verb: the CLI --brief twin — the task's for page (forTaskText, the live verb's own answer) and the
+                // warm index feed the one composer the CLI prints; bytes is the --brief-bytes twin.
+                else if( name == "brief" && !path.empty() && !task.empty() )
+                {
+                    const std::optional<std::string> forPage = forTaskText( path, task, redactPtr );
+                    const McpIndex&                  ix      = getIndex( path );
+                    resp = !forPage ? errResult( -32603, "internal error: the brief's for page lost bytes — no brief served" )
+                                    : textResult( briefPageRedacted( ix, path, task, *forPage, briefBytesArg.isPresent ? std::size_t( briefBytesArg.value ) : 0, redactPtr ) );
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
