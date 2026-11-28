@@ -931,6 +931,7 @@ for _g in \
     postingscheck \
     ppaltcheck \
     ppdeadrolescheck \
+    pprpushcheck \
     pranchorcheck \
     prbudgetcheck \
     prcheck \

@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 
 #include "pagerank.h"
+#include "pprshadow.h"   // topByScore — the ONE copy of the (score desc, id asc) ordering rule this gate asserts
 
 #include <algorithm>
 #include <array>
@@ -39,17 +40,12 @@ bool isProbabilityVector( std::span<const double> rank )
     return std::fabs( mass - 1.0 ) <= 1e-9;
 }
 
+// The (score desc, id asc) order, from the one body of that rule: rw::pprshadow::topByScore. It used to be
+// a second copy here, over doubles, which meant the ordering this gate asserts and the ordering the
+// personalized rank's shadow arm measures could drift apart without either noticing.
 std::vector<std::uint32_t> topOrder( std::span<const double> rank )
 {
-    std::vector<std::uint32_t> order( rank.size() );
-    std::iota( order.begin(), order.end(), 0u );
-    std::sort( order.begin(), order.end(), [ rank ]( std::uint32_t a, std::uint32_t b )
-               {
-        if( rank[ a ] != rank[ b ] ) {
-            return rank[ a ] > rank[ b ];
-}
-        return a < b; } );
-    return order;
+    return rw::pprshadow::topByScore( rank, rank.size() );
 }
 
 }

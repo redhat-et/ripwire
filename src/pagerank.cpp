@@ -205,4 +205,114 @@ PageRankRun pageRankDouble( const sparseCsr<float>& inEdges, std::span<const dou
     return run;
 }
 
+// The Andersen-Chung-Lang push — pagerank.h carries the contract and the reason it is compiled here.
+//
+// THE INVARIANT THE WHOLE THING RESTS ON: estimate + R*residual == R*seed, maintained exactly by each push
+// (a push of mass m at u moves m into estimate[u] and alpha*m*P[.,u] into the residual, retiring
+// (1-alpha)*m of the residual's total). R is non-negative, so estimate is a LOWER bound on R*seed
+// throughout and the unretired residual bounds the deficit. Stopping while every node's residual is under
+// epsilon*max(outdeg,1) is the ACL guarantee; it is NOT a residual on the answer this tool serves, which is
+// why nothing here is allowed to claim the push "converged".
+//
+// TERMINATION is by construction, not by the budget: each push retires at least (1-alpha)*epsilon*max(deg,1)
+// of a residual whose total never exceeds 1, so at most 1/((1-alpha)*epsilon) pushes can ever happen. The
+// budget below exists because a cap is a blow-up guard, and it is DISCLOSED when it binds rather than
+// quietly producing a short walk that reads like a finished one.
+PushRun pageRankPushPersonalized( const OutEdgeCsr& edges, std::span<const std::pair<std::uint32_t, double>> seed,
+                                  std::span<double> estimate, PushConfig config )
+{
+    const std::size_t nodeCount = edges.degree.size();
+    ASSUME( config.alpha >= 0.0 && config.alpha < 1.0 );
+    ASSUME( config.epsilon > 0.0 );
+    ASSUME( estimate.size() == nodeCount );
+    ASSUME( nodeCount == 0 || edges.offsets.size() == nodeCount + 1 );
+    ASSUME( edges.targets.size() == edges.values.size() );
+    std::fill( estimate.begin(), estimate.end(), 0.0 );
+    if( nodeCount == 0 || seed.empty() )
+    {
+        return {};   // nothing seeded ⇒ nothing reached. A zero here means "none found", never "none exists".
+    }
+
+    // Allocate all scratch once; the push loop below performs no dynamic allocation. The queue is a ring of
+    // nodeCount + 1 slots, and that is exact rather than generous: `inQueue` keeps a node from being enqueued
+    // twice at a time, so at most nodeCount entries are ever live, and one slot separates full from empty.
+    std::vector<double>        residual( nodeCount, 0.0 );
+    std::vector<char>          inQueue( nodeCount, 0 );
+    std::vector<std::uint32_t> queue( nodeCount + 1, 0u );
+    const std::size_t          queueCapacity = queue.size();
+    std::size_t                queueHead = 0, queueTail = 0;
+
+    const std::size_t walkBudget = config.maxEdgeWalks > 0
+                                       ? config.maxEdgeWalks
+                                       : std::size_t( 1.0 / ( config.epsilon * ( 1.0 - config.alpha ) ) ) + 1 + nodeCount;
+
+    // The enqueue rule, named ONCE: a node joins the queue when it is not already on it and its residual has
+    // reached the ACL frontier for its own unweighted out-degree. Both the seeding pass and the edge walk go
+    // through this, so there is one condition to read and one to be wrong.
+    const auto enqueueIfReady = [ & ]( std::uint32_t node ) noexcept
+    {
+        const std::uint32_t degree    = edges.offsets[node + 1] - edges.offsets[node];
+        const double        threshold = config.epsilon * double( degree > 0u ? degree : 1u );
+        if( inQueue[node] == 0 && residual[node] >= threshold )
+        {
+            inQueue[node]    = 1;
+            queue[queueTail] = node;
+            queueTail        = ( queueTail + 1 ) % queueCapacity;
+        }
+    };
+    // Seeds first, then the queue, both in the caller's ascending node order, so the walk order is a
+    // property of the seed set and the CSR and of nothing else.
+    for( const auto& [ seedNode, seedMass ] : seed )
+    {
+        ASSUME( seedNode < nodeCount );
+        residual[seedNode] += seedMass;
+    }
+    for( const auto& [ seedNode, seedMass ] : seed )
+    {
+        (void)seedMass;
+        enqueueIfReady( seedNode );
+    }
+
+    PushRun run{};
+    while( queueHead != queueTail )
+    {
+        const std::uint32_t node = queue[queueHead];
+        queueHead                = ( queueHead + 1 ) % queueCapacity;
+        inQueue[node]            = 0;
+        const double mass        = residual[node];
+        residual[node]           = 0.0;
+        estimate[node] += mass;
+        ++run.pushCount;
+        const double divisor = edges.degree[node];
+        if( !( divisor > 0.0 ) )
+        {
+            continue;   // dangling: the exact kernel sends that mass back through the teleport, which IS the seed
+        }
+        const double spread = config.alpha * mass;
+        for( std::uint32_t edgeIndex = edges.offsets[node]; edgeIndex < edges.offsets[node + 1]; ++edgeIndex )
+        {
+            const std::uint32_t target = edges.targets[edgeIndex];
+            residual[target] += spread * ( double( edges.values[edgeIndex] ) / divisor );
+            ++run.edgeWalkCount;
+            enqueueIfReady( target );
+        }
+        if( run.edgeWalkCount >= walkBudget )
+        {
+            // The alert STAYS and is still the only thing that names WHICH site degraded on a dev build
+            // (non-negotiable #4 — a degrade path never becomes VERIFY( false )); the fact itself leaves in
+            // the return value, where NDEBUG cannot delete it.
+            DISCLOSE( run, PushRun::DisclosureWhy::WalkBudgetReached,
+                      "personalized-rank push reached its edge-walk budget before the epsilon frontier" );
+            break;
+        }
+    }
+    // Every node that received mass, pushed or not, in one pass over both vectors — cheaper than a third
+    // `seen` array and exactly the same set.
+    for( std::size_t nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex )
+    {
+        run.touchedNodeCount += ( estimate[nodeIndex] > 0.0 || residual[nodeIndex] > 0.0 ) ? 1u : 0u;
+    }
+    return run;
+}
+
 } // namespace rw
