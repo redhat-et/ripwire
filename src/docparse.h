@@ -25,6 +25,7 @@
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
 #include "infra/depwatch.h"  // readWholeFile reports each read to the warm snapshot's dependency log when one is armed
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "htmldoc.h"          // DOCS-UNITS D5: the HTML section tree (line-preserving body text + units)
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
 
@@ -735,16 +736,11 @@ inline std::string runMarkitdown( const std::string& path )
         DISCLOSE( "docparse: popen failed for markitdown bridge" );
         return {};
     }
-    std::string         out;
-    std::array<char, 65536> buf;
-    std::size_t         n = 0;
-    while( ( n = std::fread( buf.data(), 1, buf.size(), pipe ) ) > 0 )
-    {
-        out.append( buf.data(), n );
-    }
-    const int rc = os::pclose( pipe );
-    if( rc != 0 )
-    { // markitdown absent or errored → degrade to no-doc
+    std::string out;
+    const bool  readWhole = appendRestOf( pipe, out, cmd );
+    const int   rc        = os::pclose( pipe );
+    if( rc != 0 || !readWhole )
+    { // markitdown absent or errored, or its output could not be read to its end → degrade to no-doc
         return {};
     }
     return out;

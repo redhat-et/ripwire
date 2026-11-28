@@ -2652,7 +2652,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         out.append( fromSentence ? " from=\"sentence\"" : "" );
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
     }
-    std::string rungs, body, next;
+    std::string rungs, next;
     bool        bodyCompressed = false;   // a b body was printed under --compress: the block says so (compress="1")
     // PROTO-INDEX: the generated paths the gen rung reads (X itself when qualified or `Outer_Leaf`, then each literal row's target)
     std::vector<std::vector<std::string>> genPaths;

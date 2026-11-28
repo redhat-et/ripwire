@@ -12,6 +12,7 @@
 #include "model.h"
 #include "langfacts.h"             // langFacts(l): the per-language facts verbs_quality.h and the graph read instead of a Lang:: compare
 #include "nextverb.h"              // P3 (L7): next= on every enumerated root (the verbs_*.h fragments read it from here)
+#include "infra/readall.h"         // appendRestOf — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "infra/stdinline.h"       // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
@@ -4467,8 +4468,11 @@ static std::optional<rw::legendseen::Holding> loadLegendSeen( const rw::Config& 
     rw::OwnedFile fp = rw::openOwnedFile( path.c_str(), "rb" );
     std::string   bytes;
     char          buf[ 65536 ];
-    for( std::size_t got; fp && ( got = std::fread( buf, 1, sizeof( buf ), fp.file ) ) > 0 && bytes.size() <= rw::legendseen::kMaxFileBytes; )
+    // A short count is end of file or an error alike, so the loop stops there (never a read on a stream at its end:
+    // clang-analyzer-unix.Stream) and ferror below decides which.
+    for( std::size_t got = sizeof( buf ); fp && got == sizeof( buf ) && bytes.size() <= rw::legendseen::kMaxFileBytes; )
     {
+        got = std::fread( buf, 1, sizeof( buf ), fp.file );
         bytes.append( buf, got );
     }
     if( !VALIDATE( fp && std::ferror( fp.file ) == 0 && bytes.size() <= rw::legendseen::kMaxFileBytes, "--legend-seen= FILE reads whole" ) )
@@ -4725,12 +4729,19 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 
     std::string doc;
     std::rewind( capture );
-    char buf[ 65536 ];
-    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
-    {
-        doc.append( buf, got );
-    }
+    const bool readWhole = rw::appendRestOf( capture, doc, "compact-legend capture" );
     std::fclose( capture );
+    if( !readWhole )
+    {
+        // The answer was written to the buffer and cannot be read back whole: a prefix printed as the answer is the one
+        // outcome that may not happen, and re-running the verb could repeat its side effects. Refuse, saying why.
+        DISCLOSE( Diagnostics::answerRefused, "the run exits non-zero naming the failed read-back on stderr; no answer is printed",
+                  "runWithCompactLegend: the captured answer could not be read back whole" );
+        rw::emitRaw( stderr, "ripwire: compact legend: could not read the captured answer back whole — nothing is printed rather than a "
+                             "truncated answer. The verb itself ran: check its effect before rerunning one that edits (--legend=full "
+                             "prints without this capture)\n" );
+        return rc != 0 ? rc : 1;
+    }
     if( refOnlyCapture || seenOnlyCapture )
     {
         applyCliRefPosture( cfg, doc );
@@ -4887,6 +4898,7 @@ int main( int argc, char** argv )
     using namespace rw;
 
     rw::os::init_process( argc, argv );   // POSIX: nothing. Windows: UTF-8 argv, binary stdio, path-valued environment in the program's spelling
+    rw::setReadErrorSeam( std::getenv( "RIPWIRE_TEST_READ_ERROR" ) );   // test seam (infra/readall.h): a read whose label holds this text fails
 
     if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )
     { // adoption recipe (subcommand, not a flag)
@@ -5934,12 +5946,13 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             const std::string bf( cfg.batchFile );
             std::FILE* f = std::fopen( bf.c_str(), "rb" );
             if( !f ) { rw::emitTo( stderr, "ripwire: --batch: cannot open '{}'\n", bf.c_str() ); return 1; }
-            char buf[ 4096 ]; std::size_t n;
-            while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
-            {
-                content.append( buf, n );
-            }
+            const bool readWhole = rw::appendRestOf( f, content, bf );
             std::fclose( f );
+            if( !readWhole )
+            {
+                rw::emitTo( stderr, "ripwire: --batch: cannot read '{}' to its end — no sub-query is run from a partial batch\n", bf.c_str() );
+                return 1;
+            }
         }
 
         // M5 (capture-audit 2026-09-04): the `verb:arg` -> sub-query conversion this arm used to own as a

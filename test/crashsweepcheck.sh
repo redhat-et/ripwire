@@ -303,7 +303,6 @@ clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
 crossref.h	diffTreeSlice	fopen	1	closes	returns only on a failed open; fclose after the list is written
-crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
 crossref.h	mergeBasesByOneWalk	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	popen	1	closes	the read loop leaves by break/continue only; pclose then unlink
@@ -318,7 +317,6 @@ gitmine.h	gitCommandLines	popen	1	closes	status = pclose after the loop; no exit
 gitmine.h	gitCommandLinesBy	popen	1	closes	pclose after the poll loop; a read past its deadline hands the pipe to a detached thread that pcloses it, or leaves it to process exit when no thread can start
 infra/os_win32.cpp	system	popen	1	closes	Windows body of os::system (compiled only for Windows): the drain loop has no exit; pclose after it
 gitmine.h	popenTrimmed	popen	1	closes	no exit between popen and pclose
-gitoracle.h	loadOracleCache	fopen	1	closes	returns only on a failed open; fclose after the read loop
 gitoracle.h	saveOracleCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
 gitoracle.h	walkGitPatch	popen	1	closes	break-only loops, a drain, then pclose; no return between
 infra/emit.h	open	open_memstream	1	owned	rw::MemoryStream: the destructor fcloses a stream nobody finished and frees the buffer on every path; finish() closes exactly once
@@ -335,10 +333,7 @@ main.cpp	runDefaultMap	fopen	1	closes	returns only on a failed open; fclose afte
 main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before every return
 mcpedit.h	EditLock	open	1	owned	EditLock's destructor unlocks and closes
 mcpindex.h	arm	open	1	owned	held in FsWatcher::dirFds, closed by reset and the destructor
-mcpindex.h	readFileBytes	fopen	1	closes	fclose before both returns
-mcpverbs.h	sliceText	fopen	1	closes	if-scoped; fclose after the read loop
 naminglens.h	namingLensChecks	fopen	1	closes	if-scoped; fclose after the sized read
-packtask.h	d1ReadSrcCached	fopen	1	closes	if-scoped; fclose after the read loop
 pathguard.h	openExclNoFollow	open	1	transferred	returned to createExclTempFile, which adopts it into ExclTempFile (closes and unlinks)
 pathguard.h	openNoFollowRead	fdopen	1	owned	adopted by NoFollowRead, whose destructor fcloses
 pathguard.h	openNoFollowRead	open	1	owned	closed on every refusal; otherwise fdopen'd into NoFollowRead
@@ -370,9 +365,7 @@ verbs_change.h	readTraceText	fopen	1	closes	returns only on a failed open; fclos
 verbs_change.h	runChangeViews	fopen	1	closes	returns only on a failed open; fclose after the write
 verbs_doctor.h	runDoctor	open	1	closes	if-scoped rw::os::open (#326: the rebased cache dir); write, then rw::os::close before the unlink
 verbs_lint.h	lintSymbolLevelChecks	fopen	1	closes	if-scoped; fclose after the sized read
-verbs_lint.h	parseProfTsv	fopen	1	closes	returns only on a failed open; fclose after the read loop
 verbs_navigate.h	runSafeDelete	fopen	1	closes	if-scoped; fclose after the sized read
-verbs_navigate.h	runSlice	fopen	1	closes	if-scoped; fclose after the read loop
 verbs_quality.h	runQualityViews	fopen	1	closes	returns on a failed open; fclose before the other return
 warmsnap.h	collectGitInputs	popen	1	closes	no return between the popen and the pclose: the read loop leaves by its own condition, and a non-null pipe is always closed on the next line
 REGISTRY

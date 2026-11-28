@@ -102,7 +102,7 @@ inline std::optional<std::string> renderBodyElement( const IngestResult& ing, No
     static const std::vector<std::uint8_t>  kNoNameOnly;
     ChargedSection sec = chargeSection( [ & ]( std::FILE* f )
         { packBodies( f, ing, { id }, capBytes, kNoOff, kNoTargets, CalleeEdgeBytes( kNoNameOnly ), compress, redact,
-                      /*ranges=*/nullptr, /*notes=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
+                      /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
                       /*withFileContext=*/false, rootArg, rank, {}, bodyLineCap ); },
         kBytesPerTokenBody );
     if( !sec.isRendered )

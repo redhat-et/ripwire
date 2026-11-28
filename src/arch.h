@@ -34,6 +34,7 @@
 #include "lintrules.h"          // langOfPath, noFileEdgeLangBit — a module with a no-edge language reads unknown
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — THE one atomic no-follow open the sidecar writers share
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/tablelookup.h"  // isOneOf — archUnindexedCodeExt's table lookup
@@ -473,11 +474,14 @@ inline std::vector<std::string> builtinLayerSubs( std::string_view name ) noexce
 inline ArchRules parseArchRules( const std::string& path )
 {
     ArchRules r;
-    std::ifstream f( path );
-    if( !f )
+    // Read whole first: an ifstream's getline ends the same way at a read error as at end of file (a directory opens and
+    // reads as an empty file), and a rules file that silently reads as nothing is the exit-0 gate D9 below refuses.
+    const std::optional<std::string> text = rw::readFileToEnd( path );
+    if( !text )
     {
-        return r; // can't open at all — caller reports "cannot read rules file" (r.parseError stays false)
+        return r; // can't open or read to its end — caller reports "cannot read rules file" (r.parseError stays false)
     }
+    std::istringstream f( *text );
 
     // collect raw rule tokens in file order; resolve ids AFTER all user `layer` lines are seen,
     // then auto-add built-in layers for names that still have no definition.

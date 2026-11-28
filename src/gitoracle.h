@@ -76,6 +76,7 @@
 #include "arch.h"               // fnv1a64 — the cache trailer checksum and the repo key
 #include "infra/jsonesc.h"      // shSingleQuote
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 #include <algorithm>
 #include <cctype>
@@ -374,21 +375,13 @@ inline bool saveOracleCache( const std::string& path, const HistoryIndex& idx )
 
 inline bool loadOracleCache( const std::string& path, HistoryIndex& idx )
 {
-    std::string bytes;
+    // Absent, or a read that failed part-way: a plain miss, not a degrade (the walk rebuilds the index).
+    const std::optional<std::string> read = readFileToEnd( path );
+    if( !read )
     {
-        std::FILE* fp = std::fopen( path.c_str(), "rb" );
-        if( !fp )
-        {
-            return false; // a plain miss, not a degrade
-        }
-        char        buf[ 65536 ];
-        std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
-        {
-            bytes.append( buf, n );
-        }
-        std::fclose( fp );
+        return false;
     }
+    const std::string& bytes = *read;
     if( bytes.size() < sizeof( std::uint64_t ) + 17 )
     {
         return false;

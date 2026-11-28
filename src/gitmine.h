@@ -51,6 +51,7 @@
 #include "infra/pipefields.h"  // PipeFieldReader — the record walk's deadline-keeping read
 #include "infra/os.h"  // rw::os::stat — the zero-popen .git walk-up pre-check; popen/pclose/realpath/localtime_r
 #include "gitrootfacts.h"  // gitDiscoveryView — the .git walk-up (hasEnclosingGitRepo) and the toplevel memo's freshness key
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 namespace rw
 {
@@ -269,14 +270,13 @@ inline std::string popenTrimmed( const std::string& cmd )
     {
         return {};
     }
-    std::string                  out;
-    std::array<char, 64 * 1024> block;
-    for( std::size_t got = std::fread( block.data(), 1, block.size(), pipe ); got > 0; got = std::fread( block.data(), 1, block.size(), pipe ) )
-    {
-        ASSUME( got <= block.size(), "fread returns at most the count it was asked for" );
-        out.append( block.data(), got );
-    }
+    std::string out;
+    const bool  readWhole = appendRestOf( pipe, out, cmd );
     os::pclose( pipe );
+    if( !readWhole )
+    {
+        return {};   // a read that failed part-way is no answer, as a failed popen is: never a prefix of git's output
+    }
     while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) )
     {
         out.pop_back();

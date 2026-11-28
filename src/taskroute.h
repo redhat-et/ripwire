@@ -404,16 +404,15 @@ inline bool identifierMentionShape( std::string_view task, std::size_t pos, std:
         return true;
     }
 
-    bool hasLower = false, hasUpper = false, camelSeam = false, hasUnderscore = false;
+    bool hasLower = false, camelSeam = false, hasUnderscore = false;
     for( std::size_t i = 0; i < name.size(); ++i )
     {
         const unsigned char c = (unsigned char)name[i];
         if( c == '_' ) { hasUnderscore = true; continue; }
         if( std::islower( c ) ) { hasLower = true; }
-        if( std::isupper( c ) )
+        if( std::isupper( c ) && i > 0 && std::islower( (unsigned char)name[i - 1] ) )
         {
-            hasUpper = true;
-            if( i > 0 && std::islower( (unsigned char)name[i - 1] ) ) { camelSeam = true; }
+            camelSeam = true;
         }
     }
     const bool scoped = name.find( "::" ) != std::string_view::npos || name.find( '.' ) != std::string_view::npos;

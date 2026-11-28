@@ -21,6 +21,7 @@
 #include "lexical.h"   // subtokens()
 #include "arch.h"      // rw::fnv1a64 — the path-free sample key; never a second copy of the hash
 #include "infra/jsonesc.h"   // W2-M0: rw::jsonStringEnd — the canonical escape-aware JSON string walk
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 #include <algorithm>
 #include <cmath>
@@ -1088,8 +1089,11 @@ inline void addMinedRow( MinedAcc& a, const std::vector<std::uint32_t>& ranked, 
 
 inline int runEvalMined( const std::string& root, const IngestResult& ing, const Graph& g, const std::string& path )
 {
-    std::ifstream in( path );
-    if( !in ) { rw::emitTo( stderr, "ripwire --eval-mined: cannot open '{}'\n", path.c_str() ); return 1; }
+    // Read whole first: an ifstream's getline ends the same way at a read error as at end of file, and a harness that
+    // scores part of its pairs (or none, from a directory) as the sample is the fabrication the refusals below exist to stop.
+    const std::optional<std::string> text = rw::readFileToEnd( path );
+    if( !text ) { rw::emitTo( stderr, "ripwire --eval-mined: cannot read '{}' to its end\n", path.c_str() ); return 1; }
+    std::istringstream in( *text );
 
     // gold paths in the artifact are REPO-RELATIVE (the miner strips the repo root); ing.files carry
     // the as-invoked crawl paths (absolute or CWD-relative). Index BOTH forms so `ripwire /abs/repo

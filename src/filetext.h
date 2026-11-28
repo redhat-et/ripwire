@@ -19,6 +19,7 @@
 #include "ingest.h"            // canonicalCrawlRoot / crawlPathStaysInRoot — the crawl's own root boundary, re-checked at read
 #include "model.h"
 #include "infra/ownedfile.h"   // OwnedFile — the stream is owned before any other line runs
+#include "infra/readall.h"   // appendRestOf / readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 
 #include <cstdint>
 #include <cstdio>
@@ -113,15 +114,8 @@ private:
             }
             if( OwnedFile in = openOwnedFile( path.c_str(), "rb" ) )
             {
-                char        b[ 4096 ];
-                std::size_t n = 0;
-                bool        err = false;
-                while( ( n = std::fread( b, 1, sizeof( b ), in.file ) ) > 0 )
-                {
-                    e->text.append( b, n );
-                }
-                err = std::ferror( in.file ) != 0;
-                err = !in.close() || err;
+                bool err = !appendRestOf( in.file, e->text, path );
+                err      = !in.close() || err;
                 e->ok = !err;
                 if( err )
                 {

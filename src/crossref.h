@@ -118,6 +118,7 @@
 #include <format>       // blobsUnreadCause — the one refusal sentence
 #include <type_traits>  // streamBlobs: a stream with no piece reader keeps the whole-or-skip rule
 #include "infra/pieceread.h"   // LARGE-PARTIAL-1: a lexical reader reads a blob of any size, in line-aligned pieces
+#include "infra/readall.h"   // readFileToEnd — a read error is a failure, never a shorter answer (TIDY-TRIAGE C2)
 #include "limitwarn.h"         // LARGE-PARTIAL-1: a ref window or parse guard that cuts says so on stderr too
 #include <functional>
 #include <limits>       // parseCatFileHeader: the size field never overflows
@@ -4373,18 +4374,10 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
 {
     EvalReport rep;
 
-    std::string bytes;
-    {
-        std::FILE* fp = std::fopen( labelsPath.c_str(), "rb" );
-        if( !fp ) { rep.ok = false; return rep; }
-        char        buf[ 65536 ];
-        std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
-        {
-            bytes.append( buf, n );
-        }
-        std::fclose( fp );
-    }
+    // Unreadable, or a read that failed part-way: refused like a missing file, never scored from part of the labels.
+    const std::optional<std::string> read = rw::readFileToEnd( labelsPath );
+    if( !read ) { rep.ok = false; return rep; }
+    const std::string& bytes = *read;
 
     // The labels first: past the ref window the sweep keeps every labelled ref before the newest others, so a label is scored
     // whenever the labels alone fit the window (a windowed-out label is in omittedLabels, never scored as merged).

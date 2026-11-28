@@ -42,6 +42,7 @@
 #include "infra/namesplit.h"    // afterLast — a path's last component (isConftestFile, pythonModuleTail), not a third hand-rolled basename
 #include "infra/jsonesc.h"      // L2 — rw::jsonesc::escapeMcp for staleAcksJsonArray's kind= field (the same posture serialize.h's jsonStr uses)
 #include "infra/platform.h"     // RW_LIFETIMEBOUND — the DefectSiteKey projection lambdas; owned here, not transitively
+#include "infra/readall.h"      // readEndedWhole — whether forEachGitNulRecord's streamed read stopped at the end or on an error
 #include "sourceidentity.h"    // rw::kRipwireSourceIdentity — the producer identity the qsnap/qbody keys and blob header carry
 
 #include "btree.hpp"              // gtl btree_map — sorted like std::map, cache-friendly nodes (house rule: never std::map)
@@ -5988,6 +5989,13 @@ inline bool forEachGitNulRecord( const std::string& root, const std::string& arg
             record.clear();
             at = end + 1;
         }
+    }
+    // A read that stopped on an error ends the loop as end of output does: the listing is then unknown (false), and the
+    // cut record at its end is never handed on as a whole one.
+    if( !readEndedWhole( pipe, cmd ) )
+    {
+        os::pclose( pipe );
+        return false;
     }
     if( !record.empty() )
     {

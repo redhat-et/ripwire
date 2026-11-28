@@ -524,7 +524,7 @@ inline bool regexCharSetOfClass( const std::string& pat, std::size_t openAt, std
     while( cursor < end && pat[ cursor ] != ']' )
     {
         RegexCharSet member;
-        std::size_t  memberEnd = cursor;
+        std::size_t  memberEnd = cursor + 1;   // one plain character; an escape is two
         if( pat[ cursor ] == '\\' )
         {
             if( cursor + 2 > end || !regexCharSetOfEscape( pat[ cursor + 1 ], member ) )
@@ -541,7 +541,6 @@ inline bool regexCharSetOfClass( const std::string& pat, std::size_t openAt, std
             }
             member = {};
             member.add( static_cast<unsigned char>( pat[ cursor ] ) );
-            memberEnd = cursor + 1;
         }
 
         // a RANGE is '-' between two single characters; anything else is refused
