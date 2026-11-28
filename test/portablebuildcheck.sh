@@ -1346,21 +1346,125 @@ def range_expr(text, open_index):
     return None
 
 
+# A brace block whose head names one of these is a CONTAINER, not a function body. Mirrors the same
+# distinction test/lib/capdisclose.py draws for cap sites, where it has held since 2026-11-12.
+# `extern "C" {` reaches here with the literal already blanked to SPACES (blank() preserves length), so the
+# quoted form never matches and the linkage block would be read as a function body -- which would hide every
+# declaration inside it and turn a safe range-for into a finding (CodeRabbit on #844). Match bare `extern` too.
+CONTAINER = re.compile(r'\b(?:namespace|struct|class|union|enum)\b[^;{}()]*$|\bextern\b[^;{}()]*$')
+_BODIES = {}
+
+
+def function_bodies(text):
+    """[(start, end)] of every brace block whose head is NOT a container — i.e. function bodies, and the blocks
+    nested in them. Comments and literals are already blanked, so brace counting is exact. Cached by id(text):
+    the caller's `texts` list owns every string for the life of the process, so the ids cannot be recycled."""
+    key = id(text)
+    if key not in _BODIES:
+        spans, stack, last = [], [], 0
+        for i, ch in enumerate(text):
+            if ch == '{':
+                stack.append((i, bool(CONTAINER.search(text[last:i]))))
+                last = i + 1
+            elif ch == '}':
+                if stack:
+                    start, container = stack.pop()
+                    if not container:
+                        spans.append((start, i + 1))
+                last = i + 1
+            elif ch == ';':
+                last = i + 1
+        _BODIES[key] = sorted(spans)
+    return _BODIES[key]
+
+
+def inside_function(text, pos):
+    """True when pos sits inside a function body. A `RET NAME( … );` THERE is a local variable declared with
+    parenthesised initialisation -- `std::vector<std::uint32_t> queue( nodeCount + 1, 0u )` -- not a declaration
+    of anything a call site could resolve to. Reading one as a by-value declaration of `NAME` is what made
+    src/backhops.h:841's `m_back.queue().putsIn( u )` a finding on two unrelated lanes in one day (#822; #837
+    head b5f2cdafb renamed a member to escape it). A declaration at namespace or class scope is unaffected."""
+    return any(a <= pos < b for a, b in function_bodies(text))
+
+
+def split_args(text, open_index):
+    """Top-level comma-separated argument texts of the call whose '(' is at open_index, or None.
+
+    A VERBATIM copy of the function of the same name in this file's other python block. The two blocks are
+    separate interpreter invocations, so the copy is forced rather than chosen; keep them textually identical
+    so a reader can diff them. Note what it does NOT do: it never opens on '<', so `fetch(a < b, 0)` keeps its
+    top-level comma, and it returns argument TEXTS, so a literal already blanked to spaces is a PRESENT
+    argument rather than none. Both were CodeRabbit findings against the counter this replaced."""
+    depth, args, start = 0, [], open_index + 1
+    for i in range(open_index, len(text)):
+        c = text[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+            if depth == 0:
+                args.append(text[start:i])
+                return args
+        elif c == ',' and depth == 1:
+            args.append(text[start:i])
+            start = i + 1
+    return None
+
+
+def arity(params):
+    """(required, most) parameters a declaration's parameter list spells. `...` makes `most` unbounded.
+    Top-level commas only: `std::map<int, int> m` is ONE parameter. A C++ call cannot resolve to a
+    declaration that takes more required parameters than it passes arguments, so a 0-argument call
+    cannot mean `bool queue( NodeId cls )` -- which is the second half of the two collisions this arm hit
+    (#837 head b5f2cdafb, a by-value `queue( NodeId )` on an UNRELATED class, reached by name alone)."""
+    inner = params.strip()
+    if not inner or inner == 'void':
+        return 0, 0
+    # A PACK accepts zero or many, so it contributes 0 to the minimum and unbounds the maximum:
+    # `template<class... Args> Row& fetch(Args&&... args)` must stay compatible with fetch() (CodeRabbit on
+    # #844). `...` anywhere in the list is enough to unbound it; required parameters BEFORE the pack still count.
+    if '...' in inner:
+        before = inner.split('...')[0]
+        return max(0, before.count(',')), 1 << 30
+    entries, depth, start = [], 0, 0
+    for i, ch in enumerate(inner):
+        if ch in '<([{':
+            depth += 1
+        elif ch in '>)]}':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            entries.append(inner[start:i]); start = i + 1
+    entries.append(inner[start:])
+    if entries and entries[-1].strip() == '...':
+        entries.pop()
+        return sum(1 for e in entries if '=' not in e), 1 << 30
+    return sum(1 for e in entries if '=' not in e), len(entries)
+
+
 def returns_of(texts, name, memo):
     """The return types the line-leading declarations of `name` spell (`RET NAME(` / `RET Cls::NAME(`), each ending
-    in '&' or '*' when the declaration returns a reference or a pointer. [] when the tree declares none."""
+    in '&' or '*' when the declaration returns a reference or a pointer. [] when the tree declares none.
+    Matches inside a function body are LOCALS, not declarations, and are skipped (see inside_function)."""
     if name not in memo:
         pat = re.compile(r'(?m)^[ \t]*(?:template\s*<[^\n]*>\s*)?([^\n;{}()=,.]*?[\w>])([ \t*&]+)(?:\w+::)*'
                          + re.escape(name) + r'\s*\(')
         rets = []
         for text in texts:
             for m in pat.finditer(text):
+                if inside_function(text, m.start()):
+                    continue
                 ret = SPEC.sub('', m.group(1).strip())
                 words = ret.split()
                 if not words or words[0] in NOT_DECL or words[-1] in KEYWORDS or words[-1] in NOT_DECL:
                     continue
                 marks = m.group(2).replace(' ', '').replace('\t', '')
-                rets.append(ret + marks)
+                close = m.end()
+                depth = 1
+                while close < len(text) and depth:
+                    depth += 1 if text[close] == '(' else -1 if text[close] == ')' else 0
+                    close += 1
+                lo, hi = arity(text[m.end():close - 1]) if not depth else (0, 1 << 30)
+                rets.append((ret + marks, lo, hi))
         memo[name] = rets
     return memo[name]
 
@@ -1394,7 +1498,17 @@ def findings(expr, texts, memo):
         callee = hm.group(1)
         if callee in KEYWORDS or callee in VIEW_TYPES:
             continue
-        rets = returns_of(texts, callee, memo)
+        # split_args, not a local counter: it is already in this file, it never opens on '<' (so `fetch(a < b, 0)`
+        # keeps its top-level comma), and it returns argument TEXTS, so a literal blanked to spaces is still a
+        # PRESENT argument rather than zero. Both were CodeRabbit findings against a counter I should not have
+        # written. None (unbalanced parens) means "do not know", which must not filter anything out.
+        argv = split_args(expr, k)
+        passed = None if argv is None else (0 if len(argv) == 1 and not argv[0].strip() and not argv[0] else len(argv))
+        # FAIL OPEN on uncertainty: an unparseable call keeps every candidate, so a mis-parse can only cost a
+        # missed finding, never create a false one. The arity filter subtracts a candidate only when the call
+        # provably cannot resolve to it.
+        allRets = returns_of(texts, callee, memo)
+        rets = [r for r, lo, hi in allRets] if passed is None else [r for r, lo, hi in allRets if lo <= passed <= hi]
         if rets and all(r.endswith(('&', '*')) for r in rets):
             continue
         member = head[:hm.start()].rstrip().endswith(('.', '->'))
@@ -1451,7 +1565,29 @@ cat > "$TMP/rfctl/clean/clean.h" <<'CPP'
 #include <string>
 #include <string_view>
 #include <vector>
-struct Row { std::vector<std::string> cells; const std::vector<std::string>& items() const { return cells; } };
+struct Rows { std::vector<std::string> cells; const std::vector<std::string>& items() const { return cells; } };
+struct Row { std::vector<std::string> cells; Rows held; const std::vector<std::string>& items() const { return cells; }
+             const Rows& queue() const { return held; }
+             const Rows& at( int i ) const { (void)i; return held; } };
+struct Walk
+{
+    bool queue( int cls );   // by value, class scope, 1 required parameter: a 0-arg call cannot mean it
+};
+// The four shapes CodeRabbit found on #844, each a SAFE call the pre-fix pass reported as dangling:
+// (1) a reference-returning declaration inside a linkage block. blank() turns `extern "C"` into `extern` plus
+//     spaces, so a CONTAINER regex wanting the quotes reads the block as a FUNCTION BODY and hides this.
+extern "C"
+{
+Row& externRow();
+}
+// (2) a parameter PACK: accepts zero or many, so a 0-argument call must stay compatible with it.
+template <class... Args> Row& packRow( Args&&... args );
+// (3) a declaration taking a literal. The literal is blanked to spaces before the scan, so an argument counter
+//     that strips whitespace sees ZERO and drops this 1-parameter declaration.
+Row& litRow( const char* s );
+// (4) a comparison in an argument. A counter treating '<' as an opening delimiter misses the top-level comma
+//     and counts 1 where 2 are passed.
+Row& cmpRow( bool a, int b );
 Row makeRow();
 Row& rowRef();
 const Row* rowPtr();
@@ -1468,6 +1604,23 @@ inline int clean( const std::map<int, std::vector<int>>& m, std::string_view lin
     for( const char ch : std::string_view( line ).substr( 1 ) ) { n += ch; }        // a view temporary
     for( const int v : m.find( 1 )->second ) { n += v; }                            // an iterator into a live map
     for( const std::string& c : localVar.cells.front().size() > 0 ? localVar.cells : makeList() ) { n += int( c.size() ); }
+    // SHADOWED ACCESSOR, both halves. (a) #822: a local declared with parenthesised initialisation reads, to
+    // a text pass, exactly like `std::vector<int> queue( … )` — a declaration of `queue` returning by value.
+    // (b) #837: `Walk::queue( int )` below is a REAL by-value declaration at class scope, on a class the
+    // range-for never names; a 0-argument call cannot resolve to it. The range-for calls the ACCESSOR of that
+    // name, which returns a reference, so neither shape is a finding. Drop the scope filter and (a) reds;
+    // drop the arity filter and (b) reds.
+    const std::vector<int> queue( int( line.size() ) + 1, 0 );
+    // (c) a local whose initialiser passes as many arguments as the call site does, so arity cannot separate
+    // it from a declaration and only the scope filter can: `at( 1 )` here is a local, not a by-value `at`.
+    const Rows at( 1 );
+    for( const int v : m.find( 2 )->second ) { n += v + queue[ 0 ]; }
+    for( const std::string& c : rowRef().queue().items() ) { n += int( c.size() ); }
+    for( const std::string& c : rowRef().at( 1 ).items() ) { n += int( c.size() ) + at.cells.size(); }
+    for( const std::string& c : externRow().items() ) { n += int( c.size() ); }            // (1)
+    for( const std::string& c : packRow().items() ) { n += int( c.size() ); }              // (2)
+    for( const std::string& c : litRow( "x" ).items() ) { n += int( c.size() ); }          // (3)
+    for( const std::string& c : cmpRow( n < 3, 0 ).items() ) { n += int( c.size() ); }     // (4)
     // for( const std::string& c : makeRow().items() )   — a comment is not code
     const char* s = "for( const std::string& c : makeRow().items() )";             // nor is a literal
     for( int i = 0; i < 3; ++i ) { n += i + int( s[ 0 ] ); }                        // a classic for
