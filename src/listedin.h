@@ -34,27 +34,21 @@
 // there nor a manifest there is read.
 
 #include "darkflags.h"    // forEachLine — the one line splitter over raw file text (CR stripped)
-#include "ingest.h"       // kDefaultMaxFileBytes — the crawl size ceiling a manifest read also honours
-#include "docparse.h"     // readRegularFile — a fixed-name file in the tree, refused when it is not a regular file
+#include "whereelse.h"    // the where-else family: manifest table + reader, ancestor walk, bounded path names, vendored dirs
 #include "lintrules.h"    // lintdetail::indentOf — the leading-blank count of a raw line
-#include "taskroute.h"    // taskroute::wordByte — the word byte (alnum or _)
 #include "model.h"        // IngestResult, rootRelPath, diskPath
 #include "redact.h"       // redactInPlace — a printed <ln> is a manifest line (a script or config value can hold a token)
 #include "serialize.h"    // escapeXml, truncateUtf8WithEllipsis
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <format>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 namespace rw
@@ -62,15 +56,13 @@ namespace rw
 
 // Runaway guards, not size targets (knob census ADDENDUM): every manifest, line or name past them is dropped WITH a disclosure
 // (manifests_capped="1" manifests_total= on the first element, capped="1" lines_total= on the element, also_total=, files_capped="1" on the
-// first element for the two caps on what is READ: *.bzl files past kListedBzlPerDir, shown files past kListedShownFiles; when the cut leaves
+// first element for the two caps on what is READ: *.bzl files past whereelse::kFragmentsPerDir, shown files past kListedShownFiles; when the cut leaves
 // no manifest that lists a shown file there is no element to carry it, and no clause either: an absent <listed> claims nothing).
 inline constexpr std::size_t kListedManifests   = 4;     // manifests per answer
 inline constexpr std::size_t kListedLines       = 8;     // printed lines per manifest (stanza openers included)
 inline constexpr std::size_t kListedAlsoNames   = 4;     // also= names per manifest
 inline constexpr std::size_t kListedShownFiles  = 16;    // distinct shown files whose ancestors are read
 inline constexpr std::size_t kListedLineBytes   = 240;   // one printed line (UTF-8-safe cut + ellipsis)
-inline constexpr std::size_t kListedBzlPerDir   = 8;     // *.bzl files read per directory
-inline constexpr std::uintmax_t kListedManifestBytes = kDefaultMaxFileBytes;   // a manifest above the crawl ceiling is not read (a floor)
 
 inline bool forListedInOn()
 {
@@ -84,6 +76,15 @@ struct ListedRender
 
 namespace listeddetail
 {
+
+// The manifest reader and the path-name matcher are the where-else family's (whereelse.h), shared with --for's <where> and --brief.
+using whereelse::boundedFind;
+using whereelse::inNestedPackage;
+using whereelse::isVendoredDir;
+using whereelse::Manifest;
+using whereelse::manifestsAbove;
+using whereelse::Token;
+using whereelse::tokensFor;
 
 // A creation word as a whole word of the task, case-folded; words split on every character that is not alphanumeric or '_', so a
 // creation word inside an identifier (`Plan::AddTarget`, `Workspace::new_local`, `createSingletons`) is not one: that task names a
@@ -123,164 +124,6 @@ inline bool isCreationTask( std::string_view task )
     return flush();
 }
 
-inline bool isNameChar( char c ) noexcept
-{
-    return taskroute::wordByte( c ) || c == '-';   // a path segment's name bytes: a word byte or '-' (cmd-new-session)
-}
-
-// `tok` occurs in `line` bounded on both sides: the byte before is not a name character, '.' or '!' (an exclusion), the byte after is not a
-// name character ("abi.h" never matches "abi.hpp"). A FILE-path token also refuses a '/' before it unless that '/' ends `./`, `)/`, `}/`
-// or `//` or opens the line (`$(srcdir)/x.c`, `${dir}/x.c`, `//x.c`): `legacy/x.c` and `../x.c` name ANOTHER file of the same name,
-// not the one the token resolves to from the manifest's own directory. A DIRECTORY token (`stem` non-empty) names that directory itself, not a deeper one:
-// when a '/' follows, the next segment must be the shown file's stem (`middleware/logger/index.js` for index.ts, the build output of
-// that file) — `pkg/sql/appstatspb:proto` is another package, not pkg/sql (fire table cockroach-07).
-inline bool slashBeforePathOk( std::string_view line, std::size_t slash ) noexcept
-{
-    if( slash == 0 )
-    {
-        return true;
-    }
-    const char before = line[slash - 1];
-    if( before == ')' || before == '}' || before == '/' )
-    {
-        return true;
-    }
-    return before == '.' && ( slash == 1 || ( !isNameChar( line[slash - 2] ) && line[slash - 2] != '.' ) );   // `./`, not `../` or `a./`
-}
-
-// A Bazel label `//pkg:x.cc` (`@repo//pkg:x.cc`, `pkg:x.cc`) names a file of package `pkg`: a ':' right after a name byte, or after a
-// '/' that is not the `//` opening a root label (`//:x.cc`), is another package's label, not this manifest's own file.
-inline bool colonNamesOtherPackage( std::string_view line, std::size_t colon ) noexcept
-{
-    if( colon == 0 )
-    {
-        return false;
-    }
-    const char before = line[colon - 1];
-    if( isNameChar( before ) )
-    {
-        return true;
-    }
-    if( before != '/' )
-    {
-        return false;
-    }
-    // `//:x.cc` is the root package's own label unless the `//` follows a repository name (`@repo//:x.cc`) or a path (`a//:x`)
-    const bool rootLabel = colon >= 2 && line[colon - 2] == '/' && ( colon == 2 || ( !isNameChar( line[colon - 3] ) && line[colon - 3] != '/' ) );
-    return !rootLabel;
-}
-
-// The token at `at` sits inside a negated path: the bytes back to the start of its path word (name bytes, '/' and '.') are preceded by
-// '!' — `"!./src/x"`, `"!dist/x"` in package.json `files` EXCLUDE what they name.
-inline bool negatedPath( std::string_view line, std::size_t at ) noexcept
-{
-    while( at > 0 && ( isNameChar( line[at - 1] ) || line[at - 1] == '/' || line[at - 1] == '.' ) )
-    {
-        --at;
-    }
-    return at > 0 && line[at - 1] == '!';
-}
-
-// A ROOT anchor right before the token at `at`: `$(top_srcdir)/` / `${CMAKE_SOURCE_DIR}/` (and their abs_ / build-dir / PROJECT_ twins),
-// the `//` opening a Bazel root path or the `//:` of a root label. From a SUBDIRECTORY manifest such a spelling names the ROOT file, never
-// the manifest's own sub/x.c (`$(srcdir)/`, `${CMAKE_CURRENT_SOURCE_DIR}/` and `./` stay the manifest's own directory).
-inline bool rootAnchoredAt( std::string_view line, std::size_t at ) noexcept
-{
-    // line[s], line[s+1] == "//" opening a root path: at the line start or after a byte that is neither a name byte nor '/'
-    const auto rootSlashes = [ & ]( std::size_t s ) { return s == 0 || ( !isNameChar( line[s - 1] ) && line[s - 1] != '/' ); };
-    if( at >= 3 && line[at - 1] == ':' )
-    {
-        return line[at - 2] == '/' && line[at - 3] == '/' && rootSlashes( at - 3 );
-    }
-    if( at < 2 || line[at - 1] != '/' )
-    {
-        return false;
-    }
-    const char before = line[at - 2];
-    if( before == '/' )
-    {
-        return rootSlashes( at - 2 );
-    }
-    if( before != ')' && before != '}' )
-    {
-        return false;
-    }
-    const std::size_t open = line.rfind( before == ')' ? '(' : '{', at - 2 );
-    if( open == std::string_view::npos || open == 0 || line[open - 1] != '$' )
-    {
-        return false;
-    }
-    static constexpr std::array<std::string_view, 8> kRootVars{ "top_srcdir",       "abs_top_srcdir",     "top_builddir",     "abs_top_builddir",
-                                                                "CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR", "CMAKE_BINARY_DIR", "PROJECT_BINARY_DIR" };
-    return std::ranges::find( kRootVars, line.substr( open + 1, at - 2 - open - 1 ) ) != kRootVars.end();
-}
-
-inline bool boundedFind( std::string_view line, std::string_view tok, std::string_view stem = {}, bool pathToken = false,
-                         bool refuseRootAnchor = false ) noexcept
-{
-    if( tok.empty() )
-    {
-        return false;
-    }
-    for( std::size_t at = line.find( tok ); at != std::string_view::npos; at = line.find( tok, at + 1 ) )
-    {
-        const char        prev   = at == 0 ? ' ' : line[at - 1];
-        const bool        leftOk = at == 0 || ( pathToken && prev == '/' ? slashBeforePathOk( line, at - 1 )
-                                                : prev == ':'                ? !colonNamesOtherPackage( line, at - 1 )
-                                                                             : !isNameChar( prev ) && prev != '.' && prev != '!' );
-        const std::size_t end    = at + tok.size();
-        if( negatedPath( line, at ) || ( refuseRootAnchor && rootAnchoredAt( line, at ) ) )
-        {
-            continue;
-        }
-        bool              rightOk = end == line.size() || !isNameChar( line[end] );
-        if( rightOk && !stem.empty() && end < line.size() && line[end] == '/' )
-        {
-            const std::string_view next = line.substr( end + 1 );
-            rightOk = next.starts_with( stem ) && ( next.size() == stem.size() || !isNameChar( next[stem.size()] ) );
-        }
-        if( leftOk && rightOk )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-inline std::size_t segmentCount( std::string_view p ) noexcept
-{
-    return p.empty() ? 0u : std::size_t( std::ranges::count( p, '/' ) ) + 1u;
-}
-
-inline bool isVendoredDir( std::string_view dir ) noexcept
-{
-    for( const std::string_view seg : { std::string_view( "vendor" ), std::string_view( "third_party" ), std::string_view( "node_modules" ),
-                                        std::string_view( "bower_components" ) } )
-    {
-        if( dir == seg || dir.starts_with( std::string( seg ) + "/" ) || dir.find( "/" + std::string( seg ) + "/" ) != std::string_view::npos
-            || dir.ends_with( "/" + std::string( seg ) ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-// How a manifest comments: make (`#`, a trailing backslash continues the comment), CMake (`#`, `#[[ ]]`, `#[=[ ]=]`), the other hash
-// formats (meson, Bazel, TOML: `#` outside "…" and '…'), and JSON with comments (`//`, `/* */` outside "…").
-enum class CommentStyle : unsigned char { Make, CMake, Hash, JsonC };
-
-struct Manifest
-{
-    std::string rel;    // root-relative path
-    std::string dir;    // its root-relative directory ("" = the root)
-    std::string text;
-    std::string code;   // `text` with every comment byte blanked to a space (line breaks kept): the view names are matched in
-    bool        gen = false;
-    bool        dirTokens = true;   // false for make / CMake / meson / Bazel BUILD: they list sources by FILE path; a directory there is a
-                                    // command's argument or a dep label
-};
-
 struct ManifestLine
 {
     std::uint32_t    line = 0;
@@ -288,203 +131,6 @@ struct ManifestLine
     std::string_view code;           // the same bytes with comments blanked, what is matched
     std::uint32_t    stanza = 0;     // index of the line that opens this line's top-level stanza
 };
-
-// `text` with every comment byte blanked (line breaks kept, so line numbers and offsets are unchanged). A string ("…", and '…' where
-// the format has it) protects a `#` or `//` inside it and ends with its line; make has no quotes (a `#` always starts a comment).
-inline std::string blankComments( std::string_view text, CommentStyle style )
-{
-    std::string       code( text );
-    const std::size_t n = text.size();
-    const auto        blank = [ & ]( std::size_t from, std::size_t to )
-    {
-        for( std::size_t k = from; k < to; ++k )
-        {
-            if( code[k] != '\n' && code[k] != '\r' )
-            {
-                code[k] = ' ';
-            }
-        }
-    };
-    const auto lineEnd = [ & ]( std::size_t from ) { return std::min( text.find( '\n', from ), n ); };
-    const auto continues = [ & ]( std::size_t end )   // the line ending at `end` ends in a backslash (before an optional CR)
-    {
-        while( end > 0 && text[end - 1] == '\r' )
-        {
-            --end;
-        }
-        return end > 0 && text[end - 1] == '\\';
-    };
-    char quote = 0;
-    for( std::size_t i = 0; i < n; ++i )
-    {
-        const char c = text[i];
-        if( c == '\n' )
-        {
-            quote = 0;
-        }
-        else if( quote != 0 )
-        {
-            i += c == '\\' && i + 1 < n && text[i + 1] != '\n' ? 1 : 0;
-            quote = c == quote ? 0 : quote;
-        }
-        else if( style == CommentStyle::Make && c == '\\' )
-        {
-            i += i + 1 < n && text[i + 1] != '\n' ? 1 : 0;   // `\#` is not a comment
-        }
-        else if( style != CommentStyle::Make && ( c == '"' || ( c == '\'' && style == CommentStyle::Hash ) ) )
-        {
-            quote = c;
-        }
-        else if( c == '#' && style != CommentStyle::JsonC )
-        {
-            std::size_t stop = lineEnd( i );
-            if( style == CommentStyle::CMake && i + 1 < n && text[i + 1] == '[' )   // `#[[ … ]]` / `#[==[ … ]==]`, which may span lines
-            {
-                std::size_t eq = i + 2;
-                while( eq < n && text[eq] == '=' )
-                {
-                    ++eq;
-                }
-                if( eq < n && text[eq] == '[' )
-                {
-                    const std::string close = "]" + std::string( eq - i - 2, '=' ) + "]";
-                    const std::size_t at    = text.find( close, eq + 1 );
-                    stop                    = at == std::string_view::npos ? n : at + close.size();
-                }
-            }
-            blank( i, stop );
-            // a make comment ending in a backslash continues onto the next line
-            while( style == CommentStyle::Make && stop < n && continues( stop ) )
-            {
-                const std::size_t next = lineEnd( stop + 1 );
-                blank( stop + 1, next );
-                stop = next;
-            }
-            i = stop > 0 ? stop - 1 : 0;
-        }
-        else if( c == '/' && style == CommentStyle::JsonC && i + 1 < n && ( text[i + 1] == '/' || text[i + 1] == '*' ) )
-        {
-            const std::size_t stop = text[i + 1] == '/' ? lineEnd( i ) : ( text.find( "*/", i + 2 ) == std::string_view::npos ? n : text.find( "*/", i + 2 ) + 2 );
-            blank( i, stop );
-            i = stop - 1;
-        }
-    }
-    return code;
-}
-
-inline bool saysGenerated( std::string_view text ) noexcept
-{
-    const std::string_view head = text.substr( 0, std::min<std::size_t>( text.size(), 400 ) );
-    return head.find( "generated by" ) != std::string_view::npos || head.find( "Generated by" ) != std::string_view::npos
-        || head.find( "DO NOT EDIT" ) != std::string_view::npos;
-}
-
-// The fixed-name manifests of one directory (and its *.bzl files, name order, at most kListedBzlPerDir).
-inline void readDirManifests( std::string_view dir, const std::filesystem::path& disk, std::vector<Manifest>& out, bool& filesCapped )
-{
-    static constexpr std::string_view kNames[] = { "Makefile.am", "Makefile", "GNUmakefile", "CMakeLists.txt", "meson.build", "BUILD",
-                                                   "BUILD.bazel", "package.json", "jsr.json", "deno.json", "Cargo.toml" };
-    // ONE directory listing, exact (case-sensitive) names of REGULAR files only: on a case-insensitive file system `BUILD` would
-    // otherwise open the `build/` directory (readRegularFile refuses it, but warns on stderr), and `Makefile` a `makefile`.
-    std::vector<std::string> fixedNames;
-    std::vector<std::string> bzl;
-    std::error_code          ec;
-    for( std::filesystem::directory_iterator it( disk, ec ), end; !ec && it != end; it.increment( ec ) )
-    {
-        std::error_code   sec;
-        const std::string name = it->path().filename().string();
-        if( !std::filesystem::is_regular_file( it->symlink_status( sec ) ) || sec )
-        {
-            continue;   // a directory, FIFO, device or symlink is not a manifest
-        }
-        if( it->file_size( sec ) > kListedManifestBytes || sec )
-        {
-            continue;   // above the crawl size ceiling (or unsized): a generated multi-MB list is not read whole on every --for
-        }
-        if( std::ranges::find( kNames, std::string_view( name ) ) != std::end( kNames ) )
-        {
-            fixedNames.push_back( name );
-        }
-        else if( name.ends_with( ".bzl" ) )
-        {
-            bzl.push_back( name );
-        }
-    }
-    const auto add = [ & ]( const std::string& name )
-    {
-        const std::optional<std::string> text = docparse::detail::readRegularFile( name, ( disk / name ).string() );
-        if( text && !text->empty() )
-        {
-            const bool byFile = name.starts_with( "Makefile" ) || name == "GNUmakefile" || name == "CMakeLists.txt" || name == "meson.build"
-                             || name.starts_with( "BUILD" );   // a Bazel BUILD names other packages only as deps (fire table cockroach-07)
-            const CommentStyle style = name.starts_with( "Makefile" ) || name == "GNUmakefile" ? CommentStyle::Make
-                                     : name == "CMakeLists.txt"                                ? CommentStyle::CMake
-                                     : name.ends_with( ".json" )                               ? CommentStyle::JsonC : CommentStyle::Hash;
-            Manifest   m{ dir.empty() ? name : std::string( dir ) + "/" + name, std::string( dir ), *text, blankComments( *text, style ),
-                          saysGenerated( *text ), !byFile };
-            out.push_back( std::move( m ) );
-        }
-    };
-    const bool haveAm = std::ranges::find( fixedNames, std::string( "Makefile.am" ) ) != fixedNames.end();
-    for( const std::string_view name : kNames )   // table order, so the output never depends on directory order
-    {
-        const bool present = std::ranges::find( fixedNames, std::string( name ) ) != fixedNames.end();
-        if( present && !( name == "Makefile" && haveAm ) )   // automake writes Makefile from Makefile.am: the source is the one to show
-        {
-            add( std::string( name ) );
-        }
-    }
-    std::ranges::sort( bzl );
-    filesCapped = filesCapped || bzl.size() > kListedBzlPerDir;   // the files past the cap are never read: files_capped on the answer
-    for( std::size_t i = 0; i < bzl.size() && i < kListedBzlPerDir; ++i )
-    {
-        add( bzl[i] );
-    }
-}
-
-// The path tokens that name `fileRel` from a manifest in `mdir`, most specific first, each tagged path (the file) or dir.
-struct Token
-{
-    std::string text;
-    bool        isDir      = false;
-    bool        belowSubdir = false;   // the file's path below a SUBDIRECTORY manifest: a root-anchored spelling of it is the root file
-};
-
-inline std::vector<Token> tokensFor( std::string_view fileRel, std::string_view mdir, bool dirTokens )
-{
-    std::vector<Token> t;
-    const std::string_view below = mdir.empty() ? fileRel
-                                 : ( fileRel.starts_with( mdir ) && fileRel.size() > mdir.size() && fileRel[mdir.size()] == '/' )
-                                       ? fileRel.substr( mdir.size() + 1 ) : std::string_view();
-    if( !below.empty() )
-    {
-        t.push_back( { std::string( below ), false, !mdir.empty() } );
-        if( !mdir.empty() )
-        {
-            t.push_back( { std::string( fileRel ), false } );   // a root-relative spelling of a file INSIDE the manifest's directory
-        }
-    }
-    // A file OUTSIDE the manifest's directory gets no token: a bare `x.c` in sub/Makefile.am is sub/x.c, never the root x.c or another
-    // same-named file (the full path would match the root file's spelling as if it were relative to the manifest).
-    const std::size_t slash = fileRel.rfind( '/' );
-    // A manifest in the file's own directory names it by its file name only: a directory tail there is the package's own label
-    // (a Bazel BUILD's `//pkg:dep` deps), not a listing of the file.
-    const bool sameDir = slash == std::string_view::npos ? mdir.empty() : fileRel.substr( 0, slash ) == mdir;
-    // ... and a manifest names a DIRECTORY only inside its own: package a's package.json does not list package b's src/middleware/cors
-    // (a file outside the manifest's directory is matched by its full path, never by a directory tail).
-    const bool inside = mdir.empty() || !below.empty();
-    if( slash != std::string_view::npos && !sameDir && dirTokens && inside )
-    {
-        std::string_view dir = fileRel.substr( 0, slash );
-        // directory tails of two or more segments, longest first
-        while( segmentCount( dir ) >= 2 )
-        {
-            t.push_back( { std::string( dir ), true } );
-            dir = dir.substr( dir.find( '/' ) + 1 );
-        }
-    }
-    return t;
-}
 
 // The lines of a manifest (text + comment-blanked code, same offsets), each with its top-level stanza: the nearest line above, or
 // itself, that sits at indent 0 with every bracket closed and no backslash continuation pending (`dist_tmux_SOURCES = \`, an
@@ -525,39 +171,6 @@ inline std::vector<ManifestLine> splitLines( const Manifest& man )
 
 namespace listeddetail
 {
-
-// The manifests of every shown file's directory and ancestors, nearest first, each directory once (vendored directories never read).
-inline std::vector<Manifest> manifestsAbove( const IngestResult& ing, const std::vector<std::uint32_t>& files, bool& filesCapped )
-{
-    std::vector<std::string> seenDirs;
-    std::vector<Manifest>    manifests;
-    for( const std::uint32_t f : files )
-    {
-        const std::string_view rel  = rootRelPath( ing, f );
-        std::filesystem::path  disk = std::filesystem::path( diskPath( ing, f ) ).parent_path();
-        const std::size_t      cut  = rel.rfind( '/' );
-        std::string_view       dir  = rel.substr( 0, cut == std::string_view::npos ? 0 : cut );
-        while( true )
-        {
-            if( std::ranges::find( seenDirs, dir ) == seenDirs.end() )
-            {
-                seenDirs.emplace_back( dir );
-                if( !isVendoredDir( dir ) )
-                {
-                    readDirManifests( dir, disk, manifests, filesCapped );
-                }
-            }
-            if( dir.empty() )
-            {
-                break;
-            }
-            const std::size_t up = dir.rfind( '/' );
-            dir  = up == std::string_view::npos ? std::string_view() : dir.substr( 0, up );
-            disk = disk.parent_path();
-        }
-    }
-    return manifests;
-}
 
 struct Hit
 {
@@ -621,30 +234,6 @@ inline std::vector<std::size_t> linesNaming( const std::vector<ManifestLine>& li
         }
     }
     return mine;
-}
-
-// Does a package-family manifest (package.json, jsr.json, deno.json, Cargo.toml) of its own sit in a directory of `rel` strictly below the
-// manifest's directory `mdir`? Then `rel` belongs to that NESTED package: the outer package's directory tails (build outputs, export
-// keys) do not name it.
-inline bool inNestedPackage( const IngestResult& ing, std::uint32_t fileId, std::string_view rel, std::string_view mdir )
-{
-    std::filesystem::path disk = std::filesystem::path( diskPath( ing, fileId ) ).parent_path();
-    std::string_view      dir  = rel.substr( 0, rel.rfind( '/' ) == std::string_view::npos ? 0 : rel.rfind( '/' ) );
-    while( dir.size() > mdir.size() )
-    {
-        for( const char* name : { "package.json", "jsr.json", "deno.json", "Cargo.toml" } )
-        {
-            std::error_code ec;
-            if( std::filesystem::is_regular_file( disk / name, ec ) && !ec )
-            {
-                return true;
-            }
-        }
-        const std::size_t cut = dir.rfind( '/' );
-        dir  = cut == std::string_view::npos ? std::string_view() : dir.substr( 0, cut );
-        disk = disk.parent_path();
-    }
-    return false;
 }
 
 // One manifest's hit: the first shown file it names (and those lines), and the other shown files that are its SIBLINGS: named in the
@@ -766,7 +355,7 @@ inline ListedRender renderForListedIn( const IngestResult& ing, std::span<const 
         return out;
     }
     std::vector<std::uint32_t> files;   // distinct shown files, rank order
-    bool                       filesCapped = false;   // a shown file or a *.bzl file was left unread (kListedShownFiles, kListedBzlPerDir)
+    bool                       filesCapped = false;   // a shown file or a *.bzl file was left unread (kListedShownFiles, whereelse::kFragmentsPerDir)
     for( const NodeId id : shown )
     {
         if( id < ing.symbols.size() && std::ranges::find( files, ing.symbols[id].fileId ) == files.end()

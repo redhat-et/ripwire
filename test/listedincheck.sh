@@ -41,6 +41,8 @@
 #   N4 [G] --json carries no listed
 #   L1 [P] the clause rides (compact and full) and defines every attribute <listed>/<ln> carry, as whole names in the clause alone
 #   X1 [G] determinism  X2 [G] xmllint well-formed (when xmllint exists)  X3 [G] no "--" inside the legend comment
+#   U  [G] test/whereelse_unit.cpp: the where-else family (src/whereelse.h) listedin.h reads through — one case per behaviour the
+#      former copies (listedin.h, --for's <where>, --brief's <where-else>) disagreed on, with its twin; compiled with $BIN's CMake flags
 #
 # Usage:  bash test/listedincheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/listedincheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -51,6 +53,7 @@ set -u
 export RIPWIRE_NO_CORE_LEGEND=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+. "$ROOT/test/lib/cxxflags.sh"   # the ONE flags.make parse, for (U)
 unset RIPWIRE_NO_LISTED_IN
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -303,6 +306,29 @@ for f in sys.argv[1:]:
     for c in re.findall(r'<!--(.*?)-->', s, re.S):
         if '--' in c: sys.exit(1)
 " "$T/a3" "$T/l1"; then ok "X3 no -- inside legend comments"; else no "X3 -- inside a legend comment"; fi
+
+# ---- U: the where-else unit driver, compiled with the flags CMake used for $BIN plus the standard library's bounds checks
+BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
+FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"; LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
+if [ ! -f "$FLAGS_MK" ] || [ ! -f "$LINK_TXT" ]; then
+    no "U cannot find CMake flags under $BUILD_DIR: the unit arm needs a CMake-built binary"
+elif ! cxxflags_load "$FLAGS_MK"; then
+    no "U cannot parse $FLAGS_MK without executing it"
+else
+    CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
+    [ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
+    DIAG_OBJ="$BUILD_DIR/CMakeFiles/ripwire.dir/src/infra/diagnostics.cpp.o"
+    DIAG_LINK=(); [ -f "$DIAG_OBJ" ] && DIAG_LINK=( "$DIAG_OBJ" )
+    if "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_GLIBCXX_ASSERTIONS \
+         "${CXX_INCLUDES[@]}" -I"$ROOT/src" "$ROOT/test/whereelse_unit.cpp" "${DIAG_LINK[@]}" -o "$T/whereelse_unit" >"$T/u_build.log" 2>&1; then
+        mkdir -p "$T/u_tree"; "$T/whereelse_unit" "$T/u_tree" >"$T/u_run.log" 2>&1; urc=$?
+        n="$( grep -c '  PASS' "$T/u_run.log" | tr -d ' ' )"
+        if [ "$urc" = 0 ] && [ "$n" -ge 20 ]; then ok "U whereelse_unit: $n case(s) hold"
+        else no "U whereelse_unit rc=$urc, $n case(s) passed:"; grep -E 'FAIL|assert|Assertion|out of bounds|out-of-range|index' "$T/u_run.log" | head -6 | sed 's/^/        /'; fi
+    else
+        no "U whereelse_unit does not compile:"; grep -m4 -E 'error' "$T/u_build.log" | sed 's/^/        /'
+    fi
+fi
 
 [ "$fail" -eq 0 ] && echo "listedincheck: PASS" || echo "listedincheck: FAIL"
 exit "$fail"
