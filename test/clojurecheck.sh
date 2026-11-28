@@ -25,7 +25,8 @@ expected = {'sample.core', 'sample.browser', 'sample.shared', 'sample.tasks', 'a
             'nested-quote', 'nested-discard', 'nested-comment', 'comment-not-head', 'comment-x',
             'comment-x-holder', 'before-discard', 'after-discard', 'quoted-macro', 'a', 'b',
             'syntax-quote-hole', 'live-hole-control', 'plain-call', 'meta-call', 'tag-call', 'stacked-meta-call',
-            'quoted-meta', 'special-form-metadata', 'metadata-not-call'}
+            'quoted-meta', 'special-form-metadata', 'metadata-not-call', 'fn-literal', 'fn-literal-two-arg',
+            'meta-fn-literal', 'quoted-fn-literal', 'special-form-literal', 'param-head-literal'}
 assert names == expected, (names, expected)
 by = {s.get('n').split('/')[0]: s for s in rows}
 for name, kind in {'answer':'var', 'cached':'var', 'square':'fn', 'unless':'macro',
@@ -58,6 +59,18 @@ assert calls('quoted-meta') == set(), calls('quoted-meta')
 assert calls('special-form-metadata') == set(), calls('special-form-metadata')
 assert calls('metadata-not-call') == set(), calls('metadata-not-call')
 print('PASS metadata-prefixed calls extracted; quoted metadata and special forms stay inert')
+# Arm 2 (#548): an anonymous function literal whose head is a symbol records that call (`#(cube %)` is
+# `(fn* [x] (cube x))`), also under metadata. Near misses: a call nested in the literal already worked and
+# stays as it was; a quoted literal stays inert; a special-form head (`if`, and `doto`, which has an in-tree
+# def, so a leak past the special-form gate would resolve and fail here) records nothing; a parameter head
+# (`#(%)`, `#(%1 %2)`) names no definition and is never guessed into one.
+for name in ('fn-literal', 'meta-fn-literal'):
+    assert calls(name) == {'cube'}, (name, calls(name))
+assert calls('fn-literal-two-arg') == {'square'}, calls('fn-literal-two-arg')
+assert calls('quoted-fn-literal') == set(), calls('quoted-fn-literal')
+assert calls('special-form-literal') == set(), calls('special-form-literal')
+assert calls('param-head-literal') == set(), calls('param-head-literal')
+print('PASS fn-literal heads extracted; quoted literals, special forms and parameter heads stay out')
 # Slice 8a: nested inert forms drop their calls; a live sibling proves the holder is still captured.
 for name in ('nested-quote', 'nested-discard', 'nested-comment', 'quoted-macro'):
     assert calls(name) == {'secret'}, (name, calls(name))
@@ -94,6 +107,17 @@ for name in ('plain-call', 'meta-call', 'tag-call', 'stacked-meta-call'):
 for name in ('quoted-meta', 'special-form-metadata'):
     assert name not in names, (name, names)
 print('PASS --callers=square names the metadata-prefixed callers and not the inert forms')
+PY
+
+"$BIN" "$TMP/fix" --callers=cube --no-cache >"$TMP/callers-cube.xml"
+python3 - "$TMP/callers-cube.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+names = {s.get('n').split('/')[0] for s in ET.parse(sys.argv[1]).iter('s')}
+for name in ('fn-literal', 'meta-fn-literal'):
+    assert name in names, (name, names)
+for name in ('quoted-meta', 'quoted-fn-literal', 'param-head-literal'):
+    assert name not in names, (name, names)
+print('PASS --callers=cube names the fn-literal callers and not the quoted or parameter-head forms')
 PY
 
 "$BIN" "$TMP/fix" --metrics --no-cache >"$TMP/metrics.xml"

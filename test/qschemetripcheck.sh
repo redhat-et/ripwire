@@ -34,12 +34,35 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-28, #548 arm 2 merged with main 6d8d11fb9 (which carries lane gskip-1 #842, kParserVer 354, rich 355): RE-PINNED
+#   with UPDATE_GOLDEN=1 on the merged sources (hash bf70f86088…1aa8787295). kParserVer and kIngestParserVerMirror move 354 -> 356 (rich 357),
+#   one above main's 354; kCacheVersion 57 and kQSnapCacheScheme unchanged. Neither side's hash can be right once both moves are in.
 # 2026-11-27, lane gskip-1 (on main c42aca029): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and kIngestParserVerMirror 352 -> 354
 #   (PLACEHOLDER, rich 355): a C# generic member call keeps its receiver (ingest_binds.h csharpThroughGenericName) and a C/C++ macro
 #   body's `name<..>(` is a call (ingest_relations.h macroTemplateArgsEnd). kCacheVersion and kQSnapCacheScheme unchanged. Hash 028f02458a…e7474d406a.
 # 2026-11-27, lane rust-turbofish-callers (CR follow-up to #811, on main 17543d674): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
 #   kIngestParserVerMirror 350 -> 352 (PLACEHOLDER, rich 353): the turbofish scan skips comments and takes an array type
 #   (ingest_names.h pastGenericArgs). kCacheVersion and kQSnapCacheScheme unchanged. Hash c3b283c28c…77bc80f2.
+# 2026-11-28, #548 arm 2 merged with main 17543d674 (which carries train m5-1126-5, kParserVer 350, kCacheVersion 57): RE-PINNED
+#   with UPDATE_GOLDEN=1 on the merged sources (hash c3b283c28c…77bc80f2). kParserVer and kIngestParserVerMirror move 344 -> 352 (rich 353), one above
+#   main's 350 (rich 351); kCacheVersion and kIngestCacheVersionMirror take main's 57, kQSnapCacheScheme unchanged. Neither
+#   side's hash can be right once both moves are in.
+# 2026-11-28, #548 arm 2 merged with main e00a29bfc (which carries lane c1-one-parse #819, kCacheVersion 55 -> 56): RE-PINNED
+#   with UPDATE_GOLDEN=1 on the merged sources (hash 85fc30bcd7…7b27a16af0). kParserVer stays 344, kCacheVersion and
+#   kIngestCacheVersionMirror take main's 56, kQSnapCacheScheme unchanged. Neither side's hash (2148ab87ca…b89ec40659,
+#   232a5bc864…b818ce3b) can be right once both moves are in.
+# 2026-11-27, #548 arm 2 merged with main 52663e4b2 (which carries lane cr-qd3 #750, kQSnapCacheScheme 41): RE-PINNED with
+#   UPDATE_GOLDEN=1 on the merged sources (hash 2148ab87ca…b89ec40659). kParserVer stays 344, kCacheVersion 55 and kQSnapCacheScheme
+#   take main's 55 and 41. Neither side's hash (d97049fac7…f729754d4a, e640115f3e…ccbd8342) can be right once both moves are in.
+# 2026-11-27, #548 arm 2 merged with main (which carries lane tangle-rule, kCacheVersion 54 -> 55): RE-PINNED with
+#   UPDATE_GOLDEN=1 on the merged sources (hash d97049fac7…f729754d4a). kParserVer stays 344 (above main's 342), kCacheVersion
+#   and kIngestCacheVersionMirror take main's 55, kQSnapCacheScheme unchanged. Neither side's hash (366b3fa9c3…9030201c,
+#   e4355917b4…b71344719) can be right once both moves are in.
+# 2026-11-25, #548 arm 2 (Clojure `#(f %)`: an anonymous function literal's symbol head is a call; on main 591ca4804):
+#   RE-PINNED with UPDATE_GOLDEN=1 (hash 366b3fa9c3…9030201c). Watched text: kParserVer 342 -> 344 (rich file tag 345, above
+#   342's rich 343): queries/clojure/tags.scm gains an anon_fn_lit call pattern and src/ingest_clojure.h clojureListHead accepts
+#   anon_fn_lit. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54 and kQSnapCacheScheme 38 stay: no record
+#   changes shape and no watched quality.h function moved.
 # 2026-11-27, train m5-1126-4 merged with origin/main e00a29bfc (#819 ONE-PARSE merged): RE-DERIVED with UPDATE_GOLDEN=1 on
 #   the MERGED sources rather than taken from either side, because both sides had already re-pinned (the train
 #   406ec22c68...f091e15a6, main 232a5bc864...b818ce3b) and a picked side can describe neither tree. The derivation came back

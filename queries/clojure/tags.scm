@@ -11,3 +11,8 @@
 (list_lit
   [(comment) (dis_expr) (meta_lit)]* .
   value: (sym_lit name: (sym_name) @name)) @reference.call
+
+; An anonymous function literal is a call of its head: `#(f %)` is `(fn* [x] (f x))`.
+(anon_fn_lit
+  [(comment) (dis_expr) (meta_lit)]* .
+  value: (sym_lit name: (sym_name) @name)) @reference.call

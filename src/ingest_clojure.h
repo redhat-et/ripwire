@@ -17,7 +17,13 @@ struct ClojureDefinitionShape
 
 std::string_view clojureListHead( TSNode list, std::string_view src ) noexcept
 {
-    if( ts_node_is_null( list ) || std::strcmp( ts_node_type( list ), "list_lit" ) != 0 )
+    if( ts_node_is_null( list ) )
+    {
+        return {};
+    }
+    // An anonymous function literal `#(f %)` reads as `(fn* [x] (f x))`, so its head is a call head too (#548 arm 2).
+    const char* listKind = ts_node_type( list );
+    if( !kindIs( listKind, "list_lit" ) && !kindIs( listKind, "anon_fn_lit" ) )
     {
         return {};
     }

@@ -406,7 +406,12 @@ constexpr std::uint32_t kCacheVersion = 57;           // 57: lane asserted-signa
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 354;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 356;          // bump on any grammar/.scm/extraction change
+                                                      // 356 = 2026-11-28 (#548 arm 2, @IG-ABHINAV; above main's 354 (lane gskip-1, rich 355)): an anonymous function literal
+                                                      //   whose head is a symbol (`#(cube %)`, also under `^:meta`) is captured as a call of that head, and the
+                                                      //   C++ head filter (ingest_clojure.h clojureListHead) accepts anon_fn_lit; special-form heads stay
+                                                      //   excluded. Rich file tag 357. kCacheVersion unchanged.
+                                                      // --- history: 354 ---
                                                       // 354 = 2026-11-27 (lane gskip-1, PLACEHOLDER: above main's 352 (#769, rich 353), the landing renumbers if a lane lands first;
                                                       //   rich file tag 355): a C# generic member call `x.Get<T>()` keeps its receiver (ingest_binds.h
                                                       //   memberOnlyReceiver reads through the generic_name), and a C/C++ function-like #define body's
