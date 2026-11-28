@@ -131,8 +131,8 @@ jobs:
 
           if [ "$full" = true ]; then
             legs='[
-              {"os":"macos-26","flavor":"Release","cc":"appleclang"},
-              {"os":"macos-26","flavor":"plain","cc":"appleclang","skiplist":".github/pargates-macos-plain-skip.txt"},
+              {"os":"macos-26","flavor":"Release","cc":"appleclang","budget":8},
+              {"os":"macos-26","flavor":"plain","cc":"appleclang","skiplist":".github/pargates-macos-plain-skip.txt","budget":8},
               {"os":"ubuntu-24.04","flavor":"Release","cc":"gcc"},
               {"os":"ubuntu-24.04","flavor":"plain","cc":"gcc"},
               {"os":"ubuntu-24.04","flavor":"Release","cc":"clang"},
@@ -559,13 +559,20 @@ jobs:
       # comment. The shard's own gates are still LPT-ordered by the scratch timings; -j 3 stays because
       # the 4-vCPU runners saturate (many gates are internally multi-threaded).
       - name: "gate suite, parallel, this job's shard (560+ gates: determinism, cache transparency, G4 XML, quality, …)"
+        # --budget-scale: per leg, 4 by default and 8 on macOS. test/pargates.py's own note measures that on a
+        # macOS runner "every gate ran 6-10x its idle-local wall" (run 34479806177, macos-14 Release shard 2/2),
+        # while the scale was 4 everywhere -- so the two heaviest gates in the suite time out on macOS at the
+        # per-gate budget no matter how the cost-balanced shards fall. Cost balancing equalises shard TOTALS; a
+        # per-gate tripwire bites wherever the heaviest INDIVIDUAL gate lands, which is why macos shard 2/4 failed
+        # on two PRs the same day while every sibling passed. 8 sits inside the measured 6-10x band rather than
+        # above it, and ubuntu keeps 4 so its tripwire is untouched.
         # --budget-scale 4: the harness's flat 300 s default is a hang tripwire calibrated on an idle dev machine;
         # here -j 3 on a 4-vCPU runner is a 3-8x multiplier (two gates hit rc=124 at exactly 300 s in the first
         # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
         # `skiplist` (macOS plain only): a committed list of platform-independent gates this leg does not run —
         # see .github/pargates-macos-plain-skip.txt for the measurement and the per-gate reason.
         # --no-alone-retry: pargates' alone retry (default on for --shard) stays off on CI until the owner opts CI in.
-        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 --no-alone-retry ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale ${{ matrix.budget || 4 }} --no-alone-retry ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
 
       - name: det-gate — 2-run byte-identical diff
         run: |
