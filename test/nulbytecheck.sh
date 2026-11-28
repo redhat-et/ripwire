@@ -84,6 +84,15 @@ BINARY_EXTENSIONS = {
                # addresses before commit; a text scanner cannot read pixels). Added 2026-09-28: it failed
                # here once naming the file, and this is the row plus the reason. JPEG, not PNG, because a
                # screenshot of this size is 567 KB as JPEG against 1.4 MB as PNG.
+    ".docx",   # test/fixtures/audit-reef/minimal.docx — the audit-composition fixture tree's Office Open
+               # XML container, required by the security-regression-integration spec (spec.md:59, "a
+               # `.docx`") as an adversarial input the crawl must ingest without incident. Binary because
+               # it is a ZIP CONTAINER, not because its contents are opaque: it is the same shape as
+               # present/ripwire-showcase.pptx above, and it is 952 bytes of WordprocessingML — the crawl
+               # reads it under the determinism, xmllint and ASan runs. Added 2026-11-06, the round this
+               # gate's header anticipated: train CI failed arm (a) naming this file, and this is the row
+               # plus the reason. Regenerate only from the fixture builder; never hand-edit — it must stay
+               # a REAL OOXML zip, because a renamed text file would defeat the point of shipping it.
     ".srcpack",  # bench/recalleval/snapshot.srcpack — the ranking lane's FROZEN source corpus, 1422
                # files packed and gzip-compressed (~32 MB of text, 6.7 MB stored). Added 2026-08-19 by
                # the ranking-lane freeze; it failed here once naming the file, and this is the row plus
