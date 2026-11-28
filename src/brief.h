@@ -3642,7 +3642,7 @@ inline std::vector<std::string> goPackageImporters( const Corpus& c, std::string
     std::stable_sort( hits.begin(), hits.end(), [ & ]( std::string_view a, std::string_view b )
     {
         const int pa = commonPrefixDirs( a, anchor ), pb = commonPrefixDirs( b, anchor );
-        return pa != pb ? pa > pb : a < b;
+        return pa != pb ? pa > pb : sortutil::svLess( a, b );
     } );
     for( std::size_t i = 0; i < hits.size() && i < shown; ++i )
     {
