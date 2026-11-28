@@ -1025,6 +1025,7 @@ for _g in \
     receiverevidencecheck \
     receiverfixescheck \
     recentscopecheck \
+    recordfirstcheck \
     redactcheck \
     redactfixcheck \
     reexportcheck \

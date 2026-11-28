@@ -700,6 +700,18 @@ struct dirwatch_event
     return p == MAP_FAILED ? nullptr : p;
 }
 [[gnu::always_inline]] inline void vm_unmap( void* p, std::size_t bytes ) noexcept { ::munmap( p, bytes ); }
+// file_map: the first `bytes` of the open file `fd`, mapped read-only and shared (clean file-backed pages, which the
+// footprint does not count), nullptr when refused or when `bytes` is 0. file_unmap gives the view back. The descriptor
+// may be closed once the view exists. The one caller is the warm snapshot (warmsnap.h openSnapshot): its writers replace
+// a snapshot by rename and its eviction unlinks, so a view never outlives the bytes under it.
+[[gnu::always_inline]] inline const char* file_map( int fd, std::size_t bytes ) noexcept
+{
+    void* p = bytes == 0 ? MAP_FAILED : ::mmap( nullptr, bytes, PROT_READ, MAP_SHARED, fd, 0 );
+    return p == MAP_FAILED ? nullptr : static_cast<const char*>( p );
+}
+// Not inlined, on purpose: one munmap call site for the warm snapshot's view, apart from the large-block route's own
+// (test/largeallocpeakcheck.sh S counts the binary's munmap sites to catch a replaced operator delete inlined into a caller).
+[[gnu::noinline]] inline void file_unmap( const char* p, std::size_t bytes ) noexcept { ::munmap( const_cast<char*>( p ), bytes ); }
 
 // mem_footprint: bytes this process holds. macOS: TASK_VM_INFO phys_footprint (what Activity Monitor and the
 //   jetsam killer count — compressed and swapped pages included). Linux: resident pages from /proc/self/statm.
@@ -1341,6 +1353,10 @@ int dirwatch_poll( int watchFd, dirwatch_event* events, int eventCount, const ::
 // vm_map / vm_unmap (see the POSIX branch): VirtualAlloc committed read-write, VirtualFree. No Windows caller yet.
 void* vm_map( std::size_t bytes ) noexcept;
 void  vm_unmap( void* p, std::size_t bytes ) noexcept;
+// file_map / file_unmap (see the POSIX branch): CreateFileMapping PAGE_READONLY + MapViewOfFile FILE_MAP_READ over the
+// descriptor's handle; the mapping object is closed at once (the view keeps it alive). UnmapViewOfFile.
+const char* file_map( int fd, std::size_t bytes ) noexcept;
+void        file_unmap( const char* p, std::size_t bytes ) noexcept;
 std::uint64_t mem_footprint();
 std::uint64_t mem_footprint_peak();
 std::uint64_t mem_physical();

@@ -196,7 +196,7 @@ stream_close_row(){
         no "($label e2) $sig can skip fclose after a failed write: $( printf '%s' "$bad" | head -2 | tr '\n' ';' )"
     fi
 }
-stream_close_row savecache src/ingest_cache.h   'inline void saveCache('
+stream_close_row savecache src/ingest_cache.h   'inline CacheSaveFacts saveCache('
 stream_close_row gitoracle src/gitoracle.h      'inline bool saveOracleCache('
 stream_close_row docpass   src/ingest_docpass.h 'inline void publishDocBridgeBlob('
 printf 'inline void mutantSave()\n{\n    const bool wErr = wrote != w.b.size() || std::fclose( fp ) != 0;\n}\n' > "$TMP/fclose_mutant.h"
@@ -229,7 +229,7 @@ savecache_temp_verdict(){
         echo "BAD $counts"
     fi
 }
-v="$( savecache_temp_verdict "$ROOT/src/ingest_cache.h" 'inline void saveCache(' )"
+v="$( savecache_temp_verdict "$ROOT/src/ingest_cache.h" 'inline CacheSaveFacts saveCache(' )"
 case "$v" in
     OK*) ok "(savecache e3) saveCache streams into the exclusive temp and renames it into place, no other open (${v#OK })" ;;
     *)   no "(savecache e3) saveCache's write path lost its temp-file safety (${v#BAD })" ;;

@@ -209,10 +209,10 @@ inline bool depUnmoved( const StatSig& stored, const std::string& path ) noexcep
     return now == stored;   // a stored signature is never the failed-stat one (size -1), so a stat that fails now never matches
 }
 
-inline std::string writeGraph( const Graph& g, const IngestResult& ing, const std::vector<RecordedDep>& deps, const RankedGraph& rank )
+// The GRAPH section, into `o` (a streaming Out on a recording run: warmsnap.h recordSection).
+inline void writeGraph( Out& o, const Graph& g, const IngestResult& ing, const std::vector<RecordedDep>& deps, const RankedGraph& rank )
 {
     PROFILE_SCOPE_DESCRIBE( "warmsnap: serialize the graph section" );
-    Out o;
     o.u64( ing.symbols.size() );
     o.u64( ing.files.size() );
     o.u64( ing.references.size() );
@@ -288,7 +288,6 @@ inline std::string writeGraph( const Graph& g, const IngestResult& ing, const st
     o.u32( rank.iterationCount );
     o.u8( rank.hasConverged ? 1 : 0 );
     o.u64( 0x454e'4447'5241'5048ull );   // the end mark: a reader that consumed a different shape does not land on it
-    return std::move( o.bytes );
 }
 
 // One recorded read repeated through the seam that made it: what it answers now. An unknown seam answers nothing.
@@ -396,6 +395,10 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
     if( !s.treeKeyValid || s.fileTreeKey != s.treeKey )
     {
         return refuse( Why::Stale );
+    }
+    if( !sectionIntact( s, Sec::Graph ) )
+    {
+        return refuse( Why::Checksum );
     }
     In in{ s.graphSection };
     const std::size_t N = ing.symbols.size();
@@ -582,7 +585,7 @@ inline Graph buildGraphRecorded( Session& s, const IngestResult& ing )
         const depwatch::Armed armed( &log );
         return buildGraph( ing, nullptr, false );
     }();
-    if( !s.on() || !mayStoreBuilt( s, ing.reparsedFiles, ing.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
+    if( !s.on() || s.blobUnpublished || !mayStoreBuilt( s, ing.reparsedFiles, ing.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt; a failed blob write stores nothing (as for MODEL)
     {
         return g;
     }
@@ -602,7 +605,8 @@ inline Graph buildGraphRecorded( Session& s, const IngestResult& ing )
     std::ranges::sort( deps, []( const depwatch::Dep& a, const depwatch::Dep& b ) { return std::tie( a.seam, a.path, a.answer ) < std::tie( b.seam, b.path, b.answer ); } );
     deps.erase( std::unique( deps.begin(), deps.end(), []( const depwatch::Dep& a, const depwatch::Dep& b ) { return a.seam == b.seam && a.path == b.path && a.answer == b.answer; } ), deps.end() );
     RankedGraph rank = rankGraph( g );   // once, on the run that records: this run's own map takes it from the slot too
-    s.graphOut = writeGraph( g, ing, withSettledSigs( s, std::move( deps ) ), rank );
+    const std::vector<RecordedDep> rows = withSettledSigs( s, std::move( deps ) );   // stat'd now, after the build that read them
+    recordSection( s, Sec::Graph, [ & ]( Out& o ) { writeGraph( o, g, ing, rows, rank ); } );
     storedDefaultRank() = std::move( rank );
     return g;
 }
