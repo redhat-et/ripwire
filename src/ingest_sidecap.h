@@ -2803,7 +2803,7 @@ inline void captureDefinitionEdges( const TagsFile& file, TagsSinks& sinks, cons
     }
     else if( id.kind == SymKind::Macro )
     {
-        captureMacroBodyCalls( m.roleNode, file.fileId, lang, file.src, sinks.refs );   // macro-edges: the graph connects THROUGH the macro
+        captureMacroBodyCalls( m.roleNode, file.fileId, lang, file.src, sinks.refs, sinks.shortfall );   // macro-edges: the graph connects THROUGH the macro
         if( langFacts( lang ).bangMacros )   // Rust: `$crate` exists only where `name!` macros do
         {
             captureRustTranscriberMacroCalls( m.roleNode, file.fileId, file.src, sinks.refs );   // RUST-MACRO-PATH: `$crate::m!` in a transcriber

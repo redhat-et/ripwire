@@ -1048,6 +1048,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kBaseScopeScanCap` | `4096` | INDEXING | statements the unindexed scope scans read (not the index) |
+| `kMacroTemplateArgsMaxBytes` | `1024` | — | — |
 | `kMaxImportContainerDepth` | `256` | INDEXING | — |
 
 ### `src/ingest_rest.h`
