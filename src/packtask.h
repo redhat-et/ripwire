@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
+#include "infra/envnumber.h"  // readEnvNumber — RIPWIRE_PACK_CLASS, the class shape's off switch
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -32,6 +33,7 @@
 #include "nextverb.h"      // PB1: nextFlag / nextAttrXml — a dropped candidate's next=--expand
 #include "mention.h"       // PB1: taskNamesIndexedFile — the head round robin's verdict, as --for takes it
 #include "situ.h"          // <partners>: mergeSeedPartners — --situ's own merge of co-change partners across seeds
+#include "forroute.h"      // PACK-TASK-BY-CLASS: rule E's backtick reader + kindOf/asksPath, the name class's detector
 
 #include <algorithm>
 #include <cstdio>
@@ -101,6 +103,13 @@ struct LensRanking
     // and the --for --limit=N file page are computed from the same integers that ranked the head.
     LexTermEvidence             evidence;
 };
+
+// PACK-TASK-BY-CLASS (see packTaskClassOf / packTaskFoldHead): RIPWIRE_PACK_CLASS=0 is the off switch (byte-identical to before).
+[[nodiscard]] inline bool packClassOn() noexcept
+{
+    return !readEnvNumber( "RIPWIRE_PACK_CLASS" ).isZero();   // envnumber.h: how every on-by-default switch spells "off"
+}
+enum class PackTaskClass : std::uint8_t { Off, Full, Name, Concept };   // Off: the switch is off, or a budget other than the default   // Name: one named symbol, where/what/who-calls; Concept: names none (packTaskClassOf)
 
 inline constexpr int         kPackTaskDefaultTokens  = 6000;   // the default budget when no explicit budget is given
 inline constexpr int         kPackTaskRankTopN       = 12;     // a --partition slice's ranking window (partition.h; lanes.h brief claims)
@@ -213,6 +222,7 @@ struct PackTaskHeaderParts
     bool             softBudget = false;   // forbudget-soft: the caller's own budget — a soft target (kPackTaskSoftBudgetSentence)
     std::string_view pathFromNote;     // PATH-FROM-UPSTREAM's clause (forgraphverb.h), its OWN data comment after the legend: the compact
                                         // dialect strips the legend comment, and rows it moved must stay disclosed there (S9, rv-py-mod2)
+    std::string_view legendBody;       // PACK-TASK-BY-CLASS: the legend body this bundle's shape needs ("" = kPackTaskBundleLegendBody)
 };
 
 // P10 (L7): the bundle legend's BODY, one constant, spliced by the standalone header (packTaskHeaderText) and
@@ -249,6 +259,50 @@ inline constexpr std::string_view kPackTaskSoftBudgetSentence =
     "(the header always ships; no over_ceiling). ";
 static_assert( std::string_view( kPackTaskBundleLegendBody ).ends_with( kPackTaskHardBudgetSentence ),
                "the soft bundle swaps exactly the legend body's last sentence" );
+
+// PACK-TASK-BY-CLASS: the legend's ranking sentence, and what it reads once rows past rank 12 fold to file rows (step 1). The
+// bundle swaps the one sentence and only when the fold happened, so a head of 12 rows or fewer keeps the legend byte for byte.
+inline constexpr std::string_view kPackTaskRankingSentence = "ranking: the for head for this task (its 40 rows, its order). ";
+inline constexpr std::string_view kPackTaskRankingFoldSentence =
+    "ranking: the for head for this task, its order: its first 12 rows, then fold=N rows past them as one <t p= sym= r=> per file "
+    "the rows above do not name (sym= its names, r= its first rank); next= the for call with every row. ";
+static_assert( std::string_view( kPackTaskBundleLegendBody ).find( kPackTaskRankingSentence ) != std::string_view::npos,
+               "the fold swaps exactly the ranking sentence" );
+// The name class's own legend body (step 2): the sections it serves, and nothing else. Ends with the hard-budget sentence like the
+// bundle's, so the soft swap would read the same (the class runs on the default budget only).
+inline constexpr std::string_view kPackTaskNameLegendBody =
+    ": one-call answer for a question naming ONE symbol (ledger class=name) — sections in FIXED order ranking > key body > callers > "
+    "notes > tests > tail: its key body, its 1-hop callers and tests, and the ranking and file tail as path rows; the full bundle is "
+    "the same call with any other token-budget, such as 12000. Every truncation is reported: "
+    "per section shown=rows kept, total=rows that qualified, capped=1 when a cut made the difference. "
+    "ranking: the for head's first 12 rows as <d l= n= p= r=/> (sc= the enclosing scope; full id p::sc::n), then fold=N rows past "
+    "them as one <t p= r=> per file the rows above do not name (r= its first rank); next= the for call with every row in full. "
+    "bodies: the task's backticked symbol <b> (truncated=1 when cut); <bn t= n= p= l= next=> a candidate not served, next= its "
+    "expand call (by design, not a cut); bodyless=N candidates have no body. callers: the key body's 1-hop callers (of_top=1). "
+    "tail: files the ranking did not show (p_only=N rows print p= only); capped=1 next= the file page from the first row not printed. "
+    "Row keys: n=name, l=line, e=end line, p=path, t=kind, rel=caller, r=rank. On the root: dropped_positive=N (present only when "
+    "nonzero) is the ranked candidates the ceiling cut; est_tokens= is the delivered bytes at 2.36 B/token (an upper bound); "
+    "budget_tokens= is the token target; over_ceiling= is 1 when est_tokens exceeds it (the bundle is then complete, not trimmed). ";
+static_assert( kPackTaskNameLegendBody.ends_with( kPackTaskHardBudgetSentence ), "the name legend ends as the bundle's does" );
+static_assert( kPackTaskNameLegendBody.find( "--" ) == std::string_view::npos && kPackTaskRankingFoldSentence.find( "--" ) == std::string_view::npos,
+               "legend text rides an XML comment: no \"--\"" );
+
+// The legend body a bundle of class `cls` prints: the name class's own; else the bundle's, its ranking sentence swapped when the
+// head folded. "" = the bundle's own body, unchanged.
+inline std::string packTaskLegendBodyFor( PackTaskClass cls, bool folded )
+{
+    if( cls == PackTaskClass::Name )
+    {
+        return std::string( kPackTaskNameLegendBody );
+    }
+    if( !folded )
+    {
+        return {};
+    }
+    std::string body( kPackTaskBundleLegendBody );
+    body.replace( body.find( kPackTaskRankingSentence ), kPackTaskRankingSentence.size(), kPackTaskRankingFoldSentence );
+    return body;
+}
 
 // r4/r6 (2026-09-10 lift-disclosure round): append the two experimental lift notes' JSON keys — same
 // absent-unless-present convention as the mention/boost/doc_mention keys beside them. Factored out (unlike
@@ -299,7 +353,7 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     h.append( p.docMentionNote );
     // P10 (L7): the body is ONE constant — the partitioned document states it once for all slices. forbudget-soft: a soft
     // target's bundle swaps the body's last sentence (the hard budget's reading) for the soft one.
-    const std::string_view body( kPackTaskBundleLegendBody );
+    const std::string_view body = p.legendBody.empty() ? std::string_view( kPackTaskBundleLegendBody ) : p.legendBody;
     if( p.softBudget )
     {
         h.append( body.substr( 0, body.size() - kPackTaskHardBudgetSentence.size() ) );
@@ -1063,6 +1117,13 @@ struct PackHead
     std::size_t         droppedPositive = 0;
     std::vector<NodeId> shownIds;   // the rows printed, printed order — the tail excludes their files, as --for's does
     SigsCutReport       cut;
+    // PACK-TASK-BY-CLASS: the printed rows as packTaskShapeHead built them (one string per row, in shownIds order, each with
+    // the comments that trailed it), their pointer spellings, the open tag and the comments ahead of the first row — recorded
+    // at emit time so a later row cap rebuilds the block from these values and never re-parses the rendered XML (lessons
+    // 11-27 #8). Empty when the shape pass left the block as rendered (an unexpected shape: nothing is re-cut then).
+    std::vector<std::string> rows, rowsPtr;
+    std::string              tag, lead;
+    std::size_t              rowsTotal = 0;   // the rows the ranking rendered before any cut (total= of a later cap)
 };
 
 // `<d …>…</d>` → `<d l= n= sc= p= r=/>` (the attributes it has of those, in that order).
@@ -1109,6 +1170,26 @@ inline void setOpenTagAttr( std::string& tag, std::string_view name, std::string
         return;
     }
     tag.insert( tag.size() - 1, key + std::string( value ) + "\"" );
+}
+
+// A head cut to `kept` of `totalRows` rows says so on its open tag — shown= total= capped=1 and next= the --for call that prints
+// every row — and in the cut report the ledger reads; shownIds follows (the rows printed).
+inline void markHeadCut( PackHead& h, std::string& tag, std::size_t kept, std::size_t totalRows, std::string_view task )
+{
+    const std::size_t total = std::max<std::size_t>( totalRows, h.cut.total );
+    setOpenTagAttr( tag, "shown", std::to_string( kept ) );
+    setOpenTagAttr( tag, "total", std::to_string( total ) );
+    setOpenTagAttr( tag, "capped", "1" );
+    h.cut.next = nextFlag( "--for=", task );
+    std::string nextValue;
+    appendNextValueXml( nextValue, h.cut.next );   // nextverb.h: the ONE next= value escape
+    setOpenTagAttr( tag, "next", nextValue );
+    h.cut.isCapped = true;  h.cut.shown = kept;  h.cut.total = total;
+    h.capped       = true;
+    if( h.shownIds.size() > kept )
+    {
+        h.shownIds.resize( kept );
+    }
 }
 
 // The row-shape ladder and the bound, over the rendered <sigs> block (rows in `shownIds` order, one row element each).
@@ -1206,26 +1287,202 @@ inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_
     {
         rows.emplace_back( k < fullCount ? rowsFull[k] : rowsPtr[k] );
     }
+    std::string printedTag = tag;   // the pre-cut tag stays recorded: a later cap re-marks it from the same total
     if( kept < totalRows )
     {
-        const std::size_t total = std::max<std::size_t>( totalRows, h.cut.total );
-        setOpenTagAttr( tag, "shown", std::to_string( kept ) );
-        setOpenTagAttr( tag, "total", std::to_string( total ) );
-        setOpenTagAttr( tag, "capped", "1" );
-        h.cut.next = nextFlag( "--for=", task );
-        std::string nextValue;
-        appendNextValueXml( nextValue, h.cut.next );   // nextverb.h: the ONE next= value escape
-        setOpenTagAttr( tag, "next", nextValue );
-        h.cut.isCapped = true;  h.cut.shown = kept;  h.cut.total = total;
-        h.capped       = true;
-        h.shownIds.resize( kept );
+        markHeadCut( h, printedTag, kept, totalRows, task );
     }
-    std::string out = tag + lead;
+    std::string out = printedTag + lead;
     for( std::size_t k = 0; k < kept; ++k )
     {
         out += rows[k];
     }
     h.sigsStr = out + "</sigs>";
+    rowsPtr.resize( kept );
+    h.rows    = std::move( rows );
+    h.rowsPtr = std::move( rowsPtr );
+    h.tag     = std::move( tag );
+    h.lead    = std::move( lead );
+    h.rowsTotal = totalRows;
+}
+
+// PACK-TASK-BY-CLASS — the bundle's question class and its shape (VERB-AUDIT-2, 11-27: pack-task filled its 6000-token budget on
+// every question, 12.4 KB, the cap binding in 8/8 cells). RIPWIRE_PACK_CLASS=0 turns both steps off and the bundle is then
+// byte-identical to the one served before this block existed (test/packclasscheck.sh (F)). Both steps re-shape rows already
+// chosen; only the conceptual class (a question that names no symbol) re-spends what the fold frees, on more rows of its tail.
+//   STEP 1, every class: <sigs> rows past rank kPackTaskSigsRowCap FOLD to one <t p= sym= r=/> per file the first rows do not show
+//   (sym= its folded rows' names in rank order, r= its first rank); the rows the fold drops are counted on the tag (fold=) and the
+//   full rows are one call away (next= the --for call). WHY A FOLD AND NOT A CUT: the audit measured "drop rows past 12" at 0 of 30
+//   items lost on its 8 cells, but on 18 more DEV cells (tmp/orch-1127/pack-task-class, rg gold) a gold caller file lived only in a
+//   row past 12 (1 of 93 items); the fold keeps every file named and loses 0 of 104 items for -0.7 KB a call. A CONCEPTUAL bundle
+//   (no symbol named) spends those bytes on more tail rows instead — its items sit deep in the tail (VERB-AUDIT-2 gap 3; --for
+//   names more files there and scores 14/20 to the bundle's 11/20 on the same ranking) — so it keeps its size and names more files.
+//   STEP 2, the name class (packTaskClassOf): a question that names ONE symbol the key body resolves and asks no more than where it
+//   is, what it does and who calls it. Its items are files (the definition, the caller files) and the signature (in the key body),
+//   so the ranking prints as path rows (pointer rows, the fold without sym=), the tail without sym=/tsym= (p_only= counts them) and
+//   the legend is the class's own short one; bodies, callers and tests are served as computed. MEASURED (DEV, 22 name cells): 12.2
+//   -> ~5 KB a call, 93 of 93 items. Every other class (several names, a breadth or path question, a conceptual one, an explicit
+//   --token-budget, --json, a --partition slice) keeps the full bundle: the owner's rule is that a class keeps its size if any item drops.
+inline constexpr std::size_t kPackTaskSigsRowCap   = 12;   // rows past rank 12 fold to one row per file, so every file stays named (a plain cut lost 1 of 93 DEV items)
+inline constexpr std::size_t kPackTaskNameMaxWords = 12;   // a longer question is served the full bundle (it may ask for more than one location)
+
+// The name class: exactly one backtick identifier span (forroute rule E's reading), resolved by the key body this bundle serves,
+// a question of at most kPackTaskNameMaxWords words that routes to no wider kind than its 1-hop callers (forroute kindOf None or
+// WhoCalls — the pack's <callers> IS that answer) and asks for no call path. The default budget only (no budget, or an explicit 6000, which IS the default: forsoftbudgetcheck P2):
+// any other budget is Off, the full bundle unfolded. --json and a --partition slice keep the full shape.
+[[nodiscard]] inline PackTaskClass packTaskClassOf( std::string_view task, NodeId keyId, const PackTaskInputs& in, bool isJson )
+{
+    if( !packClassOn() || ( in.budgetTokens != 0 && in.budgetTokens != std::size_t( kPackTaskDefaultTokens ) ) )
+    {
+        return PackTaskClass::Off;   // an explicit budget other than the default's own 6000 is the full bundle, unfolded
+    }
+    if( isJson || in.innerBundle )
+    {
+        return PackTaskClass::Full;
+    }
+    if( in.keyBody == kNoNode )
+    {
+        return PackTaskClass::Concept;   // the question names no symbol the index places: the conceptual route
+    }
+    if( keyId != in.keyBody )
+    {
+        return PackTaskClass::Full;
+    }
+    std::size_t spans = 0;
+    forroute::detail::forEachBacktickSpan( task, [ & ]( std::string_view raw )
+    {
+        spans += forroute::detail::isIdentPath( forroute::detail::trimCallSuffix( raw ) ) ? 1u : 0u;
+    } );
+    std::size_t words = 0;
+    for( std::size_t i = task.find_first_not_of( " \t\n\r" ); i != std::string_view::npos; i = task.find_first_not_of( " \t\n\r", i ) )
+    {
+        ++words;
+        i = task.find_first_of( " \t\n\r", i );
+    }
+    const forroute::RouteKind kind = forroute::kindOf( task );
+    const bool narrow = ( kind == forroute::RouteKind::None || kind == forroute::RouteKind::WhoCalls )
+                     && !forroute::detail::asksPath( rw::routeLower( task ) );
+    return spans == 1 && words <= kPackTaskNameMaxWords && narrow ? PackTaskClass::Name : PackTaskClass::Full;
+}
+
+// One folded file row: `<t p="P" sym="N1,N2" r="R"/>` (sym= omitted on path rows, or when no folded row had a name).
+struct HeadFoldFile
+{
+    std::string_view              p, r;   // views into the recorded rows (escaped as printed)
+    std::vector<std::string_view> names;
+};
+
+// The files of recorded rows [kept, end) that rows [0, kept) do not name, first appearance order, each with its rows' names.
+inline std::vector<HeadFoldFile> headFoldFiles( const std::vector<std::string>& rowsPtr, std::size_t kept )
+{
+    std::vector<HeadFoldFile> files;
+    const auto namedAbove = [ & ]( std::string_view p )
+    {
+        return std::any_of( rowsPtr.begin(), rowsPtr.begin() + std::ptrdiff_t( kept ), [ & ]( const std::string& r ) { return attrOf( r, "p" ) == p; } );
+    };
+    for( std::size_t k = kept; k < rowsPtr.size(); ++k )
+    {
+        const std::string_view p = attrOf( rowsPtr[k], "p" );
+        if( p.empty() || namedAbove( p ) )
+        {
+            continue;
+        }
+        auto it = std::ranges::find( files, p, &HeadFoldFile::p );
+        if( it == files.end() )
+        {
+            it = files.insert( files.end(), HeadFoldFile{ p, attrOf( rowsPtr[k], "r" ), {} } );
+        }
+        if( const std::string_view n = attrOf( rowsPtr[k], "n" ); !n.empty() && std::ranges::find( it->names, n ) == it->names.end() )
+        {
+            it->names.push_back( n );
+        }
+    }
+    return files;
+}
+
+inline void appendHeadFoldRow( std::string& out, const HeadFoldFile& f, bool withSyms )
+{
+    out += "<t p=\"";  out += f.p;  out += "\"";
+    if( withSyms && !f.names.empty() )
+    {
+        out += " sym=\"";
+        for( std::size_t i = 0; i < f.names.size(); ++i ) { out += i ? "," : "";  out += f.names[i]; }
+        out += "\"";
+    }
+    if( !f.r.empty() ) { out += " r=\"";  out += f.r;  out += "\""; }
+    out += "/>";
+}
+
+// STEP 1 (and the name class's path rows): rebuild <sigs> from the rows packTaskShapeHead recorded — the first kPackTaskSigsRowCap
+// rows (in pointer form when `pathRows`), then the fold. Returns whether the block changed. shownIds is left as it is: the tail was
+// cut from those rows, and every folded row's file is still named on the page.
+inline bool packTaskFoldHead( PackHead& h, bool pathRows, std::string_view task )
+{
+    const bool recorded = !h.rows.empty() && h.rows.size() == h.shownIds.size() && h.rowsPtr.size() == h.rows.size();
+    const std::size_t kept = std::min( kPackTaskSigsRowCap, h.rows.size() );
+    if( !recorded || ( kept == h.rows.size() && !pathRows ) )
+    {
+        return false;   // nothing recorded to rebuild from (the shape pass disclosed why), or nothing to fold
+    }
+    std::string tag = h.sigsStr.substr( 0, findSectionOpenTag( h.sigsStr, "<sigs" ).end + 1 );
+    if( kept < h.rows.size() )
+    {
+        setOpenTagAttr( tag, "fold", std::to_string( h.rows.size() - kept ) );   // rows past rank 12 printed as file rows
+        std::string nextValue;
+        appendNextValueXml( nextValue, nextFlag( "--for=", task ) );   // nextverb.h: the ONE next= value escape
+        setOpenTagAttr( tag, "next", nextValue );                       // the same call a row cut names, so set either way
+    }
+    std::string out = tag + h.lead;
+    for( std::size_t k = 0; k < kept; ++k )
+    {
+        out += pathRows ? h.rowsPtr[k] : h.rows[k];
+    }
+    for( const HeadFoldFile& f : headFoldFiles( h.rowsPtr, kept ) )
+    {
+        appendHeadFoldRow( out, f, !pathRows );
+    }
+    h.sigsStr = out + "</sigs>";
+    return true;
+}
+
+// The fold, at the point the tail is about to be cut: returns the bytes the tail may spend on top (what the fold freed, for the
+// conceptual class only; 0 for every other class, which keeps its bytes). `folded` reports whether the head was rebuilt.
+inline std::size_t packTaskFoldForTail( PackHead& head, PackTaskClass asked, std::string_view task, bool& folded )
+{
+    const std::size_t before = head.sigsStr.size();
+    folded = asked != PackTaskClass::Off && packTaskFoldHead( head, asked == PackTaskClass::Name, task );
+    return folded && asked == PackTaskClass::Concept && head.sigsStr.size() < before ? before - head.sigsStr.size() : 0;
+}
+
+// The name class's tail: every row p= only (its sym=/tsym= shed). p_only= then counts every shown row — the tail's own disclosure
+// that a row prints p= only — and next= is unchanged (it continues the file page, which the rows' symbols never decided).
+inline void packTaskPathOnlyTail( FileTail& t )
+{
+    for( std::string& s : t.syms )     { s.clear(); }
+    for( std::string& s : t.termSyms ) { s.clear(); }
+    t.oldRows     = 0;
+    t.wideSymRows = 0;
+}
+
+// The class the bundle serves (a head with no recorded rows has no shape to serve: the full bundle), with its tail settled.
+inline PackTaskClass packTaskSettleClass( PackTaskClass asked, bool headFolded, FileTail& tail )
+{
+    const PackTaskClass cls = headFolded ? asked : PackTaskClass::Full;
+    if( cls == PackTaskClass::Name )
+    {
+        packTaskPathOnlyTail( tail );
+    }
+    return cls;
+}
+
+// The ledger clause a class adds ("" for every class but the name class, whose shape differs from the full bundle's).
+inline constexpr std::string_view kPackTaskNameLedgerClause =
+    " | class=name: ranking and tail as path rows; the full bundle is the same call with any other token-budget, such as 12000";
+static_assert( kPackTaskNameLedgerClause.find( "--" ) == std::string_view::npos && kPackTaskNameLedgerClause.find( '>' ) == std::string_view::npos,
+               "the ledger is a data comment: no \"--\", and no '>' (its readers slice it at the first one)" );
+inline std::string_view packTaskClassLedger( PackTaskClass cls ) noexcept
+{
+    return cls == PackTaskClass::Name ? kPackTaskNameLedgerClause : std::string_view();
 }
 
 inline PackHead renderPackHead( const IngestResult& ing, const std::vector<float>& rank, const PackHeadInputs& hi )
@@ -2459,6 +2716,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     bool        tailCapped = false;
     bool        tailNextDropped = false;   // the echo the element could not afford — disclosed in the ledger below
     FileTail    tail;
+    const PackTaskClass asked      = packTaskClassOf( task, keyId, in, jsonOut != nullptr );   // PACK-TASK-BY-CLASS (packTaskFoldForTail)
+    bool                headFolded = false;
     if( !in.innerBundle )
     {
         remaining += tailReserve;   // the tail's own share, back on top of whatever the sections above left
@@ -2479,6 +2738,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                 tail = computeFileTail( ing, rank, lr.evidence, head.shownIds, in.rootArg, task );
             }
         }
+        remaining += packTaskFoldForTail( head, asked, task, headFolded );   // PACK-TASK-BY-CLASS: the fold (a conceptual tail gets its bytes)
         tailShown = packTaskTailRowsToFit( tail, remaining, esc );
         tailStr   = renderFileTailXml( tail, tailShown, esc );
         // THE TAIL'S next= ECHOES THE TASK, so it is a user-length PAYLOAD part — the same shape W3FIX M1 charged in the
@@ -2514,6 +2774,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         testsBudget += reflow;
         tests = packTaskTestsSection( runners, ptRows, testsBudget, kPackTaskWrapReserve, ex, &testPartition );
     }
+
+    const PackTaskClass cls        = packTaskSettleClass( asked, headFolded, tail );   // PACK-TASK-BY-CLASS: the name class's tail
+    const std::string   legendBody = packTaskLegendBodyFor( cls, headFolded );
 
     const std::string& callersStr = callers.xml;
     const std::size_t  callersKept = callers.kept;
@@ -2593,6 +2856,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                 // used to say "next= on <tail>", which is both redundant — it IS the tail's clause — and a parse hazard.
                 + ( tailCapped ? ( tailNextDropped ? " (capped; next= dropped: the task echo did not fit the bytes left)" : " (capped; next= on the tail)" ) : "" );
     }
+    report += packTaskClassLedger( cls );
     // cut-fix lane A: the <sigs> tag's cut readings, the --for twin's clauses verbatim (serialize.h sigsCutLegendNotes),
     // present only when the tag carries the case; absorbed by kPackTaskHeaderReserve like the ledger around them.
     report += rw::sigsCutReportLegend( head.cut );   // PB1: every reading the --for head's tag can carry (files_first=, docs_after_code=, next=…)
@@ -2651,7 +2915,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                    + std::string( packTaskPartnersLegend( partners.data ) );                               // rows-gated the same way
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, sibliftNote, expandNote, report, droppedPositiveAttr, in.rootArg,
-                                            runClauseStr, /*softBudget=*/in.softTarget && !in.innerBundle, pathFromNote };
+                                            runClauseStr, /*softBudget=*/in.softTarget && !in.innerBundle, pathFromNote, legendBody };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     {
         if( in.innerBundle )   // P10 (L7): a partition slice — the outer <ctx-partitions> legend speaks once for all of them

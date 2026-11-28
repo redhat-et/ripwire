@@ -403,12 +403,13 @@ case "$EXPLORE_INNER" in
     "")         no "explore verb: inner text is empty";;
     *)          ok "explore verb: returned non-empty text result";;
 esac
+# PACK-TASK-BY-CLASS: <sigs> may open with fold= next= (the ranking's rows past rank 12 folded), so the tag is matched open.
 # §B1.7 (2026-07-29): same root-attribute change — the legend comment still follows the ctx open tag,
 # but task=/route= attributes now sit between; assert the two meaning halves separately.
 { printf '%s' "$EXPLORE_INNER" | grep -qE '<ctx( |>)' \
   && printf '%s' "$EXPLORE_INNER" | grep -q '<!-- ripwire task bundle for' \
   && printf '%s' "$EXPLORE_INNER" | grep -q 'budget=' \
-  && printf '%s' "$EXPLORE_INNER" | grep -q '<sigs>' \
+  && printf '%s' "$EXPLORE_INNER" | grep -qE '<sigs( |>)' \
   && printf '%s' "$EXPLORE_INNER" | grep -q '</ctx>'; } \
     && ok "explore verb: pack-task-shaped bundle (header/budget/<sigs>/</ctx>)" \
     || { no "explore verb: not pack-task-shaped"; printf '%s\n' "$EXPLORE_INNER" | head -c 300; echo; }

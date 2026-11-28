@@ -199,7 +199,11 @@ def extract_flag_tokens_from_legend(legend_text):
     # SIZE-2 (size-trim): "class" joins for the same documented reason. The --for tail's folded= legend (src/serialize.h
     # kForFileTailFoldedLegend and its compact twin) spells the OUTPUT ATTRIBUTE's value as "folded=class=N" (doc=N,config=N,…);
     # there is no --class flag. Added by NAME, per this list's own rule.
-    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d", "x", "class"}
+    # PACK-TASK-BY-CLASS: "fold" joins for the same documented reason. --pack-task's <sigs> legend (src/packtask.h
+    # kPackTaskRankingFoldSentence and the name class's legend) defines the OUTPUT ATTRIBUTE as "fold=N rows past them";
+    # there is no --fold flag. Added by NAME, per this list's own rule.
+    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d", "x", "class",
+                           "fold"}
     for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
         word = match.group(1)
         if word not in placeholder_exclude:
