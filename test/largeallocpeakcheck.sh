@@ -69,7 +69,7 @@ fi
 # ---- L: only macOS routes, and only an LTO link can inline a replaced operator into its caller ----
 # munmap call sites in a Mach-O binary, by the stub's name (symbols may be stripped, the stub's name is not)
 unmapsites(){ otool -tV "$1" 2>/dev/null | grep -c 'symbol stub for: _munmap'; }
-kUnmapSites=4   # release() in operator delete, allocate()'s table-full path in operator new; 4 leaves room for a second copy of each
+kUnmapSites=5   # release() in operator delete, allocate()'s table-full path in operator new; 4 leaves room for a second copy of each; +1 os::file_unmap (the warm snapshot's mapped view, noinline: one site)
 if [ "$( uname -s )" = Darwin ]; then
     if ! command -v otool >/dev/null 2>&1; then
         no "L: otool is not on PATH, so no munmap call site can be counted"

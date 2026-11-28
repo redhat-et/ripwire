@@ -536,6 +536,11 @@ struct LangFacts
     /// objcxxStdQualifierBefore), and the call takes the same keepStdQualifiedCandidates guard a .cpp/.cu/.metal call does. A grammar
     /// with real qualified names (C++) answers from the tree instead and leaves this false.
     bool lexicalStdQualifier = false;
+
+    /// C++, Objective-C++ (.mm, Lang::ObjC): a call may carry explicit template arguments, `make<int>( x )`, so the lexical scan of a
+    /// function-like #define body (ingest_relations.h macroCallParenAt) reads `name<..>(` as a call of `name` (lane gskip-1). C has no
+    /// templates: there `a<b>( c )` can only be two comparisons.
+    bool templateArgumentLists = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -592,7 +597,8 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp, .assertionCalls = kCFamilyAssertionCalls },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp, .assertionCalls = kCFamilyAssertionCalls,
+      .templateArgumentLists = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python, .assertionCalls = kPythonAssertionCalls },
@@ -609,7 +615,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
       .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily,
-      .lexicalStdQualifier = true },
+      .lexicalStdQualifier = true, .templateArgumentLists = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable, .defectScan = DefectScan::Markdown },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,

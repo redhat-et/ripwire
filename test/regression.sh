@@ -635,6 +635,7 @@ for _g in \
     gateexitcheck \
     gdscriptcheck \
     gendocsmergecheck \
+    genericskipcheck \
     genrecallcheck \
     gitchildoptscheck \
     gitenvhermeticcheck \
@@ -1025,6 +1026,7 @@ for _g in \
     receiverevidencecheck \
     receiverfixescheck \
     recentscopecheck \
+    recordfirstcheck \
     redactcheck \
     redactfixcheck \
     reexportcheck \

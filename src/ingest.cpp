@@ -354,6 +354,10 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
     {
         return refuse( warmsnap::Why::NoSection );
     }
+    if( !warmsnap::sectionIntact( snap, warmsnap::Sec::Model ) )
+    {
+        return refuse( warmsnap::Why::Checksum );
+    }
     // The blob this model was built from IS the blob that named the file this section came out of (warmsnap.h kVersion 2:
     // the name carries the blob's identity, ingest_cache.h cacheBlobIdentity). Deleted, rewritten by another
     // configuration, or replaced by a run that re-parsed: in every case this run resolves a different name, or none, and
@@ -383,16 +387,26 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
     return true;
 }
 
-// Store the model a CLEAN run assembled (nothing re-extracted: a run that parsed is followed, as a rule, by another edit,
-// and must not pay to write what the next run refuses). Not for a tree with a bridge-extracted document.
-static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result, const CacheLoadStats& cacheStats )
+// Store the model this run assembled. Not for a tree with a bridge-extracted document.
+// RECORD-FIRST (#729 stage 2): a run that parsed records too, so the NEXT call is served, after an edit as after the
+// first run (warmsnap.h recordsWhatItBuilt). The cache-stats facts a served run replays are then the blob this run
+// published: every record of this crawl, and the entries the blob holds. A run whose blob write failed records nothing
+// (no facts to replay), and RIPWIRE_NO_RECORD_FIRST=1 restores the edit rule.
+static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result, const CacheLoadStats& cacheStats, const CacheSaveFacts& saved )
 {
-    const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale;
-    if( stored || !warmsnap::mayStoreBuilt( snap, result.reparsedFiles, result.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
+    // an intact MODEL for this tree is already on disk (a racy-window run that did not load it still checks its digest,
+    // so a corrupt one is replaced on this run rather than the next)
+    const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale &&
+                        warmsnap::sectionIntact( snap, warmsnap::Sec::Model );
+    const bool parsed = result.reparsedFiles != 0;
+    snap.blobUnpublished = parsed && !saved.written;   // buildGraphRecorded reads it: neither MODEL nor GRAPH is filed under a blob this run did not write
+    if( stored || !warmsnap::mayStoreBuilt( snap, result.reparsedFiles, result.memoryStop.isSet() ) || snap.blobUnpublished )   // the edit rule: warmsnap.h recordsWhatItBuilt
     {
         return;
     }
-    warmsnap::BlobFacts facts = warmsnap::recordedBlobFacts( snap, cacheStats.recordsRead, cacheStats.blobEntries, result.files.size() );
+    // a run that parsed replays the blob it published (every record of this crawl); one that parsed nothing, the blob it read
+    warmsnap::BlobFacts facts = parsed ? warmsnap::BlobFacts{ saved.ownRecords, saved.entries, {} }
+                                       : warmsnap::recordedBlobFacts( snap, cacheStats.recordsRead, cacheStats.blobEntries, result.files.size() );
     for( std::uint32_t f = 0; f < result.files.size(); ++f )
     {
         if( docparse::docKindOf( lowerExtensionOf( result.files[ f ] ) ) != docparse::DocKind::Markitdown )
@@ -411,7 +425,7 @@ static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result
     {
         return;
     }
-    snap.modelOut = warmsnap::writeModel( result, facts );
+    warmsnap::recordSection( snap, warmsnap::Sec::Model, [ & ]( warmsnap::Out& o ) { warmsnap::writeModel( o, result, facts ); } );
 }
 
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
@@ -583,7 +597,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // A crawl the guard stopped is still parsed, under the parse's own (higher) line: the crawl line — an eighth of the
     // limit — is what leaves the parse that room (memguard.h).
     memWatch.rearmForParse();
-    RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch );
+    CacheSaveFacts saved;
+    RawFacts       raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch, &saved );
 
     // The warm plan is only needed by the parse pool, which has already released it (WARM-DIRECT: the blob closes and its
     // per-file table is freed at the pool join); this covers the paths that never reach the pool.
@@ -712,7 +727,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // by the NEXT run rather than filed under the blob this one opened. No readable blob: nothing is recorded.
         const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath );
         snap->path = blobId ? warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId ) : std::string{};
-        recordWarmModel( *snap, result, cacheStats );
+        recordWarmModel( *snap, result, cacheStats, saved );
         verbfs::slotreg::noteModel( result, *snap );   // the model this run recorded, when it recorded one
     }
     memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (src/memstats.h)

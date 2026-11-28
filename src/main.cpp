@@ -3340,11 +3340,8 @@ static void finishWarmSnapshot( rw::warmsnap::Session& snap )
         return;
     }
     rw::warmsnap::saveSnapshot( snap );
-    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the file's bytes and this run's sections are not read again: give them back
-    std::string().swap( snap.file );
+    snap.releaseFile();   // the file's bytes and this run's sections are not read again: give them back
     std::string().swap( snap.treeOut );
-    std::string().swap( snap.modelOut );
-    std::string().swap( snap.graphOut );
     if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
     {
         // unsaved_why=: why a stage this run built is NOT waiting for the next run (ok: nothing it built was held back)

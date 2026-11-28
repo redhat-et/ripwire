@@ -410,11 +410,10 @@ inline void writeSideFamilies( Out& o, const IngestResult& ing )
     o.vec( ing.lexFileSig );
 }
 
-inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
+// The MODEL section, into `o` (a streaming Out on a recording run: warmsnap.h recordSection).
+inline void writeModel( Out& o, const IngestResult& ing, const BlobFacts& blob )
 {
     PROFILE_SCOPE_DESCRIBE( "warmsnap: serialize the model section" );
-    Out o;
-    o.bytes.reserve( ing.references.size() * 14 + ing.bindings.size() * 16 + ing.symbols.size() * ( sizeof( SymRow ) + 48 ) + ( 1u << 20 ) );
     o.u64( blob.cachedRecords );
     o.u64( blob.blobEntries );
     o.strs( blob.bridgeBlobs );
@@ -435,7 +434,6 @@ inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
     writeBindRows( o, ing, names );
     writeSideFamilies( o, ing );
     o.u64( 0x454e'444d'4f44'454cull );
-    return std::move( o.bytes );
 }
 
 inline bool readSymbolFamily( In& in, std::vector<Symbol>& family, std::size_t fileCount )
