@@ -105,7 +105,7 @@ mk_many "$TMP/medium" 1200
 mk_many "$TMP/large" 10050
 
 TASK="add retry to the http client send path (retry_send)"
-brief() { ( cd "$1" && "$BIN" . --no-cache "--brief=$TASK" "${@:2}" 2>/dev/null ); }
+brief() { ( cd "$1" && "$BIN" . --no-cache "--brief=$TASK" "${@:2}" 2>/dev/null ) || no "--brief exited $? in ${1##*/} ${*:2}"; }
 attr() { python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"<brief [^>]*\b"+sys.argv[1]+r"=\"([^\"]*)\"", t); print(m.group(1) if m else "")' "$1"; }
 
 classOf() { case "$1" in medium) echo medium ;; large) echo large ;; *) echo small ;; esac; }
@@ -116,7 +116,7 @@ capOf() { case "$1" in medium) echo $(( 4096 + LEGEND_DEFS )) ;; large) echo $((
 pageLen() { python3 -c 'import sys; print(len(open(sys.argv[1], "rb").read().rstrip(b"\n")))' "$1"; }
 built=0
 for f in cmake python node bare medium large; do
-    brief "$TMP/$f" > "$TMP/$f.out"
+    brief "$TMP/$f" > "$TMP/$f.out"   # status: brief() FAILs the gate on a nonzero exit
     grep -q '^<brief ' "$TMP/$f.out" && built=$(( built + 1 ))
 done
 if [ "$built" = 6 ]; then ok "(P) six fixtures answer a <brief> root"; else no "(P) only $built of 6 fixtures answered a <brief> root"; fi
@@ -135,7 +135,7 @@ for f in cmake python node bare medium large; do
     fi
 done
 if [ "$nb" = 6 ]; then ok "(B) all 6 fixtures: size_class, class cap as budget=, bytes= = page length <= budget"; else no "(B) $nb of 6 fixtures held the class budget"; fi
-brief "$TMP/large" --brief-bytes=2048 > "$TMP/l2048.out"
+brief "$TMP/large" --brief-bytes=2048 > "$TMP/l2048.out"   # status: brief() FAILs the gate on a nonzero exit
 len=$( pageLen "$TMP/l2048.out" )
 if [ "$( attr budget < "$TMP/l2048.out" )" = 2048 ] && [ "$len" -le 2048 ] && [ "$len" -gt 0 ]; then ok "(B) --brief-bytes=2048 holds a large page to $len <= 2048"; else no "(B) --brief-bytes=2048: budget=$( attr budget < "$TMP/l2048.out" ) page=$len"; fi
 
@@ -176,7 +176,7 @@ if printf '%s' "$lay" | grep -q 'src/ [a-z]*(skip)'; then no "(S) src/ marked sk
 if grep -o '<layout>[^<]*</layout>' "$TMP/node.out" | grep -qF 'node_modules/ vendored(skip)'; then ok "(S) node_modules/ marked vendored(skip)"; else no "(S) node_modules/ not marked: $( grep -o '<layout>[^<]*</layout>' "$TMP/node.out" )"; fi
 
 # ─── (O) drop order ────────────────────────────────────────────────────────────────────────────────────────────────
-brief "$TMP/cmake" --brief-bytes=512 > "$TMP/o.out"
+brief "$TMP/cmake" --brief-bytes=512 > "$TMP/o.out"   # status: brief() FAILs the gate on a nonzero exit
 dr=$( attr dropped < "$TMP/o.out" )
 python3 - "$dr" <<'PY' > "$TMP/o.probe"
 import sys
@@ -192,7 +192,7 @@ if { [ "$olen" -gt 512 ] && [ "$over" = 1 ]; } || { [ "$olen" -le 512 ] && [ -z 
 else no "(O) page $olen B vs budget 512 but over=\"$over\""; fi
 
 # ─── (D) determinism + well-formedness ─────────────────────────────────────────────────────────────────────────────
-brief "$TMP/cmake" > "$TMP/cmake.2"; brief "$TMP/large" > "$TMP/large.2"
+brief "$TMP/cmake" > "$TMP/cmake.2"; brief "$TMP/large" > "$TMP/large.2"   # status: brief() FAILs the gate on a nonzero exit
 if cmp -s "$TMP/cmake.out" "$TMP/cmake.2" && cmp -s "$TMP/large.out" "$TMP/large.2"; then ok "(D) two runs byte-identical (small + large)"; else no "(D) two runs differ"; fi
 nw=0
 for f in cmake python node bare medium large; do
@@ -226,7 +226,7 @@ fi
 # ─── (G) schema and legend: the page explains itself in both dialects ──────────────────────────────────────────────────────
 # The default (compact) page carries schema="ripwire.brief/v1" and a legend that names every attribute the page carries
 # (present-only: an absent attribute's term is not printed); --legend=full is the same page with the worded legend.
-brief "$TMP/cmake" > "$TMP/s.def"; brief "$TMP/cmake" --legend=full > "$TMP/s.full"; brief "$TMP/cmake" --brief-bytes=512 > "$TMP/s.cut"
+brief "$TMP/cmake" > "$TMP/s.def"; brief "$TMP/cmake" --legend=full > "$TMP/s.full"; brief "$TMP/cmake" --brief-bytes=512 > "$TMP/s.cut"   # status: brief() FAILs the gate on a nonzero exit
 sres=$( python3 - "$TMP/s.def" "$TMP/s.full" "$TMP/s.cut" <<'PY'
 import re, sys
 CORE = { "p", "n", "t", "id", "l", "k", "c" }
@@ -264,11 +264,12 @@ if [ "$rc" = 0 ] && [ "$nl" = 2 ] && ! printf '%s' "$lp" | grep -q '<brief'; the
 
 # ─── (C) the MCP twin ──────────────────────────────────────────────────────────────────────────────────────────────
 mcp_call() { printf '%s\n' "$@" | ( cd "$TMP/cmake" && "$BIN" --mcp 2>/dev/null ); }
-LIST=$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | tail -1 )
+LIST=$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | tail -1 )   # status: the server's JSON reply is parsed below; no reply (an exited server) fails that arm
 if printf '%s' "$LIST" | python3 -c 'import sys,json; print(int(any(t["name"]=="brief" for t in json.load(sys.stdin)["result"]["tools"])))' 2>/dev/null | grep -q 1; then ok "(C) tools/list advertises brief"; else no "(C) brief missing from tools/list"; fi
 call() {
-    mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"brief\",\"arguments\":$1}}" | tail -1 | python3 -c '
+    local req="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"brief\",\"arguments\":$1}}" reply
+    reply=$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$req" | tail -1 )   # status: the reply is parsed below; no reply (an exited server) prints a traceback, never a page, and the arm FAILs
+    printf '%s' "$reply" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
 print("__ERROR__" if "error" in r or r.get("result", {}).get("isError") else r["result"]["content"][0]["text"])'
@@ -320,10 +321,10 @@ mk_cargo() {      # a Cargo workspace (no package name): the project comes from 
     ( cd "$d" && git init -q && git remote add origin https://example.com/acme/spinner.git ) >/dev/null 2>&1
 }
 mk_autoconf; mk_goreg; mk_cargo
-xbrief() { local d="$1" t="$2"; ( cd "$TMP/$d" && "$BIN" . --no-cache --brief-bytes=8192 "--brief=$t" 2>/dev/null ); }
-xbrief ac "add a new spin operation for widgets next to widget_frobnicate" > "$TMP/ac.out"
-xbrief goreg "add a new widget variant next to HandleWidget" > "$TMP/goreg.out"
-xbrief cargo "add a new spin mode to spin_loop" > "$TMP/cargo.out"
+xbrief() { local d="$1" t="$2"; ( cd "$TMP/$d" && "$BIN" . --no-cache --brief-bytes=8192 "--brief=$t" 2>/dev/null ) || no "--brief exited $? in $d"; }
+xbrief ac "add a new spin operation for widgets next to widget_frobnicate" > "$TMP/ac.out"   # status: xbrief() FAILs the gate on a nonzero exit
+xbrief goreg "add a new widget variant next to HandleWidget" > "$TMP/goreg.out"   # status: xbrief() FAILs the gate on a nonzero exit
+xbrief cargo "add a new spin mode to spin_loop" > "$TMP/cargo.out"   # status: xbrief() FAILs the gate on a nonzero exit
 sect() { python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"<"+sys.argv[2]+r"[^>]*>(.*?)</"+sys.argv[2]+">", t, re.S); print(m.group(1) if m else "")' "$1" "$2"; }
 firstEntry() { sect "$1" entry | sed 's/ · .*//' | cut -d: -f1; }
 # X1/X5/X9 the project's own program leads (Programs/<p>.c, cmd/<p>/, crates/<p>/src/main.rs) — a tool main, a bigger cmd and a
@@ -369,10 +370,10 @@ mk_stages() {     # a pipeline of stages: the exemplar is a class two words long
     printf 'def frob(x):\n    return x + 1\n' > "$d/lib/frobs.py"
 }
 mk_stages
-abrief() { ( cd "$TMP/stages" && "$BIN" . --no-cache --brief-bytes=8192 "--brief=$1" 2>/dev/null ); }
-abrief "add a new stage (like the squash stage) to run_pipeline" > "$TMP/a1.out"
-abrief "add a new helper like frob to run_pipeline" > "$TMP/a2.out"
-abrief "add a new helper to run_pipeline" > "$TMP/a3.out"
+abrief() { ( cd "$TMP/stages" && "$BIN" . --no-cache --brief-bytes=8192 "--brief=$1" 2>/dev/null ) || no "--brief exited $? in stages: $1"; }
+abrief "add a new stage (like the squash stage) to run_pipeline" > "$TMP/a1.out"   # status: abrief() FAILs the gate on a nonzero exit
+abrief "add a new helper like frob to run_pipeline" > "$TMP/a2.out"   # status: abrief() FAILs the gate on a nonzero exit
+abrief "add a new helper to run_pipeline" > "$TMP/a3.out"   # status: abrief() FAILs the gate on a nonzero exit
 na=0
 if grep -qF '<like t="squash stage">src/ext/stages/squash/squash_stage.py</like>' "$TMP/a1.out"; then na=$(( na + 1 )); else no "(A) unique exemplar not anchored: $( grep -o '<task.*</task>' "$TMP/a1.out" | head -c 300 )"; fi
 if sect "$TMP/a1.out" edges | grep -q '^<i f="src/ext/stages/squash/squash_stage.py">'; then na=$(( na + 1 )); else no "(A) the anchored file does not lead the edges (its imports line first): $( sect "$TMP/a1.out" edges )"; fi
@@ -438,17 +439,17 @@ mkdir -p "$TMP/sec/src"
 printf 'cmake_minimum_required(VERSION 3.10)\nproject(sec C)\nadd_executable(sec src/a.c)\n' > "$TMP/sec/CMakeLists.txt"
 printf 'int a(void){return 1;}\nint b(void){return a();}\n' > "$TMP/sec/src/a.c"
 cp "$ROOT/test/redactfix/brief_agents.md" "$TMP/sec/AGENTS.md"   # the sanctioned credential-shaped fixture dir (ripwirepubliccheck arm 4)
-sec_cli() { ( cd "$TMP/sec" && "$BIN" . --no-cache "$@" "--brief=change a" 2>/dev/null ); }
-sec_mcp() { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"brief","arguments":{"path":".","task":"change a"}}}' | ( cd "$TMP/sec" && "$BIN" --mcp "$@" 2>/dev/null ) | tail -1; }
+sec_cli() { ( cd "$TMP/sec" && "$BIN" . --no-cache "$@" "--brief=change a" 2>/dev/null ) || no "--brief exited $? in sec $*"; }
+sec_mcp() { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"brief","arguments":{"path":".","task":"change a"}}}' | ( cd "$TMP/sec" && "$BIN" --mcp "$@" 2>/dev/null ) | tail -1; }   # status: its JSON reply is parsed by the (I) arms; no reply fails them
 SECRET="$( grep -o 'ghp_[A-Za-z0-9]*' "$ROOT/test/redactfix/brief_agents.md" )"
 ni=0
-sec_cli > "$TMP/i1.out"; sec_cli --no-redact > "$TMP/i2.out"; sec_mcp > "$TMP/i3.out"; sec_mcp --no-redact > "$TMP/i4.out"
+sec_cli > "$TMP/i1.out"; sec_cli --no-redact > "$TMP/i2.out"; sec_mcp > "$TMP/i3.out"; sec_mcp --no-redact > "$TMP/i4.out"   # status: sec_cli() FAILs the gate on a nonzero exit; sec_mcp output is parsed by the arms below
 grep -qF 'make test' "$TMP/i2.out" && grep -qF "$SECRET" "$TMP/i2.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact CLI brief must quote the doc command raw: $( head -c 300 "$TMP/i2.out" )"
 grep -qF 'make test' "$TMP/i1.out" && ! grep -qF "$SECRET" "$TMP/i1.out" && ni=$(( ni + 1 )) || no "(I) the CLI brief leaks the doc fence's secret"
 grep -qF "$SECRET" "$TMP/i4.out" && ni=$(( ni + 1 )) || no "(I) premise: --no-redact MCP brief must quote the doc command raw"
 grep -qF 'make test' "$TMP/i3.out" && ! grep -qF "$SECRET" "$TMP/i3.out" && ni=$(( ni + 1 )) || no "(I) the MCP brief leaks the doc fence's secret"
 rm -f "$TMP/sec/AGENTS.md"; mkfifo "$TMP/sec/AGENTS.md"
-( sec_cli > "$TMP/i5.out" 2>/dev/null & bp=$!; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; kill -0 "$bp" 2>/dev/null || exit 0; done; kill -9 "$bp" 2>/dev/null; exit 1 ) && grep -q '^<brief ' "$TMP/i5.out" && ni=$(( ni + 1 )) || no "(I) a FIFO AGENTS.md blocked the brief or it printed nothing"
+( sec_cli > "$TMP/i5.out" 2>/dev/null & bp=$!; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; kill -0 "$bp" 2>/dev/null || exit 0; done; kill -9 "$bp" 2>/dev/null; exit 1 ) && grep -q '^<brief ' "$TMP/i5.out" && ni=$(( ni + 1 )) || no "(I) a FIFO AGENTS.md blocked the brief or it printed nothing"   # status: run in a timed subshell; the grep on i5.out is the check (an exit or hang prints no page)
 if [ "$ni" = 5 ]; then ok "(I) file-derived text redacted on CLI and MCP (raw under --no-redact), FIFO convention doc skipped (5 of 5)"; else no "(I) quoted-text safety $ni of 5"; fi
 
 [ "$fail" = 0 ] && echo "briefcheck: PASS" || echo "briefcheck: FAIL"
