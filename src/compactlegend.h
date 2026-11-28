@@ -145,7 +145,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "plan-lint",    "plan-lint",    "structural lint of a plan document: each finding names the section and the rule" },
     // ── reports ──
     { "hotspots",     "hotspots",     "maintenance pain = churn x ccx over window=: <f p= churn= ccx= score= top= top_ccx= top_l=>; unranked_*= no churn/complexity" },
-    { "clones",       "clones",       "similar normalized-token bodies: <group type=2|3 gid= tokens= n= similarity=> of <f n= p=>; dup_loc=/dup_pct=" },
+    { "clones",       "clones",       "similar normalized-token bodies: <group type=2|3 gid= tokens= n= similarity=> of <f n= p=>; dup_loc=/dup_pct=; a group can span LANGUAGES and prints none, read p=" },
     { "deps",         "deps",         "file-to-file include/import view, heaviest cone first: <f p= afferent= includes= instab= transitive=>, <health>, <godfiles>, <cycles>" },
     { "dead-code",    "dead-code",    "internal-linkage functions with no caller found in the index (not a confidence score): <d n= t= p= l=>; filter= path component" },
     { "lint",         "lint",         "AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>" },

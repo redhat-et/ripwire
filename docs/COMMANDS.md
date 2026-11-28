@@ -1892,7 +1892,9 @@ $ ./build/ripwire . --hotspots
 
 ### `--clones`
 
-**Answers:** token-normalized duplicate bodies
+**Answers:** token-normalized duplicate bodies which CAN span LANGUAGES: normalization keeps keywords and punctuation verbatim while erasing identifiers, numbers and strings, and the candidate pass filters on symbol kind alone with no language term.
+
+3 of 262,737 groups over five polyglot corpora (a floor). The row prints no language -- read it from p=. A crossing only means something where a link unit, a classpath or a declared FFI/ABI surface already BINDS the two sides; otherwise two bodies that rhyme.
 
 **Try it**
 
@@ -1918,6 +1920,10 @@ $ ./build/ripwire . --clones
 ```
 
 **Shaped by:** `--affected`, `--page-bytes`, `--limit`
+
+**Caveats (stated by the binary):**
+
+- 3 of 262,737 groups over five polyglot corpora (a floor).
 
 ### `--biggest-first`
 
@@ -4800,7 +4806,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=7735f04112800391 entries=1344
+ripwire legend dictionary ripwire.dict/v1 dictv=72c1061350ecdfe9 entries=1344
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
