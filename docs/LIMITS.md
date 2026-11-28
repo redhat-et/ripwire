@@ -861,6 +861,7 @@ Discloses: `files_capped`, `importers_capped`
 | `kMaxTerminals` | `16` | — | >16 is the CALLER's usage error; the core CLAMPS (never ASSUMEs on hostile input) |
 | `kMemberSpellingsShown` | `6` | OUTPUT | — |
 | `kPythonReexportHops` | `4` | — | member-import hops provenBasesOf follows (a package re-exporting a re-export) |
+| `kUnresolvedNamesCap` | `8` | OUTPUT | — |
 
 ### `src/grepcarrier.h`
 

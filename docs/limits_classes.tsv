@@ -156,6 +156,7 @@ kTypeMentionMatchBudget	INDEXING
 kUnitComplexityLowRiskMax	BOUNDARY
 kUnitInterfacingLowRiskMax	BOUNDARY
 kUnitSizeLowRiskMax	BOUNDARY
+kUnresolvedNamesCap	OUTPUT
 kVrMaxDepth	INDEXING
 kWalkCap	INDEXING
 kWhereisHits	OUTPUT
