@@ -808,6 +808,7 @@ struct Session
     Why  modelWhy      = Why::Off;   // ...and the MODEL section
     Why  unsavedWhy    = Why::Ok;    // the FIRST reason a stage this run built was not stored for the next run (Ok: none)
     bool coldBlob      = false;      // the run opened with no blob to hit: whatever it parsed, it parsed for want of a record
+    bool blobUnpublished = false;    // the run parsed and its blob write failed: the name on disk is another blob's, so nothing is recorded under it
     bool treeReplayed  = false;
     bool modelLoaded   = false;
     bool graphLoaded   = false;

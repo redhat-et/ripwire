@@ -29,6 +29,8 @@
 #       (TREE: why=checksum and the crawl walked; MODEL: model_why=checksum; GRAPH: graph_why=checksum), the others are
 #       still used where the load order allows, and the answer == --no-cache; a byte in the header refuses the file.
 #   R5  truncation: a snapshot cut inside its last section is refused whole (why=checksum), answer == --no-cache.
+#   R6  a parsing run whose blob publish fails (the old blob made immutable): no GRAPH of that run is filed under the
+#       old blob's name, the old blob is unchanged, and the answer == --no-cache. Needs chflags (macOS/BSD); SKIP elsewhere.
 #
 # Usage: bash test/recordfirstcheck.sh [BIN]
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
@@ -71,12 +73,16 @@ use(){ CD="$TMP/cache/$1"; mkdir -p "$CD"; }
 run()
 {
     local root="$1" out="$2"; shift 2
-    ( cd "$root" && env TMPDIR="$CD/" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 ${RUNENV:-} "$BIN" . "$@" >"$out" 2>"$out.err" </dev/null ) || no "run ${out##*/}: exit $?"
+    local rc=0
+    ( cd "$root" && env TMPDIR="$CD/" RIPWIRE_CACHE_STATS=1 RIPWIRE_SNAPSHOT_STATS=1 ${RUNENV:-} "$BIN" . "$@" >"$out" 2>"$out.err" </dev/null ) || rc=$?
+    [ "$rc" = 0 ] || no "run ${out##*/}: exit $rc"
     grep '^ripwire: snapshot-stats ' "$out.err" >"$out.stats" || : >"$out.stats"
+    return "$rc"   # the binary's status, not the grep's
 }
 # full ROOT OUT [args...] — the reference: no cache, every stage built
 full(){ local root="$1" out="$2"; shift 2; ( cd "$root" && env ${RUNENV:-} "$BIN" . --no-cache "$@" >"$out" 2>/dev/null </dev/null ) || no "full ${out##*/}: exit $?"; }
-has(){ grep -q -- "$2" "$1.stats"; }
+# has OUT FIELD — the stats line carries FIELD as one whole space-delimited key=value field ('why=checksum' is not 'graph_why=checksum')
+has(){ tr ' ' '\n' <"$1.stats" | grep -qxF -- "$2"; }
 served(){ has "$1" 'model=loaded' && has "$1" 'graph=loaded'; }
 st(){ sed 's/^ripwire: snapshot-stats //' "$1.stats" 2>/dev/null; [ -s "$1.stats" ] || printf 'no snapshot-stats line'; }
 same()
@@ -288,6 +294,46 @@ if [ -n "$S" ]; then
     expect "R5 ...nothing of it is used: the crawl walked" "$TMP/r5" 'tree=walked'
     same   "R5 the answer == --no-cache" "$TMP/r5" "$TMP/map.full"
 else no "R5: VACUOUS — not exactly one snapshot"; fi
+
+# ── R6: a parsing run whose blob publish fails records nothing under the old blob's name ───────────────────────────
+# The old blob is made immutable (BSD file flags), so saveCache's rename fails and the old blob stays readable: the
+# snapshot is then named after a blob this run did not write. Neither MODEL nor GRAPH built from this run's parse may be
+# filed there: the GRAPH section after the run is empty or byte-identical to the one before it.
+gsec(){ local o n; read -r o n <<<"$( hdr "$1" span 2 )"; python3 -I -c 'import sys, hashlib; f = open( sys.argv[ 1 ], "rb" ); f.seek( int( sys.argv[ 2 ] ) ); print( sys.argv[ 3 ], hashlib.md5( f.read( int( sys.argv[ 3 ] ) ) ).hexdigest() )' "$1" "$o" "$n"; }
+if ! command -v chflags >/dev/null 2>&1; then
+    echo "  SKIP  R6: no chflags here (BSD/macOS file flags), so no portable way to make the blob's rename fail"
+else
+    use r6; W6="$TMP/w6"; mkcorpus "$W6"
+    run "$W6" "$TMP/r6.p"
+    B6="$( find "$CD" -type f -name 'ripwire-????????????????-c*p*.bin' 2>/dev/null )"; S6="$( onesnap )"
+    if [ "$( printf '%s\n' "$B6" | grep -c . )" != 1 ] || [ -z "$S6" ]; then
+        no "R6 VACUOUS: not exactly one blob and one snapshot after the cold run"
+    else
+        read -r glen0 gmd0 <<<"$( gsec "$S6" )"
+        [ "${glen0:-0}" -gt 0 ] || no "R6 VACUOUS: the cold run recorded no GRAPH to compare against"
+        printf 'package lib\n\nfunc Hello() int {\n\treturn 2\n}\n\nfunc Extra() int {\n\treturn Hello() + 1\n}\n' >"$W6/gomod/lib/lib.go"
+        sleep 2.2
+        bmd0="$( md5sum <"$B6" 2>/dev/null || md5 -q "$B6" )"
+        chflags uchg "$B6"
+        run "$W6" "$TMP/r6.1"
+        chflags nouchg "$B6"
+        full "$W6" "$TMP/r6.full"
+        bmd1="$( md5sum <"$B6" 2>/dev/null || md5 -q "$B6" )"
+        if grep -q 'cache-stats reparsed=[1-9]' "$TMP/r6.1.err" && grep -q "cannot replace" "$TMP/r6.1.err" && [ "$bmd0" = "$bmd1" ]; then
+            ok "R6 premise: the run after the edit re-parsed, its blob rename failed, and the old blob is unchanged"
+            S6b="$( onesnap )"
+            if [ -z "$S6b" ]; then ok "R6 the failed-publish run left no snapshot"
+            else
+                read -r glen1 gmd1 <<<"$( gsec "$S6b" )"
+                if [ "${glen1:-0}" = 0 ] || [ "$gmd1" = "$gmd0" ]; then ok "R6 the failed-publish run filed no GRAPH of its own under the old blob's name (GRAPH ${glen0} B -> ${glen1:-0} B)"
+                else no "R6 the failed-publish run recorded its GRAPH under the old blob's name (${glen0} B -> ${glen1} B, content changed)"; fi
+            fi
+        else
+            no "R6 VACUOUS: the publish did not fail after a parse ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/r6.1.err" ); $( grep -c 'cannot replace' "$TMP/r6.1.err" ) rename failure line(s))"
+        fi
+        same "R6 the answer == --no-cache" "$TMP/r6.1" "$TMP/r6.full"
+    fi
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

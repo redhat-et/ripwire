@@ -585,7 +585,7 @@ inline Graph buildGraphRecorded( Session& s, const IngestResult& ing )
         const depwatch::Armed armed( &log );
         return buildGraph( ing, nullptr, false );
     }();
-    if( !s.on() || !mayStoreBuilt( s, ing.reparsedFiles, ing.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
+    if( !s.on() || s.blobUnpublished || !mayStoreBuilt( s, ing.reparsedFiles, ing.memoryStop.isSet() ) )   // the edit rule: warmsnap.h recordsWhatItBuilt; a failed blob write stores nothing (as for MODEL)
     {
         return g;
     }

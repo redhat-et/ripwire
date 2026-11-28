@@ -399,7 +399,8 @@ static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result
     const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale &&
                         warmsnap::sectionIntact( snap, warmsnap::Sec::Model );
     const bool parsed = result.reparsedFiles != 0;
-    if( stored || !warmsnap::mayStoreBuilt( snap, result.reparsedFiles, result.memoryStop.isSet() ) || ( parsed && !saved.written ) )   // the edit rule: warmsnap.h recordsWhatItBuilt
+    snap.blobUnpublished = parsed && !saved.written;   // buildGraphRecorded reads it: neither MODEL nor GRAPH is filed under a blob this run did not write
+    if( stored || !warmsnap::mayStoreBuilt( snap, result.reparsedFiles, result.memoryStop.isSet() ) || snap.blobUnpublished )   // the edit rule: warmsnap.h recordsWhatItBuilt
     {
         return;
     }
