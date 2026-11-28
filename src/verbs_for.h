@@ -1150,7 +1150,16 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
             h += clause;
         }
     }
-    // the data notes, numbers kept — see compactForNote
+    // extraNotes is a DEFINITION clause (kForDegradedBundleNote is its only value), so it rides with the
+    // clauses above and BEFORE the data notes. The order is a contract, not a preference: forpages.h's
+    // coreSchema holds the data notes out of the core-legend cut by walking back from the end of this
+    // comment over " [label: text]" runs (coreNoteTailAt), so a clause appended AFTER them ends the scan
+    // on prose and the whole note run falls inside the 1 KiB cut again. Measured on the shape that found
+    // it (CodeRabbit on #839, RIPWIRE_FAULT_CHARGE_BUFFER=1 . --for=parseConfig --adaptive): the tail read
+    // "[adaptive: kept 5 of 40 …] [floor: kept 0 of 5]; reason=degraded: … est_tokens is omitted".
+    // corelegendcheck (C11) pins the order on a degraded run; (C11n) is its negative control.
+    h.append( extraNotes );
+    // the data notes, numbers kept — see compactForNote. LAST in this comment, by the contract above.
     h += compactForNote( p.adaptiveNote );
     h += compactForNote( p.mentionNote );
     h += compactForNote( p.boostNote );
@@ -1158,7 +1167,6 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h += compactForNote( p.expandNote );
     h += compactForNote( p.docMentionNote );
     h += compactForNote( p.floorNote );
-    h.append( extraNotes );
     h += " -->";
     // M10: at= folded into the SAME trailing comment as root= (one wrapper, not two) — the
     // weak=/dropped_positive=/est_tokens= splice below still targets the LAST comment's closing "-->"

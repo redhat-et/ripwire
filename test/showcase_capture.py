@@ -603,6 +603,8 @@ add(S6, f"{BIN} --scan-skills=skills", "Scan a whole skills directory (exit 2 = 
 
 S7 = "knobs / modes"
 add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prior instead of PageRank.")
+add(S7, f"{BIN} . --rank-by=churn --include-bots --top-k=5",
+    "The same churn prior with bot-authored commits KEPT — they are left out by default (gitmine.h WHOSE HISTORY), so this is the switch that says whose history the ranking counted.")
 # THE N IN --since=HEAD~N IS DERIVED, NOT PINNED, because this demo's whole point is visible only inside a
 # narrow band and the band MOVES with the repository's own history. Too wide and the global block runs past
 # fmt_block's display cut, so the reader never reaches the scoped one, its next= or the stub; too narrow and

@@ -14,6 +14,19 @@
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
+#   (C10) THE DATA NOTES SURVIVE THE CUT (lane CORE-NOTES, 2026-11-27): a " [label: ...]" note is this ANSWER'S DATA, not a
+#        definition, so the pointer cannot stand in for it -- following it RE-DERIVES the datum instead of reading it back. Every
+#        note the full (--legend=last) page 1 carries is in the core schema comment too, on the default fixture and on the
+#        --adaptive one (two notes, so the multi-note walk is exercised), and that comment still meets (C1)'s bounds: the notes are
+#        charged to the same 1 KiB and displace definition clauses. COUNTS the notes it read and fails on zero. Before this arm the
+#        notes sat in the comment's last bytes and were the FIRST thing the cut dropped -- a default --adaptive run disclosed no
+#        narrowing at all. (C10n) the same comparison against a core page with its note tail stripped fails
+#   (C11) THE DATA NOTES ARE THE SCHEMA COMMENT'S LAST CLAUSES, on the one path that appends a DEFINITION clause late:
+#        the degraded header (kForDegradedBundleNote, reached with forautobodycheck #11's RIPWIRE_FAULT_CHARGE_BUFFER=1 and
+#        compiled out under NDEBUG, where this arm SKIPs). (C10) can only hold if the walk forpages.h coreNoteTailAt makes
+#        -- back from the end over " [label: text]" runs -- reaches them, and a clause appended AFTER them ends that walk on
+#        prose. This arm runs the walk here, over the degraded comment, and requires it to recover every note. (C11n) the same
+#        walk over that comment respelled the pre-fix way (the degrade clause moved back behind the notes) recovers none
 #   (C3) REFILL, never growth: the default page 1 (rows as lines, as served) is no larger than --legend=last's page 1, and its
 #        withheld_bytes= is <= (it holds at least the rows the full-legend page 1 holds)
 #   (C4) the switch: RIPWIRE_NO_CORE_LEGEND=1 serves --legend=last's page 1 byte for byte, but for the --legend=compact its next= names (C9)
@@ -57,6 +70,19 @@ env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK"                 >"$WORK/lines_
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --legend=last   >"$WORK/lines_last_1.xml" 2>/dev/null
 env -u RIPWIRE_NO_ROWLINES "$BIN" . --for="$TASK" --page-bytes=100000000 >"$WORK/lines_onepage.xml" 2>/dev/null
 for p in compact dict; do "$BIN" . --for="$TASK" --legend=$p >"$WORK/${p}_1.xml" 2>/dev/null; done
+# (C10): the same task with --adaptive, whose answer carries TWO data notes (adaptive + doc mentions) back to back
+"$BIN" . --for="$TASK" --adaptive                        >"$WORK/anote_1.xml" 2>/dev/null
+"$BIN" . --for="$TASK" --adaptive --legend=last           >"$WORK/anote_last_1.xml" 2>/dev/null
+# (C11): the degraded header is the one path that appends a definition clause (kForDegradedBundleNote) where the data notes
+# end. The fault switch is compiled out of an NDEBUG binary, so read the flavour from --version (forautobodycheck #11's
+# reading) and SKIP rather than pass blind. test/fixture, not '.', is where the fault path still emits notes beside it.
+DG_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$DG_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel)
+        printf '  SKIP  (C11) the charge-buffer fault switch is compiled out of this %s (NDEBUG) binary -- the plain-flavour leg proves it\n' "$DG_FLAVOUR" ;;
+    *)
+        env -u RIPWIRE_NO_ROWLINES RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" test/fixture --for=parseConfig --adaptive --no-cache >"$WORK/degraded_1.xml" 2>/dev/null ;;
+esac
 follow(){   # follow next= from $WORK/$1_1.xml to the last page (pasteable shell: shlex, never by hand); pages served -> $1.n
     local k=1 nx   # $2..: the env(1) arguments every continuation runs under
     while :; do
@@ -74,7 +100,7 @@ follow last RIPWIRE_NO_ROWLINES=1
 follow lines -u RIPWIRE_NO_ROWLINES   # the shipped form, for (C6)'s xmllint
 
 python3 - "$WORK" <<'PY'
-import re, sys, glob, subprocess, shlex, html
+import re, sys, os, glob, subprocess, shlex, html
 W = sys.argv[1]; bad = 0
 POINTER = "FULL LEGEND (every definition): this call with the legend=last flag"
 ROWCLAUSES = ("<!-- sigs rseq=1:", "<!-- sigs/tail rows are lines:")
@@ -120,6 +146,70 @@ say(okl, f"(C1) row-line form (as served): page 1 legend {nbl} B in {ncl} commen
 say(not core_ok(core.replace(POINTER, ""))[0], "(C1n) the checker fails page 1 with the pointer removed")
 say(not core_ok(last)[0], "(C1n) the checker fails the full-legend (--legend=last) page 1")
 say("<!-- page=K of pages=N:" in last and len(lleg.encode()) > 1024, "(C2) --legend=last page 1 carries the page clause and the full legend")
+# (C10) the data-note tail. A note is " [label: text]" with no ']' inside it -- the shape every emitter writes
+# (verbs_for.h/mcpverbs.h formatTo sites) and the shape forpages.h coreNoteTailAt holds back from the clause cut.
+NOTE = re.compile(r" \[[a-z][a-z ]*: [^\]]*\]")
+def notes_of(t):
+    return NOTE.findall(doc_legend(t)[0])
+def schema_of(t):
+    cs = re.findall(r"<!--.*?-->", doc_legend(t)[0], re.S)
+    return cs[0] if cs else ""
+anote, anote_last = rd(W + "/anote_1.xml"), rd(W + "/anote_last_1.xml")
+for name, cf, lf, least in (("default", core, last, 1), ("--adaptive", anote, anote_last, 2)):
+    want, have = notes_of(lf), schema_of(cf)
+    miss = [n for n in want if n not in have]
+    say(len(want) >= least and not miss,
+        f"(C10) {name} page 1: {len(want)} data note(s) in the full legend, all in the core schema comment; lost: {miss}")
+oka, nba, nca = core_ok(anote)
+say(oka, f"(C10) --adaptive page 1 legend {nba} B in {nca} comment(s): the notes are charged to the same 1 KiB, (C1) bounds held")
+stripped = NOTE.sub("", anote)
+say([n for n in notes_of(anote_last) if n not in schema_of(stripped)] != [],
+    "(C10n) the comparison fails a core page with its data-note tail stripped")
+# (C11) the walk itself, mirroring forpages.h coreNoteTailAt: back from the end while the text ends in ']', over runs
+# of " [label: text]" that hold no ']' and do carry ": ". Whatever it returns is what survives the 1 KiB clause cut.
+DEGRADE = "; reason=degraded: "
+def note_tail(inner):
+    at = len(inner)
+    while at > 0 and inner[at - 1] == "]":
+        o = inner.rfind(" [", 0, at - 1)
+        if o < 0:
+            break
+        body = inner[o + 2:at - 1]
+        if "]" in body or ": " not in body:
+            break
+        at = o
+    return inner[at:]
+def first_comment(t):
+    """the document's FIRST comment -- the schema one. Not doc_legend: on the faulted path the answer's last element is
+    <syms held="uncaptured"/>, so the trailing-comment run is empty and the schema comment is not in it."""
+    cs = re.findall(r"<!--.*?-->", t, re.S)
+    return cs[0] if cs else ""
+def inner_of(t):
+    s = first_comment(t)
+    return s[4:-3].rstrip() if s.endswith("-->") else s
+dgp = W + "/degraded_1.xml"
+if os.path.exists(dgp):
+    dg = inner_of(rd(dgp))
+    dn = NOTE.findall(first_comment(rd(dgp)))
+    kept = note_tail(dg)
+    lost = [n for n in dn if n not in kept]
+    say(DEGRADE in dg and len(dn) >= 1 and not lost,
+        f"(C11) degraded header: the reason=degraded clause and {len(dn)} data note(s) in one comment, and the "
+        f"coreNoteTailAt walk recovers all of them ({len(kept)} B of tail); lost: {lost}")
+    # (C11n) THE SAME WALK LOSES THEM when that clause sits behind the notes. On a fixed binary the comment has to be
+    # respelled to get there (lift the clause out, re-append it after the note run); on a binary that still emits the
+    # pre-fix order the text already IS that case, so the control reads it as served. Either way it asserts the loss,
+    # which is what makes (C11) non-vacuous -- measured against a pre-lane binary, where (C11) reds with 0 B of tail.
+    at = dg.find(DEGRADE)
+    end = dg.find(" [", at) if at >= 0 else -1
+    if at >= 0 and end > at:
+        pre, how = dg[:at] + dg[end:] + dg[at:end], "respelled behind the notes"
+    elif at > 0 and dn and dg.rfind(dn[-1]) < at:
+        pre, how = dg, "already behind the notes, as served"
+    else:
+        pre, how = "", ""
+    say(bool(how) and not [n for n in dn if n in note_tail(pre)],
+        f"(C11n) the same walk recovers none with the degrade clause {how or 'MOVED: neither spelling could be read'}")
 lc, ll = rd(W + "/lines_1.xml"), rd(W + "/lines_last_1.xml")
 cw, lw = root_int(lc, "withheld_bytes"), root_int(ll, "withheld_bytes")
 say(len(lc.encode()) <= len(ll.encode()) and cw is not None and lw is not None and cw <= lw,
