@@ -4597,16 +4597,15 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
 // once, after the answer, in the answer's stream when that stream can hold a comment, and always on stderr (gitmine.h THE BUDGET).
 static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
 {
-    const rw::GitWalkCutReport& cuts = rw::gitWalkCutsToDisclose();
-    const std::uint32_t walks = cuts.walks.load( std::memory_order_relaxed );
-    if( walks == 0 )
+    // The CLI answers one verb, so "since the process started" is this answer's own cut count.
+    const rw::GitWalkCutMark cuts = rw::gitWalkCutsSince( {} );
+    if( cuts.walks + cuts.timeWalks == 0 )
     {
         return;
     }
-    const std::uint64_t commits = cuts.commitsRead.load( std::memory_order_relaxed );
-    DISCLOSE( Diagnostics::answerUnchanged, "the walk's numbers are floors and the answer says so",
-              "main: a git history walk hit its budget — its counts cover only the newest commits" );
-    const std::string sentence = rw::gitWalkCutSentence( walks, commits );
+    DISCLOSE( Diagnostics::answerUnchanged, "a commit cut's numbers are floors and a clock cut's commits are not counted; the answer says which",
+              "main: a git history walk hit its budget" );
+    const std::string sentence = rw::gitWalkCutSentence( cuts );
     // The servers' stdout is the protocol, so a comment there is a line no client can parse: they carry the sentence per request in the
     // envelope (`_history_cut`, mcp.h) and here only on stderr.
     if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
@@ -6541,11 +6540,20 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             const auto         joinWalk      = [ & ]( std::size_t r )
             {
                 quality::HistoryWalk walk = historyWalks[ r ].get();
-                if( walk.raw.cut != GitWalkCut::None )
+                if( walk.raw.cut == GitWalkCut::Time )
+                {
+                    // The WALL CLOCK ended it, so the stream came back empty on purpose (gitmine.h WHICH BUDGET CUT IT): how far
+                    // the walk got moves with machine load, and counting it is what made two runs of one binary differ (#813).
+                    // No commit count is added to the report, because that count IS the load-dependent number.
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkTimeCut,
+                              "main: the git history walk ran out of its wall-clock budget — none of its commits is counted, churn= is absent and amp= counts "
+                              "callers only, and the document says so" );
+                }
+                else if( walk.raw.cut != GitWalkCut::None )
                 {
                     historyReport.cutCommits += walk.raw.commits.size();
                     DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkCut,
-                              "main: the git history walk hit its budget — churn= and amp= count only the newest commits (floors), and the document says so" );
+                              "main: the git history walk hit its commit budget — churn= and amp= count only the newest commits (floors), and the document says so" );
                 }
                 else if( walk.raw.unread && walk.raw.notRun )
                 {

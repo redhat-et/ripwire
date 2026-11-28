@@ -1723,8 +1723,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
                                      "background snapshot), so it may be incomplete — " + std::string( memguard::kOverride );
                 }
-                const GitWalkCutMark cutsNow  = gitWalkCutMark();
-                const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
+                const std::string    cutNote  = gitWalkCutSentence( gitWalkCutsSince( cutsAtEntry ) );
                 // `_history_policy`: what the history-signal tools' walks in THIS request left out (bots) and followed (exact moves)
                 const bool        historyTool = name == "cochange" || name == "situational_awareness" || name == "quality_delta" || name == "rank_by";
                 const std::string historyNote = historyTool ? gitHistoryPolicySentence() : std::string();
