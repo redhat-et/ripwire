@@ -1444,6 +1444,146 @@ claudeMdHoldsBlurb()
     done
     return 1
 }
+# agentsMdHoldsBlurb DIR BLURB: the Codex counterpart (θ20, 2026-11-27): true when an AGENTS.md that Codex loads at session start
+# already holds BLURB word for word. Codex's documented discovery (learn.chatgpt.com/docs/agent-configuration/agents-md; the
+# selection below follows codex-rs core/src/agents_md.rs at rust-v0.164.0): the global level in ${CODEX_HOME:-~/.codex} is
+# AGENTS.override.md when it holds a non-whitespace byte, else AGENTS.md; then, for a TRUSTED project only, one file per directory from the project root
+# (the Git root) down to DIR, where an AGENTS.override.md that exists is taken even when empty (no fallback to AGENTS.md beside
+# it); root-first, and no file is added once the combined size reaches project_doc_max_bytes (32 KiB by default; truncated past it).
+# CONSERVATIVE where that is not modelled: a file only counts when every byte up to its end lies within 32 KiB, the global file
+# included; a config.toml (system /etc/codex, user-level, any profile, or a project .codex/ one) naming project_doc_max_bytes,
+# project_doc_fallback_filenames or project_root_markers keeps the primer; trust is read only from the user config.toml's
+# `[projects."DIR"]` table, else its `[projects."<root>"]` one, with trust_level "trusted" (any other spelling: untrusted), and any
+# trust mention in another layer (system, managed, profile, project) keeps the primer;
+# carriage returns ignored. test/hookcheck.sh (3i7) pins each case (the /etc/codex layer is out of a gate's sandbox).
+codexDiscoveryKeys() # FILE...: true when a readable config file names a key that changes AGENTS.md discovery or its byte limit
+{
+    local f text
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *project_doc_max_bytes* || "$text" == *project_doc_fallback_filenames* || "$text" == *project_root_markers* ]] && return 0
+    done
+    return 1
+}
+codexTrustOf() # CONFIG PATH: prints the trust_level of CONFIG's [projects."PATH"] table: its value, `-` for a table without one, nothing
+{              # when CONFIG has no such table (or cannot be read)
+    local text line in=0 found=0 val=""
+    claudeMdRead "$1" || return 0
+    while IFS= read -r line
+    do
+        line="${line%$'\r'}"
+        if [[ "$line" =~ ^[[:space:]]*\[ ]]
+        then
+            in=0
+            [[ "$line" =~ ^[[:space:]]*\[projects\.\"(.*)\"\][[:space:]]*(#.*)?$ ]] && [ "${BASH_REMATCH[1]}" = "$2" ] && in=1 && found=1
+        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*trust_level[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]
+        then
+            val="${BASH_REMATCH[1]}"
+        elif [ "$in" = 1 ] && [[ "$line" =~ ^[[:space:]]*[\"\']?trust_level ]]
+        then
+            val="?"   # a trust_level this reader cannot classify (another quoting, a quoted key): untrusted, the primer is kept
+        fi
+    done <<< "$text"
+    [ "$found" = 1 ] && printf '%s' "${val:--}"
+    return 0
+}
+# codexProjectTrusted CONFIG ROOT DIR: true when CONFIG trusts the project. As Codex resolves it (codex-rs config/src/project_trust.rs
+# at rust-v0.164.0: "Cwd keys always take precedence over repository-root keys"), DIR's own [projects."DIR"] table decides when it
+# exists, and ROOT's only when it does not; a table without trust_level counts as untrusted (conservative).
+codexProjectTrusted()
+{
+    local v
+    v="$( codexTrustOf "$1" "$3" )"
+    [ -n "$v" ] || v="$( codexTrustOf "$1" "$2" )"
+    [ "$v" = trusted ]
+}
+# codexTrustElsewhere FILE...: true when a config layer other than the user config.toml mentions project trust ([projects] or
+# trust_level). Codex merges every layer's projects map before resolving trust, and a managed layer sits above the user one
+# (config/src/loader/project_discovery.rs), so such a mention may override the user's entry: the primer is kept (conservative).
+# Out of the hook's sight, so not honoured: an MDM profile and cloud-managed config.
+# codexMultiline FILE...: true when a readable config file holds a TOML multi-line string (''' or """), inside which a line-based reader
+# could take text for a table header or a trust_level: no project file counts then (CodeRabbit #831 round 3, closed conservatively)
+codexMultiline()
+{
+    local f text
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *"'''"* || "$text" == *'"""'* ]] && return 0
+    done
+    return 1
+}
+codexTrustElsewhere()
+{
+    local f text
+    for f in "$@"
+    do
+        claudeMdRead "$f" || continue
+        [[ "$text" == *trust_level* || "$text" == *projects* ]] && return 0
+    done
+    return 1
+}
+codexHasText() # FILE: true when FILE is readable and holds a non-whitespace byte
+{
+    local text
+    claudeMdRead "$1" || return 1
+    [[ "$text" == *[![:space:]]* ]]
+}
+agentsMdHoldsBlurb()
+{
+    local d="${1%/}" want="$2" f text size top="" cwd="" total=0 project=0 home="${CODEX_HOME:-${HOME:-/nonexistent}/.codex}"
+    local -a files=() dirs=()
+    codexDiscoveryKeys "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/config.toml" "$home/"*.config.toml && return 1
+    local -a otherLayers=( "/etc/codex/config.toml" "/etc/codex/managed_config.toml" "$home/"*.config.toml )
+    # the global level takes the first file holding a non-whitespace byte (Codex trims it: codex-home instructions/mod.rs)
+    if codexHasText "$home/AGENTS.override.md"; then files+=( "$home/AGENTS.override.md" )
+    elif codexHasText "$home/AGENTS.md"; then files+=( "$home/AGENTS.md" ); fi
+    top="$( git -C "$d" rev-parse --show-toplevel 2>/dev/null )" || top=""
+    if [ -n "$top" ] && top="$( cd "$top" 2>/dev/null && pwd -P )" && cwd="$( cd "$d" 2>/dev/null && pwd -P )" \
+        && { [ "$cwd" = "$top" ] || [[ "$cwd" == "$top"/* ]]; } && codexProjectTrusted "$home/config.toml" "$top" "$cwd"
+    then
+        d="$cwd"
+        while :
+        do
+            otherLayers+=( "$d/.codex/config.toml" )
+            [ "$d" = "$top" ] && break
+            d="${d%/*}"
+        done
+        codexTrustElsewhere "${otherLayers[@]}" || codexMultiline "$home/config.toml" "${otherLayers[@]}" || project=1   # another layer may
+        # override the trust, or a multi-line string may hide a table: then no project file counts
+    fi
+    if [ "$project" = 1 ]
+    then
+        d="$cwd"
+        while :
+        do
+            dirs=( "$d" ${dirs[@]+"${dirs[@]}"} )   # bash 3.2 + set -u: an empty array is unbound
+            [ "$d" = "$top" ] && break
+            d="${d%/*}"
+        done
+        for f in "${dirs[@]}"
+        do
+            codexDiscoveryKeys "$f/.codex/config.toml" && return 1
+        done
+        for f in "${dirs[@]}"
+        do
+            if [ -f "$f/AGENTS.override.md" ]; then files+=( "$f/AGENTS.override.md" )   # taken even when empty
+            elif [ -s "$f/AGENTS.md" ]; then files+=( "$f/AGENTS.md" ); fi
+        done
+    fi
+    for f in ${files[@]+"${files[@]}"}
+    do
+        size="$( wc -c < "$f" 2>/dev/null )"
+        [ -n "$size" ] || return 1
+        total=$(( total + size ))
+        [ "$total" -le 32768 ] || return 1   # this file and every later one may be cut: Codex stops adding at 32 KiB
+        claudeMdRead "$f" || continue
+        [[ "$text" == *$'\r'* ]] && text="${text//$'\r'/}"
+        [[ "$text" == *"$want"* ]] && return 0
+    done
+    return 1
+}
 
 if [ "${1:-}" = "--session-start" ]
 then
@@ -1497,8 +1637,9 @@ then
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
     # HOOK-DEDUP (2026-11-24): with the block pasted into CLAUDE.md AND this hook installed, the same ~3.9 KB arrived
-    # twice on every request. Only for Claude, whose memory files are the ones checked; Codex's AGENTS.md is not.
+    # twice on every request. Each agent is checked against the files IT loads: Claude's memory files, Codex's AGENTS.md chain (θ20).
     [ "$meter_agent" = claude ] && claudeMdHoldsBlurb "$dir" "$blurb" && exit 0
+    [ "$meter_agent" = codex ] && agentsMdHoldsBlurb "$dir" "$blurb" && exit 0
 
     if command -v jq >/dev/null 2>&1
     then
