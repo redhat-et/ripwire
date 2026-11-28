@@ -958,6 +958,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
          + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
+         + unresolvedCallsSpelling( chRows.unresCalls, /*json=*/true )    // CALLEE-GAP: the CLI callees answer's <unres> line (callees direction only; absent when none)
          + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, sqName, chNextSelector )   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
          + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", sqName, pwPrimary.end < rowTotal, rowTotal ) : std::string(),
                           "all_next" );   // BAND DC: the CLI root's all_next=, by the same rule (callers direction only)

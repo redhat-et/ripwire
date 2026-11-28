@@ -17,7 +17,7 @@ namespace rw::warmsnap
 {
 
 #if defined( _LIBCPP_VERSION ) && defined( __LP64__ )
-static_assert( sizeof( Graph ) == 1536, "Graph changed: store and load the new field in writeGraph / readGraph below, bump warmsnap::kVersion, then re-pin this size" );
+static_assert( sizeof( Graph ) == 1560, "Graph changed: store and load the new field in writeGraph / readGraph below, bump warmsnap::kVersion, then re-pin this size" );
 #endif
 
 // A per-symbol array almost every symbol leaves at zero (ambOut, declinedOut, ...): its size, then the non-zero rows.
@@ -273,6 +273,8 @@ inline void writeGraph( Out& o, const Graph& g, const IngestResult& ing, const s
     o.u64( g.stdMemberDeclinedCalls );
     o.u64( g.stdMemberDeclines.size() );
     for( const auto& [ caller, name ] : g.stdMemberDeclines ) { o.u32( caller ); o.pod( name ); }
+    o.u64( g.unresolvedSites.size() );   // CALLEE-GAP: the callees answer's <unres> line
+    for( const auto& [ caller, ref ] : g.unresolvedSites ) { o.u32( caller ); o.u32( ref ); }
     o.vec( g.keptForwards );
     o.vec( g.provenSites );
     o.pod( g.callDispositions );
@@ -498,6 +500,11 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
         const NodeId caller = in.u32();
         g.stdMemberDeclines.emplace_back( caller, in.pod<std::uint16_t>() );
     }
+    for( std::size_t i = 0, n = in.count( 8 ); i < n && in.ok; ++i )
+    {
+        const NodeId caller = in.u32();
+        g.unresolvedSites.emplace_back( caller, in.u32() );
+    }
     in.vec( g.keptForwards );
     in.vec( g.provenSites );
     g.callDispositions = in.pod<CallDispositionCounts>();
@@ -541,6 +548,10 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
     const auto symbolIds = [ & ]( const auto& ids ) { return std::ranges::all_of( ids, [ & ]( NodeId id ) { return id < N; } ); };
     const auto refIds    = [ & ]( const auto& ids ) { return std::ranges::all_of( ids, [ & ]( std::uint32_t id ) { return id < ing.references.size(); } ); };
     const auto nestedIds = [ & ]( const std::vector<std::vector<NodeId>>& rows ) { return std::ranges::all_of( rows, symbolIds ); };
+    const auto unresolvedSitesIn = [ & ]( const std::vector<std::pair<NodeId, std::uint32_t>>& sites )
+    {
+        return std::ranges::is_sorted( sites ) && std::ranges::all_of( sites, [ & ]( const auto& p ) { return p.first < N && p.second < ing.references.size(); } );
+    };
     const auto provenSitesIn = [ & ]( const std::vector<ProvenSite>& sites )
     {
         return std::ranges::is_sorted( sites ) && std::ranges::all_of( sites, [ & ]( const ProvenSite& p ) { return p.ref < ing.references.size() && p.target < N; } );
@@ -550,7 +561,7 @@ inline std::optional<Graph> readGraph( Session& s, const IngestResult& ing )
                       && symbolIds( g.declinedListCand ) && symbolIds( g.inertDeclinedCaller ) && std::ranges::is_sorted( g.outOff ) && std::ranges::is_sorted( g.declinedListOff )
                       && !g.declinedListOff.empty() && g.declinedListOff.back() == g.declinedListCand.size() && g.declinedListCallCount.size() + 1 == g.declinedListOff.size()
                       && g.declinedSiteList.size() == g.declinedSiteCaller.size() && g.declinedSiteRef.size() == g.declinedSiteCaller.size()
-                      && g.declinedSiteKind.size() == g.declinedSiteCaller.size() && ( g.outVals.empty() || g.outVals.size() == g.outTargets.size() )
+                      && g.declinedSiteKind.size() == g.declinedSiteCaller.size() && unresolvedSitesIn( g.unresolvedSites ) && ( g.outVals.empty() || g.outVals.size() == g.outTargets.size() )
                       && ( g.outProv.empty() || g.outProv.size() == g.outTargets.size() ) && ( g.outNameOnly.empty() || g.outNameOnly.size() == g.outTargets.size() )
                       && ( g.outAnchorMiss.empty() || g.outAnchorMiss.size() == g.outTargets.size() ) && g.implementorBound.size() <= N
                       && ( g.priorWeight.empty() || g.priorWeight.size() == N ) && ( g.gateDeclinedTarget.empty() || g.gateDeclinedTarget.size() == N );

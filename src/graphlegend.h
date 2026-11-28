@@ -741,6 +741,13 @@ inline const char* declinedCallsStdLegend( bool on ) noexcept { return on ? kDec
 inline constexpr const char* kStdMemberCallsLegend =
     "<stdm n= calls=>: of declined_calls=, the calls these definitions make that are named like a standard-type member of their language (C++ containers, strings, optional, smart pointers; Rust collections, strings, Option, Result; n=, each name once) on a receiver no rule tied to an in-tree class; calls= how many. No edge and no row: the standard library's own member may be the one called, and so may an in-tree namesake. It is not a claim that the receiver is a standard type, and a Rust receiver of an in-tree type that no rule typed is listed too (Rust types a parameter, local or field written or constructed as an in-tree type by its name, path or use alias, and a call result; not a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a pattern other than a plain name, or a value behind Option, Result, Rc, Arc, RefCell, Cell, Mutex or RwLock). It does not list every standard-library call the body makes: a name with no in-tree definition never had a candidate to decline. ";
 inline const char* stdMemberCallsLegend( bool on ) noexcept { return on ? kStdMemberCallsLegend : ""; }
+// CALLEE-GAP: the <unres> line's clause, exactly when the line rides (XML; the JSON forms carry no legend).
+inline constexpr const char* kUnresolvedCallsLegend =
+    "<unres n= calls= more=>: calls these definitions make that have NO edge, NO row and NO <dc> although the called name (n=, "
+    "each once, first call first) is defined in this tree: every definition was ruled out (another language, the written "
+    "qualifier, a local, closure or known-indirect call); calls= how many, more= further names not listed. Not a claim the "
+    "call reaches an in-tree definition; read the line in the body (next=). ";
+inline const char* unresolvedCallsLegend( bool on ) noexcept { return on ? kUnresolvedCallsLegend : ""; }
 // --test-gate's own short form: the same attribute and unit, sized for a verb whose legend has an absolute byte budget
 // (test/testgatelegendbudgetcheck.sh), so it defines the one form it emits rather than all three.
 inline constexpr const char* kDeclinedCallsTestGateLegend =

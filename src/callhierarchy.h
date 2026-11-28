@@ -119,6 +119,7 @@ struct CallHierarchyRows
     std::size_t         declinedIface = 0;   // callers only: declinedIfaceCallsNaming below, the root's declined_iface=
     ValueRefRows        valueRefs;     // reference-as-value round: <vr> rows, never in `rows` or any count above
     StdMemberCallsMade  stdCalls;      // callees only: of declinedCalls, the standard-member ones (graph.h stdMemberCallsMadeBy)
+    UnresolvedCallsMade unresCalls;    // CALLEE-GAP, callees only: the calls with no edge and no decline whose name is defined in-tree (<unres>)
     OneHopAttribution   attr;          // attrib-multidef (defattrib.h): the definition groups + each row's ties, parallel to `rows`
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
@@ -278,6 +279,30 @@ inline std::string stdMemberCallsSpelling( const StdMemberCallsMade& m, bool jso
     }
     return json ? std::format( ",\"stdm\":{{\"n\":\"{}\",\"calls\":{}}}", m.names, m.calls )
                 : std::format( "<stdm n=\"{}\" calls=\"{}\"/>", m.names, m.calls );
+}
+
+// CALLEE-GAP: the callees answer's <unres> line (graph.h unresolvedCallsMadeBy), one spelling per dialect — the JSON keys mirror
+// the XML attributes, n= the same comma-joined value — absent when the definitions made no such call. A called name is the
+// reference's own text, so both dialects escape it.
+inline std::string unresolvedCallsSpelling( const UnresolvedCallsMade& m, bool json )
+{
+    if( m.calls == 0 )
+    {
+        return {};
+    }
+    std::string names;
+    for( const std::string_view n : m.names )
+    {
+        names.append( names.empty() ? "" : "," ).append( n );
+    }
+    if( json )
+    {
+        return std::format( ",\"unres\":{{\"n\":\"{}\",\"calls\":{}{}}}", jsonStr( names ), m.calls,
+                            m.more > 0 ? std::format( ",\"more\":{}", m.more ) : std::string() );
+    }
+    std::vector<char> esc;
+    return std::format( "<unres n=\"{}\" calls=\"{}\"{}/>", escapeXml( names, esc ), m.calls,
+                        m.more > 0 ? std::format( " more=\"{}\"", m.more ) : std::string() );
 }
 
 // cross_kind= (comparison table hono-07, 2026-09-30): a bare `getPath` resolved to ONE free function
@@ -684,6 +709,7 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     std::tie( out.declinedCalls, out.declinedSites ) = declinedCallsAndSites( ing, g, out.matches, wantCallers );   // the count and its <dc> rows
     out.declinedIface = wantCallers ? declinedIfaceCallsNaming( ing, g, out.matches ) : 0;
     out.stdCalls      = wantCallers ? StdMemberCallsMade{} : stdMemberCallsMadeBy( g, out.matches );
+    out.unresCalls    = wantCallers ? UnresolvedCallsMade{} : unresolvedCallsMadeBy( ing, g, out.matches );
 
     // Reference-as-value round: the <vr> rows beside the call rows — the binding sites of `matches` (callers), or what
     // `matches` stores/passes and may call through (callees). Never merged into `rows`: they are not calls.

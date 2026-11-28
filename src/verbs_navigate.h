@@ -251,7 +251,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                    + rw::viaMacroCappedKeyJson( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling
                    + rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
                    + rw::declinedIfaceKeyJson( chRows.declinedIface )
-                   + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),
+                   + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )
+                   + rw::unresolvedCallsSpelling( chRows.unresCalls, /*json=*/true ),   // CALLEE-GAP: the XML <unres> line
                  ( rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( ing, chRows.valueRefs.depthCut, chVr )
                    + rw::patternDispatchKeyJson( chRows.valueRefs.patternSites.size(), chRows.valueRefs.patternWideSites.size() )   // IX-3: the XML root's pattern counts
                    + rw::slotCallsKeyJson( chRows.valueRefs.slotSites.size() ) ) );   // IX-1: the XML root's slot_calls=
@@ -455,7 +456,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                                            !wantCallers && rw::inertDeclinedMadeBy( g, matches ) > 0 )   // exactly when the root carries declined_calls=; the inert sentence only where THESE definitions made an inert quoted site
                            + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( chDc, wantCallers, chDcCut, cfg.columnar ) ),   // and the <dc> rows, exactly when one rides
                          std::string( rw::declinedIfaceLegend( chRows.declinedIface > 0 ) ) + rw::viaImplLegend( chHasImpl )   // likewise, exactly when declined_iface= / a via="impl" row is there
-                           + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar ),   // and when the <stdm> line is (XML only)
+                           + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar )   // and when the <stdm> line is (XML only)
+                           + rw::unresolvedCallsLegend( chRows.unresCalls.calls > 0 && !cfg.columnar ),   // CALLEE-GAP: likewise the <unres> line
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
                            + rw::implsLegend( chRows.contractSeeds > 0 )                           // BODILESS-SEED: likewise for impls=
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
@@ -553,7 +555,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          rw::splitArmAttrXml( chAttr.splitArm( i ) ), rw::ofDefAttrXml( chAttr.groups, chAttr.tokens, i ),   // attrib-multidef
                          chSites.any ? rw::callSitesAttrXml( chSites.tokens[ i - pw.begin ], chSites.totals[ i - pw.begin ] ) : std::string() );   // CALLSITE-AT
         }
-        rw::emitTo( stdout, "{}{}{}{}</{}>", rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/false ),   // the declined standard-member calls, after the rows
+        rw::emitTo( stdout, "{}{}{}{}</{}>", rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/false )   // the declined standard-member calls, after the rows
+                                               + rw::unresolvedCallsSpelling( chRows.unresCalls, /*json=*/false ),   // CALLEE-GAP: the unbound in-tree names
                      chDcRows,                                                                                // and each declined call SITE (<dc>)
                      chInRows,                                                                                // ix2-slice: each closure's own callees (<in>)
                      rw::valueRefsXml( ing, chRows.valueRefs, wantCallers, chVr, chVrNext )

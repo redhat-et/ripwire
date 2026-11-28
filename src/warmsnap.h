@@ -93,7 +93,7 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 12;                       // bump on ANY layout change in the header or the three sections
+inline constexpr std::uint32_t kVersion = 14;                       // bump on ANY layout change in the header or the three sections
                                                                     // 7: lane tangle-rule — the MODEL section carries IngestResult::tangleBlocks (after fnLocalScopes)
                                                                     // 8-10: reserved (M2 slot table 11-26: #752, #754, M2 C1 stages)
                                                                     // 11: lane deps-reread — each GRAPH dependency row carries its file's settled StatSig
