@@ -10,10 +10,21 @@ ReDoS subject, a real minimal OOXML zip (a fake `PK\x03\x04` header would prove 
 branch), and a hostile git repo built at run time — a committed name containing `|`, a space or a newline does
 not survive every checkout path.
 
-Eight rows, one per (attack, transport) pair, each `repelled` and each required to carry the exact shape the
-repaired acceptance criteria name — the structural-screen lead-in `refused, nothing was scanned:` (not the
-`refused, no hit is reported` abandonment, and not the exit status, which reads identically for both). The
-report is emitted as real CSV and parsed as real CSV: one field legitimately contains `", "`, and an
+Eight rows, one per (attack, transport) pair, each `repelled` and each required to carry **its own** expected
+shape in the captured output, not one shared sentence:
+
+- **A1 / CLI** — the structural-screen lead-in `refused, nothing was scanned:` (not the `refused, no hit is
+  reported` abandonment, and not the exit status, which reads identically for both).
+- **A1 / HTTP** — not a refusal. A structured empty result (`files=0 total=0 complete=true`) plus the positive
+  control that proves the tree really was scanned.
+- **A2 / stdio and HTTP** — `-32602` naming the workspace (`path outside workspace` on stdio, `outside this
+  server's workspace` on HTTP, with and without `--allow-remote-edits`), and the victim file byte-identical.
+- **A3 / stdio** — the victim outside the tree byte-identical, the edit still applied, and no temp residue.
+- **A4 / CLI** — every ownership row names the true author, with no forged author and no committer email.
+- **A5 / HTTP and stdio** — `413` plus the 8 MB sentence, and `-32600` plus the 32 MiB line-limit sentence, each
+  followed by a healthy answer.
+
+The report is emitted as real CSV and parsed as real CSV: one field legitimately contains `", "`, and an
 `awk -F', '` column counter reports that row as malformed when it is exactly right.
 
 **Four things the gate deliberately does not assert, each disclosed in its own header.** It does not assert a
