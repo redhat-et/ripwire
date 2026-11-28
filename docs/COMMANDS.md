@@ -3036,7 +3036,7 @@ $ ./build/ripwire . --quality-delta
 
 **Answers:** (with --quality-delta=A..B) run only the named kinds — the replay a partial answer hands back (with --quality-delta=A..B) run ONLY the named kinds, comma-separated, of the thirteen: api-surface, complexity, dead-code, defect-shape, duplication, error-masking, nesting, new-clone-of-reused-helper, params, placeholder, short-horizon-churn, tangle, verbosity.
 
-A named kind's rows are exactly its rows in a full answer (same code, same bars); the header names the others (kinds_skipped=, skipped_why="selector"), stale acks are judged for the named kinds only, and a pass no named kind needs does not run. An unknown name is refused (exit 1) naming the thirteen; refused beside --quality-ack or --quality-baseline and on the bare form (the working-tree form and the MCP quality_delta tool have no selector yet). A selection the changed files cannot answer (whole-tree kinds, with or without defect-shape) is never pre-empted by the memory projection: it runs in full, and only a real memory stop refuses it (exit 5) — so the kinds_next= replay is not degraded again.
+The same code and bars apply; exact/near overlaps merge only when both clone kinds are selected. The header names the unselected kinds (kinds_skipped=, skipped_why="selector"); stale acks are judged only for selected kinds, and passes they do not need are skipped. Unknown names are refused (exit 1); also refused beside --quality-ack or --quality-baseline and on the bare form (working tree and MCP have no selector yet). A selection the changed files cannot answer (whole-tree kinds, with or without defect-shape) is never pre-empted by the memory projection: it runs in full, and only a real memory stop refuses it (exit 5) — so the kinds_next= replay is not degraded again.
 
 **Try it**
 
@@ -3051,9 +3051,9 @@ $ ./build/ripwire . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dead
 
 **Caveats (stated by the binary):**
 
-- the header names the others (kinds_skipped=, skipped_why="selector"), stale acks are judged for the named kinds only, and a pass no named kind needs does not run.
-- An unknown name is refused (exit 1) naming the thirteen;
-- refused beside --quality-ack or --quality-baseline and on the bare form (the working-tree form and the MCP quality_delta tool have no selector yet).
+- The header names the unselected kinds (kinds_skipped=, skipped_why="selector");
+- stale acks are judged only for selected kinds, and passes they do not need are skipped.
+- Unknown names are refused (exit 1);
 
 ### `--dmm[=REV|A..B]`
 
@@ -3107,7 +3107,7 @@ $ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
 
 **Answers:** (with --quality-ack) ack only SOME findings — those whose KIND, canonical id or FACET matches (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or FACET contains one of these;
 
-the pseudo-token 'gating' selects exactly what would exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the never-gating api-surface new-symbol rows; a defect-shape facet (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift) selects that shape alone. Matching nothing refuses (exit 1) rather than falling back to acking everything. Whatever you leave unacked stays visible.
+the pseudo-token 'gating' selects exactly what would exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the never-gating api-surface new-symbol rows; a defect-shape facet (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm, zero-evidence, count-drift) selects that shape alone. Matching nothing refuses (exit 1) rather than falling back to acking everything. Whatever you leave unacked stays visible. Matching a merged clone row also accepts its component findings.
 
 **Try it**
 
@@ -4800,7 +4800,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=7735f04112800391 entries=1344
+ripwire legend dictionary ripwire.dict/v1 dictv=f7506e4f8d24cd65 entries=1344
 <about legend="ref" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that needs … [line truncated: 80 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)

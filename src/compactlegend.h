@@ -1935,7 +1935,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement and call-sequence leave out parameter names, std:: chains and container words and never demote a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=
-    { "members", "r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
+    { "members", "r members=/tokens=: clone member ids (union for overlaps) / representative's normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
     // #228: which git-HEAD floor answered. A zero from a self-comparison and a zero from an archived
     // comparison are different claims, so the attribute is present-only and its ABSENCE is the archived tree.
     { "head_basis", "head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },

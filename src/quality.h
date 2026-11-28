@@ -8613,6 +8613,7 @@ struct Regression
     std::string why;
     std::string fix;
     std::string locals;
+    std::size_t cloneGroupIndex = 0;   // One-based index into this ingest's exact groups followed by its near groups; zero for non-candidates.
 
     // P0.3 (r27) — ZERO MAGNITUDE. A finding with was == now == 0 carries no magnitude at all, so the ack
     // ratchet's `now <= ackNow` test degenerates to `0 <= 0` = "always suppressed" — a permanent blank check,
@@ -11337,8 +11338,7 @@ inline std::string ratchetAttrsJson( const DeltaExtras& x )
 // the first-sorting member, and the ownership partition has to ask "does ANY member live in this scope"; the
 // members= TEXT cannot answer that, because a canonId degrades to a BARE NAME for a scope-less free function
 // and carries no path at all (quality::displaySym's own documented case). Sorted and deduplicated, so the
-// field is deterministic and usually one or two entries. A free function rather than a few lines inside
-// computeDelta's stampCloneLoc: that body is already the file's largest, and this is a pure map over a group.
+// field is deterministic and usually one or two entries.
 inline std::vector<std::string> cloneMemberPaths( const CloneGroup& cg, const IngestResult& ing, std::string_view root )
 {
     std::vector<std::string> paths;
@@ -11352,6 +11352,70 @@ inline std::vector<std::string> cloneMemberPaths( const CloneGroup& cg, const In
     }
     rw::sortutil::sortUnique( paths );
     return paths;
+}
+
+inline void stampRegressionLocation( Regression& row, NodeId node, const IngestResult& ing, std::string_view root )
+{
+    if( node >= ing.symbols.size() || ing.symbols[ node ].fileId >= ing.files.size() )
+    {
+        row.path.clear();   // degrade: no locator rather than a wrong one
+        row.line = 0;
+        return;
+    }
+    const Symbol& s = ing.symbols[ node ];
+    row.path.assign( relForHash( ing.files[ s.fileId ], root ) );
+    row.line = s.line;
+}
+
+// Name the same leading member as the row's canonId-sorted members list.
+inline void stampCloneRegressionLocation( Regression& row, const CloneGroup& cg, const Graph& g,
+                                          const IngestResult& ing, std::string_view root )
+{
+    NodeId best = NodeId( -1 );
+    std::string_view bestId;
+    for( NodeId member : cg.members )
+    {
+        if( member >= g.canonId.size() || g.canonId[ member ].empty() )
+        {
+            continue;
+        }
+        const std::string_view id = g.canonId[ member ];
+        if( bestId.empty() || id < bestId )
+        {
+            best = member;
+            bestId = id;
+        }
+    }
+    stampRegressionLocation( row, best, ing, root );
+}
+
+inline std::string joinCloneMemberIds( const CloneGroup& cg, const Graph& g )
+{
+    constexpr std::string_view sep = " | ";
+    std::vector<std::string_view> ids;
+    ids.reserve( cg.members.size() );
+    std::size_t bytes = 0;
+    for( NodeId member : cg.members )
+    {
+        if( member < g.canonId.size() )
+        {
+            const std::string_view id = g.canonId[ member ];
+            bytes += id.size() + ( ids.empty() ? 0 : sep.size() );
+            ids.push_back( id );
+        }
+    }
+    std::ranges::sort( ids, rw::sortutil::svLess );
+    std::string joined;
+    joined.reserve( bytes );
+    for( std::size_t index = 0; index < ids.size(); ++index )
+    {
+        if( index > 0 )
+        {
+            joined += sep;
+        }
+        joined += ids[ index ];
+    }
+    return joined;
 }
 
 // P1 — the SCOPE disclosure, built once for BOTH emitters, exactly as identityDisclosure is: two surfaces
@@ -12206,6 +12270,176 @@ inline void demoteShrinkOnlyClones( std::vector<Regression>& regs, const std::ve
     }
 }
 
+inline bool regressionDisplayLess( const Regression& a, const Regression& b )
+{
+    return a.kind != b.kind ? a.kind < b.kind : a.sym < b.sym;
+}
+
+inline bool betterCloneRow( const Regression& row, const Regression& best )
+{
+    if( row.kind != best.kind )
+    {
+        return row.kind == "new-clone-of-reused-helper";
+    }
+    // For equal magnitudes, prefer the original pass order (exact before near), not the report order.
+    return row.now != best.now ? row.now > best.now : row.cloneGroupIndex < best.cloneGroupIndex;
+}
+
+struct CloneOverlapSelection
+{
+    std::function<bool( const Regression&, const std::string& )> matches;
+    std::vector<char> rows;   // original row indices selected by a match on the merged display row
+};
+
+// Only a surviving gating near group that shares an exact member can join a family. A selector can
+// match that same display view without modifying the original rows and their acknowledgment keys.
+inline void mergeOverlappingCloneRows( std::vector<Regression>& regs, TreePasses& passes,
+                                       const Graph& g, const IngestResult& ing, std::string_view root, KindMask kinds = kAllKinds,
+                                       CloneOverlapSelection* selection = nullptr )
+{
+    if( !kindSelected( kinds, "duplication" ) || !kindSelected( kinds, "new-clone-of-reused-helper" ) )
+    {
+        return;
+    }
+    std::vector<ShrinkCandidate> cands;
+    for( std::size_t i = 0; i < regs.size(); ++i )
+    {
+        const Regression& row = regs[i];
+        if( row.cloneGroupIndex == 0 || !rowGates( row ) )
+        {
+            continue;
+        }
+        const auto& exact = passes.exactClones( ing );
+        const auto& type3 = passes.type3Clones( ing );
+        const std::size_t index = row.cloneGroupIndex - 1;
+        EXPECTS( index < exact.size() + type3.size(), "clone row indices address the passes that produced them" );
+        const CloneGroup& group = index < exact.size() ? exact[index] : type3[index - exact.size()];
+        cands.push_back( { i, &group } );
+    }
+    if( cands.size() < 2 )
+    {
+        return;
+    }
+    UnionFind overlaps( cands.size() );
+    HashMap<NodeId, std::uint32_t> firstExactByMember;
+    firstExactByMember.reserve( cands.size() );
+    for( std::uint32_t candidateIndex = 0; candidateIndex < cands.size(); ++candidateIndex )
+    {
+        const ShrinkCandidate& candidate = cands[ candidateIndex ];
+        if( candidate.group->type == 3 )
+        {
+            continue;
+        }
+        for( NodeId member : candidate.group->members )
+        {
+            const auto [ it, fresh ] = firstExactByMember.try_emplace( member, candidateIndex );
+            if( !fresh )
+            {
+                overlaps.unite( candidateIndex, it->second );
+            }
+        }
+    }
+
+    std::vector<std::uint32_t> linkedNear;
+    for( std::uint32_t candidateIndex = 0; candidateIndex < cands.size(); ++candidateIndex )
+    {
+        const ShrinkCandidate& candidate = cands[ candidateIndex ];
+        if( candidate.group->type != 3 )
+        {
+            continue;
+        }
+        bool touchesExact = false;
+        for( NodeId member : candidate.group->members )
+        {
+            if( const auto it = firstExactByMember.find( member ); it != firstExactByMember.end() )
+            {
+                overlaps.unite( candidateIndex, it->second );
+                touchesExact = true;
+            }
+        }
+        if( touchesExact )
+        {
+            linkedNear.push_back( candidateIndex );
+        }
+    }
+    if( linkedNear.empty() )
+    {
+        return;
+    }
+
+    struct Overlap
+    {
+        CloneGroup  group{};
+        std::size_t bestRowIndex = 0;
+        bool        hasNear = false;
+        bool        selected = false;
+    };
+    std::vector<Overlap> families( cands.size() );
+    for( std::uint32_t candidateIndex : linkedNear )
+    {
+        families[ overlaps.find( candidateIndex ) ].hasNear = true;
+    }
+    std::vector<char> rowMask( regs.size(), 0 );
+    for( std::uint32_t candidateIndex = 0; candidateIndex < cands.size(); ++candidateIndex )
+    {
+        Overlap& family = families[ overlaps.find( candidateIndex ) ];
+        const ShrinkCandidate& candidate = cands[ candidateIndex ];
+        if( !family.hasNear )
+        {
+            continue;
+        }
+        if( family.group.members.empty() || betterCloneRow( regs[ candidate.row ], regs[ family.bestRowIndex ] ) )
+        {
+            family.bestRowIndex = candidate.row;
+        }
+        family.group.members.insert( family.group.members.end(), candidate.group->members.begin(), candidate.group->members.end() );
+        rowMask[ candidate.row ] = 1;
+    }
+    for( Overlap& family : families )
+    {
+        if( !family.hasNear )
+        {
+            continue;
+        }
+        rw::sortutil::sortUnique( family.group.members );
+        Regression& row = regs[ family.bestRowIndex ];
+        std::string sym = joinCloneMemberIds( family.group, g );
+        if( selection != nullptr )
+        {
+            family.selected = selection->matches( row, sym );
+            continue;
+        }
+        row.sym = std::move( sym );
+        stampCloneRegressionLocation( row, family.group, g, ing, root );
+        row.memberPaths = cloneMemberPaths( family.group, ing, root );
+        rowMask[ family.bestRowIndex ] = 0;
+    }
+    if( selection != nullptr )
+    {
+        for( std::uint32_t i = 0; i < cands.size(); ++i )
+        {
+            rowMask[ cands[i].row ] = families[ overlaps.find( i ) ].selected;
+        }
+        selection->rows = std::move( rowMask );
+        return;
+    }
+    std::size_t kept = 0;
+    for( std::size_t rowIndex = 0; rowIndex < regs.size(); ++rowIndex )
+    {
+        if( rowMask[ rowIndex ] )
+        {
+            continue;
+        }
+        if( kept != rowIndex )
+        {
+            regs[ kept ] = std::move( regs[ rowIndex ] );
+        }
+        ++kept;
+    }
+    regs.resize( kept );
+    std::stable_sort( regs.begin(), regs.end(), regressionDisplayLess );
+}
+
 // QD-REPEATED-DECISION (repeateddecision.h) — a FACET on the complexity and tangle rows already built: when the function's
 // body tests one condition twice or repeats a loop body, fix= names it with its lines ("name the decision once"); a tangle
 // row's own fix= keeps its text first. It adds no row and changes no severity. The body read is the key's highest-ccx
@@ -12543,38 +12777,14 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     const auto stampLoc = [ & ]( NodeId i )
     {
         ASSUME( !regs.empty() );
-        if( i >= ing.symbols.size() )
-        {
-            return; // degrade: no locator rather than a wrong one
-        }
-        const Symbol& s = ing.symbols[i];
-        if( s.fileId >= ing.files.size() )
-        {
-            return;
-        }
-        regs.back().path = std::string( relForHash( ing.files[ s.fileId ], root ) );
-        regs.back().line = s.line;
+        stampRegressionLocation( regs.back(), i, ing, root );
     };
 
-    // The clone kinds' locator: the member whose canonId sorts FIRST, so p= names the same symbol that leads
-    // the emitted members= list rather than an arbitrary NodeId-order pick.
+    // P1 SCOPE: in addition to p=, clone rows carry the paths of all their members.
     const auto stampCloneLoc = [ & ]( const CloneGroup& cg )
     {
-        NodeId      best   = NodeId( -1 );
-        std::string bestId;
-        for( NodeId m : cg.members )
-        {
-            if( m >= g.canonId.size() || g.canonId[m].empty() )
-            {
-                continue;
-            }
-            if( best == NodeId( -1 ) || g.canonId[m] < bestId ) { best = m; bestId = g.canonId[m]; }
-        }
-        if( best != NodeId( -1 ) )
-        {
-            stampLoc( best );
-        }
-        regs.back().memberPaths = cloneMemberPaths( cg, ing, root );   // P1 SCOPE — see cloneMemberPaths
+        stampCloneRegressionLocation( regs.back(), cg, g, ing, root );
+        regs.back().memberPaths = cloneMemberPaths( cg, ing, root );
     };
 
     const MovedBodies moved( base, keyByNode, nowMove );
@@ -12690,8 +12900,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // duplication: a clone group (exact Type-1/2 OR gapped Type-3) whose member-set is not in the
     // baseline set. Both passes hash by the same sorted-member-canonId identity, so a change that
     // introduces a NEW near-clone (Type-3) is flagged exactly like a new exact copy. `now` carries the
-    // group's tokens; the reported set is deduped by the same emitted-hash guard both passes share (an
-    // exact and a near group can never share a member-set hash, so no double-report).
+    // group's tokens. Both passes share the emitted-hash guard; a later display merge handles
+    // overlapping exact and near groups with different hashes.
     // IDIOM CLASS (cloneidiom.h) — an idiom COLLISION is reported minor with its shape NAMED, not gated; a
     // group that classifies but fails the rest of the conjunction gates as before, name and all.
     const std::vector<CloneIdiomVerdict> exactIdioms = classifyCloneGroupIdioms( ing, exactClones );
@@ -12787,10 +12997,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     // QD-SHRINK-PAIR: the gating clone rows both reports push, judged together once both have run (demoteShrinkOnlyClones)
     std::vector<ShrinkCandidate> shrinkCands;
-    const auto noteShrinkCandidate = [ & ]( const CloneGroup& cg )
+    const auto noteShrinkCandidate = [ & ]( const CloneGroup& cg, std::size_t index )
     {
         if( rowGates( regs.back() ) )
         {
+            regs.back().cloneGroupIndex = index + 1 + ( cg.type == 3 ? exactClones.size() : 0 );
             shrinkCands.push_back( { regs.size() - 1, &cg } );
         }
     };
@@ -12828,31 +13039,13 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 continue; // same member-set already reported this run
             }
-            std::vector<std::string> ids;
-            for( NodeId m : cg.members )
-            {
-                if( m < g.canonId.size() )
-                {
-                    ids.push_back( g.canonId[m] );
-                }
-            }
-            std::sort( ids.begin(), ids.end() );
-            std::string joined;
-            for( std::size_t k = 0; k < ids.size(); ++k )
-            {
-                joined += ids[k];
-                if( k + 1 < ids.size() )
-                {
-                    joined += " | ";
-                }
-            }
             // isMinor = the demotion; facet = the recognized shape, emitted as idiom= (facetAttrName).
             // QD-IDIOM-ELEMTYPE: a group whose members operate on different data (cloneidiom.h's operand path) is minor too, why= naming it.
-            regs.push_back( { "duplication", joined, 0, cg.tokens, h, vd.demoted || vd.operands != CloneOperandDiff::None,
+            regs.push_back( { "duplication", joinCloneMemberIds( cg, g ), 0, cg.tokens, h, vd.demoted || vd.operands != CloneOperandDiff::None,
                               std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
             regs.back().why = cloneOperandWhy( vd.operands );
             stampCloneLoc( cg );
-            noteShrinkCandidate( cg );
+            noteShrinkCandidate( cg, ci );
         }
     };
     reportNewClones( exactClones, exactIdioms );
@@ -13273,29 +13466,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 {
                     continue; // same member-set already reported
                 }
-                std::vector<std::string> ids;
-                for( NodeId m : cg.members )
-                {
-                    if( m < g.canonId.size() )
-                    {
-                        ids.push_back( g.canonId[m] );
-                    }
-                }
-                std::sort( ids.begin(), ids.end() );
-                std::string joined;
-                for( std::size_t k = 0; k < ids.size(); ++k )
-                {
-                    joined += ids[k];
-                    if( k + 1 < ids.size() )
-                    {
-                        joined += " | ";
-                    }
-                }
-                regs.push_back( { "new-clone-of-reused-helper", joined, 0, maxFanin, h, vd.demoted || vd.operands != CloneOperandDiff::None,
+                regs.push_back( { "new-clone-of-reused-helper", joinCloneMemberIds( cg, g ), 0, maxFanin, h, vd.demoted || vd.operands != CloneOperandDiff::None,
                                   std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // now = the eroded helper's fan-in; ack identity = the member-set hash
                 regs.back().why = cloneOperandWhy( vd.operands );   // QD-IDIOM-ELEMTYPE, as on the duplication row
                 stampCloneLoc( cg );
-                noteShrinkCandidate( cg );
+                noteShrinkCandidate( cg, ci );
             }
         };
         reportReusedClones( exactClones, exactIdioms );
@@ -13305,13 +13480,12 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     // qd-memory-degrade: only the selected kinds' rows. A pass shared by two kinds (error-masking and placeholder, the
     // two clone kinds) or read by another kind (params, which api-surface's one-fact-one-row rule reads) ran for the
-    // selected one; its other rows are dropped here, so a selected kind's rows are exactly its rows in a full answer.
+    // selected one; drop its unselected rows here. A single clone kind retains its per-group rows.
     if( scope.kinds != kAllKinds )
     {
         std::erase_if( regs, [ &scope ]( const Regression& r ) { return !kindSelected( scope.kinds, r.kind ); } );
     }
-    std::sort( regs.begin(), regs.end(), []( const Regression& a, const Regression& b )
-    { return a.kind != b.kind ? a.kind < b.kind : a.sym < b.sym; } );
+    std::sort( regs.begin(), regs.end(), regressionDisplayLess );
     if( historyUnreadOut )
     {
         *historyUnreadOut = historyUnread;
