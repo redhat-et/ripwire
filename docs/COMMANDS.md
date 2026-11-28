@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#--detailn) · [`--pack-signatures`](#--pack-signatures) · [`--outline`](#--outlineab) · [`--expand`](#--expandab) · [`--compress`](#--compress) · [`--pack-top-n`](#--pack-top-nn) · [`--no-redact`](#--no-redact)
 
-**assess quality / structure** — [`--metrics`](#--metrics) · [`--deps`](#--deps) · [`--hotspots`](#--hotspots) · [`--clones`](#--clones) · [`--biggest-first`](#--biggest-first) · [`--nonlocal-state`](#--nonlocal-state) · [`--ensemble`](#--ensemble) · [`--quality-panel`](#--quality-panelpreset) · [`--context-ratio`](#--context-ratio) · [`--naming-calibration`](#--naming-calibration) · [`--naming-consistency`](#--naming-consistency) · [`--naming-locals`](#--naming-locals) · [`--comment-coherence`](#--comment-coherence) · [`--cochange`](#--cochangefile) · [`--cochange-recur`](#--cochange-recurk) · [`--cochange-groups`](#--cochange-groups) · [`--since`](#--sincerevdate) · [`--include-bots`](#--include-bots) · [`--arch`](#--archfile) · [`--arch`](#--archfile---baseline) · [`--arch`](#--archfile---baseline-update) · [`--lint`](#--lint) · [`--lint-catalog`](#--lint-catalog) · [`--lint-rules`](#--lint-rulesdir) · [`--lint-select`](#--lint-selectprefix) · [`--lint-ignore`](#--lint-ignoreprefix) · [`--lint-max-per-rule`](#--lint-max-per-rulen) · [`--sarif`](#--sarif) · [`--with-profile`](#--with-profilefile) · [`--communities`](#--communities) · [`--community`](#--communityid) · [`--zoom`](#--zoomdepth) · [`--report`](#--report) · [`--seams`](#--seams) · [`--mermaid`](#--mermaid) · [`--owners`](#--ownerssym) · [`--dead-code`](#--dead-codedir) · [`--quality-baseline`](#--quality-baseline) · [`--allow-dirty`](#--allow-dirty) · [`--show-stale`](#--show-stale) · [`--quality-delta`](#--quality-delta) · [`--quality-delta`](#--quality-deltarevab) · [`--quality-kinds`](#--quality-kindskk) · [`--dmm`](#--dmmrevab) · [`--quality-ack`](#--quality-ackreason) · [`--ack-only`](#--ack-onlysubstrsubstr) · [`--scope`](#--scopeglobglob) · [`--edit-check`](#--edit-checksym) · [`--replace-symbol-body`](#--replace-symbol-bodytarget) · [`--insert-before-symbol`](#--insert-before-symboltarget) · [`--insert-after-symbol`](#--insert-after-symboltarget) · [`--edit-payload`](#--edit-payloadfile-) · [`--edit-target-file`](#--edit-target-filepath) · [`--no-post-check`](#--no-post-check) · [`--edit-plan`](#--edit-planfile) · [`--dry-run`](#--dry-run----apply) · [`--safe-delete`](#--safe-deletesym) · [`--slice`](#--slicesymvar) · [`--slice-flow`](#--slice-flowbackfwdboth) · [`--slice-depth`](#--slice-depthn) · [`--at`](#--atfileline) · [`--pr-context`](#--pr-contextbaseref) · [`--merge-scout`](#--merge-scoutrefref) · [`--plan-lanes`](#--plan-lanesn---taskgoal) · [`--plan-lanes`](#--plan-lanes---brieffile) · [`--stray-content`](#--stray-contentsubstr) · [`--plan`](#--plan) · [`--abi`](#--abi) · [`--whereis`](#--whereissym) · [`--whereis-full-text`](#--whereis-full-text) · [`--whereis-listing`](#--whereis-listingwhich) · [`--flags`](#--flagssubstr) · [`--flip`](#--flipname) · [`--layout`](#--layoutstruct) · [`--field-affinity`](#--field-affinitystruct) · [`--doc-drift`](#--doc-driftsubstr) · [`--doc-drift`](#--doc-drift---gateability) · [`--with-history`](#--with-history) · [`--plan-lint`](#--plan-lintfile) · [`--from-trace`](#--from-tracefile) · [`--run-trace`](#--run-tracecmd) · [`--run-timeout`](#--run-timeoutseconds) · [`--note-add`](#--note-addtarget-text) · [`--notes`](#--notes) · [`--pack-task`](#--pack-tasktask) · [`--partition`](#--partitionn) · [`--with-graph`](#--with-graph) · [`--export`](#--exportccjsonfile) · [`--batch`](#--batchfile)
+**assess quality / structure** — [`--metrics`](#--metrics) · [`--deps`](#--deps) · [`--hotspots`](#--hotspots) · [`--clones`](#--clones) · [`--biggest-first`](#--biggest-first) · [`--nonlocal-state`](#--nonlocal-state) · [`--ensemble`](#--ensemble) · [`--quality-panel`](#--quality-panelpreset) · [`--context-ratio`](#--context-ratio) · [`--naming-calibration`](#--naming-calibration) · [`--naming-consistency`](#--naming-consistency) · [`--naming-locals`](#--naming-locals) · [`--comment-coherence`](#--comment-coherence) · [`--cochange`](#--cochangefile) · [`--cochange-recur`](#--cochange-recurk) · [`--cochange-groups`](#--cochange-groups) · [`--since`](#--sincerevdate) · [`--include-bots`](#--include-bots) · [`--arch`](#--archfile) · [`--arch`](#--archfile---baseline) · [`--arch`](#--archfile---baseline-update) · [`--lint`](#--lint) · [`--lint-catalog`](#--lint-catalog) · [`--lint-rules`](#--lint-rulesdir) · [`--lint-select`](#--lint-selectprefix) · [`--lint-ignore`](#--lint-ignoreprefix) · [`--lint-max-per-rule`](#--lint-max-per-rulen) · [`--sarif`](#--sarif) · [`--with-profile`](#--with-profilefile) · [`--communities`](#--communities) · [`--community`](#--communityid) · [`--zoom`](#--zoomdepth) · [`--report`](#--report) · [`--seams`](#--seams) · [`--mermaid`](#--mermaid) · [`--owners`](#--ownerssym) · [`--dead-code`](#--dead-codedir) · [`--quality-baseline`](#--quality-baseline) · [`--allow-dirty`](#--allow-dirty) · [`--show-stale`](#--show-stale) · [`--quality-delta`](#--quality-delta) · [`--quality-delta`](#--quality-deltarevab) · [`--quality-kinds`](#--quality-kindskk) · [`--dmm`](#--dmmrevab) · [`--quality-ack`](#--quality-ackreason) · [`--ack-only`](#--ack-onlysubstrsubstr) · [`--scope`](#--scopeglobglob) · [`--edit-check`](#--edit-checksym) · [`--replace-symbol-body`](#--replace-symbol-bodytarget) · [`--insert-before-symbol`](#--insert-before-symboltarget) · [`--insert-after-symbol`](#--insert-after-symboltarget) · [`--edit-payload`](#--edit-payloadfile-) · [`--edit-target-file`](#--edit-target-filepath) · [`--no-post-check`](#--no-post-check) · [`--edit-plan`](#--edit-planfile) · [`--dry-run`](#--dry-run----apply) · [`--safe-delete`](#--safe-deletesym) · [`--slice`](#--slicesymvar) · [`--slice-flow`](#--slice-flowbackfwdboth) · [`--slice-depth`](#--slice-depthn) · [`--at`](#--atfileline) · [`--pr-context`](#--pr-contextbaseref) · [`--merge-scout`](#--merge-scoutrefref) · [`--plan-lanes`](#--plan-lanesn---taskgoal) · [`--plan-lanes`](#--plan-lanes---brieffile) · [`--stray-content`](#--stray-contentsubstr) · [`--plan`](#--plan) · [`--abi`](#--abi) · [`--whereis`](#--whereissym) · [`--whereis-full-text`](#--whereis-full-text) · [`--whereis-listing`](#--whereis-listingwhich) · [`--flags`](#--flagssubstr) · [`--flip`](#--flipname) · [`--layout`](#--layoutstruct) · [`--field-affinity`](#--field-affinitystruct) · [`--doc-drift`](#--doc-driftsubstr) · [`--doc-drift`](#--doc-drift---gateability) · [`--with-history`](#--with-history) · [`--plan-lint`](#--plan-lintfile) · [`--from-trace`](#--from-tracefile) · [`--run-trace`](#--run-tracecmd) · [`--run-timeout`](#--run-timeoutseconds) · [`--note-add`](#--note-addtarget-text) · [`--notes`](#--notes) · [`--pack-task`](#--pack-tasktask) · [`--brief`](#--brieftask) · [`--brief-bytes`](#--brief-bytesn) · [`--partition`](#--partitionn) · [`--with-graph`](#--with-graph) · [`--export`](#--exportccjsonfile) · [`--batch`](#--batchfile)
 
 **self-diagnosis** — [`--doctor`](#--doctor) · [`--agent`](#--agentcodexclaude) · [`--skipped`](#--skipped)
 
@@ -3629,7 +3629,7 @@ add the CLI parse arm and help text for the new filter
 write regression tests for the new filter
 ```
 
-**Shaped by:** `--legend`, `--json`
+**Shaped by:** `--brief-bytes`, `--legend`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -4246,6 +4246,44 @@ $ ./build/ripwire . --pack-task="add a new output format flag to the CLI"
 - an under-spent section's leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section eventually but never past its own fair share.
 - Each section truncates rank-adaptively and the header reports EVERY truncation (no silent caps).
 - A tiny budget degrades to ranking-only WITH the truncation note.
+
+### `--brief="TASK"`
+
+**Answers:** a pasteable brief for a fresh code-editing subagent: layout, build, entries, the --for core ONE size-capped answer a parent pastes into a subagent's prompt so it skips orientation.
+
+Eight sections in order: <layout> top dirs with a role and a file count (vendored and generated dirs marked (skip)); <build> build/test commands quoted from the repo's docs and manifests, never guessed (none found when there are none), plus the build file that lists the tests and the unit's own (the nearest manifest above it); <entry> program entries and the public header, ranked by call/include hops to the task; <task> --for's confidence, <act read=> with up to 8 ranges and the question's own sites; <edges> callers and cross-file callees of the top 3 act symbols, registration first; <where-else> the tests, docs and changelog the unit's siblings change with in git history (history="1"), then tests by name, docs and test registration; <conventions> agent docs as path + H2 headings with lines; <next> the three-moment line. Budget by files indexed: < 1K 2,560 B, < 10K 4,096 B, else 6,144 B. Over it, parts drop in a fixed order, named in dropped=; act and build never drop (over="1" says the answer still did not fit). OPT-IN: call it by name; --for stays the default route and is unchanged. Held-out check (8 repos, 24 E / 32 S / 24 T / 32 B items): --brief 9 / 24 / 12 / 19 = 64 items in 25,483 B; --for 13 / 23 / 6 / 16 = 58 items in 121,072 B. Entry points: --for finds more (13 vs 9). Only 1 of 8 repos met every per-class bar (Python 23 vs 16, TypeScript 17 vs 10 items; Rust 5 vs 9, C++ 9 vs 12, Go 10 vs 11). Off switches: RIPWIRE_BRIEF_COCHANGE=0 (history roles), RIPWIRE_BRIEF_UNITBUILD=0 (the unit's build file).
+
+**Try it**
+
+_NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode)._
+
+```
+$ ./build/ripwire . --plan-lanes --brief=<scratch>/aux/lanes_brief.txt
+add a --since filter to the doc-drift verb
+add the CLI parse arm and help text for the new filter
+write regression tests for the new filter
+```
+
+**Shaped by:** `--plan-lanes`, `--brief-bytes`
+
+**Caveats (stated by the binary):**
+
+- a pasteable brief for a fresh code-editing subagent: layout, build, entries, the --for core ONE size-capped answer a parent pastes into a subagent's prompt so it skips orientation.
+- Eight sections in order: <layout> top dirs with a role and a file count (vendored and generated dirs marked (skip));
+- <build> build/test commands quoted from the repo's docs and manifests, never guessed (none found when there are none), plus the build file that lists the tests and the unit's own (the nearest manifest above it);
+
+### `--brief-bytes=N`
+
+**Answers:** (with --brief, 512..8192) the brief's byte budget instead of the size class's
+
+**Try it**
+
+_A byte-capped brief for a fresh subagent: --brief-bytes=N (512..8192) replaces the size class's budget._
+
+```
+$ ./build/ripwire . --brief="add a --since filter to the doc-drift verb" --brief-bytes=2048
+... [1 more line(s); run it to see the whole thing]
+```
 
 ### `--partition=N`
 
