@@ -36,4 +36,7 @@ inline EnvNumber readEnvNumber( const char* name ) noexcept
     n.parsed = !n.text.empty() && ec == std::errc() && end == n.text.data() + n.text.size();
     return n;
 }
+// An OFF switch: the knob is set to exactly 0. Unset, empty or any other value leaves the feature on — the shape of every
+// default-ON feature's kill switch (the host passes the knob's name in), so each reads it here instead of restating it.
+[[nodiscard]] inline bool envSwitchedOff( const char* name ) noexcept { return readEnvNumber( name ).isZero(); }
 } // namespace rw

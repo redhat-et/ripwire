@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "infra/envnumber.h"  // envSwitchedOff — the orient-brief card's OFF switch
 #include "infra/tablelookup.h" // isOneOf
 #include "infra/jsonesc.h"   // shSingleQuote — the repository's canonical POSIX argv quoting
 #include "model.h"           // IngestResult
@@ -1676,6 +1677,46 @@ inline std::optional<RouteChoice> directTaskChoice( const RouteContext& ctx )
     return std::nullopt;
 }
 
+// ORIENT-BRIEF (BRIEF round 3, owner 11-26: "route orientation questions to --brief", default ON only behind a sealed verdict;
+// the sealed 8-repo holdout PASSED it: --brief 59 items vs --for 51 at 26.6 % of --for's bytes, >= --for on 5 of 8 repos).
+// An orientation question about the REPOSITORY ITSELF ("I'm new to this repo, where do I start", "give me an overview of this
+// codebase", "how is this project organized") is answered by the size-capped --brief page (layout, build/test commands, entry
+// points, edges, the ranked files) rather than by a whole --for bundle. Two conjunctive halves, both word-bounded: a repository
+// noun AND orientation wording over a floor — "where do I start" alone is ordinary English, and so is "overview of the quarter",
+// so neither half recommends without the other.
+// Placement is the whole safety argument: classifyRoutesUncapped asks this card only where it would otherwise ABSTAIN (no
+// direct card, no symbol route, no weighted candidate, no recency window), so every older route keeps every row it had; a
+// subsystem question ("how does the plugin system work") names no repository noun and keeps the abstain + next="--for=…".
+// RIPWIRE_BRIEF_ROUTE=0 is the kill switch: the card answers nothing and the router is byte-identical to the one before it.
+inline std::optional<RouteChoice> orientBriefTaskChoice( std::string_view task, std::string_view lower, const std::string& root )
+{
+    if( envSwitchedOff( "RIPWIRE_BRIEF_ROUTE" ) )
+    {
+        return std::nullopt;
+    }
+    // "project" is also ordinary office English ("the project budget"), so a task whose only repository noun is "project" needs
+    // more orientation evidence (>= 10) than one that says repo / repository / codebase / code base / monorepo (>= 8).
+    const bool codeNoun = wordScore( lower, { { "repo", 1 }, { "repository", 1 }, { "codebase", 1 }, { "code base", 1 },
+                                              { "monorepo", 1 }, { "source tree", 1 } } ) > 0;
+    const bool projectNoun = boundedFind( lower, "project" ) != std::string_view::npos;
+    const int orientScore = wordScore( lower, { { "new to this", 9 }, { "new to the", 8 }, { "unfamiliar with", 8 },
+                                                { "orient me", 9 }, { "get oriented", 9 }, { "orient myself", 9 },
+                                                { "lay of the land", 9 }, { "overview of", 8 }, { "high-level overview", 9 },
+                                                { "big picture", 6 }, { "where do i start", 7 }, { "where should i start", 7 },
+                                                { "where to start", 6 }, { "tour of", 8 },
+                                                { "how is this", 4 }, { "how is the", 3 }, { "organized", 6 }, { "structured", 5 },
+                                                { "laid out", 6 }, { "architecture of", 6 }, { "architecture", 3 }, { "explain", 3 },
+                                                { "just joined", 6 }, { "just cloned", 6 }, { "first time", 4 } } );
+    const int floor = codeNoun ? 8 : 10;
+    if( !( codeNoun || projectNoun ) || orientScore < floor )
+    {
+        return std::nullopt;
+    }
+    return RouteChoice{ "orient-brief", "ripwire-orient",
+                        "repository noun plus orientation wording (new to it / overview / how it is organized)",
+                        commandWithValue( root, "--brief=", task ), 100, 20 };
+}
+
 // THE ROUTER SPELLS NO LEGEND POSTURE (L1 fix round, rv-r1-L1 LOW-2). PR #215 item 5 had classify() append --legend=compact
 // to every command the binary would accept it on, and 26 route strings carried it by hand. Since L1 compact IS the CLI
 // default, so the suffix bought nothing — and it PINNED a posture: a caller that maps a routed command onto a session
@@ -1781,11 +1822,16 @@ inline TaskRouteResult classifyRoutesUncapped( std::string_view task, const std:
     // on a CLEAN tree the same sentence has no diff to review and the history reading is the honest one.
     if( candidates.empty() )
     {
-        if( std::optional<RouteChoice> recency = recencyTaskChoice( task, lower, root, ing, git, caps ) )
+        std::optional<RouteChoice> fallback = recencyTaskChoice( task, lower, root, ing, git, caps );
+        if( !fallback )
+        {
+            fallback = orientBriefTaskChoice( task, lower, root );   // last of all: see its own comment
+        }
+        if( fallback )
         {
             result.status = RouteStatus::Recommend;
             result.score  = result.margin = 100;
-            result.choices.push_back( std::move( *recency ) );
+            result.choices.push_back( std::move( *fallback ) );
         }
         return result;
     }

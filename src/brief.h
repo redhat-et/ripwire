@@ -7,11 +7,12 @@
 //   2 <build>        build/test commands QUOTED from manifests and the repo's own docs, never guessed; the test registration
 //   3 <entry>        program entries and the public header, ranked by call/include reach to the task's act symbols
 //   4 <task>         the --for core for TASK: confidence, <act read=> with up to 8 ranges, θ11 question sites
+//   4b <ranked>      the files --for's own page ranks (exemplar family, registration, sigs and tail rows) no other section names
 //   5 <edges>        callers and cross-file callees of the top-3 act symbols
 //   6 <where-else>   co-change partners, tests, docs, changelog and the test-registering build file of the act files
 //   7 <conventions>  agent/contributor docs as pointers: path + H2 headings with their lines
 //   8 <next>         the three-moment line `ripwire wrap claude` prints (subagentblock.h), unchanged
-// Size by repo class (files indexed): small < 1K -> 2,560 B; medium < 10K -> 4,096 B; large -> 6,144 B; --brief-bytes=N
+// Size by repo class (files indexed): small < 1K -> 3,584 B; medium < 10K -> 5,120 B; large -> 7,168 B; --brief-bytes=N
 // (512..8,192) overrides. Over budget, parts drop in kDropOrder and each drop is named in dropped=; act and build never drop
 // (owner: "a budget that prevents answers is bad"), so an answer that still does not fit says over="1".
 //
@@ -32,7 +33,7 @@
 #include "sarif.h"         // rootPrefixOf — the question sites' root-relative paths
 #include "serialize.h"     // escapeXml, attrOf
 #include "subagentblock.h" // kSubagentBriefBlock — section 8
-#include "infra/envnumber.h" // readEnvNumber — the two halves' OFF switches
+#include "infra/envnumber.h" // envSwitchedOff — the RIPWIRE_BRIEF_* OFF switches
 #include "infra/namesplit.h" // afterLast — the one last-segment split
 #include "infra/ownedfile.h"
 #include "infra/sortutil.h"  // sortUnique — the co-change path sets
@@ -114,9 +115,9 @@ inline std::string compactLegend( const LegendTerms& t )
 inline constexpr std::size_t kReadingNotesBytes = 104;
 inline constexpr std::size_t kLegendDefsBytes   = kLegend.size() + kSchemaAttr.size() - kReadingNotesBytes;
 inline constexpr std::array<ClassCaps, 3> kClassCaps = { {
-    { "small", 1000, 2560 + kLegendDefsBytes, 12, 3, 6 },
-    { "medium", 10000, 4096 + kLegendDefsBytes, 12, 4, 8 },
-    { "large", 0, 6144 + kLegendDefsBytes, 20, 5, 8 },
+    { "small", 1000, 3584 + kLegendDefsBytes, 12, 3, 6 },
+    { "medium", 10000, 5120 + kLegendDefsBytes, 12, 4, 8 },
+    { "large", 0, 7168 + kLegendDefsBytes, 20, 5, 8 },
 } };
 inline constexpr std::size_t kMinBudgetBytes  = 512;
 inline constexpr std::size_t kHardCapBytes    = 8192;
@@ -343,6 +344,11 @@ inline bool isDocPath( std::string_view rel ) noexcept
     const std::string_view b = baseName( rel );
     return roleOfPath( rel ) == "docs" || b.ends_with( ".md" ) || b.ends_with( ".rst" ) || b.ends_with( ".adoc" ) || b.ends_with( ".txt" );
 }
+
+inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
+
+// The basename's last dot-segment: the sibling test's "same language" key (an extension-less name is its own key).
+inline std::string_view extOf( std::string_view rel ) noexcept { return namesplit::afterLast( baseName( rel ), "." ); }
 
 // ── the corpus view every step reads ────────────────────────────────────────────────────────────────────────────────────────
 struct Corpus
@@ -655,7 +661,7 @@ inline std::vector<std::string> exemplarWords( std::string_view task )
         {
             const char ch   = i < task.size() ? task[i] : ' ';
             const bool last = i + 1 >= task.size() || task[i + 1] == ' ';
-            const bool end  = ch == ')' || ch == ',' || ch == ';' || ch == '?' || ch == '!' || ch == '\n' || ( ch == '.' && last );
+            const bool end  = ch == ')' || ch == ',' || ch == ';' || ch == '?' || ch == '!' || ch == '\n' || ( ( ch == '.' || ch == ':' ) && last );
             if( ch == ' ' || end )
             {
                 const std::string w = lower( cur );
@@ -825,18 +831,40 @@ inline std::string singular( std::string w )
 
 // The probes in order (one word: its name leaf exact, then case-blind, then as a path leaf; several: their CamelCase join
 // case-blind, the snake join, then the first word as a path leaf with the rest as kind words); the first probe that hits decides.
-inline Exemplar findExemplar( const Corpus& c, std::string_view task )
+// The file a "like X: path" phrase names outright, when it is an indexed file: the task's own pointer beats any name probe.
+inline std::string namedExemplarFile( const Corpus& c, std::string_view task )
 {
-    Exemplar                       ex;
-    const std::vector<std::string> words = exemplarWords( task );
-    if( words.empty() )
+    const std::string lo = lower( task );
+    for( std::size_t at = lo.find( "like " ); at != std::string::npos; at = lo.find( "like ", at + 1 ) )
     {
-        return ex;
+        const std::size_t close = task.find_first_of( ")\n", at );
+        const std::size_t colon = task.find( ": ", at );
+        if( ( at > 0 && lo[at - 1] != ' ' && lo[at - 1] != '(' ) || colon == std::string_view::npos || ( close != std::string_view::npos && colon > close ) )
+        {
+            continue;
+        }
+        std::string_view path = task.substr( colon + 2 );
+        path = path.substr( 0, path.find_first_of( " ),;\n" ) );
+        while( !path.empty() && ( path.back() == '.' || path.back() == '`' ) )
+        {
+            path.remove_suffix( 1 );
+        }
+        if( !path.empty() && path.front() == '`' )
+        {
+            path.remove_prefix( 1 );
+        }
+        if( c.indexedId( path ) )
+        {
+            return std::string( path );
+        }
     }
-    for( const std::string& w : words )
-    {
-        ex.phrase += ( ex.phrase.empty() ? "" : " " ) + w;
-    }
+    return {};
+}
+
+// The exemplar phrase's lookups, most specific first: one word -> the exact symbol, then its prefix, then a path leaf (unqualified
+// only); several words -> the camelCase and snake_case joins, then a path named by the first word with the rest as its kinds.
+inline std::vector<std::vector<std::string>> exemplarProbes( const Corpus& c, const std::vector<std::string>& words )
+{
     std::vector<std::vector<std::string>> probes;
     if( words.size() == 1 )
     {
@@ -866,7 +894,27 @@ inline Exemplar findExemplar( const Corpus& c, std::string_view task )
         }
         probes.push_back( pathHits( c, nameLeaf( words[0] ), kinds ) );
     }
-    for( const std::vector<std::string>& hits : probes )
+    return probes;
+}
+
+inline Exemplar findExemplar( const Corpus& c, std::string_view task )
+{
+    Exemplar                       ex;
+    const std::vector<std::string> words = exemplarWords( task );
+    if( words.empty() )
+    {
+        return ex;
+    }
+    for( const std::string& w : words )
+    {
+        ex.phrase += ( ex.phrase.empty() ? "" : " " ) + w;
+    }
+    if( std::string named = namedExemplarFile( c, task ); !named.empty() )
+    {
+        ex.file = std::move( named );
+        return ex;
+    }
+    for( const std::vector<std::string>& hits : exemplarProbes( c, words ) )
     {
         std::vector<std::string> units = exemplarUnits( hits );
         if( units.size() == 1 )
@@ -2175,12 +2223,181 @@ inline std::string testdataDir( const Corpus& c, const std::vector<std::string>&
     return bestPrefix + "/" + std::filesystem::relative( shown, joinPath( c.diskRoot, bestPrefix ), ec ).generic_string() + "/";
 }
 
+// ── the subject tests (round 2, T): where the tests of the anchor and its siblings live, from the call graph ────────────────
+// A test file's subject is what its symbols call. The anchor's own tests are the test files that call into the anchor file (the
+// exemplar's own symbol first: tests/db_functions/math/test_cot.py for Cot); the test home is the dir holding the most test files
+// that call into the anchor's siblings (same dir, same extension), and its support file is the test-tree file those tests
+// import most (tests/db_functions/models.py, Lib/test/string_tests.py). No file-name pattern: call and import edges only.
+inline constexpr std::size_t kSubjectTestsShown = 2;   // the anchor's own test files named
+inline constexpr int         kMinHomeTests      = 2;   // a test home holds at least this many sibling-calling test files
+inline constexpr int         kMinSupportUsers   = 2;   // a support file is imported by at least this many of them
+
+struct SubjectTests
+{
+    std::vector<std::string> files;    // test files calling into the anchor, best first (≤ kSubjectTestsShown)
+    std::string              dir;      // the dir with the most test files calling into the anchor's siblings, "dir/"
+    std::string              helper;   // the test-tree file those test files import most
+};
+
+struct SubjectHits
+{
+    int  anchor = 0, siblings = 0, all = 0;   // a test file's call edges into the anchor, into its siblings, into any other file
+    bool exemplar = false;                    // one of them lands on the exemplar's own symbol
+};
+
+// Per test file: its cross-file call edges, those into the anchor's siblings (`sibling[fileId]`) and into the anchor itself.
+inline HashMap<std::uint32_t, SubjectHits> subjectTestHits( const Corpus& c, std::uint32_t anchorId, const std::vector<std::uint8_t>& sibling, std::string_view leaf )
+{
+    HashMap<std::uint32_t, SubjectHits> perTest;
+    const std::size_t                   n = c.ing.symbols.size();
+    for( std::uint32_t s = 0; s < n; ++s )
+    {
+        const std::uint32_t from = c.ing.symbols[s].fileId;
+        if( from >= c.rel.size() || sibling[from] || !isCoTestPath( c.rel[from] ) || isSkipRole( roleOfPath( c.rel[from] ) ) )
+        {
+            continue;
+        }
+        for( std::uint32_t e = c.g.outOff[s]; e < c.g.outOff[s + 1]; ++e )
+        {
+            const NodeId t = c.g.outTargets[e];
+            if( t >= n || c.ing.symbols[t].fileId >= c.rel.size() || c.ing.symbols[t].fileId == from )
+            {
+                continue;
+            }
+            SubjectHits&        h  = perTest[from];
+            const std::uint32_t to = c.ing.symbols[t].fileId;
+            ++h.all;
+            h.siblings += sibling[to];
+            if( to == anchorId )
+            {
+                ++h.anchor;
+                h.exemplar = h.exemplar || ( !leaf.empty() && c.ing.symbols[t].name == leaf );
+            }
+        }
+    }
+    return perTest;
+}
+
+// In scope: a test inside the anchor's own package (2+ shared dirs: packages/common/test/, axum/src/routing/tests/) or under the
+// repo's top-level test root (tests/…); a test in another crate that touches a widely used anchor is incidental.
+inline bool inSubjectScope( std::string_view test, std::string_view anchor )
+{
+    const std::size_t slash = test.find( '/' );
+    return commonPrefixDirs( test, anchor ) >= 2 || ( slash != std::string_view::npos && roleOfPath( std::string( test.substr( 0, slash ) ) + "/x" ) == "test" );
+}
+
+// The in-scope test files that call the siblings: the exemplar's callers first, then the file most ABOUT the anchor — its share of
+// the test file's cross-file edges (tests/test_switch.py before tests/test_disabled.py, which calls every widget once).
+inline std::vector<std::pair<std::uint32_t, SubjectHits>> rankedSubjects( const Corpus& c, const HashMap<std::uint32_t, SubjectHits>& perTest, std::string_view anchor )
+{
+    std::vector<std::pair<std::uint32_t, SubjectHits>> tests;
+    for( const auto& [ f, h ] : perTest )
+    {
+        if( h.siblings > 0 && inSubjectScope( c.rel[f], anchor ) )
+        {
+            tests.emplace_back( f, h );
+        }
+    }
+    std::sort( tests.begin(), tests.end(), [ & ]( const auto& a, const auto& b )
+    {
+        if( a.second.exemplar != b.second.exemplar )
+        {
+            return a.second.exemplar;
+        }
+        const long sa = long( a.second.anchor ) * b.second.all, sb = long( b.second.anchor ) * a.second.all;
+        return sa != sb ? sa > sb : a.second.anchor != b.second.anchor ? a.second.anchor > b.second.anchor : c.rel[a.first] < c.rel[b.first];
+    } );
+    return tests;
+}
+
+// The dir holding the most of `tests` (at least kMinHomeTests; ties: the smaller path), "dir/".
+inline std::string busiestTestDir( const Corpus& c, const std::vector<std::pair<std::uint32_t, SubjectHits>>& tests )
+{
+    HashMap<std::string_view, int> perDir;
+    for( const auto& [ f, h ] : tests )
+    {
+        ++perDir[dirName( c.rel[f] )];
+    }
+    std::string best;
+    int         most = kMinHomeTests - 1;
+    for( const auto& [ d, k ] : perDir )
+    {
+        const std::string slashed = std::string( d ) + "/";
+        if( !d.empty() && ( k > most || ( k == most && !best.empty() && slashed < best ) ) )
+        {
+            most = k;
+            best = slashed;
+        }
+    }
+    return best;
+}
+
+// The test-tree file (same top dir as `home`; never a subject or a sibling, never an __init__.py) the subject tests import most.
+inline std::string supportFile( const Corpus& c, const FileAdjacency& adj, const std::vector<std::pair<std::uint32_t, SubjectHits>>& tests,
+                                const std::vector<std::uint8_t>& sibling, std::string_view home )
+{
+    std::vector<int>          importers( c.rel.size(), 0 );
+    std::vector<std::uint8_t> isSubject( c.rel.size(), 0 );
+    for( const auto& [ f, h ] : tests )
+    {
+        isSubject[f] = 1;
+        for( std::size_t k = 0; f < adj.size() && k < adj[f].size(); ++k )
+        {
+            if( const std::uint32_t to = adj[f][k]; to < importers.size() && to != f )
+            {
+                ++importers[to];
+            }
+        }
+    }
+    std::string helper;
+    int         best = kMinSupportUsers - 1;
+    for( std::uint32_t f = 0; !home.empty() && f < c.rel.size(); ++f )
+    {
+        const std::string_view r = c.rel[f];
+        if( importers[f] > best && commonPrefixDirs( r, home ) > 0 && !sibling[f] && !isSubject[f] && isCoTestPath( r ) && baseName( r ) != "__init__.py"
+            && !isSkipRole( roleOfPath( r ) ) )
+        {
+            best   = importers[f];
+            helper = std::string( r );
+        }
+    }
+    return helper;
+}
+
+inline SubjectTests subjectTests( const Corpus& c, const FileAdjacency& adj, std::string_view anchor, std::string_view leaf )
+{
+    SubjectTests                       out;
+    const std::optional<std::uint32_t> anchorId = c.indexedId( anchor );
+    if( !anchorId || c.g.outOff.size() < c.ing.symbols.size() + 1 || envSwitchedOff( "RIPWIRE_BRIEF_SUBJECTTESTS" ) )
+    {
+        return out;
+    }
+    std::vector<std::uint8_t> sibling( c.rel.size(), 0 );
+    for( std::uint32_t f = 0; f < c.rel.size(); ++f )
+    {
+        sibling[f] = dirName( c.rel[f] ) == dirName( anchor ) && extOf( c.rel[f] ) == extOf( anchor ) && !isTestPath( c.rel[f] ) ? 1 : 0;
+    }
+    const std::vector<std::pair<std::uint32_t, SubjectHits>> tests = rankedSubjects( c, subjectTestHits( c, *anchorId, sibling, leaf ), anchor );
+    for( const auto& [ f, h ] : tests )
+    {
+        // a named test file (test_x.py, x.spec.ts, x_test.go): a .py under tests/data/cases/ is a fixture the parser reads as code
+        if( h.anchor > 0 && out.files.size() < kSubjectTestsShown && isTestPath( "x/" + std::string( baseName( c.rel[f] ) ) ) )
+        {
+            out.files.emplace_back( c.rel[f] );
+        }
+    }
+    out.dir    = busiestTestDir( c, tests );
+    out.helper = supportFile( c, adj, tests, sibling, out.dir );
+    return out;
+}
+
 inline TestHome findTestHome( const Corpus& c, const FileAdjacency& adj, const ForCore& core, const std::vector<std::string>& files, std::string_view project,
-                              std::string_view task )
+                              std::string_view task, const SubjectTests& subject )
 {
     TestHome                       home;
     const std::vector<std::string> stems = taskStems( core, files, project );
-    // the dir-named test beside the act and a test named by a task word lead the stem-ranked ones
+    // the dir-named test beside the act and a test named by a task word lead the stem-ranked ones (the subject tests are
+    // where-else's own rows: the support scan below reads beside the first of THESE)
     std::vector<std::string>       tests = dirNamedTests( c, files );
     for( std::string& t : taskWordTests( c, task ) )
     {
@@ -2204,6 +2421,14 @@ inline TestHome findTestHome( const Corpus& c, const FileAdjacency& adj, const F
     }
     home.registrar = testRegistrar( c, home.testFiles );
     findTestSupport( c, adj, home );
+    if( home.testDir.empty() )   // after the support scan, which reads beside the first test file only when no test dir was found
+    {
+        home.testDir = subject.dir;
+    }
+    if( home.helper.empty() )
+    {
+        home.helper = subject.helper;
+    }
     home.runner = testRunner( c, !home.testDir.empty() ? std::string_view( home.testDir ) : home.testFiles.empty() ? std::string_view() : std::string_view( home.testFiles.front() ) );
     return home;
 }
@@ -2263,6 +2488,7 @@ struct Entry
     int           rankKey = 255; // EntryReach::of's key: primary hops, 64 + act hops, 255 unreached, 256 a generator; -1 = the manifest's own entry
     int           size   = 0;    // indexed files under the entry's dir: the bigger program leads among far entries
     std::vector<std::string> delegates;   // the files the leading program's main hands off to (main -> Modules/main.c)
+    bool                     chained = false;   // delegates are a hand-off chain (a -> b), not siblings (a, b)
 };
 
 // Far reach is a weak signal: hops past 3 rank as one band, where program size and shared path words decide (kubelet before genman).
@@ -2620,40 +2846,78 @@ inline bool declaresBinary( const Corpus& c, std::string_view rel )
     return false;
 }
 
+// The cross-file callees reached from symbol `s`, each with the number of edges into its file: the direct callees, else (a main
+// whose body only calls helpers beside it: main -> realMain) through same-file callees, breadth first, at most kHandOffDepth deep.
+inline constexpr int kHandOffDepth = 3;
+
+inline void handOffTargets( const Corpus& c, std::uint32_t s, std::vector<std::string>& out, std::vector<int>& calls, std::vector<std::uint32_t>* via = nullptr )
+{
+    const std::size_t          n    = c.ing.symbols.size();
+    const std::uint32_t        home = c.ing.symbols[s].fileId;
+    std::vector<std::uint32_t> level{ s }, seen{ s };
+    for( int depth = 0; depth <= kHandOffDepth && !level.empty() && out.empty(); ++depth )
+    {
+        std::vector<std::uint32_t> next;
+        for( const std::uint32_t at : level )
+        {
+            for( std::uint32_t k = c.g.outOff.size() > at + 1 ? c.g.outOff[at] : 0; c.g.outOff.size() > at + 1 && k < c.g.outOff[at + 1]; ++k )
+            {
+                const NodeId t = c.g.outTargets[k];
+                if( t >= n || c.ing.symbols[t].fileId >= c.rel.size() )
+                {
+                    continue;
+                }
+                if( c.ing.symbols[t].fileId == home )
+                {
+                    if( std::find( seen.begin(), seen.end(), t ) == seen.end() )
+                    {
+                        seen.push_back( t );
+                        next.push_back( t );
+                    }
+                    continue;
+                }
+                const std::string_view r = c.rel[c.ing.symbols[t].fileId];
+                // a call that resolves into a C/C++ header lands on an inline helper or a macro, not on the code a program
+                // hands off to: it neither counts nor stops the same-file descent
+                const std::string_view e = extOf( r );
+                if( isTestPath( r ) || isSkipRole( roleOfPath( r ) ) || e == "h" || e == "hh" || e == "hpp" || e == "hxx" )
+                {
+                    continue;
+                }
+                const auto it = std::find( out.begin(), out.end(), r );
+                if( it == out.end() )
+                {
+                    out.emplace_back( r );
+                    calls.push_back( 1 );
+                    if( via )
+                    {
+                        via->push_back( t );
+                    }
+                }
+                else
+                {
+                    ++calls[std::size_t( it - out.begin() )];
+                }
+            }
+        }
+        level = std::move( next );
+    }
+}
+
 // The files a program's main hands off to: its cross-file callees outside tests and skip dirs, the main file's own dir first,
-// then the file it calls into most (≤ 2).
-inline std::vector<std::string> mainDelegates( const Corpus& c, const Entry& e )
+// then the file it calls into most (≤ 2). A main that hands off to ONE file is a trampoline (python.c -> Modules/main.c): the
+// chain follows that file's own hand-off once (main -> Modules/main.c -> Python/pylifecycle.c).
+inline std::vector<std::string> mainDelegates( const Corpus& c, Entry& e )
 {
     std::vector<std::string>           out;
     std::vector<int>                   calls;   // per out[] row: the main's callees defined in that file
+    std::vector<std::uint32_t>         via;     // per out[] row: the first callee reached in that file
     const std::optional<std::uint32_t> s = c.symbolAt( e.fileId, e.line );
-    const std::size_t                  n = c.ing.symbols.size();
     if( !s || c.g.outOff.size() <= *s + 1 )
     {
         return out;
     }
-    for( std::uint32_t k = c.g.outOff[*s]; k < c.g.outOff[*s + 1]; ++k )
-    {
-        const NodeId t = c.g.outTargets[k];
-        if( t < n && c.ing.symbols[t].fileId != e.fileId && c.ing.symbols[t].fileId < c.rel.size() )
-        {
-            const std::string_view r = c.rel[c.ing.symbols[t].fileId];
-            if( isTestPath( r ) || isSkipRole( roleOfPath( r ) ) )
-            {
-                continue;
-            }
-            const auto at = std::find( out.begin(), out.end(), r );
-            if( at == out.end() )
-            {
-                out.emplace_back( r );
-                calls.push_back( 1 );
-            }
-            else
-            {
-                ++calls[std::size_t( at - out.begin() )];
-            }
-        }
-    }
+    handOffTargets( c, *s, out, calls, &via );
     const std::string_view   home = c.rel[e.fileId];
     std::vector<std::size_t> order( out.size() );
     for( std::size_t i = 0; i < order.size(); ++i )
@@ -2672,7 +2936,27 @@ inline std::vector<std::string> mainDelegates( const Corpus& c, const Entry& e )
     std::vector<std::string> shown;
     for( std::size_t i = 0; i < order.size() && i < kDelegatesShown; ++i )
     {
-        shown.push_back( std::move( out[order[i]] ) );
+        shown.push_back( out[order[i]] );
+    }
+    if( out.size() == 1 && !envSwitchedOff( "RIPWIRE_BRIEF_HANDOFF" ) )
+    {
+        std::vector<std::string> next;
+        std::vector<int>         nextCalls;
+        handOffTargets( c, via.front(), next, nextCalls );
+        std::vector<std::size_t> rank;   // the trampoline's targets, back into main's own file excluded
+        for( std::size_t i = 0; i < next.size(); ++i )
+        {
+            if( next[i] != home )
+            {
+                rank.push_back( i );
+            }
+        }
+        if( !rank.empty() )
+        {
+            std::sort( rank.begin(), rank.end(), [ & ]( std::size_t a, std::size_t b ) { return nextCalls[a] != nextCalls[b] ? nextCalls[a] > nextCalls[b] : next[a] < next[b]; } );
+            shown.push_back( next[rank.front()] );
+            e.chained = true;
+        }
     }
     return shown;
 }
@@ -2799,20 +3083,196 @@ inline std::vector<Entry> findEntries( const Corpus& c, const FileAdjacency& adj
     return out;
 }
 
-inline std::string renderEntries( const Corpus& c, const std::vector<Entry>& entries, int cap )
+// ── the package surface (round 2, E): the files that re-export the anchor up its package tree ───────────────────────────────
+// A unit a task adds "exported from the package" is wired into the files that re-export its sibling: --for's own <reexports>
+// block (rx p=, the dotted module's spec entry=) first, then the import graph walked up from the anchor — an importer in the
+// anchor's own dir or an ancestor dir that is its language's module root (Python's __init__.py, Node's index.*, Rust's mod.rs /
+// lib.rs: the resolution rule, not a repo's naming) or a JS/TS barrel (3/4 of its code lines `export … from`).
+inline constexpr std::size_t kSurfaceShown   = 4;      // surface files named at the head of <entry>
+inline constexpr int         kSurfaceHops    = 4;      // importer hops walked up from the anchor
+inline constexpr std::size_t kBarrelReadBytes = 16 * 1024;
+
+inline bool isScriptExt( std::string_view ext ) noexcept
+{
+    return ext == "ts" || ext == "tsx" || ext == "mts" || ext == "js" || ext == "mjs" || ext == "cjs";
+}
+
+inline bool isModuleRoot( std::string_view rel ) noexcept
+{
+    const std::string_view b = baseName( rel );
+    if( b == "__init__.py" || b == "mod.rs" || b == "lib.rs" )   // Python's package root, Rust's module and crate roots
+    {
+        return true;
+    }
+    return stemOf( rel ) == "index" && isScriptExt( extOf( rel ) );   // Node's directory module
+}
+
+inline bool isBarrel( const Corpus& c, std::string_view rel )
+{
+    if( !isScriptExt( extOf( rel ) ) )
+    {
+        return false;
+    }
+    const std::optional<std::string> text = c.read( rel, kBarrelReadBytes );
+    int                              code = 0, reexports = 0;
+    bool                             inList = false;   // inside a multi-line `export { a, b } from "…"` name list
+    forEachLine( text ? std::string_view( *text ) : std::string_view(), [ & ]( std::string_view line, int )
+    {
+        const std::string_view t = trim( line );
+        if( t.empty() || t.starts_with( "//" ) || t.starts_with( "/*" ) || t.starts_with( "*" ) )
+        {
+            return true;
+        }
+        ++code;
+        if( inList )
+        {
+            ++reexports;
+            inList = t.find( '}' ) == std::string_view::npos;
+        }
+        else if( t.starts_with( "export " ) && ( t.find( " from " ) != std::string_view::npos || t.starts_with( "export *" ) ) )
+        {
+            ++reexports;
+        }
+        else if( t.starts_with( "export {" ) || t.starts_with( "export type {" ) )
+        {
+            ++reexports;
+            inList = t.find( '}' ) == std::string_view::npos;
+        }
+        return true;
+    } );
+    return code > 0 && reexports * 4 >= code * 3;
+}
+
+// The re-exporting files --for's page already names: <rx p=…> rows and a dotted module's <spec entry=…>, page order.
+inline std::vector<std::string> pageReexporters( std::string_view page )
+{
+    std::vector<std::string> out;
+    const std::size_t        open = page.find( "<reexports" );
+    const std::size_t        shut = open == std::string_view::npos ? open : page.find( "</reexports>", open );
+    if( shut == std::string_view::npos )
+    {
+        return out;
+    }
+    const std::string_view block = page.substr( open, shut - open );
+    for( std::size_t at = block.find( '<', 1 ); at != std::string_view::npos; at = block.find( '<', at + 1 ) )
+    {
+        const std::string_view tag = block.substr( at, block.find( '>', at ) - at );
+        const std::string_view p   = tag.starts_with( "<rx " ) ? attrOf( tag, "p" ) : tag.starts_with( "<spec " ) ? attrOf( tag, "entry" ) : std::string_view();
+        if( !p.empty() )
+        {
+            pattern::appendUnique( out, std::string( p ) );
+        }
+    }
+    return out;
+}
+
+inline bool isAncestorDir( std::string_view dir, std::string_view of ) noexcept
+{
+    return dir.empty() || of == dir || ( of.starts_with( dir ) && of.size() > dir.size() && of[dir.size()] == '/' );
+}
+
+inline std::vector<std::string> packageSurface( const Corpus& c, const FileAdjacency& adj, std::string_view page, const std::vector<std::string>& from )
+{
+    std::vector<std::string> out;
+    if( envSwitchedOff( "RIPWIRE_BRIEF_SURFACE" ) )
+    {
+        return out;
+    }
+    const auto add = [ & ]( std::string_view p )
+    {
+        if( out.size() < kSurfaceShown && std::find( from.begin(), from.end(), p ) == from.end() )
+        {
+            pattern::appendUnique( out, std::string( p ) );
+        }
+    };
+    for( const std::string& p : pageReexporters( page ) )
+    {
+        add( p );
+    }
+    if( adj.size() != c.rel.size() )
+    {
+        return out;
+    }
+    std::vector<std::vector<std::uint32_t>> users( adj.size() );
+    for( std::uint32_t f = 0; f < adj.size(); ++f )
+    {
+        for( const std::uint32_t to : adj[f] )
+        {
+            if( to < users.size() && to != f && ( users[to].empty() || users[to].back() != f ) )
+            {
+                users[to].push_back( f );
+            }
+        }
+    }
+    std::vector<std::uint8_t>  seen( adj.size(), 0 );
+    std::vector<std::uint32_t> level;
+    for( const std::string& p : from )
+    {
+        if( const std::optional<std::uint32_t> id = c.indexedId( p ); id && !seen[*id] )
+        {
+            seen[*id] = 1;
+            level.push_back( *id );
+        }
+    }
+    for( int hop = 0; hop < kSurfaceHops && !level.empty() && out.size() < kSurfaceShown; ++hop )
+    {
+        std::vector<std::uint32_t> next;
+        for( const std::uint32_t f : level )
+        {
+            for( const std::uint32_t u : users[f] )
+            {
+                const std::string_view r = c.rel[u];
+                if( seen[u] || !isAncestorDir( dirName( r ), dirName( c.rel[f] ) ) || isTestPath( r ) || isSkipRole( roleOfPath( r ) ) )
+                {
+                    continue;
+                }
+                seen[u] = 1;
+                if( isModuleRoot( r ) || isBarrel( c, r ) )
+                {
+                    next.push_back( u );
+                    add( r );
+                }
+            }
+        }
+        level = std::move( next );
+    }
+    return out;
+}
+
+// One entry row: path, then (unless lean) :line kind hops=, then its hand-off files — siblings "-> a, b" or a chain "-> a -> b".
+inline std::string entryRow( const Corpus& c, const Entry& e, bool lean )
+{
+    std::string out = xml( c.rel[e.fileId] );
+    if( !lean )   // the line, the kind and the hops hold no path: the size fit's attrs step sheds them before any entry
+    {
+        out += ":" + std::to_string( e.line ) + " " + e.what + ( e.hops >= 0 ? " hops=" + std::to_string( e.hops ) : std::string() );
+    }
+    for( std::size_t k = 0; k < e.delegates.size(); ++k )
+    {
+        out += ( k == 0 || e.chained ? " -> " : ", " ) + xml( e.delegates[k] );
+    }
+    return out;
+}
+
+inline std::string renderEntrySlot( const Corpus& c, const std::vector<Entry>& entries, int cap, const std::vector<std::string>& surface, bool lean )
 {
     std::string out = "<entry>";
+    for( std::size_t k = 0; k < surface.size(); ++k )
+    {
+        out += ( k == 0 ? "surface: " : " · " ) + xml( surface[k] );
+    }
+    bool first = surface.empty();
     for( int i = 0; i < int( entries.size() ) && i < cap; ++i )
     {
         const Entry& e = entries[std::size_t( i )];
-        out += ( i > 0 ? " · " : "" ) + xml( c.rel[e.fileId] ) + ":" + std::to_string( e.line ) + " " + e.what
-               + ( e.hops >= 0 ? " hops=" + std::to_string( e.hops ) : std::string() );
-        for( std::size_t k = 0; k < e.delegates.size(); ++k )
+        if( lean && e.delegates.empty() && std::ranges::contains( surface, c.rel[e.fileId] ) )
         {
-            out += ( k == 0 ? " -> " : ", " ) + xml( e.delegates[k] );
+            continue;   // the lean row would repeat a surface path and say nothing else
         }
+        out += ( first ? "" : " · " ) + entryRow( c, e, lean );
+        first = false;
     }
-    if( entries.empty() )
+    if( entries.empty() && surface.empty() )
     {
         out += "none found";
     }
@@ -2871,6 +3331,80 @@ inline std::string renderTask( const ForCore& core, std::string_view qs )
     out += "\"/>";
     out += qs;
     return out + "</task>";
+}
+
+// ── section 4b: the files --for's page ranks that the brief does not name ─────────────────────────────────────────────────
+// Reuses --for's own ranking, never a name rule: the exemplar family's members (<m p=>) and the files that register them
+// (<touch p=>), then the files of the <sigs> rows and of the <tail> rows, page order. Only indexed files count; the slot
+// drops those any other slot already names.
+inline constexpr std::size_t kRankedShown = 12;   // ranked files named in <ranked>
+inline constexpr std::size_t kRankedKept  = 4;    // what the ranked drop keeps
+
+// The CDATA text of the first `<tag …><![CDATA[…]]>` on the page (empty when the page has none).
+inline std::string_view pageCdata( std::string_view page, std::string_view tag )
+{
+    const std::size_t open = page.find( "<" + std::string( tag ) + " " );
+    const std::size_t gt   = open == std::string_view::npos ? open : page.find( '>', open );
+    if( gt == std::string_view::npos || page.substr( gt + 1 ).rfind( "<![CDATA[", 0 ) != 0 )
+    {
+        return {};
+    }
+    const std::size_t from = gt + 1 + 9;
+    const std::size_t shut = page.find( "]]>", from );
+    return shut == std::string_view::npos ? std::string_view() : page.substr( from, shut - from );
+}
+
+inline std::string_view pathOfRow( std::string_view row ) noexcept
+{
+    const std::size_t end = row.find_first_of( ": \t" );
+    return row.substr( 0, end );
+}
+
+inline std::vector<std::string> pageRanked( const Corpus& c, std::string_view page )
+{
+    std::vector<std::string> out;
+    if( envSwitchedOff( "RIPWIRE_BRIEF_RANKED" ) )
+    {
+        return out;
+    }
+    const auto add = [ & ]( std::string_view p )
+    {
+        if( !p.empty() && c.indexedId( p ) )
+        {
+            pattern::appendUnique( out, std::string( p ) );
+        }
+    };
+    for( const std::string_view tag : { std::string_view( "<m n=" ), std::string_view( "<touch p=" ) } )
+    {
+        for( std::size_t at = page.find( tag ); at != std::string_view::npos; at = page.find( tag, at + 1 ) )
+        {
+            add( pathOfRow( attrOf( page.substr( at, page.find( '>', at ) - at ), "p" ) ) );
+        }
+    }
+    for( const std::string_view block : { pageCdata( page, "sigs" ), pageCdata( page, "tail" ) } )
+    {
+        forEachLine( block, [ & ]( std::string_view row, int )
+        {
+            add( pathOfRow( row ) );
+            return true;
+        } );
+    }
+    return out;
+}
+
+// The ranked files no other slot names, at most `cap`; `named` is the rest of the brief at its fullest.
+inline std::string renderRanked( const std::vector<std::string>& ranked, std::string_view named, std::size_t cap )
+{
+    std::string out;
+    std::size_t shown = 0;
+    for( const std::string& p : ranked )
+    {
+        if( shown < cap && named.find( p ) == std::string_view::npos )
+        {
+            out += ( shown++ > 0 ? " · " : "" ) + xml( p );
+        }
+    }
+    return shown == 0 ? std::string() : "<ranked>" + out + "</ranked>";
 }
 
 // ── section 5: edges ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -3131,6 +3665,43 @@ inline std::vector<std::string> primaryUsers( const Corpus& c, const FileAdjacen
     return out;
 }
 
+// Go's package surface: a package is wired in by the files that import it, so the non-test .go files in the anchor's ANCESTOR
+// dirs whose import block quotes the anchor's package path (gin.go and context.go import gin/render), nearest dir first.
+inline std::vector<std::string> goPackageImporters( const Corpus& c, std::string_view anchor, std::size_t shown )
+{
+    std::vector<std::string> out;
+    const std::string_view   dir    = dirName( anchor );
+    const std::string        module = anchor.ends_with( ".go" ) && !dir.empty() ? goModule( c ) : std::string();
+    if( module.empty() || envSwitchedOff( "RIPWIRE_BRIEF_SURFACE" ) )
+    {
+        return out;
+    }
+    const std::string quoted = "\"" + module + "/" + std::string( dir ) + "\"";
+    std::vector<std::string_view> hits;
+    for( const std::string_view r : c.rel )
+    {
+        const std::string_view d = dirName( r );
+        if( !r.ends_with( ".go" ) || r.ends_with( "_test.go" ) || d == dir || !isAncestorDir( d, dir ) || isTestPath( r ) || isSkipRole( roleOfPath( r ) ) )
+        {
+            continue;
+        }
+        if( const std::optional<std::string> head = c.read( r, 4096 ); head && head->find( quoted ) != std::string::npos )
+        {
+            hits.push_back( r );
+        }
+    }
+    std::stable_sort( hits.begin(), hits.end(), [ & ]( std::string_view a, std::string_view b )
+    {
+        const int pa = commonPrefixDirs( a, anchor ), pb = commonPrefixDirs( b, anchor );
+        return pa != pb ? pa > pb : rw::sortutil::svLess( a, b );
+    } );
+    for( std::size_t i = 0; i < hits.size() && i < shown; ++i )
+    {
+        out.emplace_back( hits[i] );
+    }
+    return out;
+}
+
 // The primary file's in-repo imports/includes, nearest first (most shared dirs), at most 6: the framework a model file is built
 // on (bracketMatching.ts -> editorExtensions.ts, editorCommon.ts; node_affinity.go -> plugins/names, framework).
 inline EdgeSet primaryImports( const Corpus& c, const FileAdjacency& adj, const std::vector<std::string>& named, const std::vector<std::string>& files, std::size_t shown )
@@ -3248,7 +3819,27 @@ inline Registration findRegistration( const Corpus& c, const std::vector<std::st
     return reg;
 }
 
-inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const EdgeSet& imports, const Registration& reg )
+// One edge row's side, "label a, b, +N"; lean: each caller's or callee's file once — its line and name hold no path.
+inline std::string edgeList( const char* label, const std::vector<std::string>& xs, bool lean )
+{
+    std::vector<std::string_view> shown;
+    for( const std::string& x : xs )
+    {
+        const std::string_view v = lean && !x.starts_with( "+" ) ? std::string_view( x ).substr( 0, x.find( ':' ) ) : std::string_view( x );
+        if( std::find( shown.begin(), shown.end(), v ) == shown.end() )
+        {
+            shown.push_back( v );
+        }
+    }
+    std::string out = shown.empty() ? std::string() : std::string( label );
+    for( std::size_t k = 0; k < shown.size(); ++k )
+    {
+        out += ( k > 0 ? ", " : "" ) + xml( shown[k] );
+    }
+    return out;
+}
+
+inline std::string renderEdgeSlot( const std::vector<EdgeSet>& sets, int cap, const EdgeSet& imports, const Registration& reg, bool lean )
 {
     std::string out = "<edges>";
     if( !reg.paths.empty() )
@@ -3276,26 +3867,8 @@ inline std::string renderEdges( const std::vector<EdgeSet>& sets, int cap, const
     for( int i = 0; i < int( sets.size() ) && i < cap; ++i )
     {
         const EdgeSet& s = sets[std::size_t( i )];
-        out += "<e s=\"" + xml( s.symbol ) + "\">";
-        const auto list = [ & ]( const char* label, const std::vector<std::string>& xs )
-        {
-            if( xs.empty() )
-            {
-                return;
-            }
-            out += label;
-            for( std::size_t k = 0; k < xs.size(); ++k )
-            {
-                out += ( k > 0 ? ", " : "" ) + xml( xs[k] );
-            }
-        };
-        list( "callers: ", s.callers );
-        if( !s.callers.empty() && !s.callees.empty() )
-        {
-            out += " | ";
-        }
-        list( "calls: ", s.callees );
-        out += "</e>";
+        out += "<e s=\"" + xml( s.symbol ) + "\">" + edgeList( "callers: ", s.callers, lean ) + ( !s.callers.empty() && !s.callees.empty() ? " | " : "" )
+               + edgeList( "calls: ", s.callees, lean ) + "</e>";
     }
     if( sets.empty() && imports.callees.empty() && imports.callers.empty() && reg.paths.empty() )
     {
@@ -3326,13 +3899,6 @@ inline constexpr std::size_t kRoleShown         = 2;     // test, build and docs
 inline constexpr std::size_t kUnitBuildShown    = 2;
 inline constexpr std::size_t kPartnersRead      = 400;   // the strongest partners sorted into roles (each is a disk stat)
 
-// unset, empty or not a number: the feature stays on
-inline bool switchOff( const char* name ) noexcept { return readEnvNumber( name ).isZero(); }
-
-inline bool isCoTestPath( std::string_view rel ) noexcept { return isTestPath( rel ) || rw::isTestPath( rel ); }
-
-// The basename's last dot-segment: the sibling test's "same language" key (an extension-less name is its own key).
-inline std::string_view extOf( std::string_view rel ) noexcept { return namesplit::afterLast( baseName( rel ), "." ); }
 
 // A build manifest by its name: the files a build system reads to know the units (lockfiles are outputs, not lists).
 inline constexpr std::string_view kUnitManifests[] = { "BUILD.bazel", "BUILD", "BUILD.gn", "CMakeLists.txt", "Cargo.toml", "meson.build", "Makefile.am",
@@ -3622,7 +4188,7 @@ inline void assignRoles( const Corpus& c, const std::vector<CoScore>& scores, co
 inline RoleHistory roleHistory( const Corpus& c, std::string_view anchor, bool noCache )
 {
     RoleHistory h;
-    if( anchor.empty() || switchOff( "RIPWIRE_BRIEF_COCHANGE" ) || !hasEnclosingGitRepo( c.diskRoot ) )
+    if( anchor.empty() || envSwitchedOff( "RIPWIRE_BRIEF_COCHANGE" ) || !hasEnclosingGitRepo( c.diskRoot ) )
     {
         return h;
     }
@@ -3647,7 +4213,7 @@ inline RoleHistory roleHistory( const Corpus& c, std::string_view anchor, bool n
 inline std::vector<std::string> unitBuild( const Corpus& c, std::string_view anchor, const TestHome& home, const RoleHistory& h )
 {
     std::vector<std::string> out;
-    if( !switchOff( "RIPWIRE_BRIEF_UNITBUILD" ) && !anchor.empty() )
+    if( !envSwitchedOff( "RIPWIRE_BRIEF_UNITBUILD" ) && !anchor.empty() )
     {
         const std::string_view testFrom = !h.tests.empty()          ? std::string_view( h.tests.front() )
                                           : !home.testDir.empty()   ? std::string_view( home.testDir )
@@ -3814,7 +4380,7 @@ inline bool isDistinctiveName( std::string_view n ) noexcept
 }
 
 inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std::vector<std::string>& files, const TestHome& home, const RoleHistory& hist,
-                                const std::vector<std::string>& mirrors )
+                                const std::vector<std::string>& mirrors, const SubjectTests& subject )
 {
     WhereElse w;
     w.hasHistory = hist.read;
@@ -3822,6 +4388,11 @@ inline WhereElse findWhereElse( const Corpus& c, const ForCore& core, const std:
     {
         addItem( w, "test", t, files );
     }
+    for( const std::string& t : subject.files )   // then the tests that call into the anchor, and the dir holding its siblings' tests
+    {
+        addItem( w, "test", t, files );
+    }
+    addItem( w, "test", subject.dir, files );
     for( const std::string& d : hist.docs )
     {
         addItem( w, "doc", d, files );
@@ -3971,31 +4542,83 @@ inline std::string renderConventions( const std::vector<ConventionDoc>& docs, bo
 }
 
 // ── the drop ladder ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-enum class Drop : std::uint8_t { ConventionHeadings, LayoutDepth, EntriesPast3, EdgesPast1, WhereElsePast3, QuestionSites };
-inline constexpr std::array<std::pair<Drop, std::string_view>, 6> kDropOrder = { {
-    { Drop::ConventionHeadings, "conventions" }, { Drop::LayoutDepth, "layout_depth" }, { Drop::EntriesPast3, "entry" },
+// Byte order inside each slot (round 2): the attrs step sheds what holds no path — an entry's line, kind and hops, an edge row's
+// caller lines and names, a question site's line numbers — before any step cuts a path. The act ranges stay: they are the read plan.
+enum class Drop : std::uint8_t { ConventionHeadings, Attrs, LayoutDepth, RankedPast4, EntriesPast3, EdgesPast1, WhereElsePast3, QuestionSites };
+inline constexpr std::array<std::pair<Drop, std::string_view>, 8> kDropOrder = { {
+    { Drop::ConventionHeadings, "conventions" }, { Drop::Attrs, "attrs" }, { Drop::LayoutDepth, "layout_depth" }, { Drop::RankedPast4, "ranked" },
+    { Drop::EntriesPast3, "entry" },
     { Drop::EdgesPast1, "edges" }, { Drop::WhereElsePast3, "where_else" }, { Drop::QuestionSites, "qs" },
 } };
 
-struct Sections
+// One slot's renders: [lean][cut] — lean = the attrs step has run, cut = the slot's own drop step has run.
+struct SlotForms
 {
-    std::string layoutDeep, layoutTop, build, entryAll, entry3, task, taskNoQs, edgesAll, edges1, whereAll, where3, convFull, convPaths, next;
+    std::array<std::array<std::string, 2>, 2> form;
+    const std::string& pick( bool lean, bool cut ) const { return form[lean ? 1 : 0][cut ? 1 : 0]; }
 };
 
-inline std::size_t bodyBytes( const Sections& s, std::span<const bool> dropped )
+struct Sections
 {
-    const auto on = [ & ]( Drop d ) { return dropped[std::size_t( d )]; };
-    return ( on( Drop::LayoutDepth ) ? s.layoutTop : s.layoutDeep ).size() + s.build.size() + ( on( Drop::EntriesPast3 ) ? s.entry3 : s.entryAll ).size()
-           + ( on( Drop::QuestionSites ) ? s.taskNoQs : s.task ).size() + ( on( Drop::EdgesPast1 ) ? s.edges1 : s.edgesAll ).size()
-           + ( on( Drop::WhereElsePast3 ) ? s.where3 : s.whereAll ).size() + ( on( Drop::ConventionHeadings ) ? s.convPaths : s.convFull ).size() + s.next.size();
-}
+    std::string layoutDeep, layoutTop, build;
+    SlotForms   entry, task, edges;
+    std::string whereAll, where3, convFull, convPaths, next;
+    std::string rankedAll, ranked4;   // filled after the rest: it names only what no other slot does
+};
 
 inline std::string body( const Sections& s, std::span<const bool> dropped )
 {
-    const auto on = [ & ]( Drop d ) { return dropped[std::size_t( d )]; };
-    return ( on( Drop::LayoutDepth ) ? s.layoutTop : s.layoutDeep ) + s.build + ( on( Drop::EntriesPast3 ) ? s.entry3 : s.entryAll )
-           + ( on( Drop::QuestionSites ) ? s.taskNoQs : s.task ) + ( on( Drop::EdgesPast1 ) ? s.edges1 : s.edgesAll )
+    const auto on   = [ & ]( Drop d ) { return dropped[std::size_t( d )]; };
+    const bool lean = on( Drop::Attrs );
+    return ( on( Drop::LayoutDepth ) ? s.layoutTop : s.layoutDeep ) + s.build + s.entry.pick( lean, on( Drop::EntriesPast3 ) )
+           + s.task.pick( lean, on( Drop::QuestionSites ) ) + ( on( Drop::RankedPast4 ) ? s.ranked4 : s.rankedAll ) + s.edges.pick( lean, on( Drop::EdgesPast1 ) )
            + ( on( Drop::WhereElsePast3 ) ? s.where3 : s.whereAll ) + ( on( Drop::ConventionHeadings ) ? s.convPaths : s.convFull ) + s.next;
+}
+
+inline std::size_t bodyBytes( const Sections& s, std::span<const bool> dropped ) { return body( s, dropped ).size(); }
+
+// The question sites with their line lists shed (a/b.go:89,112 c.go:4 -> a/b.go c.go): the attrs step's form of the sites.
+inline std::string leanSites( std::string_view sites )
+{
+    std::string out;
+    for( std::size_t i = 0; i < sites.size(); ++i )
+    {
+        if( sites[i] == ':' && i + 1 < sites.size() && sites[i + 1] >= '0' && sites[i + 1] <= '9' )
+        {
+            std::size_t k = i + 1;
+            while( k < sites.size() && ( ( sites[k] >= '0' && sites[k] <= '9' ) || sites[k] == ',' ) )
+            {
+                ++k;
+            }
+            if( k == sites.size() || sites[k] == ' ' || sites[k] == '<' )
+            {
+                i = k - 1;
+                continue;
+            }
+        }
+        out += sites[i];
+    }
+    return out;
+}
+
+// The package surface <entry> leads with: from the anchor and the first two named files, the re-exporters, then Go's importers.
+inline std::vector<std::string> briefSurface( const Corpus& c, const FileAdjacency& adj, std::string_view page, const std::string& anchor,
+                                              const std::vector<std::string>& named )
+{
+    std::vector<std::string> from{ anchor };
+    for( std::size_t i = 0; i < named.size() && i < 2; ++i )
+    {
+        pattern::appendUnique( from, named[i] );
+    }
+    std::vector<std::string> surface = packageSurface( c, adj, page, from );
+    for( std::string& g : goPackageImporters( c, anchor, kSurfaceShown ) )
+    {
+        if( surface.size() < kSurfaceShown )
+        {
+            pattern::appendUnique( surface, std::move( g ) );
+        }
+    }
+    return surface;
 }
 
 inline std::string langsOf( const Corpus& c )
@@ -4070,9 +4693,11 @@ inline std::string composeBrief( const BriefInputs& in )
     // the include/import graph feeds the test home's helper, 3's reach and 5's imports line
     const FileAdjacency adj     = resolveIncludeAdj( in.ing );
     const std::string   project = projectName( c );
-    const TestHome      home    = findTestHome( c, adj, core, files, project, in.task );
+    const SubjectTests  subject = subjectTests( c, adj, anchor, nameLeaf( ex.phrase.substr( 0, ex.phrase.find( ' ' ) ) ) );
+    const TestHome      home    = findTestHome( c, adj, core, files, project, in.task, subject );
     // 3 entry
     const std::vector<Entry> entries = findEntries( c, adj, actSyms, files, named, caps.entries, project );
+    const std::vector<std::string> surface = briefSurface( c, adj, in.forPage, anchor, named );
     // 4 task
     const QuestionSites qs( c, in.task );
     // 5 edges
@@ -4080,14 +4705,27 @@ inline std::string composeBrief( const BriefInputs& in )
     const EdgeSet              imports = primaryImports( c, adj, named, files, caps.imports );
     const Registration         reg     = withHistory( findRegistration( c, files ), hist );
     // 6 where-else
-    const WhereElse where = findWhereElse( c, core, files, home, hist, exemplarMirrors( c, ex ) );
+    const WhereElse where = findWhereElse( c, core, files, home, hist, exemplarMirrors( c, ex ), subject );
     // 7 conventions
     const std::vector<ConventionDoc> conv = findConventions( c );
     // 8 next
+    const std::string sites = qs.text( kQsBytes );
     Sections s{ renderLayout( deep, caps.layoutEntries ), renderLayout( top, caps.layoutEntries ), withUnitBuild( renderBuild( buildLines, buildMore, home ), unitBuild( c, anchor, home, hist ) ),
-                      renderEntries( c, entries, caps.entries ), renderEntries( c, entries, 3 ), renderTask( core, renderExemplar( ex ) + qs.text( kQsBytes ) ), renderTask( core, "" ),
-                      renderEdges( edges, kEdgeSymbols, imports, reg ), renderEdges( edges, 1, imports, reg ), renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
-                      renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>" };
+                SlotForms{ { { { renderEntrySlot( c, entries, caps.entries, surface, false ), renderEntrySlot( c, entries, 3, surface, false ) },
+                               { renderEntrySlot( c, entries, caps.entries, surface, true ), renderEntrySlot( c, entries, 3, surface, true ) } } } },
+                SlotForms{ { { { renderTask( core, renderExemplar( ex ) + sites ), renderTask( core, "" ) },
+                               { renderTask( core, renderExemplar( ex ) + leanSites( sites ) ), renderTask( core, "" ) } } } },
+                SlotForms{ { { { renderEdgeSlot( edges, kEdgeSymbols, imports, reg, false ), renderEdgeSlot( edges, 1, imports, reg, false ) },
+                               { renderEdgeSlot( edges, kEdgeSymbols, imports, reg, true ), renderEdgeSlot( edges, 1, imports, reg, true ) } } } },
+                renderWhereElse( where, kWhereElseCap ), renderWhereElse( where, kWhereElseKept ),
+                renderConventions( conv, true ), renderConventions( conv, false ), "<next><![CDATA[" + std::string( kSubagentBriefBlock ) + "]]></next>", {}, {} };
+    {
+        const std::array<bool, kDropOrder.size()> none{};
+        const std::string                         named   = body( s, none );
+        const std::vector<std::string>            ranked  = pageRanked( c, in.forPage );
+        s.rankedAll = renderRanked( ranked, named, kRankedShown );
+        s.ranked4   = renderRanked( ranked, named, kRankedKept );
+    }
 
     // the root, then the fit: drop in kDropOrder until the whole answer is within budget
     std::string task( in.task.substr( 0, std::min( in.task.size(), kTaskEchoBytes ) ) );
@@ -4126,7 +4764,7 @@ inline std::string composeBrief( const BriefInputs& in )
         const std::size_t rest = total( budget );
         if( rest < budget )
         {
-            s.taskNoQs = renderTask( core, qs.text( std::min( kQsBytes, budget - rest ) ) );
+            s.task.form[1][1] = renderTask( core, leanSites( qs.text( std::min( kQsBytes, budget - rest ) ) ) );   // attrs ran before qs
         }
     }
     const bool  over = total( budget ) > budget;

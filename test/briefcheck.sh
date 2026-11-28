@@ -4,7 +4,7 @@
 #
 # WHY. --brief is pasted into a fresh subagent's prompt, so every byte is paid once per lane and a wrong line is acted on.
 # The two promises a reader cannot check by eye are the ones gated here: the page stays under its size class's cap
-# (2.5 / 4 / 6 KB by indexed files < 1K / < 10K / more; --brief-bytes overrides, 512..8192), and a build/test command is
+# (3.5 / 5 / 7 KB by indexed files < 1K / < 10K / more; --brief-bytes overrides, 512..8192), and a build/test command is
 # QUOTED from a file that exists (a manifest or a doc's fenced block), never guessed: a tree with neither says `none found`.
 #
 # ARMS (each counts what it saw and FAILs on zero)
@@ -15,7 +15,7 @@
 #        `<build>none found` with build_source="none", and NO command head (make cmake npm pytest go cargo tox) appears in
 #        its <build> — the negative arm.
 #   (S)  skip: vendored and generated dirs are marked (skip) in the layout, ordinary code dirs are not.
-#   (O)  drop order: under --brief-bytes=512 dropped= is a prefix of conventions,layout_depth,entry,edges,where_else,qs in
+#   (O)  drop order: under --brief-bytes=512 dropped= is a prefix of conventions,attrs,layout_depth,ranked,entry,edges,where_else,qs in
 #        that order, the act and build sections are still there, and over="1" is set exactly when the fixed sections
 #        alone outgrow the budget.
 #   (D)  determinism: two runs are byte-identical; every page is well-formed XML (xmllint when present, else python).
@@ -41,6 +41,15 @@
 #        the line that lists the exemplar, history="1"; the hot file and the sweep-only file are absent. The same tree cut to
 #        one commit (a shallow clone's shape) answers history="0" with no history slot; RIPWIRE_BRIEF_COCHANGE=0 and
 #        RIPWIRE_BRIEF_UNITBUILD=0 each remove exactly their half.
+#   (R)  BRIEF-R3: a "like X: path" task takes that path as the exemplar; <ranked> holds only indexed files no other slot names;
+#        RIPWIRE_BRIEF_RANKED=0 removes it.
+#   (Q)  BRIEF-R2, synthetic fixtures: a TS package whose pipe is re-exported through a barrel (pipes/index.ts) and the
+#        package index.ts — both named in <entry> as `surface:`; a Python package whose __init__.py imports the unit; a Go module
+#        whose root file imports the unit's package (named), while a root file that does not import it is not; a test file that
+#        calls the exemplar leads where-else ahead of one that only imports it, the dir holding the siblings' tests is named, and
+#        the same-tree file they import is the test support; a trampoline main (one delegate) names the delegate's own hand-off
+#        `a -> b -> c`; a main that calls only a same-file helper names the file that helper calls; the attrs step sheds
+#        `:line kind hops=` from <entry> before any entry is cut. Each OFF switch (SURFACE / SUBJECTTESTS / HANDOFF) removes its part.
 # usage: test/briefcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -109,10 +118,10 @@ brief() { ( cd "$1" && "$BIN" . --no-cache "--brief=$TASK" "${@:2}" 2>/dev/null 
 attr() { python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"<brief [^>]*\b"+sys.argv[1]+r"=\"([^\"]*)\"", t); print(m.group(1) if m else "")' "$1"; }
 
 classOf() { case "$1" in medium) echo medium ;; large) echo large ;; *) echo small ;; esac; }
-# Each class cap is its content room (2560/4096/6144) plus the 379 B the legend's attribute definitions and schema= add over the
+# Each class cap is its content room (3584/5120/7168) plus the 379 B the legend's attribute definitions and schema= add over the
 # 104-B notes comment (brief.h kLegendDefsBytes): a legend edit that moves this must re-pin it here, so the fit change is seen.
 LEGEND_DEFS=379
-capOf() { case "$1" in medium) echo $(( 4096 + LEGEND_DEFS )) ;; large) echo $(( 6144 + LEGEND_DEFS )) ;; *) echo $(( 2560 + LEGEND_DEFS )) ;; esac; }
+capOf() { case "$1" in medium) echo $(( 5120 + LEGEND_DEFS )) ;; large) echo $(( 7168 + LEGEND_DEFS )) ;; *) echo $(( 3584 + LEGEND_DEFS )) ;; esac; }
 pageLen() { python3 -c 'import sys; print(len(open(sys.argv[1], "rb").read().rstrip(b"\n")))' "$1"; }
 built=0
 for f in cmake python node bare medium large; do
@@ -180,7 +189,7 @@ brief "$TMP/cmake" --brief-bytes=512 > "$TMP/o.out"   # status: brief() FAILs th
 dr=$( attr dropped < "$TMP/o.out" )
 python3 - "$dr" <<'PY' > "$TMP/o.probe"
 import sys
-order = "conventions,layout_depth,entry,edges,where_else,qs".split(",")
+order = "conventions,attrs,layout_depth,ranked,entry,edges,where_else,qs".split(",")
 got = [x for x in sys.argv[1].split(",") if x]
 print("OK" if got and got == order[:len(got)] else "BAD")
 PY
@@ -451,6 +460,98 @@ grep -qF 'make test' "$TMP/i3.out" && ! grep -qF "$SECRET" "$TMP/i3.out" && ni=$
 rm -f "$TMP/sec/AGENTS.md"; mkfifo "$TMP/sec/AGENTS.md"
 ( sec_cli > "$TMP/i5.out" 2>/dev/null & bp=$!; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; kill -0 "$bp" 2>/dev/null || exit 0; done; kill -9 "$bp" 2>/dev/null; exit 1 ) && grep -q '^<brief ' "$TMP/i5.out" && ni=$(( ni + 1 )) || no "(I) a FIFO AGENTS.md blocked the brief or it printed nothing"   # status: run in a timed subshell; the grep on i5.out is the check (an exit or hang prints no page)
 if [ "$ni" = 5 ]; then ok "(I) file-derived text redacted on CLI and MCP (raw under --no-redact), FIFO convention doc skipped (5 of 5)"; else no "(I) quoted-text safety $ni of 5"; fi
+# ─── (Q) package surface, subject tests, main hand-off, attrs-first byte order (BRIEF-R2) ─────────────────────────────
+mk_r2() {
+    local t="$TMP/r2ts" p="$TMP/r2py" g="$TMP/r2go" m="$TMP/r2main"
+    mkdir -p "$t/packages/common/pipes" "$t/packages/common/test/pipes" "$t/packages/common/test/helpers"
+    printf '{\n  "name": "@x/common",\n  "main": "index.js"\n}\n' > "$t/packages/common/package.json"
+    printf 'export * from "./pipes/index.js";\n' > "$t/packages/common/index.ts"
+    printf '// the pipes\nexport * from "./parse-int.pipe.js";\nexport * from "./parse-uuid.pipe.js";\n' > "$t/packages/common/pipes/index.ts"
+    printf 'export class ParseIntPipe {\n  transform(v: string) { return parseInt(v); }\n}\n' > "$t/packages/common/pipes/parse-int.pipe.ts"
+    printf 'export class ParseUuidPipe {\n  transform(v: string) { return v; }\n}\n' > "$t/packages/common/pipes/parse-uuid.pipe.ts"
+    printf 'export function makeArg(s: string) { return s; }\n' > "$t/packages/common/test/helpers/args.ts"
+    for n in a b; do
+        printf 'import { ParseIntPipe } from "../../pipes/parse-int.pipe";\nimport { makeArg } from "../helpers/args";\ndescribe("p%s", () => { it("t", () => { new ParseIntPipe().transform(makeArg("1")); }); });\n' "$n" > "$t/packages/common/test/pipes/parse-int-$n.spec.ts"
+    done
+    printf 'import { ParseUuidPipe } from "../../pipes/parse-uuid.pipe";\nimport { makeArg } from "../helpers/args";\ndescribe("u", () => { it("t", () => { new ParseUuidPipe().transform(makeArg("1")); }); });\n' > "$t/packages/common/test/pipes/parse-uuid.spec.ts"
+    mkdir -p "$p/pkg/types" "$p/tests"
+    printf '[project]\nname = "pkg"\n' > "$p/pyproject.toml"
+    printf 'from pkg.types.sizes import ByteSize\n' > "$p/pkg/types/__init__.py"
+    printf 'from pkg.types import ByteSize\n' > "$p/pkg/__init__.py"
+    printf 'class ByteSize:\n    def human(self):\n        return "1B"\n' > "$p/pkg/types/sizes.py"
+    printf 'from pkg.types.sizes import ByteSize\n\ndef test_human():\n    assert ByteSize().human() == "1B"\n' > "$p/tests/test_sizes.py"
+    mkdir -p "$g/render"
+    printf 'module example.com/web\n\ngo 1.22\n' > "$g/go.mod"
+    printf 'package render\n\ntype TOML struct{}\n\nfunc (r TOML) Render() error { return nil }\n' > "$g/render/toml.go"
+    printf 'package render\n\ntype JSON struct{}\n\nfunc (r JSON) Render() error { return nil }\n' > "$g/render/json.go"
+    printf 'package web\n\nimport (\n\t"example.com/web/render"\n)\n\nfunc Serve() error { return render.TOML{}.Render() }\n' > "$g/engine.go"
+    printf 'package web\n\nfunc Unrelated() int { return 1 }\n' > "$g/zzz_unrelated.go"
+    mkdir -p "$m/Programs" "$m/Modules" "$m/Python" "$m/cmd"
+    printf 'all:\n\tcc -o app Programs/app.c Modules/main.c Python/lifecycle.c\n' > "$m/Makefile"
+    printf 'int app_main( int argc );\nint main( int argc, char** argv )\n{\n    return app_main( argc );\n}\n' > "$m/Programs/app.c"
+    printf 'int lifecycle_init( int n );\nstatic int run( int n )\n{\n    return lifecycle_init( n );\n}\nint app_main( int argc )\n{\n    return run( argc );\n}\n' > "$m/Modules/main.c"
+    printf 'int lifecycle_init( int n )\n{\n    return n;\n}\n' > "$m/Python/lifecycle.c"
+}
+mk_r2
+qbrief() { ( cd "$1" && env "${@:3}" "$BIN" . --no-cache --brief-bytes=8192 "--brief=$2" 2>/dev/null ); }
+TS_TASK="add a new pipe (like ParseIntPipe) exported from the package"
+qbrief "$TMP/r2ts" "$TS_TASK" > "$TMP/q1.out"
+qbrief "$TMP/r2ts" "$TS_TASK" RIPWIRE_BRIEF_SURFACE=0 > "$TMP/q1s.out"
+qbrief "$TMP/r2ts" "$TS_TASK" RIPWIRE_BRIEF_SUBJECTTESTS=0 > "$TMP/q1t.out"
+qbrief "$TMP/r2py" "add a new type (like ByteSize) exported from pkg" > "$TMP/q2.out"
+qbrief "$TMP/r2go" "add a new render format (like TOML)" > "$TMP/q3.out"
+qbrief "$TMP/r2main" "change how the app starts up (lifecycle_init)" > "$TMP/q4.out"
+qbrief "$TMP/r2main" "change how the app starts up (lifecycle_init)" RIPWIRE_BRIEF_HANDOFF=0 > "$TMP/q4h.out"
+nq=0
+en="$( sect "$TMP/q1.out" entry )"
+case "$en" in "surface: packages/common/pipes/index.ts · packages/common/index.ts"*) nq=$(( nq + 1 )) ;; *) no "(Q) TS barrel + package index are not the surface: $en" ;; esac
+sect "$TMP/q1s.out" entry | grep -q 'surface:' && no "(Q) RIPWIRE_BRIEF_SURFACE=0 kept the surface" || nq=$(( nq + 1 ))
+we="$( sect "$TMP/q1.out" where-else )"
+case "$we" in *"test packages/common/test/pipes/parse-int-a.spec.ts"*"test packages/common/test/pipes/"*) nq=$(( nq + 1 )) ;; *) no "(Q) the exemplar's spec files and the tests' dir do not lead where-else: $we" ;; esac
+sect "$TMP/q1.out" build | grep -qF 'helpers packages/common/test/helpers/args.ts' && nq=$(( nq + 1 )) || no "(Q) the same-tree helper the tests import is not test support: $( sect "$TMP/q1.out" build )"
+case "$( sect "$TMP/q1t.out" where-else )" in *"parse-int-a.spec.ts"*"parse-int-b.spec.ts"*"packages/common/test/pipes/"*) no "(Q) RIPWIRE_BRIEF_SUBJECTTESTS=0 kept the subject tests: $( sect "$TMP/q1t.out" where-else )" ;; *) nq=$(( nq + 1 )) ;; esac
+sect "$TMP/q2.out" entry | grep -qF 'surface: pkg/types/__init__.py · pkg/__init__.py' && nq=$(( nq + 1 )) || no "(Q) the Python package roots are not the surface: $( sect "$TMP/q2.out" entry )"
+en3="$( sect "$TMP/q3.out" entry )"
+case "$en3" in *"surface: engine.go"*) nq=$(( nq + 1 )) ;; *) no "(Q) the Go root file importing render/ is not the surface: $en3" ;; esac
+case "$en3" in *zzz_unrelated.go*) no "(Q) a Go root file that does not import render/ reached the surface: $en3" ;; *) nq=$(( nq + 1 )) ;; esac
+sect "$TMP/q4.out" entry | grep -qE 'Programs/app.c:2 main( hops=[0-9]+)? -> Modules/main.c -> Python/lifecycle.c' && nq=$(( nq + 1 )) || no "(Q) the trampoline main does not chain through Modules/main.c: $( sect "$TMP/q4.out" entry )"
+sect "$TMP/q4h.out" entry | grep -qF 'Python/lifecycle.c' && no "(Q) RIPWIRE_BRIEF_HANDOFF=0 kept the chain: $( sect "$TMP/q4h.out" entry )" || nq=$(( nq + 1 ))
+# attrs before any path cut: at a budget that needs the attrs step, entry rows lose :line/kind/hops but no row
+( cd "$TMP/r2main" && "$BIN" . --no-cache --brief-bytes=1024 "--brief=change how the app starts up (lifecycle_init)" 2>/dev/null ) > "$TMP/q5.out" || no "(Q) --brief exited $? at --brief-bytes=1024"
+dq=$( attr dropped < "$TMP/q5.out" )
+case ",$dq," in *,attrs,*) case "$( sect "$TMP/q5.out" entry )" in *"Programs/app.c -> Modules/main.c"*) nq=$(( nq + 1 )) ;; *) no "(Q) attrs did not shed the entry's line/kind: $( sect "$TMP/q5.out" entry )" ;; esac ;; *) no "(Q) premise: 1024 B did not reach the attrs step (dropped=\"$dq\")" ;; esac
+if [ "$nq" = 11 ]; then ok "(Q) round 2: TS barrel + index and Python roots as surface, Go importer named and a non-importer not, subject tests + dir + same-tree helper, trampoline chain, attrs shed first, three OFF switches (11 of 11)"; else no "(Q) round 2 $nq of 11"; fi
+
+# ─── (R) round 3: --for's ranked files the rest does not name, and a "like X: path" exemplar (BRIEF-R3) ─────────────────
+mk_r3() {
+    local p="$TMP/r3py"
+    mkdir -p "$p/enc" "$p/tests"
+    printf '[project]\nname = "enc"\n' > "$p/pyproject.toml"
+    printf 'class Codec:\n    def encode(self, s):\n        raise NotImplementedError\n' > "$p/enc/base.py"
+    for n in alpha beta gamma delta epsilon zeta eta theta iota kappa; do
+        printf 'from enc.base import Codec\nfrom enc.registry import register\n\n@register\nclass %sCodec(Codec):\n    def encode(self, s):\n        return s\n' "$n" > "$p/enc/$n.py"
+    done
+    printf 'REGISTRY = []\n\ndef register(cls):\n    REGISTRY.append(cls)\n    return cls\n' > "$p/enc/registry.py"
+    printf 'from enc.alpha import alphaCodec\n\ndef test_alpha():\n    assert alphaCodec().encode("x") == "x"\n' > "$p/tests/test_alpha.py"
+}
+mk_r3
+R3_TASK="add one more (like alphaCodec: enc/alpha.py)"   # words no sibling holds, so the question sites do not already list the family
+qbrief "$TMP/r3py" "$R3_TASK" > "$TMP/r1.out"
+qbrief "$TMP/r3py" "$R3_TASK" RIPWIRE_BRIEF_RANKED=0 > "$TMP/r1r.out"
+nr=0
+sect "$TMP/r1.out" like | grep -qx 'enc/alpha.py' && nr=$(( nr + 1 )) || no "(R) the \"like X: path\" exemplar is not that path: $( grep -o '<like[^/]*/like>' "$TMP/r1.out" )"
+rk="$( sect "$TMP/r1.out" ranked )"
+[ -n "$rk" ] && nr=$(( nr + 1 )) || no "(R) premise: no <ranked> slot on a family of 10 sibling codecs"
+python3 - "$TMP/r1.out" "$TMP/r3py" <<'PY' && nr=$(( nr + 1 )) || no "(R) a ranked path is not an indexed file, or another slot already names it"
+import os, re, sys
+t = open(sys.argv[1]).read(); m = re.search(r"<ranked>(.*?)</ranked>", t)
+paths = m.group(1).split(" · ") if m else []
+rest = t[:m.start()] + t[m.end():] if m else t
+ok = paths and all(os.path.isfile(os.path.join(sys.argv[2], p)) and p not in rest for p in paths)
+sys.exit(0 if ok else 1)
+PY
+grep -q '<ranked>' "$TMP/r1r.out" && no "(R) RIPWIRE_BRIEF_RANKED=0 kept <ranked>" || nr=$(( nr + 1 ))
+if [ "$nr" = 4 ]; then ok "(R) round 3: like X: path is the exemplar, ranked files are indexed and named nowhere else, OFF switch (4 of 4)"; else no "(R) round 3 $nr of 4"; fi
 
 [ "$fail" = 0 ] && echo "briefcheck: PASS" || echo "briefcheck: FAIL"
 exit "$fail"

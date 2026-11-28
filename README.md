@@ -1837,7 +1837,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-28 the tool had 499 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-28 the tool had 504 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names
