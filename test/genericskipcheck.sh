@@ -14,6 +14,8 @@
 # Arm classes: [P] positive — RED on the parent binary (origin/main 17543d674); [C] control — the same callee without type
 # arguments, or a generic name that is no member access: holds on every binary; [N] near miss — a comparison spelled like a
 # template-id, which must not read as a call (holds on the parent binary too: it guards the fix, it does not prove it).
+# [D] the scan bound (kMacroTemplateArgsMaxBytes, 1 KB): a list under it is a call, a list it stops undecided is disclosed as
+# --skipped why="extract-partial" (CodeRabbit 4726101904), and the ordinary corpus files are not.
 # Every arm counts toward a premise total; a run that saw zero rows of a corpus FAILs (gatepremisecheck).
 #
 # Not an arm: a block comment inside a #define. tree-sitter-cpp ends a preproc_arg before `/*` and degrades the file
@@ -111,6 +113,8 @@ cat >"$DIR/cpp/main.cpp" <<'E'
 #define N_AND2( y, w ) cmpx<y && cmpz>( w )
 #define N_OR( y, w ) cmpx<y || cmpz>( w )
 #define N_SHIFT( y, w ) cmpa<<y>( w )
+#define N_ANDNEG( y, w ) cmpx<y && -cmpz>( w )
+#define N_ANDSCOPE( y, w ) cmpx<y && ::cmpz>( w )
 int caller( int x ) { return M_E( x ); }
 E
 cat >"$DIR/cpp/line.cpp" <<'E'
@@ -126,7 +130,7 @@ MS="$( callees "$DIR/cpp" M_STR )"; MP="$( callees "$DIR/cpp" M_PAREN )"; ML="$(
 MR="$( callees "$DIR/cpp" M_RREF )"; M0="$( callees "$DIR/cpp" M_E0 )"
 NC="$( callees "$DIR/cpp" N_CMP )"; NA="$( callees "$DIR/cpp" N_AND )"; NA2="$( callees "$DIR/cpp" N_AND2 )"
 NO="$( callees "$DIR/cpp" N_OR )"; NS="$( callees "$DIR/cpp" N_SHIFT )"; NL="$( callees "$DIR/cpp" N_LINE )"
-CC="$( callees "$DIR/cpp" C_CMP )"
+CC="$( callees "$DIR/cpp" C_CMP )"; NAN="$( callees "$DIR/cpp" N_ANDNEG )"; NASC="$( callees "$DIR/cpp" N_ANDSCOPE )"
 if ! CR="$( ( cd "$DIR/cpp" && "$BIN" . --no-cache --callers=returnOrThrow --legend=compact 2>&1 ) )"; then
     no "--callers=returnOrThrow exited non-zero"
 fi
@@ -146,8 +150,8 @@ echo "── [C] G2 control"
 has "$M0" 'n="make" p="lib.h:1"'           "[C3] make( x ) without type arguments: --callees M_E0 lists make"
 
 echo "── [N] G2 near misses: a comparison is no call"
-nfound="$( printf '%s\n' "$NC" "$NA" "$NA2" "$NO" "$NS" "$NL" "$CC" | grep -cx FOUND )"
-if [ "$nfound" -eq 7 ]; then ok "premise: all 7 near-miss macros resolved"; else no "premise: $nfound of 7 near-miss macros resolved (a hasnt arm would pass blind)"; fi
+nfound="$( printf '%s\n' "$NC" "$NA" "$NA2" "$NO" "$NS" "$NL" "$CC" "$NAN" "$NASC" | grep -cx FOUND )"
+if [ "$nfound" -eq 9 ]; then ok "premise: all 9 near-miss macros resolved"; else no "premise: $nfound of 9 near-miss macros resolved (a hasnt arm would pass blind)"; fi
 hasnt "$NC"  'n="cmpa"'                    "[N1] cmpa < b > ( c ): no call of cmpa"
 hasnt "$NA"  'n="cmpx"'                    "[N2] cmpx < y && cmpz > ( w ): no call of cmpx"
 hasnt "$NA"  'n="cmpz"'                    "[N2] ... nor of cmpz"
@@ -156,6 +160,32 @@ hasnt "$NO"  'n="cmpx"'                    "[N4] cmpx<y || cmpz>( w ): no call o
 hasnt "$NS"  'n="cmpa"'                    "[N5] cmpa<<y>( w ), a shift: no call of cmpa"
 hasnt "$NL"  'n="cmpq"'                    "[N6] cmpq<int // >( x ): the // comment ends the macro, no call of cmpq"
 hasnt "$CC"  'n="cmpc"'                    "[N7] C has no templates: cmpc<b>( c ) in a .c #define is no call of cmpc"
+hasnt "$NAN" 'n="cmpx"'                    "[N8] cmpx<y && -cmpz>( w ): an operand may open with a unary operator, no call of cmpx (CodeRabbit 4726101898)"
+hasnt "$NASC" 'n="cmpx"'                   "[N9] cmpx<y && ::cmpz>( w ): ... or with ::, no call of cmpx"
+
+# ── [D] the scan bound: a separate corpus, so the extract-partial row names only the file that earns it ──────────────────
+mkdir -p "$DIR/cap"
+cp "$DIR/cpp/lib.h" "$DIR/cap/lib.h"
+args(){ local n="$1" out="int" i; for (( i = 1; i < n; i++ )); do out="$out, int"; done; printf '%s' "$out"; }
+{ echo '#include "lib.h"'
+  echo "#define M_NEAR( x ) make<Tup<$( args 160 )>>( x )"   # ~800 B: inside the bound
+  echo '#define M_E( x ) make<int>( x )'
+} >"$DIR/cap/near.cpp"
+{ echo '#include "lib.h"'
+  echo "#define M_FAR( x ) make<Tup<$( args 260 )>>( x )"    # ~1.3 KB: past the bound
+} >"$DIR/cap/far.cpp"
+nb="$( awk '/M_NEAR/ { print length( $0 ) }' "$DIR/cap/near.cpp" )"; fb="$( awk '/M_FAR/ { print length( $0 ) }' "$DIR/cap/far.cpp" )"
+if [ "$nb" -lt 1000 ] && [ "$fb" -gt 1100 ]; then ok "premise: the near list is $nb B (under 1 KB) and the far list $fb B (over it)"; else no "premise: list sizes $nb / $fb B do not straddle the 1 KB bound"; fi
+MN="$( callees "$DIR/cap" M_NEAR )"; MF="$( callees "$DIR/cap" M_FAR )"
+if [ "$( printf '%s\n' "$MN" "$MF" | grep -cx FOUND )" -eq 2 ]; then ok "premise: M_NEAR and M_FAR resolved"; else no "premise: M_NEAR or M_FAR did not resolve (the arms below would pass blind)"; fi
+SK="$( cd "$DIR/cap" && "$BIN" . --no-cache --skipped --legend=compact 2>&1 )" || no "--skipped on the cap corpus exited non-zero"
+SKC="$( cd "$DIR/cpp" && "$BIN" . --no-cache --skipped --legend=compact 2>&1 )" || no "--skipped on the cpp corpus exited non-zero"
+echo "── [D] the 1 KB scan bound"
+has   "$MN"  'n="make" p="lib.h:1"'        "[D1] an 800 B list inside the bound: --callees M_NEAR lists make"
+hasnt "$MF"  'n="make"'                    "[D2] a 1.3 KB list past the bound claims no call of make"
+has   "$SK"  'p="far.cpp" why="extract-partial"'  "[D3] ... and --skipped discloses far.cpp as extract-partial"
+hasnt "$SK"  'p="near.cpp"'                "[D4] near.cpp (its list closed inside the bound) is not disclosed"
+hasnt "$SKC" 'extract-partial'             "[D5] no file of the ordinary C/C++ corpus (comparisons included) is extract-partial"
 
 if [ "$arms" -eq 0 ]; then
     no "no arm ran (vacuous)"

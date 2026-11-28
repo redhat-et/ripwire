@@ -122,7 +122,7 @@ kLineStartReach	none:the snap window of a line-start search, not a cut (Stage 0 
 kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
 kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
 kMacroArgNestingDepth	sink:discloseMacroArgNesting
-kMacroTemplateArgsMaxBytes	none:a shape test, not a cut: a #define body's `<..>` longer than 1 KB reads as no template argument list, so no call is claimed (the refusal a comparison gets); real lists are a few dozen bytes and the bound keeps the per-identifier scan linear (lane gskip-1)
+kMacroTemplateArgsMaxBytes	sink:discloseMacroTemplateArgsCap
 kManifestFileRows	sink:capped
 kManifestLineMax	sink:cut
 kManifestRowsPerFile	sink:capped

@@ -562,6 +562,10 @@ bool macroBodyTemplateKeyword( std::string_view w ) noexcept
 // macroTemplateArgsEnd's scan window (below)
 inline constexpr std::uint32_t kMacroTemplateArgsMaxBytes = 1024;
 
+struct ExtractShortfall;   // defined with captureIncludes below
+// a #define body's `<..>` that ran past kMacroTemplateArgsMaxBytes undecided: a call behind it is not captured, and the file says so
+void discloseMacroTemplateArgsCap( ExtractShortfall& shortfall );
+
 // macroTemplateArgsEnd's step over one opaque span at `k`: the byte past a block comment, a string or character literal, or a
 // digit separator; `k` itself when none starts there; 0 when the span closes no list (a `//` comment, an unterminated one).
 // tree-sitter-cpp ends a preproc_arg before `/*`, so the block-comment arm is defensive: the bytes it is handed hold none.
@@ -594,7 +598,8 @@ std::uint32_t macroArgOpaqueEnd( std::string_view src, std::uint32_t lt, std::ui
     return q < stop ? q + 1 : 0u;
 }
 
-// true when the `&&` at `k` joins two operands (`y && z`), not an rvalue reference closing a type (`T&&>`, `T&&,`)
+// true when the `&&` at `k` joins two operands (`y && z`, `y && -z`, `y && ::z`), not an rvalue reference closing a type: only
+// `>`, `,`, `)`, `]` or a pack's `...` follows one (`T&&>`, `T&&,`, `T&&...`), and an operand may start with any other byte
 bool macroArgConjunctionAt( std::string_view src, std::uint32_t k, std::uint32_t stop ) noexcept
 {
     std::uint32_t r = k + 2;
@@ -602,7 +607,12 @@ bool macroArgConjunctionAt( std::string_view src, std::uint32_t k, std::uint32_t
     {
         ++r;
     }
-    return r < stop && ( namesplit::isIdentChar( src[r] ) || src[r] == '(' || src[r] == '!' );
+    if( r >= stop )
+    {
+        return false;
+    }
+    const char c = src[r];
+    return c != '>' && c != ',' && c != ')' && c != ']' && c != '.';
 }
 
 // lane gskip-1: the byte just past the `>` that closes the template argument list opening at `lt` (src[lt] == '<'), or 0
@@ -614,8 +624,9 @@ bool macroArgConjunctionAt( std::string_view src, std::uint32_t k, std::uint32_t
 // that joins two operands (`x < y && z > (w)`; `T&&` stays), a `<<` / `<=` opening, and a `//` comment (it runs to the end
 // of the macro's logical line, so no `>` can follow). The caller adds the spacing rule (no blank between the name and `<`).
 // A list longer than kMacroTemplateArgsMaxBytes is refused: the scan is per identifier, and the bound keeps a long body of
-// comparisons linear; a real argument list is a few dozen bytes.
-std::uint32_t macroTemplateArgsEnd( std::string_view src, std::uint32_t lt, std::uint32_t vb ) noexcept
+// comparisons linear; a real argument list is a few dozen bytes. A scan the bound stops undecided is disclosed
+// (discloseMacroTemplateArgsCap: --skipped why=extract-partial), since a call behind it may be lost.
+std::uint32_t macroTemplateArgsEnd( std::string_view src, std::uint32_t lt, std::uint32_t vb, ExtractShortfall& shortfall )
 {
     const std::uint32_t stop = std::min( vb, lt + kMacroTemplateArgsMaxBytes );
     if( lt + 1 >= stop || src[ lt + 1 ] == '<' || src[ lt + 1 ] == '=' )
@@ -664,6 +675,10 @@ std::uint32_t macroTemplateArgsEnd( std::string_view src, std::uint32_t lt, std:
         }
         ++k;
     }
+    if( stop < vb )   // the bound, not the body's end, stopped the scan: the list may still close
+    {
+        discloseMacroTemplateArgsCap( shortfall );
+    }
     return 0;
 }
 
@@ -681,11 +696,12 @@ inline std::uint32_t macroSkipBlanks( std::string_view src, std::uint32_t at, st
 // C++ past an explicit template argument list. `name<..>(` (lane gskip-1) counts only written flush against the name, as every
 // C++ style spells a template-id and none spells a comparison; macroTemplateArgsEnd judges the list itself. C has no templates
 // (LangFacts::templateArgumentLists).
-inline std::uint32_t macroCallParenAt( std::string_view src, std::uint32_t wordEnd, std::uint32_t vb, Lang lang, std::string_view word ) noexcept
+inline std::uint32_t macroCallParenAt( std::string_view src, std::uint32_t wordEnd, std::uint32_t vb, Lang lang, std::string_view word,
+                                       ExtractShortfall& shortfall )
 {
     if( langFacts( lang ).templateArgumentLists && wordEnd < vb && src[ wordEnd ] == '<' && !macroBodyTemplateKeyword( word ) )
     {
-        if( const std::uint32_t past = macroTemplateArgsEnd( src, wordEnd, vb ); past != 0 )
+        if( const std::uint32_t past = macroTemplateArgsEnd( src, wordEnd, vb, shortfall ); past != 0 )
         {
             return macroSkipBlanks( src, past, vb );
         }
@@ -896,7 +912,7 @@ bool preprocFunctionDefHasBody( TSNode defineNode, std::string_view src ) noexce
     return false;
 }
 
-void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
+void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
 {
     // function-like `#define` only: object-like preproc_def is not a call-edge participant, and the
     // non-C-family @definition.macro capture (Rust macro_definition) has no preproc replacement to scan.
@@ -1007,10 +1023,14 @@ void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, 
         const std::string_view word = src.substr( idStart, i - idStart );
         // lookahead across whitespace + `\`-newline continuations (and a C++ template argument list) for the call-shaped `(`. j only PEEKS —
         // the main scan resumes at i (the identifier end), so a peeked-over '\n' is still line-counted there.
-        const uint32_t j = macroCallParenAt( src, i, vb, lang, word );
-        if( j >= vb || src[j] != '(' || pasted || macroBodyKeyword( word ) || isParam( word ) || word == macroName )
+        if( pasted || macroBodyKeyword( word ) || isParam( word ) || word == macroName )
         {
-            continue;   // not a call shape (or a known non-callee) — resume the scan at the byte after the identifier
+            continue;   // a known non-callee, judged before the lookahead so a capped template scan discloses only a possible call
+        }
+        const uint32_t j = macroCallParenAt( src, i, vb, lang, word, shortfall );
+        if( j >= vb || src[j] != '(' )
+        {
+            continue;   // not a call shape — resume the scan at the byte after the identifier
         }
         RawRef r;
         r.fileId    = fileId;
@@ -3065,6 +3085,7 @@ struct ExtractShortfall
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
         RestUnitsCapped,          // a reST file past kMaxRestUnits or kMaxRestDepth: later units stay in the whole-file node
         MacroArgsNestedTooDeep,   // Rust macro arguments nested past kMacroArgNestingDepth: the deeper calls are not captured
+        MacroTemplateArgsTooLong,   // a C++ #define body's `<..>` ran past kMacroTemplateArgsMaxBytes: a call behind it is not captured
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
@@ -3072,6 +3093,12 @@ struct ExtractShortfall
         isShort = true;
     }
 };
+
+void discloseMacroTemplateArgsCap( ExtractShortfall& shortfall )
+{
+    DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::MacroTemplateArgsTooLong,
+              "ingest: a #define body's template argument list ran past the scan bound — a call behind it is not captured (--skipped why=extract-partial)" );
+}
 
 void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs,
                       std::vector<RawBind>& binds, std::vector<ConstOpen>& constOpens, ExtractShortfall& shortfall )
