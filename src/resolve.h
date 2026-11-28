@@ -7423,7 +7423,7 @@ struct IdentityNarrower
         {
             seen.insert( id );
         }
-        bool queue( NodeId cls )   // true when `cls` was not reached before (it is then on the next level)
+        bool queueNext( NodeId cls )   // true when `cls` was not reached before (it is then on the next level)
         {
             if( !seen.insert( cls ) )
             {
@@ -8088,7 +8088,7 @@ struct IdentityNarrower
             }
             for( NodeId b : plausibleOfName( bases->second, fileOf( c, ids ), ids ) )
             {
-                walk.queue( b );
+                walk.queueNext( b );
             }
         }
         return declares;
@@ -8151,7 +8151,7 @@ struct IdentityNarrower
         }
         for( NodeId d : down->second )
         {
-            if( !clauseMeans( d, c, named->second, ids ) || !walk.queue( d ) )
+            if( !clauseMeans( d, c, named->second, ids ) || !walk.queueNext( d ) )
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
