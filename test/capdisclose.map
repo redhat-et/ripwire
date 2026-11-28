@@ -130,6 +130,7 @@ kMaxLinesUp	none:shape windows (two locals share the name), not a cut (Stage 0 a
 kOneSideMaxEndpointDefs	none:a rule gate deciding whether the one-side rule applies, not a cut (Stage 0 audit)
 kOneSideRootPathMaxHops	none:a classification threshold, not a cut (Stage 0 audit)
 kOwnerNearRows	none:the K3 window; the demotion it bounds is disclosed (Stage 0 audit)
+kPageCapPercent	none:a SHARE, not a compared bound: it sets PageAsk.capPercent, which pageAnswer resolves to ask.capBytes; the cut compares capBytes (forpages.h capPlan) and is disclosed by budget_bytes= page= pages= withheld_bytes= next= (pagebudgetcheck C P)
 kPathDeclinedLastCands	none:a precision gate on a declined path, not a cut (Stage 0 audit)
 kPathFromReachMaxNodes	sink:floorScore
 kPathRouteCandsCeiling	none:saturating, and disclosed by the literal route_cands_capped=1 the lint cannot see (fired once in 140 large-repo calls, cpython-02) (Stage 0 audit)
