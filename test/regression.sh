@@ -1128,6 +1128,7 @@ for _g in \
     situbulkcheck \
     situdiffcheck \
     situhunkcheck \
+    situnamecheck \
     situshapecheck \
     skilldescbudgetcheck \
     skillevalcheck \

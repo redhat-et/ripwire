@@ -1618,7 +1618,10 @@ Discloses: `partners_capped`, `tests_capped`, `untested_capped`
 | --- | --- | --- | --- |
 | `kMaxUntestedRows` | `25` | — | — |
 | `kSituBlastFilesShown` | `8` | OUTPUT | section [1] — blast-radius file rows; a raisable DEFAULT |
+| `kSituChangedCallerFiles` | `3` | OUTPUT | direct-caller files named per seed row |
+| `kSituChangedRowsShown` | `8` | OUTPUT | changed: rows; a raisable DEFAULT (--limit=N) |
 | `kSituCochangeProbeFiles` | `20` | — | section [3] — changed files probed for co-change (cut-fix E: disclosed) |
+| `kSituLastCommitFilesShown` | `3` | OUTPUT | last commit: files named before "+K" |
 | `kSituPartnerFileRowsShown` | `4` | OUTPUT | section [1] — decl/def partner rows |
 | `kSituPartnerRowsShown` | `8` | OUTPUT | section [3] — co-change partner rows; a raisable DEFAULT |
 | `kSituSiblingRowsShown` | `8` | — | section [1] — L-D lexical sibling rows; a raisable DEFAULT |
