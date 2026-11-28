@@ -10,7 +10,8 @@
 #        vacuous; the checker COUNTS the legend comments it read and fails on zero
 #   (C1) the default page 1's document legend (every comment after the last row block, less the row-line clauses
 #        forrowlines.h writes after paging) is the schema comment (<= 1024 B, carrying the full-legend pointer) plus at most one
-#        paging/act comment (<= 512 B)
+#        paging/act comment (<= 512 B, less the ACT-EDGES lane's edges:/where: clauses, each <= 100 B, present with their lines —
+#        src/forpages.h kCoreEdgesClause / kCoreWhereClause, pinned by test/actedgescheck.sh)
 #   (C1n) negative control: the same checker on page 1 with the pointer removed fails, and on the --legend=last page 1 (the full
 #        legend, > 1 KiB) fails
 #   (C2) the pointer works: --legend=last's page 1 carries the page clause (page=K of pages=N) and a legend over 1 KiB
@@ -90,10 +91,13 @@ def doc_legend(t):
         s = body.rfind("<!--"); comments.insert(0, body[s:]); body = body[:s]
     kept = [c for c in comments if not c.startswith(ROWCLAUSES)]
     return "".join(kept), len(kept)
+LANE = re.compile(r"(?:edges: per act symbol|where: tests= )[^;]*?(?:; |(?= -->))")   # ACT-EDGES: one clause per line the page carries
+def paging_ok(c):
+    return len(LANE.sub("", c).encode()) <= 512 and all(len(x.encode()) <= 100 for x in LANE.findall(c))
 def core_ok(t):
     leg, n = doc_legend(t)
     cs = re.findall(r"<!--.*?-->", leg, re.S)
-    ok = 1 <= n <= 2 and len(cs[0].encode()) <= 1024 and POINTER in cs[0] and all(len(c.encode()) <= 512 for c in cs[1:])
+    ok = 1 <= n <= 2 and len(cs[0].encode()) <= 1024 and POINTER in cs[0] and all(paging_ok(c) for c in cs[1:])
     return ok, len(leg.encode()), n
 PAGING = ("page", "pages", "withheld_bytes", "continued", "deferred", "next", "root", "at")
 def undefined(t):

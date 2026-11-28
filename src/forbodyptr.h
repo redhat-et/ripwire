@@ -31,6 +31,7 @@
 
 #include "clones.h"            // readCloneSourceFile — a file's bytes by fileId through the one disk-path seam
 #include "foreditverb.h"      // isEditTask — does the --for task read as an edit (the edit-file form's gate)
+#include "foractline.h"        // actline::detail::listedRangeHolds — the act line's one containment test
 #include "foranswerfirst.h"    // rootBody — the root's open-tag end and its </ctx>
 #include "forbodiesform.h"     // bodyPointersOn — the switch
 #include "forpages.h"          // detail::pricePage — est_tokens= prices the page as served
@@ -391,32 +392,6 @@ namespace detail
     const std::string_view p = rw::attrOf( row, "p" ), l = rw::attrOf( row, "l" ), e = rw::attrOf( row, "e" );
     return e.empty() ? std::string() : std::string( p ) + ":" + std::string( l ) + "-" + std::string( e );
 }
-[[nodiscard]] inline unsigned lineNumber( std::string_view v ) noexcept
-{
-    unsigned n = 0;
-    (void)std::from_chars( v.data(), v.data() + v.size(), n );
-    return n;
-}
-// Does a range listed in `value` (P:L-E,…) already hold `range`?
-[[nodiscard]] inline bool listedRangeHolds( std::string_view value, std::string_view range )
-{
-    const std::size_t      c    = range.rfind( ':' );
-    const std::string_view path = range.substr( 0, c ), lines = range.substr( c + 1 );
-    const unsigned         l = lineNumber( lines.substr( 0, lines.find( '-' ) ) ), e = lineNumber( lines.substr( lines.find( '-' ) + 1 ) );
-    for( std::size_t at = 0; at <= value.size(); )
-    {
-        const std::size_t      next = std::min( value.find( ',', at ), value.size() );
-        const std::string_view item = value.substr( at, next - at );
-        const std::size_t      ic   = item.rfind( ':' );
-        if( ic != std::string_view::npos && item.substr( 0, ic ) == path )
-        {
-            const std::string_view il = item.substr( ic + 1 );
-            if( lineNumber( il.substr( 0, il.find( '-' ) ) ) <= l && lineNumber( il.substr( il.find( '-' ) + 1 ) ) >= e ) { return true; }
-        }
-        at = next + 1;
-    }
-    return false;
-}
 // Append the ranges the act line does not already hold to its read= value. False when the page keeps no act line (the act-line
 // producer omits it when a top row has no e=): no element can hold the ranges, so the caller keeps the bodies inline.
 [[nodiscard]] inline bool appendActRanges( std::string& doc, const std::vector<std::string>& ranges )
@@ -431,7 +406,7 @@ namespace detail
         std::string       value   = doc.substr( valueAt, valueEnd - valueAt );
         for( const std::string& r : ranges )
         {
-            if( !r.empty() && r.find( ',' ) == std::string::npos && !listedRangeHolds( value, r ) ) { value.append( "," ).append( r ); }
+            if( !r.empty() && r.find( ',' ) == std::string::npos && !actline::detail::listedRangeHolds( value, r ) ) { value.append( "," ).append( r ); }
         }
         doc.replace( valueAt, valueEnd - valueAt, value );
         return true;

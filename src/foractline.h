@@ -46,11 +46,13 @@
 #include <cstddef>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "foractlineswitch.h" // actLineOn — the switch (cli.h's --version reads the same header)
+#include "foractedgesswitch.h" // actEdgesOn / kActRowsWide — ACT-8, the wide line (lane ACT-EDGES)
+#include "foractlineswitch.h" // actLineOn, kActClause / kActClauseWide — the switch (cli.h's --version reads the same header)
 #include "forbudgetfit.h"     // ForAnswerLedger — the render's priced ledger the line re-prices through and keeps current
 #include "foranswerfirst.h"   // rootBody / topLevelBlocks — the one CDATA-safe scanner of a --for answer's blocks
 #include "forpages.h"         // detail::rootPriceSpan — the one reader of where a document's price sits (pricePage's)
@@ -61,15 +63,41 @@ namespace rw::actline
 {
 
 inline constexpr std::size_t kActRows = 3;   // see the header: GA1 DEV page 1, the largest N inside a ~120 B median element
-inline constexpr std::string_view kActClause =
-    "<!-- the act line: read= P:L-E of the top 3 sigs d rows by r=: Read ALL in ONE turn, parallel ranged Reads, except a served "
-    "body; search only for what no row lists; absent if one lacks e= -->";
 
-static_assert( kActRows == 3 && kActClause.find( "top 3 " ) != std::string_view::npos,
+static_assert( kActRows == 3 && kActRows == actedges::kActShippedRanges && actedges::kActRowsWide == 8 && kActClause.find( "top 3 " ) != std::string_view::npos
+                   && kActClauseWide.find( "top 3 " ) != std::string_view::npos && kActClauseWide.find( "up to 8 " ) != std::string_view::npos,
                "the legend clause kActClause states \"top 3\": reword it with kActRows (test/capdisclose.map: legend)" );
 
 namespace detail
 {
+[[nodiscard]] inline unsigned lineNumber( std::string_view v ) noexcept
+{
+    unsigned n = 0;
+    (void)std::from_chars( v.data(), v.data() + v.size(), n );
+    return n;
+}
+// Does a range listed in `value` (P:L-E,…) already hold `range` (P:L-E)? The act line's one containment test: ACT-8's added rows and
+// the edit-file form's body ranges (forbodyptr.h appendActRanges) both ask it, so neither lists a range the line already holds.
+[[nodiscard]] inline bool listedRangeHolds( std::string_view value, std::string_view range )
+{
+    const std::size_t      c    = range.rfind( ':' );
+    const std::string_view path = range.substr( 0, c ), lines = range.substr( c + 1 );
+    const unsigned         l = lineNumber( lines.substr( 0, lines.find( '-' ) ) ), e = lineNumber( lines.substr( lines.find( '-' ) + 1 ) );
+    for( std::size_t at = 0; at <= value.size(); )
+    {
+        const std::size_t      next = std::min( value.find( ',', at ), value.size() );
+        const std::string_view item = value.substr( at, next - at );
+        const std::size_t      ic   = item.rfind( ':' );
+        if( ic != std::string_view::npos && item.substr( 0, ic ) == path )
+        {
+            const std::string_view il = item.substr( ic + 1 );
+            if( lineNumber( il.substr( 0, il.find( '-' ) ) ) <= l && lineNumber( il.substr( il.find( '-' ) + 1 ) ) >= e ) { return true; }
+        }
+        at = next + 1;
+    }
+    return false;
+}
+
 // One sigs <d> row the line may list: p= l= e= as printed (still escaped, so they go into the attribute as they stand) and its rank.
 struct Candidate
 {
@@ -109,6 +137,28 @@ struct Candidate
     return rows;
 }
 
+[[nodiscard]] inline bool ranged( const Candidate& c ) noexcept
+{
+    return !c.p.empty() && !c.l.empty() && !c.e.empty() && c.p.find( ',' ) == std::string_view::npos;
+}
+inline void appendRange( std::string& value, const Candidate& c )
+{
+    value.append( value.empty() ? "" : "," ).append( c.p ).append( ":" ).append( c.l ).append( "-" ).append( c.e );
+}
+// ACT-8 (lane ACT-EDGES, foractedgesswitch.h): after the top rows, the next ranged rows by rank, up to kActRowsWide ranges in all; a
+// row whose range a listed one already holds adds nothing (the agent reads it once). A row with no e= is skipped, not a stop: the top
+// 3 are the condition.
+inline void appendWideRows( std::string& value, std::span<const Candidate> rest, std::size_t listed )
+{
+    for( const Candidate& c : rest )
+    {
+        if( listed >= actedges::kActRowsWide ) { return; }
+        if( !ranged( c ) || listedRangeHolds( value, std::string( c.p ) + ":" + std::string( c.l ) + "-" + std::string( c.e ) ) ) { continue; }
+        appendRange( value, c );
+        ++listed;
+    }
+}
+
 // The read= value for the page whose root's top-level blocks are `blocks`; nullopt when the condition (header) does not hold.
 [[nodiscard]] inline std::optional<std::string> readValue( std::string_view doc, const std::vector<answerfirst::Block>& blocks )
 {
@@ -116,11 +166,11 @@ struct Candidate
     const std::optional<rowlines::Section> sec = sigs == blocks.end() ? std::nullopt : rowlines::readSection( doc, *sigs );
     std::optional<std::vector<Candidate>> rows = sec ? rankedCandidates( *sec ) : std::nullopt;
     if( !rows ) { return std::nullopt; }
-    rows->resize( std::min( rows->size(), kActRows ) );   // a size_t: the STL's own size, at its boundary
-    const auto ranged = []( const Candidate& c ) { return !c.p.empty() && !c.l.empty() && !c.e.empty() && c.p.find( ',' ) == std::string_view::npos; };
-    if( rows->empty() || !std::ranges::all_of( *rows, ranged ) ) { return std::nullopt; }
+    const std::span<const Candidate> top( rows->data(), std::min( rows->size(), kActRows ) );   // a size_t: the STL's own size, at its boundary
+    if( top.empty() || !std::ranges::all_of( top, ranged ) ) { return std::nullopt; }
     std::string value;
-    for( const Candidate& c : *rows ) { value.append( value.empty() ? "" : "," ).append( c.p ).append( ":" ).append( c.l ).append( "-" ).append( c.e ); }
+    for( const Candidate& c : top ) { appendRange( value, c ); }
+    if( actedges::actEdgesOn( actedges::kPartAct8 ) ) { appendWideRows( value, std::span<const Candidate>( *rows ).subspan( top.size() ), top.size() ); }
     return value;
 }
 }   // namespace detail
@@ -179,7 +229,7 @@ inline bool insertActLine( std::string& doc, std::size_t maxEstTokens = 0, ForAn
     std::string       was      = maxEstTokens > 0 ? doc : std::string();
     const std::size_t before   = doc.size();
     doc.insert( lineAt, "<act read=\"" + *value + "\"/>" );   // the later position first, so clauseAt still holds
-    doc.insert( clauseAt, kActClause );
+    doc.insert( clauseAt, actedges::actEdgesOn( actedges::kPartAct8 ) ? kActClauseWide : kActClause );
     const std::size_t added = doc.size() - before;
     if( ledger != nullptr && ledger->priced )
     {

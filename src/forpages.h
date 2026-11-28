@@ -43,9 +43,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "serialize.h"       // pricedRootAttrTokens / tokensForEmittedBytes — est_tokens= prices the page as delivered
+#include "foractedgesswitch.h" // uncountedActBytes / isLaneLine / fullLegendExtraBytes — the lane's counted bytes (ACT-EDGES)
 #include "foranswerfirst.h"  // topLevelBlocks / declaredBlock — the one CDATA-safe scanner of a --for answer's blocks
 #include "legenddict.h"      // detail::aboutPointer — the ref posture's closing pointer
 #include "forpagelegend.h"   // LD1: a clause only a later page uses travels with that page
@@ -81,6 +83,7 @@ struct PageResult
     Outcome     outcome = Outcome::NotApplicable;
     std::size_t pages   = 1;
 };
+inline PageResult pageAnswer( std::string& doc, const PageAsk& ask );   // ACT-EDGES: detail::wholeWithoutLane pages the lane-off twin
 
 namespace detail
 {
@@ -237,6 +240,9 @@ inline constexpr std::string_view kCorePageClause =
 inline constexpr std::string_view kCoreRootClause   = "root= the crawl root, p= relative to it; at= this commit; ";
 inline constexpr std::string_view kCoreActClause    = "act read= P:L-E ranges of the top rows: Read ALL in ONE turn (parallel ranged Reads); ";
 inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no ptr= is a lower same-file sibling (p= sym= r=), not the answer; ";
+// ACT-EDGES (foractedges.h): the edges and where lines, defined on page 1 as the act line is.
+inline constexpr std::string_view kCoreEdgesClause = "edges: per act symbol NAME: called by / calls P:L N (other files, exact first), (+K) more; ";
+inline constexpr std::string_view kCoreWhereClause = "where: tests= docs= changelog= build= files beside the act files, X_total= all found; ";
 [[nodiscard]] inline std::string pagingActLegend( std::string_view legend, bool paged )
 {
     std::string body;
@@ -244,6 +250,8 @@ inline constexpr std::string_view kCoreDemoteClause = "demote: a sigs t with no 
     body += legend.find( "<!-- root= is the crawl root" ) != std::string_view::npos ? kCoreRootClause : std::string_view();
     body += legend.find( "<!-- the act line:" ) != std::string_view::npos ? kCoreActClause : std::string_view();
     body += legend.find( "<!-- demote:" ) != std::string_view::npos ? kCoreDemoteClause : std::string_view();
+    body += legend.find( "<!-- the edges line:" ) != std::string_view::npos ? kCoreEdgesClause : std::string_view();
+    body += legend.find( "<!-- the where line:" ) != std::string_view::npos ? kCoreWhereClause : std::string_view();
     if( body.empty() )
     {
         return body;
@@ -326,6 +334,7 @@ struct Stream
     std::vector<Cut>                cuts;
     std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
     std::vector<std::size_t>        gone;   // LD1: the document-legend clauses page 1 sheds to the later pages that use them (scope::shed)
+    std::vector<std::pair<std::size_t, std::size_t>> lane;   // ACT-EDGES: the counted lane bytes (wide act ranges, <edges>, <where>)
 };
 
 // KB1: find the key-body group (its legend comment, then <bodies of="key">) among the stream's blocks and mark every cut with the group
@@ -355,10 +364,78 @@ inline void markActLine( Stream& st )
         const answerfirst::Block& b = st.blocks[ k ];
         if( !b.comment && b.name == "act" )
         {
-            for( Cut& cut : st.cuts ) { cut.free += uncountedBefore( cut.at, b.begin, b.end ); }
+            // ACT-EDGES: only the shipped (top kActRows) part; the wide line's added ranges come out of the bottom of the page
+            const std::size_t uncounted = actedges::uncountedActBytes( st.view.substr( b.begin, b.end - b.begin ), actedges::kActShippedRanges );
+            for( Cut& cut : st.cuts ) { cut.free += uncountedBefore( cut.at, b.begin, b.begin + uncounted ); }
+            // the added ranges sit before the closing `"/>`, which the uncounted part counts: the lane span is `,r4,…,r8` exactly, so
+            // withoutLane's twin is the 3-range element (measured: erasing from begin + uncounted kept 3 bytes of range 4 and dropped the
+            // close, a broken twin that paged as Whole — 11 DEV answers OFF pages were served whole, +57 KB)
+            if( b.begin + uncounted < b.end ) { st.lane.emplace_back( b.begin + uncounted - actedges::kActClose.size(), b.end - actedges::kActClose.size() ); }
+            for( std::size_t j = k + 1; j < st.streamBlocks && !st.blocks[ j ].comment && actedges::isLaneLine( st.blocks[ j ].name ); ++j )
+            {
+                st.lane.emplace_back( st.blocks[ j ].begin, st.blocks[ j ].end );
+            }
             return;
         }
     }
+}
+
+// The stream's two legend runs: the leading one (the comments before its first row block) and the trailing document legend (after its
+// last row block). Every clause of the act line and the lane's lines sits in one of them (the raw render writes it into the leading
+// run; the answer-first permutation moves the document legend to the end), and a row quoting a clause sits in neither.
+struct LegendRuns
+{
+    std::size_t leadFrom = 0, leadTo = 0, trailFrom = 0, trailTo = 0;
+};
+[[nodiscard]] inline LegendRuns legendRuns( const Stream& st )
+{
+    const auto rowsEnd  = st.blocks.begin() + std::ptrdiff_t( st.streamBlocks );
+    const auto firstRow = std::ranges::find_if( st.blocks.begin(), rowsEnd, []( const answerfirst::Block& b ) { return !b.comment; } );
+    return { .leadFrom  = st.openEnd + 1,
+             .leadTo    = firstRow == rowsEnd ? st.openEnd + 1 : firstRow->begin,
+             .trailFrom = st.streamBlocks < st.blocks.size() ? st.blocks[ st.streamBlocks ].begin : st.closeAt,
+             .trailTo   = st.closeAt };
+}
+
+// ACT-EDGES: the full-legend bytes the lane's clauses add (actedges::fullLegendExtraBytes over both legend runs). Reading the leading
+// run alone missed them once the permutation had moved the legend: θ5's refill target kept them, and page 1 grew by the lane (actedgescheck
+// (P) at the tightest size: 403 B of lane moved 172 B of rows, page 1 +351 B).
+[[nodiscard]] inline std::size_t laneClauseBytes( const Stream& st )
+{
+    const LegendRuns r = legendRuns( st );
+    return actedges::fullLegendExtraBytes( st.view.substr( r.leadFrom, r.leadTo - r.leadFrom ) )
+         + actedges::fullLegendExtraBytes( st.view.substr( r.trailFrom, r.trailTo - r.trailFrom ) );
+}
+
+// ACT-EDGES: the answer without the lane — the stream with its lane spans (the wide act line's added ranges, the lines after it) and
+// the lane's clauses taken out of the leading and the trailing legend runs, the wide act clause back to the shipped one: the document
+// RIPWIRE_ACT_EDGES=0 renders, est_tokens= aside (its digits can differ by one). pageAnswer pages it first: an answer that is whole
+// without the lane (one page, or paging saves nothing) is served whole with it, so the lane's bytes come out of the BOTTOM of a page,
+// never out of an item (measured: mf1-ninja-01 R3 916 B pushed onto a page 2; actedgescheck (P2) on src/, 678 B at 23887 B, where
+// the OFF answer is whole because its page 1 saves nothing). nullopt when the stream has no lane.
+[[nodiscard]] inline std::optional<std::string> withoutLane( const Stream& st )
+{
+    if( st.lane.empty() )
+    {
+        return std::nullopt;
+    }
+    const LegendRuns r = legendRuns( st );
+    std::string      off( st.view );
+    // back to front, so every earlier position still holds: the trailing legend run, the lane spans, the leading legend run
+    const auto clauses = [ &off ]( std::size_t from, std::size_t to )
+    {
+        std::string run = off.substr( from, to - from );
+        for( const std::string_view c : { actedges::kWhereClause, actedges::kEdgesClause } )
+        {
+            if( const std::size_t at = run.find( c ); at != std::string::npos ) { run.erase( at, c.size() ); }
+        }
+        if( const std::size_t at = run.find( actline::kActClauseWide ); at != std::string::npos ) { run.replace( at, actline::kActClauseWide.size(), actline::kActClause ); }
+        off.replace( from, to - from, run );
+    };
+    clauses( r.trailFrom, r.trailTo );
+    for( auto it = st.lane.rbegin(); it != st.lane.rend(); ++it ) { off.erase( it->first, it->second - it->first ); }
+    clauses( r.leadFrom, r.leadTo );
+    return off;
 }
 
 // The stream ends where the trailing run of DOCUMENT legend comments begins. A document legend comment anywhere inside the
@@ -538,10 +615,12 @@ inline void markActLine( Stream& st )
     PageAsk full = ask;
     full.coreLegend         = false;
     const std::size_t today = deliveredFirstPage( st, full, ends );
+    const std::size_t extra = laneClauseBytes( st );   // ACT-EDGES: the target is the page before the lane's clauses
+    const std::size_t target = today > extra ? today - extra : 0;
     for( std::size_t last = ends[ 0 ] + 1; last + 1 < st.cuts.size() && tailCut( st, st.cuts[ last ] ); ++last )
     {
         std::vector<std::size_t> e = pageEnds( st.cuts, ask.pageBytes, last );
-        if( deliveredFirstPage( st, ask, e ) > today ) { break; }
+        if( deliveredFirstPage( st, ask, e ) > target ) { break; }
         ends = std::move( e );
     }
     st.gone = shedFor( st, ends );
@@ -571,9 +650,21 @@ struct PagePlan
     std::vector<std::size_t> ends;
     bool                     wholeFirst = false;
 };
+// ACT-EDGES: is the answer served whole without the lane (withoutLane)? Then it is served whole with it.
+[[nodiscard]] inline bool wholeWithoutLane( const Stream& st, const PageAsk& ask )
+{
+    std::optional<std::string> off = withoutLane( st );
+    PageAsk                    one = ask;
+    one.page                       = 1;
+    return off && pageAnswer( *off, one ).outcome == PageResult::Outcome::Whole;
+}
 [[nodiscard]] inline PagePlan planPages( Stream& st, const PageAsk& ask )
 {
     PagePlan plan{ .ends = pageEnds( st.cuts, ask.pageBytes ) };
+    if( plan.ends.size() >= 2 && wholeWithoutLane( st, ask ) )
+    {
+        plan.ends.assign( 1, st.cuts.size() - 1 );   // one page: the whole answer
+    }
     if( plan.ends.size() < 2 )
     {
         return plan;
@@ -610,7 +701,7 @@ struct PagePlan
     {
         return std::nullopt;
     }
-    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes ).size();
+    const std::size_t      pages    = detail::wholeWithoutLane( *st, ask ) ? 1 : detail::pageEnds( st->cuts, ask.pageBytes ).size();
     const detail::Cut      end{ st->blocks[ blockIdx ].end, std::string_view::npos };
     const std::string_view rootOpen = doc.substr( st->openAt, st->openEnd - st->openAt );
     std::string out = "<ctx";

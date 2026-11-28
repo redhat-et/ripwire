@@ -13,6 +13,7 @@
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
 #include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
 #include "foractline.h"     // BR1: the act line — the page's top undelivered ranges, read in one turn
+#include "foractedges.h"    // ACT-EDGES: the EDGES and WHERE lines after the act line
 #include "fortinyshape.h"   // THETA6 (default on; RIPWIRE_TINY_SHAPE=0 off): the named-location tiny shape
 #include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
@@ -5794,6 +5795,19 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
              .tailSameDir = rw::answerfirst::tailSameDirOn() };
 }
 
+// ACT-EDGES (foractedges.h): the EDGES and WHERE lines right after the act line, on the same raw render, re-priced through its ledger.
+// `maxEstTokens` > 0 (a budget's limit): kept only while the answer's est_tokens= stays within it, as the act line is.
+inline void forActEdges( const MainDispatch& d, std::string& doc, rw::ForAnswerLedger* ledger, std::size_t maxEstTokens = 0 )
+{
+    const std::string_view root = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+    std::string            was  = maxEstTokens > 0 ? doc : std::string();
+    rw::ForAnswerLedger    kept = ledger != nullptr ? *ledger : rw::ForAnswerLedger{};
+    if( rw::actedges::insertActEdges( doc, d.ing, d.g, root, ledger ) && maxEstTokens > 0 && rw::actline::detail::rootEstTokens( doc ) > maxEstTokens )
+    {
+        doc.swap( was );   // over the budget with them: the answer is served as it was shaped
+        if( ledger != nullptr ) { *ledger = kept; }
+    }
+}
 // The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
 inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
 {
@@ -5808,9 +5822,9 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
                                                                                     : std::max( ask.targetTokens, ask.ceilingTokens );
     const bool          wholeFit    = fit.verdict == rw::ForBudgetFitResult::Verdict::Whole;
     rw::ForAnswerLedger ledger      = u.ledger;
-    if( wholeFit )
+    if( wholeFit && rw::actline::insertActLine( out, budgetLimit, &ledger ) )
     {
-        (void)rw::actline::insertActLine( out, budgetLimit, &ledger );
+        forActEdges( d, out, &ledger, budgetLimit );   // ACT-EDGES: only while the answer still fits with them, as the act line
     }
     // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
     // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
@@ -6023,6 +6037,7 @@ inline std::optional<int> runForLensLegendFirstAct( const MainDispatch& d )
     if( capturedWhole( r.out ) )
     {
         (void)rw::actline::insertActLine( doc, 0, &r.ledger );
+        forActEdges( d, doc, &r.ledger );   // ACT-EDGES: the legend-first posture carries the same lines
         rw::qsites::appendQuestionSites( doc, r.ledger, d.cfg.forPage );   // θ11: the legend-first posture carries the same block
     }
     std::fwrite( doc.data(), 1, doc.size(), stdout );
@@ -6074,6 +6089,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                 std::fwrite( tiny->data(), 1, tiny->size(), stdout );
                 return r.rc;
             }
+            forActEdges( d, doc, &r.ledger );                        // ACT-EDGES (foractedges.h): after the tiny shape (θ6 keeps its own edges line), on the same render
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document

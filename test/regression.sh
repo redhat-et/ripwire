@@ -300,6 +300,7 @@ for _g in \
     abicheck \
     accessshapecheck \
     ackonlycheck \
+    actedgescheck \
     actlinecheck \
     adaptivecheck \
     adaptivecutshapecheck \
