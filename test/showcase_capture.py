@@ -216,8 +216,13 @@ def bodySeed( rel, sigRe ):
               f"count) — the seed fixture names a symbol this tree no longer defines; fix the pattern "
               f"rather than shipping a stale seed" )
 
-TELEPORT_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraphTeleport\(' )
-RANKGRAPH_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraph\(' )
+# The location-seed demos (--at=FILE:LINE, --callers=@FILE:LINE) and the ASan trace frames seed from src/pagerank.cpp,
+# NOT src/graph.h: graph.h is ~15k lines that nearly every PR edits, so a line number in it moved with each one and
+# turned showcasecapturecheck arm (H) red, forcing a full re-record (#814, #816, #822, #826 in one day). pagerank.cpp
+# is ~200 lines whose last edit was 2026-09-19; arm (H) also asserts the seed file stays short.
+SEED_FILE = 'src/pagerank.cpp'
+SEED_LN = bodySeed( SEED_FILE, r'^PageRankRun pageRankDouble\(' )
+INNER_LN = bodySeed( SEED_FILE, r'^double probabilityMass\(' )
 DEFAULTMAP_LN = bodySeed( 'src/main.cpp', r'^int runDefaultMap\(' )
 MAIN_LN = bodySeed( 'src/main.cpp', r'^int main\(' )
 
@@ -227,8 +232,8 @@ MAIN_LN = bodySeed( 'src/main.cpp', r'^int main\(' )
 TRACE = f"""AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:{TELEPORT_LN}
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:{RANKGRAPH_LN}
+    #0 0x102f4a1c8 in rw::(anonymous namespace)::probabilityMass(std::span<double const, 18446744073709551615ul>) src/pagerank.cpp:{INNER_LN}
+    #1 0x102f3e884 in rw::pageRankDouble(rw::sparseCsr<float> const&, std::span<double const, 18446744073709551615ul>, std::span<double const, 18446744073709551615ul>, std::span<double, 18446744073709551615ul>, rw::PageRankConfig) src/pagerank.cpp:{SEED_LN}
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:{DEFAULTMAP_LN}
     #3 0x102e01a44 in main src/main.cpp:{MAIN_LN}
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
@@ -828,9 +833,9 @@ add(S7, f"{BIN} --version", "Version + short build info.")
 
 
 S2B = "navigate — seeds, claims, slices, shapes"
-add(S2B, f"{BIN} . --at=src/graph.h:{TELEPORT_LN}", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
-add(S2B, f"{BIN} . --callers=@src/graph.h:{TELEPORT_LN}", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
-add(S2B, f"{BIN} . --at=src/graph.h:999999", "A seed past the end of the file — the refusal shape for a faulted location.")
+add(S2B, f"{BIN} . --at={SEED_FILE}:{SEED_LN}", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
+add(S2B, f"{BIN} . --callers=@{SEED_FILE}:{SEED_LN}", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
+add(S2B, f"{BIN} . --at={SEED_FILE}:999999", "A seed past the end of the file — the refusal shape for a faulted location.")
 add(S2B, f'{BIN} . --verify="calls(runDefaultMap, rankGraphTeleport)"', "VERIFY a closed claim in one call: three-valued verdict (confirmed / refuted / not-established) with the evidence rows inline.")
 add(S2B, f'{BIN} . --verify="unused(rankGraphTeleport)"', "A claim that is FALSE — the refuted shape, with the references that refute it.")
 add(S2B, f'{BIN} . --verify="contains(src/graph.h, \\"no such literal anywhere\\")"', "A literal-scan absence: refuted only with complete= evidence, never on a partial scan.")
