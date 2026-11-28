@@ -789,7 +789,12 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
 // named, so an agent that did mean the symbol can see it and ask for it alone.
 inline std::string subjectDroppedClause( const IngestResult& ing, const std::vector<std::string>& dropped )
 {
-    const HashMap<std::string, NameAnchor> names = buildLowerNameIndex( ing );
+    std::vector<std::string> lowerDropped;   // the words probed below, the only entries read
+    for( const std::string& w : dropped )
+    {
+        lowerDropped.push_back( routeLower( w ) );
+    }
+    const HashMap<std::string, NameAnchor> names = buildLowerNameIndex( ing, lowerDropped );
     std::string                            out   = "; dropped: ";
     bool                                   first = true;
     for( const std::string& w : dropped )
@@ -1000,7 +1005,12 @@ inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice
     {
         return false;
     }
-    const HashMap<std::string, NameAnchor> names = buildLowerNameIndex( ing );
+    std::vector<std::string> lowerDropped;   // the words probed below, the only entries read
+    for( const std::string& w : r.dropped )
+    {
+        lowerDropped.push_back( routeLower( w ) );
+    }
+    const HashMap<std::string, NameAnchor> names = buildLowerNameIndex( ing, lowerDropped );
     for( const std::string& w : r.dropped )
     {
         const auto at = names.find( routeLower( w ) );
