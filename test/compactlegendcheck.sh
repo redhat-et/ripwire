@@ -1058,6 +1058,13 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     fi
     nXml=$(( nXml + 1 )); name="${flag%%=*}"; xmlVerbs="$xmlVerbs $name"
     ( cd "$REPO" && "$BIN" . "$probe" --legend=compact >"$TMP/u.c" 2>"$TMP/u.cerr" </dev/null ); rcC=$?
+    # --handoff=TASK prints TWO documents: the packet (this layer's answer), then the --brief page, whose legend is native and
+    # which keeps its own probe (--brief=). Every arm below reads the packet: cut each capture after its root's close.
+    if [ "$flag" = "--handoff=" ]; then
+        for hf in "$TMP/u.def" "$TMP/u.full" "$TMP/u.c"; do
+            python3 -c 'import sys; p=sys.argv[1]; b=open(p,"rb").read(); i=b.find(b"</handoff>\n"); open(p,"wb").write(b if i<0 else b[:i+11])' "$hf"
+        done
+    fi
     # the default IS the default posture, on every XML verb (posture-generic: DEFAULT_POSTURE read from cli.h in (A))
     if [ "$DEFAULT_POSTURE" = compact ]; then defRef="$TMP/u.c"; else defRef="$TMP/u.full"; fi
     read -r ugN ugGaps <<UGEOF
