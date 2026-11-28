@@ -130,9 +130,12 @@ QUERIES_CAPPED=(stale cache buffer resize DISCLOSE)
 # GrepHit (68 hits on main b059ac593, 75 once forliteral-3 added its matches: any identifier the --grep code itself
 # uses grows with every grep change) was swapped for AstQuerySpec (34 hits on main and on that lane: a type of the
 # AST-query verb, which no --grep or --for change touches).
+# lineStarts (65 hits in src/ on main 2026-11-26, 74 once STRKERN-DROPIN moved the hand-rolled line tables onto
+# strkern::lineStarts: a routine every line-table conversion adds a call of) was swapped for TestRunnerIndex (46 hits on
+# main, on the ADOPT base and on that lane: a type of the test-runner map, which no string-kernel change touches).
 UNCAPPED_HEADROOM=70
 QUERIES_UNCAPPED=(appendCdataSafe truncateUtf8WithEllipsis resolveAtSeed langOfPath RankedGraph McpPageArgs
-                  AstQuerySpec GrepRawHit lineStarts rankGraphTeleport findByField xmllint)
+                  AstQuerySpec GrepRawHit TestRunnerIndex rankGraphTeleport findByField xmllint)
 
 # ── presence guards (CONTRIBUTING.md §2: a gate that cannot observe what it asserts is green for the
 #    wrong reason) — before trusting a byte count, prove the feature that is supposed to produce it fired ──

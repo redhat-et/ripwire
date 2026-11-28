@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-28, lane strkern-dropin (PR 1/3, rebased onto main 6d8d11fb9): RE-PINNED with UPDATE_GOLDEN=1 (hash f4f113681a…c63411).
+#   Refactor-only: defectSitesOf's line number is strkern::lineNumberAt( src, st.startByte ) instead of the spelled-out
+#   1 + std::count( ..., '\n' ) (lineNumberAt is 1 + countByte of the prefix, and verify_strkern D5 pins countByte to
+#   std::count; byteid fire321 + md5 identical). No kParserVer, kCacheVersion or kQSnapCacheScheme bump.
 # 2026-11-27, lane gskip-1 (on main c42aca029): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and kIngestParserVerMirror 352 -> 354
 #   (PLACEHOLDER, rich 355): a C# generic member call keeps its receiver (ingest_binds.h csharpThroughGenericName) and a C/C++ macro
 #   body's `name<..>(` is a call (ingest_relations.h macroTemplateArgsEnd). kCacheVersion and kQSnapCacheScheme unchanged. Hash 028f02458a…e7474d406a.

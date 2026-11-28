@@ -16,6 +16,7 @@
 #include "filter.h"
 #include "gitmine.h"
 #include "infra/sortutil.h"   // svLess — string_view order without libstdc++'s length subtraction (#344)
+#include "infra/strkern.h"    // strkern::lineStarts — a hunk file's line-start table
 #include "lexical.h"     // lexicalScanText — the working-tree bytes of a file, read once, for the hunk-coverage and accessor checks below
 #include "diffhunks.h"   // gitDiffHunksAllVsHead — the ONE-spawn whole-tree hunk evidence the symbol-granular change set narrows by
 #include "prcontext.h"   // A3-F17b/A3-F13: reuse the ONE numstat-based mask builder (gitDiffChangedMaskNumstat)
@@ -891,11 +892,7 @@ struct HunkSourceText
         if( !text )
         {
             text = lexicalScanText( ing, fileId, scratch );
-            lineStart.push_back( 0 );
-            for( std::size_t i = 0; i < text->size(); ++i )
-            {
-                if( ( *text )[i] == '\n' ) { lineStart.push_back( i + 1 ); }
-            }
+            strkern::lineStarts( *text, lineStart );
         }
         return *text;
     }

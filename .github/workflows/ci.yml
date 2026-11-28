@@ -531,6 +531,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # strkern::find against std::string_view::find on NATIVE x86-64 (the AVX2 path at the shipped -march=x86-64-v3 floor):
+      # bench/bench_strkern_find.cpp's 138-cell table, REPORT-ONLY. The NEON run on arm64 holds "never slower than std" in every
+      # cell (bench/STRKERN_FIND.md); the AVX2 dispatch is that one carried over block for block, so on x86-64 the bench prints its
+      # SLOWER cells and exits 0 until STRKERN-X86-TUNE tunes it from this table. Both ubuntu Release legs (gcc, clang), shard 1;
+      # the light set runs the clang one. A few minutes of one runner.
+      - name: strkern::find vs std find, native AVX2 table (REPORT-ONLY, never gates)
+        if: matrix.os == 'ubuntu-24.04' && matrix.flavor == 'Release' && matrix.shard == 1
+        continue-on-error: true
+        env:
+          BENCH_CXX: ${{ matrix.cc == 'clang' && 'clang++' || 'g++-14' }}
+        run: |
+          "$BENCH_CXX" -O2 -std=c++23 -march=x86-64-v3 bench/bench_strkern_find.cpp -Isrc -Isrc/infra -o "$RUNNER_TEMP/find_ab"
+          "$RUNNER_TEMP/find_ab" .
+
       # The HEAD comparison binary, built ONCE per job in its own step: before the suite, outside every gate budget.
       # Six gates (crossdirinclude, nestedimport, preproccond, py/rust/tsimportprecise; binoverridecheck re-runs them)
       # compare this tree's binary against a second ripwire built from git HEAD. test/lib/headbinlib.sh used to build

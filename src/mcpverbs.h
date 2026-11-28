@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "infra/sortutil.h"   // sortUnique
+#include "infra/strkern.h"    // strkern::countByte — a fetched body's line count
 #include "infra/os.h"   // rw::os::open_memstream — the verb response buffers
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -5887,14 +5888,7 @@ inline std::string sliceBodyLinesOrError( const std::string& body, long long sta
 {
     oob = false;
     // total lines: count '\n', plus one for a final non-newline-terminated line.
-    long long nl = 0;
-    for( char c : body )
-    {
-        if( c == '\n' )
-        {
-            ++nl;
-        }
-    }
+    const auto nl     = static_cast<long long>( strkern::countByte( body, '\n' ) );
     const bool endsNl = !body.empty() && body.back() == '\n';
     totalLines = nl + ( ( !body.empty() && !endsNl ) ? 1 : 0 );
     if( totalLines < 1 )
@@ -5925,15 +5919,11 @@ inline std::string sliceBodyLinesOrError( const std::string& body, long long sta
             return 0;
         }
         long long seen = 1;                                     // we are at the start of line 1
-        for( std::size_t i = 0; i < body.size(); ++i )
+        for( std::size_t i = body.find( '\n' ); i != std::string::npos; i = body.find( '\n', i + 1 ) )
         {
-            if( body[i] == '\n' )
+            if( ++seen == lineNo )                              // the byte AFTER this '\n' starts line `seen`
             {
-                ++seen;                                         // the byte AFTER this '\n' starts line `seen`
-                if( seen == lineNo )
-                {
-                    return i + 1;
-                }
+                return i + 1;
             }
         }
         return body.size();                                     // past the last line → end of body

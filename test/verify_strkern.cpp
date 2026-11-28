@@ -71,6 +71,7 @@
 #include "serialize.h"
 #include "harnesscommon.h"      // DeterministicRng — the sanitizer-clean generator the SIMD harnesses share
 
+#include <algorithm>        // std::count — D5's reference
 #include <cctype>           // std::tolower — D3's reference fold
 #include <cstdio>
 #include <cstdlib>
@@ -1358,13 +1359,13 @@ std::vector<std::pair<std::string, std::string>> needleCases()
     return cases;
 }
 
-// D2's random text: `n` bytes over "ab\n" (dense: matches overlap often) or over every byte value.
-std::string drawNeedleText( DeterministicRng& gen, std::size_t n, bool dense )
+// D2's random text: `n` bytes over `alphabet` — "ab\n" by default (dense: matches overlap often) — or over every byte value.
+std::string drawNeedleText( DeterministicRng& gen, std::size_t n, bool dense, std::string_view alphabet = "ab\n" )
 {
     std::string text( n, '\0' );
     for( char& c : text )
     {
-        c = dense ? "ab\n"[ gen.next() % 3u ] : char( gen.next() & 0xFF );
+        c = dense ? alphabet[ gen.next() % alphabet.size() ] : char( gen.next() & 0xFF );
     }
     return text;
 }
@@ -1393,6 +1394,99 @@ TEST_CASE( "strkern: D2 find == std::string_view::find, both paths, exact-size b
     CHECK( caseCount > 4000 );
     CHECK( fail.empty() );
 }
+
+// D2's literal rows: find( hay, "literal", from ) takes the Literal overload (a compile-time length), which must agree with
+// std::string_view::find( "literal", from ) for every start, at every literal length 1..16. The literals are spelled over D2's dense
+// alphabet so they occur. (The other half of the Literal contract, that a RUNTIME char array does not compile as a needle, is a
+// compile-fail arm in test/strkerncheck.sh: a TU that passes `char buf[ 8 ]` must be refused by the compiler.)
+std::uint32_t literalLengthsSeen = 0;   // bit m set once a row of literal length m ran: D2b asserts exactly 1..16
+
+template<class Probe>
+std::string literalVsStd( std::string_view hay, std::size_t literalLength, Probe&& probe )
+{
+    literalLengthsSeen |= std::uint32_t( 1 ) << literalLength;
+    const std::unique_ptr<char[]> exact( new char[ hay.size() ] );
+    std::memcpy( exact.get(), hay.data(), hay.size() );
+    const std::string_view view( exact.get(), hay.size() );
+    for( std::size_t from = 0; from <= hay.size() + 1; ++from )
+    {
+        const auto [ got, want ] = probe( view, from );
+        if( got != want )
+        {
+            return "literal m=" + std::to_string( literalLength ) + " n=" + std::to_string( hay.size() ) + " from=" + std::to_string( from )
+                 + " got=" + std::to_string( got ) + " want=" + std::to_string( want );
+        }
+    }
+    return {};
+}
+
+#define STRKERN_LITERAL_ROW( LIT )                                                                                                     \
+    literalVsStd( hay, sizeof( LIT ) - 1, []( std::string_view h, std::size_t from ) {                                                 \
+        return std::pair<std::size_t, std::size_t>{ sk::find( h, LIT, from ), h.find( LIT, from ) };                                    \
+    } )
+
+TEST_CASE( "strkern: D2b find( hay, literal ) == std::string_view::find for literal lengths 1..16, every start, exact-size buffers" )
+{
+    DeterministicRng gen{ 0xD2B11EEDull };
+    std::string      fail;
+    std::size_t      rows = 0;
+    for( int iter = 0; iter < 600; ++iter )
+    {
+        const std::string hay = drawNeedleText( gen, std::size_t( gen.next() % 97u ), true );
+        const std::string why[] = {
+            STRKERN_LITERAL_ROW( "a" ),         STRKERN_LITERAL_ROW( "ab" ),         STRKERN_LITERAL_ROW( "a\nb" ),
+            STRKERN_LITERAL_ROW( "abba" ),      STRKERN_LITERAL_ROW( "ab\nab" ),     STRKERN_LITERAL_ROW( "aabbaa" ),
+            STRKERN_LITERAL_ROW( "ab\nb\nab" ), STRKERN_LITERAL_ROW( "abababab" ),   STRKERN_LITERAL_ROW( "a\naa\nbb\na" ),
+            STRKERN_LITERAL_ROW( "abaabbaaab" ), STRKERN_LITERAL_ROW( "ab\nab\nab\nab" ), STRKERN_LITERAL_ROW( "aaaaaaaaaaaa" ),
+            STRKERN_LITERAL_ROW( "abab\nbaba\naba" ), STRKERN_LITERAL_ROW( "a\nb\na\nb\na\nb\nab" ), STRKERN_LITERAL_ROW( "abbaabbaabbaabb" ),
+            STRKERN_LITERAL_ROW( "ab\nab\nab\nab\nab\na" ),
+        };
+        for( const std::string& w : why )
+        {
+            ++rows;
+            if( fail.empty() ) { fail = w; }
+        }
+    }
+    INFO( "rows: ", rows, "  lengths mask: ", literalLengthsSeen, "  first divergence: ", fail );
+    CHECK( rows == 600u * 16u );
+    CHECK( literalLengthsSeen == 0x1FFFEu );   // every literal length 1..16, and no other
+    CHECK( fail.empty() );
+}
+
+// D2c — find's dispatch boundaries, each one -1 / at / +1: the one-byte memchr cutoff, one and two vector blocks of starts (the literal
+// cutoff, the final overlapped block), the four-block loop's 64 starts and the blocks after it; with a first byte find hands to the
+// block kernel ('a' 'b' '\n' are in kCommonLeadBytes) and one it hands to std ('#' ']' '<' are not). Every start is walked, so every
+// "bytes left" up to n is reached, on both paths, in exact-size buffers.
+TEST_CASE( "strkern: D2c find == std::string_view::find at every dispatch boundary -1/0/+1, common and rare first byte, both paths" )
+{
+    std::string      fail;
+    std::size_t      caseCount = 0;
+    DeterministicRng gen{ 0xD2C0FFEEull };
+    for( const std::size_t m : { 1u, 2u, 3u, 4u, 5u, 8u, 15u, 16u, 17u, 31u, 32u, 33u } )
+    {
+        const std::size_t b = sk::kFindBlockStarts;
+        for( const std::size_t cut : { sk::kFindMemchrCutoff, m + b - 1, m + 2 * b - 1, m + 63, m + 64 + b - 1, m + 127, m + 128 } )
+        {
+            for( const std::size_t n : { cut - 1, cut, cut + 1 } )
+            {
+                for( const char* alphabet : { "ab\n", "#]<" } )
+                {
+                    std::string hay( n, '\0' );
+                    for( char& c : hay ) { c = alphabet[ gen.next() % 3u ]; }
+                    std::string needle( m, '\0' );
+                    for( char& c : needle ) { c = alphabet[ gen.next() % 3u ]; }
+                    if( m <= n && ( gen.next() & 1 ) ) { needle.assign( hay, std::size_t( gen.next() % ( n - m + 1 ) ), m ); }
+                    ++caseCount;
+                    if( fail.empty() ) { fail = needleVsStd( hay, needle ); }
+                }
+            }
+        }
+    }
+    INFO( "cases: ", caseCount, "  path: ", sk::kPathName, "  first divergence: ", fail );
+    CHECK( caseCount == 12u * 7u * 3u * 2u );
+    CHECK( fail.empty() );
+}
+#undef STRKERN_LITERAL_ROW
 
 // D3's text: mixed-case letters next to the fold's edges ('@' = 'A' - 1, '[' = 'Z' + 1, '`', '{'), the high-bit images of A-Z and a-z
 // (0xC1, 0xDA, 0xE1, 0xFA: a byte >= 0x80 must never fold, and the SWAR fold must not borrow across one), 0x80, 0xFF and '\n'.
@@ -1464,6 +1558,166 @@ TEST_CASE( "strkern: D3 ciFindLiteral == tolower + std::string_view::find, both 
     INFO( "cases: ", cases.size(), "  path: ", sk::kPathName, "  first divergence: ", fail );
     CHECK( cases.size() > 4600 );
     CHECK( fail.empty() );
+}
+
+// D4-D6's buffers: `n` bytes over "ab\n\r" (dense: newlines, CRLF pairs and set members are common) or over every byte value, then
+// copied to an EXACT-SIZE heap buffer (see D2), so a block loop reading one byte past the end is an ASan report.
+std::string drawLineText( DeterministicRng& gen, std::size_t n, bool dense ) { return drawNeedleText( gen, n, dense, "ab\n\r" ); }
+
+// D4-D6's lengths: every size 0..80, either side of the 8/16/32-byte blocks and of countByte's 255-block lane bound (4080 bytes), and
+// random sizes up to 300.
+std::vector<std::size_t> byteScanLengths( DeterministicRng& gen )
+{
+    std::vector<std::size_t> lengths;
+    for( std::size_t n = 0; n <= 80; ++n ) { lengths.push_back( n ); }
+    for( const std::size_t n : { 4079u, 4080u, 4081u, 4095u, 4096u, 4111u, 8161u, 8176u } ) { lengths.push_back( n ); }
+    for( int i = 0; i < 400; ++i ) { lengths.push_back( std::size_t( gen.next() % 301u ) ); }
+    return lengths;
+}
+
+// The hand loop lineStarts replaced, both conventions: graph.h / lsp.h / situ.h (keep the start a final '\n' adds) and
+// FileTextCache / forfilepage.h (`&& i + 1 < size`: drop it).
+std::vector<std::uint32_t> handLineStarts( std::string_view text, bool dropAtEnd )
+{
+    std::vector<std::uint32_t> starts{ 0 };
+    for( std::size_t i = 0; i < text.size(); ++i )
+    {
+        if( text[ i ] == '\n' && ( !dropAtEnd || i + 1 < text.size() ) ) { starts.push_back( std::uint32_t( i + 1 ) ); }
+    }
+    return starts;
+}
+
+// "" when lineStarts and countByte agree with the hand loop and std::count on `text` (exact-size copy), both paths, both conventions;
+// lineStarts APPENDS, so each run starts from a one-element sentinel table that must survive.
+std::string lineKernelsVsHand( std::string_view text, char countedByte )
+{
+    const std::unique_ptr<char[]> exact( new char[ text.size() ] );
+    std::memcpy( exact.get(), text.data(), text.size() );
+    const std::string_view view( exact.get(), text.size() );
+    for( const sk::KernelPath path : { sk::KernelPath::Vector, sk::KernelPath::Scalar } )
+    {
+        const char* const pathName = path == sk::KernelPath::Scalar ? "scalar" : "vector";
+        for( const bool drop : { false, true } )
+        {
+            std::vector<std::uint32_t> got{ 0xFEEDu };
+            sk::lineStarts( view, got, drop ? sk::FinalLineStart::DropAtEnd : sk::FinalLineStart::Keep, path );
+            std::vector<std::uint32_t> want = handLineStarts( text, drop );
+            want.insert( want.begin(), 0xFEEDu );
+            if( got != want )
+            {
+                return std::string( "lineStarts path=" ) + pathName + " drop=" + ( drop ? "1" : "0" ) + " n=" + std::to_string( text.size() )
+                     + " got=" + std::to_string( got.size() ) + " starts, want=" + std::to_string( want.size() );
+            }
+        }
+        for( const char b : { '\n', countedByte } )
+        {
+            const std::size_t got = sk::countByte( view, b, path ), want = std::size_t( std::count( text.begin(), text.end(), b ) );
+            if( got != want )
+            {
+                return std::string( "countByte path=" ) + pathName + " n=" + std::to_string( text.size() ) + " b=" + std::to_string( int( (unsigned char)b ) )
+                     + " got=" + std::to_string( got ) + " want=" + std::to_string( want );
+            }
+        }
+    }
+    return {};
+}
+
+TEST_CASE( "strkern: D4/D5 lineStarts == the hand loop (both conventions), countByte == std::count, both paths, exact-size buffers" )
+{
+    DeterministicRng gen{ 0xD4115EEDull };
+    std::string      fail;
+    std::size_t      caseCount = 0, newlines = 0;
+    for( const std::size_t n : byteScanLengths( gen ) )
+    {
+        for( const bool dense : { true, false } )
+        {
+            const std::string text = drawLineText( gen, n, dense );
+            newlines += std::size_t( std::count( text.begin(), text.end(), '\n' ) );
+            ++caseCount;
+            const std::string why = lineKernelsVsHand( text, char( gen.next() & 0xFF ) );
+            if( fail.empty() ) { fail = why; }
+        }
+    }
+    // the lane-bound worst case: every byte matches, so each NEON lane reaches 255 before it is summed
+    for( const std::size_t n : { 4080u, 4096u, 8192u + 7u } )
+    {
+        ++caseCount;
+        const std::string why = lineKernelsVsHand( std::string( n, '\n' ), '\n' );
+        if( fail.empty() ) { fail = why; }
+    }
+    for( const char* edge : { "", "\n", "a", "a\n", "\r\n", "a\r\nb", "a\r\nb\r\n", "\n\n", "ab" } )
+    {
+        ++caseCount;
+        const std::string why = lineKernelsVsHand( edge, 'a' );
+        if( fail.empty() ) { fail = why; }
+    }
+    INFO( "cases: ", caseCount, "  newlines: ", newlines, "  path: ", sk::kPathName, "  first divergence: ", fail );
+    CHECK( caseCount > 900 );
+    CHECK( newlines > 10000 );
+    CHECK( fail.empty() );
+}
+
+// "" when findAnyOf / findNotAnyOf / skipWhile agree with find_first_of / find_first_not_of / the run loop for every start 0..n+1, both
+// paths, on an exact-size copy of `text`.
+std::string bytesetKernelsVsStd( std::string_view text, std::string_view chars )
+{
+    const sk::Byteset256          set = sk::bytesetOf( chars );
+    const std::unique_ptr<char[]> exact( new char[ text.size() ] );
+    std::memcpy( exact.get(), text.data(), text.size() );
+    const std::string_view view( exact.get(), text.size() );
+    for( std::size_t from = 0; from <= text.size() + 1; ++from )
+    {
+        std::size_t run = from;
+        while( run < text.size() && chars.find( text[ run ] ) != std::string_view::npos ) { ++run; }
+        const std::size_t want[ 3 ] = { text.find_first_of( chars, from ), text.find_first_not_of( chars, from ), run };
+        for( const sk::KernelPath path : { sk::KernelPath::Vector, sk::KernelPath::Scalar } )
+        {
+            const std::size_t got[ 3 ] = { sk::findAnyOf( view, set, from, path ), sk::findNotAnyOf( view, set, from, path ), sk::skipWhile( view, set, from, path ) };
+            for( int which = 0; which < 3; ++which )
+            {
+                if( got[ which ] != want[ which ] )
+                {
+                    static constexpr const char* kNames[ 3 ] = { "findAnyOf", "findNotAnyOf", "skipWhile" };
+                    return std::string( kNames[ which ] ) + " path=" + ( path == sk::KernelPath::Scalar ? "scalar" : "vector" ) + " n="
+                         + std::to_string( text.size() ) + " m=" + std::to_string( chars.size() ) + " from=" + std::to_string( from )
+                         + " got=" + std::to_string( got[ which ] ) + " want=" + std::to_string( want[ which ] );
+                }
+            }
+        }
+    }
+    return {};
+}
+
+TEST_CASE( "strkern: D6 findAnyOf / findNotAnyOf / skipWhile == find_first_of / find_first_not_of / the run loop, both paths, exact-size buffers" )
+{
+    DeterministicRng gen{ 0xD6B17E5Eull };
+    std::string      fail;
+    std::size_t      caseCount = 0;
+    for( int iter = 0; iter < 1500; ++iter )
+    {
+        const bool        dense = ( iter & 1 ) == 0;
+        const std::string text  = drawLineText( gen, std::size_t( gen.next() % 161u ), dense );
+        const std::string chars = drawLineText( gen, std::size_t( gen.next() % 7u ), dense );   // 0..6 set bytes, high bytes included
+        ++caseCount;
+        const std::string why = bytesetKernelsVsStd( text, chars );
+        if( fail.empty() ) { fail = why; }
+    }
+    // the shipped ASCII classes: each set is exactly its <cctype> predicate in the "C" locale, over all 256 byte values
+    std::string classFail;
+    for( unsigned b = 0; b < 256u; ++b )
+    {
+        const auto c = static_cast<unsigned char>( b );
+        const bool want[ 4 ] = { std::isspace( c ) != 0, std::isdigit( c ) != 0, std::isalnum( c ) != 0, std::isalnum( c ) != 0 || c == '_' };
+        const bool got[ 4 ]  = { sk::kAsciiSpace.contains( c ), sk::kAsciiDigit.contains( c ), sk::kAsciiAlnum.contains( c ), sk::kAsciiIdent.contains( c ) };
+        for( int k = 0; k < 4; ++k )
+        {
+            if( got[ k ] != want[ k ] && classFail.empty() ) { classFail = "class " + std::to_string( k ) + " byte " + std::to_string( b ); }
+        }
+    }
+    INFO( "cases: ", caseCount, "  path: ", sk::kPathName, "  first divergence: ", fail, "  class: ", classFail );
+    CHECK( caseCount == 1500 );
+    CHECK( fail.empty() );
+    CHECK( classFail.empty() );
 }
 
 TEST_CASE( "strkern: E0 Byteset256 carries two agreeing representations (bits vs words)" )

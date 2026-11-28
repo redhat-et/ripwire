@@ -26,6 +26,7 @@
 // and a kind or registry word: `MeterClass`, `kCodecRegistry`; not an affix key, the head by construction). The highest score wins; the cascade order (a)..(e) breaks a tie,
 // then the larger family. The rows are where existing siblings live, read off the index and the files: not a guarantee.
 #include "docparse.h" // detail::readWholeFile
+#include "infra/strkern.h"   // strkern::countByte — the newline count a line number is
 #include "filter.h" // isTestPath
 #include "graph.h"
 #include "infra/enumcount.h" // enumCountIsExact — kExemplarRuleTags has one row per ExemplarRule value
@@ -1570,7 +1571,7 @@ inline void holderRows( const IngestResult& ing, const ExemplarMember& holder, E
         const std::size_t open = span.find( '{' );
         if( open != std::string_view::npos )
         {
-            const std::uint32_t first = h.line + std::uint32_t( std::ranges::count( span.substr( 0, open ), '\n' ) );
+            const std::uint32_t first = h.line + std::uint32_t( strkern::countByte( span.substr( 0, open ), '\n' ) );
             propertyLineRows( span.substr( open ), { .fileId = h.fileId, .firstLine = first }, into );
         }
     }

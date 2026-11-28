@@ -25,7 +25,7 @@
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "infra/sortutil.h"     // sortUnique — the one sorted-unique step
-#include "infra/strkern.h"      // strkern::find — the literal scan's string find, == std::string_view::find (grepScanText)
+#include "infra/strkern.h"      // strkern::find (grepScanText's literal scan), lineStarts / countByte (the hit-line tables)
 #include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
 #include "pathguard.h"           // openRegularFileNoFollow — a piece-read file is opened no-follow, its size read from the descriptor
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
@@ -1172,12 +1172,9 @@ struct GrepScanVerdict
 // as a scan loop with a cursor inlined into it.
 inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std::size_t& scanned, std::uint32_t& line ) noexcept
 {
-    for( std::size_t i = scanned; i < pos; ++i )
+    if( pos > scanned )
     {
-        if( text[i] == '\n' )
-        {
-            ++line;
-        }
+        line += std::uint32_t( strkern::countByte( std::string_view( text.data() + scanned, pos - scanned ), '\n' ) );
     }
     scanned = pos;
     return line;
@@ -1919,11 +1916,7 @@ inline void appendAuxFileHits( const std::string& text, const std::string& path,
                                std::vector<std::size_t>& lineStarts, GrepAuxCollection& out, std::uint32_t lineBase = 0 )
 {
     lineStarts.clear();
-    lineStarts.push_back( 0 );
-    for( std::size_t i = 0; i < text.size(); ++i )
-    {
-        if( text[i] == '\n' ) { lineStarts.push_back( i + 1 ); }
-    }
+    strkern::lineStarts( text, lineStarts );
     for( const GrepMatchSite& s : sites )
     {
         if( !out.hits.empty() && out.hits.back().line == s.line + lineBase && out.hits.back().path == path )
@@ -2182,14 +2175,7 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
         loadedFileId = f;
         fileText     = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() ); // degrade: no text, never a crash
         lineStarts.clear();
-        lineStarts.push_back( 0 );
-        for( std::size_t i = 0; i < fileText.size(); ++i )
-        {
-            if( fileText[i] == '\n' )
-            {
-                lineStarts.push_back( i + 1 );
-            }
-        }
+        strkern::lineStarts( fileText, lineStarts );
     };
 
     std::vector<GrepHit> hits;
@@ -2377,14 +2363,7 @@ inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollec
         loadedFileId = f;
         fileText     = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );   // degrade: an unreadable file satisfies nothing rather than crashing
         lineStarts.clear();
-        lineStarts.push_back( 0 );
-        for( std::size_t i = 0; i < fileText.size(); ++i )
-        {
-            if( fileText[i] == '\n' )
-            {
-                lineStarts.push_back( i + 1 );
-            }
-        }
+        strkern::lineStarts( fileText, lineStarts );
         if( scope == GrepScope::File )
         {
             fileOk = grepTextSatisfiesTerms( fileText, terms );

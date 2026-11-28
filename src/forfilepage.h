@@ -28,6 +28,7 @@
 #include "resolve.h"     // trimWs — the one blank-trimmer
 #include "redact.h"      // redactInPlace — the top-level text is file text, redacted like any served body
 #include "infra/tablelookup.h"   // isOneOf — the one "is this word in the table" predicate
+#include "infra/strkern.h"       // strkern::lineStarts — the file's line-start table
 #include "serialize.h"   // escapeXml, appendCdataSafe, cleanSig, truncateUtf8WithEllipsis
 
 #include <algorithm>
@@ -406,10 +407,8 @@ inline FileText loadFileText( const IngestResult& ing, std::uint32_t f )
         t.src  = std::move( *read );
         t.read = true;
     }
-    for( std::uint32_t i = 0; i < t.src.size(); ++i )
-    {
-        if( t.src[i] == '\n' && i + 1 < t.src.size() ) { t.lineStart.push_back( i + 1 ); }
-    }
+    t.lineStart.clear();   // the table is built here whole: lineStarts writes its own line-1 start
+    strkern::lineStarts( t.src, t.lineStart, strkern::FinalLineStart::DropAtEnd );
     t.lineCount = t.src.empty() ? 0u : std::uint32_t( t.lineStart.size() );
     return t;
 }

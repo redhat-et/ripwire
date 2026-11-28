@@ -497,13 +497,38 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
 
 ### String search
 
-- **The one string-find utility is `rw::strkern::find( hay, needle, from = 0 )` (`src/infra/strkern.h`).** It returns
-  exactly what `std::string_view::find` returns for every input (D2 in `test/verify_strkern.cpp` is the property test that
-  holds it to that) and picks NEON, AVX2 or the portable scalar twin inside, so it swaps in with no other change.
-- Use it in a hot loop over file text: a scan walked over every file, or a pattern found again and again in one file.
-  A one-off probe of a short string gains nothing; leave it as `std::string_view::find`.
-- A new SIMD string kernel goes in the same header, with its NEON, AVX2 and scalar paths side by side and the scalar
-  twin as the oracle that `test/strkerncheck.sh` runs it against.
+- **Use the faster string routines: `rw::strkern` (`src/infra/strkern.h`) for find / case-insensitive find / byte-set /
+  newline / line-start / byte count, as you would reach for the faster containers. A hand-rolled byte loop over text is a
+  review comment.** Each routine returns exactly what its std equivalent returns for every input (a property test in
+  `test/verify_strkern.cpp` holds it to that, under ASan + UBSan) and picks NEON, AVX2 or the portable scalar twin inside,
+  so it swaps in with no other change.
+- **`rw::strkern::find` is the fastest find at every size; use it instead of `std::string_view::find`** — a 4-byte token
+  as well as a whole file. It dispatches inside (needle length, first byte, bytes left), and
+  `bench/bench_strkern_find.cpp` holds it to "never slower than std" in every measured cell: 4 B to whole files, needles
+  of 1 to 16 bytes, runtime and literal (bench/STRKERN_FIND.md). A literal needle, `find( hay, "::" )`, binds the
+  `Literal` overload, whose length is a compile-time constant; a runtime `char` array does not compile there (spell it
+  `std::string_view( buf )`).
+- The catalog, one routine per line, with the std (or hand-loop) spelling it replaces:
+  - `find( hay, needle, from )` — `hay.find( needle, from )`, the substring find (D2; literal needles D2b).
+  - `ciFindLiteral( hay, needleLowered, from )` — fold A-Z of `hay` to lower case, then `find`; ASCII only (D3).
+  - `lowerFoldedEquals( s, lowered )` / `lowerFoldedStartsWith( s, loweredPrefix )` — an ASCII case-insensitive
+    `==` / `starts_with` against an already lowered string.
+  - `findAnyOf( hay, set, from )` — `hay.find_first_of( chars, from )` (D6).
+  - `findNotAnyOf( hay, set, from )` — `hay.find_first_not_of( chars, from )` (D6).
+  - `skipWhile( hay, set, from )` — the run loop `while( i < n && in( hay[ i ] ) ) ++i;` (D6).
+  - `bytesetOf( "chars" )` — the `Byteset256` the three above take; build it `constexpr`, once. `kAsciiSpace`,
+    `kAsciiDigit`, `kAsciiAlnum` and `kAsciiIdent` are `std::isspace` / `isdigit` / `isalnum` / `isalnum || '_'` in the
+    "C" locale, with no libc call per byte.
+  - `countByte( text, b )` — `std::count( text.begin(), text.end(), b )`, and the `if( c == '\n' ) ++line;` loop (D5).
+  - `lineNumberAt( text, at )` — `1 + countByte( text.substr( 0, at ), '\n' )`: the 1-based `std::uint32_t` line of a byte offset.
+  - `lineStarts( text, out, FinalLineStart::Keep | DropAtEnd )` — the line-start table, `{ 0 }` then `i + 1` for each
+    `'\n'` (D4).
+  - `forEachByte( p, n, b, fn )` — `fn( i )` for each `p[ i ] == b`, in order: a line split, or any walk over one byte.
+  - `findByte( p, n, c )` — `memchr`; `std::string_view::find( c )` is already memchr, so prefer that spelling.
+  - `classMasks( p, n, masks )` — upper / lower / digit / alnum bit masks of one block: the tokenizer's classifier.
+  - `lowerFoldAscii( p, n )` — `std::tolower` over a buffer in place, ASCII only.
+- A new SIMD string kernel goes in the same header, with its NEON, AVX2 and scalar paths side by side, one dispatcher,
+  and the scalar twin as the oracle that `test/strkerncheck.sh` runs it against.
 
 **The global allocator.** On macOS `operator new` of 256 KiB or more goes through mmap and munmap
 (`src/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does

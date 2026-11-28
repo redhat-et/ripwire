@@ -19,6 +19,7 @@
 #include "ingest.h"            // canonicalCrawlRoot / crawlPathStaysInRoot — the crawl's own root boundary, re-checked at read
 #include "model.h"
 #include "infra/ownedfile.h"   // OwnedFile — the stream is owned before any other line runs
+#include "infra/strkern.h"     // strkern::lineStarts — the line-start table
 
 #include <cstdint>
 #include <cstdio>
@@ -67,14 +68,7 @@ public:
         Entry& e = entry( fid );
         if( e.ok && !e.linesBuilt )
         {
-            e.lines.push_back( 0 );
-            for( std::size_t i = 0; i < e.text.size(); ++i )
-            {
-                if( e.text[i] == '\n' && i + 1 < e.text.size() )
-                {
-                    e.lines.push_back( std::uint32_t( i + 1 ) );
-                }
-            }
+            strkern::lineStarts( e.text, e.lines, strkern::FinalLineStart::DropAtEnd );
             e.linesBuilt = true;
         }
         return e.lines;

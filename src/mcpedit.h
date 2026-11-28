@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h" // strkern::lineNumberAt / forEachByte — the receipt's line numbers and line split
 #include "infra/os.h"   // rw::os — the edit lockfile (open/flock/close), the atomic write (open/write/fchmod/fsync/rename/unlink), realpath/getcwd
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -888,12 +889,7 @@ namespace mcpedit
     {
         const auto lineAt = [ & ]( std::size_t upto ) -> std::uint32_t
         {
-            std::uint32_t line = 1;
-            for( std::size_t i = 0; i < upto && i < bytes.size(); ++i )
-            {
-                if( bytes[i] == '\n' ) { ++line; }
-            }
-            return line;
+            return strkern::lineNumberAt( bytes, upto );
         };
         const std::uint32_t first = lineAt( startByte );
         const std::size_t   last  = ( endByte > startByte ) ? endByte - 1 : startByte;
@@ -913,13 +909,10 @@ namespace mcpedit
     {
         std::vector<std::string_view> lines;
         std::size_t start = 0;
-        for( std::size_t i = 0; i <= bytes.size(); ++i )
+        strkern::forEachByte( bytes.data(), bytes.size(), '\n', [ & ]( std::size_t i ) { lines.push_back( bytes.substr( start, i - start ) ); start = i + 1; } );
+        if( start < bytes.size() )
         {
-            if( i == bytes.size() || bytes[i] == '\n' )
-            {
-                if( i < bytes.size() || start < bytes.size() ) { lines.push_back( bytes.substr( start, i - start ) ); }
-                start = i + 1;
-            }
+            lines.push_back( bytes.substr( start ) );   // the last line has no '\n'
         }
         return lines;
     }

@@ -2321,7 +2321,7 @@ void regexScanLines( const std::regex& engine, const RegexLiteralPaths& paths, s
         std::size_t counted = 0;
         paths.forEachPlanMatch( base, text.size(), [ & ]( std::size_t at )
         {
-            line   += std::uint32_t( std::count( base + counted, base + at, '\n' ) );
+            line   += std::uint32_t( strkern::countByte( std::string_view( base + counted, at - counted ), '\n' ) );
             counted = at;
             return report( at );
         } );
@@ -2341,7 +2341,7 @@ void regexScanLines( const std::regex& engine, const RegexLiteralPaths& paths, s
             }
             const std::size_t lastBreak = found == 0 ? std::string_view::npos : text.rfind( '\n', found - 1 );
             const std::size_t landing   = ( lastBreak == std::string_view::npos || lastBreak < lineBegin ) ? lineBegin : lastBreak + 1;
-            line     += std::uint32_t( std::count( base + lineBegin, base + landing, '\n' ) );
+            line     += std::uint32_t( strkern::countByte( std::string_view( base + lineBegin, landing - lineBegin ), '\n' ) );
             lineBegin = landing;
         }
         const std::size_t nl       = text.find( '\n', lineBegin );

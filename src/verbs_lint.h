@@ -1,5 +1,6 @@
 #pragma once
 
+#include "infra/strkern.h" // strkern::countByte — large-function's body line count
 #include <algorithm>   // std::any_of (H8: findings_capped over the emitted rules)
 #include <charconv>    // std::from_chars — parseProfTsv's line column (never std::atoi: undefined past INT_MAX)
 #include <system_error> // std::errc — from_chars' result
@@ -174,7 +175,7 @@ std::optional<std::uint32_t> inconsistentReturnLine( std::string_view src, std::
         if( inertEnd != i )
         {
             const std::size_t scanEnd = std::min<std::size_t>( inertEnd, bodyEnd );
-            currentLine += static_cast<std::uint32_t>( std::count( src.begin() + i, src.begin() + scanEnd, '\n' ) );
+            currentLine += static_cast<std::uint32_t>( rw::strkern::countByte( std::string_view( src ).substr( i, scanEnd - i ), '\n' ) );
             i = static_cast<std::uint32_t>( scanEnd );
             continue;
         }
@@ -310,14 +311,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
 
                 // large-function: count newlines in body span
                 {
-                    std::uint32_t lines = 0;
-                    for( std::uint32_t i = bodyA; i < bodyB; ++i )
-                    {
-                        if( src[i] == '\n' )
-                        {
-                            ++lines;
-                        }
-                    }
+                    const auto lines = std::uint32_t( rw::strkern::countByte( std::string_view( src ).substr( bodyA, bodyB - bodyA ), '\n' ) );
                     if( lines > 80 )
                     {
                         AstMatch hit;

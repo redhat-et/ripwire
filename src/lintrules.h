@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/strkern.h" // strkern::forEachByte — the rule file split into lines
 
 
 // lintrules.h — user-extensible lint rules, ast-grep style (Wave 4 #2). Load a directory of YAML
@@ -482,10 +483,8 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
     std::vector<std::string_view> lines;
     {
         std::size_t start = 0;
-        for( std::size_t i = 0; i <= src.size(); ++i )
-        {
-            if( i == src.size() || src[i] == '\n' ) { lines.emplace_back( src.data() + start, i - start ); start = i + 1; }
-        }
+        strkern::forEachByte( src.data(), src.size(), '\n', [ & ]( std::size_t i ) { lines.emplace_back( src.data() + start, i - start ); start = i + 1; } );
+        lines.emplace_back( src.data() + start, src.size() - start );   // the text after the last '\n' (empty when the file ends in one)
     }
 
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool

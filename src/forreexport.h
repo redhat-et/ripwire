@@ -37,6 +37,7 @@
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
 #include "defslookup.h"          // aliasTargetRow — an alias row (model.h AliasTarget) is another name, not the definition a sentence asks for
+#include "infra/strkern.h"   // strkern::lineNumberAt — a line number from a byte offset
 #include "infra/sortutil.h"   // sortUnique
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
@@ -154,7 +155,7 @@ struct Sources
         {
             return 0;
         }
-        return std::uint32_t( std::count( t->begin(), t->begin() + byte, '\n' ) ) + 1;
+        return strkern::lineNumberAt( *t, byte );
     }
     // The visibility the statement at `byte` is written with: 0 none (or unreadable / not a statement start: reads as private),
     // 1 `pub`, 2 `pub(crate)` / `pub(super)` / `pub(in path)` (visible only inside part of its crate: not a public path).
